@@ -14,7 +14,11 @@ const closeMobileMenu = () => {
 
       <!-- Logo -->
       <RouterLink to="/" class="logo" @click="closeMobileMenu">
-        <div class="logo-icon">N</div>
+        <img
+          src="/images/logo.png"
+          alt="Niah Biodiversity Logo"
+          class="logo-image"
+        />
 
         <div class="logo-text">
           <span class="logo-title">NIAH</span>
@@ -123,6 +127,7 @@ const closeMobileMenu = () => {
 
 .navbar-container {
   width: min(1200px, 92%);
+
   min-height: 76px;
 
   margin: 0 auto;
@@ -151,21 +156,12 @@ const closeMobileMenu = () => {
   flex-shrink: 0;
 }
 
-.logo-icon {
-  width: 42px;
-  height: 42px;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
+/* Circular logo image */
+.logo-image {
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
-
-  background: #50B498;
-  color: white;
-
-  font-size: 20px;
-  font-weight: 700;
+  object-fit: cover;
 }
 
 .logo-text {
@@ -318,7 +314,6 @@ const closeMobileMenu = () => {
    ========================= */
 
 @media (max-width: 900px) {
-
   .desktop-nav,
   .login-button {
     display: none;
