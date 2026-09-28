@@ -1,0 +1,435 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+
+interface Card {
+  id: number
+  image: string
+  alt: string
+}
+
+const cards = ref<Card[]>([
+  {
+    id: 1,
+    image: '/images/hero.jpg',
+    alt: 'Niah Cave',
+  },
+  {
+    id: 2,
+    image: '/images/logo.png',
+    alt: 'Niah rainforest',
+  },
+  {
+    id: 3,
+    image: '/images/hero.jpg',
+    alt: 'Plants in Niah National Park',
+  },
+  {
+    id: 4,
+    image: '/images/hero.jpg',
+    alt: 'Wildlife in Niah National Park',
+  },
+])
+
+const isDragging = ref(false)
+
+const startX = ref(0)
+const startY = ref(0)
+
+const currentX = ref(0)
+const currentY = ref(0)
+
+const dragThreshold = 120
+
+const topCard = computed(() => {
+  return cards.value[cards.value.length - 1]
+})
+
+/* =========================
+   Switch Image
+   ========================= */
+
+const nextImage = () => {
+  const top = cards.value.pop()
+
+  if (top) {
+    cards.value.unshift(top)
+  }
+
+  currentX.value = 0
+  currentY.value = 0
+}
+
+const previousImage = () => {
+  const first = cards.value.shift()
+
+  if (first) {
+    cards.value.push(first)
+  }
+
+  currentX.value = 0
+  currentY.value = 0
+}
+
+
+/* =========================
+   Drag
+   ========================= */
+
+const startDrag = (event: PointerEvent) => {
+  if (!topCard.value) return
+
+  isDragging.value = true
+
+  startX.value = event.clientX
+  startY.value = event.clientY
+
+  currentX.value = 0
+  currentY.value = 0
+}
+
+const moveDrag = (event: PointerEvent) => {
+  if (!isDragging.value) return
+
+  currentX.value = event.clientX - startX.value
+  currentY.value = event.clientY - startY.value
+}
+
+const endDrag = () => {
+  if (!isDragging.value) return
+
+  isDragging.value = false
+
+  const distance = Math.sqrt(
+    currentX.value * currentX.value +
+    currentY.value * currentY.value
+  )
+
+  if (distance > dragThreshold) {
+    if (Math.abs(currentX.value) > Math.abs(currentY.value)) {
+      if (currentX.value > 0) {
+        previousImage()
+      } else {
+        nextImage()
+      }
+    } else {
+      nextImage()
+    }
+  } else {
+    currentX.value = 0
+    currentY.value = 0
+  }
+}
+
+
+/* =========================
+   Click
+   ========================= */
+
+const handleClick = () => {
+  if (!isDragging.value) {
+    nextImage()
+  }
+}
+
+
+/* =========================
+   Card Style
+   ========================= */
+
+const getCardStyle = (index: number) => {
+  const total = cards.value.length
+  const positionFromTop = total - index - 1
+
+  const isTop = positionFromTop === 0
+
+  if (isTop) {
+    return {
+      transform: `
+        translate(${currentX.value}px, ${currentY.value}px)
+        rotate(${currentX.value * 0.05}deg)
+        scale(1)
+      `,
+      zIndex: total,
+    }
+  }
+
+  return {
+    transform: `
+      rotate(${positionFromTop * 4}deg)
+      scale(${1 - positionFromTop * 0.06})
+      translate(${positionFromTop * 8}px, ${positionFromTop * 8}px)
+    `,
+    zIndex: index + 1,
+  }
+}
+</script>
+
+<template>
+
+  <div class="image-stack-wrapper">
+
+    <!-- Left Arrow -->
+    <button
+      class="stack-arrow stack-arrow-left"
+      type="button"
+      aria-label="Previous image"
+      @click="previousImage"
+    >
+      ‹
+    </button>
+
+
+    <!-- Image Stack -->
+    <div
+      class="stack-container"
+      @pointermove="moveDrag"
+      @pointerup="endDrag"
+      @pointercancel="endDrag"
+      @pointerleave="endDrag"
+    >
+
+      <div
+        v-for="(card, index) in cards"
+        :key="card.id"
+        class="stack-card"
+        :class="{
+          dragging: isDragging && index === cards.length - 1
+        }"
+        :style="getCardStyle(index)"
+        @pointerdown="
+          index === cards.length - 1
+            ? startDrag($event)
+            : undefined
+        "
+        @click="
+          index === cards.length - 1
+            ? handleClick()
+            : undefined
+        "
+      >
+
+        <img
+          :src="card.image"
+          :alt="card.alt"
+          class="stack-image"
+          draggable="false"
+        />
+
+      </div>
+
+    </div>
+
+
+    <!-- Right Arrow -->
+    <button
+      class="stack-arrow stack-arrow-right"
+      type="button"
+      aria-label="Next image"
+      @click="nextImage"
+    >
+      ›
+    </button>
+
+  </div>
+
+</template>
+
+<style scoped>
+
+/* ==================================================
+   Wrapper
+   ================================================== */
+
+.image-stack-wrapper {
+  position: relative;
+
+  width: 100%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 0 55px;
+}
+
+
+/* ==================================================
+   Stack
+   ================================================== */
+
+.stack-container {
+  position: relative;
+
+  width: 100%;
+  max-width: 480px;
+
+  aspect-ratio: 1 / 1;
+
+  perspective: 800px;
+
+  touch-action: none;
+
+  user-select: none;
+}
+
+
+.stack-card {
+  position: absolute;
+
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+
+  overflow: hidden;
+
+  border-radius: 24px;
+
+  background: #e0ebdd;
+
+  box-shadow:
+    0 18px 40px rgba(70, 133, 133, 0.18);
+
+  transition:
+    transform 0.35s ease,
+    box-shadow 0.35s ease;
+
+  cursor: grab;
+}
+
+
+.stack-card.dragging {
+  transition: none;
+
+  cursor: grabbing;
+}
+
+
+.stack-image {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: cover;
+
+  pointer-events: none;
+
+  user-select: none;
+
+  -webkit-user-drag: none;
+}
+
+
+/* ==================================================
+   Navigation Arrows
+   ================================================== */
+
+.stack-arrow {
+  position: absolute;
+
+  top: 50%;
+  transform: translateY(-50%);
+
+  width: 44px;
+  height: 44px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid rgba(70, 133, 133, 0.20);
+
+  border-radius: 50%;
+
+  background: rgba(255, 246, 220, 0.95);
+
+  color: #468585;
+
+  font-family: inherit;
+
+  font-size: 32px;
+  font-weight: 400;
+
+  line-height: 1;
+
+  cursor: pointer;
+
+  z-index: 20;
+
+  box-shadow:
+    0 8px 20px rgba(70, 133, 133, 0.15);
+
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+
+.stack-arrow:hover {
+  background: #50b498;
+
+  color: white;
+
+  box-shadow:
+    0 10px 24px rgba(70, 133, 133, 0.22);
+}
+
+
+.stack-arrow:active {
+  transform: translateY(-50%) scale(0.94);
+}
+
+
+.stack-arrow-left {
+  left: 0;
+}
+
+
+.stack-arrow-right {
+  right: 0;
+}
+
+
+/* ==================================================
+   Responsive
+   ================================================== */
+
+@media (max-width: 900px) {
+
+  .stack-container {
+    max-width: 500px;
+  }
+
+}
+
+
+@media (max-width: 500px) {
+
+  .image-stack-wrapper {
+    padding: 0 45px;
+  }
+
+
+  .stack-container {
+    max-width: 100%;
+  }
+
+
+  .stack-card {
+    border-radius: 20px;
+  }
+
+
+  .stack-arrow {
+    width: 38px;
+    height: 38px;
+
+    font-size: 28px;
+  }
+
+}
+
+</style>
