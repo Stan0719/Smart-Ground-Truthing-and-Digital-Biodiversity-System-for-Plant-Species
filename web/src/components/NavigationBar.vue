@@ -147,6 +147,8 @@ const closeMobileMenu = () => {
   display: flex;
   align-items: center;
 
+  transform: translateX(-120px);
+
   gap: 10px;
 
   color: #468585;
@@ -314,6 +316,10 @@ const closeMobileMenu = () => {
    ========================= */
 
 @media (max-width: 900px) {
+  .logo {
+    transform: translateX(-12px);
+  }
+
   .desktop-nav,
   .login-button {
     display: none;
