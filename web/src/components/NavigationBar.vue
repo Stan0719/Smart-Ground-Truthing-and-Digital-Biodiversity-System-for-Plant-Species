@@ -1,7 +1,117 @@
 <script setup lang="ts">
+import {
+  ref,
+  computed,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
+  watch
+} from 'vue'
 
-import { ref } from 'vue'
+import { useRoute } from 'vue-router'
 import LoginModal from './LoginModal.vue'
+
+const route = useRoute()
+
+const navItems = [
+  {
+    label: 'Home',
+    to: '/'
+  },
+  {
+    label: 'Explore Plants',
+    to: '/plants'
+  },
+  {
+    label: 'About Niah',
+    to: '/about'
+  },
+  {
+    label: 'Search',
+    to: '/search'
+  }
+]
+
+const navTrack = ref<HTMLElement | null>(null)
+
+const thumbLeft = ref(0)
+const thumbWidth = ref(0)
+
+const activeNavIndex = computed(() => {
+  const index = navItems.findIndex(item => {
+    if (item.to === '/') {
+      return route.path === '/'
+    }
+
+    return route.path.startsWith(item.to)
+  })
+
+  return index === -1 ? 0 : index
+})
+
+const updateNavThumb = async () => {
+  await nextTick()
+
+  const track = navTrack.value
+
+  if (!track) {
+    return
+  }
+
+  const links =
+    track.querySelectorAll<HTMLElement>('.nav-link')
+
+  const activeLink =
+    links[activeNavIndex.value]
+
+  if (!activeLink) {
+    return
+  }
+
+  const trackRect =
+    track.getBoundingClientRect()
+
+  const linkRect =
+    activeLink.getBoundingClientRect()
+
+  thumbLeft.value =
+    linkRect.left - trackRect.left
+
+  thumbWidth.value =
+    linkRect.width
+}
+
+const navThumbStyle = computed(() => ({
+  transform: `translateX(${thumbLeft.value}px)`,
+  width: `${thumbWidth.value}px`
+}))
+
+const handleResize = () => {
+  updateNavThumb()
+}
+
+onMounted(() => {
+  updateNavThumb()
+
+  window.addEventListener(
+    'resize',
+    handleResize
+  )
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener(
+    'resize',
+    handleResize
+  )
+})
+
+watch(
+  () => route.path,
+  () => {
+    updateNavThumb()
+  }
+)
 
 const mobileMenuOpen = ref(false)
 
@@ -89,22 +199,26 @@ const logout = () => {
       </RouterLink>
 
       <!-- Desktop Navigation -->
-      <nav class="desktop-nav">
-        <RouterLink to="/" class="nav-link">
-          Home
-        </RouterLink>
+      <nav class="desktop-nav" aria-label="Main navigation">
+        <div
+          ref="navTrack"
+          class="nav-track"
+        >
+          <div
+            class="nav-thumb"
+            :style="navThumbStyle"
+            aria-hidden="true"
+          ></div>
 
-        <RouterLink to="/plants" class="nav-link">
-          Explore Plants
-        </RouterLink>
-
-        <RouterLink to="/about" class="nav-link">
-          About Niah
-        </RouterLink>
-
-        <RouterLink to="/search" class="nav-link">
-          Search
-        </RouterLink>
+          <RouterLink
+            v-for="item in navItems"
+            :key="item.to"
+            :to="item.to"
+            class="nav-link"
+          >
+            {{ item.label }}
+          </RouterLink>
+        </div>
       </nav>
 
       <!-- =========================
@@ -418,7 +532,7 @@ const logout = () => {
 
 /* =========================
    Logo
-   ========================= */
+========================= */
 
 .logo {
   display: flex;
@@ -476,52 +590,91 @@ const logout = () => {
   display: flex;
   align-items: center;
   justify-self: center;
+}
 
-  gap: 28px;
+.nav-track {
+  position: relative;
+
+  display: inline-flex;
+  align-items: center;
+
+  gap: 4px;
+  padding: 4px;
+
+  border-radius: 14px;
+
+  user-select: none;
+}
+
+.nav-thumb {
+  position: absolute;
+
+  top: 4px;
+  left: 0;
+
+  height: 36px;
+
+  border-radius: 10px;
+
+  background: #468585;
+
+  box-shadow:
+    0 2px 8px rgba(70, 133, 133, 0.25);
+
+  pointer-events: none;
+
+  transition:
+    transform 280ms cubic-bezier(0.23, 1, 0.32, 1),
+    width 280ms cubic-bezier(0.23, 1, 0.32, 1);
+
+  z-index: 0;
 }
 
 .nav-link {
   position: relative;
 
-  color: #468585;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 
+  min-height: 36px;
+  padding: 0 15px;
+
+  border-radius: 10px;
+
+  color: #468585;
   text-decoration: none;
 
   font-size: 14px;
   font-weight: 600;
+  white-space: nowrap;
 
-  transition: color 0.2s ease;
-}
+  transition:
+    color 180ms ease,
+    transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
 
-.nav-link::after {
-  content: '';
-
-  position: absolute;
-
-  left: 0;
-  bottom: -7px;
-
-  width: 0;
-  height: 2px;
-
-  background: #50B498;
-
-  transition: width 0.2s ease;
-}
-
-.nav-link:hover {
-  color: #50B498;
-}
-
-.nav-link:hover::after,
-.nav-link.router-link-active::after {
-  width: 100%;
+  z-index: 1;
 }
 
 .nav-link.router-link-active {
-  color: #50B498;
+  color: #ffffff;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  .nav-link:not(.router-link-active):hover {
+    color: #50B498;
+    background: rgba(80, 180, 152, 0.08);
+  }
+}
+
+.nav-link:active {
+  transform: scale(0.96);
+}
+
+.nav-link:focus-visible {
+  outline: 2px solid #50B498;
+  outline-offset: 3px;
+}
 /* =========================
    Login Button
    ========================= */

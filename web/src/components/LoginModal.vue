@@ -97,6 +97,12 @@ const handleLogin = () => {
                 <label class="floating-label" for="password">Password</label>
             </div>
 
+            <div class="forgot-password-row">
+                <button type="button" class="forgot-password-button">
+                    Forget password?
+                </button>
+            </div>
+
             <p
                 v-if="loginError"
                 class="login-error"
@@ -305,6 +311,30 @@ const handleLogin = () => {
 .form-input:not(:placeholder-shown) ~ .floating-label {
   color: #def9c4;
   transform: translateY(-27px) translateX(5px) scale(0.78);
+}
+
+.forgot-password-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: -16px 0 -8px;
+}
+
+.forgot-password-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #c9ddd6;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 180ms ease;
+}
+
+.forgot-password-button:hover,
+.forgot-password-button:focus-visible {
+  color: #def9c4;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .login-submit {
