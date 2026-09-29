@@ -123,6 +123,57 @@ import ImageStack from '../components/ImageStack.vue'
 
       </div>
 
+      <div class="visitor-overview">
+        <div class="why-niah">
+          <p class="section-label">WHY NIAH?</p>
+
+          <h3>Where nature meets human history</h3>
+
+          <p>
+            Hidden within the rainforests of northern Sarawak, Niah National Park is a
+            remarkable meeting point of nature and human history. Its vast limestone caves
+            preserve archaeological discoveries, prehistoric paintings, and evidence of
+            people who lived here thousands of years ago.
+          </p>
+        </div>
+
+        <div class="visitor-info">
+          <h3>Plan your visit</h3>
+
+          <div class="visitor-cards">
+            <article class="visitor-card">
+              <span class="visitor-icon" aria-hidden="true">🕗</span>
+              <span class="visitor-label">Opening hours</span>
+              <strong>Daily, 8 AM–5 PM</strong>
+            </article>
+
+            <article class="visitor-card">
+              <span class="visitor-icon" aria-hidden="true">📍</span>
+              <span class="visitor-label">Location</span>
+              <strong>Niah, Miri Division</strong>
+            </article>
+
+            <article class="visitor-card">
+              <span class="visitor-icon" aria-hidden="true">🥾</span>
+              <span class="visitor-label">Main experience</span>
+              <strong>Cave &amp; rainforest trekking</strong>
+            </article>
+
+            <article class="visitor-card">
+              <span class="visitor-icon" aria-hidden="true">☀️</span>
+              <span class="visitor-label">Best period</span>
+              <strong>March–September</strong>
+            </article>
+
+            <article class="visitor-card">
+              <span class="visitor-icon" aria-hidden="true">⏱️</span>
+              <span class="visitor-label">From Miri</span>
+              <strong>About 1.5 hours</strong>
+            </article>
+          </div>
+        </div>
+      </div>
+
     </section>
 
   </main>
@@ -481,6 +532,100 @@ import ImageStack from '../components/ImageStack.vue'
 }
 
 
+/* =========================
+   Visitor Overview
+   ========================= */
+
+.visitor-overview {
+  width: min(1200px, 88%);
+
+  margin: 90px auto 0;
+}
+
+
+.why-niah {
+  max-width: 820px;
+}
+
+
+.why-niah h3,
+.visitor-info h3 {
+  margin: 0;
+
+  color: #315f5f;
+
+  font-size: clamp(26px, 3vw, 36px);
+  line-height: 1.2;
+}
+
+
+.why-niah p:last-child {
+  margin: 18px 0 0;
+
+  color: #405f5b;
+
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+
+.visitor-info {
+  margin-top: 48px;
+}
+
+
+.visitor-cards {
+  margin-top: 24px;
+
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+
+  gap: 14px;
+}
+
+
+.visitor-card {
+  min-height: 150px;
+
+  padding: 22px 18px;
+
+  display: flex;
+  flex-direction: column;
+
+  border: 1px solid rgba(70, 133, 133, 0.14);
+  border-radius: 16px;
+
+  background: rgba(255, 246, 220, 0.75);
+}
+
+
+.visitor-icon {
+  margin-bottom: 16px;
+
+  font-size: 25px;
+}
+
+
+.visitor-label {
+  margin-bottom: 7px;
+
+  color: #64807c;
+
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+
+.visitor-card strong {
+  color: #315f5f;
+
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+
 /* ==================================================
    RESPONSIVE
    ================================================== */
@@ -547,6 +692,16 @@ import ImageStack from '../components/ImageStack.vue'
     aspect-ratio: 16 / 10;
   }
 
+
+  .visitor-overview {
+    margin-top: 70px;
+  }
+
+
+  .visitor-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
 }
 
 
@@ -601,6 +756,23 @@ import ImageStack from '../components/ImageStack.vue'
 
   .about-facts {
     grid-template-columns: 1fr;
+  }
+
+
+  .visitor-overview {
+    width: 86%;
+
+    margin-top: 60px;
+  }
+
+
+  .visitor-cards {
+    grid-template-columns: 1fr;
+  }
+
+
+  .visitor-card {
+    min-height: 0;
   }
 
 }
