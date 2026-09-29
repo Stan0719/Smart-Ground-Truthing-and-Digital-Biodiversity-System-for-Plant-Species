@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import NavigationBar from '../components/NavigationBar.vue'
 import { plants } from '../data/plants'
 
 const categories = ['All', 'Trees', 'Flowers', 'Ferns', 'Climbers'] as const
 const activeCategory = ref<(typeof categories)[number]>('All')
-const searchQuery = ref('')
+const route = useRoute()
+const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search : '')
+
+watch(
+  () => route.query.search,
+  (search) => {
+    searchQuery.value = typeof search === 'string' ? search : ''
+  },
+)
 
 const filteredPlants = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()

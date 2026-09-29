@@ -8,10 +8,12 @@ import {
   watch
 } from 'vue'
 
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import LoginModal from './LoginModal.vue'
 
 const route = useRoute()
+const router = useRouter()
+const navSearch = ref('')
 
 const navItems = [
   {
@@ -25,12 +27,17 @@ const navItems = [
   {
     label: 'About Niah',
     to: '/about'
-  },
-  {
-    label: 'Search',
-    to: '/search'
   }
 ]
+
+const submitNavSearch = () => {
+  const query = navSearch.value.trim()
+
+  router.push({
+    path: '/plants',
+    query: query ? { search: query } : {}
+  })
+}
 
 const navTrack = ref<HTMLElement | null>(null)
 
@@ -239,6 +246,25 @@ const logout = () => {
           >
             {{ item.label }}
           </RouterLink>
+
+          <form class="nav-search" role="search" @submit.prevent="submitNavSearch">
+            <label>
+              <span class="sr-only">Search plants</span>
+              <input
+                v-model="navSearch"
+                autocomplete="off"
+                placeholder="Search here..."
+                type="search"
+              />
+            </label>
+
+            <button type="submit" aria-label="Search plants">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.8" cy="10.8" r="6.8" />
+                <path d="m16 16 4.5 4.5" />
+              </svg>
+            </button>
+          </form>
         </div>
       </nav>
 
@@ -696,6 +722,88 @@ const logout = () => {
 .nav-link:focus-visible {
   outline: 2px solid #50B498;
   outline-offset: 3px;
+}
+
+.nav-search {
+  margin-left: 5px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nav-search label {
+  display: flex;
+}
+
+.nav-search input {
+  width: 150px;
+  padding: 9px 14px;
+  border: 1px solid rgba(70, 133, 133, 0.45);
+  border-radius: 999px;
+  outline: none;
+  background: #e0ebdd;
+  color: #405f5b;
+  font-family: inherit;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(70, 133, 133, 0.12);
+  transition: 0.3s ease;
+}
+
+.nav-search input::placeholder {
+  color: #648580;
+  opacity: 0.72;
+}
+
+.nav-search input:focus {
+  width: 185px;
+  border-color: #50b498;
+  box-shadow: 0 5px 16px rgba(80, 180, 152, 0.28), 0 0 0 2px rgba(80, 180, 152, 0.14);
+}
+
+.nav-search button {
+  width: 36px;
+  height: 36px;
+  padding: 7px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(70, 133, 133, 0.45);
+  border-radius: 50%;
+  outline: none;
+  background: #e0ebdd;
+  color: #468585;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(70, 133, 133, 0.12);
+  transition: 0.3s ease;
+}
+
+.nav-search button:hover,
+.nav-search button:focus-visible {
+  border-color: #50b498;
+  background: #d5e8d7;
+  color: #32756a;
+  box-shadow: 0 5px 16px rgba(80, 180, 152, 0.28);
+  transform: translateY(-2px);
+}
+
+.nav-search button svg {
+  width: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 /* =========================
    Login Button
