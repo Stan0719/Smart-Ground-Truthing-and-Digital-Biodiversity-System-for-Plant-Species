@@ -121,13 +121,7 @@ function AccountStack() {
       <Stack.Screen
         name="Login"
         component={LoginScreen}
-        options={{
-          title: "Botanist Login",
-          headerTintColor: theme.dark,
-          headerStyle: {
-            backgroundColor: theme.light,
-          },
-        }}
+        options={{ headerShown: false }}
       />
 
       <Stack.Screen
