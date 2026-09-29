@@ -175,7 +175,16 @@ const getCardStyle = (index: number) => {
       aria-label="Previous image"
       @click="previousImage"
     >
-      ‹
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path
+          d="M9 5l7 7-7 7"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
     </button>
 
 
@@ -227,7 +236,16 @@ const getCardStyle = (index: number) => {
       aria-label="Next image"
       @click="nextImage"
     >
-      ›
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path
+          d="M9 5l7 7-7 7"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
     </button>
 
   </div>
@@ -383,8 +401,21 @@ const getCardStyle = (index: number) => {
 }
 
 
+.stack-arrow svg {
+  width: 20px;
+  height: 20px;
+
+  fill: currentColor;
+}
+
+
 .stack-arrow-left {
   left: 0;
+}
+
+
+.stack-arrow-left svg {
+  transform: rotate(180deg);
 }
 
 
