@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
 interface Card {
   id: number
@@ -31,6 +31,9 @@ const cards = ref<Card[]>([
 ])
 
 const isDragging = ref(false)
+const isAnimating = ref(false)
+const isResetting = ref(false)
+const animationDirection = ref<'next' | 'previous' | null>(null)
 
 const startX = ref(0)
 const startY = ref(0)
@@ -39,6 +42,8 @@ const currentX = ref(0)
 const currentY = ref(0)
 
 const dragThreshold = 120
+const animationDuration = 360
+const exitDistance = 560
 
 const topCard = computed(() => {
   return cards.value[cards.value.length - 1]
@@ -48,7 +53,7 @@ const topCard = computed(() => {
    Switch Image
    ========================= */
 
-const nextImage = () => {
+const commitNextImage = () => {
   const top = cards.value.pop()
 
   if (top) {
@@ -59,7 +64,7 @@ const nextImage = () => {
   currentY.value = 0
 }
 
-const previousImage = () => {
+const commitPreviousImage = () => {
   const first = cards.value.shift()
 
   if (first) {
@@ -70,13 +75,63 @@ const previousImage = () => {
   currentY.value = 0
 }
 
+const wait = (duration: number) => new Promise((resolve) => window.setTimeout(resolve, duration))
+
+const finishStackReset = async () => {
+  await nextTick()
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  isResetting.value = false
+}
+
+const animateStep = async (direction: 'next' | 'previous') => {
+  animationDirection.value = direction
+
+  if (direction === 'next') {
+    currentX.value = -exitDistance
+    currentY.value = Math.min(currentY.value, 30)
+  } else {
+    currentX.value = 0
+    currentY.value = 0
+  }
+
+  await wait(animationDuration)
+
+  isResetting.value = true
+
+  if (direction === 'next') {
+    commitNextImage()
+  } else {
+    commitPreviousImage()
+  }
+
+  animationDirection.value = null
+  await finishStackReset()
+}
+
+const navigate = async (direction: 'next' | 'previous', steps = 1) => {
+  if (isAnimating.value || isDragging.value || steps < 1) return
+
+  isAnimating.value = true
+
+  try {
+    for (let step = 0; step < steps; step += 1) {
+      await animateStep(direction)
+    }
+  } finally {
+    isAnimating.value = false
+  }
+}
+
+const nextImage = () => navigate('next')
+const previousImage = () => navigate('previous')
+
 
 /* =========================
    Drag
    ========================= */
 
 const startDrag = (event: PointerEvent) => {
-  if (!topCard.value) return
+  if (!topCard.value || isAnimating.value) return
 
   isDragging.value = true
 
@@ -107,12 +162,12 @@ const endDrag = () => {
   if (distance > dragThreshold) {
     if (Math.abs(currentX.value) > Math.abs(currentY.value)) {
       if (currentX.value > 0) {
-        previousImage()
+        void navigate('previous')
       } else {
-        nextImage()
+        void navigate('next')
       }
     } else {
-      nextImage()
+      void navigate('next')
     }
   } else {
     currentX.value = 0
@@ -125,9 +180,23 @@ const endDrag = () => {
    Click
    ========================= */
 
-const handleClick = () => {
-  if (!isDragging.value) {
-    nextImage()
+const handleCardClick = (index: number) => {
+  if (isDragging.value || isAnimating.value) return
+
+  const topIndex = cards.value.length - 1
+
+  if (index === topIndex) {
+    void navigate('next')
+    return
+  }
+
+  const nextSteps = topIndex - index
+  const previousSteps = index + 1
+
+  if (nextSteps <= previousSteps) {
+    void navigate('next', nextSteps)
+  } else {
+    void navigate('previous', previousSteps)
   }
 }
 
@@ -142,24 +211,48 @@ const getCardStyle = (index: number) => {
 
   const isTop = positionFromTop === 0
 
+  if (animationDirection.value === 'previous' && index === 0) {
+    return {
+      transform: 'translate(0, 0) rotate(0deg) scale(1)',
+      opacity: 1,
+      zIndex: total + 1,
+    }
+  }
+
   if (isTop) {
+    if (animationDirection.value === 'previous') {
+      return getRestingCardStyle(1, total - 1)
+    }
+
     return {
       transform: `
         translate(${currentX.value}px, ${currentY.value}px)
         rotate(${currentX.value * 0.05}deg)
         scale(1)
       `,
+      opacity: animationDirection.value === 'next' ? 0 : 1,
       zIndex: total,
     }
   }
 
+  const targetPosition = animationDirection.value === 'next'
+    ? Math.max(positionFromTop - 1, 0)
+    : animationDirection.value === 'previous'
+      ? positionFromTop + 1
+      : positionFromTop
+
+  return getRestingCardStyle(targetPosition, index + 1)
+}
+
+const getRestingCardStyle = (positionFromTop: number, zIndex: number) => {
   return {
     transform: `
       rotate(${positionFromTop * 4}deg)
       scale(${1 - positionFromTop * 0.06})
       translate(${positionFromTop * 8}px, ${positionFromTop * 8}px)
     `,
-    zIndex: index + 1,
+    opacity: 1,
+    zIndex,
   }
 }
 </script>
@@ -173,6 +266,7 @@ const getCardStyle = (index: number) => {
       class="stack-arrow stack-arrow-left"
       type="button"
       aria-label="Previous image"
+      :disabled="isAnimating"
       @click="previousImage"
     >
       <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -191,6 +285,7 @@ const getCardStyle = (index: number) => {
     <!-- Image Stack -->
     <div
       class="stack-container"
+      :class="{ 'is-resetting': isResetting, 'is-animating': isAnimating }"
       @pointermove="moveDrag"
       @pointerup="endDrag"
       @pointercancel="endDrag"
@@ -210,11 +305,7 @@ const getCardStyle = (index: number) => {
             ? startDrag($event)
             : undefined
         "
-        @click="
-          index === cards.length - 1
-            ? handleClick()
-            : undefined
-        "
+        @click="handleCardClick(index)"
       >
 
         <img
@@ -234,6 +325,7 @@ const getCardStyle = (index: number) => {
       class="stack-arrow stack-arrow-right"
       type="button"
       aria-label="Next image"
+      :disabled="isAnimating"
       @click="nextImage"
     >
       <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -309,7 +401,8 @@ const getCardStyle = (index: number) => {
     0 18px 40px rgba(70, 133, 133, 0.18);
 
   transition:
-    transform 0.35s ease,
+    transform 0.36s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.3s ease,
     box-shadow 0.35s ease;
 
   cursor: grab;
@@ -320,6 +413,14 @@ const getCardStyle = (index: number) => {
   transition: none;
 
   cursor: grabbing;
+}
+
+.stack-container.is-resetting .stack-card {
+  transition: none;
+}
+
+.stack-container.is-animating .stack-card {
+  cursor: default;
 }
 
 
@@ -398,6 +499,11 @@ const getCardStyle = (index: number) => {
 
 .stack-arrow:active {
   transform: translateY(-50%) scale(0.94);
+}
+
+.stack-arrow:disabled {
+  cursor: default;
+  pointer-events: none;
 }
 
 
