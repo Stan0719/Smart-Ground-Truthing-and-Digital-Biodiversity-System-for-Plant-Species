@@ -130,6 +130,20 @@ const closeMobileMenu = () => {
 
 }
 
+const handleLogoClick = (event: MouseEvent) => {
+  closeMobileMenu()
+
+  // If already on HomeView, scroll to the top instead of reloading the route
+  if (route.path === '/') {
+    event.preventDefault()
+
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    })
+  }
+}
+
 const toggleMobileMenu = () => {
   mobileMenuOpen.value = !mobileMenuOpen.value
 }
@@ -178,6 +192,8 @@ const logout = () => {
 
 }
 
+
+
 </script>
 
 <template>
@@ -185,7 +201,11 @@ const logout = () => {
     <div class="navbar-container">
 
       <!-- Logo -->
-      <RouterLink to="/" class="logo" @click="closeMobileMenu">
+      <RouterLink
+        to="/"
+        class="logo"
+        @click="handleLogoClick"
+      >
         <img
           src="/images/logo2.png"
           alt="Niah Biodiversity Logo"
@@ -826,7 +846,7 @@ const logout = () => {
   }
 
   .mobile-nav-link:hover {
-    background: #DEF9C4;
+    background: #5fb3b388;
   }
 
   .mobile-nav-divider {
