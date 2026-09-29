@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import NavigationBar from '../components/NavigationBar.vue'
 import ImageStack from '../components/ImageStack.vue'
+import { plants } from '../data/plants'
 </script>
 
 <template>
@@ -172,6 +173,134 @@ import ImageStack from '../components/ImageStack.vue'
             </article>
           </div>
         </div>
+      </div>
+
+    </section>
+
+    <section class="explore-plants">
+
+      <div class="explore-plants-container">
+
+        <div class="explore-plants-header">
+
+          <div class="explore-plants-heading">
+
+            <p class="section-label">
+              EXPLORE THE FLORA
+            </p>
+
+            <h2>
+              Plants of Niah
+            </h2>
+
+            <p class="explore-plants-description">
+              Discover the remarkable plants found throughout
+              Niah National Park.
+            </p>
+
+          </div>
+
+          <RouterLink
+            to="/plants"
+            class="explore-more-button"
+          >
+            <span>Explore More Plants</span>
+            <span class="button-arrow">→</span>
+          </RouterLink>
+
+        </div>
+
+
+        <div class="plant-carousel">
+
+          <div class="plant-track">
+
+            <!-- First set -->
+            <RouterLink
+              v-for="plant in plants"
+              :key="`first-${plant.slug}`"
+              :to="`/plants/${plant.slug}`"
+              class="home-plant-card"
+            >
+
+              <div class="home-plant-image">
+
+                <!-- Temporary image area -->
+                <div class="plant-image-placeholder">
+                  <span>🌿</span>
+                </div>
+
+                <span class="home-plant-category">
+                  {{ plant.category }}
+                </span>
+
+              </div>
+
+
+              <div class="home-plant-info">
+
+                <h3>
+                  {{ plant.name }}
+                </h3>
+
+                <p class="home-plant-scientific">
+                  {{ plant.scientificName }}
+                </p>
+
+                <span class="view-plant">
+                  View plant →
+                </span>
+
+              </div>
+
+            </RouterLink>
+
+
+            <!-- Duplicate set for continuous loop -->
+            <RouterLink
+              v-for="plant in plants"
+              :key="`second-${plant.slug}`"
+              :to="`/plants/${plant.slug}`"
+              class="home-plant-card"
+              aria-hidden="true"
+              tabindex="-1"
+            >
+
+              <div class="home-plant-image">
+
+                <div class="plant-image-placeholder">
+                  <span>🌿</span>
+                </div>
+
+                <span class="home-plant-category">
+                  {{ plant.category }}
+                </span>
+
+              </div>
+
+
+              <div class="home-plant-info">
+
+                <h3>
+                  {{ plant.name }}
+                </h3>
+
+                <p class="home-plant-scientific">
+                  {{ plant.scientificName }}
+                </p>
+
+                <span class="view-plant">
+                  View plant →
+                </span>
+
+              </div>
+
+            </RouterLink>
+
+          </div>
+
+        </div>
+
       </div>
 
     </section>
@@ -624,6 +753,345 @@ import ImageStack from '../components/ImageStack.vue'
   font-size: 15px;
   line-height: 1.5;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* ==================================================
+   EXPLORE PLANTS
+   ================================================== */
+
+.explore-plants {
+  padding: 110px 0 120px;
+  background: #f8f6ee;
+  overflow: hidden;
+}
+
+.explore-plants-container {
+  width: min(1200px, 88%);
+  margin: 0 auto;
+}
+
+.explore-plants-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 40px;
+  margin-bottom: 48px;
+}
+
+.explore-plants-heading {
+  max-width: 650px;
+}
+
+.explore-plants-heading .section-label {
+  margin-bottom: 12px;
+  color: #50b498;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 3px;
+}
+
+.explore-plants-heading h2 {
+  margin: 0;
+  color: #315f5f;
+  font-size: clamp(38px, 4vw, 54px);
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.explore-plants-description {
+  max-width: 560px;
+  margin: 18px 0 0;
+  color: #60756f;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+
+/* Explore More Button */
+
+.explore-more-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px;
+
+  border: 1px solid rgba(70, 133, 133, 0.25);
+  border-radius: 999px;
+
+  background: #fff6dc;
+  color: #468585;
+
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+
+  white-space: nowrap;
+
+  transition: 0.25s ease;
+}
+
+.explore-more-button:hover {
+  transform: translateY(-3px);
+  background: #ffffff;
+  box-shadow: 0 10px 25px rgba(50, 90, 70, 0.12);
+}
+
+.button-arrow {
+  font-size: 18px;
+}
+
+
+/* Carousel */
+
+.plant-carousel {
+  width: 100%;
+  overflow: hidden;
+}
+
+.plant-track {
+  width: max-content;
+
+  display: flex;
+  gap: 22px;
+
+  animation: plant-scroll 40s linear infinite;
+}
+
+.plant-carousel:hover .plant-track {
+  animation-play-state: paused;
+}
+
+@keyframes plant-scroll {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+
+/* Plant Card */
+
+.home-plant-card {
+  width: 280px;
+  flex: 0 0 280px;
+
+  overflow: hidden;
+
+  border: 1px solid rgba(49, 91, 70, 0.1);
+  border-radius: 20px;
+
+  background: #ffffff;
+
+  box-shadow: 0 10px 30px rgba(33, 57, 44, 0.08);
+
+  color: inherit;
+  text-decoration: none;
+
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.home-plant-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 18px 40px rgba(33, 57, 44, 0.15);
+}
+
+
+/* Image */
+
+.home-plant-image {
+  position: relative;
+
+  width: 100%;
+  aspect-ratio: 4 / 3;
+
+  overflow: hidden;
+
+  background: #dce8d6;
+}
+
+.plant-image-placeholder {
+  width: 100%;
+  height: 100%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background:
+    linear-gradient(
+      135deg,
+      #dce8d6,
+      #b9d4bd
+    );
+}
+
+.plant-image-placeholder span {
+  font-size: 55px;
+}
+
+
+/* Category */
+
+.home-plant-category {
+  position: absolute;
+
+  top: 14px;
+  right: 14px;
+
+  padding: 7px 11px;
+
+  border-radius: 999px;
+
+  background: rgba(20, 54, 37, 0.86);
+
+  color: #ffffff;
+
+  font-size: 10px;
+  font-weight: 700;
+
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+
+/* Information */
+
+.home-plant-info {
+  min-height: 115px;
+
+  padding: 20px 20px 22px;
+
+  display: flex;
+  flex-direction: column;
+}
+
+
+.home-plant-info h3 {
+  margin: 0;
+
+  color: #254b42;
+
+  font-family: Georgia, 'Times New Roman', serif;
+
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+
+.home-plant-scientific {
+  margin: 7px 0 0;
+
+  color: #88735d;
+
+  font-family: Georgia, 'Times New Roman', serif;
+
+  font-size: 14px;
+  font-style: italic;
+}
+
+
+/* Always stay at the bottom */
+
+.view-plant {
+  margin-top: auto;
+
+  padding-top: 18px;
+
+  color: #508a6a;
+
+  font-size: 12px;
+
+  font-weight: 700;
+
+  letter-spacing: 0.7px;
+
+  text-transform: uppercase;
+}
+
+
+/* Responsive */
+
+@media (max-width: 900px) {
+
+  .explore-plants {
+    padding: 85px 0 95px;
+  }
+
+  .explore-plants-header {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 36px;
+  }
+
+  .home-plant-card {
+    width: 260px;
+    flex-basis: 260px;
+  }
+
+}
+
+
+@media (max-width: 500px) {
+
+  .explore-plants {
+    padding: 70px 0 80px;
+  }
+
+  .explore-plants-container {
+    width: 86%;
+  }
+
+  .explore-plants-heading h2 {
+    font-size: 38px;
+  }
+
+  .explore-plants-description {
+    font-size: 14px;
+  }
+
+  .home-plant-card {
+    width: 235px;
+    flex-basis: 235px;
+  }
+
+  .home-plant-info {
+    padding: 18px;
+  }
+
+  .home-plant-info h3 {
+    font-size: 20px;
+  }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /* ==================================================
