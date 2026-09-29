@@ -357,33 +357,20 @@ onBeforeUnmount(() => {
   background-position: center;
 
   overflow: hidden;
-}
 
-.hero {
   animation: hero-image-zoom 12s ease-out forwards;
 }
 
 @keyframes hero-image-zoom {
-  from {
-    background-size: 100%;
-  }
-
-  to {
-    background-size: 106%;
-  }
+  from { background-size: 100%; }
+  to { background-size: 106%; }
 }
 
 @keyframes hero-content-enter {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+
 
 /* =========================
    Hero Left Side
@@ -1129,13 +1116,8 @@ onBeforeUnmount(() => {
   will-change: opacity, transform;
 }
 
-.reveal-left {
-  transform: translateX(-24px);
-}
-
-.reveal-right {
-  transform: translateX(24px);
-}
+.reveal-left { transform: translateX(-24px); }
+.reveal-right { transform: translateX(24px); }
 
 .reveal.is-visible {
   opacity: 1;
@@ -1377,7 +1359,6 @@ onBeforeUnmount(() => {
   }
 
 }
-
 
 @media (prefers-reduced-motion: reduce) {
 
