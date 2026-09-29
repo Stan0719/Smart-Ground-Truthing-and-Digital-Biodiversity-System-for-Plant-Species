@@ -3,6 +3,7 @@ import HomeView from '../views/HomeView.vue'
 import PlantsView from '../views/PlantsView.vue'
 import PlantDetailView from '../views/PlantDetailView.vue'
 import AdminDashboardView from '../views/AdminDashboardView.vue'
+import ConservationDashboardView from '../views/ConservationDashboardView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -27,6 +28,11 @@ const router = createRouter({
       name: 'admin-dashboard',
       component: AdminDashboardView,
       meta: { requiresAdmin: true },
+    },
+    {
+      path: '/conservation-dashboard',
+      name: 'conservation-dashboard',
+      component: ConservationDashboardView,
     },
   ],
 })
