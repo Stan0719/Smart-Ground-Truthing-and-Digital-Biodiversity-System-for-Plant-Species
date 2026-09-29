@@ -211,10 +211,11 @@ const logout = () => {
           ></div>
 
           <RouterLink
-            v-for="item in navItems"
+            v-for="(item, index) in navItems"
             :key="item.to"
             :to="item.to"
             class="nav-link"
+            :class="{ 'is-active': index === activeNavIndex }"
           >
             {{ item.label }}
           </RouterLink>
@@ -656,12 +657,13 @@ const logout = () => {
   z-index: 1;
 }
 
-.nav-link.router-link-active {
-  color: #ffffff;
+.nav-link.router-link-active,
+.nav-link.is-active {
+  color: #ffffff !important;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .nav-link:not(.router-link-active):hover {
+  .nav-link:not(.is-active):hover {
     color: #50B498;
     background: rgba(80, 180, 152, 0.08);
   }
