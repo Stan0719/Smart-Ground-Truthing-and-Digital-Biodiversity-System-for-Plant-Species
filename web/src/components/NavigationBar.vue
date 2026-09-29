@@ -187,7 +187,7 @@ const logout = () => {
       <!-- Logo -->
       <RouterLink to="/" class="logo" @click="closeMobileMenu">
         <img
-          src="/images/logo.png"
+          src="/images/logo2.png"
           alt="Niah Biodiversity Logo"
           class="logo-image"
         />
@@ -553,7 +553,7 @@ const logout = () => {
 .logo-image {
   width: 46px;
   height: 46px;
-  border-radius: 50%;
+  /* border-radius: 50%; */
   object-fit: cover;
 }
 
