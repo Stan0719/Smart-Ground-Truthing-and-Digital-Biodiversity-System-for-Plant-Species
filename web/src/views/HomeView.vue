@@ -1,7 +1,37 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from 'vue'
 import NavigationBar from '../components/NavigationBar.vue'
 import ImageStack from '../components/ImageStack.vue'
 import { plants } from '../data/plants'
+
+let revealObserver: IntersectionObserver | null = null
+
+onMounted(() => {
+  const revealElements = document.querySelectorAll<HTMLElement>('.reveal')
+
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    revealElements.forEach((element) => element.classList.add('is-visible'))
+    return
+  }
+
+  revealObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+
+        entry.target.classList.add('is-visible')
+        revealObserver?.unobserve(entry.target)
+      })
+    },
+    { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
+  )
+
+  revealElements.forEach((element) => revealObserver?.observe(element))
+})
+
+onBeforeUnmount(() => {
+  revealObserver?.disconnect()
+})
 </script>
 
 <template>
@@ -64,13 +94,13 @@ import { plants } from '../data/plants'
       <div class="about-container">
 
         <!-- Image -->
-        <div class="about-image-wrapper">
+        <div class="about-image-wrapper reveal reveal-left">
           <ImageStack />
         </div>
 
 
         <!-- Content -->
-        <div class="about-content">
+        <div class="about-content reveal reveal-right reveal-delay-1">
 
           <p class="section-label">
             ABOUT NIAH
@@ -97,21 +127,21 @@ import { plants } from '../data/plants'
           <!-- Key Facts -->
           <div class="about-facts">
 
-            <div class="fact-card">
+            <div class="fact-card reveal">
               <span class="fact-number">40,000+</span>
               <span class="fact-label">
                 Years of Human History
               </span>
             </div>
 
-            <div class="fact-card">
+            <div class="fact-card reveal reveal-delay-1">
               <span class="fact-number">UNESCO</span>
               <span class="fact-label">
                 World Heritage Site
               </span>
             </div>
 
-            <div class="fact-card">
+            <div class="fact-card reveal reveal-delay-2">
               <span class="fact-number">Rich</span>
               <span class="fact-label">
                 Natural Biodiversity
@@ -126,11 +156,11 @@ import { plants } from '../data/plants'
 
       <div class="visitor-overview">
         <div class="why-niah">
-          <p class="section-label">WHY NIAH?</p>
+          <p class="section-label reveal">WHY NIAH?</p>
 
-          <h3>Where nature meets human history</h3>
+          <h3 class="reveal reveal-delay-1">Where nature meets human history</h3>
 
-          <p>
+          <p class="reveal reveal-delay-2">
             Hidden within the rainforests of northern Sarawak, Niah National Park is a
             remarkable meeting point of nature and human history. Its vast limestone caves
             preserve archaeological discoveries, prehistoric paintings, and evidence of
@@ -139,34 +169,34 @@ import { plants } from '../data/plants'
         </div>
 
         <div class="visitor-info">
-          <h3>Plan your visit</h3>
+          <h3 class="reveal">Plan your visit</h3>
 
           <div class="visitor-cards">
-            <article class="visitor-card">
+            <article class="visitor-card reveal">
               <span class="visitor-icon" aria-hidden="true">🕗</span>
               <span class="visitor-label">Opening hours</span>
               <strong>Daily, 8 AM–5 PM</strong>
             </article>
 
-            <article class="visitor-card">
+            <article class="visitor-card reveal reveal-delay-visitor-1">
               <span class="visitor-icon" aria-hidden="true">📍</span>
               <span class="visitor-label">Location</span>
               <strong>Niah, Miri Division</strong>
             </article>
 
-            <article class="visitor-card">
+            <article class="visitor-card reveal reveal-delay-visitor-2">
               <span class="visitor-icon" aria-hidden="true">🥾</span>
               <span class="visitor-label">Main experience</span>
               <strong>Cave &amp; rainforest trekking</strong>
             </article>
 
-            <article class="visitor-card">
+            <article class="visitor-card reveal reveal-delay-visitor-3">
               <span class="visitor-icon" aria-hidden="true">☀️</span>
               <span class="visitor-label">Best period</span>
               <strong>March–September</strong>
             </article>
 
-            <article class="visitor-card">
+            <article class="visitor-card reveal reveal-delay-visitor-4">
               <span class="visitor-icon" aria-hidden="true">⏱️</span>
               <span class="visitor-label">From Miri</span>
               <strong>About 1.5 hours</strong>
@@ -185,15 +215,15 @@ import { plants } from '../data/plants'
 
           <div class="explore-plants-heading">
 
-            <p class="section-label">
+            <p class="section-label reveal">
               EXPLORE THE FLORA
             </p>
 
-            <h2>
+            <h2 class="reveal reveal-delay-1">
               Plants of Niah
             </h2>
 
-            <p class="explore-plants-description">
+            <p class="explore-plants-description reveal reveal-delay-2">
               Discover the remarkable plants found throughout
               Niah National Park.
             </p>
@@ -202,7 +232,7 @@ import { plants } from '../data/plants'
 
           <RouterLink
             to="/plants"
-            class="explore-more-button"
+            class="explore-more-button reveal reveal-delay-3"
           >
             <span>Explore More Plants</span>
             <span class="button-arrow">→</span>
@@ -329,6 +359,31 @@ import { plants } from '../data/plants'
   overflow: hidden;
 }
 
+.hero {
+  animation: hero-image-zoom 12s ease-out forwards;
+}
+
+@keyframes hero-image-zoom {
+  from {
+    background-size: 100%;
+  }
+
+  to {
+    background-size: 106%;
+  }
+}
+
+@keyframes hero-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 /* =========================
    Hero Left Side
@@ -390,6 +445,9 @@ import { plants } from '../data/plants'
   font-weight: 700;
 
   letter-spacing: 4px;
+
+  opacity: 0;
+  animation: hero-content-enter 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 
@@ -406,6 +464,9 @@ import { plants } from '../data/plants'
   font-weight: 800;
 
   letter-spacing: -1.5px;
+
+  opacity: 0;
+  animation: hero-content-enter 0.65s 0.12s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 
@@ -427,6 +488,9 @@ import { plants } from '../data/plants'
 
   font-size: 17px;
   line-height: 1.8;
+
+  opacity: 0;
+  animation: hero-content-enter 0.65s 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 
@@ -441,6 +505,9 @@ import { plants } from '../data/plants'
   gap: 14px;
 
   flex-wrap: wrap;
+
+  opacity: 0;
+  animation: hero-content-enter 0.65s 0.36s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 
@@ -725,6 +792,17 @@ import { plants } from '../data/plants'
   border-radius: 16px;
 
   background: rgba(255, 246, 220, 0.75);
+
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.visitor-card.reveal.is-visible:hover {
+  transform: translateY(-5px);
+  border-color: rgba(70, 133, 133, 0.28);
+  box-shadow: 0 13px 28px rgba(50, 90, 70, 0.12);
 }
 
 
@@ -849,6 +927,11 @@ import { plants } from '../data/plants'
 
 .button-arrow {
   font-size: 18px;
+  transition: transform 0.25s ease;
+}
+
+.explore-more-button:hover .button-arrow {
+  transform: translateX(4px);
 }
 
 
@@ -939,6 +1022,12 @@ import { plants } from '../data/plants'
       #dce8d6,
       #b9d4bd
     );
+
+  transition: transform 0.45s ease;
+}
+
+.home-plant-card:hover .plant-image-placeholder {
+  transform: scale(1.05);
 }
 
 .plant-image-placeholder span {
@@ -1023,6 +1112,50 @@ import { plants } from '../data/plants'
   letter-spacing: 0.7px;
 
   text-transform: uppercase;
+}
+
+
+/* ==================================================
+   SCROLL REVEALS
+   ================================================== */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition:
+    opacity 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: 0s;
+  will-change: opacity, transform;
+}
+
+.reveal-left {
+  transform: translateX(-24px);
+}
+
+.reveal-right {
+  transform: translateX(24px);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: translate(0, 0);
+}
+
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-visitor-1 { transition-delay: 0.08s; }
+.reveal-delay-visitor-2 { transition-delay: 0.16s; }
+.reveal-delay-visitor-3 { transition-delay: 0.24s; }
+.reveal-delay-visitor-4 { transition-delay: 0.32s; }
+
+.visitor-card.reveal {
+  transition:
+    opacity 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
 }
 
 
@@ -1241,6 +1374,43 @@ import { plants } from '../data/plants'
 
   .visitor-card {
     min-height: 0;
+  }
+
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+
+  .hero,
+  .eyebrow,
+  .hero h1,
+  .hero-description,
+  .hero-actions,
+  .plant-track {
+    animation: none;
+  }
+
+  .eyebrow,
+  .hero h1,
+  .hero-description,
+  .hero-actions,
+  .reveal,
+  .reveal-left,
+  .reveal-right {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .explore-button,
+  .learn-button,
+  .visitor-card,
+  .explore-more-button,
+  .button-arrow,
+  .home-plant-card,
+  .plant-image-placeholder,
+  .about-image {
+    transition: none;
   }
 
 }
