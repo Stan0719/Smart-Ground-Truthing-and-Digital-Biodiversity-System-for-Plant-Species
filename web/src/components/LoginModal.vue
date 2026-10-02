@@ -206,6 +206,7 @@ const handleLogin = () => {
 
 .modal-header {
   position: relative;
+  display: block;
   margin-bottom: 34px;
   text-align: center;
 }
