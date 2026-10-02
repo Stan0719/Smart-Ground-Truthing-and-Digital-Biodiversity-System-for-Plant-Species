@@ -7,7 +7,7 @@ defineProps<{
 
 const emit = defineEmits<{
   close: []
-  login: [username: string]
+  login: [user: { username: string; role: 'admin' | 'conservation-officer' }]
 }>()
 
 const email = ref('')
@@ -20,11 +20,30 @@ const closeModal = () => {
 }
 //testing
 const handleLogin = () => {
-  const testEmail = 'admin@niah.com'
-  const testPassword = 'admin123'
+  const mockUsers = [
+    {
+      email: 'admin@niah.com',
+      password: 'admin123',
+      username: 'Admin01',
+      role: 'admin' as const,
+    },
+    {
+      email: 'officer@niah.com',
+      password: 'officer123',
+      username: 'Officer01',
+      role: 'conservation-officer' as const,
+    },
+  ]
 
-  if (email.value === testEmail && password.value === testPassword) {
-    emit('login', 'Admin')
+  const mockUser = mockUsers.find(
+    (user) => user.email === email.value && user.password === password.value,
+  )
+
+  if (mockUser) {
+    emit('login', {
+      username: mockUser.username,
+      role: mockUser.role,
+    })
     emit('close')
 
     email.value = ''

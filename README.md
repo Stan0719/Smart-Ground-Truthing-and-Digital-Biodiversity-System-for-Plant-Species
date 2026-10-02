@@ -1,8 +1,22 @@
 # Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species
 
+# For web:
 cd web
 npm install
 npm run dev
+
+# Harcoded account for testing:
+account: admin@niah.com
+password: admin123
+
+account: officer@niah.com
+password: officer123
+
+# For App:
+cd mobileapp
+npm install
+npx expo start
+
 
 
 cd mobileapp

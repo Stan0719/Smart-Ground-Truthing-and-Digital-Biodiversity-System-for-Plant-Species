@@ -15,20 +15,49 @@ const route = useRoute()
 const router = useRouter()
 const navSearch = ref('')
 
-const navItems = [
-  {
-    label: 'Home',
-    to: '/'
-  },
-  {
-    label: 'Explore Plants',
-    to: '/plants'
-  },
-  {
-    label: 'About Niah',
-    to: '/about'
+type UserRole = 'admin' | 'conservation-officer' | null
+
+const isLoggedIn = ref(false)
+
+// TEMPORARY FRONTEND ROLE STATE.
+// Replace this with the authenticated user's role from the backend/database
+// when authentication is integrated.
+const userRole = ref<UserRole>(null)
+
+const username = ref('')
+
+const navItems = computed(() => {
+  const items = [
+    {
+      label: 'Home',
+      to: '/',
+    },
+    {
+      label: 'Explore Plants',
+      to: '/plants',
+    },
+    {
+      label: 'About Niah',
+      to: '/about',
+    },
+  ]
+
+  if (isLoggedIn.value && userRole.value === 'admin') {
+    items.push({
+      label: 'Admin',
+      to: '/admin',
+    })
   }
-]
+
+  if (isLoggedIn.value && userRole.value === 'conservation-officer') {
+    items.push({
+      label: 'Conservation Officer',
+      to: '/conservation-dashboard',
+    })
+  }
+
+  return items
+})
 
 const submitNavSearch = () => {
   const query = navSearch.value.trim()
@@ -45,7 +74,7 @@ const thumbLeft = ref(0)
 const thumbWidth = ref(0)
 
 const activeNavIndex = computed(() => {
-  const index = navItems.findIndex(item => {
+  const index = navItems.value.findIndex(item => {
     if (item.to === '/') {
       return route.path === '/'
     }
@@ -114,7 +143,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => route.path,
+  [() => route.path, isLoggedIn, userRole],
   () => {
     updateNavThumb()
   }
@@ -125,11 +154,6 @@ const mobileMenuOpen = ref(false)
 const loginModalOpen = ref(false)
 
 const logoutModalOpen = ref(false)
-
-const isLoggedIn = ref(false)
-
-const username = ref('Admin')
-
 
 const closeMobileMenu = () => {
 
@@ -162,8 +186,12 @@ const openLoginModal = () => {
 
 }
 
-const handleLogin = (loggedInUsername: string) => {
-  username.value = loggedInUsername
+const handleLogin = (user: {
+  username: string
+  role: Exclude<UserRole, null>
+}) => {
+  username.value = user.username
+  userRole.value = user.role
   isLoggedIn.value = true
   loginModalOpen.value = false
 }
@@ -194,6 +222,10 @@ const closeLogoutModal = () => {
 const logout = () => {
 
   isLoggedIn.value = false
+
+  userRole.value = null
+
+  username.value = ''
 
   logoutModalOpen.value = false
 
@@ -369,27 +401,13 @@ const logout = () => {
       >
 
         <RouterLink
-          to="/"
+          v-for="item in navItems"
+          :key="item.to"
+          :to="item.to"
           class="mobile-nav-link"
           @click="closeMobileMenu"
         >
-          Home
-        </RouterLink>
-
-        <RouterLink
-          to="/plants"
-          class="mobile-nav-link"
-          @click="closeMobileMenu"
-        >
-          Explore Plants
-        </RouterLink>
-
-        <RouterLink
-          to="/about"
-          class="mobile-nav-link"
-          @click="closeMobileMenu"
-        >
-          About Niah
+          {{ item.label }}
         </RouterLink>
 
         <RouterLink
