@@ -4,6 +4,7 @@ import { ref } from 'vue'
 type Tone = 'green' | 'blue' | 'warning' | 'danger' | 'success' | 'neutral'
 
 const sidebarOpen = ref(false)
+const desktopSidebarCollapsed = ref(false)
 const profileOpen = ref(false)
 
 const sidebarItems = [
@@ -63,11 +64,30 @@ const mapMarkers = [
 const closeSidebar = () => {
   sidebarOpen.value = false
 }
+
+const toggleSidebar = () => {
+  if (window.matchMedia('(max-width: 920px)').matches) {
+    sidebarOpen.value = !sidebarOpen.value
+    return
+  }
+
+  desktopSidebarCollapsed.value = !desktopSidebarCollapsed.value
+}
+
+const closeSidebarFromControl = () => {
+  if (window.matchMedia('(max-width: 920px)').matches) {
+    closeSidebar()
+    return
+  }
+
+  desktopSidebarCollapsed.value = true
+}
 </script>
 
 <template>
-  <div class="officer-layout">
+  <div class="officer-layout" :class="{ 'sidebar-collapsed': desktopSidebarCollapsed }">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
+      <button class="sidebar-close-button" type="button" aria-label="Close navigation" @click="closeSidebarFromControl">&times;</button>
       <RouterLink class="brand" to="/" data-tooltip="Back to public website" aria-label="Back to public website">
         <img src="/images/logo.png" alt="Niah Biodiversity" />
         <div><strong>NIAH</strong><span>CONSERVATION</span></div>
@@ -91,7 +111,12 @@ const closeSidebar = () => {
 
     <div class="main-area">
       <header class="topbar">
-        <button class="menu-button" type="button" aria-label="Open navigation" @click="sidebarOpen = true"><span></span><span></span><span></span></button>
+        <button
+          class="menu-button"
+          type="button"
+          aria-label="Toggle navigation"
+          @click="toggleSidebar"
+        ><span></span><span></span><span></span></button>
         <div class="page-heading"><p>OVERVIEW</p><h1>Conservation Officer Dashboard</h1></div>
         <div class="topbar-actions">
           <button class="notification-button" type="button" aria-label="Notifications">
@@ -199,10 +224,14 @@ const closeSidebar = () => {
 <style scoped>
 * { box-sizing: border-box; }
 button, select { font-family: inherit; }
-.officer-layout { min-height: 100vh; display: grid; grid-template-columns: 258px minmax(0, 1fr); background: #f3f6f2; color: #29483e; }
-.sidebar { position: sticky; top: 0; z-index: 100; height: 100vh; padding: 24px 16px; display: flex; flex-direction: column; background: #173f34; color: #fff; }
-.brand { position: relative; margin: -8px -4px 0; padding: 8px 12px 25px; display: flex; align-items: center; gap: 11px; border-bottom: 1px solid rgba(255,255,255,.12); border-radius: 10px 10px 0 0; color: #fff; text-decoration: none; transition: background .2s ease, border-color .2s ease; }
-.brand:hover { border-bottom-color: rgba(255,255,255,.2); background: rgba(255,255,255,.055); }
+.officer-layout { min-height: 100vh; display: flex; align-items: flex-start; overflow-x: clip; background: #f3f6f2; color: #29483e; }
+.sidebar { position: sticky; top: 0; z-index: 100; width: 258px; min-width: 0; height: 100vh; padding: 24px 16px; flex: 0 0 258px; overflow: hidden; display: flex; flex-direction: column; background: #173f34; color: #fff; transition: flex-basis .2s cubic-bezier(.4,0,.2,1), padding-inline .2s cubic-bezier(.4,0,.2,1); will-change: flex-basis; }
+.sidebar > * { min-width: 226px; }
+.sidebar-close-button { position: absolute; top: 12px; right: 10px; z-index: 2; width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; background: rgba(255,255,255,.07); color: #bfd7cd; cursor: pointer; font-size: 22px; line-height: 1; transition: .2s ease; }
+.sidebar-close-button:hover { background: #2b6754; color: #fff; }
+.sidebar-close-button:focus-visible { outline: 2px solid #9dd5ba; outline-offset: 2px; }
+.brand { position: relative; margin: -8px -4px 0; padding: 8px 12px 25px; display: flex; align-items: center; gap: 11px; border-bottom: 1px solid rgba(255,255,255,.12); border-radius: 10px 10px 0 0; color: #fff; text-decoration: none; transition: border-color .2s ease; }
+.brand:hover { border-bottom-color: rgba(255,255,255,.2); }
 .brand:focus-visible { outline: 2px solid #9dd5ba; outline-offset: 2px; }
 .brand::after { content: attr(data-tooltip); position: absolute; z-index: 110; left: 12px; bottom: -30px; padding: 6px 9px; border-radius: 6px; background: rgba(18,25,22,.96); color: #fff; box-shadow: 0 5px 14px rgba(0,0,0,.2); font-size: 8px; font-weight: 600; letter-spacing: .2px; white-space: nowrap; opacity: 0; visibility: hidden; pointer-events: none; transform: translateY(-3px); transition: opacity .18s ease, transform .18s ease, visibility .18s ease; }
 .brand:hover::after, .brand:focus-visible::after { opacity: 1; visibility: visible; transform: translateY(0); }
@@ -220,7 +249,7 @@ button, select { font-family: inherit; }
 .sidebar-footer .logout-button { justify-content: center; background: #fce8e6; color: #b84d42; transition: background .2s ease, color .2s ease, transform .2s ease; }
 .sidebar-footer .logout-button:hover { background: #b84d42; color: #fff; }
 .sidebar-footer .logout-button:active { transform: translateY(1px); }
-.main-area { min-width: 0; }
+.main-area { min-width: 0; flex: 1 1 auto; }
 .topbar { position: sticky; top: 0; z-index: 80; min-height: 82px; padding: 0 3.5%; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid #dce4dc; background: rgba(255,255,255,.93); backdrop-filter: blur(12px); }
 .page-heading p { margin: 0 0 3px; color: #62a087; font-size: 9px; font-weight: 800; letter-spacing: 1.8px; }
 .page-heading h1 { margin: 0; color: #204c3d; font-size: 23px; }
@@ -239,7 +268,8 @@ button, select { font-family: inherit; }
 .profile-menu { position: absolute; top: 52px; right: 0; width: 160px; padding: 7px; border: 1px solid #e1e6e1; border-radius: 11px; background: #fff; box-shadow: 0 12px 30px rgba(28,65,51,.13); }
 .profile-menu button { width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: #425e54; font-size: 12px; text-align: left; cursor: pointer; }
 .profile-menu button:hover { background: #edf3ed; }
-.menu-button { display: none; }
+.menu-button { width:39px; height:39px; flex:0 0 39px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; border:1px solid #dfe6df; border-radius:9px; background:#fff; cursor:pointer; }
+.menu-button span { width:18px; height:2px; background:#376354; }
 .dashboard { width: min(1420px, 94%); margin: 0 auto; padding: 31px 0 55px; }
 .welcome-row { margin-bottom: 24px; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
 .welcome-row h2 { margin: 0 0 5px; color: #204b3c; font-size: 22px; }
@@ -319,8 +349,10 @@ td em { color: #3d6254; font-style: italic; font-weight: 500; }
 .action-grid > button > span { width:34px; height:34px; flex:0 0 34px; display:grid; place-items:center; border-radius:9px; background:#e1eee5; color:#39795f; font-size:17px; font-weight:800; }
 .action-grid div { display:flex; flex-direction:column; }.action-grid strong { font-size:11px; }.action-grid small { margin-top:2px; color:#8c9993; font-size:8px; }
 .drawer-backdrop { display:none; }
+@media(min-width:921px){.officer-layout.sidebar-collapsed .sidebar{flex-basis:0;padding-inline:0;visibility:hidden;pointer-events:none;transition: flex-basis .2s cubic-bezier(.4,0,.2,1), padding-inline .2s cubic-bezier(.4,0,.2,1), visibility 0s linear .2s}}
 @media(max-width:1250px){.summary-grid{grid-template-columns:repeat(3,1fr)}.primary-grid{grid-template-columns:1fr}.biodiversity-overview .status-list{grid-template-columns:repeat(5,1fr)}.lower-grid{grid-template-columns:1fr}.park-map{height:320px}}
-@media(max-width:920px){.officer-layout{grid-template-columns:1fr}.sidebar{position:fixed;left:0;width:258px;transform:translateX(-100%);transition:transform .25s ease}.sidebar.open{transform:translateX(0)}.drawer-backdrop{position:fixed;inset:0;z-index:90;display:block;border:0;background:rgba(12,35,27,.5)}.menu-button{width:39px;height:39px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:1px solid #dfe6df;border-radius:9px;background:#fff}.menu-button span{width:18px;height:2px;background:#376354}.topbar{justify-content:flex-start}.topbar-actions{margin-left:auto}.action-grid{grid-template-columns:repeat(2,1fr)}.biodiversity-overview .status-list{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:920px){.officer-layout{display:block;overflow-x:hidden}.sidebar{position:fixed;left:0;width:258px;transform:translateX(-100%);transition:transform .2s cubic-bezier(.4,0,.2,1)}.sidebar.open{transform:translateX(0)}.drawer-backdrop{position:fixed;inset:0;z-index:90;display:block;border:0;background:rgba(12,35,27,.5)}.topbar{justify-content:flex-start}.topbar-actions{margin-left:auto}.action-grid{grid-template-columns:repeat(2,1fr)}.biodiversity-overview .status-list{grid-template-columns:repeat(2,1fr)}}
+@media(prefers-reduced-motion:reduce){.sidebar{transition:none!important}}
 @media(max-width:620px){.topbar{min-height:72px;padding:0 4%;gap:10px}.page-heading p,.profile-copy,.chevron{display:none}.page-heading h1{font-size:16px}.dashboard{width:91%;padding-top:23px}.welcome-row{align-items:flex-start;flex-direction:column}.welcome-row time{display:none}.welcome-row h2{font-size:19px}.summary-grid{grid-template-columns:repeat(2,1fr)}.summary-card{padding:14px}.summary-icon{display:none}.summary-card p,.summary-card small{white-space:normal}.panel{padding:19px}.panel-header{align-items:flex-start;flex-direction:column}.action-grid{grid-template-columns:1fr}.profile-button{padding:3px}.profile-button .avatar{width:35px;height:35px}.map-filters{grid-template-columns:1fr}.park-map{height:280px}.alert-item{grid-template-columns:31px minmax(0,1fr)}.alert-badges{grid-column:2;flex-direction:row;align-items:center}.map-legend{left:10px;right:auto}.biodiversity-overview .status-list{grid-template-columns:1fr}}
 @media(max-width:400px){.summary-grid{grid-template-columns:1fr}.page-heading h1{font-size:14px}.notification-button{display:none}}
 </style>
