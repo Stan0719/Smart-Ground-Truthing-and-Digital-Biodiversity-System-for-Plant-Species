@@ -36,19 +36,26 @@ export default function MapScreen() {
         Documented Plants
       </Text>
 
-      <ScrollView>
+      <ScrollView showsVerticalScrollIndicator={false}>
         {plants.map((plant) => (
-          <View style={styles.locationCard} key={plant.id}>
+          <View
+            style={styles.locationCard}
+            key={plant.slug}
+          >
             <Text style={styles.plantName}>
               {plant.scientificName}
             </Text>
 
             <Text style={styles.commonName}>
-              {plant.commonName}
+              {plant.name}
+            </Text>
+
+            <Text style={styles.category}>
+              {plant.category}
             </Text>
 
             <Text style={styles.location}>
-              📍 {plant.latitude}, {plant.longitude}
+              📍 GPS location not available
             </Text>
           </View>
         ))}
@@ -127,6 +134,13 @@ const styles = StyleSheet.create({
   commonName: {
     color: "#666",
     marginTop: 3,
+  },
+
+  category: {
+    color: "#50B498",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 5,
   },
 
   location: {
