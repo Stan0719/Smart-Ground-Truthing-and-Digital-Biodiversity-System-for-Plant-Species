@@ -168,7 +168,6 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
 .hero-copy h1 {
   margin: 0;
   color: #234a3c;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: clamp(46px, 5vw, 68px);
   font-weight: 600;
   line-height: 1.04;
@@ -177,7 +176,6 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
 .scientific-name {
   margin: 14px 0 26px;
   color: #7c6955;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: 23px;
   font-style: italic;
 }
@@ -212,7 +210,6 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
 .quick-facts h2 {
   margin: 0 0 24px;
   color: #234a3c;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: 36px;
   font-weight: 600;
   line-height: 1.2;
@@ -221,7 +218,6 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
 .main-description h3 {
   margin: 38px 0 10px;
   color: #315f4e;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: 24px;
 }
 
@@ -302,7 +298,6 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
 
 .explore-more p {
   margin: 0;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: 23px;
 }
 
@@ -336,7 +331,6 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
 .not-found h1 {
   margin: 16px 0 8px;
   color: #234a3c;
-  font-family: Georgia, 'Times New Roman', serif;
 }
 
 .not-found p {

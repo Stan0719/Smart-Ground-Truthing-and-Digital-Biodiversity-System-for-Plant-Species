@@ -1,36 +1,225 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import NavigationBar from '../components/NavigationBar.vue'
 import ImageStack from '../components/ImageStack.vue'
 import { plants } from '../data/plants'
 
 let revealObserver: IntersectionObserver | null = null
+const plantCarousel = ref<HTMLElement | null>(null)
+const plantTrack = ref<HTMLElement | null>(null)
+
+let carouselFrame = 0
+let carouselResizeObserver: ResizeObserver | null = null
+let carouselOffset = 0
+let carouselSetWidth = 0
+let carouselLastTime = 0
+let carouselDragged = false
+let carouselSuppressClickUntil = 0
+let dragStartX = 0
+let dragStartOffset = 0
+type CarouselMode = 'auto' | 'tween' | 'drag' | 'hover' | 'waiting'
+let carouselMode: CarouselMode = 'auto'
+let carouselPointerOver = false
+let carouselResumeTimer: number | null = null
+let carouselTween: {
+  start: number
+  end: number
+  startedAt: number
+  duration: number
+} | null = null
+
+const carouselResumeDelay = 500
+const dragThreshold = 6
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+const setCarouselMode = (nextMode: CarouselMode) => {
+  carouselMode = nextMode
+}
+
+const clearCarouselResumeTimer = () => {
+  if (carouselResumeTimer === null) return
+  window.clearTimeout(carouselResumeTimer)
+  carouselResumeTimer = null
+}
+
+const scheduleCarouselResume = () => {
+  clearCarouselResumeTimer()
+  setCarouselMode('waiting')
+
+  carouselResumeTimer = window.setTimeout(() => {
+    carouselResumeTimer = null
+    setCarouselMode(carouselPointerOver ? 'hover' : 'auto')
+    carouselLastTime = performance.now()
+  }, carouselResumeDelay)
+}
+
+const normalizeCarouselOffset = (offset: number) => {
+  if (!carouselSetWidth) return offset
+  return ((offset % carouselSetWidth) + carouselSetWidth) % carouselSetWidth
+}
+
+const renderCarousel = () => {
+  if (!plantTrack.value) return
+  plantTrack.value.style.transform = `translate3d(${-normalizeCarouselOffset(carouselOffset)}px, 0, 0)`
+}
+
+const measureCarousel = () => {
+  const cards = plantTrack.value?.querySelectorAll<HTMLElement>('.home-plant-card')
+  if (!cards || cards.length < 2) return
+
+  const firstCard = cards[0]
+  const duplicateStart = cards[Math.floor(cards.length / 2)]
+  if (!firstCard || !duplicateStart) return
+
+  carouselSetWidth = duplicateStart.offsetLeft - firstCard.offsetLeft
+  carouselOffset = normalizeCarouselOffset(carouselOffset)
+  renderCarousel()
+}
+
+const runCarousel = () => {
+  const now = performance.now()
+  const elapsed = carouselLastTime ? Math.min(now - carouselLastTime, 50) : 0
+  carouselLastTime = now
+
+  if (carouselMode === 'tween' && carouselTween) {
+    const progress = Math.min((now - carouselTween.startedAt) / carouselTween.duration, 1)
+    const eased = 1 - Math.pow(1 - progress, 3)
+    carouselOffset = carouselTween.start + (carouselTween.end - carouselTween.start) * eased
+
+    if (progress >= 1) {
+      carouselOffset = normalizeCarouselOffset(carouselTween.end)
+      carouselTween = null
+      carouselLastTime = now
+      scheduleCarouselResume()
+    }
+  } else if (carouselMode === 'auto' && !prefersReducedMotion()) {
+    carouselOffset += (carouselSetWidth / 40000) * elapsed
+    carouselOffset = normalizeCarouselOffset(carouselOffset)
+  }
+
+  renderCarousel()
+  carouselFrame = requestAnimationFrame(runCarousel)
+}
+
+const moveCarousel = (direction: -1 | 1) => {
+  const firstCard = plantTrack.value?.querySelector<HTMLElement>('.home-plant-card')
+  if (!firstCard) return
+
+  const gap = Number.parseFloat(getComputedStyle(plantTrack.value!).columnGap) || 0
+  const distance = firstCard.offsetWidth + gap
+  const now = performance.now()
+  clearCarouselResumeTimer()
+
+  if (prefersReducedMotion()) {
+    carouselTween = null
+    carouselOffset = normalizeCarouselOffset(carouselOffset + direction * distance)
+    renderCarousel()
+    scheduleCarouselResume()
+    return
+  }
+
+  carouselTween = {
+    start: carouselOffset,
+    end: carouselOffset + direction * distance,
+    startedAt: now,
+    duration: 420,
+  }
+  setCarouselMode('tween')
+}
+
+const startCarouselDrag = (event: PointerEvent) => {
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+
+  clearCarouselResumeTimer()
+  carouselTween = null
+  carouselDragged = false
+  dragStartX = event.clientX
+  dragStartOffset = carouselOffset
+  setCarouselMode('drag')
+  plantCarousel.value?.setPointerCapture(event.pointerId)
+}
+
+const dragCarousel = (event: PointerEvent) => {
+  if (carouselMode !== 'drag') return
+
+  const distance = event.clientX - dragStartX
+  if (Math.abs(distance) >= dragThreshold) carouselDragged = true
+  if (!carouselDragged) return
+
+  if (event.cancelable) event.preventDefault()
+  carouselOffset = dragStartOffset - distance
+  renderCarousel()
+}
+
+const stopCarouselDrag = (event: PointerEvent) => {
+  if (carouselMode !== 'drag') return
+
+  if (plantCarousel.value?.hasPointerCapture(event.pointerId)) {
+    plantCarousel.value.releasePointerCapture(event.pointerId)
+  }
+
+  if (carouselDragged) {
+    carouselSuppressClickUntil = performance.now() + 250
+  }
+
+  carouselOffset = normalizeCarouselOffset(carouselOffset)
+  scheduleCarouselResume()
+}
+
+const preventCarouselClick = (event: MouseEvent) => {
+  if (performance.now() > carouselSuppressClickUntil) return
+  event.preventDefault()
+  event.stopPropagation()
+  carouselSuppressClickUntil = 0
+}
+
+const setCarouselHover = (hovered: boolean, event: PointerEvent) => {
+  if (event.pointerType !== 'mouse') return
+
+  carouselPointerOver = hovered
+
+  if (hovered && (carouselMode === 'auto' || carouselMode === 'waiting')) {
+    clearCarouselResumeTimer()
+    setCarouselMode('hover')
+  } else if (!hovered && carouselMode === 'hover') {
+    scheduleCarouselResume()
+  }
+}
 
 onMounted(() => {
   const revealElements = document.querySelectorAll<HTMLElement>('.reveal')
 
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     revealElements.forEach((element) => element.classList.add('is-visible'))
-    return
+  } else {
+    revealObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return
+
+          entry.target.classList.add('is-visible')
+          revealObserver?.unobserve(entry.target)
+        })
+      },
+      { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
+    )
+
+    revealElements.forEach((element) => revealObserver?.observe(element))
   }
 
-  revealObserver = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return
-
-        entry.target.classList.add('is-visible')
-        revealObserver?.unobserve(entry.target)
-      })
-    },
-    { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
-  )
-
-  revealElements.forEach((element) => revealObserver?.observe(element))
+  nextTick(() => {
+    measureCarousel()
+    carouselResizeObserver = new ResizeObserver(measureCarousel)
+    if (plantCarousel.value) carouselResizeObserver.observe(plantCarousel.value)
+    carouselFrame = requestAnimationFrame(runCarousel)
+  })
 })
 
 onBeforeUnmount(() => {
   revealObserver?.disconnect()
+  carouselResizeObserver?.disconnect()
+  clearCarouselResumeTimer()
+  cancelAnimationFrame(carouselFrame)
 })
 </script>
 
@@ -173,31 +362,65 @@ onBeforeUnmount(() => {
 
           <div class="visitor-cards">
             <article class="visitor-card reveal">
-              <span class="visitor-icon" aria-hidden="true">🕗</span>
+              <span class="visitor-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <path d="M12 7.5V12l3 2" />
+                </svg>
+              </span>
               <span class="visitor-label">Opening hours</span>
               <strong>Daily, 8 AM–5 PM</strong>
             </article>
 
             <article class="visitor-card reveal reveal-delay-visitor-1">
-              <span class="visitor-icon" aria-hidden="true">📍</span>
+              <span class="visitor-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M19 10c0 5.25-7 10-7 10S5 15.25 5 10a7 7 0 1 1 14 0Z" />
+                  <circle cx="12" cy="10" r="2.25" />
+                </svg>
+              </span>
               <span class="visitor-label">Location</span>
               <strong>Niah, Miri Division</strong>
+              <a
+                class="visitor-map-link"
+                href="https://www.google.com/maps/search/?api=1&amp;query=Niah+National+Park%2C+Sarawak%2C+Malaysia"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View on Google Maps →
+              </a>
             </article>
 
             <article class="visitor-card reveal reveal-delay-visitor-2">
-              <span class="visitor-icon" aria-hidden="true">🥾</span>
+              <span class="visitor-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="m3.5 18.5 5.3-8 3.3 4.2 2.2-2.8 6.2 6.6" />
+                  <path d="M3.5 18.5h17M8.8 10.5 10.5 8l1.8 2.3" />
+                </svg>
+              </span>
               <span class="visitor-label">Main experience</span>
               <strong>Cave &amp; rainforest trekking</strong>
             </article>
 
             <article class="visitor-card reveal reveal-delay-visitor-3">
-              <span class="visitor-icon" aria-hidden="true">☀️</span>
+              <span class="visitor-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="3.5" />
+                  <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4" />
+                </svg>
+              </span>
               <span class="visitor-label">Best period</span>
               <strong>March–September</strong>
             </article>
 
             <article class="visitor-card reveal reveal-delay-visitor-4">
-              <span class="visitor-icon" aria-hidden="true">⏱️</span>
+              <span class="visitor-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <circle cx="6.5" cy="17.5" r="2.5" />
+                  <circle cx="17.5" cy="6.5" r="2.5" />
+                  <path d="M8.5 16c2-1.25 1.5-3.75 3.5-5s2.5 1.25 4.5-3M6.5 12.5v-2M17.5 13.5v2" />
+                </svg>
+              </span>
               <span class="visitor-label">From Miri</span>
               <strong>About 1.5 hours</strong>
             </article>
@@ -241,9 +464,20 @@ onBeforeUnmount(() => {
         </div>
 
 
-        <div class="plant-carousel">
+        <div
+          ref="plantCarousel"
+          class="plant-carousel"
+          @pointerenter="setCarouselHover(true, $event)"
+          @pointerleave="setCarouselHover(false, $event)"
+          @pointerdown="startCarouselDrag"
+          @pointermove="dragCarousel"
+          @pointerup="stopCarouselDrag"
+          @pointercancel="stopCarouselDrag"
+          @click.capture="preventCarouselClick"
+          @dragstart.prevent
+        >
 
-          <div class="plant-track">
+          <div ref="plantTrack" class="plant-track">
 
             <!-- First set -->
             <RouterLink
@@ -251,6 +485,7 @@ onBeforeUnmount(() => {
               :key="`first-${plant.slug}`"
               :to="`/plants/${plant.slug}`"
               class="home-plant-card"
+              draggable="false"
             >
 
               <div class="home-plant-image">
@@ -294,6 +529,7 @@ onBeforeUnmount(() => {
               class="home-plant-card"
               aria-hidden="true"
               tabindex="-1"
+              draggable="false"
             >
 
               <div class="home-plant-image">
@@ -331,6 +567,26 @@ onBeforeUnmount(() => {
 
         </div>
 
+        <div class="carousel-controls" aria-label="Plant carousel controls">
+          <button
+            type="button"
+            class="carousel-control"
+            aria-label="Previous plants"
+            @click="moveCarousel(-1)"
+          >
+            <span aria-hidden="true">←</span>
+          </button>
+
+          <button
+            type="button"
+            class="carousel-control"
+            aria-label="Next plants"
+            @click="moveCarousel(1)"
+          >
+            <span aria-hidden="true">→</span>
+          </button>
+        </div>
+
       </div>
 
     </section>
@@ -364,6 +620,11 @@ onBeforeUnmount(() => {
 @keyframes hero-image-zoom {
   from { background-size: 100%; }
   to { background-size: 106%; }
+}
+
+@keyframes hero-image-scale {
+  from { transform: scale(1); }
+  to { transform: scale(1.06); }
 }
 
 @keyframes hero-content-enter {
@@ -720,14 +981,76 @@ onBeforeUnmount(() => {
    ========================= */
 
 .visitor-overview {
+  position: relative;
+
   width: min(1200px, 88%);
+  box-sizing: border-box;
 
   margin: 90px auto 0;
+
+  padding: 48px;
+
+  overflow: hidden;
+
+  border: 1px solid rgba(70, 133, 133, 0.16);
+  border-radius: 28px;
+
+  background: #173f34;
+
+  box-shadow: 0 18px 45px rgba(31, 65, 50, 0.16);
+}
+
+
+.visitor-overview::before,
+.visitor-overview::after {
+  content: '';
+
+  position: absolute;
+
+  pointer-events: none;
+}
+
+
+.visitor-overview::before {
+  inset: 0;
+
+  border-radius: inherit;
+
+  background:
+    linear-gradient(110deg, rgba(15, 51, 40, 0.88), rgba(22, 65, 51, 0.7)),
+    linear-gradient(to bottom, rgba(18, 51, 41, 0.08), rgba(12, 39, 31, 0.28)),
+    url('/images/b1.jpg') center 46% / cover no-repeat;
+
+  z-index: 0;
+}
+
+
+.visitor-overview::after {
+  display: none;
+}
+
+
+.visitor-overview > * {
+  position: relative;
+  z-index: 1;
 }
 
 
 .why-niah {
-  max-width: 820px;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 1.2fr);
+  grid-template-rows: auto 1fr;
+
+  column-gap: 64px;
+}
+
+
+.why-niah .section-label {
+  grid-column: 1;
+
+  margin-bottom: 12px;
+
+  color: #a9e7c4;
 }
 
 
@@ -735,7 +1058,7 @@ onBeforeUnmount(() => {
 .visitor-info h3 {
   margin: 0;
 
-  color: #315f5f;
+  color: #fff6dc;
 
   font-size: clamp(26px, 3vw, 36px);
   line-height: 1.2;
@@ -743,42 +1066,77 @@ onBeforeUnmount(() => {
 
 
 .why-niah p:last-child {
-  margin: 18px 0 0;
+  grid-column: 2;
+  grid-row: 1 / span 2;
 
-  color: #405f5b;
+  align-self: center;
+
+  margin: 0;
+
+  padding-left: 32px;
+
+  color: #e0ebdd;
 
   font-size: 16px;
   line-height: 1.8;
+
+  border-left: 1px solid rgba(224, 235, 221, 0.3);
 }
 
 
 .visitor-info {
-  margin-top: 48px;
+  margin-top: 38px;
+
+  padding-top: 30px;
+
+  border-top: 1px solid rgba(224, 235, 221, 0.2);
+}
+
+
+.visitor-info h3 {
+  display: flex;
+  align-items: center;
+
+  gap: 16px;
+}
+
+
+.visitor-info h3::after {
+  content: '';
+
+  width: 58px;
+  height: 2px;
+
+  border-radius: 999px;
+
+  background: #9cdba6;
 }
 
 
 .visitor-cards {
-  margin-top: 24px;
+  margin-top: 22px;
 
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
 
-  gap: 14px;
+  gap: 15px;
 }
 
 
 .visitor-card {
-  min-height: 150px;
+  min-height: 168px;
 
-  padding: 22px 18px;
+  padding: 22px 20px 20px;
 
   display: flex;
   flex-direction: column;
 
-  border: 1px solid rgba(70, 133, 133, 0.14);
-  border-radius: 16px;
+  border: 1px solid rgba(214, 229, 209, 0.72);
+  border-radius: 18px;
 
-  background: rgba(255, 246, 220, 0.75);
+  background: rgba(255, 250, 235, 0.94);
+
+  box-shadow: 0 7px 18px rgba(10, 36, 28, 0.11);
 
   transition:
     transform 0.3s ease,
@@ -787,36 +1145,82 @@ onBeforeUnmount(() => {
 }
 
 .visitor-card.reveal.is-visible:hover {
-  transform: translateY(-5px);
-  border-color: rgba(70, 133, 133, 0.28);
-  box-shadow: 0 13px 28px rgba(50, 90, 70, 0.12);
+  transform: translateY(-3px);
+  border-color: rgba(80, 180, 152, 0.48);
+  box-shadow: 0 12px 24px rgba(10, 36, 28, 0.17);
 }
 
 
 .visitor-icon {
-  margin-bottom: 16px;
+  width: 44px;
+  height: 44px;
 
-  font-size: 25px;
+  margin-bottom: 19px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid rgba(70, 133, 133, 0.2);
+  border-radius: 14px;
+
+  background: #e6eee1;
+
+  color: #3f786b;
+}
+
+
+.visitor-icon svg {
+  width: 22px;
+  height: 22px;
+
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 
 .visitor-label {
   margin-bottom: 7px;
 
-  color: #64807c;
+  color: #607c75;
 
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
   text-transform: uppercase;
 }
 
 
 .visitor-card strong {
-  color: #315f5f;
+  color: #294f47;
 
   font-size: 15px;
+  font-weight: 700;
   line-height: 1.5;
+}
+
+
+.visitor-map-link {
+  margin-top: auto;
+
+  padding-top: 12px;
+
+  color: #4b7f70;
+
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+
+  text-decoration: none;
+
+  transition: color 0.2s ease;
+}
+
+
+.visitor-map-link:hover {
+  color: #285f52;
 }
 
 
@@ -926,7 +1330,19 @@ onBeforeUnmount(() => {
 
 .plant-carousel {
   width: 100%;
+
+  margin: -10px 0 -14px;
+  padding: 10px 0 14px;
+
   overflow: hidden;
+
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.plant-carousel:active {
+  cursor: grabbing;
 }
 
 .plant-track {
@@ -935,21 +1351,59 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 22px;
 
-  animation: plant-scroll 40s linear infinite;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
 }
 
-.plant-carousel:hover .plant-track {
-  animation-play-state: paused;
+
+.carousel-controls {
+  margin-top: 22px;
+
+  display: flex;
+  justify-content: flex-end;
+
+  gap: 9px;
 }
 
-@keyframes plant-scroll {
-  from {
-    transform: translateX(0);
-  }
 
-  to {
-    transform: translateX(-50%);
-  }
+.carousel-control {
+  width: 38px;
+  height: 38px;
+
+  padding: 0;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid rgba(70, 133, 133, 0.24);
+  border-radius: 12px;
+
+  background: #fff6dc;
+  color: #468585;
+
+  cursor: pointer;
+
+  font-size: 18px;
+  line-height: 1;
+
+  transition:
+    transform 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+
+.carousel-control:hover {
+  transform: translateY(-2px);
+  border-color: rgba(70, 133, 133, 0.42);
+  background: #ffffff;
+}
+
+
+.carousel-control:focus-visible {
+  outline: 3px solid rgba(80, 180, 152, 0.3);
+  outline-offset: 3px;
 }
 
 
@@ -1063,7 +1517,6 @@ onBeforeUnmount(() => {
 
   color: #254b42;
 
-  font-family: Georgia, 'Times New Roman', serif;
 
   font-size: 22px;
   font-weight: 600;
@@ -1076,7 +1529,6 @@ onBeforeUnmount(() => {
 
   color: #88735d;
 
-  font-family: Georgia, 'Times New Roman', serif;
 
   font-size: 14px;
   font-style: italic;
@@ -1222,7 +1674,27 @@ onBeforeUnmount(() => {
 
     min-height: calc(100vh - 76px);
 
+    background: none;
+
+    animation: none;
+  }
+
+
+  .hero::after {
+    content: '';
+
+    position: absolute;
+    inset: -1px;
+
+    background-image: url('/images/hero.jpg');
+    background-size: cover;
     background-position: center;
+
+    transform-origin: center;
+    animation: hero-image-scale 12s ease-out forwards;
+
+    z-index: 0;
+    pointer-events: none;
   }
 
 
@@ -1234,6 +1706,14 @@ onBeforeUnmount(() => {
       rgba(30, 45, 40, 0.10) 80%,
       rgba(30, 45, 40, 0.00) 100%
     );
+
+    z-index: 1;
+  }
+
+
+  .hero-left,
+  .hero-right {
+    z-index: 2;
   }
 
 
@@ -1278,6 +1758,31 @@ onBeforeUnmount(() => {
 
   .visitor-overview {
     margin-top: 70px;
+
+    padding: 38px;
+  }
+
+
+  .why-niah {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+
+
+  .why-niah .section-label,
+  .why-niah p:last-child {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+
+  .why-niah p:last-child {
+    margin-top: 22px;
+
+    padding: 20px 0 0;
+
+    border-top: 1px solid rgba(224, 235, 221, 0.24);
+    border-left: 0;
   }
 
 
@@ -1346,6 +1851,22 @@ onBeforeUnmount(() => {
     width: 86%;
 
     margin-top: 60px;
+
+    padding: 30px 20px;
+
+    border-radius: 22px;
+  }
+
+
+  .visitor-overview::before {
+    background-position: 56% center;
+  }
+
+
+  .visitor-info {
+    margin-top: 32px;
+
+    padding-top: 26px;
   }
 
 
@@ -1356,6 +1877,8 @@ onBeforeUnmount(() => {
 
   .visitor-card {
     min-height: 0;
+
+    padding: 19px;
   }
 
 }
@@ -1363,6 +1886,7 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
 
   .hero,
+  .hero::after,
   .eyebrow,
   .hero h1,
   .hero-description,

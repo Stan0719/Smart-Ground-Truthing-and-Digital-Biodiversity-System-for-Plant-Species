@@ -179,7 +179,6 @@ const filteredPlants = computed(() => {
 
 .plants-hero h1 {
   margin: 0;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: clamp(54px, 7vw, 86px);
   font-weight: 600;
   line-height: 1;
@@ -188,7 +187,6 @@ const filteredPlants = computed(() => {
 
 .hero-lead {
   margin: 14px 0 8px;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: clamp(21px, 2.2vw, 30px);
 }
 
@@ -220,7 +218,6 @@ const filteredPlants = computed(() => {
 .library-heading h2 {
   margin: 0;
   color: #254b42;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: clamp(32px, 4vw, 48px);
   font-weight: 600;
 }
@@ -378,14 +375,12 @@ const filteredPlants = computed(() => {
 .plant-card h3 {
   margin: 0;
   color: #203f35;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: 23px;
 }
 
 .scientific-name {
   margin: 5px 0 14px;
   color: #7c6c5b;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: 15px;
   font-style: italic;
 }
@@ -520,7 +515,6 @@ const filteredPlants = computed(() => {
 .empty-state h3 {
   margin: 12px 0 6px;
   color: #254b42;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: 26px;
 }
 
@@ -555,7 +549,6 @@ const filteredPlants = computed(() => {
 
 .plants-quote p {
   margin: 0 0 18px;
-  font-family: Georgia, 'Times New Roman', serif;
   font-size: clamp(25px, 3.5vw, 38px);
   font-style: italic;
 }
