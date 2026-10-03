@@ -10,9 +10,11 @@ import {
 
 import { plants } from "../data/mockData";
 
+
 export default function BotanistDashboardScreen({
   route,
   navigation,
+  onLogout,
 }) {
   const botanist = route.params?.botanist;
 
@@ -26,18 +28,54 @@ export default function BotanistDashboardScreen({
       plant.syncStatus === "Pending Sync"
   );
 
+
+  function handleLogout() {
+
+  if (onLogout) {
+    onLogout();
+    return;
+  }
+
+  navigation.goBack();
+}
+
+
   return (
     <View style={styles.container}>
-      <Text style={styles.greeting}>
-        Hello, {botanist?.name} 👋
-      </Text>
 
-      <Text style={styles.subtitle}>
-        Manage your plant records
-      </Text>
+      {/* ================= HEADER ================= */}
+
+      <View style={styles.header}>
+
+        <View>
+          <Text style={styles.greeting}>
+            Hello, {botanist?.name} 👋
+          </Text>
+
+          <Text style={styles.subtitle}>
+            Manage your plant records
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+          activeOpacity={0.75}
+        >
+          <Text style={styles.logoutText}>
+            Logout
+          </Text>
+        </TouchableOpacity>
+
+      </View>
+
+
+      {/* ================= STATS ================= */}
 
       <View style={styles.statsRow}>
+
         <View style={styles.statCard}>
+
           <View style={styles.statIcon}>
             <Text>🌿</Text>
           </View>
@@ -49,9 +87,12 @@ export default function BotanistDashboardScreen({
           <Text style={styles.statLabel}>
             My Plants
           </Text>
+
         </View>
 
+
         <View style={styles.statCard}>
+
           <View style={styles.statIcon}>
             <Text>🔄</Text>
           </View>
@@ -63,15 +104,22 @@ export default function BotanistDashboardScreen({
           <Text style={styles.statLabel}>
             Pending Sync
           </Text>
+
         </View>
+
       </View>
+
+
+      {/* ================= ADD PLANT ================= */}
 
       <TouchableOpacity
         style={styles.addButton}
         onPress={() =>
           navigation.navigate(
             "AddPlant",
-            { botanist }
+            {
+              botanist,
+            }
           )
         }
       >
@@ -80,15 +128,21 @@ export default function BotanistDashboardScreen({
         </Text>
       </TouchableOpacity>
 
+
+      {/* ================= RECORDS ================= */}
+
       <Text style={styles.sectionTitle}>
         My Plant Records
       </Text>
+
 
       <FlatList
         data={myPlants}
         keyExtractor={(item) => item.id}
         showsVerticalScrollIndicator={false}
+
         renderItem={({ item }) => (
+
           <TouchableOpacity
             style={styles.plantCard}
             onPress={() =>
@@ -101,7 +155,9 @@ export default function BotanistDashboardScreen({
               )
             }
           >
+
             <View style={styles.plantInfo}>
+
               <Text style={styles.plantName}>
                 {item.scientificName}
               </Text>
@@ -113,26 +169,36 @@ export default function BotanistDashboardScreen({
               <Text style={styles.recordId}>
                 ID: {item.id}
               </Text>
+
             </View>
+
 
             <View
               style={[
                 styles.syncBadge,
+
                 item.syncStatus === "Pending Sync"
                   ? styles.pendingBadge
                   : styles.syncedBadge,
               ]}
             >
+
               <Text style={styles.syncText}>
                 {item.syncStatus === "Synced"
                   ? "✓ Synced"
                   : "⟳ Pending"}
               </Text>
+
             </View>
+
           </TouchableOpacity>
+
         )}
+
         ListEmptyComponent={
+
           <View style={styles.empty}>
+
             <Text style={styles.emptyIcon}>
               🌱
             </Text>
@@ -140,31 +206,69 @@ export default function BotanistDashboardScreen({
             <Text style={styles.emptyText}>
               No plant records yet.
             </Text>
+
           </View>
         }
+
       />
+
     </View>
   );
 }
 
+
 const styles = StyleSheet.create({
+
   container: {
     flex: 1,
-    backgroundColor: "#DEF9C4",
+    backgroundColor: "#F3F8F4",
     paddingHorizontal: 20,
   },
 
-  greeting: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#468585",
+
+  /* ================= HEADER ================= */
+
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginTop: 25,
   },
+
+
+  greeting: {
+    fontSize: 25,
+    fontWeight: "800",
+    color: "#468585",
+  },
+
 
   subtitle: {
     color: "#687568",
     marginTop: 4,
   },
+
+
+  /* ================= LOGOUT ================= */
+
+  logoutButton: {
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#468585",
+    backgroundColor: "#FFFFFF",
+  },
+
+
+  logoutText: {
+    color: "#468585",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+
+  /* ================= STATS ================= */
 
   statsRow: {
     flexDirection: "row",
@@ -172,12 +276,14 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
 
+
   statCard: {
     flex: 1,
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
     padding: 16,
   },
+
 
   statIcon: {
     width: 38,
@@ -188,6 +294,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+
   statNumber: {
     fontSize: 27,
     fontWeight: "800",
@@ -195,11 +302,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
+
   statLabel: {
     color: "#687568",
     marginTop: 2,
     fontSize: 13,
   },
+
+
+  /* ================= ADD BUTTON ================= */
 
   addButton: {
     backgroundColor: "#50B498",
@@ -209,11 +320,15 @@ const styles = StyleSheet.create({
     marginTop: 15,
   },
 
+
   addButtonText: {
     color: "#FFFFFF",
     fontWeight: "700",
     fontSize: 16,
   },
+
+
+  /* ================= RECORDS ================= */
 
   sectionTitle: {
     fontSize: 20,
@@ -222,6 +337,7 @@ const styles = StyleSheet.create({
     marginTop: 25,
     marginBottom: 10,
   },
+
 
   plantCard: {
     backgroundColor: "#FFFFFF",
@@ -233,9 +349,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+
   plantInfo: {
     flex: 1,
   },
+
 
   plantName: {
     fontWeight: "700",
@@ -244,10 +362,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 
+
   commonName: {
     color: "#687568",
     marginTop: 3,
   },
+
 
   recordId: {
     color: "#999",
@@ -255,19 +375,25 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
 
+
+  /* ================= SYNC ================= */
+
   syncBadge: {
     borderRadius: 20,
     paddingHorizontal: 9,
     paddingVertical: 6,
   },
 
+
   syncedBadge: {
     backgroundColor: "#DEF9C4",
   },
 
+
   pendingBadge: {
     backgroundColor: "#9CDBA6",
   },
+
 
   syncText: {
     color: "#468585",
@@ -275,17 +401,23 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
+
+  /* ================= EMPTY ================= */
+
   empty: {
     alignItems: "center",
     marginTop: 50,
   },
 
+
   emptyIcon: {
     fontSize: 45,
   },
+
 
   emptyText: {
     color: "#687568",
     marginTop: 10,
   },
+
 });

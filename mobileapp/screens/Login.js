@@ -122,7 +122,10 @@ function FloatingInput({
 }
 
 
-export default function LoginScreen({ navigation }) {
+export default function LoginScreen({
+  navigation,
+  onLogin,
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -185,28 +188,43 @@ export default function LoginScreen({ navigation }) {
 
 
   function handleLogin() {
-    if (
-      email.trim() !== TEST_EMAIL ||
-      password !== TEST_PASSWORD
-    ) {
-      setLoginError("Invalid email or password.");
-      return;
-    }
 
-    const botanist = {
-      username: "admin",
-      email: TEST_EMAIL,
-      name: "Admin",
-    };
-
-    setEmail("");
-    setPassword("");
-    setLoginError("");
-
-    navigation.replace("BotanistDashboard", {
-      botanist,
-    });
+  if (
+    email.trim() !== TEST_EMAIL ||
+    password !== TEST_PASSWORD
+  ) {
+    setLoginError("Invalid email or password.");
+    return;
   }
+
+
+  const botanist = {
+    username: "admin",
+    email: TEST_EMAIL,
+    name: "Admin",
+  };
+
+
+  setEmail("");
+  setPassword("");
+  setLoginError("");
+
+
+  if (onLogin) {
+
+    onLogin(botanist);
+
+  } else {
+
+    navigation.replace(
+      "MainTabs",
+      {
+        botanist,
+      }
+    );
+
+  }
+}
 
 
   function handleGuest() {

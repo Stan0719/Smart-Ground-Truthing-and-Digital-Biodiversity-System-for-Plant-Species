@@ -128,16 +128,16 @@ export const plants = [
   },
 ];
 
-export const botanists = [
-  {
-    username: "alice",
-    password: "123456",
-    name: "Alice",
-  },
+// export const botanists = [
+//   {
+//     username: "alice",
+//     password: "123456",
+//     name: "Alice",
+//   },
 
-  {
-    username: "bob",
-    password: "123456",
-    name: "Bob",
-  },
-];
+//   {
+//     username: "bob",
+//     password: "123456",
+//     name: "Bob",
+//   },
+// ];

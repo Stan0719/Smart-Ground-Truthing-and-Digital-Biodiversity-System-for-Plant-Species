@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 import {
   NavigationContainer,
@@ -167,10 +167,56 @@ function MapStack() {
 
 
 /* =========================================================
+   ACCOUNT
+========================================================= */
+
+function AccountScreen({
+  botanist,
+  onLogin,
+  onLogout,
+}) {
+
+  // Not logged in
+  if (!botanist) {
+
+    return (
+      <LoginScreen
+        onLogin={onLogin}
+      />
+    );
+  }
+
+
+  // Logged in
+  return (
+    <BotanistDashboardScreen
+      route={{
+        params: {
+          botanist,
+        },
+      }}
+      navigation={{
+        navigate: (...args) => {
+          // This will be replaced below by the actual
+          // navigation object from the screen.
+        },
+      }}
+      onLogout={onLogout}
+    />
+  );
+}
+
+
+/* =========================================================
    MAIN BOTTOM TABS
 ========================================================= */
 
-function MainTabs() {
+function MainTabs({
+  botanist,
+  onLogin,
+  onLogout,
+}) {
+
   return (
     <Tab.Navigator
 
@@ -301,14 +347,43 @@ function MainTabs() {
       />
 
 
-      {/* ACCOUNT */}
+      {/* ACCOUNT / BOTANIST DASHBOARD */}
       <Tab.Screen
         name="AccountTab"
-        component={LoginScreen}
         options={{
-          title: "Account",
+          title: botanist
+            ? "Dashboard"
+            : "Account",
         }}
-      />
+      >
+        {(props) => {
+
+          if (!botanist) {
+
+            return (
+              <LoginScreen
+                {...props}
+                onLogin={onLogin}
+              />
+            );
+          }
+
+
+          return (
+            <BotanistDashboardScreen
+              {...props}
+              route={{
+                ...props.route,
+                params: {
+                  botanist,
+                },
+              }}
+              onLogout={onLogout}
+            />
+          );
+        }}
+
+      </Tab.Screen>
 
     </Tab.Navigator>
   );
@@ -320,6 +395,29 @@ function MainTabs() {
 ========================================================= */
 
 export default function App() {
+
+  const [botanist, setBotanist] = useState(null);
+
+
+  /* =======================================================
+     LOGIN
+  ======================================================= */
+
+  function handleLogin(loggedInBotanist) {
+
+    setBotanist(loggedInBotanist);
+  }
+
+
+  /* =======================================================
+     LOGOUT
+  ======================================================= */
+
+  function handleLogout() {
+
+    setBotanist(null);
+  }
+
 
   return (
     <NavigationContainer>
@@ -334,29 +432,62 @@ export default function App() {
 
 
         {/* ================================================
-            FIRST PAGE
-            No bottom tabs
+            LOGIN PAGE
+            First page without bottom tabs
         ================================================= */}
 
         <RootStack.Screen
           name="Login"
-          component={LoginScreen}
-        />
+        >
+          {(props) => (
+
+            <LoginScreen
+              {...props}
+              onLogin={(loggedInBotanist) => {
+
+                setBotanist(loggedInBotanist);
+
+                props.navigation.replace(
+                  "MainTabs"
+                );
+
+              }}
+            />
+
+          )}
+        </RootStack.Screen>
 
 
         {/* ================================================
             MAIN APP
-            Bottom tabs become visible here
         ================================================= */}
 
         <RootStack.Screen
           name="MainTabs"
-          component={MainTabs}
-        />
+        >
+          {(props) => (
+
+            <MainTabs
+              botanist={botanist}
+              onLogin={handleLogin}
+              onLogout={() => {
+
+                setBotanist(null);
+
+                props.navigation.replace(
+                  "Login"
+                );
+
+              }}
+            />
+
+          )}
+        </RootStack.Screen>
 
 
         {/* ================================================
             BOTANIST DASHBOARD
+            Kept for other navigation if needed
         ================================================= */}
 
         <RootStack.Screen
