@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { authenticatePrototypeUser } from '../data/prototypeAuth'
 
 defineProps<{
   visible: boolean
@@ -7,19 +8,48 @@ defineProps<{
 
 const emit = defineEmits<{
   close: []
-  login: [user: { username: string; role: 'admin' | 'conservation-officer' }]
+  login: [user: {
+    username: string
+    role: 'admin' | 'conservation-officer'
+    email?: string
+    mustChangePassword?: boolean
+  }]
 }>()
 
 const email = ref('')
 const password = ref('')
 const loginError = ref('')
+const platformMessage = ref('')
 
 const closeModal = () => {
   emit('close')
   loginError.value = ''
+  platformMessage.value = ''
 }
 //testing
 const handleLogin = () => {
+  loginError.value = ''
+  platformMessage.value = ''
+  const prototypeUser = authenticatePrototypeUser(email.value, password.value)
+
+  if (prototypeUser?.role === 'Botanist') {
+    platformMessage.value = 'This Botanist account is intended for the Niah mobile application.'
+    return
+  }
+
+  if (prototypeUser) {
+    emit('login', {
+      username: prototypeUser.name,
+      role: 'conservation-officer',
+      email: prototypeUser.email,
+      mustChangePassword: prototypeUser.mustChangePassword,
+    })
+    emit('close')
+    email.value = ''
+    password.value = ''
+    return
+  }
+
   const mockUsers = [
     {
       email: 'admin@niah.com',
@@ -128,6 +158,7 @@ const handleLogin = () => {
             >
                 {{ loginError }}
             </p>
+            <p v-if="platformMessage" class="platform-message">{{ platformMessage }}</p>
 
             <button type="submit" class="login-submit">Login</button>
         </form>
@@ -431,6 +462,13 @@ const handleLogin = () => {
   color: #B84A4A;
   font-size: 13px;
   font-weight: 500;
+  text-align: center;
+}
+.platform-message {
+  margin: 18px 0 -18px;
+  color: #def9c4;
+  font-size: 13px;
+  line-height: 1.5;
   text-align: center;
 }
 </style>

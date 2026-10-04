@@ -10,6 +10,7 @@ import {
 
 import { useRoute, useRouter } from 'vue-router'
 import LoginModal from './LoginModal.vue'
+import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
 
 const route = useRoute()
 const router = useRouter()
@@ -189,11 +190,21 @@ const openLoginModal = () => {
 const handleLogin = (user: {
   username: string
   role: Exclude<UserRole, null>
+  email?: string
+  mustChangePassword?: boolean
 }) => {
+  if (user.mustChangePassword && user.email) {
+    sessionStorage.setItem(PENDING_PASSWORD_CHANGE_KEY, user.email)
+    loginModalOpen.value = false
+    router.push({ name: 'change-password' })
+    return
+  }
+
   username.value = user.username
   userRole.value = user.role
   isLoggedIn.value = true
   loginModalOpen.value = false
+  router.push(user.role === 'admin' ? { name: 'admin-dashboard' } : { name: 'conservation-dashboard' })
 }
 
 const closeLoginModal = () => {

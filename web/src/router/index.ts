@@ -6,6 +6,7 @@ import AdminDashboardView from '../views/AdminDashboardView.vue'
 import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
 import AdminModuleView from '../views/AdminModuleView.vue'
+import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -24,6 +25,11 @@ const router = createRouter({
       path: '/plants/:slug',
       name: 'plant-detail',
       component: PlantDetailView,
+    },
+    {
+      path: '/change-password',
+      name: 'change-password',
+      component: () => import('../views/ChangePasswordView.vue'),
     },
     {
       path: '/admin',
@@ -164,6 +170,13 @@ const router = createRouter({
       ],
     },
   ],
+})
+
+router.beforeEach((to) => {
+  const passwordChangePending = sessionStorage.getItem(PENDING_PASSWORD_CHANGE_KEY)
+  if (passwordChangePending && to.path.startsWith('/conservation')) {
+    return { name: 'change-password' }
+  }
 })
 
 export default router

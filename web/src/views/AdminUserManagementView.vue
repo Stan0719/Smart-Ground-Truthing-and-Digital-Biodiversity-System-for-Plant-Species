@@ -1,5 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import {
+  createPrototypeUser,
+  findPrototypeUserByEmail,
+  getPrototypeUsers,
+  type PrototypeRole,
+  type PrototypeUser,
+} from '../data/prototypeAuth'
 
 type UserStatus = 'Active' | 'Inactive' | 'Suspended'
 type UserRole = 'Administrator' | 'Conservation Officer' | 'Botanist'
@@ -20,7 +27,7 @@ const search = ref('')
 const roleFilter = ref('All roles')
 const statusFilter = ref('All statuses')
 
-const users = ref<UserRecord[]>([
+const existingUsers: UserRecord[] = [
   {
     id: 'USR001',
     name: 'Aina Rahman',
@@ -84,7 +91,75 @@ const users = ref<UserRecord[]>([
     lastLogin: '18 Sep, 10:10 AM',
     initials: 'FN',
   },
-])
+]
+
+const existingEmails = new Set(existingUsers.map((user) => user.email.toLowerCase()))
+const existingIds = new Set(existingUsers.map((user) => user.id))
+const locallyCreatedUsers = getPrototypeUsers().filter(
+  (user) => !existingEmails.has(user.email.toLowerCase()) && !existingIds.has(user.id),
+)
+const users = ref<UserRecord[]>([...existingUsers, ...locallyCreatedUsers])
+const createdUser = ref<PrototypeUser | null>(null)
+const copyLabel = ref('Copy Password')
+const formError = ref('')
+const newUser = ref<{ name: string; email: string; role: PrototypeRole | '' }>({
+  name: '',
+  email: '',
+  role: '',
+})
+
+const openAddUser = () => {
+  newUser.value = { name: '', email: '', role: '' }
+  formError.value = ''
+  createdUser.value = null
+  copyLabel.value = 'Copy Password'
+  addUserOpen.value = true
+}
+
+const submitNewUser = () => {
+  const name = newUser.value.name.trim()
+  const email = newUser.value.email.trim().toLowerCase()
+  formError.value = ''
+
+  if (!name || !email || !newUser.value.role) {
+    formError.value = 'Full name, email and role are required.'
+    return
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    formError.value = 'Enter a valid email address.'
+    return
+  }
+  if (
+    existingUsers.some((user) => user.email.toLowerCase() === email) ||
+    findPrototypeUserByEmail(email)
+  ) {
+    formError.value = 'An account with this email already exists.'
+    return
+  }
+
+  createdUser.value = createPrototypeUser({
+    name,
+    email,
+    role: newUser.value.role,
+    existingIds: existingUsers.map((user) => user.id),
+  })
+  users.value.push(createdUser.value)
+}
+
+const copyPassword = async () => {
+  if (!createdUser.value) return
+  try {
+    await navigator.clipboard.writeText(createdUser.value.password)
+    copyLabel.value = 'Copied'
+  } catch {
+    copyLabel.value = 'Copy unavailable'
+  }
+}
+
+const finishCreatingUser = () => {
+  addUserOpen.value = false
+  createdUser.value = null
+}
 
 const filteredUsers = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -170,7 +245,7 @@ const clearFilters = () => {
             <h2>Manage system users</h2>
             <p>View accounts, assign access roles, and manage user status.</p>
           </div>
-          <button class="primary-button" type="button" @click="addUserOpen = true">
+          <button class="primary-button" type="button" @click="openAddUser">
             <span>＋</span> Add New User
           </button>
         </section>
@@ -309,31 +384,29 @@ const clearFilters = () => {
           </div>
           <button type="button" aria-label="Close" @click="addUserOpen = false">×</button>
         </div>
-        <form @submit.prevent="addUserOpen = false">
-          <label>Full name<input type="text" placeholder="Enter full name" required /></label>
-          <label>Email address<input type="email" placeholder="name@example.com" required /></label>
-          <div class="form-row">
-            <label
-              >Role<select required>
-                <option value="" disabled selected>Select role</option>
-                <option>Administrator</option>
-                <option>Conservation Officer</option>
-                <option>Botanist</option>
-              </select></label
-            ><label
-              >Account status<select>
-                <option>Active</option>
-                <option>Inactive</option>
-              </select></label
-            >
+        <div v-if="createdUser" class="creation-result">
+          <strong>{{ createdUser.name }}</strong>
+          <span>{{ createdUser.role }}</span>
+          <span>{{ createdUser.email }}</span>
+          <div class="temporary-password">
+            <small>Temporary password</small><code>{{ createdUser.password }}</code>
           </div>
-          <label
-            >Temporary password<input
-              type="password"
-              placeholder="Enter temporary password"
-              required
-          /></label>
-          <p class="form-note">This prototype form does not save data to a database.</p>
+          <p class="form-note">The user must change this password when signing in for the first time.</p>
+          <div class="modal-actions">
+            <button type="button" @click="copyPassword">{{ copyLabel }}</button>
+            <button class="primary-button" type="button" @click="finishCreatingUser">Done</button>
+          </div>
+        </div>
+        <form v-else @submit.prevent="submitNewUser">
+          <label>Full name<input v-model="newUser.name" type="text" placeholder="Enter full name" /></label>
+          <label>Email address<input v-model="newUser.email" type="email" placeholder="name@example.com" /></label>
+          <label>Role<select v-model="newUser.role">
+            <option value="" disabled>Select role</option>
+            <option>Conservation Officer</option>
+            <option>Botanist</option>
+          </select></label>
+          <p v-if="formError" class="form-error">{{ formError }}</p>
+          <p class="form-note">A temporary password will be generated for this frontend-only prototype.</p>
           <div class="modal-actions">
             <button type="button" @click="addUserOpen = false">Cancel</button
             ><button class="primary-button" type="submit">Create User</button>
@@ -930,6 +1003,40 @@ code {
   color: #71827a;
   font-size: 9px;
 }
+.form-error {
+  margin: 0;
+  color: #b84b3a;
+  font-size: 10px;
+  font-weight: 700;
+}
+.creation-result {
+  display: grid;
+  gap: 7px;
+  color: #617169;
+  font-size: 11px;
+}
+.creation-result > strong {
+  color: #315749;
+  font-size: 15px;
+}
+.temporary-password {
+  margin-top: 9px;
+  padding: 13px;
+  display: grid;
+  gap: 7px;
+  border-radius: 8px;
+  background: #f1f5f1;
+}
+.temporary-password small {
+  color: #71827a;
+  font-size: 9px;
+  font-weight: 700;
+}
+.temporary-password code {
+  width: fit-content;
+  font-size: 15px;
+  letter-spacing: 1px;
+}
 .modal-actions {
   margin-top: 5px;
   display: flex;
@@ -969,7 +1076,7 @@ code {
     grid-column: 1/-1;
   }
 }
-@media (max-width: 820px) {
+@media (max-width: 920px) {
   .admin-layout {
     grid-template-columns: 1fr;
   }
