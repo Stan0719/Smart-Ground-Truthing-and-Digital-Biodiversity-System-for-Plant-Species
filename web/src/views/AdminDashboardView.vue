@@ -7,11 +7,11 @@ const profileOpen = ref(false)
 const sidebarItems = [
   { label: 'Dashboard', icon: '⌂', active: true, to: '/admin' },
   { label: 'User Management', icon: '♙', to: '/admin/users' },
-  { label: 'Role & Permission', icon: '◇' },
-  { label: 'IoT Monitoring', icon: '⌁' },
-  { label: 'Sensor Management', icon: '◉' },
-  { label: 'Threat Alerts', icon: '△', count: 3 },
-  { label: 'System Activity', icon: '↻' },
+  { label: 'Role & Permission', icon: '◇', to: '/admin/roles' },
+  { label: 'IoT Monitoring', icon: '⌁', to: '/admin/iot' },
+  { label: 'Sensor Management', icon: '◉', to: '/admin/sensors' },
+  { label: 'Threat Alerts', icon: '△', count: 3, to: '/admin/alerts' },
+  { label: 'System Activity', icon: '↻', to: '/admin/activity' },
 ]
 
 const summaryCards = [

@@ -124,11 +124,11 @@ const clearFilters = () => {
         <RouterLink to="/admin/users" class="active" @click="closeSidebar"
           ><span>♙</span> User Management</RouterLink
         >
-        <button type="button"><span>◇</span> Role &amp; Permission</button>
-        <button type="button"><span>⌁</span> IoT Monitoring</button>
-        <button type="button"><span>◉</span> Sensor Management</button>
-        <button type="button"><span>△</span> Threat Alerts <i>3</i></button>
-        <button type="button"><span>↻</span> System Activity</button>
+        <RouterLink to="/admin/roles"><span>◇</span> Role &amp; Permission</RouterLink>
+        <RouterLink to="/admin/iot"><span>⌁</span> IoT Monitoring</RouterLink>
+        <RouterLink to="/admin/sensors"><span>◉</span> Sensor Management</RouterLink>
+        <RouterLink to="/admin/alerts"><span>△</span> Threat Alerts <i>3</i></RouterLink>
+        <RouterLink to="/admin/activity"><span>↻</span> System Activity</RouterLink>
       </nav>
       <div class="sidebar-footer">
         <RouterLink to="/">← View public website</RouterLink

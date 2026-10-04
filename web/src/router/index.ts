@@ -5,6 +5,7 @@ import PlantDetailView from '../views/PlantDetailView.vue'
 import AdminDashboardView from '../views/AdminDashboardView.vue'
 import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
+import AdminModuleView from '../views/AdminModuleView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -34,6 +35,41 @@ const router = createRouter({
       path: '/admin/users',
       name: 'admin-users',
       component: AdminUserManagementView,
+      meta: { requiresAdmin: true },
+    },
+    {
+      path: '/admin/roles',
+      name: 'admin-roles',
+      component: AdminModuleView,
+      props: { section: 'roles' },
+      meta: { requiresAdmin: true },
+    },
+    {
+      path: '/admin/iot',
+      name: 'admin-iot',
+      component: AdminModuleView,
+      props: { section: 'iot' },
+      meta: { requiresAdmin: true },
+    },
+    {
+      path: '/admin/sensors',
+      name: 'admin-sensors',
+      component: AdminModuleView,
+      props: { section: 'sensors' },
+      meta: { requiresAdmin: true },
+    },
+    {
+      path: '/admin/alerts',
+      name: 'admin-alerts',
+      component: AdminModuleView,
+      props: { section: 'alerts' },
+      meta: { requiresAdmin: true },
+    },
+    {
+      path: '/admin/activity',
+      name: 'admin-activity',
+      component: AdminModuleView,
+      props: { section: 'activity' },
       meta: { requiresAdmin: true },
     },
     {
