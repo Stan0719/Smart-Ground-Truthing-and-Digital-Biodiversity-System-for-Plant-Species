@@ -14,6 +14,7 @@ import {
 } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
+import { getVisitorAccounts } from "../utils/visitorStorage";
 
 const TEST_EMAIL = "admin@niah.com";
 const TEST_PASSWORD = "admin123";
@@ -125,6 +126,7 @@ function FloatingInput({
 export default function LoginScreen({
   navigation,
   onLogin,
+  route,
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -168,6 +170,15 @@ export default function LoginScreen({
     ]).start();
   }, []);
 
+  useEffect(() => {
+    const registeredEmail = route?.params?.registeredEmail;
+
+    if (registeredEmail) {
+      setEmail(registeredEmail);
+      navigation.setParams({ registeredEmail: undefined });
+    }
+  }, [navigation, route?.params?.registeredEmail]);
+
 
   function updateEmail(value) {
     setEmail(value);
@@ -187,22 +198,39 @@ export default function LoginScreen({
   }
 
 
-  function handleLogin() {
+  async function handleLogin() {
+  const normalizedEmail = email.trim().toLowerCase();
+  let user;
 
   if (
-    email.trim() !== TEST_EMAIL ||
-    password !== TEST_PASSWORD
+    normalizedEmail === TEST_EMAIL.toLowerCase() &&
+    password === TEST_PASSWORD
   ) {
+    user = {
+      username: "admin",
+      email: TEST_EMAIL,
+      name: "Admin",
+      role: "Botanist",
+    };
+  } else {
+    try {
+      const visitors = await getVisitorAccounts();
+      user = visitors.find(
+        (visitor) =>
+          visitor.email.trim().toLowerCase() === normalizedEmail &&
+          visitor.password === password &&
+          visitor.role === "Visitor" &&
+          visitor.status === "Active"
+      );
+    } catch {
+      user = null;
+    }
+  }
+
+  if (!user) {
     setLoginError("Invalid email or password.");
     return;
   }
-
-
-  const botanist = {
-    username: "admin",
-    email: TEST_EMAIL,
-    name: "Admin",
-  };
 
 
   setEmail("");
@@ -212,14 +240,14 @@ export default function LoginScreen({
 
   if (onLogin) {
 
-    onLogin(botanist);
+    onLogin(user);
 
   } else {
 
     navigation.replace(
       "MainTabs",
       {
-        botanist,
+        botanist: user,
       }
     );
 
@@ -362,7 +390,7 @@ export default function LoginScreen({
               ) : null}
 
 
-              {/* Botanist login */}
+              {/* Login */}
               <TouchableOpacity
                 style={styles.loginButton}
                 onPress={handleLogin}
@@ -370,7 +398,23 @@ export default function LoginScreen({
                 accessibilityRole="button"
               >
                 <Text style={styles.loginButtonText}>
-                  Botanist Login
+                  Login
+                </Text>
+              </TouchableOpacity>
+
+
+              {/* Visitor registration */}
+              <TouchableOpacity
+                style={styles.registerPrompt}
+                onPress={() => navigation.navigate("VisitorRegister")}
+                activeOpacity={0.65}
+                accessibilityRole="button"
+              >
+                <Text style={styles.registerPromptText}>
+                  New visitor?{" "}
+                  <Text style={styles.registerLinkText}>
+                    Create an account
+                  </Text>
                 </Text>
               </TouchableOpacity>
 
@@ -694,6 +738,30 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
 
     fontSize: 16,
+    fontWeight: "700",
+  },
+
+
+  registerPrompt: {
+    alignSelf: "center",
+
+    marginTop: -12,
+    marginBottom: -8,
+
+    paddingVertical: 2,
+  },
+
+
+  registerPromptText: {
+    color: "#C9DDD6",
+
+    fontSize: 13,
+  },
+
+
+  registerLinkText: {
+    color: "#DEF9C4",
+
     fontWeight: "700",
   },
 

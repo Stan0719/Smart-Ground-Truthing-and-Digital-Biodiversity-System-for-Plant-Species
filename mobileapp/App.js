@@ -25,6 +25,7 @@ import LoginScreen from "./screens/Login";
 import BotanistDashboardScreen from "./screens/BotanistDashboard";
 import AddPlantScreen from "./screens/AddPlant";
 import EditPlantScreen from "./screens/EditPlant";
+import VisitorRegisterScreen from "./screens/VisitorRegister";
 
 
 const Tab = createBottomTabNavigator();
@@ -456,6 +457,16 @@ export default function App() {
 
           )}
         </RootStack.Screen>
+
+
+        {/* ================================================
+            VISITOR REGISTRATION
+        ================================================= */}
+
+        <RootStack.Screen
+          name="VisitorRegister"
+          component={VisitorRegisterScreen}
+        />
 
 
         {/* ================================================
