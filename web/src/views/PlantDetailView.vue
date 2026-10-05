@@ -13,21 +13,25 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
 
   <main v-if="plant" class="detail-page">
     <section class="detail-hero">
-      <div class="detail-container hero-grid">
-        <div class="plant-placeholder" role="img" :aria-label="`${plant.name} image placeholder`">
-          <svg viewBox="0 0 64 64" aria-hidden="true">
-            <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
-            <path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" />
-          </svg>
-          <span>Plant image coming soon</span>
-        </div>
+      <div class="detail-container">
+        <RouterLink to="/plants" class="back-link">← Back to all plants</RouterLink>
 
-        <div class="hero-copy">
-          <RouterLink to="/plants" class="back-link">← Back to all plants</RouterLink>
-          <span class="category">{{ plant.category }}</span>
-          <h1>{{ plant.name }}</h1>
-          <p class="scientific-name">{{ plant.scientificName }}</p>
-          <p class="summary">{{ plant.description }}</p>
+        <div class="hero-grid">
+          <img v-if="plant.image" class="plant-image" :src="plant.image" :alt="plant.name" />
+          <div v-else class="plant-placeholder" role="img" :aria-label="`${plant.name} image placeholder`">
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
+              <path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" />
+            </svg>
+            <span>Plant image coming soon</span>
+          </div>
+
+          <div class="hero-copy">
+            <span class="category">{{ plant.category }}</span>
+            <h1>{{ plant.name }}</h1>
+            <p class="scientific-name">{{ plant.scientificName }}</p>
+            <p class="summary">{{ plant.description }}</p>
+          </div>
         </div>
       </div>
     </section>
@@ -36,14 +40,24 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
       <div class="detail-container information-grid">
         <article class="main-description">
           <p class="section-label">ABOUT THIS PLANT</p>
-          <h2>A remarkable rainforest species</h2>
+          <h2>About {{ plant.name }}</h2>
           <p>{{ plant.overview }}</p>
 
           <h3>Natural habitat</h3>
           <p>{{ plant.habitat }}</p>
 
-          <h3>Ecological and cultural importance</h3>
-          <p>{{ plant.significance }}</p>
+          <template v-if="plant.distribution">
+            <h3>Distribution</h3>
+            <p>{{ plant.distribution }}</p>
+          </template>
+
+          <h3>Ecological importance</h3>
+          <p>{{ plant.ecologicalRole || plant.significance }}</p>
+
+          <template v-if="plant.culturalSignificance">
+            <h3>Traditional and cultural importance</h3>
+            <p>{{ plant.culturalSignificance }}</p>
+          </template>
         </article>
 
         <aside class="quick-facts">
@@ -58,16 +72,32 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
 
           <dl>
             <div>
+              <dt>Common name</dt>
+              <dd>{{ plant.name }}</dd>
+            </div>
+            <div>
               <dt>Scientific name</dt>
               <dd>{{ plant.scientificName }}</dd>
+            </div>
+            <div v-if="plant.family">
+              <dt>Family</dt>
+              <dd>{{ plant.family }}</dd>
             </div>
             <div>
               <dt>Plant group</dt>
               <dd>{{ plant.category }}</dd>
             </div>
+            <div v-if="plant.localName">
+              <dt>Local name</dt>
+              <dd>{{ plant.localName }}</dd>
+            </div>
+            <div v-if="plant.conservationStatus">
+              <dt>Conservation status</dt>
+              <dd>{{ plant.conservationStatus }}</dd>
+            </div>
             <div>
               <dt>Location</dt>
-              <dd>Niah National Park, Sarawak</dd>
+              <dd>{{ plant.niahLocation || 'Niah National Park, Sarawak' }}</dd>
             </div>
           </dl>
         </aside>
@@ -127,6 +157,16 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
   color: #4e7060;
 }
 
+.plant-image {
+  width: 100%;
+  height: 500px;
+  display: block;
+  border: 1px solid rgba(63, 104, 77, 0.15);
+  border-radius: 28px;
+  box-shadow: 0 22px 50px rgba(37, 75, 58, 0.12);
+  object-fit: cover;
+}
+
 .plant-placeholder svg {
   width: 82px;
   fill: none;
@@ -150,6 +190,16 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+.back-link:focus-visible {
+  outline: 3px solid rgba(80, 160, 120, 0.25);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 
 .category {
@@ -344,8 +394,13 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
     gap: 48px;
   }
 
-  .plant-placeholder {
+  .plant-placeholder,
+  .plant-image {
     min-height: 380px;
+  }
+
+  .plant-image {
+    height: 380px;
   }
 
   .back-link {
@@ -359,8 +414,13 @@ const plant = computed(() => plants.find((item) => item.slug === route.params.sl
     padding: 55px 0;
   }
 
-  .plant-placeholder {
+  .plant-placeholder,
+  .plant-image {
     min-height: 300px;
+  }
+
+  .plant-image {
+    height: 300px;
   }
 
   .hero-copy h1 {

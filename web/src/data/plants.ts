@@ -10,6 +10,14 @@ export interface Plant {
   habitat: string
   characteristics: string[]
   significance: string
+  family?: string
+  localName?: string
+  conservationStatus?: string
+  distribution?: string
+  ecologicalRole?: string
+  culturalSignificance?: string
+  niahLocation?: string
+  image?: string
 }
 
 export const plants: Plant[] = [

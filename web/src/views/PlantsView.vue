@@ -1,13 +1,36 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import NavigationBar from '../components/NavigationBar.vue'
 import { plants } from '../data/plants'
 
 const categories = ['All', 'Trees', 'Flowers', 'Ferns', 'Climbers'] as const
 const activeCategory = ref<(typeof categories)[number]>('All')
+const sortOption = ref<'default' | 'name-asc' | 'name-desc' | 'scientific-asc'>('default')
+const sortMenuOpen = ref(false)
+const sortMenu = ref<HTMLElement | null>(null)
 const route = useRoute()
 const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search : '')
+
+const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
+  if (
+    event instanceof KeyboardEvent
+      ? event.key === 'Escape'
+      : !sortMenu.value?.contains(event.target as Node)
+  ) {
+    sortMenuOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', closeSortMenu)
+  document.addEventListener('keydown', closeSortMenu)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeSortMenu)
+  document.removeEventListener('keydown', closeSortMenu)
+})
 
 watch(
   () => route.query.search,
@@ -19,7 +42,7 @@ watch(
 const filteredPlants = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
 
-  return plants.filter((plant) => {
+  const filtered = plants.filter((plant) => {
     const matchesCategory = activeCategory.value === 'All' || plant.category === activeCategory.value
     const matchesSearch =
       !query ||
@@ -30,6 +53,22 @@ const filteredPlants = computed(() => {
 
     return matchesCategory && matchesSearch
   })
+
+  const sorted = [...filtered]
+
+  if (sortOption.value === 'name-asc') {
+    return sorted.sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  if (sortOption.value === 'name-desc') {
+    return sorted.sort((a, b) => b.name.localeCompare(a.name))
+  }
+
+  if (sortOption.value === 'scientific-asc') {
+    return sorted.sort((a, b) => a.scientificName.localeCompare(b.scientificName))
+  }
+
+  return sorted
 })
 </script>
 
@@ -62,17 +101,75 @@ const filteredPlants = computed(() => {
         </div>
 
         <div class="filter-bar">
-          <label class="search-box">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m21 21-4.35-4.35m2.35-5.15A7.5 7.5 0 1 1 4 11.5a7.5 7.5 0 0 1 15 0Z" />
-            </svg>
-            <span class="sr-only">Search plants</span>
-            <input
-              v-model="searchQuery"
-              type="search"
-              placeholder="Search by name, scientific name or keyword..."
-            />
-          </label>
+          <div class="filter-controls">
+            <label class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m21 21-4.35-4.35m2.35-5.15A7.5 7.5 0 1 1 4 11.5a7.5 7.5 0 0 1 15 0Z" />
+              </svg>
+              <span class="sr-only">Search plants</span>
+              <input
+                v-model="searchQuery"
+                type="search"
+                placeholder="Search by name, scientific name or keyword..."
+              />
+            </label>
+
+            <div ref="sortMenu" class="sort-menu">
+              <button
+                type="button"
+                class="sort-button"
+                aria-label="Sort plants"
+                aria-haspopup="menu"
+                :aria-expanded="sortMenuOpen"
+                aria-controls="plant-sort-menu"
+                @click="sortMenuOpen = !sortMenuOpen"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 6h12M4 6h.01M11 12h9M4 12h3M14 18h6M4 18h6" />
+                </svg>
+                <span>Sort</span>
+              </button>
+
+              <div v-if="sortMenuOpen" id="plant-sort-menu" class="sort-options" role="menu">
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  :aria-checked="sortOption === 'default'"
+                  :class="{ selected: sortOption === 'default' }"
+                  @click="sortOption = 'default'; sortMenuOpen = false"
+                >
+                  Default order
+                </button>
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  :aria-checked="sortOption === 'name-asc'"
+                  :class="{ selected: sortOption === 'name-asc' }"
+                  @click="sortOption = 'name-asc'; sortMenuOpen = false"
+                >
+                  Name: A–Z
+                </button>
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  :aria-checked="sortOption === 'name-desc'"
+                  :class="{ selected: sortOption === 'name-desc' }"
+                  @click="sortOption = 'name-desc'; sortMenuOpen = false"
+                >
+                  Name: Z–A
+                </button>
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  :aria-checked="sortOption === 'scientific-asc'"
+                  :class="{ selected: sortOption === 'scientific-asc' }"
+                  @click="sortOption = 'scientific-asc'; sortMenuOpen = false"
+                >
+                  Scientific name: A–Z
+                </button>
+              </div>
+            </div>
+          </div>
 
           <div class="category-filters" aria-label="Filter plants by category">
             <button
@@ -232,8 +329,15 @@ const filteredPlants = computed(() => {
 .filter-bar {
   margin-bottom: 28px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 18px;
+}
+
+.filter-controls {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  min-width: 0;
 }
 
 .search-box {
@@ -297,6 +401,79 @@ const filteredPlants = computed(() => {
 .category-filters button.active {
   background: #35652f;
   color: #fff;
+}
+
+.sort-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.sort-button {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px;
+  border: 1px solid #d9d9cf;
+  border-radius: 14px;
+  background: #fff;
+  color: #44564e;
+  box-shadow: 0 5px 20px rgba(35, 63, 49, 0.05);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sort-button svg {
+  width: 18px;
+  fill: none;
+  stroke: #254b42;
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.sort-button:focus-visible,
+.sort-options button:focus-visible {
+  outline: 3px solid rgba(80, 138, 106, 0.12);
+  outline-offset: 1px;
+  border-color: #508a6a;
+}
+
+.sort-options {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid #d9d9cf;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(33, 57, 44, 0.14);
+}
+
+.sort-options button {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #44564e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.sort-options button:hover {
+  background: #eeece3;
+}
+
+.sort-options button.selected {
+  background: #dfe8da;
+  color: #254b42;
+  font-weight: 700;
 }
 
 .plant-grid {
@@ -573,11 +750,6 @@ const filteredPlants = computed(() => {
 }
 
 @media (max-width: 950px) {
-  .filter-bar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .category-filters {
     overflow-x: auto;
     padding-bottom: 4px;
@@ -626,6 +798,10 @@ const filteredPlants = computed(() => {
 
   .search-box {
     min-width: 0;
+  }
+
+  .sort-button {
+    padding: 0 14px;
   }
 
   .plant-grid {
