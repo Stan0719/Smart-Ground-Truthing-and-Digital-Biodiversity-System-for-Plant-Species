@@ -400,12 +400,41 @@ const logout = () => {
          Mobile Navigation
       ========================= -->
 
+      <button
+        v-if="mobileMenuOpen"
+        class="mobile-nav-backdrop"
+        type="button"
+        aria-label="Close navigation menu"
+        @click="closeMobileMenu"
+      ></button>
+
       <nav
         id="mobile-navigation"
-        v-if="mobileMenuOpen"
         class="mobile-nav"
+        :class="{ open: mobileMenuOpen }"
         aria-label="Mobile navigation"
       >
+
+        <div class="mobile-drawer-header">
+          <RouterLink to="/" class="mobile-drawer-brand" @click="closeMobileMenu">
+            <img src="/images/logo.png" alt="" />
+            <span>
+              <strong>NIAH</strong>
+              <small>BIODIVERSITY</small>
+            </span>
+          </RouterLink>
+
+          <button
+            class="mobile-drawer-close"
+            type="button"
+            aria-label="Close navigation menu"
+            @click="closeMobileMenu"
+          >
+            ×
+          </button>
+        </div>
+
+        <p class="mobile-menu-label">MENU</p>
 
         <RouterLink
           v-for="item in navItems"
@@ -414,7 +443,11 @@ const logout = () => {
           class="mobile-nav-link"
           @click="closeMobileMenu"
         >
-          {{ item.label }}
+          <span class="mobile-link-icon" aria-hidden="true">
+            <svg v-if="item.to === '/'" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8M5 10v10h14V10M9 20v-6h6v6" /></svg>
+            <svg v-else viewBox="0 0 24 24"><path d="M20 4C10 4 5 9 5 16c5-4 9-6 13-8-5 3-9 7-11 12" /></svg>
+          </span>
+          <span>{{ item.label }}</span>
         </RouterLink>
 
         <RouterLink
@@ -422,7 +455,10 @@ const logout = () => {
           class="mobile-nav-link"
           @click="closeMobileMenu"
         >
-          Search
+          <span class="mobile-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg>
+          </span>
+          <span>Search</span>
         </RouterLink>
 
 
@@ -926,6 +962,10 @@ const logout = () => {
   display: none;
 }
 
+.mobile-nav-backdrop {
+  display: none;
+}
+
 /* =========================
    Responsive
    ========================= */
@@ -953,42 +993,169 @@ const logout = () => {
 
   .mobile-nav {
     box-sizing: border-box;
-    width: 100%;
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 1200;
 
-    padding: 10px 0 20px;
+    width: min(330px, 86vw);
+    height: 100dvh;
+
+    padding: 0 18px 24px;
 
     display: flex;
     flex-direction: column;
+    gap: 3px;
 
-    gap: 4px;
+    overflow-y: auto;
 
-    background: #E0EBDD;
+    background: #356f70;
+    box-shadow: -18px 0 45px rgba(25, 55, 50, 0.24);
 
-    border-top: 1px solid rgba(70, 133, 133, 0.1);
+    transform: translateX(105%);
+    visibility: hidden;
+
+    transition:
+      transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0.3s ease;
+  }
+
+  .mobile-nav.open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  .mobile-nav-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+
+    display: block;
+
+    padding: 0;
+    border: 0;
+
+    background: rgba(18, 39, 34, 0.48);
+    backdrop-filter: blur(2px);
+  }
+
+  .mobile-drawer-header {
+    min-height: 92px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  }
+
+  .mobile-drawer-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #fff;
+    text-decoration: none;
+  }
+
+  .mobile-drawer-brand img {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #fff;
+  }
+
+  .mobile-drawer-brand > span {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mobile-drawer-brand strong {
+    font-size: 16px;
+    letter-spacing: 2px;
+  }
+
+  .mobile-drawer-brand small {
+    margin-top: 3px;
+    color: #c5ead1;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 1.8px;
+  }
+
+  .mobile-drawer-close {
+    width: 35px;
+    height: 35px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    cursor: pointer;
+    font: inherit;
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  .mobile-menu-label {
+    margin: 8px 12px 9px;
+    color: #a9d8c0;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 2px;
   }
 
   .mobile-nav-link {
-    padding: 13px 10px;
+    padding: 13px 12px;
 
-    color: #468585;
+    display: flex;
+    align-items: center;
+    gap: 13px;
+
+    color: #e5f1eb;
 
     text-decoration: none;
 
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 600;
 
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 8px;
+
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
-  .mobile-nav-link:hover {
-    background: #5fb3b388;
+  .mobile-nav-link:hover,
+  .mobile-nav-link.router-link-active {
+    background: rgba(255, 255, 255, 0.13);
+    color: #fff;
+  }
+
+  .mobile-link-icon {
+    width: 25px;
+    height: 25px;
+    flex: 0 0 25px;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.09);
+  }
+
+  .mobile-link-icon svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .mobile-nav-divider {
     width: 100%;
     height: 1px;
     margin: 10px 0 8px;
-    background: rgba(70, 133, 133, 0.2);
+    background: rgba(255, 255, 255, 0.16);
   }
 
   .mobile-login-button,
@@ -1010,9 +1177,9 @@ const logout = () => {
 
     border-radius: 24px;
 
-    background: #468585;
+    background: #fff6dc;
 
-    color: white;
+    color: #356f70;
 
     font-family: inherit;
 
@@ -1026,7 +1193,7 @@ const logout = () => {
 
   .mobile-login-button:hover,
   .mobile-logout-button:hover {
-    background: #50B498;
+    background: #def9c4;
     transform: translateY(-1px);
   }
 
@@ -1045,8 +1212,8 @@ const logout = () => {
     min-width: 0;
     padding: 12px 14px;
     border-radius: 12px;
-    background: rgba(70, 133, 133, 0.1);
-    color: #405F5B;
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
     font-size: 15px;
     font-weight: 700;
   }
