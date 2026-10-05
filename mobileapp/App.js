@@ -26,6 +26,7 @@ import BotanistDashboardScreen from "./screens/BotanistDashboard";
 import AddPlantScreen from "./screens/AddPlant";
 import EditPlantScreen from "./screens/EditPlant";
 import VisitorRegisterScreen from "./screens/VisitorRegister";
+import PlantQRCodeScreen from "./screens/PlantQRCode";
 
 
 const Tab = createBottomTabNavigator();
@@ -556,6 +557,19 @@ export default function App() {
 
             headerTintColor: theme.dark,
 
+            headerStyle: {
+              backgroundColor: theme.light,
+            },
+          }}
+        />
+
+        <RootStack.Screen
+          name="PlantQRCode"
+          component={PlantQRCodeScreen}
+          options={{
+            headerShown: true,
+            title: "Plant QR Code",
+            headerTintColor: theme.dark,
             headerStyle: {
               backgroundColor: theme.light,
             },
