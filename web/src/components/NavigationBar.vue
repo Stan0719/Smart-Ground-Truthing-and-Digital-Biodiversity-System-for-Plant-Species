@@ -37,10 +37,6 @@ const navItems = computed(() => {
       label: 'Explore Plants',
       to: '/plants',
     },
-    {
-      label: 'About Niah',
-      to: '/about',
-    },
   ]
 
   if (isLoggedIn.value && userRole.value === 'admin') {

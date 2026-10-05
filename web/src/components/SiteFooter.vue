@@ -29,7 +29,6 @@ const currentYear = new Date().getFullYear()
           <h2>Explore</h2>
           <RouterLink to="/">Home</RouterLink>
           <RouterLink to="/plants">Explore Plants</RouterLink>
-          <RouterLink to="/about">About Niah</RouterLink>
           <a href="#journey-to-cave">Journey to the Cave</a>
         </nav>
 

@@ -260,10 +260,6 @@ onBeforeUnmount(() => {
               Explore Plants
             </RouterLink>
 
-            <RouterLink to="/about" class="learn-button">
-              Learn About Niah
-            </RouterLink>
-
           </div>
 
         </div>
