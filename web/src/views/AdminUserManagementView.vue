@@ -189,31 +189,31 @@ const clearFilters = () => {
 <template>
   <div class="admin-layout">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
-      <div class="brand">
+      <button class="sidebar-close-button" type="button" aria-label="Close navigation" @click="closeSidebar">×</button>
+      <RouterLink class="brand" to="/" data-tooltip="Go back to the public website" aria-label="Go back to the public website">
         <img src="/images/logo.png" alt="Niah Biodiversity" />
         <div><strong>NIAH</strong><span>ADMINISTRATION</span></div>
-      </div>
+      </RouterLink>
       <p class="nav-label">MAIN MENU</p>
       <nav aria-label="Administrator navigation">
         <RouterLink to="/admin" @click="closeSidebar"><span>⌂</span> Dashboard</RouterLink>
         <RouterLink to="/admin/users" class="active" @click="closeSidebar"
           ><span>♙</span> User Management</RouterLink
         >
-        <RouterLink to="/admin/roles"><span>◇</span> Role &amp; Permission</RouterLink>
-        <RouterLink to="/admin/iot"><span>⌁</span> IoT Monitoring</RouterLink>
-        <RouterLink to="/admin/sensors"><span>◉</span> Sensor Management</RouterLink>
-        <RouterLink to="/admin/alerts"><span>△</span> Threat Alerts <i>3</i></RouterLink>
-        <RouterLink to="/admin/activity"><span>↻</span> System Activity</RouterLink>
+        <RouterLink to="/admin/roles" @click="closeSidebar"><span>◇</span> Role &amp; Permission</RouterLink>
+        <RouterLink to="/admin/iot" @click="closeSidebar"><span>⌁</span> IoT Monitoring</RouterLink>
+        <RouterLink to="/admin/sensors" @click="closeSidebar"><span>◉</span> Sensor Management</RouterLink>
+        <RouterLink to="/admin/alerts" @click="closeSidebar"><span>△</span> Threat Alerts <i>3</i></RouterLink>
+        <RouterLink to="/admin/activity" @click="closeSidebar"><span>↻</span> System Activity</RouterLink>
       </nav>
       <div class="sidebar-footer">
-        <RouterLink to="/">← View public website</RouterLink
-        ><button type="button"><span>↪</span> Logout</button>
+        <button type="button">Logout</button>
       </div>
     </aside>
 
     <button
       v-if="sidebarOpen"
-      class="backdrop"
+      class="drawer-backdrop"
       type="button"
       aria-label="Close navigation"
       @click="closeSidebar"
@@ -1161,6 +1161,111 @@ code {
   }
   .form-row {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Match the Administrator Dashboard sidebar. */
+.sidebar {
+  width: 258px;
+  overflow: hidden;
+  transition: 0.2s ease;
+}
+.sidebar-close-button {
+  display: none;
+}
+.brand {
+  position: relative;
+  margin: -8px -4px 0;
+  padding: 8px 12px 25px;
+  color: #fff;
+  text-decoration: none;
+}
+.brand::after {
+  position: absolute;
+  bottom: -30px;
+  left: 12px;
+  z-index: 110;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(18, 25, 22, 0.96);
+  color: #fff;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.2);
+  content: attr(data-tooltip);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    visibility 180ms ease;
+}
+.brand:hover::after,
+.brand:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.sidebar nav {
+  gap: 4px;
+}
+.sidebar nav a,
+.sidebar nav button,
+.sidebar-footer button {
+  padding: 10px 13px;
+  font-size: 12px;
+  transition: 0.2s ease;
+}
+.sidebar-footer {
+  display: block;
+}
+.sidebar-footer button {
+  justify-content: center;
+  background: #fce8e6;
+  color: #b84d42;
+}
+.sidebar-footer button:hover,
+.sidebar-footer button:focus-visible {
+  background: #b84d42;
+  color: #fff;
+}
+.drawer-backdrop {
+  display: none;
+}
+@media (max-width: 920px) {
+  .sidebar {
+    transition: transform 0.2s ease;
+  }
+  .sidebar-close-button {
+    position: absolute;
+    top: 12px;
+    right: 10px;
+    z-index: 2;
+    width: 30px;
+    min-width: 0;
+    height: 30px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.07);
+    color: #bfd7cd;
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+  }
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: block;
+    border: 0;
+    background: rgba(12, 35, 27, 0.5);
   }
 }
 </style>
