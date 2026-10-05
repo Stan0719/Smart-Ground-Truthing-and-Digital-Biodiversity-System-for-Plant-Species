@@ -104,10 +104,23 @@ const closeSidebar = () => {
 <template>
   <div class="admin-layout">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
-      <div class="brand">
+      <button
+        class="sidebar-close-button"
+        type="button"
+        aria-label="Close navigation"
+        @click="closeSidebar"
+      >
+        ×
+      </button>
+      <RouterLink
+        class="brand"
+        to="/"
+        data-tooltip="Go back to the public website"
+        aria-label="Go back to the public website"
+      >
         <img src="/images/logo.png" alt="Niah Biodiversity" />
         <div><strong>NIAH</strong><span>ADMINISTRATION</span></div>
-      </div>
+      </RouterLink>
 
       <p class="nav-label">MAIN MENU</p>
       <nav aria-label="Administrator navigation">
@@ -135,8 +148,7 @@ const closeSidebar = () => {
       </nav>
 
       <div class="sidebar-footer">
-        <RouterLink to="/">← View public website</RouterLink>
-        <button type="button"><span class="nav-icon" aria-hidden="true">↪</span> Logout</button>
+        <button type="button">Logout</button>
       </div>
     </aside>
 
@@ -451,20 +463,30 @@ const closeSidebar = () => {
 .sidebar {
   position: sticky;
   top: 0;
+  width: 258px;
   height: 100vh;
   padding: 24px 16px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   background: #173f34;
   color: #fff;
   z-index: 100;
+  transition: 0.2s ease;
+}
+.sidebar-close-button {
+  display: none;
 }
 .brand {
-  padding: 0 8px 25px;
+  position: relative;
+  margin: -8px -4px 0;
+  padding: 8px 12px 25px;
   display: flex;
   align-items: center;
   gap: 11px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  text-decoration: none;
 }
 .brand img {
   width: 44px;
@@ -487,6 +509,36 @@ const closeSidebar = () => {
   font-weight: 700;
   letter-spacing: 1.5px;
 }
+.brand::after {
+  position: absolute;
+  bottom: -30px;
+  left: 12px;
+  z-index: 110;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(18, 25, 22, 0.96);
+  color: #fff;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.2);
+  content: attr(data-tooltip);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    visibility 180ms ease;
+}
+.brand:hover::after,
+.brand:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
 .nav-label {
   margin: 25px 13px 9px;
   color: #75a392;
@@ -496,13 +548,13 @@ const closeSidebar = () => {
 }
 .sidebar nav {
   display: grid;
-  gap: 5px;
+  gap: 4px;
 }
 .sidebar nav button,
 .sidebar nav a,
 .sidebar-footer button {
   width: 100%;
-  padding: 11px 13px;
+  padding: 10px 13px;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -512,7 +564,7 @@ const closeSidebar = () => {
   color: #bfd7cd;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   text-align: left;
   text-decoration: none;
@@ -544,15 +596,16 @@ const closeSidebar = () => {
   margin-top: auto;
   padding-top: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  display: grid;
-  gap: 5px;
 }
-.sidebar-footer a {
-  padding: 10px 13px;
-  color: #96c3b1;
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
+.sidebar-footer button {
+  justify-content: center;
+  background: #fce8e6;
+  color: #b84d42;
+}
+.sidebar-footer button:hover,
+.sidebar-footer button:focus-visible {
+  background: #b84d42;
+  color: #fff;
 }
 .main-area {
   min-width: 0;
@@ -1183,7 +1236,26 @@ td strong {
     left: 0;
     width: 258px;
     transform: translateX(-100%);
-    transition: transform 0.25s ease;
+    transition: transform 0.2s ease;
+  }
+  .sidebar-close-button {
+    position: absolute;
+    top: 12px;
+    right: 10px;
+    z-index: 2;
+    width: 30px;
+    min-width: 0;
+    height: 30px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.07);
+    color: #bfd7cd;
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
   }
   .sidebar.open {
     transform: translateX(0);

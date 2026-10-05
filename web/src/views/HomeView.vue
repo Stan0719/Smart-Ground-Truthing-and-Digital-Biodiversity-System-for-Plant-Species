@@ -1298,7 +1298,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(70, 133, 133, 0.25);
   border-radius: 999px;
 
-  background: #fff6dc;
+  background: #FFF6DC;
   color: #468585;
 
   text-decoration: none;
@@ -1360,7 +1360,7 @@ onBeforeUnmount(() => {
   margin-top: 22px;
 
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
 
   gap: 9px;
 }
@@ -1397,7 +1397,7 @@ onBeforeUnmount(() => {
 .carousel-control:hover {
   transform: translateY(-2px);
   border-color: rgba(70, 133, 133, 0.42);
-  background: #ffffff;
+  background: #9cdba6;
 }
 
 
