@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import NavigationBar from '../components/NavigationBar.vue'
 import ImageStack from '../components/ImageStack.vue'
+import SiteFooter from '../components/SiteFooter.vue'
 import { plants } from '../data/plants'
 
 let revealObserver: IntersectionObserver | null = null
@@ -343,6 +344,53 @@ onBeforeUnmount(() => {
 
       </div>
 
+      <!-- =========================
+           Explore Niah Section
+           ========================= -->
+
+      <section class="explore-niah" aria-labelledby="explore-niah-title">
+        <div class="explore-niah-heading">
+          <p class="section-label reveal">EXPLORE NIAH</p>
+          <h2 id="explore-niah-title" class="reveal reveal-delay-1">
+            Discover Niah's Remarkable Landscapes
+          </h2>
+          <p class="reveal reveal-delay-2">
+            From vast limestone caves to ancient rock art and tropical rainforest, discover
+            the places that make Niah National Park extraordinary.
+          </p>
+        </div>
+
+        <div class="attraction-grid">
+          <article class="attraction-card attraction-card-featured reveal">
+            <div class="attraction-content">
+              <span>Featured landscape</span>
+              <h3>Great Cave</h3>
+              <p>
+                Step inside Niah's spectacular limestone cave system and explore one of its
+                most important archaeological landscapes.
+              </p>
+            </div>
+          </article>
+
+          <article class="attraction-card attraction-card-painted reveal reveal-delay-1">
+            <div class="attraction-content">
+              <h3>Painted Cave</h3>
+              <p>Discover prehistoric rock paintings and traces of Niah's ancient human story.</p>
+            </div>
+          </article>
+
+          <article class="attraction-card attraction-card-rainforest reveal reveal-delay-2">
+            <div class="attraction-content">
+              <h3>Rainforest Trails</h3>
+              <p>
+                Walk through lush tropical rainforest and boardwalks on the journey towards
+                Niah's caves.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <div class="visitor-overview">
         <div class="why-niah">
           <p class="section-label reveal">WHY NIAH?</p>
@@ -428,6 +476,54 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+    </section>
+
+    <!-- =========================
+         Journey to the Great Cave
+         ========================= -->
+
+    <section id="journey-to-cave" class="journey-section">
+      <div class="journey-container">
+        <div class="journey-heading">
+          <p class="section-label reveal">YOUR JOURNEY</p>
+          <h2 class="reveal reveal-delay-1">The Adventure Begins Before the Cave</h2>
+          <p class="reveal reveal-delay-2">
+            Follow the journey from the park headquarters through rainforest, heritage sites
+            and caves towards some of Niah's most remarkable landmarks.
+          </p>
+        </div>
+
+        <ol class="journey-route" aria-label="Journey from Park Headquarters to Painted Cave">
+          <li class="reveal">
+            <span class="journey-marker">01</span>
+            <div><strong>Park HQ</strong><small>Begin your visit</small></div>
+          </li>
+          <li class="reveal reveal-delay-1">
+            <span class="journey-marker">02</span>
+            <div><strong>River Crossing</strong><small>Cross into the forest</small></div>
+          </li>
+          <li class="reveal reveal-delay-2">
+            <span class="journey-marker">03</span>
+            <div><strong>Archaeology Museum</strong><small>Discover Niah's story</small></div>
+          </li>
+          <li class="reveal reveal-delay-3">
+            <span class="journey-marker">04</span>
+            <div><strong>Rainforest Boardwalk</strong><small>Walk beneath the canopy</small></div>
+          </li>
+          <li class="reveal">
+            <span class="journey-marker">05</span>
+            <div><strong>Trader's Cave</strong><small>Enter the cave landscape</small></div>
+          </li>
+          <li class="journey-highlight reveal reveal-delay-1">
+            <span class="journey-marker">06</span>
+            <div><strong>Great Cave</strong><small>The main destination</small></div>
+          </li>
+          <li class="reveal reveal-delay-2">
+            <span class="journey-marker">07</span>
+            <div><strong>Painted Cave</strong><small>Ancient art awaits</small></div>
+          </li>
+        </ol>
+      </div>
     </section>
 
     <section class="explore-plants">
@@ -591,7 +687,59 @@ onBeforeUnmount(() => {
 
     </section>
 
+    <!-- =========================
+         Before You Explore
+         ========================= -->
+
+    <section class="before-explore">
+      <div class="before-explore-container">
+        <div class="before-explore-heading">
+          <div>
+            <p class="section-label reveal">BEFORE YOU EXPLORE</p>
+            <h2 class="reveal reveal-delay-1">Come Prepared for the Adventure</h2>
+          </div>
+          <p class="reveal reveal-delay-2">
+            A little preparation will make your journey through Niah's rainforest and caves
+            safer and more comfortable.
+          </p>
+        </div>
+
+        <div class="preparation-grid">
+          <article class="preparation-item reveal">
+            <span class="preparation-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M5 5v8l-2 3c-.6 1 .1 2.3 1.3 2.3H18c1.7 0 3-1.3 3-3V14l-6-1.2-4-4V5H5Z"/><path d="M6 14h8M16 17.8v-2"/></svg>
+            </span>
+            <div><h3>Good Footwear</h3><p>Wear comfortable shoes with good grip as trails and cave surfaces can be slippery.</p></div>
+          </article>
+
+          <article class="preparation-item reveal reveal-delay-1">
+            <span class="preparation-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="m8 5 8 2-1 4-8-2 1-4ZM8 9l-2 9 6 1 3-8"/><path d="m16 7 4-1M16 9l4 1M17 5l2-2"/></svg>
+            </span>
+            <div><h3>Bring a Torch</h3><p>Some sections of the caves are naturally dark, so bring a reliable torch.</p></div>
+          </article>
+
+          <article class="preparation-item reveal reveal-delay-2">
+            <span class="preparation-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M9 3h6v3l2 3v10c0 1.1-.9 2-2 2H9c-1.1 0-2-.9-2-2V9l2-3V3Z"/><path d="M7 12h10M10 6h4"/></svg>
+            </span>
+            <div><h3>Carry Water</h3><p>Stay hydrated during the walk through the tropical rainforest and cave system.</p></div>
+          </article>
+
+          <article class="preparation-item reveal reveal-delay-3">
+            <span class="preparation-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="13" rx="4" ry="6"/><path d="M12 7V4M9.5 5.5 8 4M14.5 5.5 16 4M8 10 4 8M16 10l4-2M8 14H4M16 14h4M8.5 17.5 5 20M15.5 17.5 19 20"/></svg>
+            </span>
+            <div><h3>Insect Repellent</h3><p>Bring insect repellent for greater comfort while travelling through the rainforest.</p></div>
+          </article>
+        </div>
+
+      </div>
+    </section>
+
   </main>
+
+  <SiteFooter />
 </template>
 
 <style scoped>
@@ -1224,6 +1372,351 @@ onBeforeUnmount(() => {
 }
 
 
+/* ==================================================
+   EXPLORE NIAH
+   ================================================== */
+
+.explore-niah {
+  width: min(1200px, 88%);
+  margin: 100px auto 0;
+}
+
+.explore-niah-heading {
+  max-width: 760px;
+  margin-bottom: 42px;
+}
+
+.explore-niah-heading h2,
+.journey-heading h2,
+.before-explore-heading h2 {
+  margin: 0;
+  color: #315f5f;
+  font-size: clamp(38px, 4vw, 54px);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.explore-niah-heading > p:last-child,
+.journey-heading > p:last-child {
+  max-width: 680px;
+  margin: 18px 0 0;
+  color: #60756f;
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+.attraction-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+  grid-template-rows: repeat(2, 255px);
+  gap: 20px;
+}
+
+.attraction-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px;
+  background-color: #315f54;
+  background-position: center;
+  background-size: cover;
+  box-shadow: 0 14px 34px rgba(31, 65, 50, 0.14);
+  isolation: isolate;
+  transition: transform 0.35s ease, box-shadow 0.35s ease;
+}
+
+.attraction-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(to top, rgba(11, 37, 29, 0.9), rgba(11, 37, 29, 0.1) 72%);
+  transition: background-color 0.35s ease;
+}
+
+.attraction-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 42px rgba(31, 65, 50, 0.2);
+}
+
+.attraction-card:hover::before {
+  background-color: rgba(20, 70, 52, 0.08);
+}
+
+.attraction-card-featured {
+  grid-row: 1 / span 2;
+  background-image: url('/images/greatcave.jpg');
+}
+
+.attraction-card-painted {
+  background-image: url('/images/b1.jpg');
+  background-position: 70% 35%;
+}
+
+.attraction-card-rainforest {
+  background-image: url('/images/hero.jpg');
+  background-position: center 38%;
+}
+
+.attraction-content {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 30px;
+  color: #fff;
+}
+
+.attraction-card-featured .attraction-content {
+  padding: 38px;
+}
+
+.attraction-content > span:first-child {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: #bce8c9;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.attraction-content h3 {
+  margin: 0;
+  color: #fff6dc;
+  font-size: clamp(25px, 3vw, 36px);
+  line-height: 1.1;
+}
+
+.attraction-content p {
+  max-width: 590px;
+  margin: 10px 0 15px;
+  color: #e3eee7;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.attraction-content a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #d4f0d9;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.attraction-content a span {
+  transition: transform 0.2s ease;
+}
+
+.attraction-content a:hover span {
+  transform: translateX(4px);
+}
+
+
+/* ==================================================
+   JOURNEY TO THE GREAT CAVE
+   ================================================== */
+
+.journey-section {
+  padding: 110px 0;
+  overflow: hidden;
+  background: #f5f3e9;
+}
+
+.journey-container {
+  width: min(1200px, 88%);
+  margin: 0 auto;
+}
+
+.journey-heading {
+  max-width: 760px;
+  margin-bottom: 75px;
+}
+
+.journey-route {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  list-style: none;
+}
+
+.journey-route::before {
+  content: '';
+  position: absolute;
+  top: 28px;
+  left: 7%;
+  right: 7%;
+  height: 2px;
+  background: linear-gradient(to right, #a8c9b2, #4d9274, #a8c9b2);
+}
+
+.journey-route li {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.journey-marker {
+  position: relative;
+  z-index: 1;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border: 7px solid #f5f3e9;
+  border-radius: 50%;
+  background: #d9e8d9;
+  color: #3c755f;
+  font-size: 10px;
+  font-weight: 800;
+  box-shadow: 0 0 0 1px rgba(70, 133, 103, 0.22);
+}
+
+.journey-route li div {
+  margin-top: 17px;
+}
+
+.journey-route strong {
+  display: block;
+  color: #31584c;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.journey-route small {
+  display: block;
+  margin-top: 5px;
+  color: #85958e;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.journey-highlight .journey-marker {
+  transform: scale(1.18);
+  background: #2f7358;
+  color: #fff;
+  box-shadow: 0 0 0 5px rgba(80, 180, 152, 0.15);
+}
+
+.journey-highlight strong {
+  color: #246149;
+  font-size: 14px;
+}
+
+
+/* ==================================================
+   BEFORE YOU EXPLORE
+   ================================================== */
+
+.before-explore {
+  padding: 100px 0;
+  background: #e8efe3;
+}
+
+.before-explore-container {
+  width: min(1200px, 88%);
+  margin: 0 auto;
+}
+
+.before-explore-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
+  align-items: end;
+  gap: 70px;
+}
+
+.before-explore-heading > p {
+  margin: 0 0 3px;
+  color: #60756f;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.preparation-grid {
+  margin-top: 45px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.preparation-item {
+  padding: 23px 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  border: 1px solid rgba(70, 133, 133, 0.15);
+  border-radius: 16px;
+  background: rgba(255, 250, 235, 0.68);
+  transition: transform 0.25s ease, background-color 0.25s ease;
+}
+
+.preparation-item:hover {
+  transform: translateY(-3px);
+  background: #fffaf0;
+}
+
+.preparation-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: #dce9d9;
+  color: #3c7763;
+}
+
+.preparation-icon svg {
+  width: 23px;
+  height: 23px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.preparation-item h3 {
+  margin: 1px 0 7px;
+  color: #31584c;
+  font-size: 15px;
+}
+
+.preparation-item p {
+  margin: 0;
+  color: #71817a;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.visitor-guide-link {
+  width: fit-content;
+  margin: 30px auto 0;
+  padding: 13px 20px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(70, 133, 133, 0.25);
+  border-radius: 999px;
+  background: #fff6dc;
+  color: #468585;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.visitor-guide-link:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(40, 85, 64, 0.1);
+}
+
+
 
 
 
@@ -1597,6 +2090,60 @@ onBeforeUnmount(() => {
 
 @media (max-width: 900px) {
 
+  .attraction-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 420px 285px;
+  }
+
+  .attraction-card-featured {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .journey-route {
+    padding-left: 9px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .journey-route::before {
+    top: 22px;
+    bottom: 22px;
+    left: 28px;
+    right: auto;
+    width: 2px;
+    height: auto;
+  }
+
+  .journey-route li {
+    min-height: 88px;
+    flex-direction: row;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .journey-marker {
+    flex: 0 0 56px;
+  }
+
+  .journey-route li div {
+    margin: 12px 0 0 19px;
+  }
+
+  .journey-highlight .journey-marker {
+    transform: none;
+  }
+
+  .before-explore-heading {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+
+  .preparation-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .explore-plants {
     padding: 85px 0 95px;
   }
@@ -1616,6 +2163,58 @@ onBeforeUnmount(() => {
 
 
 @media (max-width: 500px) {
+
+  .explore-niah {
+    width: 86%;
+    margin-top: 70px;
+  }
+
+  .explore-niah-heading h2,
+  .journey-heading h2,
+  .before-explore-heading h2 {
+    font-size: 36px;
+  }
+
+  .explore-niah-heading > p:last-child,
+  .journey-heading > p:last-child {
+    font-size: 14px;
+  }
+
+  .attraction-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: 390px 280px 280px;
+  }
+
+  .attraction-card-featured {
+    grid-column: auto;
+  }
+
+  .attraction-content,
+  .attraction-card-featured .attraction-content {
+    padding: 24px;
+  }
+
+  .journey-section {
+    padding: 75px 0;
+  }
+
+  .journey-container,
+  .before-explore-container {
+    width: 86%;
+  }
+
+  .journey-heading {
+    margin-bottom: 48px;
+  }
+
+  .before-explore {
+    padding: 75px 0;
+  }
+
+  .preparation-grid {
+    grid-template-columns: 1fr;
+    margin-top: 35px;
+  }
 
   .explore-plants {
     padding: 70px 0 80px;
@@ -1910,6 +2509,9 @@ onBeforeUnmount(() => {
   .explore-button,
   .learn-button,
   .visitor-card,
+  .attraction-card,
+  .preparation-item,
+  .visitor-guide-link,
   .explore-more-button,
   .button-arrow,
   .home-plant-card,
