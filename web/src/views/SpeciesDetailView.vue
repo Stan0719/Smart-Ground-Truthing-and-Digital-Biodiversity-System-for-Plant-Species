@@ -2,13 +2,20 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import NavigationBar from '../components/NavigationBar.vue'
+import PlantRecordCard from '../components/PlantRecordCard.vue'
 import { plants as species } from '../data/plants'
+import { plantRecords } from '../data/plantRecords'
 
 const route = useRoute()
 const selectedSpecies = computed(() => species.find((item) => item.slug === route.params.slug))
 const primaryImage = computed(() =>
   selectedSpecies.value?.image || selectedSpecies.value?.images?.find((image) => image.path)?.path,
 )
+const speciesPlants = computed(() =>
+  plantRecords.filter((plant) => plant.speciesSlug === selectedSpecies.value?.slug),
+)
+const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
+
 </script>
 
 <template>
@@ -17,7 +24,7 @@ const primaryImage = computed(() =>
   <main v-if="selectedSpecies" class="detail-page">
     <section class="detail-hero">
       <div class="detail-container">
-        <RouterLink to="/plants" class="back-link">← Back to all plants</RouterLink>
+        <RouterLink to="/species" class="back-link">← Back to Species</RouterLink>
 
         <div class="hero-grid">
           <img v-if="primaryImage" class="plant-image" :src="primaryImage" :alt="selectedSpecies.name" />
@@ -106,12 +113,39 @@ const primaryImage = computed(() =>
               <dt>Conservation status</dt>
               <dd>{{ selectedSpecies.conservationStatus }}</dd>
             </div>
+            <div v-if="selectedSpecies.sensitivityLevel">
+              <dt>Sensitivity level</dt>
+              <dd>{{ selectedSpecies.sensitivityLevel }}</dd>
+            </div>
             <div v-if="selectedSpecies.niahDistribution">
               <dt>Distribution in Niah</dt>
               <dd>Zones {{ selectedSpecies.niahDistribution.zones.join(', ') }}</dd>
             </div>
           </dl>
         </aside>
+      </div>
+    </section>
+
+    <section class="individual-plants" aria-labelledby="individual-plants-title">
+      <div class="detail-container">
+        <div class="section-heading">
+          <p class="section-label">INDIVIDUAL PLANTS OF THIS SPECIES</p>
+          <h2 id="individual-plants-title">Verified plants in Niah</h2>
+          <p>{{ speciesPlants.length }} tagged plant records are linked to this species in the prototype.</p>
+        </div>
+
+        <div v-if="speciesPlants.length" class="individual-plant-grid">
+          <PlantRecordCard
+            v-for="plant in previewPlants"
+            :key="plant.plantId"
+            :plant="plant"
+            compact
+          />
+        </div>
+        <p v-else class="no-records">No verified individual plant records are linked yet.</p>
+        <div v-if="speciesPlants.length" class="view-all-row">
+          <RouterLink :to="`/species/${selectedSpecies.slug}/plants`">View All Plants →</RouterLink>
+        </div>
       </div>
     </section>
 
@@ -142,8 +176,8 @@ const primaryImage = computed(() =>
           <p class="section-label">DISTRIBUTION IN NIAH NATIONAL PARK</p>
           <h2>Known species occurrence</h2>
           <p>
-            This prototype summary represents approved species occurrence records at zone level.
-            Exact coordinates are not displayed publicly.
+            This staff prototype summary represents approved species occurrence records at zone level.
+            Authorized coordinates are available on each individual plant record.
           </p>
           <div class="distribution-stats">
             <div><strong>{{ selectedSpecies.niahDistribution.knownOccurrences }}</strong><span>Known verified occurrences</span></div>
@@ -161,7 +195,7 @@ const primaryImage = computed(() =>
 
     <section class="explore-more">
       <p>Continue discovering the remarkable flora of Niah.</p>
-      <RouterLink to="/plants">Explore more plants →</RouterLink>
+      <RouterLink to="/species">Explore more species →</RouterLink>
     </section>
   </main>
 
@@ -169,7 +203,7 @@ const primaryImage = computed(() =>
     <span aria-hidden="true">🌿</span>
     <h1>Species not found</h1>
     <p>The species you are looking for is not in the collection.</p>
-    <RouterLink to="/plants">Return to Explore Plants</RouterLink>
+    <RouterLink to="/species">Return to Species</RouterLink>
   </main>
 </template>
 
@@ -501,6 +535,22 @@ const primaryImage = computed(() =>
   background: #f8f6ee;
 }
 
+.individual-plants {
+  padding: 90px 0;
+  background: #e8efe3;
+}
+
+.individual-plant-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.no-records { padding: 30px; border: 1px dashed #aebfad; border-radius: 16px; text-align: center; }
+.view-all-row { margin-top: 30px; text-align: center; }
+.view-all-row a { display: inline-flex; padding: 12px 22px; border-radius: 999px; background: #315b49; color: #fff; font-size: 13px; font-weight: 700; text-decoration: none; transition: background .2s ease, transform .2s ease; }
+.view-all-row a:hover { background: #234a3c; transform: translateY(-2px); }
+
 .distribution-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
@@ -666,6 +716,8 @@ const primaryImage = computed(() =>
   .gallery-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .individual-plant-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 560px) {
@@ -702,7 +754,8 @@ const primaryImage = computed(() =>
   }
 
   .gallery-grid,
-  .distribution-stats {
+  .distribution-stats,
+  .individual-plant-grid {
     grid-template-columns: 1fr;
   }
 

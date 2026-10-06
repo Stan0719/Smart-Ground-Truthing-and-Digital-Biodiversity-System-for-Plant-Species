@@ -10,6 +10,13 @@ import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  scrollBehavior(_to, _from, savedPosition) {
+    if (savedPosition) {
+      return savedPosition
+    }
+
+    return { top: 0, left: 0 }
+  },
   routes: [
     {
       path: '/',
@@ -17,14 +24,28 @@ const router = createRouter({
       component: HomeView,
     },
     {
-      path: '/plants',
-      name: 'plants',
+      path: '/species',
+      name: 'species',
       component: PlantsView,
+    },
+    {
+      path: '/plants',
+      redirect: '/species',
+    },
+    {
+      path: '/species/:slug/plants',
+      name: 'species-plants',
+      component: () => import('../views/SpeciesPlantsView.vue'),
     },
     {
       path: '/species/:slug',
       name: 'species-detail',
       component: SpeciesDetailView,
+    },
+    {
+      path: '/plant/:plantId',
+      name: 'plant-detail',
+      component: () => import('../views/PlantDetailView.vue'),
     },
     {
       path: '/change-password',

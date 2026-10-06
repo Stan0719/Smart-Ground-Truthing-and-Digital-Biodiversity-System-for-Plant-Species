@@ -48,6 +48,7 @@ const filteredSpecies = computed(() => {
       !query ||
       item.name.toLowerCase().includes(query) ||
       item.scientificName.toLowerCase().includes(query) ||
+      item.genus?.toLowerCase().includes(query) ||
       item.category.toLowerCase().includes(query) ||
       item.family?.toLowerCase().includes(query) ||
       item.description.toLowerCase().includes(query)
@@ -107,7 +108,7 @@ const filteredSpecies = computed(() => {
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="m21 21-4.35-4.35m2.35-5.15A7.5 7.5 0 1 1 4 11.5a7.5 7.5 0 0 1 15 0Z" />
               </svg>
-              <span class="sr-only">Search plants</span>
+              <span class="sr-only">Search species</span>
               <input
                 v-model="searchQuery"
                 type="search"
@@ -119,7 +120,7 @@ const filteredSpecies = computed(() => {
               <button
                 type="button"
                 class="sort-button"
-                aria-label="Sort plants"
+                aria-label="Sort species"
                 aria-haspopup="menu"
                 :aria-expanded="sortMenuOpen"
                 aria-controls="plant-sort-menu"
@@ -172,7 +173,7 @@ const filteredSpecies = computed(() => {
             </div>
           </div>
 
-          <div class="category-filters" aria-label="Filter plants by category">
+          <div class="category-filters" aria-label="Filter species by plant group">
             <button
               v-for="category in categories"
               :key="category"
@@ -213,23 +214,31 @@ const filteredSpecies = computed(() => {
               <p v-if="item.family" class="plant-family"><span>Family:</span> {{ item.family }}</p>
               <p class="plant-description">{{ item.description }}</p>
 
-              <RouterLink
-                :to="`/species/${item.slug}`"
-                class="learn-more"
-                :aria-label="`Learn more about ${item.name}`"
-              >
-                <span class="circle" aria-hidden="true">
-                  <span class="button-arrow"></span>
-                </span>
-                <span class="button-text">Learn more</span>
-              </RouterLink>
+              <div class="card-actions">
+                <RouterLink
+                  :to="`/species/${item.slug}`"
+                  class="card-action-link card-action-secondary"
+                  :aria-label="`View species information for ${item.scientificName}`"
+                >
+                  <span>View Species</span>
+                </RouterLink>
+
+                <RouterLink
+                  :to="`/species/${item.slug}/plants`"
+                  class="card-action-link card-action-primary"
+                  :aria-label="`View individual plants for ${item.scientificName}`"
+                >
+                  <span>View Plants</span>
+                  <span class="action-arrow" aria-hidden="true">→</span>
+                </RouterLink>
+              </div>
             </div>
           </article>
         </div>
 
         <div v-else class="empty-state">
           <span aria-hidden="true">🌿</span>
-          <h3>No plants found</h3>
+          <h3>No species found</h3>
           <p>Try another search term or select a different category.</p>
           <button type="button" @click="searchQuery = ''; activeCategory = 'All'">Clear filters</button>
         </div>
@@ -636,6 +645,80 @@ const filteredSpecies = computed(() => {
   overflow: hidden;
 }
 
+.card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.card-action-link {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+
+  border-radius: 999px;
+
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+/* Secondary: species knowledge */
+.card-action-secondary {
+  border: 1px solid #b7c7bd;
+  background: #f7f6ef;
+  color: #315b49;
+}
+
+.card-action-secondary:hover {
+  border-color: #759785;
+  background: #e9f0e8;
+  color: #234a3c;
+  transform: translateY(-2px);
+}
+
+/* Primary: individual plants */
+.card-action-primary {
+  border: 1px solid #315b49;
+  background: #315b49;
+  color: #fff;
+  box-shadow: 0 5px 14px rgba(35, 74, 60, 0.12);
+}
+
+.card-action-primary:hover {
+  border-color: #234a3c;
+  background: #234a3c;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(35, 74, 60, 0.18);
+}
+
+.action-arrow {
+  display: inline-block;
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.card-action-primary:hover .action-arrow {
+  transform: translateX(3px);
+}
+
+.card-action-link:focus-visible {
+  outline: 3px solid rgba(49, 91, 73, 0.22);
+  outline-offset: 3px;
+}
+
 .learn-more .circle {
   position: absolute;
   top: 0;
@@ -811,50 +894,244 @@ const filteredSpecies = computed(() => {
 
 @media (max-width: 620px) {
   .plants-hero {
-    min-height: 420px;
+    min-height: 320px;
   }
 
   .hero-content {
-    width: 86%;
-    padding-bottom: 46px;
+    width: 90%;
+    padding: 48px 0 32px;
+  }
+
+  .eyebrow,
+  .section-label {
+    margin-bottom: 8px;
+    font-size: 10px;
+    letter-spacing: 2px;
   }
 
   .plants-hero h1 {
-    font-size: 52px;
+    font-size: 40px;
+    letter-spacing: -1px;
+  }
+
+  .hero-lead {
+    margin: 9px 0 5px;
+    font-size: 17px;
   }
 
   .hero-copy {
-    font-size: 14px;
+    font-size: 12px;
+    line-height: 1.55;
   }
 
   .plant-library {
-    padding: 48px 0 64px;
+    padding: 32px 0 44px;
   }
 
   .library-container {
-    width: 88%;
+    width: 92%;
   }
 
   .library-heading {
+    margin-bottom: 20px;
     align-items: flex-start;
     flex-direction: column;
+    gap: 5px;
+  }
+
+  .library-heading h2 {
+    font-size: 28px;
+  }
+
+  .library-heading > p {
+    margin-bottom: 0;
+    font-size: 11px;
+  }
+
+  .filter-bar {
+    margin-bottom: 22px;
+    gap: 12px;
+  }
+
+  .filter-controls {
     gap: 8px;
   }
 
   .search-box {
     min-width: 0;
+    gap: 8px;
+    padding: 0 12px;
+    border-radius: 11px;
+  }
+
+  .search-box svg {
+    width: 17px;
+  }
+
+  .search-box input {
+    padding: 11px 0;
+    font-size: 13px;
   }
 
   .sort-button {
-    padding: 0 14px;
+    min-height: 42px;
+    padding: 0 12px;
+    border-radius: 11px;
+    font-size: 12px;
+  }
+
+  .sort-button svg {
+    width: 16px;
+  }
+
+  .category-filters {
+    gap: 6px;
+  }
+
+  .category-filters button {
+    padding: 8px 13px;
+    font-size: 11px;
   }
 
   .plant-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .plant-card {
+    display: flex;
+    flex-direction: column;
+    border-radius: 13px;
+    box-shadow: 0 5px 16px rgba(33, 57, 44, 0.06);
+  }
+
+  .plant-image-wrapper {
+    aspect-ratio: 4 / 3;
+  }
+
+  .card-badges {
+    top: 7px;
+    right: 7px;
+    left: 7px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .category-badge,
+  .status-badge {
+    padding: 4px 6px;
+    font-size: 8px;
+  }
+
+  .status-badge {
+    font-size: 7px;
+  }
+
+  .plant-card-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 11px;
+  }
+
+  .plant-card h3 {
+    font-size: 16px;
+    line-height: 1.15;
+  }
+
+  .scientific-name {
+    margin: 3px 0 5px;
+    font-size: 11px;
+    line-height: 1.3;
+  }
+
+  .plant-family {
+    margin-bottom: 7px;
+    font-size: 9px;
+    line-height: 1.3;
   }
 
   .plant-description {
-    min-height: 0;
+    min-height: 30px;
+    margin-bottom: 10px;
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: 10px;
+    line-height: 1.45;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .card-actions {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    margin-top: auto;
+  }
+
+  .card-action-link {
+    min-height: 36px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 8px;
+    font-size: 10px;
+  }
+
+  .action-arrow {
+    font-size: 12px;
+  }
+
+  .empty-state {
+    padding: 42px 18px;
+  }
+
+  .empty-state > span {
+    font-size: 30px;
+  }
+
+  .empty-state h3 {
+    margin: 9px 0 4px;
+    font-size: 21px;
+  }
+
+  .empty-state p {
+    margin-bottom: 15px;
+    font-size: 12px;
+  }
+
+  .empty-state button {
+    padding: 9px 14px;
+    font-size: 12px;
+  }
+
+  .plants-quote {
+    min-height: 150px;
+    padding: 30px 6%;
+  }
+
+  .plants-quote p {
+    margin-bottom: 13px;
+    font-size: 22px;
+  }
+
+  .plants-quote span {
+    font-size: 9px;
+    letter-spacing: 3px;
+  }
+}
+
+@media (max-width: 360px) {
+  .plant-card-content {
+    padding: 9px;
+  }
+
+  .card-action-link {
+    min-height: 35px;
+    padding-inline: 6px;
+    font-size: 9px;
+  }
+
+  .action-arrow {
+    font-size: 11px;
   }
 }
 </style>

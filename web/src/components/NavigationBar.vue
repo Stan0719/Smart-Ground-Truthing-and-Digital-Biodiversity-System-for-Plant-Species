@@ -34,8 +34,8 @@ const navItems = computed(() => {
       to: '/',
     },
     {
-      label: 'Explore Plants',
-      to: '/plants',
+      label: 'Species',
+      to: '/species',
     },
   ]
 
@@ -60,7 +60,7 @@ const submitNavSearch = () => {
   const query = navSearch.value.trim()
 
   router.push({
-    path: '/plants',
+    path: '/species',
     query: query ? { search: query } : {}
   })
 }
