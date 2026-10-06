@@ -775,55 +775,124 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   .individual-plant-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 620px) {
+  .detail-container {
+    width: 92%;
+  }
+
   .detail-hero,
   .plant-information,
+  .individual-plants,
   .botanical-gallery,
   .distribution-section {
-    padding: 55px 0;
+    padding: 38px 0;
   }
 
   .plant-placeholder {
-    min-height: 300px;
+    min-height: 220px;
   }
 
   .species-image-card {
-    border-radius: 20px;
+    border-radius: 16px;
   }
 
   .plant-image {
     min-height: 0;
-    height: 260px;
+    height: 220px;
   }
 
   .hero-copy h1 {
-    font-size: 42px;
+    font-size: 36px;
+  }
+
+  .hero-grid {
+    gap: 24px;
+  }
+
+  .hero-badges {
+    margin-bottom: 10px;
+  }
+
+  .category,
+  .conservation-status {
+    padding: 5px 9px;
+    font-size: 9px;
+  }
+
+  .scientific-name {
+    margin: 8px 0 14px;
+    font-size: 17px;
+  }
+
+  .summary {
+    font-size: 13px;
+    line-height: 1.6;
   }
 
   .information-grid {
-    gap: 42px;
+    gap: 30px;
   }
 
   .main-description h2 {
-    font-size: 31px;
+    font-size: 28px;
+  }
+
+  .main-description h3 {
+    margin-top: 28px;
+    font-size: 20px;
+  }
+
+  .main-description p:not(.section-label) {
+    font-size: 13px;
+    line-height: 1.7;
   }
 
   .quick-facts {
-    padding: 25px;
+    padding: 18px;
+  }
+
+  .quick-facts h2 {
+    margin-bottom: 18px;
+    font-size: 24px;
+  }
+
+  .section-heading {
+    margin-bottom: 22px;
+  }
+
+  .section-heading h2,
+  .distribution-copy h2 {
+    font-size: 28px;
+  }
+
+  .section-label {
+    margin-bottom: 8px;
+    font-size: 10px;
+    letter-spacing: 1.7px;
+  }
+
+  .individual-plant-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .gallery-grid,
-  .distribution-stats,
-  .individual-plant-grid {
+  .distribution-stats {
     grid-template-columns: 1fr;
   }
 
   .distribution-map {
-    min-height: 290px;
+    min-height: 250px;
   }
 
   .explore-more {
     flex-direction: column;
+    gap: 18px;
+    padding: 38px 6%;
+  }
+
+  .explore-more p {
+    font-size: 19px;
   }
 
   .back-link {
@@ -834,6 +903,121 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
 
   .back-arrow {
     font-size: 14px;
+  }
+
+  :deep(.plant-record-card) {
+    display: flex;
+    flex-direction: column;
+    border-radius: 13px;
+    box-shadow: 0 5px 16px rgba(37, 75, 58, 0.07);
+  }
+
+  :deep(.record-image) {
+    height: 120px;
+  }
+
+  :deep(.record-placeholder) {
+    font-size: 34px;
+  }
+
+  :deep(.record-image > span) {
+    left: 7px;
+    bottom: 7px;
+    padding: 4px 6px;
+    font-size: 8px;
+  }
+
+  :deep(.record-copy) {
+    min-width: 0;
+    padding: 10px;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  :deep(.record-copy h3) {
+    font-size: 16px;
+    line-height: 1.15;
+  }
+
+  :deep(.record-common-name) {
+    margin: 3px 0 1px;
+    font-size: 11px;
+    line-height: 1.3;
+  }
+
+  :deep(.record-species) {
+    margin-bottom: 9px;
+    overflow-wrap: anywhere;
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  :deep(.record-copy dl) {
+    margin-bottom: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px 5px;
+  }
+
+  :deep(.record-copy dt) {
+    font-size: 7px;
+    letter-spacing: 0.35px;
+  }
+
+  :deep(.record-copy dd) {
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+    font-size: 9px;
+    line-height: 1.25;
+  }
+
+  :deep(.learn-more) {
+    width: min(100%, 140px);
+    height: 36px;
+    margin-top: auto;
+  }
+
+  :deep(.learn-more .circle) {
+    width: 36px;
+    height: 36px;
+  }
+
+  :deep(.learn-more .button-arrow) {
+    left: 9px;
+    width: 14px;
+  }
+
+  :deep(.learn-more .button-text) {
+    padding: 8px 6px 8px 29px;
+    font-size: 10px;
+    line-height: 20px;
+  }
+}
+
+@media (max-width: 360px) {
+  .individual-plant-grid {
+    gap: 8px;
+  }
+
+  :deep(.record-image) {
+    height: 110px;
+  }
+
+  :deep(.record-copy) {
+    padding: 8px;
+  }
+
+  :deep(.learn-more) {
+    height: 35px;
+  }
+
+  :deep(.learn-more .circle) {
+    width: 35px;
+    height: 35px;
+  }
+
+  :deep(.learn-more .button-text) {
+    font-size: 9px;
   }
 }
 </style>
