@@ -16,8 +16,14 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { getVisitorAccounts } from "../utils/visitorStorage";
 
-const TEST_EMAIL = "admin@niah.com";
-const TEST_PASSWORD = "admin123";
+const TEST_BOTANIST = {
+  id: 1,
+  name: "Admin",
+  email: "admin@niah.com",
+  password: "admin123",
+  role: "botanist",
+  status: "Active",
+};
 
 
 function FloatingInput({
@@ -200,32 +206,61 @@ export default function LoginScreen({
 
   async function handleLogin() {
   const normalizedEmail = email.trim().toLowerCase();
-  let user;
+
+  let user = null;
+
+
+  // =====================================================
+  // BOTANIST LOGIN
+  // =====================================================
 
   if (
-    normalizedEmail === TEST_EMAIL.toLowerCase() &&
-    password === TEST_PASSWORD
+    normalizedEmail === TEST_BOTANIST.email.toLowerCase() &&
+    password === TEST_BOTANIST.password
   ) {
     user = {
-      username: "admin",
-      email: TEST_EMAIL,
-      name: "Admin",
-      role: "Botanist",
+      id: TEST_BOTANIST.id,
+      name: TEST_BOTANIST.name,
+      email: TEST_BOTANIST.email,
+      role: TEST_BOTANIST.role,
     };
-  } else {
+  }
+
+
+  // =====================================================
+  // VISITOR LOGIN
+  // =====================================================
+
+  if (!user) {
     try {
       const visitors = await getVisitorAccounts();
-      user = visitors.find(
+
+      const visitor = visitors.find(
         (visitor) =>
-          visitor.email.trim().toLowerCase() === normalizedEmail &&
+          visitor.email?.trim().toLowerCase() === normalizedEmail &&
           visitor.password === password &&
           visitor.role === "Visitor" &&
           visitor.status === "Active"
       );
-    } catch {
-      user = null;
+
+      if (visitor) {
+        user = {
+          id: visitor.id,
+          name: visitor.name,
+          email: visitor.email,
+          role: "visitor",
+        };
+      }
+
+    } catch (error) {
+      console.log("Unable to load visitor accounts:", error);
     }
   }
+
+
+  // =====================================================
+  // LOGIN FAILED
+  // =====================================================
 
   if (!user) {
     setLoginError("Invalid email or password.");
@@ -233,26 +268,22 @@ export default function LoginScreen({
   }
 
 
+  // =====================================================
+  // LOGIN SUCCESS
+  // =====================================================
+
   setEmail("");
   setPassword("");
   setLoginError("");
 
 
+  console.log("LOGGED IN USER:", user);
+
   if (onLogin) {
-
     onLogin(user);
-
   } else {
-
-    navigation.replace(
-      "MainTabs",
-      {
-        botanist: user,
-      }
-    );
-
-  }
-}
+    navigation.replace("MainTabs");
+  }}
 
 
   function handleGuest() {

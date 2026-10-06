@@ -1,111 +1,247 @@
-// import React from "react";
-// import {
-//   View,
-//   Text,
-//   StyleSheet,
-// } from "react-native";
+import React from "react";
 
-// import CustomButton from "../components/CustomButton";
+import {
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
-// export default function AccountScreen({ navigation }) {
-//   return (
-//     <View style={styles.container}>
-//       <View style={styles.logoCircle}>
-//         <Text style={styles.logoIcon}>
-//           🌿
-//         </Text>
-//       </View>
+import { Ionicons } from "@expo/vector-icons";
 
-//       <Text style={styles.title}>
-//         Welcome
-//       </Text>
+export default function AccountScreen({
+  navigation,
+  user,
+  onLogout,
+}) {
+  function handleLogout() {
+    if (onLogout) {
+      onLogout();
+    }
+  }
 
-//       <Text style={styles.subtitle}>
-//         Login as a botanist to manage plant records
-//       </Text>
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <Text style={styles.title}>Account</Text>
 
-//       <CustomButton
-//         title="Botanist Login"
-//         onPress={() =>
-//           navigation.navigate("Login")
-//         }
-//       />
+        {/* Profile Card */}
+        <View style={styles.profileCard}>
+          <View style={styles.avatar}>
+            <Ionicons
+              name="person"
+              size={38}
+              color="#468585"
+            />
+          </View>
 
-//       <CustomButton
-//         title="Continue as Guest"
-//         secondary
-//         onPress={() => {}}
-//       />
+          <View style={styles.profileInfo}>
+            <Text style={styles.name}>
+              {user?.name || "Visitor"}
+            </Text>
 
-//       <View style={styles.infoCard}>
-//         <Text style={styles.infoTitle}>
-//           Guest Access
-//         </Text>
+            <Text style={styles.email}>
+              {user?.email || "No email"}
+            </Text>
+          </View>
+        </View>
 
-//         <Text style={styles.infoText}>
-//           You can browse plant information, scan QR codes and
-//           explore plant locations without logging in.
-//         </Text>
-//       </View>
-//     </View>
-//   );
-// }
+        {/* Account Options */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.option}
+            onPress={() => navigation.navigate("FavouritePlants")}
+          >
+            <View style={styles.iconContainer}>
+              <Ionicons
+                name="star"
+                size={22}
+                color="#468585"
+              />
+            </View>
 
-// const styles = StyleSheet.create({
-//   container: {
-//     flex: 1,
-//     backgroundColor: "#DEF9C4",
-//     padding: 25,
-//     justifyContent: "center",
-//   },
+            <View style={styles.optionText}>
+              <Text style={styles.optionTitle}>
+                Favourite Plants
+              </Text>
 
-//   logoCircle: {
-//     width: 105,
-//     height: 105,
-//     borderRadius: 53,
-//     backgroundColor: "#9CDBA6",
-//     alignSelf: "center",
-//     justifyContent: "center",
-//     alignItems: "center",
-//   },
+              <Text style={styles.optionSubtitle}>
+                View your favourite plants
+              </Text>
+            </View>
 
-//   logoIcon: {
-//     fontSize: 50,
-//   },
+            <Ionicons
+              name="chevron-forward"
+              size={22}
+              color="#9BBDB4"
+            />
+          </TouchableOpacity>
 
-//   title: {
-//     fontSize: 29,
-//     fontWeight: "800",
-//     textAlign: "center",
-//     color: "#468585",
-//     marginTop: 20,
-//   },
+          <TouchableOpacity
+            style={styles.option}
+            onPress={() => navigation.navigate("ScanHistory")}
+          >
+            <View style={styles.iconContainer}>
+              <Ionicons
+                name="scan"
+                size={22}
+                color="#468585"
+              />
+            </View>
 
-//   subtitle: {
-//     textAlign: "center",
-//     color: "#687568",
-//     marginTop: 6,
-//     marginBottom: 20,
-//     lineHeight: 21,
-//   },
+            <View style={styles.optionText}>
+              <Text style={styles.optionTitle}>
+                Scan History
+              </Text>
 
-//   infoCard: {
-//     backgroundColor: "#FFFFFF",
-//     borderRadius: 15,
-//     padding: 17,
-//     marginTop: 25,
-//   },
+              <Text style={styles.optionSubtitle}>
+                View your previous plant scans
+              </Text>
+            </View>
 
-//   infoTitle: {
-//     fontSize: 16,
-//     fontWeight: "700",
-//     color: "#468585",
-//   },
+            <Ionicons
+              name="chevron-forward"
+              size={22}
+              color="#9BBDB4"
+            />
+          </TouchableOpacity>
+        </View>
 
-//   infoText: {
-//     fontSize: 13,
-//     color: "#687568",
-//     lineHeight: 20,
-//     marginTop: 5,
-//   },
-// });
+        {/* Logout */}
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+        >
+          <Ionicons
+            name="log-out-outline"
+            size={22}
+            color="#D9534F"
+          />
+
+          <Text style={styles.logoutText}>
+            Log Out
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F8FFF5",
+  },
+
+  content: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+
+  title: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#468585",
+    marginBottom: 24,
+  },
+
+  profileCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#DEF9C4",
+    borderRadius: 18,
+    padding: 20,
+    marginBottom: 28,
+  },
+
+  avatar: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 16,
+  },
+
+  profileInfo: {
+    flex: 1,
+  },
+
+  name: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#315E59",
+    marginBottom: 5,
+  },
+
+  email: {
+    fontSize: 14,
+    color: "#5F7772",
+  },
+
+  section: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    overflow: "hidden",
+    marginBottom: 24,
+  },
+
+  option: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E8F1E8",
+  },
+
+  iconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#DEF9C4",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+
+  optionText: {
+    flex: 1,
+  },
+
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#315E59",
+    marginBottom: 4,
+  },
+
+  optionSubtitle: {
+    fontSize: 13,
+    color: "#7A918C",
+  },
+
+  logoutButton: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingVertical: 15,
+    borderWidth: 1,
+    borderColor: "#F0D5D5",
+  },
+
+  logoutText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#D9534F",
+    marginLeft: 8,
+  },
+});
