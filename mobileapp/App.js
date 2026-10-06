@@ -27,6 +27,9 @@ import AddPlantScreen from "./screens/AddPlant";
 import EditPlantScreen from "./screens/EditPlant";
 import VisitorRegisterScreen from "./screens/VisitorRegister";
 import PlantQRCodeScreen from "./screens/PlantQRCode";
+import AccountScreen from "./screens/Account";
+import FavouritePlantsScreen from "./screens/FavouritePlants";
+import ScanHistoryScreen from "./screens/ScanHistory";
 
 
 const Tab = createBottomTabNavigator();
@@ -167,54 +170,71 @@ function MapStack() {
   );
 }
 
-
-/* =========================================================
-   ACCOUNT
-========================================================= */
-
-function AccountScreen({
-  botanist,
-  onLogin,
+function AccountStack({
+  user,
   onLogout,
 }) {
-
-  // Not logged in
-  if (!botanist) {
-
-    return (
-      <LoginScreen
-        onLogin={onLogin}
-      />
-    );
-  }
-
-
-  // Logged in
   return (
-    <BotanistDashboardScreen
-      route={{
-        params: {
-          botanist,
-        },
-      }}
-      navigation={{
-        navigate: (...args) => {
-          // This will be replaced below by the actual
-          // navigation object from the screen.
-        },
-      }}
-      onLogout={onLogout}
-    />
+    <Stack.Navigator>
+
+      <Stack.Screen
+        name="Account"
+        options={{
+          headerShown: false,
+        }}
+      >
+        {(props) => (
+          <AccountScreen
+            {...props}
+            user={user}
+            onLogout={onLogout}
+          />
+        )}
+      </Stack.Screen>
+
+      <Stack.Screen
+        name="FavouritePlants"
+        component={FavouritePlantsScreen}
+        options={{
+          title: "Favourite Plants",
+          headerTintColor: theme.dark,
+          headerStyle: {
+            backgroundColor: theme.light,
+          },
+        }}
+      />
+
+      {/* Plant Details */}
+      <Stack.Screen
+        name="PlantDetails"
+        component={PlantDetailsScreen}
+        options={{
+          title: "Plant Details",
+          headerTintColor: theme.dark,
+          headerStyle: {
+            backgroundColor: theme.light,
+          },
+        }}
+      />
+
+      <Stack.Screen
+        name="ScanHistory"
+        component={ScanHistoryScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+
+    </Stack.Navigator>
   );
 }
-
 
 /* =========================================================
    MAIN BOTTOM TABS
 ========================================================= */
 
 function MainTabs({
-  botanist,
+  user,
   onLogin,
   onLogout,
 }) {
@@ -350,18 +370,19 @@ function MainTabs({
 
 
       {/* ACCOUNT / BOTANIST DASHBOARD */}
+      {/* ACCOUNT / BOTANIST DASHBOARD */}
       <Tab.Screen
         name="AccountTab"
         options={{
-          title: botanist
+          title: user?.role === "botanist"
             ? "Dashboard"
             : "Account",
         }}
       >
         {(props) => {
 
-          if (!botanist) {
-
+          // No user logged in
+          if (!user) {
             return (
               <LoginScreen
                 {...props}
@@ -371,25 +392,36 @@ function MainTabs({
           }
 
 
+          // Botanist
+          if (user.role === "botanist") {
+            return (
+              <BotanistDashboardScreen
+                {...props}
+                route={{
+                  ...props.route,
+                  params: {
+                    botanist: user,
+                  },
+                }}
+                onLogout={onLogout}
+              />
+            );
+          }
+
+
+          // Visitor
           return (
-            <BotanistDashboardScreen
-              {...props}
-              route={{
-                ...props.route,
-                params: {
-                  botanist,
-                },
-              }}
+            <AccountStack
+              user={user}
               onLogout={onLogout}
             />
           );
         }}
-
       </Tab.Screen>
 
-    </Tab.Navigator>
-  );
-}
+          </Tab.Navigator>
+        );
+      }
 
 
 /* =========================================================
@@ -398,26 +430,19 @@ function MainTabs({
 
 export default function App() {
 
-  const [botanist, setBotanist] = useState(null);
+  const [user, setUser] = useState(null);
 
 
   /* =======================================================
      LOGIN
   ======================================================= */
 
-  function handleLogin(loggedInBotanist) {
-
-    setBotanist(loggedInBotanist);
+  function handleLogin(loggedInUser) {
+    setUser(loggedInUser);
   }
 
-
-  /* =======================================================
-     LOGOUT
-  ======================================================= */
-
   function handleLogout() {
-
-    setBotanist(null);
+    setUser(null);
   }
 
 
@@ -445,9 +470,9 @@ export default function App() {
 
             <LoginScreen
               {...props}
-              onLogin={(loggedInBotanist) => {
+              onLogin={(loggedInUser) => {
 
-                setBotanist(loggedInBotanist);
+                setUser(loggedInUser);
 
                 props.navigation.replace(
                   "MainTabs"
@@ -480,11 +505,11 @@ export default function App() {
           {(props) => (
 
             <MainTabs
-              botanist={botanist}
+              user={user}
               onLogin={handleLogin}
               onLogout={() => {
 
-                setBotanist(null);
+                setUser(null);
 
                 props.navigation.replace(
                   "Login"
