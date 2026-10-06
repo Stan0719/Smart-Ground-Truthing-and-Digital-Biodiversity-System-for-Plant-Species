@@ -268,6 +268,8 @@ const filteredSpecies = computed(() => {
   overflow: hidden;
 }
 
+
+
 .hero-overlay {
   position: absolute;
   inset: 0;

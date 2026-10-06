@@ -24,10 +24,15 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   <main v-if="selectedSpecies" class="detail-page">
     <section class="detail-hero">
       <div class="detail-container">
-        <RouterLink to="/species" class="back-link">← Back to Species</RouterLink>
+        <RouterLink to="/species" class="back-link">
+          <span class="back-arrow" aria-hidden="true">←</span>
+          <span>Back to Species</span>
+        </RouterLink>
 
         <div class="hero-grid">
-          <img v-if="primaryImage" class="plant-image" :src="primaryImage" :alt="selectedSpecies.name" />
+          <div v-if="primaryImage" class="species-image-card">
+            <img class="plant-image" :src="primaryImage" :alt="selectedSpecies.name" />
+          </div>
           <div v-else class="plant-placeholder" role="img" :aria-label="`${selectedSpecies.name} image placeholder`">
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
@@ -246,13 +251,22 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   color: #4e7060;
 }
 
+.species-image-card {
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 30px;
+  background: #e7eadf;
+  box-shadow:
+    20px 20px 38px rgba(88, 104, 92, 0.38),
+    -16px -16px 32px rgba(255, 255, 255, 0.95);
+}
+
 .plant-image {
   width: 100%;
-  height: 500px;
+  height: 470px;
   display: block;
-  border: 1px solid rgba(63, 104, 77, 0.15);
-  border-radius: 28px;
-  box-shadow: 0 22px 50px rgba(37, 75, 58, 0.12);
+  border-radius: inherit;
   object-fit: cover;
 }
 
@@ -273,17 +287,55 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
 }
 
 .back-link {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
   margin-bottom: 36px;
-  color: #477462;
-  font-size: 14px;
-  font-weight: 600;
+  padding: 10px 16px;
+
+  border: 1px solid rgba(71, 116, 98, 0.22);
+  border-radius: 999px;
+
+  background: rgba(255, 255, 255, 0.58);
+  color: #315b49;
+
+  box-shadow: 0 5px 14px rgba(37, 75, 58, 0.08);
+
+  font-size: 13px;
+  font-weight: 700;
   text-decoration: none;
+
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.back-arrow {
+  display: inline-block;
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 0.2s ease;
 }
 
 .back-link:hover {
-  text-decoration: underline;
+  background: #ffffff;
+  border-color: rgba(71, 116, 98, 0.38);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(37, 75, 58, 0.12);
 }
+
+.back-link:hover .back-arrow {
+  transform: translateX(-3px);
+}
+
+.back-link:focus-visible {
+  outline: 3px solid rgba(80, 160, 120, 0.22);
+  outline-offset: 3px;
+}
+
 
 .back-link:focus-visible {
   outline: 3px solid rgba(80, 160, 120, 0.25);
@@ -700,9 +752,12 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     gap: 48px;
   }
 
-  .plant-placeholder,
-  .plant-image {
+  .plant-placeholder {
     min-height: 380px;
+  }
+
+  .species-image-card {
+    border-radius: 24px;
   }
 
   .plant-image {
@@ -728,13 +783,17 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     padding: 55px 0;
   }
 
-  .plant-placeholder,
-  .plant-image {
+  .plant-placeholder {
     min-height: 300px;
   }
 
+  .species-image-card {
+    border-radius: 20px;
+  }
+
   .plant-image {
-    height: 300px;
+    min-height: 0;
+    height: 260px;
   }
 
   .hero-copy h1 {
@@ -765,6 +824,16 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
 
   .explore-more {
     flex-direction: column;
+  }
+
+  .back-link {
+    margin-bottom: 20px;
+    padding: 8px 13px;
+    font-size: 11px;
+  }
+
+  .back-arrow {
+    font-size: 14px;
   }
 }
 </style>

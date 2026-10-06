@@ -54,7 +54,7 @@ const closeControl = () => window.matchMedia('(max-width: 920px)').matches ? sid
           <RouterLink class="notification-button" :to="{ name:'conservation-alerts' }" aria-label="View notifications"><span aria-hidden="true">♢</span><b>3</b></RouterLink>
           <div class="profile-wrap">
             <button class="profile-button" type="button" :aria-expanded="profileOpen" @click="profileOpen = !profileOpen"><span class="avatar">O</span><span class="profile-copy"><strong>Officer01</strong><small>Conservation Officer</small></span><span class="chevron">⌄</span></button>
-            <div v-if="profileOpen" class="profile-menu"><button type="button">Profile settings</button><RouterLink to="/">Sign out</RouterLink></div>
+            <div v-if="profileOpen" class="profile-menu"><RouterLink :to="{ name: 'conservation-profile' }" @click="profileOpen = false">Profile settings</RouterLink><RouterLink to="/">Sign out</RouterLink></div>
           </div>
         </div>
       </header>

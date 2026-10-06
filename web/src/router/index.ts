@@ -188,6 +188,16 @@ const router = createRouter({
             section: 'ANALYSIS & EXPORT',
           },
         },
+        {
+          path: 'profile',
+          name: 'conservation-profile',
+          component: () =>
+            import('../views/conservation/ConservationProfileView.vue'),
+          meta: {
+            title: 'Profile Settings',
+            section: 'ACCOUNT',
+          },
+        },
       ],
     },
   ],
