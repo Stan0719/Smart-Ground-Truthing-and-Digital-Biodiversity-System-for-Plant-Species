@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import NavigationBar from '../components/NavigationBar.vue'
-import { plants } from '../data/plants'
+import { plants as species } from '../data/plants'
 
 const categories = ['All', 'Trees', 'Flowers', 'Ferns', 'Climbers'] as const
 const activeCategory = ref<(typeof categories)[number]>('All')
@@ -39,17 +39,18 @@ watch(
   },
 )
 
-const filteredPlants = computed(() => {
+const filteredSpecies = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
 
-  const filtered = plants.filter((plant) => {
-    const matchesCategory = activeCategory.value === 'All' || plant.category === activeCategory.value
+  const filtered = species.filter((item) => {
+    const matchesCategory = activeCategory.value === 'All' || item.category === activeCategory.value
     const matchesSearch =
       !query ||
-      plant.name.toLowerCase().includes(query) ||
-      plant.scientificName.toLowerCase().includes(query) ||
-      plant.category.toLowerCase().includes(query) ||
-      plant.description.toLowerCase().includes(query)
+      item.name.toLowerCase().includes(query) ||
+      item.scientificName.toLowerCase().includes(query) ||
+      item.category.toLowerCase().includes(query) ||
+      item.family?.toLowerCase().includes(query) ||
+      item.description.toLowerCase().includes(query)
 
     return matchesCategory && matchesSearch
   })
@@ -97,7 +98,7 @@ const filteredPlants = computed(() => {
             <p class="section-label">EXPLORE THE COLLECTION</p>
             <h2 id="plant-library-title">Discover Niah's flora</h2>
           </div>
-          <p>{{ filteredPlants.length }} plant{{ filteredPlants.length === 1 ? '' : 's' }} found</p>
+          <p>{{ filteredSpecies.length }} species found</p>
         </div>
 
         <div class="filter-bar">
@@ -184,28 +185,38 @@ const filteredPlants = computed(() => {
           </div>
         </div>
 
-        <div v-if="filteredPlants.length" class="plant-grid">
-          <article v-for="plant in filteredPlants" :key="plant.name" class="plant-card">
+        <div v-if="filteredSpecies.length" class="plant-grid">
+          <article v-for="item in filteredSpecies" :key="item.slug" class="plant-card">
             <div class="plant-image-wrapper">
-              <div class="plant-image-placeholder" role="img" :aria-label="`${plant.name} image placeholder`">
+              <img
+                v-if="item.image || item.images?.find((image) => image.path)?.path"
+                class="plant-card-image"
+                :src="item.image || item.images?.find((image) => image.path)?.path"
+                :alt="item.name"
+              />
+              <div v-else class="plant-image-placeholder" role="img" :aria-label="`${item.name} image placeholder`">
                 <svg viewBox="0 0 64 64" aria-hidden="true">
                   <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
                   <path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" />
                 </svg>
                 <span>Image coming soon</span>
               </div>
-              <span class="category-badge">{{ plant.category }}</span>
+              <div class="card-badges">
+                <span class="category-badge">{{ item.category }}</span>
+                <span v-if="item.conservationStatus" class="status-badge">{{ item.conservationStatus }}</span>
+              </div>
             </div>
 
             <div class="plant-card-content">
-              <h3>{{ plant.name }}</h3>
-              <p class="scientific-name">{{ plant.scientificName }}</p>
-              <p class="plant-description">{{ plant.description }}</p>
+              <h3>{{ item.name }}</h3>
+              <p class="scientific-name">{{ item.scientificName }}</p>
+              <p v-if="item.family" class="plant-family"><span>Family:</span> {{ item.family }}</p>
+              <p class="plant-description">{{ item.description }}</p>
 
               <RouterLink
-                :to="`/plants/${plant.slug}`"
+                :to="`/species/${item.slug}`"
                 class="learn-more"
-                :aria-label="`Learn more about ${plant.name}`"
+                :aria-label="`Learn more about ${item.name}`"
               >
                 <span class="circle" aria-hidden="true">
                   <span class="button-arrow"></span>
@@ -516,6 +527,13 @@ const filteredPlants = computed(() => {
   color: #577265;
 }
 
+.plant-card-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
 .plant-image-placeholder svg {
   width: 54px;
   fill: none;
@@ -532,10 +550,19 @@ const filteredPlants = computed(() => {
   text-transform: uppercase;
 }
 
-.category-badge {
+.card-badges {
   position: absolute;
   top: 14px;
   right: 14px;
+  left: 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.category-badge,
+.status-badge {
   padding: 7px 11px;
   border-radius: 999px;
   background: rgba(20, 54, 37, 0.84);
@@ -543,6 +570,13 @@ const filteredPlants = computed(() => {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.5px;
+}
+
+.status-badge {
+  background: rgba(255, 246, 220, 0.92);
+  color: #6f532e;
+  font-size: 9px;
+  text-transform: uppercase;
 }
 
 .plant-card-content {
@@ -556,10 +590,21 @@ const filteredPlants = computed(() => {
 }
 
 .scientific-name {
-  margin: 5px 0 14px;
+  margin: 5px 0 9px;
   color: #7c6c5b;
   font-size: 15px;
   font-style: italic;
+}
+
+.plant-family {
+  margin: 0 0 14px;
+  color: #66786f;
+  font-size: 11px;
+}
+
+.plant-family span {
+  color: #3d5f52;
+  font-weight: 700;
 }
 
 .plant-description {

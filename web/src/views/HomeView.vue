@@ -2,7 +2,6 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import NavigationBar from '../components/NavigationBar.vue'
 import ImageStack from '../components/ImageStack.vue'
-import SiteFooter from '../components/SiteFooter.vue'
 import { plants } from '../data/plants'
 
 let revealObserver: IntersectionObserver | null = null
@@ -575,7 +574,7 @@ onBeforeUnmount(() => {
             <RouterLink
               v-for="plant in plants"
               :key="`first-${plant.slug}`"
-              :to="`/plants/${plant.slug}`"
+              :to="`/species/${plant.slug}`"
               class="home-plant-card"
               draggable="false"
             >
@@ -617,7 +616,7 @@ onBeforeUnmount(() => {
             <RouterLink
               v-for="plant in plants"
               :key="`second-${plant.slug}`"
-              :to="`/plants/${plant.slug}`"
+              :to="`/species/${plant.slug}`"
               class="home-plant-card"
               aria-hidden="true"
               tabindex="-1"
@@ -735,7 +734,6 @@ onBeforeUnmount(() => {
 
   </main>
 
-  <SiteFooter />
 </template>
 
 <style scoped>

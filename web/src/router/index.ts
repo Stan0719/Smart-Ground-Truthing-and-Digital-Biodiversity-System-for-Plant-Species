@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import PlantsView from '../views/PlantsView.vue'
-import PlantDetailView from '../views/PlantDetailView.vue'
+import SpeciesDetailView from '../views/SpeciesDetailView.vue'
 import AdminDashboardView from '../views/AdminDashboardView.vue'
 import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
@@ -22,9 +22,9 @@ const router = createRouter({
       component: PlantsView,
     },
     {
-      path: '/plants/:slug',
-      name: 'plant-detail',
-      component: PlantDetailView,
+      path: '/species/:slug',
+      name: 'species-detail',
+      component: SpeciesDetailView,
     },
     {
       path: '/change-password',
