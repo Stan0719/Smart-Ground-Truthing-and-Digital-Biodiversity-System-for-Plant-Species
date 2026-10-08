@@ -4,6 +4,7 @@ import PlantsView from '../views/PlantsView.vue'
 import SpeciesDetailView from '../views/SpeciesDetailView.vue'
 import AdminDashboardView from '../views/AdminDashboardView.vue'
 import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
+import ReviewSubmissionsView from '../views/conservation/ReviewSubmissionsView.vue'
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
 import AdminModuleView from '../views/AdminModuleView.vue'
 import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
@@ -141,8 +142,7 @@ const router = createRouter({
         {
           path: 'reviews',
           name: 'conservation-reviews',
-          component: () =>
-            import('../views/conservation/ReviewSubmissionsView.vue'),
+          component: ReviewSubmissionsView,
           meta: {
             title: 'Review Submissions',
             section: 'VERIFICATION',
