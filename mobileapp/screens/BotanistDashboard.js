@@ -1,4 +1,7 @@
-import React, { useCallback, useState } from "react";
+import React, {
+  useCallback,
+  useState,
+} from "react";
 
 import {
   View,
@@ -8,49 +11,91 @@ import {
   StyleSheet,
 } from "react-native";
 
-import { useFocusEffect } from "@react-navigation/native";
+import {
+  useFocusEffect,
+} from "@react-navigation/native";
 
-import { plants } from "../data/mockData";
+import {
+  botanistPlantRecords,
+} from "../data/mockData";
+
 
 export default function BotanistDashboardScreen({
   route,
   navigation,
   onLogout,
 }) {
-  const botanist = route.params?.botanist;
 
-  const [myPlants, setMyPlants] = useState([]);
+  const botanist =
+    route.params?.botanist;
 
-  // Refresh plant records whenever this screen becomes active
+  const [
+    myPlants,
+    setMyPlants,
+  ] = useState([]);
+
+
+  // =====================================================
+  // REFRESH PLANT RECORDS
+  // =====================================================
+
   useFocusEffect(
     useCallback(() => {
-      const updatedPlants = plants.filter(
-        (plant) =>
-          plant.botanist === botanist?.name
+
+      const updatedPlants =
+        botanistPlantRecords.filter(
+          (plant) =>
+            plant.botanist ===
+            botanist?.name
+        );
+
+      setMyPlants(
+        updatedPlants
       );
 
-      setMyPlants(updatedPlants);
     }, [botanist?.name])
   );
 
-  // Pending approval records
-  const pendingApproval = myPlants.filter(
-    (plant) =>
-      plant.status === "pending" ||
-      plant.status === "Pending Approval" ||
-      plant.status === "pending_approval" ||
-      plant.syncStatus === "Pending Sync" ||
-      plant.syncStatus === "pending"
-  );
 
-  // Approved records
-  const approvedPlants = myPlants.filter(
-    (plant) =>
-      plant.status === "approved" ||
-      plant.status === "Approved"
-  );
+  // =====================================================
+  // PENDING APPROVAL
+  // =====================================================
+
+  const pendingApproval =
+    myPlants.filter(
+      (plant) =>
+        plant.status === "pending" ||
+        plant.status ===
+          "Pending Approval" ||
+        plant.status ===
+          "pending_approval" ||
+        plant.syncStatus ===
+          "Pending Sync" ||
+        plant.syncStatus ===
+          "pending"
+    );
+
+
+  // =====================================================
+  // APPROVED
+  // =====================================================
+
+  const approvedPlants =
+    myPlants.filter(
+      (plant) =>
+        plant.status ===
+          "approved" ||
+        plant.status ===
+          "Approved"
+    );
+
+
+  // =====================================================
+  // LOGOUT
+  // =====================================================
 
   function handleLogout() {
+
     if (onLogout) {
       onLogout();
       return;
@@ -59,109 +104,455 @@ export default function BotanistDashboardScreen({
     navigation.goBack();
   }
 
-  function handlePlantPress(plant) {
-    navigation.navigate("PlantDetail", {
-      id: plant.id,
-      slug: plant.slug,
-      plant,
-      botanist,
-    });
+
+  // =====================================================
+  // PLANT PRESS
+  // =====================================================
+
+  function handlePlantPress(
+    plant
+  ) {
+
+    /*
+      For now, we do not navigate to PlantDetails.
+
+      The new botanist plant record has a different
+      data structure from the existing public plantRecords.
+
+      We can create BotanistPlantDetail later.
+    */
+
+    console.log(
+      "Selected botanist plant:",
+      plant
+    );
   }
+
+
+  // =====================================================
+  // ADD PLANT
+  // =====================================================
 
   function handleAddPlant() {
-    navigation.navigate("AddPlant", {
-      botanist,
-    });
+
+    navigation.navigate(
+      "AddPlant",
+      {
+        botanist,
+      }
+    );
   }
+
+
+  // =====================================================
+  // QR CODE MANAGEMENT
+  // =====================================================
 
   function handleQRCodeManagement() {
-    navigation.navigate("PlantQRCode", {
-      botanist,
-    });
+
+    navigation.navigate(
+      "PlantQRCode",
+      {
+        botanist,
+      }
+    );
   }
 
-  return (
-    <View style={styles.container}>
 
-      {/* Header */}
-      <View style={styles.header}>
+  // =====================================================
+  // RENDER PLANT
+  // =====================================================
 
-        <View style={styles.headerText}>
+  function renderPlant({
+    item,
+  }) {
 
-          <Text style={styles.greeting}>
-            Hello, {botanist?.name || "Botanist"} 👋
+    return (
+      <TouchableOpacity
+        style={
+          styles.plantCard
+        }
+        activeOpacity={0.8}
+        onPress={() =>
+          handlePlantPress(
+            item
+          )
+        }
+      >
+
+        {/* LEFT */}
+
+        <View
+          style={
+            styles.plantInfo
+          }
+        >
+
+          <Text
+            style={
+              styles.scientificName
+            }
+            numberOfLines={1}
+          >
+            {item.scientificName ||
+              item.name ||
+              "Unknown Species"}
           </Text>
 
-          <Text style={styles.subtitle}>
+
+          <Text
+            style={
+              styles.commonName
+            }
+            numberOfLines={1}
+          >
+            {item.name ||
+              "No common name"}
+          </Text>
+
+
+          <Text
+            style={
+              styles.plantId
+            }
+          >
+            ID: {item.id}
+          </Text>
+
+
+          {/* QR CODE */}
+
+          {item.qrCode && (
+            <Text
+              style={
+                styles.qrText
+              }
+            >
+              QR: {item.qrCode}
+            </Text>
+          )}
+
+        </View>
+
+
+        {/* RIGHT */}
+
+        <View
+          style={
+            styles.badges
+          }
+        >
+
+          {/* STATUS */}
+
+          {item.status ===
+            "pending" && (
+            <View
+              style={[
+                styles.badge,
+                styles.pendingBadge,
+              ]}
+            >
+
+              <Text
+                style={
+                  styles.pendingText
+                }
+              >
+                Pending
+              </Text>
+
+            </View>
+          )}
+
+
+          {(
+            item.status ===
+              "approved" ||
+            item.status ===
+              "Approved"
+          ) && (
+            <View
+              style={[
+                styles.badge,
+                styles.approvedBadge,
+              ]}
+            >
+
+              <Text
+                style={
+                  styles.approvedText
+                }
+              >
+                Approved
+              </Text>
+
+            </View>
+          )}
+
+
+          {item.status ===
+            "rejected" && (
+            <View
+              style={[
+                styles.badge,
+                styles.rejectedBadge,
+              ]}
+            >
+
+              <Text
+                style={
+                  styles.rejectedText
+                }
+              >
+                Rejected
+              </Text>
+
+            </View>
+          )}
+
+
+          {/* QR STATUS */}
+
+          {item.qrStatus && (
+            <View
+              style={[
+                styles.badge,
+                styles.qrBadge,
+              ]}
+            >
+
+              <Text
+                style={
+                  styles.qrStatusText
+                }
+              >
+                QR Ready
+              </Text>
+
+            </View>
+          )}
+
+        </View>
+
+      </TouchableOpacity>
+    );
+  }
+
+
+  // =====================================================
+  // EMPTY LIST
+  // =====================================================
+
+  function renderEmpty() {
+
+    return (
+      <View
+        style={
+          styles.emptyContainer
+        }
+      >
+
+        <Text
+          style={
+            styles.emptyIcon
+          }
+        >
+          🌿
+        </Text>
+
+
+        <Text
+          style={
+            styles.emptyTitle
+          }
+        >
+          No Plant Records
+        </Text>
+
+
+        <Text
+          style={
+            styles.emptyText
+          }
+        >
+          Generate a QR code first,
+          then add a plant record
+          during your field survey.
+        </Text>
+
+
+        <TouchableOpacity
+          style={
+            styles.emptyButton
+          }
+          onPress={
+            handleAddPlant
+          }
+        >
+
+          <Text
+            style={
+              styles.emptyButtonText
+            }
+          >
+            + Add Plant Record
+          </Text>
+
+        </TouchableOpacity>
+
+      </View>
+    );
+  }
+
+
+  // =====================================================
+  // UI
+  // =====================================================
+
+  return (
+    <View
+      style={styles.container}
+    >
+
+      {/* HEADER */}
+
+      <View
+        style={styles.header}
+      >
+
+        <View
+          style={styles.headerInfo}
+        >
+
+          <Text
+            style={styles.greeting}
+          >
+            Hello,{" "}
+            {botanist?.name ||
+              "Botanist"} 👋
+          </Text>
+
+
+          <Text
+            style={styles.subtitle}
+          >
             Manage your plant records
           </Text>
 
         </View>
 
+
         <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={handleLogout}
-          activeOpacity={0.75}
+          style={
+            styles.logoutButton
+          }
+          activeOpacity={0.8}
+          onPress={
+            handleLogout
+          }
         >
-          <Text style={styles.logoutText}>
+
+          <Text
+            style={
+              styles.logoutText
+            }
+          >
             Logout
           </Text>
+
         </TouchableOpacity>
 
       </View>
 
 
-      {/* Statistics */}
-      <View style={styles.statsRow}>
+      {/* STATISTICS */}
 
-        {/* My Plants */}
-        <View style={styles.statCard}>
+      <View
+        style={styles.statsRow}
+      >
 
-          <View style={styles.statIcon}>
-            <Text>🌿</Text>
-          </View>
+        {/* MY PLANTS */}
 
-          <Text style={styles.statNumber}>
+        <View
+          style={styles.statCard}
+        >
+
+          <Text
+            style={styles.statIcon}
+          >
+            🌿
+          </Text>
+
+
+          <Text
+            style={styles.statNumber}
+          >
             {myPlants.length}
           </Text>
 
-          <Text style={styles.statLabel}>
+
+          <Text
+            style={styles.statLabel}
+          >
             My Plants
           </Text>
 
         </View>
 
 
-        {/* Pending Approval */}
-        <View style={styles.statCard}>
+        {/* PENDING */}
 
-          <View style={styles.statIcon}>
-            <Text>⏳</Text>
-          </View>
+        <View
+          style={styles.statCard}
+        >
 
-          <Text style={styles.statNumber}>
+          <Text
+            style={styles.statIcon}
+          >
+            ⏳
+          </Text>
+
+
+          <Text
+            style={styles.statNumber}
+          >
             {pendingApproval.length}
           </Text>
 
-          <Text style={styles.statLabel}>
+
+          <Text
+            style={styles.statLabel}
+          >
             Pending Approval
           </Text>
 
         </View>
 
 
-        {/* Approved */}
-        <View style={styles.statCard}>
+        {/* APPROVED */}
 
-          <View style={styles.statIcon}>
-            <Text>✓</Text>
-          </View>
+        <View
+          style={styles.statCard}
+        >
 
-          <Text style={styles.statNumber}>
+          <Text
+            style={styles.statIcon}
+          >
+            ✓
+          </Text>
+
+
+          <Text
+            style={styles.statNumber}
+          >
             {approvedPlants.length}
           </Text>
 
-          <Text style={styles.statLabel}>
+
+          <Text
+            style={styles.statLabel}
+          >
             Approved
           </Text>
 
@@ -170,202 +561,122 @@ export default function BotanistDashboardScreen({
       </View>
 
 
-      {/* QR Code Management */}
+      {/* QR MANAGEMENT */}
+
       <TouchableOpacity
-        style={styles.qrButton}
+        style={
+          styles.qrManagementButton
+        }
         activeOpacity={0.8}
-        onPress={handleQRCodeManagement}
+        onPress={
+          handleQRCodeManagement
+        }
       >
 
-        <View style={styles.qrButtonIcon}>
-          <Text style={styles.qrIconText}>
+        <View
+          style={
+            styles.qrManagementIcon
+          }
+        >
+
+          <Text
+            style={
+              styles.qrManagementIconText
+            }
+          >
             ▦
           </Text>
+
         </View>
 
-        <View style={styles.qrButtonInfo}>
 
-          <Text style={styles.qrButtonTitle}>
+        <View
+          style={
+            styles.qrManagementInfo
+          }
+        >
+
+          <Text
+            style={
+              styles.qrManagementTitle
+            }
+          >
             QR Code Management
           </Text>
 
-          <Text style={styles.qrButtonSubtitle}>
-            Generate and print QR codes before your field survey
+
+          <Text
+            style={
+              styles.qrManagementSubtitle
+            }
+          >
+            Generate and manage QR codes
           </Text>
 
         </View>
 
-        <Text style={styles.arrow}>
+
+        <Text
+          style={styles.arrow}
+        >
           ›
         </Text>
 
       </TouchableOpacity>
 
 
-      {/* Add Plant Button */}
+      {/* ADD PLANT */}
+
       <TouchableOpacity
         style={styles.addButton}
         activeOpacity={0.8}
-        onPress={handleAddPlant}
+        onPress={
+          handleAddPlant
+        }
       >
-        <Text style={styles.addButtonText}>
+
+        <Text
+          style={
+            styles.addButtonText
+          }
+        >
           + Add New Plant Record
         </Text>
+
       </TouchableOpacity>
 
 
-      {/* Section Title */}
-      <Text style={styles.sectionTitle}>
+      {/* TITLE */}
+
+      <Text
+        style={
+          styles.sectionTitle
+        }
+      >
         My Plant Records
       </Text>
 
 
-      {/* Plant List */}
+      {/* LIST */}
+
       <FlatList
         data={myPlants}
-        keyExtractor={(item, index) =>
-          String(
-            item.id ||
-            item.slug ||
-            index
-          )
+        keyExtractor={(item) =>
+          item.id
         }
-        showsVerticalScrollIndicator={false}
-
-        renderItem={({ item }) => {
-
-          const isPending =
-            item.status === "pending" ||
-            item.status === "Pending Approval" ||
-            item.status === "pending_approval" ||
-            item.syncStatus === "Pending Sync" ||
-            item.syncStatus === "pending";
-
-          const isApproved =
-            item.status === "approved" ||
-            item.status === "Approved";
-
-          const isRejected =
-            item.status === "rejected" ||
-            item.status === "Rejected";
-
-          return (
-            <TouchableOpacity
-              style={styles.plantCard}
-              activeOpacity={0.75}
-              onPress={() =>
-                handlePlantPress(item)
-              }
-            >
-
-              <View style={styles.plantInfo}>
-
-                <Text style={styles.plantName}>
-                  {item.scientificName ||
-                    item.name ||
-                    "Unnamed Plant"}
-                </Text>
-
-                <Text style={styles.commonName}>
-                  {item.name ||
-                    item.commonName ||
-                    "No common name"}
-                </Text>
-
-                <Text style={styles.recordId}>
-                  ID: {item.id || "No ID"}
-                </Text>
-
-                {/* QR Code */}
-                {item.qrCode && (
-                  <Text style={styles.qrCodeText}>
-                    QR: {item.qrCode}
-                  </Text>
-                )}
-
-              </View>
-
-
-              <View style={styles.badgeContainer}>
-
-                {/* Pending */}
-                {isPending && (
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      styles.pendingBadge,
-                    ]}
-                  >
-                    <Text style={styles.pendingText}>
-                      ⏳ Pending Approval
-                    </Text>
-                  </View>
-                )}
-
-
-                {/* Approved */}
-                {isApproved && (
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      styles.approvedBadge,
-                    ]}
-                  >
-                    <Text style={styles.approvedText}>
-                      ✓ Approved
-                    </Text>
-                  </View>
-                )}
-
-
-                {/* Rejected */}
-                {isRejected && (
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      styles.rejectedBadge,
-                    ]}
-                  >
-                    <Text style={styles.rejectedText}>
-                      ✕ Rejected
-                    </Text>
-                  </View>
-                )}
-
-
-                {/* QR Status */}
-                {item.qrStatus && (
-                  <View style={styles.qrStatusBadge}>
-                    <Text style={styles.qrStatusText}>
-                      QR: {item.qrStatus}
-                    </Text>
-                  </View>
-                )}
-
-              </View>
-
-            </TouchableOpacity>
-          );
-        }}
-
-
+        renderItem={
+          renderPlant
+        }
         ListEmptyComponent={
-          <View style={styles.empty}>
-
-            <Text style={styles.emptyIcon}>
-              🌱
-            </Text>
-
-            <Text style={styles.emptyTitle}>
-              No plant records yet
-            </Text>
-
-            <Text style={styles.emptyText}>
-              Generate QR codes first, then add
-              plant records during your field survey.
-            </Text>
-
-          </View>
+          renderEmpty
+        }
+        showsVerticalScrollIndicator={
+          false
+        }
+        contentContainerStyle={
+          myPlants.length === 0
+            ? styles.emptyList
+            : styles.list
         }
       />
 
@@ -374,314 +685,371 @@ export default function BotanistDashboardScreen({
 }
 
 
-const styles = StyleSheet.create({
+// =====================================================
+// STYLES
+// =====================================================
 
-  container: {
-    flex: 1,
-    backgroundColor: "#F3F8F4",
-    paddingHorizontal: 20,
-    padding: 50,
-  },
+const styles =
+  StyleSheet.create({
 
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 25,
-    marginBottom: 20,
-  },
-
-  headerText: {
-    flex: 1,
-  },
-
-  greeting: {
-    fontSize: 25,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  subtitle: {
-    fontSize: 14,
-    color: "#6B7D73",
-    marginTop: 4,
-  },
-
-  logoutButton: {
-    backgroundColor: "#E8F3EC",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-
-  logoutText: {
-    color: "#468585",
-    fontSize: 13,
-    fontWeight: "600",
-  },
+    container: {
+      flex: 1,
+      backgroundColor: "#F7FBF4",
+      paddingHorizontal: 20,
+      paddingTop: 50,
+    },
 
 
-  /* Statistics */
+    // -------------------------------------------------
+    // HEADER
+    // -------------------------------------------------
 
-  statsRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 16,
-  },
-
-  statCard: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    paddingVertical: 15,
-    paddingHorizontal: 6,
-    alignItems: "center",
-
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-
-  statIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#DEF9C4",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 7,
-  },
-
-  statNumber: {
-    fontSize: 21,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  statLabel: {
-    fontSize: 11,
-    color: "#6B7D73",
-    marginTop: 3,
-    textAlign: "center",
-  },
+    header: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 20,
+    },
 
 
-  /* QR Management */
-
-  qrButton: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 15,
-    marginBottom: 12,
-
-    flexDirection: "row",
-    alignItems: "center",
-
-    borderWidth: 1,
-    borderColor: "#D9EBDD",
-
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-
-  qrButtonIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 13,
-    backgroundColor: "#DEF9C4",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-
-  qrIconText: {
-    fontSize: 27,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  qrButtonInfo: {
-    flex: 1,
-  },
-
-  qrButtonTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  qrButtonSubtitle: {
-    fontSize: 12,
-    color: "#718078",
-    marginTop: 4,
-    lineHeight: 17,
-  },
-
-  arrow: {
-    fontSize: 28,
-    color: "#50B498",
-    marginLeft: 5,
-  },
+    headerInfo: {
+      flex: 1,
+    },
 
 
-  /* Add Plant */
-
-  addButton: {
-    backgroundColor: "#50B498",
-    paddingVertical: 15,
-    borderRadius: 14,
-    alignItems: "center",
-    marginBottom: 20,
-  },
-
-  addButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
-  },
+    greeting: {
+      fontSize: 24,
+      fontWeight: "700",
+      color: "#234B3A",
+    },
 
 
-  /* Plant Records */
-
-  sectionTitle: {
-    fontSize: 19,
-    fontWeight: "700",
-    color: "#468585",
-    marginBottom: 12,
-  },
-
-  plantCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-
-  plantInfo: {
-    flex: 1,
-    paddingRight: 10,
-  },
-
-  plantName: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  commonName: {
-    fontSize: 14,
-    color: "#5F6F65",
-    marginTop: 4,
-  },
-
-  recordId: {
-    fontSize: 11,
-    color: "#9AA79F",
-    marginTop: 6,
-  },
-
-  qrCodeText: {
-    fontSize: 11,
-    color: "#50B498",
-    fontWeight: "600",
-    marginTop: 4,
-  },
+    subtitle: {
+      marginTop: 4,
+      fontSize: 14,
+      color: "#6D7F75",
+    },
 
 
-  /* Status */
-
-  badgeContainer: {
-    alignItems: "flex-end",
-    gap: 5,
-  },
-
-  statusBadge: {
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 10,
-  },
-
-  pendingBadge: {
-    backgroundColor: "#FFF3D6",
-  },
-
-  approvedBadge: {
-    backgroundColor: "#DEF9C4",
-  },
-
-  rejectedBadge: {
-    backgroundColor: "#FFE3E3",
-  },
-
-  pendingText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#9A7215",
-  },
-
-  approvedText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#35652F",
-  },
-
-  rejectedText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#B44A4A",
-  },
-
-  qrStatusBadge: {
-    backgroundColor: "#E8F3EC",
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 9,
-  },
-
-  qrStatusText: {
-    fontSize: 9,
-    fontWeight: "600",
-    color: "#468585",
-  },
+    logoutButton: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      backgroundColor: "#E7F2E2",
+    },
 
 
-  /* Empty */
+    logoutText: {
+      fontSize: 13,
+      fontWeight: "600",
+      color: "#468585",
+    },
 
-  empty: {
-    alignItems: "center",
-    paddingTop: 50,
-    paddingHorizontal: 30,
-  },
 
-  emptyIcon: {
-    fontSize: 45,
-    marginBottom: 12,
-  },
+    // -------------------------------------------------
+    // STATISTICS
+    // -------------------------------------------------
 
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#468585",
-    marginBottom: 8,
-  },
+    statsRow: {
+      flexDirection: "row",
+      gap: 10,
+      marginBottom: 18,
+    },
 
-  emptyText: {
-    textAlign: "center",
-    fontSize: 14,
-    lineHeight: 21,
-    color: "#718078",
-  },
 
-}); 
+    statCard: {
+      flex: 1,
+      minHeight: 105,
+      backgroundColor: "#FFFFFF",
+      borderRadius: 16,
+      padding: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: "#E2EDE0",
+    },
+
+
+    statIcon: {
+      fontSize: 22,
+      marginBottom: 4,
+    },
+
+
+    statNumber: {
+      fontSize: 22,
+      fontWeight: "700",
+      color: "#468585",
+    },
+
+
+    statLabel: {
+      marginTop: 3,
+      textAlign: "center",
+      fontSize: 11,
+      color: "#6D7F75",
+    },
+
+
+    // -------------------------------------------------
+    // QR MANAGEMENT
+    // -------------------------------------------------
+
+    qrManagementButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: "#E9F7E4",
+      borderRadius: 16,
+      padding: 15,
+      marginBottom: 12,
+    },
+
+
+    qrManagementIcon: {
+      width: 46,
+      height: 46,
+      borderRadius: 12,
+      backgroundColor: "#9CDBA6",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+
+
+    qrManagementIconText: {
+      fontSize: 26,
+      color: "#234B3A",
+      fontWeight: "700",
+    },
+
+
+    qrManagementInfo: {
+      flex: 1,
+      marginLeft: 12,
+    },
+
+
+    qrManagementTitle: {
+      fontSize: 15,
+      fontWeight: "700",
+      color: "#234B3A",
+    },
+
+
+    qrManagementSubtitle: {
+      marginTop: 3,
+      fontSize: 12,
+      color: "#6D7F75",
+    },
+
+
+    arrow: {
+      fontSize: 28,
+      color: "#468585",
+      marginLeft: 8,
+    },
+
+
+    // -------------------------------------------------
+    // ADD BUTTON
+    // -------------------------------------------------
+
+    addButton: {
+      backgroundColor: "#468585",
+      borderRadius: 14,
+      paddingVertical: 15,
+      alignItems: "center",
+      marginBottom: 20,
+    },
+
+
+    addButtonText: {
+      color: "#FFFFFF",
+      fontSize: 15,
+      fontWeight: "700",
+    },
+
+
+    // -------------------------------------------------
+    // SECTION
+    // -------------------------------------------------
+
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: "700",
+      color: "#234B3A",
+      marginBottom: 10,
+    },
+
+
+    list: {
+      paddingBottom: 30,
+    },
+
+
+    // -------------------------------------------------
+    // PLANT CARD
+    // -------------------------------------------------
+
+    plantCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: "#FFFFFF",
+      borderRadius: 16,
+      padding: 15,
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: "#E2EDE0",
+    },
+
+
+    plantInfo: {
+      flex: 1,
+      paddingRight: 10,
+    },
+
+
+    scientificName: {
+      fontSize: 15,
+      fontWeight: "700",
+      fontStyle: "italic",
+      color: "#234B3A",
+    },
+
+
+    commonName: {
+      marginTop: 3,
+      fontSize: 13,
+      color: "#6D7F75",
+    },
+
+
+    plantId: {
+      marginTop: 7,
+      fontSize: 11,
+      color: "#8A9991",
+    },
+
+
+    qrText: {
+      marginTop: 3,
+      fontSize: 11,
+      color: "#8A9991",
+    },
+
+
+    badges: {
+      alignItems: "flex-end",
+      gap: 5,
+    },
+
+
+    badge: {
+      paddingVertical: 5,
+      paddingHorizontal: 9,
+      borderRadius: 8,
+    },
+
+
+    pendingBadge: {
+      backgroundColor: "#FFF1D6",
+    },
+
+
+    pendingText: {
+      fontSize: 10,
+      fontWeight: "700",
+      color: "#B97900",
+    },
+
+
+    approvedBadge: {
+      backgroundColor: "#E1F4E3",
+    },
+
+
+    approvedText: {
+      fontSize: 10,
+      fontWeight: "700",
+      color: "#398344",
+    },
+
+
+    rejectedBadge: {
+      backgroundColor: "#FCE2E2",
+    },
+
+
+    rejectedText: {
+      fontSize: 10,
+      fontWeight: "700",
+      color: "#B84444",
+    },
+
+
+    qrBadge: {
+      backgroundColor: "#E2F1F0",
+    },
+
+
+    qrStatusText: {
+      fontSize: 10,
+      fontWeight: "700",
+      color: "#468585",
+    },
+
+
+    // -------------------------------------------------
+    // EMPTY
+    // -------------------------------------------------
+
+    emptyList: {
+      flexGrow: 1,
+    },
+
+
+    emptyContainer: {
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 25,
+      paddingVertical: 50,
+    },
+
+
+    emptyIcon: {
+      fontSize: 45,
+      marginBottom: 12,
+    },
+
+
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: "700",
+      color: "#234B3A",
+    },
+
+
+    emptyText: {
+      marginTop: 8,
+      textAlign: "center",
+      lineHeight: 20,
+      fontSize: 13,
+      color: "#718078",
+    },
+
+
+    emptyButton: {
+      marginTop: 18,
+      backgroundColor: "#468585",
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 12,
+    },
+
+
+    emptyButtonText: {
+      color: "#FFFFFF",
+      fontSize: 13,
+      fontWeight: "700",
+    },
+
+  });
