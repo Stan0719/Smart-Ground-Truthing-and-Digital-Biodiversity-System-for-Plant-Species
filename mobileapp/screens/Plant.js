@@ -236,6 +236,8 @@ export default function Plant({ navigation }) {
         data={filteredSpecies}
         keyExtractor={(item) => item.slug}
         renderItem={renderSpeciesCard}
+        numColumns={2}
+        columnWrapperStyle={styles.columnWrapper}
 
         contentContainerStyle={styles.listContent}
 
@@ -659,16 +661,17 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    marginHorizontal: 20,
-    marginBottom: 15,
-    overflow: "hidden",
-    borderRadius: 16,
-    backgroundColor: "#FFFFFF",
-    elevation: 3,
-    shadowColor: "#21392C",
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-  },
+  flex: 1,
+  marginBottom: 15,
+  marginHorizontal: 5,
+  overflow: "hidden",
+  borderRadius: 16,
+  backgroundColor: "#FFFFFF",
+  elevation: 3,
+  shadowColor: "#21392C",
+  shadowOpacity: 0.08,
+  shadowRadius: 10,
+},
 
   imageWrapper: {
     height: 190,

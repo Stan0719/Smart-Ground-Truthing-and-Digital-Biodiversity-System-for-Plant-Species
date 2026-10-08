@@ -7,15 +7,27 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
+  FlatList,
 } from "react-native";
 
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, {
+  Marker,
+  PROVIDER_GOOGLE,
+} from "react-native-maps";
 
-import { plants } from "../data/mockData";
+import {
+  plants,
+  plantRecords,
+} from "../data/mockData";
 
 export default function MapScreen({ navigation }) {
   const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [selectedCategory, setSelectedCategory] =
+    useState("All");
+
+  // =====================================================
+  // CATEGORIES
+  // =====================================================
 
   const categories = [
     "All",
@@ -26,95 +38,333 @@ export default function MapScreen({ navigation }) {
     ),
   ];
 
-  function hasLocation(plant) {
-    return (
-      plant.latitude !== null &&
-      plant.latitude !== undefined &&
-      plant.longitude !== null &&
-      plant.longitude !== undefined &&
-      !Number.isNaN(Number(plant.latitude)) &&
-      !Number.isNaN(Number(plant.longitude))
+  // =====================================================
+  // COMBINE SPECIES + PLANT RECORDS
+  // =====================================================
+
+  const documentedPlants = useMemo(() => {
+    return plantRecords.map((record) => {
+      const species = plants.find(
+        (plant) =>
+          plant.slug === record.speciesSlug
+      );
+
+      return {
+        ...record,
+
+        // Species information
+        speciesName:
+          species?.name ||
+          "Unknown Plant",
+
+        scientificName:
+          species?.scientificName ||
+          "Unknown species",
+
+        category:
+          species?.category ||
+          "Unknown",
+
+        family:
+          species?.family ||
+          "",
+
+        description:
+          species?.description ||
+          "",
+
+        speciesImage:
+          species?.image ||
+          null,
+
+        // Common name
+        name:
+          species?.name ||
+          "Unknown Plant",
+
+        // Record ID
+        id:
+          record.plantId,
+      };
+    });
+  }, []);
+
+  // =====================================================
+  // CHECK GPS
+  // =====================================================
+
+  // function hasLocation(plant) {
+  //   return (
+  //     plant.latitude !== null &&
+  //     plant.latitude !== undefined &&
+  //     plant.longitude !== null &&
+  //     plant.longitude !== undefined &&
+  //     !Number.isNaN(
+  //       Number(plant.latitude)
+  //     ) &&
+  //     !Number.isNaN(
+  //       Number(plant.longitude)
+  //     )
+  //   );
+  // }
+
+  // =====================================================
+  // FILTER RECORDS
+  // =====================================================
+
+  const filteredPlants = useMemo(() => {
+    const searchText =
+      search.toLowerCase().trim();
+
+    return documentedPlants.filter(
+      (plant) => {
+        const matchesSearch =
+          !searchText ||
+          plant.name
+            ?.toLowerCase()
+            .includes(searchText) ||
+          plant.scientificName
+            ?.toLowerCase()
+            .includes(searchText) ||
+          plant.family
+            ?.toLowerCase()
+            .includes(searchText) ||
+          plant.category
+            ?.toLowerCase()
+            .includes(searchText) ||
+          plant.plantId
+            ?.toLowerCase()
+            .includes(searchText);
+
+        const matchesCategory =
+          selectedCategory === "All" ||
+          plant.category ===
+            selectedCategory;
+
+        return (
+          matchesSearch &&
+          matchesCategory
+        );
+      }
+    );
+  }, [
+    documentedPlants,
+    search,
+    selectedCategory,
+  ]);
+
+  // =====================================================
+  // GPS RECORDS
+  // =====================================================
+
+  // const plantsWithLocation =
+  //   filteredPlants.filter(
+  //     hasLocation
+  //   );
+
+  // const totalPlantsWithLocation =
+  //   documentedPlants.filter(
+  //     hasLocation
+  //   ).length;
+
+  // =====================================================
+  // FORMAT COORDINATE
+  // =====================================================
+
+  // function formatCoordinate(value) {
+  //   if (
+  //     value === undefined ||
+  //     value === null ||
+  //     value === ""
+  //   ) {
+  //     return "Not available";
+  //   }
+
+  //   return Number(value).toFixed(6);
+  // }
+
+  // =====================================================
+  // RECORD PRESS
+  // =====================================================
+
+  function handlePlantPress(record) {
+    navigation?.navigate(
+      "PlantDetails",
+      {
+        plantId: record.plantId || record.id,
+      }
     );
   }
 
-  const filteredPlants = useMemo(() => {
-    return plants.filter((plant) => {
-      const searchText = search.toLowerCase().trim();
-
-      const matchesSearch =
-        plant.name?.toLowerCase().includes(searchText) ||
-        plant.scientificName
-          ?.toLowerCase()
-          .includes(searchText) ||
-        plant.commonName
-          ?.toLowerCase()
-          .includes(searchText) ||
-        plant.family
-          ?.toLowerCase()
-          .includes(searchText) ||
-        plant.botanist
-          ?.toLowerCase()
-          .includes(searchText);
-
-      const matchesCategory =
-        selectedCategory === "All" ||
-        plant.category === selectedCategory;
-
-      return matchesSearch && matchesCategory;
-    });
-  }, [search, selectedCategory]);
-
-  const plantsWithLocation =
-    filteredPlants.filter(hasLocation);
-
-  const totalPlantsWithLocation =
-    plants.filter(hasLocation).length;
-
-  function formatCoordinate(value) {
-    if (
-      value === undefined ||
-      value === null ||
-      value === ""
-    ) {
-      return "Not available";
-    }
-
-    return Number(value).toFixed(6);
-  }
-
-  function handlePlantPress(plant) {
-    navigation?.navigate("PlantDetails", {
-      plant,
-      id: plant.id,
-      slug: plant.slug,
-    });
-  }
+  // =====================================================
+  // CLEAR FILTERS
+  // =====================================================
 
   function clearFilters() {
     setSearch("");
     setSelectedCategory("All");
   }
 
+  // =====================================================
+  // RENDER CARD
+  // =====================================================
+
+  function renderPlantCard({
+    item,
+  }) {
+    const photos =
+      item.images ||
+      item.photos ||
+      [];
+
+    return (
+      <TouchableOpacity
+        style={styles.locationCard}
+        onPress={() =>
+          handlePlantPress(item)
+        }
+        activeOpacity={0.85}
+      >
+        {/* ICON */}
+
+        <View
+          style={
+            styles.plantIconContainer
+          }
+        >
+          <Text style={styles.plantIcon}>
+            🌿
+          </Text>
+        </View>
+
+        {/* SCIENTIFIC NAME */}
+
+        <Text
+          style={styles.plantName}
+          numberOfLines={2}
+        >
+          {item.scientificName}
+        </Text>
+
+        {/* COMMON NAME */}
+
+        <Text
+          style={styles.commonName}
+          numberOfLines={1}
+        >
+          {item.name}
+        </Text>
+
+        {/* CATEGORY */}
+
+        {item.category && (
+          <View
+            style={
+              styles.categoryBadge
+            }
+          >
+            <Text
+              style={
+                styles.categoryText
+              }
+            >
+              {item.category}
+            </Text>
+          </View>
+        )}
+
+        {/* RECORD ID */}
+
+        <Text
+          style={styles.recordId}
+          numberOfLines={1}
+        >
+          {item.plantId}
+        </Text>
+
+        {/* STATUS */}
+
+        <View
+          style={styles.statusRow}
+        >
+          <View
+            style={[
+              styles.statusBadge,
+              item.status ===
+                "approved"
+                ? styles.statusApproved
+                : styles.statusPending,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                item.status ===
+                  "approved"
+                  ? styles.statusApprovedText
+                  : styles.statusPendingText,
+              ]}
+            >
+              {item.status
+                ? item.status
+                    .charAt(0)
+                    .toUpperCase() +
+                  item.status.slice(1)
+                : "Unknown"}
+            </Text>
+          </View>
+
+          {photos.length > 0 && (
+            <Text
+              style={styles.photoCount}
+            >
+              📷 {photos.length}
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
+  // =====================================================
+  // MAIN SCREEN
+  // =====================================================
+
   return (
     <View style={styles.container}>
       <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={
+          false
+        }
+        contentContainerStyle={
+          styles.content
+        }
       >
-        {/* Header */}
+        {/* =====================================================
+            HEADER
+        ===================================================== */}
+
         <View style={styles.header}>
           <Text style={styles.title}>
             Plant Map
           </Text>
 
           <Text style={styles.subtitle}>
-            Explore documented plant locations
-            in Niah National Park
+            Explore documented plant
+            locations in Niah National
+            Park
           </Text>
         </View>
 
-        {/* Search */}
-        <View style={styles.searchContainer}>
+        {/* =====================================================
+            SEARCH
+        ===================================================== */}
+
+        <View
+          style={
+            styles.searchContainer
+          }
+        >
           <Text style={styles.searchIcon}>
             🔍
           </Text>
@@ -129,247 +379,202 @@ export default function MapScreen({ navigation }) {
 
           {search.length > 0 && (
             <TouchableOpacity
-              onPress={() => setSearch("")}
+              onPress={() =>
+                setSearch("")
+              }
               activeOpacity={0.7}
             >
-              <Text style={styles.clearButton}>
+              <Text
+                style={
+                  styles.clearButton
+                }
+              >
                 ×
               </Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Category Filter */}
+        {/* =====================================================
+            CATEGORY FILTER
+        ===================================================== */}
+
         <ScrollView
           horizontal
-          showsHorizontalScrollIndicator={false}
+          showsHorizontalScrollIndicator={
+            false
+          }
           contentContainerStyle={
             styles.categoryList
           }
         >
-          {categories.map((category) => {
-            const selected =
-              selectedCategory === category;
+          {categories.map(
+            (category) => {
+              const selected =
+                selectedCategory ===
+                category;
 
-            return (
-              <TouchableOpacity
-                key={category}
-                style={[
-                  styles.filterButton,
-                  selected &&
-                    styles.filterButtonSelected,
-                ]}
-                onPress={() =>
-                  setSelectedCategory(category)
-                }
-                activeOpacity={0.8}
-              >
-                <Text
+              return (
+                <TouchableOpacity
+                  key={category}
                   style={[
-                    styles.filterText,
+                    styles.filterButton,
                     selected &&
-                      styles.filterTextSelected,
+                      styles.filterButtonSelected,
                   ]}
+                  onPress={() =>
+                    setSelectedCategory(
+                      category
+                    )
+                  }
+                  activeOpacity={0.8}
                 >
-                  {category}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+                  <Text
+                    style={[
+                      styles.filterText,
+                      selected &&
+                        styles.filterTextSelected,
+                    ]}
+                  >
+                    {category}
+                  </Text>
+                </TouchableOpacity>
+              );
+            }
+          )}
         </ScrollView>
 
-        {/* REAL NIAH NATIONAL PARK MAP */}
-        <View style={styles.mapContainer}>
-          <MapView
-            style={styles.map}
-            initialRegion={{
-              latitude: 3.815,
-              longitude: 113.813,
-              latitudeDelta: 0.05,
-              longitudeDelta: 0.05,
-            }}
-            mapType="standard"
-            showsCompass={true}
-            showsScale={true}
-            showsPointsOfInterest={true}
-            zoomEnabled={true}
-            scrollEnabled={true}
-            rotateEnabled={true}
-            pitchEnabled={true}
-          >
-            {plantsWithLocation.map((plant) => (
-              <Marker
-                key={plant.id}
-                coordinate={{
-                  latitude: Number(plant.latitude),
-                  longitude: Number(plant.longitude),
-                }}
-                title={plant.scientificName || plant.name || "Plant"}
-                description={plant.name || "Documented plant"}
-                onCalloutPress={() => handlePlantPress(plant)}
-              >
-                <View style={styles.markerCircle}>
-                  <Text style={styles.markerIcon}>🌿</Text>
-                </View>
-              </Marker>
-            ))}
-          </MapView>
+        
+        {/* =====================================================
+            SUMMARY
+        ===================================================== */}
 
-          {/* Map Information Overlay */}
-          <View style={styles.mapOverlay}>
-            <Text style={styles.mapOverlayIcon}>
-              📍
-            </Text>
-
-            <View
-              style={styles.mapOverlayInfo}
-            >
-              <Text
-                style={styles.mapOverlayTitle}
-              >
-                Niah National Park
-              </Text>
-
-              <Text
-                style={styles.mapOverlayText}
-              >
-                {plantsWithLocation.length}{" "}
-                documented{" "}
-                {plantsWithLocation.length === 1
-                  ? "plant"
-                  : "plants"}{" "}
-                with GPS
-              </Text>
-            </View>
-          </View>
-
-          {/* No GPS */}
-          {plantsWithLocation.length === 0 && (
-            <View
+        <View
+          style={
+            styles.summaryContainer
+          }
+        >
+          <View style={styles.summaryItem}>
+            <Text
               style={
-                styles.noGpsMapContainer
+                styles.summaryNumber
               }
             >
-              <Text
-                style={styles.noGpsMapIcon}
-              >
-                📍
-              </Text>
-
-              <Text
-                style={styles.noGpsMapTitle}
-              >
-                No GPS locations
-              </Text>
-
-              <Text
-                style={styles.noGpsMapText}
-              >
-                Plant locations will appear
-                here after GPS coordinates
-                are recorded.
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Map Hint */}
-        <View style={styles.mapHint}>
-          <Text style={styles.mapHintIcon}>
-            👆
-          </Text>
-
-          <Text style={styles.mapHintText}>
-            Pinch to zoom and drag the map to
-            explore Niah National Park
-          </Text>
-        </View>
-
-        {/* Summary */}
-        <View style={styles.summaryContainer}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>
-              {plants.length}
+              {documentedPlants.length}
             </Text>
 
-            <Text style={styles.summaryLabel}>
-              Total Plants
+            <Text
+              style={styles.summaryLabel}
+            >
+              Total Records
             </Text>
           </View>
 
           <View
-            style={styles.summaryDivider}
+            style={
+              styles.summaryDivider
+            }
           />
-
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>
-              {totalPlantsWithLocation}
-            </Text>
-
-            <Text style={styles.summaryLabel}>
-              GPS Recorded
-            </Text>
-          </View>
-
+          
           <View
-            style={styles.summaryDivider}
+            style={
+              styles.summaryDivider
+            }
           />
 
           <View style={styles.summaryItem}>
-            <Text style={styles.summaryNumber}>
+            <Text
+              style={
+                styles.summaryNumber
+              }
+            >
               {Math.max(
                 categories.length - 1,
                 0
               )}
             </Text>
 
-            <Text style={styles.summaryLabel}>
+            <Text
+              style={styles.summaryLabel}
+            >
               Categories
             </Text>
           </View>
         </View>
 
-        {/* Plant List */}
-        <View style={styles.sectionHeader}>
+        {/* =====================================================
+            DOCUMENTED PLANTS
+        ===================================================== */}
+
+        <View
+          style={styles.sectionHeader}
+        >
           <View
-            style={styles.sectionHeaderText}
+            style={
+              styles.sectionHeaderText
+            }
           >
             <Text
-              style={styles.sectionTitle}
+              style={
+                styles.sectionTitle
+              }
             >
               Documented Plants
             </Text>
 
             <Text
-              style={styles.sectionSubtitle}
+              style={
+                styles.sectionSubtitle
+              }
             >
-              Tap a plant to view its details
+              Tap a record to view its
+              details
             </Text>
           </View>
 
           <View
-            style={styles.resultCountContainer}
+            style={
+              styles.resultCountContainer
+            }
           >
-            <Text style={styles.resultCount}>
+            <Text
+              style={
+                styles.resultCount
+              }
+            >
               {filteredPlants.length}
             </Text>
           </View>
         </View>
 
+        {/* =====================================================
+            PLANT GRID
+        ===================================================== */}
+
         {filteredPlants.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>
+          <View
+            style={
+              styles.emptyContainer
+            }
+          >
+            <Text
+              style={styles.emptyIcon}
+            >
               🌱
             </Text>
 
-            <Text style={styles.emptyTitle}>
-              No plants found
+            <Text
+              style={styles.emptyTitle}
+            >
+              No records found
             </Text>
 
-            <Text style={styles.emptyText}>
-              Try searching for another plant
-              or selecting a different
-              category.
+            <Text
+              style={styles.emptyText}
+            >
+              Try searching for another
+              plant or selecting a
+              different category.
             </Text>
 
             <TouchableOpacity
@@ -389,235 +594,29 @@ export default function MapScreen({ navigation }) {
             </TouchableOpacity>
           </View>
         ) : (
-          filteredPlants.map(
-            (plant, index) => {
-              const locationAvailable =
-                hasLocation(plant);
-
-              const photos =
-                plant.photos ||
-                (plant.photo
-                  ? [plant.photo]
-                  : []);
-
-              return (
-                <TouchableOpacity
-                  key={
-                    plant.id ||
-                    plant.slug ||
-                    index
-                  }
-                  style={styles.locationCard}
-                  onPress={() =>
-                    handlePlantPress(plant)
-                  }
-                  activeOpacity={0.85}
-                >
-                  {/* Card Top */}
-                  <View style={styles.cardTop}>
-                    <View
-                      style={
-                        styles.plantIconContainer
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.plantIcon
-                        }
-                      >
-                        🌿
-                      </Text>
-                    </View>
-
-                    <View
-                      style={styles.plantInfo}
-                    >
-                      <Text
-                        style={
-                          styles.plantName
-                        }
-                        numberOfLines={1}
-                      >
-                        {plant.scientificName ||
-                          plant.name}
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.commonName
-                        }
-                        numberOfLines={1}
-                      >
-                        {plant.name}
-                      </Text>
-                    </View>
-
-                    {plant.category && (
-                      <View
-                        style={
-                          styles.categoryBadge
-                        }
-                      >
-                        <Text
-                          style={
-                            styles.categoryText
-                          }
-                        >
-                          {plant.category}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Botanist */}
-                  <View style={styles.infoRow}>
-                    <Text
-                      style={styles.infoIcon}
-                    >
-                      👤
-                    </Text>
-
-                    <Text
-                      style={styles.infoText}
-                    >
-                      Documented by{" "}
-                      <Text
-                        style={
-                          styles.infoTextBold
-                        }
-                      >
-                        {plant.botanist ||
-                          "Unknown"}
-                      </Text>
-                    </Text>
-                  </View>
-
-                  {/* Status */}
-                  <View
-                    style={styles.statusRow}
-                  >
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        plant.status ===
-                          "approved"
-                          ? styles.statusApproved
-                          : styles.statusPending,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusText,
-                          plant.status ===
-                            "approved"
-                            ? styles.statusApprovedText
-                            : styles.statusPendingText,
-                        ]}
-                      >
-                        {plant.status
-                          ? plant.status
-                              .charAt(0)
-                              .toUpperCase() +
-                            plant.status.slice(
-                              1
-                            )
-                          : "Unknown"}
-                      </Text>
-                    </View>
-
-                    {plant.syncStatus && (
-                      <Text
-                        style={
-                          styles.syncStatus
-                        }
-                      >
-                        {plant.syncStatus}
-                      </Text>
-                    )}
-
-                    {photos.length > 0 && (
-                      <Text
-                        style={
-                          styles.photoCount
-                        }
-                      >
-                        📷 {photos.length}
-                      </Text>
-                    )}
-                  </View>
-
-                  {/* Location */}
-                  <View
-                    style={
-                      styles.locationContainer
-                    }
-                  >
-                    <View
-                      style={
-                        styles.locationIconContainer
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.locationIcon
-                        }
-                      >
-                        📍
-                      </Text>
-                    </View>
-
-                    <View
-                      style={styles.coordinates}
-                    >
-                      <Text
-                        style={
-                          styles.locationTitle
-                        }
-                      >
-                        GPS Location
-                      </Text>
-
-                      {locationAvailable ? (
-                        <Text
-                          style={
-                            styles.locationValue
-                          }
-                        >
-                          {formatCoordinate(
-                            plant.latitude
-                          )}
-                          {"  •  "}
-                          {formatCoordinate(
-                            plant.longitude
-                          )}
-                        </Text>
-                      ) : (
-                        <Text
-                          style={
-                            styles.noLocation
-                          }
-                        >
-                          GPS location not
-                          available
-                        </Text>
-                      )}
-                    </View>
-
-                    <Text
-                      style={styles.arrow}
-                    >
-                      ›
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
+          <FlatList
+            data={filteredPlants}
+            keyExtractor={(item) =>
+              item.plantId
             }
-          )
+            numColumns={2}
+            scrollEnabled={false}
+            columnWrapperStyle={
+              styles.plantGrid
+            }
+            renderItem={
+              renderPlantCard
+            }
+          />
         )}
       </ScrollView>
     </View>
   );
 }
+
+// =====================================================
+// STYLES
+// =====================================================
 
 const styles = StyleSheet.create({
   container: {
@@ -630,6 +629,10 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 35,
   },
+
+  // =====================================================
+  // HEADER
+  // =====================================================
 
   header: {
     marginTop: 10,
@@ -646,7 +649,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#687568",
     marginTop: 5,
+    lineHeight: 20,
   },
+
+  // =====================================================
+  // SEARCH
+  // =====================================================
 
   searchContainer: {
     height: 48,
@@ -677,6 +685,10 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
 
+  // =====================================================
+  // CATEGORY
+  // =====================================================
+
   categoryList: {
     paddingBottom: 4,
   },
@@ -705,6 +717,10 @@ const styles = StyleSheet.create({
   filterTextSelected: {
     color: "#FFFFFF",
   },
+
+  // =====================================================
+  // MAP
+  // =====================================================
 
   mapContainer: {
     height: 320,
@@ -750,71 +766,9 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
 
-  mapOverlay: {
-    position: "absolute",
-    top: 12,
-    left: 12,
-    right: 12,
-    backgroundColor:
-      "rgba(255,255,255,0.95)",
-    borderRadius: 12,
-    padding: 11,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  mapOverlayIcon: {
-    fontSize: 22,
-    marginRight: 9,
-  },
-
-  mapOverlayInfo: {
-    flex: 1,
-  },
-
-  mapOverlayTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#356859",
-  },
-
-  mapOverlayText: {
-    fontSize: 11,
-    color: "#777",
-    marginTop: 2,
-  },
-
-  noGpsMapContainer: {
-    position: "absolute",
-    left: 35,
-    right: 35,
-    top: 95,
-    alignItems: "center",
-    backgroundColor:
-      "rgba(255,255,255,0.92)",
-    borderRadius: 15,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
-  },
-
-  noGpsMapIcon: {
-    fontSize: 28,
-    marginBottom: 5,
-  },
-
-  noGpsMapTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  noGpsMapText: {
-    fontSize: 11,
-    color: "#777",
-    textAlign: "center",
-    lineHeight: 16,
-    marginTop: 4,
-  },
+  // =====================================================
+  // MAP HINT
+  // =====================================================
 
   mapHint: {
     flexDirection: "row",
@@ -832,6 +786,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: "#7A8278",
   },
+
+  // =====================================================
+  // SUMMARY
+  // =====================================================
 
   summaryContainer: {
     backgroundColor: "#FFFFFF",
@@ -873,6 +831,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#E5ECE2",
   },
 
+  // =====================================================
+  // SECTION
+  // =====================================================
+
   sectionHeader: {
     marginTop: 23,
     marginBottom: 12,
@@ -912,11 +874,20 @@ const styles = StyleSheet.create({
     color: "#468585",
   },
 
+  // =====================================================
+  // PLANT GRID
+  // =====================================================
+
+  plantGrid: {
+    justifyContent: "space-between",
+  },
+
   locationCard: {
+    width: "48%",
     backgroundColor: "#FFFFFF",
     borderRadius: 15,
-    padding: 15,
-    marginBottom: 10,
+    padding: 13,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: "#EDF1EA",
     elevation: 1,
@@ -929,87 +900,70 @@ const styles = StyleSheet.create({
     },
   },
 
-  cardTop: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
   plantIconContainer: {
-    width: 43,
-    height: 43,
-    borderRadius: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 13,
     backgroundColor: "#EAF6E4",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 11,
+    marginBottom: 10,
   },
 
   plantIcon: {
-    fontSize: 21,
-  },
-
-  plantInfo: {
-    flex: 1,
-    paddingRight: 8,
+    fontSize: 23,
   },
 
   plantName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
     fontStyle: "italic",
     color: "#356859",
+    lineHeight: 19,
   },
 
   commonName: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#777",
     marginTop: 3,
   },
 
   categoryBadge: {
+    alignSelf: "flex-start",
     backgroundColor: "#DEF9C4",
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 9,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginTop: 8,
   },
 
   categoryText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
     color: "#468585",
   },
 
-  infoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 12,
-  },
-
-  infoIcon: {
-    fontSize: 13,
-    marginRight: 6,
-  },
-
-  infoText: {
-    fontSize: 11,
-    color: "#888",
-  },
-
-  infoTextBold: {
+  recordId: {
+    fontSize: 9,
+    color: "#999",
+    marginTop: 7,
     fontWeight: "600",
-    color: "#468585",
   },
+
+  // =====================================================
+  // STATUS
+  // =====================================================
 
   statusRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 9,
+    marginTop: 8,
   },
 
   statusBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: 7,
   },
 
   statusApproved: {
@@ -1021,7 +975,7 @@ const styles = StyleSheet.create({
   },
 
   statusText: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "700",
   },
 
@@ -1033,67 +987,16 @@ const styles = StyleSheet.create({
     color: "#A66A13",
   },
 
-  syncStatus: {
-    fontSize: 10,
-    color: "#777",
-    marginLeft: 8,
-  },
-
   photoCount: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#777",
     marginLeft: "auto",
   },
 
-  locationContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 13,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#EEF2EC",
-  },
-
-  locationIconContainer: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "#F0F7ED",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 9,
-  },
-
-  locationIcon: {
-    fontSize: 16,
-  },
-
-  coordinates: {
-    flex: 1,
-  },
-
-  locationTitle: {
-    fontSize: 11,
-    color: "#888",
-    marginBottom: 3,
-  },
-
-  locationValue: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#468585",
-  },
-
-  noLocation: {
-    fontSize: 12,
-    color: "#999",
-  },
-
-  arrow: {
-    fontSize: 27,
-    color: "#AAB5A7",
-    marginLeft: 5,
-  },
+  
+  // =====================================================
+  // EMPTY
+  // =====================================================
 
   emptyContainer: {
     backgroundColor: "#FFFFFF",

@@ -1,6 +1,4 @@
-import React, {
-  useState,
-} from "react";
+import React, { useState } from "react";
 
 import {
   View,
@@ -11,15 +9,14 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  Image,
 } from "react-native";
 
 import * as Location from "expo-location";
-
 import * as ImagePicker from "expo-image-picker";
 
 import {
   botanistPlantRecords,
+  botanistSpeciesRequests,
 } from "../data/mockData";
 
 import {
@@ -28,135 +25,149 @@ import {
 } from "../data/qrData";
 
 
+// =====================================================
+// MAIN SCREEN
+// =====================================================
+
 export default function AddPlantScreen({
   route,
   navigation,
 }) {
 
-  const botanist =
-    route.params?.botanist;
+  const botanist = route.params?.botanist;
 
 
-  // =====================================================
-  // BASIC INFORMATION
-  // =====================================================
-
-  const [
-    scientificName,
-    setScientificName,
-  ] = useState("");
-
-  const [
-    commonName,
-    setCommonName,
-  ] = useState("");
-
-  const [
-    family,
-    setFamily,
-  ] = useState("");
-
-  const [
-    category,
-    setCategory,
-  ] = useState("");
-
-
-  // =====================================================
+  // ===================================================
   // PLANT INFORMATION
-  // =====================================================
+  // ===================================================
 
-  const [
-    height,
-    setHeight,
-  ] = useState("");
+  const [scientificName, setScientificName] =
+    useState("");
 
-  const [
-    description,
-    setDescription,
-  ] = useState("");
+  const [commonName, setCommonName] =
+    useState("");
 
-  const [
-    overview,
-    setOverview,
-  ] = useState("");
+  const [family, setFamily] =
+    useState("");
 
-  const [
-    habitat,
-    setHabitat,
-  ] = useState("");
+  const [category, setCategory] =
+    useState("");
 
-  const [
-    significance,
-    setSignificance,
-  ] = useState("");
+  const [height, setHeight] =
+    useState("");
 
-  const [
-    characteristics,
-    setCharacteristics,
-  ] = useState("");
+  const [description, setDescription] =
+    useState("");
+
+  const [overview, setOverview] =
+    useState("");
+
+  const [habitat, setHabitat] =
+    useState("");
+
+  const [significance, setSignificance] =
+    useState("");
+
+  const [characteristics, setCharacteristics] =
+    useState("");
 
 
-  // =====================================================
+  // ===================================================
   // LOCATION
-  // =====================================================
+  // ===================================================
 
-  const [
-    latitude,
-    setLatitude,
-  ] = useState("");
+  const [latitude, setLatitude] =
+    useState("");
 
-  const [
-    longitude,
-    setLongitude,
-  ] = useState("");
+  const [longitude, setLongitude] =
+    useState("");
 
-  const [
-    loadingLocation,
-    setLoadingLocation,
-  ] = useState(false);
+  const [loadingLocation, setLoadingLocation] =
+    useState(false);
 
 
-  // =====================================================
+  // ===================================================
   // PHOTOS
-  // =====================================================
+  // ===================================================
 
-  const [
-    photos,
-    setPhotos,
-  ] = useState([]);
+  const [photos, setPhotos] =
+    useState([]);
 
 
-  // =====================================================
+  // ===================================================
   // QR CODE
-  // =====================================================
+  // ===================================================
 
-  const [
-    selectedQRCode,
-    setSelectedQRCode,
-  ] = useState("");
+  const [selectedQRCode, setSelectedQRCode] =
+    useState("");
 
-  const [
-    showQRDropdown,
-    setShowQRDropdown,
-  ] = useState(false);
+  const [showQRDropdown, setShowQRDropdown] =
+    useState(false);
 
 
-  // =====================================================
+  // ===================================================
+  // NEW SPECIES REQUEST
+  // ===================================================
+
+  const [showSpeciesForm, setShowSpeciesForm] =
+    useState(false);
+
+
+  // These fields belong ONLY to the species request.
+
+  const [speciesScientificName, setSpeciesScientificName] =
+    useState("");
+
+  const [speciesCommonName, setSpeciesCommonName] =
+    useState("");
+
+  const [speciesFamily, setSpeciesFamily] =
+    useState("");
+
+  const [speciesDescription, setSpeciesDescription] =
+    useState("");
+
+  const [speciesOverview, setSpeciesOverview] =
+    useState("");
+
+  const [speciesHabitat, setSpeciesHabitat] =
+    useState("");
+
+  const [speciesSignificance, setSpeciesSignificance] =
+    useState("");
+
+  const [speciesCharacteristics, setSpeciesCharacteristics] =
+    useState("");
+
+
+  // ===================================================
+  // SPECIES REQUEST ID
+  // ===================================================
+
+  const [speciesRequestId, setSpeciesRequestId] =
+    useState(null);
+
+
+  // ===================================================
+  // SPECIES REQUEST PREPARED
+  // ===================================================
+
+  const [speciesRequestAdded, setSpeciesRequestAdded] =
+    useState(false);
+
+
+  // ===================================================
   // AVAILABLE QR CODES
-  // =====================================================
+  // ===================================================
 
-  const availableQRCodes =
-    qrCodes.filter(
-      (qr) =>
-        qr.status ===
-        "AVAILABLE"
-    );
+  const availableQRCodes = qrCodes.filter(
+    (qr) => qr.status === "AVAILABLE"
+  );
 
 
-  // =====================================================
-  // GET LOCATION
-  // =====================================================
+  // ===================================================
+  // GET CURRENT LOCATION
+  // ===================================================
 
   async function handleGetLocation() {
 
@@ -171,49 +182,32 @@ export default function AddPlantScreen({
         await Location.requestForegroundPermissionsAsync();
 
 
-      if (
-        status !==
-        "granted"
-      ) {
+      if (status !== "granted") {
 
         Alert.alert(
           "Permission Required",
-          "Location permission is required to record the plant location."
+          "Location permission is required to get the plant location."
         );
-
-        setLoadingLocation(false);
 
         return;
       }
 
 
       const location =
-        await Location.getCurrentPositionAsync(
-          {
-            accuracy:
-              Location.Accuracy.High,
-          }
-        );
+        await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
 
 
       const lat =
-        location.coords.latitude
-          .toFixed(6);
+        location.coords.latitude.toFixed(6);
 
       const lng =
-        location.coords.longitude
-          .toFixed(6);
+        location.coords.longitude.toFixed(6);
 
 
       setLatitude(lat);
-
       setLongitude(lng);
-
-
-      Alert.alert(
-        "Location Captured",
-        `Latitude: ${lat}\nLongitude: ${lng}`
-      );
 
     } catch (error) {
 
@@ -224,7 +218,7 @@ export default function AddPlantScreen({
 
       Alert.alert(
         "Location Error",
-        "Unable to get the current location."
+        "Unable to get your current location."
       );
 
     } finally {
@@ -235,9 +229,9 @@ export default function AddPlantScreen({
   }
 
 
-  // =====================================================
+  // ===================================================
   // TAKE PHOTO
-  // =====================================================
+  // ===================================================
 
   async function handleTakePhoto() {
 
@@ -249,14 +243,11 @@ export default function AddPlantScreen({
         await ImagePicker.requestCameraPermissionsAsync();
 
 
-      if (
-        status !==
-        "granted"
-      ) {
+      if (status !== "granted") {
 
         Alert.alert(
           "Permission Required",
-          "Camera permission is required to take a plant photo."
+          "Camera permission is required."
         );
 
         return;
@@ -264,37 +255,22 @@ export default function AddPlantScreen({
 
 
       const result =
-        await ImagePicker.launchCameraAsync(
-          {
-            mediaTypes: [
-              "images",
-            ],
-
-            allowsEditing:
-              true,
-
-            aspect: [
-              4,
-              3,
-            ],
-
-            quality: 0.8,
-          }
-        );
+        await ImagePicker.launchCameraAsync({
+          mediaTypes: ["images"],
+          quality: 0.8,
+        });
 
 
-      if (
-        !result.canceled &&
-        result.assets &&
-        result.assets.length > 0
-      ) {
+      if (!result.canceled) {
 
-        setPhotos(
-          (previous) => [
-            ...previous,
-            result.assets[0].uri,
-          ]
-        );
+        const uri =
+          result.assets[0].uri;
+
+
+        setPhotos((current) => [
+          ...current,
+          uri,
+        ]);
 
       }
 
@@ -314,11 +290,11 @@ export default function AddPlantScreen({
   }
 
 
-  // =====================================================
-  // SELECT PHOTOS
-  // =====================================================
+  // ===================================================
+  // PICK PHOTO FROM GALLERY
+  // ===================================================
 
-  async function handleSelectPhotos() {
+  async function handlePickPhoto() {
 
     try {
 
@@ -328,14 +304,11 @@ export default function AddPlantScreen({
         await ImagePicker.requestMediaLibraryPermissionsAsync();
 
 
-      if (
-        status !==
-        "granted"
-      ) {
+      if (status !== "granted") {
 
         Alert.alert(
           "Permission Required",
-          "Photo library permission is required."
+          "Gallery permission is required."
         );
 
         return;
@@ -343,44 +316,25 @@ export default function AddPlantScreen({
 
 
       const result =
-        await ImagePicker.launchImageLibraryAsync(
-          {
-            mediaTypes: [
-              "images",
-            ],
-
-            allowsEditing:
-              false,
-
-            allowsMultipleSelection:
-              true,
-
-            selectionLimit:
-              10,
-
-            quality: 0.8,
-          }
-        );
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ["images"],
+          allowsMultipleSelection: true,
+          quality: 0.8,
+        });
 
 
-      if (
-        !result.canceled &&
-        result.assets
-      ) {
+      if (!result.canceled) {
 
         const selectedPhotos =
           result.assets.map(
-            (asset) =>
-              asset.uri
+            (asset) => asset.uri
           );
 
 
-        setPhotos(
-          (previous) => [
-            ...previous,
-            ...selectedPhotos,
-          ]
-        );
+        setPhotos((current) => [
+          ...current,
+          ...selectedPhotos,
+        ]);
 
       }
 
@@ -393,68 +347,55 @@ export default function AddPlantScreen({
 
       Alert.alert(
         "Gallery Error",
-        "Unable to open the photo library."
+        "Unable to open the gallery."
       );
 
     }
   }
 
 
-  // =====================================================
+  // ===================================================
   // REMOVE PHOTO
-  // =====================================================
+  // ===================================================
 
-  function handleRemovePhoto(
-    index
-  ) {
+  function handleRemovePhoto(index) {
 
-    setPhotos(
-      (previous) =>
-        previous.filter(
-          (_, photoIndex) =>
-            photoIndex !==
-            index
-        )
-    );
-  }
-
-
-  // =====================================================
-  // SELECT QR
-  // =====================================================
-
-  function handleSelectQRCode(
-    qr
-  ) {
-
-    setSelectedQRCode(
-      qr.id
-    );
-
-    setShowQRDropdown(
-      false
+    setPhotos((current) =>
+      current.filter(
+        (_, photoIndex) =>
+          photoIndex !== index
+      )
     );
 
   }
 
 
-  // =====================================================
-  // SAVE PLANT
-  // =====================================================
+  // ===================================================
+  // ADD SPECIES REQUEST
+  //
+  // IMPORTANT:
+  //
+  // This does NOT submit anything.
+  //
+  // It only prepares the species request.
+  //
+  // The actual species request will be saved when
+  // "Submit Plant Record" is pressed.
+  // ===================================================
 
-  function handleSavePlant() {
+  function handleAddSpeciesRequest() {
 
     // -------------------------------------------------
-    // VALIDATION
+    // VALIDATE SPECIES INFORMATION
     // -------------------------------------------------
 
     if (
-      !selectedQRCode
+      !speciesScientificName.trim()
     ) {
 
       Alert.alert(
-        "QR Code Required",
-        "Please select a QR code."
+        "Missing Information",
+        "Please enter the scientific name of the new species."
       );
 
       return;
@@ -462,8 +403,161 @@ export default function AddPlantScreen({
 
 
     if (
-      !scientificName.trim()
+      !speciesCommonName.trim()
     ) {
+
+      Alert.alert(
+        "Missing Information",
+        "Please enter the common name of the new species."
+      );
+
+      return;
+    }
+
+
+    if (
+      !speciesFamily.trim()
+    ) {
+
+      Alert.alert(
+        "Missing Information",
+        "Please enter the family of the new species."
+      );
+
+      return;
+    }
+    // -------------------------------------------------
+    // CREATE SPECIES REQUEST ID
+    // -------------------------------------------------
+
+    const requestId =
+      `NIAH-SPECIES-${Date.now()}`;
+
+
+    setSpeciesRequestId(
+      requestId
+    );
+
+
+    setSpeciesRequestAdded(
+      true
+    );
+
+
+    // -------------------------------------------------
+    // CLOSE FORM
+    // -------------------------------------------------
+
+    setShowSpeciesForm(false);
+
+
+    Alert.alert(
+      "Species Request Added",
+      "The new species request has been added. It will be submitted together with the plant record."
+    );
+  }
+
+
+  // ===================================================
+  // EDIT SPECIES REQUEST
+  // ===================================================
+
+  function handleEditSpeciesRequest() {
+
+    setShowSpeciesForm(true);
+
+    setSpeciesRequestAdded(false);
+  }
+
+
+  // ===================================================
+  // REMOVE SPECIES REQUEST
+  // ===================================================
+
+  function handleRemoveSpeciesRequest() {
+
+    Alert.alert(
+      "Remove Species Request",
+      "Are you sure you want to remove this new species request?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+
+        {
+          text: "Remove",
+          style: "destructive",
+
+          onPress: () => {
+
+            setSpeciesRequestId(
+              null
+            );
+
+            setSpeciesRequestAdded(
+              false
+            );
+
+            setSpeciesScientificName(
+              ""
+            );
+
+            setSpeciesCommonName(
+              ""
+            );
+
+            setSpeciesFamily(
+              ""
+            );
+
+            setSpeciesDescription(
+              ""
+            );
+
+            setSpeciesOverview(
+              ""
+            );
+
+            setSpeciesHabitat(
+              ""
+            );
+
+            setSpeciesSignificance(
+              ""
+            );
+
+            setSpeciesCharacteristics(
+              ""
+            );
+
+          },
+        },
+      ]
+    );
+  }
+
+
+  // ===================================================
+  // SUBMIT PLANT RECORD
+  //
+  // This is the ONLY final submit.
+  //
+  // It can submit:
+  //
+  // 1. Plant record
+  //
+  // 2. Species request if one was added
+  //
+  // ===================================================
+
+  function handleSubmitPlant() {
+
+    // =================================================
+    // VALIDATE PLANT INFORMATION
+    // =================================================
+
+    if (!scientificName.trim()) {
 
       Alert.alert(
         "Missing Information",
@@ -474,9 +568,7 @@ export default function AddPlantScreen({
     }
 
 
-    if (
-      !commonName.trim()
-    ) {
+    if (!commonName.trim()) {
 
       Alert.alert(
         "Missing Information",
@@ -487,94 +579,62 @@ export default function AddPlantScreen({
     }
 
 
-    if (
-      !family.trim()
-    ) {
+    if (!family.trim()) {
 
       Alert.alert(
         "Missing Information",
-        "Please enter the plant family."
+        "Please enter the family."
       );
 
       return;
     }
 
 
-    if (
-      !category.trim()
-    ) {
+    if (!category) {
 
       Alert.alert(
         "Missing Information",
-        "Please enter the plant category."
+        "Please select a category."
       );
 
       return;
     }
 
 
-    if (
-      !latitude ||
-      !longitude
-    ) {
+    // =================================================
+    // VALIDATE LOCATION
+    // =================================================
+
+    if (!latitude || !longitude) {
 
       Alert.alert(
-        "Location Required",
-        "Please capture the plant's GPS location."
+        "Missing Location",
+        "Please get the current GPS location before submitting the plant record."
       );
 
       return;
     }
 
 
-    // -------------------------------------------------
-    // CHARACTERISTICS
-    // -------------------------------------------------
+    // =================================================
+    // VALIDATE QR CODE
+    // =================================================
 
-    const characteristicList =
-      characteristics
-        .split("\n")
-        .map(
-          (item) =>
-            item.trim()
-        )
-        .filter(
-          (item) =>
-            item.length > 0
-        );
+    if (!selectedQRCode) {
 
+      Alert.alert(
+        "Missing QR Code",
+        "Please select a QR code."
+      );
 
-    // -------------------------------------------------
-    // PLANT ID
-    // -------------------------------------------------
+      return;
+    }
 
-    const newPlantId =
-      `NIAH-PLANT-${Date.now()}`;
-
-
-    // -------------------------------------------------
-    // SLUG
-    // -------------------------------------------------
-
-    const slug =
-      scientificName
-        .toLowerCase()
-        .trim()
-        .replace(
-          /\s+/g,
-          "-"
-        );
-
-
-    // -------------------------------------------------
-    // SELECTED QR
-    // -------------------------------------------------
 
     const selectedQR =
       qrCodes.find(
         (qr) =>
-          qr.id ===
-          selectedQRCode
+          qr.id === selectedQRCode
       );
 
 
@@ -595,7 +655,7 @@ export default function AddPlantScreen({
     ) {
 
       Alert.alert(
-        "QR Code Error",
+        "QR Code Unavailable",
         "The selected QR code is no longer available."
       );
 
@@ -603,29 +663,90 @@ export default function AddPlantScreen({
     }
 
 
-    // -------------------------------------------------
-    // CREATE RECORD
-    // -------------------------------------------------
+    // =================================================
+    // CREATE PLANT ID
+    // =================================================
+
+    const newPlantId =
+      `NIAH-PLANT-${Date.now()}`;
+
+
+    // =================================================
+    // CREATE PLANT SLUG
+    // =================================================
+
+    const slug =
+      scientificName
+        .toLowerCase()
+        .trim()
+        .replace(
+          /\s+/g,
+          "-"
+        );
+
+
+    // =================================================
+    // PLANT CHARACTERISTICS
+    // =================================================
+
+    const characteristicList =
+      characteristics
+        .split("\n")
+        .map(
+          (item) =>
+            item.trim()
+        )
+        .filter(
+          (item) =>
+            item.length > 0
+        );
+
+
+    // =================================================
+    // CREATE PLANT RECORD
+    //
+    // THIS ONLY CONTAINS PLANT INFORMATION.
+    // =================================================
 
     const newPlant = {
 
+      // -----------------------------------------------
+      // IDENTIFICATION
+      // -----------------------------------------------
+
       id:
+        newPlantId,
+
+      plantId:
         newPlantId,
 
       slug:
         slug,
 
+
+      // -----------------------------------------------
+      // PLANT SPECIES INFORMATION
+      // -----------------------------------------------
+
       name:
+        commonName.trim(),
+
+      commonName:
         commonName.trim(),
 
       scientificName:
         scientificName.trim(),
 
+      family:
+        family.trim(),
+
       category:
         category.trim(),
 
-      family:
-        family.trim(),
+
+      // -----------------------------------------------
+      // PLANT DETAILS
+      // -----------------------------------------------
 
       height:
         height.trim(),
@@ -645,21 +766,67 @@ export default function AddPlantScreen({
       characteristics:
         characteristicList,
 
+
+      // -----------------------------------------------
+      // LOCATION
+      // -----------------------------------------------
+
       latitude:
         Number(latitude),
 
       longitude:
         Number(longitude),
 
+
+      // -----------------------------------------------
+      // PHOTOS
+      // -----------------------------------------------
+
       photos:
         photos,
+
+
+      // -----------------------------------------------
+      // BOTANIST
+      // -----------------------------------------------
 
       botanist:
         botanist?.name ||
         "Unknown",
 
+
+      // -----------------------------------------------
+      // PLANT APPROVAL
+      // -----------------------------------------------
+
       status:
         "pending",
+
+      approvalStatus:
+        "PENDING_APPROVAL",
+
+
+      // -----------------------------------------------
+      // LINK TO SPECIES REQUEST
+      //
+      // null if existing species
+      // ID if new species was requested
+      // -----------------------------------------------
+
+      speciesRequestId:
+        speciesRequestId ||
+        null,
+
+
+      speciesStatus:
+        speciesRequestId
+          ? "pending"
+          : "existing",
+
+
+      // -----------------------------------------------
+      // QR CODE
+      // -----------------------------------------------
 
       qrCode:
         selectedQRCode,
@@ -673,17 +840,27 @@ export default function AddPlantScreen({
       qrValue:
         selectedQR.value,
 
+
+      // -----------------------------------------------
+      // SYNC
+      // -----------------------------------------------
+
       syncStatus:
         "Pending Sync",
+
+
+      // -----------------------------------------------
+      // DATE
+      // -----------------------------------------------
 
       createdAt:
         new Date().toISOString(),
     };
 
 
-    // -------------------------------------------------
-    // ASSIGN QR
-    // -------------------------------------------------
+    // =================================================
+    // ASSIGN QR CODE
+    // =================================================
 
     const assigned =
       assignQRCode(
@@ -703,31 +880,175 @@ export default function AddPlantScreen({
     }
 
 
-    // -------------------------------------------------
-    // SAVE TO BOTANIST RECORDS
-    // -------------------------------------------------
+    // =================================================
+    // CREATE SPECIES REQUEST
+    //
+    // ONLY IF THE BOTANIST ADDED A NEW SPECIES REQUEST
+    //
+    // THIS IS SEPARATE FROM THE PLANT RECORD.
+    // =================================================
+
+    if (
+      speciesRequestId
+    ) {
+
+      const speciesRequest = {
+
+        // ---------------------------------------------
+        // SPECIES REQUEST ID
+        // ---------------------------------------------
+
+        id:
+          speciesRequestId,
+
+
+        // ---------------------------------------------
+        // SPECIES INFORMATION
+        // ---------------------------------------------
+
+        scientificName:
+          speciesScientificName.trim(),
+
+        commonName:
+          speciesCommonName.trim(),
+
+        family:
+          speciesFamily.trim(),
+
+        description:
+          speciesDescription.trim(),
+
+        overview:
+          speciesOverview.trim(),
+
+        habitat:
+          speciesHabitat.trim(),
+
+        significance:
+          speciesSignificance.trim(),
+
+        characteristics:
+          speciesCharacteristics
+            .split("\n")
+            .map(
+              (item) =>
+                item.trim()
+            )
+            .filter(
+              (item) =>
+                item.length > 0
+            ),
+
+
+        // ---------------------------------------------
+        // BOTANIST
+        // ---------------------------------------------
+
+        botanist:
+          botanist?.name ||
+          "Unknown",
+
+
+        // ---------------------------------------------
+        // SPECIES APPROVAL
+        // ---------------------------------------------
+
+        status:
+          "pending",
+
+        approvalStatus:
+          "PENDING_APPROVAL",
+
+
+        // ---------------------------------------------
+        // LINK TO PLANT
+        // ---------------------------------------------
+
+        plantRecordId:
+          newPlantId,
+
+
+        // ---------------------------------------------
+        // DATE
+        // ---------------------------------------------
+
+        createdAt:
+          new Date().toISOString(),
+      };
+
+
+      botanistSpeciesRequests.push(
+        speciesRequest
+      );
+    }
+
+
+    // =================================================
+    // SAVE PLANT RECORD
+    // =================================================
 
     botanistPlantRecords.push(
       newPlant
     );
 
 
-    console.log(
-      "New botanist plant:",
-      newPlant
-    );
+    // =================================================
+    // SUCCESS MESSAGE
+    // =================================================
+
+    if (
+      speciesRequestId
+    ) {
+
+      Alert.alert(
+        "Submitted Successfully",
+        "The plant record and new species request have both been submitted. Both will remain pending until they are reviewed and approved.",
+        [
+          {
+            text: "OK",
+            onPress: () =>
+              navigation.goBack(),
+          },
+        ]
+      );
+
+    } else {
+
+      Alert.alert(
+        "Plant Submitted",
+        "The plant record has been submitted and is waiting for administrator approval.",
+        [
+          {
+            text: "OK",
+            onPress: () =>
+              navigation.goBack(),
+          },
+        ]
+      );
+
+    }
+  }
 
 
-    // -------------------------------------------------
-    // SUCCESS
-    // -------------------------------------------------
+  // ===================================================
+  // CANCEL
+  // ===================================================
+
+  function handleCancel() {
 
     Alert.alert(
-      "Plant Submitted",
-      "The plant record has been submitted for approval.",
+      "Cancel",
+      "Are you sure you want to leave? Your entered information will be lost.",
       [
         {
-          text: "OK",
+          text: "Stay",
+          style: "cancel",
+        },
+
+        {
+          text: "Leave",
+          style: "destructive",
+
           onPress: () =>
             navigation.goBack(),
         },
@@ -736,736 +1057,1245 @@ export default function AddPlantScreen({
   }
 
 
-  // =====================================================
+  // ===================================================
   // UI
-  // =====================================================
+  // ===================================================
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={
-        styles.contentContainer
-      }
-      keyboardShouldPersistTaps="handled"
-    >
 
-      {/* HEADER */}
-
-      <Text
-        style={styles.title}
-      >
-        Add Plant Record
-      </Text>
-
-
-      <Text
-        style={styles.subtitle}
-      >
-        Record a plant during your
-        field survey
-      </Text>
+    <View style={styles.container}>
 
 
       {/* =================================================
-          QR CODE
-          ================================================= */}
+          HEADER
+      ================================================= */}
 
-      <Text
-        style={styles.sectionTitle}
-      >
-        QR Code
-      </Text>
+      <View style={styles.header}>
 
-
-      <TouchableOpacity
-        style={
-          styles.dropdown
-        }
-        onPress={() =>
-          setShowQRDropdown(
-            !showQRDropdown
-          )
-        }
-        activeOpacity={0.8}
-      >
-
-        <Text
-          style={[
-            styles.dropdownText,
-            !selectedQRCode &&
-              styles.placeholder,
-          ]}
+        <TouchableOpacity
+          onPress={handleCancel}
+          style={styles.backButton}
         >
 
-          {selectedQRCode ||
-            "Select an available QR code"}
+          <Text
+            style={styles.backButtonText}
+          >
+            ←
+          </Text>
 
-        </Text>
-
-
-        <Text
-          style={
-            styles.dropdownArrow
-          }
-        >
-          {showQRDropdown
-            ? "▲"
-            : "▼"}
-        </Text>
-
-      </TouchableOpacity>
+        </TouchableOpacity>
 
 
-      {showQRDropdown && (
         <View
-          style={
-            styles.dropdownList
-          }
+          style={styles.headerTextContainer}
         >
 
-          {availableQRCodes.length ===
-            0 ? (
+          <Text
+            style={styles.headerTitle}
+          >
+            Add Plant Record
+          </Text>
 
-            <Text
-              style={
-                styles.noQRText
-              }
-            >
-              No available QR codes.
-              Generate a QR code first.
+          <Text
+            style={styles.headerSubtitle}
+          >
+            Register a new plant found in Niah
+          </Text>
+
+        </View>
+
+      </View>
+
+
+      {/* =================================================
+          SCROLL FORM
+      ================================================= */}
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={
+          styles.scrollContent
+        }
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+
+
+        {/* =================================================
+            PLANT INFORMATION
+        ================================================= */}
+
+        <View style={styles.card}>
+
+          <Text
+            style={styles.sectionTitle}
+          >
+            Plant Information
+          </Text>
+
+
+          {/* ---------------------------------------------
+              Scientific Name
+          --------------------------------------------- */}
+
+          <Text style={styles.label}>
+            Scientific Name *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={scientificName}
+            onChangeText={
+              setScientificName
+            }
+            placeholder="e.g. Nepenthes rafflesiana"
+            placeholderTextColor="#9AA7A0"
+          />
+
+
+          {/* ---------------------------------------------
+              Common Name
+          --------------------------------------------- */}
+
+          <Text style={styles.label}>
+            Common Name *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={commonName}
+            onChangeText={
+              setCommonName
+            }
+            placeholder="e.g. Tropical Pitcher Plant"
+            placeholderTextColor="#9AA7A0"
+          />
+
+
+          {/* ---------------------------------------------
+              Family
+          --------------------------------------------- */}
+
+          <Text style={styles.label}>
+            Family *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={family}
+            onChangeText={
+              setFamily
+            }
+            placeholder="e.g. Nepenthaceae"
+            placeholderTextColor="#9AA7A0"
+          />
+
+
+          {/* ---------------------------------------------
+              Category
+          --------------------------------------------- */}
+
+          {!showSpeciesForm && !speciesRequestAdded && (
+
+          <>
+            <Text style={styles.label}>
+              Species *
             </Text>
 
-          ) : (
+            <View style={styles.categoryContainer}>
 
-            availableQRCodes.map(
-              (qr) => (
+              {[
+                "Trees",
+                "Flowers",
+                "Ferns",
+                "Climbers",
+              ].map((item) => (
 
                 <TouchableOpacity
-                  key={qr.id}
-                  style={
-                    styles.dropdownItem
-                  }
+                  key={item}
+                  style={[
+                    styles.categoryOption,
+
+                    category === item &&
+                      styles.categoryOptionSelected,
+                  ]}
                   onPress={() =>
-                    handleSelectQRCode(
-                      qr
+                    setCategory(
+                      category === item ? "" : item
                     )
                   }
+                  activeOpacity={0.8}
                 >
 
                   <Text
-                    style={
-                      styles.dropdownItemText
-                    }
-                  >
-                    {qr.id}
-                  </Text>
+                    style={[
+                      styles.categoryOptionText,
 
-                  <Text
-                    style={
-                      styles.availableText
-                    }
+                      category === item &&
+                        styles.categoryOptionTextSelected,
+                    ]}
                   >
-                    AVAILABLE
+                    {item}
                   </Text>
 
                 </TouchableOpacity>
 
-              )
-            )
+              ))}
 
-          )}
-
-        </View>
-      )}
-
-
-      {/* =================================================
-          BASIC INFORMATION
-          ================================================= */}
-
-      <Text
-        style={styles.sectionTitle}
-      >
-        Basic Information
-      </Text>
-
-
-      <Text
-        style={styles.label}
-      >
-        Scientific Name *
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        value={
-          scientificName
-        }
-        onChangeText={
-          setScientificName
-        }
-        placeholder="e.g. Nepenthes rafflesiana"
-        placeholderTextColor="#9AA7A0"
-      />
-
-
-      <Text
-        style={styles.label}
-      >
-        Common Name *
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        value={
-          commonName
-        }
-        onChangeText={
-          setCommonName
-        }
-        placeholder="e.g. Tropical Pitcher Plant"
-        placeholderTextColor="#9AA7A0"
-      />
-
-
-      <Text
-        style={styles.label}
-      >
-        Family *
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        value={
-          family
-        }
-        onChangeText={
-          setFamily
-        }
-        placeholder="e.g. Nepenthaceae"
-        placeholderTextColor="#9AA7A0"
-      />
-
-
-      <Text style={styles.label}>
-  Category *
-</Text>
-
-<View style={styles.categoryContainer}>
-
-  {[
-    "Trees",
-    "Flowers",
-    "Ferns",
-    "Climbers",
-  ].map((item) => (
-
-    <TouchableOpacity
-      key={item}
-      style={[
-        styles.categoryOption,
-        category === item &&
-          styles.categoryOptionSelected,
-      ]}
-      onPress={() =>
-        setCategory(item)
-      }
-      activeOpacity={0.8}
-    >
-
-      <Text
-        style={[
-          styles.categoryOptionText,
-          category === item &&
-            styles.categoryOptionTextSelected,
-        ]}
-      >
-        {item}
-      </Text>
-
-    </TouchableOpacity>
-
-  ))}
-
-</View>
-
-
-      {/* =================================================
-          PLANT DETAILS
-          ================================================= */}
-
-      <Text
-        style={styles.sectionTitle}
-      >
-        Plant Details
-      </Text>
-
-
-      <Text
-        style={styles.label}
-      >
-        Height
-      </Text>
-
-      <TextInput
-        style={styles.input}
-        value={
-          height
-        }
-        onChangeText={
-          setHeight
-        }
-        placeholder="e.g. 80 cm"
-        placeholderTextColor="#9AA7A0"
-      />
-
-
-      <Text
-        style={styles.label}
-      >
-        Description
-      </Text>
-
-      <TextInput
-        style={
-          styles.textArea
-        }
-        value={
-          description
-        }
-        onChangeText={
-          setDescription
-        }
-        placeholder="Describe the plant..."
-        placeholderTextColor="#9AA7A0"
-        multiline
-        textAlignVertical="top"
-      />
-
-
-      <Text
-        style={styles.label}
-      >
-        Overview
-      </Text>
-
-      <TextInput
-        style={
-          styles.textArea
-        }
-        value={
-          overview
-        }
-        onChangeText={
-          setOverview
-        }
-        placeholder="General information..."
-        placeholderTextColor="#9AA7A0"
-        multiline
-        textAlignVertical="top"
-      />
-
-
-      <Text
-        style={styles.label}
-      >
-        Habitat
-      </Text>
-
-      <TextInput
-        style={
-          styles.textArea
-        }
-        value={
-          habitat
-        }
-        onChangeText={
-          setHabitat
-        }
-        placeholder="Describe the habitat..."
-        placeholderTextColor="#9AA7A0"
-        multiline
-        textAlignVertical="top"
-      />
-
-
-      <Text
-        style={styles.label}
-      >
-        Significance
-      </Text>
-
-      <TextInput
-        style={
-          styles.textArea
-        }
-        value={
-          significance
-        }
-        onChangeText={
-          setSignificance
-        }
-        placeholder="Why is this plant important?"
-        placeholderTextColor="#9AA7A0"
-        multiline
-        textAlignVertical="top"
-      />
-
-
-      <Text
-        style={styles.label}
-      >
-        Characteristics
-      </Text>
-
-      <Text
-        style={
-          styles.helperText
-        }
-      >
-        Enter one characteristic
-        per line.
-      </Text>
-
-      <TextInput
-        style={
-          styles.textArea
-        }
-        value={
-          characteristics
-        }
-        onChangeText={
-          setCharacteristics
-        }
-        placeholder={
-          "Large leaves\nClimbing stem\nCarnivorous"
-        }
-        placeholderTextColor="#9AA7A0"
-        multiline
-        textAlignVertical="top"
-      />
-
-
-      {/* =================================================
-          GPS
-          ================================================= */}
-
-      <Text
-        style={styles.sectionTitle}
-      >
-        GPS Location
-      </Text>
-
-
-      <TouchableOpacity
-        style={
-          styles.locationButton
-        }
-        onPress={
-          handleGetLocation
-        }
-        disabled={
-          loadingLocation
-        }
-        activeOpacity={0.8}
-      >
-
-        {loadingLocation ? (
-
-          <ActivityIndicator
-            color="#FFFFFF"
-          />
-
-        ) : (
-
-          <Text
-            style={
-              styles.locationButtonText
-            }
-          >
-            📍 Capture Current Location
-          </Text>
+            </View>
+          </>
 
         )}
 
-      </TouchableOpacity>
 
-
-      <View
-        style={styles.coordinatesRow}
-      >
-
-        <View
-          style={
-            styles.coordinateBox
-          }
-        >
-
-          <Text
-            style={
-              styles.coordinateLabel
-            }
-          >
-            Latitude
-          </Text>
-
-          <TextInput
-            style={
-              styles.coordinateInput
-            }
-            value={
-              latitude
-            }
-            onChangeText={
-              setLatitude
-            }
-            placeholder="0.000000"
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-        </View>
-
-
-        <View
-          style={
-            styles.coordinateBox
-          }
-        >
-
-          <Text
-            style={
-              styles.coordinateLabel
-            }
-          >
-            Longitude
-          </Text>
-
-          <TextInput
-            style={
-              styles.coordinateInput
-            }
-            value={
-              longitude
-            }
-            onChangeText={
-              setLongitude
-            }
-            placeholder="0.000000"
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-        </View>
-
-      </View>
-
-
-      {/* =================================================
-          PHOTOS
+          {/* =================================================
+              NEW SPECIES REQUEST
           ================================================= */}
 
-      <Text
-        style={styles.sectionTitle}
-      >
-        Plant Photos
-      </Text>
+          <View
+            style={styles.speciesDivider}
+          />
 
 
-      <View
-        style={styles.photoButtons}
-      >
+          <Text
+            style={styles.speciesQuestion}
+          >
+            Can't find this species?
+          </Text>
 
-        <TouchableOpacity
-          style={
-            styles.photoButton
-          }
-          onPress={
-            handleTakePhoto
-          }
-          activeOpacity={0.8}
-        >
 
           <Text
             style={
-              styles.photoButtonText
+              styles.speciesQuestionDescription
             }
           >
-            📷 Take Photo
+            Request a new species to be added to
+            the system. The species request will
+            be submitted together with this plant
+            record.
           </Text>
 
-        </TouchableOpacity>
 
+          {!speciesRequestAdded && (
 
-        <TouchableOpacity
-          style={
-            styles.photoButton
-          }
-          onPress={
-            handleSelectPhotos
-          }
-          activeOpacity={0.8}
-        >
+            <TouchableOpacity
+            style={styles.requestSpeciesButton}
+            onPress={() => {
 
-          <Text
-            style={
-              styles.photoButtonText
-            }
+              if (!showSpeciesForm) {
+                // Opening new species request
+                // means the existing plant category
+                // should be cleared.
+                setCategory("");
+              }
+
+              setShowSpeciesForm(
+                !showSpeciesForm
+              );
+
+            }}
+            activeOpacity={0.8}
           >
-            🖼 Select Photos
-          </Text>
 
-        </TouchableOpacity>
+              <Text
+                style={
+                  styles.requestSpeciesButtonText
+                }
+              >
+                {showSpeciesForm
+                  ? "− Hide New Species Form"
+                  : "+ Request to Add New Species"}
+              </Text>
 
-      </View>
+            </TouchableOpacity>
+
+          )}
 
 
-      {/* PHOTO PREVIEW */}
+          {/* =================================================
+              INLINE SPECIES REQUEST FORM
+          ================================================= */}
 
-      {photos.length > 0 && (
+          {showSpeciesForm &&
+            !speciesRequestAdded && (
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={
-            false
-          }
-          style={
-            styles.photoPreviewContainer
-          }
-        >
+            <View
+              style={
+                styles.speciesRequestCard
+              }
+            >
 
-          {photos.map(
-            (
-              photo,
-              index
-            ) => (
+              <Text
+                style={
+                  styles.speciesRequestTitle
+                }
+              >
+                New Species Information
+              </Text>
+
+
+              <Text
+                style={
+                  styles.speciesRequestSubtitle
+                }
+              >
+                Enter information about the species
+                that is not currently available in
+                the system.
+              </Text>
+
+
+              {/* -------------------------------------------
+                  Species Scientific Name
+              ------------------------------------------- */}
+
+              <Text style={styles.label}>
+                Scientific Name *
+              </Text>
+
+              <TextInput
+                style={styles.input}
+                value={
+                  speciesScientificName
+                }
+                onChangeText={
+                  setSpeciesScientificName
+                }
+                placeholder="e.g. Nepenthes mirabilis"
+                placeholderTextColor="#9AA7A0"
+              />
+
+
+              {/* -------------------------------------------
+                  Species Common Name
+              ------------------------------------------- */}
+
+              <Text style={styles.label}>
+                Common Name *
+              </Text>
+
+              <TextInput
+                style={styles.input}
+                value={
+                  speciesCommonName
+                }
+                onChangeText={
+                  setSpeciesCommonName
+                }
+                placeholder="e.g. Swamp Pitcher Plant"
+                placeholderTextColor="#9AA7A0"
+              />
+
+
+              {/* -------------------------------------------
+                  Species Family
+              ------------------------------------------- */}
+
+              <Text style={styles.label}>
+                Family *
+              </Text>
+
+              <TextInput
+                style={styles.input}
+                value={
+                  speciesFamily
+                }
+                onChangeText={
+                  setSpeciesFamily
+                }
+                placeholder="e.g. Nepenthaceae"
+                placeholderTextColor="#9AA7A0"
+              />
+
+
+              {/* -------------------------------------------
+                  Species Description
+              ------------------------------------------- */}
+
+              <Text style={styles.label}>
+                Description
+              </Text>
+
+              <TextInput
+                style={styles.textArea}
+                value={
+                  speciesDescription
+                }
+                onChangeText={
+                  setSpeciesDescription
+                }
+                placeholder="Describe the species..."
+                placeholderTextColor="#9AA7A0"
+                multiline
+                textAlignVertical="top"
+              />
+
+
+              {/* -------------------------------------------
+                  Species Overview
+              ------------------------------------------- */}
+
+              <Text style={styles.label}>
+                Overview
+              </Text>
+
+              <TextInput
+                style={styles.textArea}
+                value={
+                  speciesOverview
+                }
+                onChangeText={
+                  setSpeciesOverview
+                }
+                placeholder="General information about the species..."
+                placeholderTextColor="#9AA7A0"
+                multiline
+                textAlignVertical="top"
+              />
+
+
+              {/* -------------------------------------------
+                  Species Habitat
+              ------------------------------------------- */}
+
+              <Text style={styles.label}>
+                Habitat
+              </Text>
+
+              <TextInput
+                style={styles.textArea}
+                value={
+                  speciesHabitat
+                }
+                onChangeText={
+                  setSpeciesHabitat
+                }
+                placeholder="Describe the natural habitat..."
+                placeholderTextColor="#9AA7A0"
+                multiline
+                textAlignVertical="top"
+              />
+
+
+              {/* -------------------------------------------
+                  Species Significance
+              ------------------------------------------- */}
+
+              <Text style={styles.label}>
+                Significance
+              </Text>
+
+              <TextInput
+                style={styles.textArea}
+                value={
+                  speciesSignificance
+                }
+                onChangeText={
+                  setSpeciesSignificance
+                }
+                placeholder="Why is this species important?"
+                placeholderTextColor="#9AA7A0"
+                multiline
+                textAlignVertical="top"
+              />
+
+
+              {/* -------------------------------------------
+                  Species Characteristics
+              ------------------------------------------- */}
+
+              <Text style={styles.label}>
+                Characteristics
+              </Text>
+
+              <Text
+                style={styles.helperText}
+              >
+                Enter one characteristic per line.
+              </Text>
+
+              <TextInput
+                style={styles.textArea}
+                value={
+                  speciesCharacteristics
+                }
+                onChangeText={
+                  setSpeciesCharacteristics
+                }
+                placeholder={
+                  "Large leaves\nClimbing stem\nCarnivorous"
+                }
+                placeholderTextColor="#9AA7A0"
+                multiline
+                textAlignVertical="top"
+              />
+
+
+              {/* -------------------------------------------
+                  SPECIES APPROVAL INFO
+              ------------------------------------------- */}
 
               <View
-                key={`${photo}-${index}`}
+                style={styles.approvalInfo}
+              >
+
+                <Text
+                  style={
+                    styles.approvalTitle
+                  }
+                >
+                  Species Approval Required
+                </Text>
+
+                <Text
+                  style={
+                    styles.approvalText
+                  }
+                >
+                  This species request will be submitted
+                  together with the plant record. It will
+                  remain pending until an administrator
+                  reviews and approves it.
+                </Text>
+
+              </View>
+
+
+              {/* -------------------------------------------
+                  ADD SPECIES REQUEST
+              ------------------------------------------- */}
+
+              <TouchableOpacity
                 style={
-                  styles.photoWrapper
+                  styles.useSpeciesButton
+                }
+                onPress={
+                  handleAddSpeciesRequest
+                }
+                activeOpacity={0.8}
+              >
+
+                <Text
+                  style={
+                    styles.useSpeciesButtonText
+                  }
+                >
+                  Add Species Request
+                </Text>
+
+              </TouchableOpacity>
+
+            </View>
+
+          )}
+
+
+          {/* =================================================
+              SPECIES REQUEST SUMMARY
+          ================================================= */}
+
+          {speciesRequestAdded && (
+
+            <View
+              style={
+                styles.pendingSpeciesCard
+              }
+            >
+
+              <View
+                style={
+                  styles.pendingSpeciesHeader
                 }
               >
 
-                <Image
-                  source={{
-                    uri: photo,
-                  }}
+                <Text
                   style={
-                    styles.photoPreview
+                    styles.pendingSpeciesTitle
                   }
-                />
+                >
+                  New Species Request
+                </Text>
 
-
-                <TouchableOpacity
+                <View
                   style={
-                    styles.removePhotoButton
-                  }
-                  onPress={() =>
-                    handleRemovePhoto(
-                      index
-                    )
+                    styles.pendingBadge
                   }
                 >
 
                   <Text
                     style={
-                      styles.removePhotoText
+                      styles.pendingBadgeText
                     }
                   >
-                    ×
+                    Pending
+                  </Text>
+
+                </View>
+
+              </View>
+
+
+              <Text
+                style={
+                  styles.pendingSpeciesName
+                }
+              >
+                {speciesCommonName}
+              </Text>
+
+
+              <Text
+                style={
+                  styles.pendingSpeciesScientific
+                }
+              >
+                {speciesScientificName}
+              </Text>
+
+
+              <Text
+                style={
+                  styles.pendingSpeciesText
+                }
+              >
+                This species request will be submitted
+                together with the plant record.
+              </Text>
+
+
+              <View
+                style={
+                  styles.speciesActionRow
+                }
+              >
+
+                <TouchableOpacity
+                  style={
+                    styles.editSpeciesButton
+                  }
+                  onPress={
+                    handleEditSpeciesRequest
+                  }
+                  activeOpacity={0.8}
+                >
+
+                  <Text
+                    style={
+                      styles.editSpeciesText
+                    }
+                  >
+                    Edit
+                  </Text>
+
+                </TouchableOpacity>
+
+
+                <TouchableOpacity
+                  style={
+                    styles.removeSpeciesButton
+                  }
+                  onPress={
+                    handleRemoveSpeciesRequest
+                  }
+                  activeOpacity={0.8}
+                >
+
+                  <Text
+                    style={
+                      styles.removeSpeciesText
+                    }
+                  >
+                    Remove
                   </Text>
 
                 </TouchableOpacity>
 
               </View>
 
-            )
+            </View>
+
           )}
 
-        </ScrollView>
-
-      )}
+        </View>
 
 
-      {/* =================================================
-          BOTANIST
-          ================================================= */}
+        {/* =================================================
+            ADDITIONAL PLANT INFORMATION
+        ================================================= */}
 
-      <View
-        style={
-          styles.botanistInfo
-        }
-      >
+        <View style={styles.card}>
 
-        <Text
+          <Text
+            style={styles.sectionTitle}
+          >
+            Additional Information
+          </Text>
+
+
+          {/* Height */}
+
+          <Text style={styles.label}>
+            Height
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={height}
+            onChangeText={
+              setHeight
+            }
+            placeholder="e.g. 80 cm"
+            placeholderTextColor="#9AA7A0"
+          />
+
+
+          {/* Description */}
+
+          <Text style={styles.label}>
+            Description
+          </Text>
+
+          <TextInput
+            style={styles.textArea}
+            value={description}
+            onChangeText={
+              setDescription
+            }
+            placeholder="Describe this plant..."
+            placeholderTextColor="#9AA7A0"
+            multiline
+            textAlignVertical="top"
+          />
+
+
+          {/* Overview */}
+
+          <Text style={styles.label}>
+            Overview
+          </Text>
+
+          <TextInput
+            style={styles.textArea}
+            value={overview}
+            onChangeText={
+              setOverview
+            }
+            placeholder="General information..."
+            placeholderTextColor="#9AA7A0"
+            multiline
+            textAlignVertical="top"
+          />
+
+
+          {/* Habitat */}
+
+          <Text style={styles.label}>
+            Habitat
+          </Text>
+
+          <TextInput
+            style={styles.textArea}
+            value={habitat}
+            onChangeText={
+              setHabitat
+            }
+            placeholder="Describe the habitat..."
+            placeholderTextColor="#9AA7A0"
+            multiline
+            textAlignVertical="top"
+          />
+
+
+          {/* Significance */}
+
+          <Text style={styles.label}>
+            Significance
+          </Text>
+
+          <TextInput
+            style={styles.textArea}
+            value={significance}
+            onChangeText={
+              setSignificance
+            }
+            placeholder="Why is this plant important?"
+            placeholderTextColor="#9AA7A0"
+            multiline
+            textAlignVertical="top"
+          />
+
+
+          {/* Characteristics */}
+
+          <Text style={styles.label}>
+            Characteristics
+          </Text>
+
+          <Text
+            style={styles.helperText}
+          >
+            Enter one characteristic per line.
+          </Text>
+
+          <TextInput
+            style={styles.textArea}
+            value={characteristics}
+            onChangeText={
+              setCharacteristics
+            }
+            placeholder={
+              "Large leaves\nClimbing stem\nCarnivorous"
+            }
+            placeholderTextColor="#9AA7A0"
+            multiline
+            textAlignVertical="top"
+          />
+
+        </View>
+
+
+        {/* =================================================
+            LOCATION
+        ================================================= */}
+
+        <View style={styles.card}>
+
+          <Text
+            style={styles.sectionTitle}
+          >
+            Plant Location
+          </Text>
+
+
+          <Text
+            style={styles.sectionDescription}
+          >
+            Use your current GPS location to record
+            where this plant was found.
+          </Text>
+
+
+          {/* Latitude */}
+
+          <Text style={styles.label}>
+            Latitude *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={latitude}
+            onChangeText={
+              setLatitude
+            }
+            placeholder="e.g. 3.812345"
+            placeholderTextColor="#9AA7A0"
+            keyboardType="numeric"
+          />
+
+
+          {/* Longitude */}
+
+          <Text style={styles.label}>
+            Longitude *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={longitude}
+            onChangeText={
+              setLongitude
+            }
+            placeholder="e.g. 113.812345"
+            placeholderTextColor="#9AA7A0"
+            keyboardType="numeric"
+          />
+
+
+          <TouchableOpacity
+            style={
+              styles.locationButton
+            }
+            onPress={
+              handleGetLocation
+            }
+            disabled={
+              loadingLocation
+            }
+            activeOpacity={0.8}
+          >
+
+            {loadingLocation ? (
+
+              <ActivityIndicator
+                color="#FFFFFF"
+              />
+
+            ) : (
+
+              <Text
+                style={
+                  styles.locationButtonText
+                }
+              >
+                📍 Get Current Location
+              </Text>
+
+            )}
+
+          </TouchableOpacity>
+
+        </View>
+
+
+        {/* =================================================
+            PHOTOS
+        ================================================= */}
+
+        <View style={styles.card}>
+
+          <Text
+            style={styles.sectionTitle}
+          >
+            Plant Photos
+          </Text>
+
+
+          <Text
+            style={styles.sectionDescription}
+          >
+            Add photos of the plant for identification
+            and documentation.
+          </Text>
+
+
+          <View
+            style={styles.photoButtonRow}
+          >
+
+            <TouchableOpacity
+              style={styles.photoButton}
+              onPress={
+                handleTakePhoto
+              }
+              activeOpacity={0.8}
+            >
+
+              <Text
+                style={
+                  styles.photoButtonText
+                }
+              >
+                📷 Camera
+              </Text>
+
+            </TouchableOpacity>
+
+
+            <TouchableOpacity
+              style={styles.photoButton}
+              onPress={
+                handlePickPhoto
+              }
+              activeOpacity={0.8}
+            >
+
+              <Text
+                style={
+                  styles.photoButtonText
+                }
+              >
+                🖼 Gallery
+              </Text>
+
+            </TouchableOpacity>
+
+          </View>
+
+
+          {photos.length > 0 && (
+
+            <View
+              style={styles.photoList}
+            >
+
+              {photos.map(
+                (photo, index) => (
+
+                  <View
+                    key={`${photo}-${index}`}
+                    style={
+                      styles.photoItem
+                    }
+                  >
+
+                    <Text
+                      style={
+                        styles.photoName
+                      }
+                      numberOfLines={1}
+                    >
+                      Photo {index + 1}
+                    </Text>
+
+
+                    <TouchableOpacity
+                      onPress={() =>
+                        handleRemovePhoto(
+                          index
+                        )
+                      }
+                    >
+
+                      <Text
+                        style={
+                          styles.removePhotoText
+                        }
+                      >
+                        Remove
+                      </Text>
+
+                    </TouchableOpacity>
+
+                  </View>
+
+                )
+              )}
+
+            </View>
+
+          )}
+
+        </View>
+
+
+        {/* =================================================
+            QR CODE
+        ================================================= */}
+
+        <View style={styles.card}>
+
+          <Text
+            style={styles.sectionTitle}
+          >
+            QR Code
+          </Text>
+
+
+          <Text
+            style={styles.sectionDescription}
+          >
+            Select an available QR code for this plant.
+          </Text>
+
+
+          <TouchableOpacity
+            style={
+              styles.qrSelector
+            }
+            onPress={() =>
+              setShowQRDropdown(
+                !showQRDropdown
+              )
+            }
+            activeOpacity={0.8}
+          >
+
+            <Text
+              style={
+                selectedQRCode
+                  ? styles.qrSelectedText
+                  : styles.qrPlaceholder
+              }
+            >
+              {selectedQRCode ||
+                "Select QR Code"}
+            </Text>
+
+
+            <Text
+              style={
+                styles.dropdownArrow
+              }
+            >
+              {showQRDropdown
+                ? "▲"
+                : "▼"}
+            </Text>
+
+          </TouchableOpacity>
+
+
+          {showQRDropdown && (
+
+            <View
+              style={
+                styles.qrDropdown
+              }
+            >
+
+              {availableQRCodes.length === 0 ? (
+
+                <Text
+                  style={
+                    styles.noQRText
+                  }
+                >
+                  No available QR codes.
+                </Text>
+
+              ) : (
+
+                availableQRCodes.map(
+                  (qr) => (
+
+                    <TouchableOpacity
+                      key={qr.id}
+                      style={
+                        styles.qrOption
+                      }
+                      onPress={() => {
+
+                        setSelectedQRCode(
+                          qr.id
+                        );
+
+                        setShowQRDropdown(
+                          false
+                        );
+
+                      }}
+                    >
+
+                      <Text
+                        style={
+                          styles.qrOptionText
+                        }
+                      >
+                        {qr.id}
+                      </Text>
+
+
+                      <Text
+                        style={
+                          styles.qrAvailableText
+                        }
+                      >
+                        Available
+                      </Text>
+
+                    </TouchableOpacity>
+
+                  )
+                )
+
+              )}
+
+            </View>
+
+          )}
+
+        </View>
+
+
+        {/* =================================================
+            FINAL APPROVAL INFORMATION
+        ================================================= */}
+
+        <View
           style={
-            styles.botanistLabel
+            styles.finalApprovalCard
           }
         >
-          Submitted by
-        </Text>
 
-        <Text
+          <Text
+            style={
+              styles.finalApprovalTitle
+            }
+          >
+            Approval Required
+          </Text>
+
+
+          <Text
+            style={
+              styles.finalApprovalText
+            }
+          >
+            This plant record will be submitted
+            for administrator approval.
+          </Text>
+
+
+          {speciesRequestAdded && (
+
+            <Text
+              style={
+                styles.finalApprovalText
+              }
+            >
+              Your new species request will also be
+              submitted together with this plant record
+              and will remain pending until approved.
+            </Text>
+
+          )}
+
+        </View>
+
+
+        {/* =================================================
+            FINAL SUBMIT
+        ================================================= */}
+
+        <TouchableOpacity
           style={
-            styles.botanistName
+            styles.submitButton
           }
+          onPress={
+            handleSubmitPlant
+          }
+          activeOpacity={0.8}
         >
-          {botanist?.name ||
-            "Unknown Botanist"}
-        </Text>
 
-      </View>
+          <Text
+            style={
+              styles.submitButtonText
+            }
+          >
+            Submit Plant Record
+          </Text>
+
+        </TouchableOpacity>
 
 
-      {/* =================================================
-          SAVE
-          ================================================= */}
+        {/* =================================================
+            CANCEL
+        ================================================= */}
 
-      <TouchableOpacity
-        style={
-          styles.saveButton
-        }
-        onPress={
-          handleSavePlant
-        }
-        activeOpacity={0.8}
-      >
-
-        <Text
+        <TouchableOpacity
           style={
-            styles.saveButtonText
+            styles.cancelButton
           }
-        >
-          Submit Plant Record
-        </Text>
-
-      </TouchableOpacity>
-
-
-      {/* CANCEL */}
-
-      <TouchableOpacity
-        style={
-          styles.cancelButton
-        }
-        onPress={() =>
-          navigation.goBack()
-        }
-        activeOpacity={0.8}
-      >
-
-        <Text
-          style={
-            styles.cancelButtonText
+          onPress={
+            handleCancel
           }
+          activeOpacity={0.8}
         >
-          Cancel
-        </Text>
 
-      </TouchableOpacity>
+          <Text
+            style={
+              styles.cancelButtonText
+            }
+          >
+            Cancel
+          </Text>
 
-    </ScrollView>
+        </TouchableOpacity>
+
+
+      </ScrollView>
+
+    </View>
   );
 }
 
@@ -1474,386 +2304,654 @@ export default function AddPlantScreen({
 // STYLES
 // =====================================================
 
-const styles =
-  StyleSheet.create({
-
-    container: {
-      flex: 1,
-      backgroundColor: "#F7FBF4",
-    },
-
-
-    contentContainer: {
-      padding: 20,
-      paddingTop: 50,
-      paddingBottom: 40,
-    },
-
-
-    title: {
-      fontSize: 26,
-      fontWeight: "700",
-      color: "#234B3A",
-    },
-
-
-    subtitle: {
-      marginTop: 5,
-      marginBottom: 25,
-      fontSize: 14,
-      color: "#6D7F75",
-    },
-
-
-    // -------------------------------------------------
-    // SECTION
-    // -------------------------------------------------
-
-    sectionTitle: {
-      fontSize: 18,
-      fontWeight: "700",
-      color: "#234B3A",
-      marginTop: 20,
-      marginBottom: 12,
-    },
-
-
-    label: {
-      fontSize: 13,
-      fontWeight: "600",
-      color: "#365548",
-      marginBottom: 6,
-      marginTop: 10,
-    },
-
-    categoryContainer: {
-  flexDirection: "row",
-  flexWrap: "wrap",
-  gap: 10,
-},
-
-categoryOption: {
-  paddingVertical: 10,
-  paddingHorizontal: 16,
-  borderRadius: 10,
-  backgroundColor: "#FFFFFF",
-  borderWidth: 1,
-  borderColor: "#DCE8D6",
-},
-
-categoryOptionSelected: {
-  backgroundColor: "#468585",
-  borderColor: "#468585",
-},
-
-categoryOptionText: {
-  fontSize: 13,
-  fontWeight: "600",
-  color: "#468585",
-},
-
-categoryOptionTextSelected: {
-  color: "#FFFFFF",
-},
-
-
-    helperText: {
-      fontSize: 11,
-      color: "#7A8981",
-      marginBottom: 5,
-    },
-
-
-    // -------------------------------------------------
-    // INPUT
-    // -------------------------------------------------
-
-    input: {
-      height: 48,
-      backgroundColor: "#FFFFFF",
-      borderWidth: 1,
-      borderColor: "#DCE8D6",
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      fontSize: 14,
-      color: "#234B3A",
-    },
-
-
-    textArea: {
-      minHeight: 100,
-      backgroundColor: "#FFFFFF",
-      borderWidth: 1,
-      borderColor: "#DCE8D6",
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      fontSize: 14,
-      color: "#234B3A",
-    },
-
-
-    // -------------------------------------------------
-    // QR
-    // -------------------------------------------------
-
-    dropdown: {
-      minHeight: 50,
-      backgroundColor: "#FFFFFF",
-      borderWidth: 1,
-      borderColor: "#DCE8D6",
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-
+const styles = StyleSheet.create({
 
-    dropdownText: {
-      flex: 1,
-      fontSize: 14,
-      color: "#234B3A",
-    },
-
-
-    placeholder: {
-      color: "#9AA7A0",
-    },
-
-
-    dropdownArrow: {
-      fontSize: 12,
-      color: "#468585",
-      marginLeft: 10,
-    },
-
-
-    dropdownList: {
-      backgroundColor: "#FFFFFF",
-      borderWidth: 1,
-      borderColor: "#DCE8D6",
-      borderRadius: 12,
-      marginTop: 5,
-      overflow: "hidden",
-    },
-
-
-    dropdownItem: {
-      padding: 14,
-      borderBottomWidth: 1,
-      borderBottomColor: "#EDF2EA",
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-
-
-    dropdownItemText: {
-      fontSize: 14,
-      fontWeight: "600",
-      color: "#234B3A",
-    },
+  // ===================================================
+  // MAIN
+  // ===================================================
+
+  container: {
+    flex: 1,
+    backgroundColor: "#F5F9F3",
+  },
 
-
-    availableText: {
-      fontSize: 10,
-      fontWeight: "700",
-      color: "#398344",
-    },
-
-
-    noQRText: {
-      padding: 15,
-      fontSize: 13,
-      color: "#718078",
-    },
-
 
-    // -------------------------------------------------
-    // LOCATION
-    // -------------------------------------------------
-
-    locationButton: {
-      backgroundColor: "#50B498",
-      borderRadius: 12,
-      minHeight: 48,
-      alignItems: "center",
-      justifyContent: "center",
-      marginBottom: 12,
-    },
-
-
-    locationButtonText: {
-      color: "#FFFFFF",
-      fontSize: 14,
-      fontWeight: "700",
-    },
-
-
-    coordinatesRow: {
-      flexDirection: "row",
-      gap: 10,
-    },
-
-
-    coordinateBox: {
-      flex: 1,
-    },
-
-
-    coordinateLabel: {
-      fontSize: 11,
-      color: "#6D7F75",
-      marginBottom: 5,
-    },
-
-
-    coordinateInput: {
-      height: 45,
-      backgroundColor: "#FFFFFF",
-      borderWidth: 1,
-      borderColor: "#DCE8D6",
-      borderRadius: 10,
-      paddingHorizontal: 10,
-      color: "#234B3A",
-      fontSize: 13,
-    },
-
-
-    // -------------------------------------------------
-    // PHOTOS
-    // -------------------------------------------------
-
-    photoButtons: {
-      flexDirection: "row",
-      gap: 10,
-    },
-
-
-    photoButton: {
-      flex: 1,
-      minHeight: 48,
-      borderRadius: 12,
-      backgroundColor: "#E8F5E4",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-
-
-    photoButtonText: {
-      fontSize: 13,
-      fontWeight: "600",
-      color: "#468585",
-    },
-
-
-    photoPreviewContainer: {
-      marginTop: 14,
-    },
-
-
-    photoWrapper: {
-      width: 110,
-      height: 110,
-      marginRight: 10,
-      borderRadius: 12,
-      overflow: "hidden",
-      position: "relative",
-    },
-
-
-    photoPreview: {
-      width: "100%",
-      height: "100%",
-    },
-
-
-    removePhotoButton: {
-      position: "absolute",
-      top: 5,
-      right: 5,
-      width: 26,
-      height: 26,
-      borderRadius: 13,
-      backgroundColor: "rgba(0,0,0,0.6)",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-
-
-    removePhotoText: {
-      color: "#FFFFFF",
-      fontSize: 20,
-      lineHeight: 22,
-    },
-
-
-    // -------------------------------------------------
-    // BOTANIST
-    // -------------------------------------------------
-
-    botanistInfo: {
-      marginTop: 25,
-      padding: 15,
-      backgroundColor: "#E9F7E4",
-      borderRadius: 12,
-    },
-
-
-    botanistLabel: {
-      fontSize: 11,
-      color: "#6D7F75",
-    },
-
-
-    botanistName: {
-      marginTop: 4,
-      fontSize: 15,
-      fontWeight: "700",
-      color: "#234B3A",
-    },
-
-
-    // -------------------------------------------------
-    // SAVE
-    // -------------------------------------------------
-
-    saveButton: {
-      marginTop: 25,
-      minHeight: 52,
-      borderRadius: 14,
-      backgroundColor: "#468585",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-
-
-    saveButtonText: {
-      color: "#FFFFFF",
-      fontSize: 15,
-      fontWeight: "700",
-    },
-
-
-    // -------------------------------------------------
-    // CANCEL
-    // -------------------------------------------------
-
-    cancelButton: {
-      marginTop: 10,
-      minHeight: 48,
-      borderRadius: 14,
-      backgroundColor: "#E8EEE6",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-
-
-    cancelButtonText: {
-      color: "#468585",
-      fontSize: 14,
-      fontWeight: "600",
-    },
-
-  });
+  scrollView: {
+    flex: 1,
+  },
+
+
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 50,
+  },
+
+
+  // ===================================================
+  // HEADER
+  // ===================================================
+
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 55,
+    paddingBottom: 18,
+    backgroundColor: "#468585",
+  },
+
+
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.15)",
+    marginRight: 12,
+  },
+
+
+  backButtonText: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "500",
+  },
+
+
+  headerTextContainer: {
+    flex: 1,
+  },
+
+
+  headerTitle: {
+    color: "#FFFFFF",
+    fontSize: 21,
+    fontWeight: "700",
+  },
+
+
+  headerSubtitle: {
+    marginTop: 3,
+    color: "#E7F3EA",
+    fontSize: 12,
+  },
+
+
+  // ===================================================
+  // CARD
+  // ===================================================
+
+  card: {
+    marginBottom: 18,
+    padding: 18,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E0EADF",
+    elevation: 2,
+    shadowColor: "#234B3A",
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+  },
+
+
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#234B3A",
+    marginBottom: 6,
+  },
+
+
+  sectionDescription: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#6D7F75",
+    marginBottom: 12,
+  },
+
+
+  // ===================================================
+  // FORM
+  // ===================================================
+
+  label: {
+    marginTop: 15,
+    marginBottom: 7,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#234B3A",
+  },
+
+
+  input: {
+    minHeight: 48,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DCE8D6",
+    backgroundColor: "#FAFCF9",
+    color: "#234B3A",
+    fontSize: 14,
+  },
+
+
+  textArea: {
+    minHeight: 110,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DCE8D6",
+    backgroundColor: "#FAFCF9",
+    color: "#234B3A",
+    fontSize: 14,
+  },
+
+
+  helperText: {
+    marginTop: -2,
+    marginBottom: 7,
+    color: "#7C8A82",
+    fontSize: 11,
+  },
+
+
+  // ===================================================
+  // CATEGORY
+  // ===================================================
+
+  categoryContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+
+
+  categoryOption: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DCE8D6",
+  },
+
+
+  categoryOptionSelected: {
+    backgroundColor: "#468585",
+    borderColor: "#468585",
+  },
+
+
+  categoryOptionText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#468585",
+  },
+
+
+  categoryOptionTextSelected: {
+    color: "#FFFFFF",
+  },
+
+
+  // ===================================================
+  // SPECIES REQUEST
+  // ===================================================
+
+  speciesDivider: {
+    height: 1,
+    backgroundColor: "#E5ECE2",
+    marginTop: 22,
+    marginBottom: 18,
+  },
+
+
+  speciesQuestion: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#234B3A",
+  },
+
+
+  speciesQuestionDescription: {
+    marginTop: 5,
+    marginBottom: 12,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#6D7F75",
+  },
+
+
+  requestSpeciesButton: {
+    minHeight: 46,
+    paddingHorizontal: 15,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#468585",
+    backgroundColor: "#F2FAF0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+
+  requestSpeciesButtonText: {
+    color: "#468585",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+
+  speciesRequestCard: {
+    marginTop: 15,
+    padding: 18,
+    backgroundColor: "#F8FBF7",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#DCE8D6",
+  },
+
+
+  speciesRequestTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#234B3A",
+  },
+
+
+  speciesRequestSubtitle: {
+    marginTop: 5,
+    marginBottom: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#6D7F75",
+  },
+
+
+  approvalInfo: {
+    marginTop: 20,
+    padding: 14,
+    backgroundColor: "#E9F7E4",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D4EBD0",
+  },
+
+
+  approvalTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#234B3A",
+  },
+
+
+  approvalText: {
+    marginTop: 5,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#5F7067",
+  },
+
+
+  useSpeciesButton: {
+    marginTop: 15,
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: "#468585",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+
+  useSpeciesButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+
+  // ===================================================
+  // SPECIES REQUEST SUMMARY
+  // ===================================================
+
+  pendingSpeciesCard: {
+    marginTop: 15,
+    padding: 15,
+    backgroundColor: "#E9F7E4",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D4EBD0",
+  },
+
+
+  pendingSpeciesHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+
+  pendingSpeciesTitle: {
+    color: "#234B3A",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+
+  pendingBadge: {
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 20,
+    backgroundColor: "#FFF1C9",
+  },
+
+
+  pendingBadgeText: {
+    color: "#77612A",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+
+  pendingSpeciesName: {
+    marginTop: 12,
+    color: "#234B3A",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+
+  pendingSpeciesScientific: {
+    marginTop: 3,
+    color: "#6D7F75",
+    fontSize: 12,
+    fontStyle: "italic",
+  },
+
+
+  pendingSpeciesText: {
+    marginTop: 8,
+    color: "#5F7067",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+
+
+  speciesActionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+
+
+  editSpeciesButton: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#468585",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+
+  editSpeciesText: {
+    color: "#468585",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+
+  removeSpeciesButton: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 10,
+    backgroundColor: "#FFF0F0",
+    borderWidth: 1,
+    borderColor: "#E6BABA",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+
+  removeSpeciesText: {
+    color: "#C85C5C",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+
+  // ===================================================
+  // LOCATION
+  // ===================================================
+
+  locationButton: {
+    marginTop: 12,
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: "#50B498",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+
+  locationButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+
+  // ===================================================
+  // PHOTOS
+  // ===================================================
+
+  photoButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 5,
+  },
+
+
+  photoButton: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 12,
+    backgroundColor: "#EAF6E7",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#D5E8D1",
+  },
+
+
+  photoButtonText: {
+    color: "#468585",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+
+  photoList: {
+    marginTop: 15,
+  },
+
+
+  photoItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: "#F5F9F3",
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+
+
+  photoName: {
+    flex: 1,
+    marginRight: 10,
+    color: "#234B3A",
+    fontSize: 12,
+  },
+
+
+  removePhotoText: {
+    color: "#C85C5C",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+
+  // ===================================================
+  // QR CODE
+  // ===================================================
+
+  qrSelector: {
+    minHeight: 50,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DCE8D6",
+    backgroundColor: "#FAFCF9",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+
+  qrSelectedText: {
+    color: "#234B3A",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+
+  qrPlaceholder: {
+    color: "#9AA7A0",
+    fontSize: 14,
+  },
+
+
+  dropdownArrow: {
+    color: "#468585",
+    fontSize: 12,
+  },
+
+
+  qrDropdown: {
+    marginTop: 5,
+    borderWidth: 1,
+    borderColor: "#DCE8D6",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+
+
+  qrOption: {
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EDF2EA",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+
+  qrOptionText: {
+    color: "#234B3A",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+
+  qrAvailableText: {
+    color: "#50B498",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+
+
+  noQRText: {
+    padding: 15,
+    color: "#7C8A82",
+    fontSize: 12,
+  },
+
+
+  // ===================================================
+  // FINAL APPROVAL
+  // ===================================================
+
+  finalApprovalCard: {
+    marginBottom: 15,
+    padding: 15,
+    backgroundColor: "#FFF8E8",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#F0DFB1",
+  },
+
+
+  finalApprovalTitle: {
+    color: "#6E5A24",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+
+  finalApprovalText: {
+    marginTop: 5,
+    color: "#776B4C",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+
+
+  // ===================================================
+  // SUBMIT
+  // ===================================================
+
+  submitButton: {
+    minHeight: 52,
+    borderRadius: 14,
+    backgroundColor: "#468585",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+
+  submitButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+
+  // ===================================================
+  // CANCEL
+  // ===================================================
+
+  cancelButton: {
+    marginTop: 10,
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: "#E8EEE6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+
+  cancelButtonText: {
+    color: "#468585",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+});
