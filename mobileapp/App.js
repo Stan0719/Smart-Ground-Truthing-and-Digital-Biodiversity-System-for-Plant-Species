@@ -30,6 +30,8 @@ import PlantQRCodeScreen from "./screens/PlantQRCode";
 import AccountScreen from "./screens/Account";
 import FavouritePlantsScreen from "./screens/FavouritePlants";
 import ScanHistoryScreen from "./screens/ScanHistory";
+import SpeciesScreen from "./screens/Species";
+import SpeciesDetailScreen from "./screens/SpeciesDetail";
 
 
 const Tab = createBottomTabNavigator();
@@ -83,13 +85,27 @@ function PlantsStack() {
       />
 
       <Stack.Screen
+        name="SpeciesDetail"
+        component={SpeciesDetailScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+
+      <Stack.Screen
+        name="Species"
+        component={SpeciesScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+
+      <Stack.Screen
         name="PlantDetails"
         component={PlantDetailsScreen}
         options={{
           title: "Plant Details",
-
           headerTintColor: theme.dark,
-
           headerStyle: {
             backgroundColor: theme.light,
           },

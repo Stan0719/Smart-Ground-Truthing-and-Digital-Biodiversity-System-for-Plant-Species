@@ -1,16 +1,28 @@
 // mockData.js
 
+// =====================================================
+// SPECIES DATA
+// Same information as Vue plant.ts
+// =====================================================
+
+const commonsImage = (fileName) =>
+  `https://commons.wikimedia.org/wiki/Special:Redirect/file/${encodeURIComponent(
+    fileName
+  )}?width=1200`;
+
+
 export const plants = [
   {
-    id: "NIAH-PLANT-0001",
-
+    speciesId: "SP001",
     slug: "tropical-pitcher-plant",
-
     name: "Tropical Pitcher Plant",
-
     scientificName: "Nepenthes rafflesiana",
-
+    genus: "Nepenthes",
     category: "Climbers",
+    family: "Nepenthaceae",
+    localName: "Periuk kera",
+    conservationStatus: "Not evaluated",
+    sensitivityLevel: "Sensitive",
 
     description:
       "A remarkable carnivorous plant whose colourful pitchers trap insects in nutrient-poor soils.",
@@ -19,7 +31,16 @@ export const plants = [
       "The tropical pitcher plant is one of Borneo’s most distinctive carnivorous plants. Its leaves form specialised, fluid-filled pitchers that attract and capture small insects, helping the plant obtain nutrients that are scarce in the surrounding soil.",
 
     habitat:
-      "It grows in humid lowland forest, heath forest, and open areas with acidic, nutrient-poor soil. Around Niah, it may be found where sunlight reaches damp vegetation near the forest edge.",
+      "It grows in humid lowland forest, heath forest, and open areas with acidic, nutrient-poor soil. Around Niah, it may occur where sunlight reaches damp vegetation near the forest edge.",
+
+    distribution:
+      "Native to Borneo, Peninsular Malaysia, Singapore, and Sumatra in suitable humid, nutrient-poor habitats.",
+
+    ecologicalRole:
+      "Its pitchers capture insects and form tiny aquatic habitats for specialised organisms, contributing to the rainforest food web.",
+
+    culturalSignificance:
+      "Pitcher plants are widely recognised in Borneo as symbols of the island’s extraordinary plant diversity.",
 
     characteristics: [
       "Hanging, vase-shaped pitchers",
@@ -31,41 +52,47 @@ export const plants = [
     significance:
       "Pitcher plants are an important example of rainforest adaptation and support small ecological communities inside their pitchers.",
 
-    // GPS
-    latitude: 4.392529,
-    longitude: 113.991234,
+    image: commonsImage("Nepenthes rafflesiana.jpg"),
 
-    // Botanist
-    botanist: "Alice",
+    images: [
+      {
+        path: commonsImage("Nepenthes rafflesiana.jpg"),
+        caption: "Mature pitcher",
+      },
+      {
+        path: commonsImage(
+          "Raffles' Pitcher Plant (Nepenthes rafflesiana) (15589450910).jpg"
+        ),
+        caption: "Pitcher in natural habitat",
+      },
+      {
+        path: commonsImage(
+          "Nepenthes rafflesiana with Dischidia.jpg"
+        ),
+        caption: "Climbing growth habit",
+      },
+    ],
 
-    // Approval status
-    status: "approved",
-
-    // Sync status
-    syncStatus: "Synced",
-
-    // QR Code
-    qrGenerated: false,
-    qrValue: null,
-
-    // Photo
-    photo: null,
-
-    // Date
-    createdAt: "2026-10-05T10:00:00.000Z",
+    niahDistribution: {
+      knownOccurrences: 12,
+      zones: ["A", "B", "C"],
+      publicNote:
+        "Public locations are shown by general monitoring zone to protect sensitive occurrences.",
+    },
   },
 
 
   {
-    id: "NIAH-PLANT-0002",
-
+    speciesId: "SP002",
     slug: "wild-ginger",
-
     name: "Wild Ginger",
-
     scientificName: "Etlingera elatior",
-
+    genus: "Etlingera",
     category: "Flowers",
+    family: "Zingiberaceae",
+    localName: "Kantan",
+    conservationStatus: "Not evaluated",
+    sensitivityLevel: "Standard",
 
     description:
       "A striking rainforest herb recognised by its tall stems and waxy pink flower heads.",
@@ -76,6 +103,15 @@ export const plants = [
     habitat:
       "This species thrives in warm, wet forest margins, stream banks, and disturbed rainforest areas where the soil remains rich and moist.",
 
+    distribution:
+      "Occurs across tropical Southeast Asia in moist lowland habitats, forest margins, and stream banks.",
+
+    ecologicalRole:
+      "Its flowers provide nectar and pollen for insects, while dense growth offers cover within moist forest-edge habitats.",
+
+    culturalSignificance:
+      "The aromatic flower buds and young shoots of torch ginger are used in regional cuisine and traditional practices.",
+
     characteristics: [
       "Large pink or red flower heads",
       "Tall leafy stems",
@@ -84,36 +120,47 @@ export const plants = [
     ],
 
     significance:
-      "Wild ginger provides nectar and shelter for rainforest insects, while related ginger species have long been valued in local food and cultural traditions.",
+      "Wild ginger provides nectar and shelter for rainforest insects and has long been valued in local food and cultural traditions.",
 
-    latitude: 4.392536,
-    longitude: 113.991228,
+    image: commonsImage("Etlingera elatior-0001 09.jpg"),
 
-    botanist: "Bob",
+    images: [
+      {
+        path: commonsImage("Etlingera elatior-0001 09.jpg"),
+        caption: "Flower head",
+      },
+      {
+        path: commonsImage(
+          "Etlingera elatior ( black background ).jpg"
+        ),
+        caption: "Flower detail",
+      },
+      {
+        path: commonsImage("MCBG Etlingera elatior 02.JPG"),
+        caption: "Leaf and stem structure",
+      },
+    ],
 
-    status: "approved",
-
-    syncStatus: "Synced",
-
-    qrGenerated: false,
-    qrValue: null,
-
-    photo: null,
-
-    createdAt: "2026-10-05T10:00:00.000Z",
+    niahDistribution: {
+      knownOccurrences: 8,
+      zones: ["A", "B"],
+      publicNote:
+        "Occurrences are summarised from approved prototype records.",
+    },
   },
 
 
   {
-    id: "NIAH-PLANT-0003",
-
+    speciesId: "SP003",
     slug: "tree-fern",
-
     name: "Tree Fern",
-
     scientificName: "Cyathea contaminans",
-
+    genus: "Cyathea",
     category: "Ferns",
+    family: "Cyatheaceae",
+    localName: "Paku tiang",
+    conservationStatus: "Not evaluated",
+    sensitivityLevel: "Standard",
 
     description:
       "An ancient forest plant with an elegant crown of arching fronds above a slender trunk.",
@@ -124,6 +171,15 @@ export const plants = [
     habitat:
       "They favour humid, shaded places with consistently moist soil, including forest slopes, gullies, and areas close to streams.",
 
+    distribution:
+      "Found in humid forests across parts of Southeast Asia, particularly on moist slopes, gullies, and forest edges.",
+
+    ecologicalRole:
+      "Tree ferns help maintain humid understory conditions and provide surfaces for mosses, epiphytes, and small forest organisms.",
+
+    culturalSignificance:
+      "Tree ferns are familiar elements of Southeast Asian forest landscapes and are valued for their distinctive ancient form.",
+
     characteristics: [
       "Tall fibrous trunk",
       "Broad arching fronds",
@@ -132,36 +188,51 @@ export const plants = [
     ],
 
     significance:
-      "Their trunks and fronds create shelter for insects, mosses, and epiphytic plants while contributing to the cool, moist forest understory.",
+      "Their trunks and fronds create shelter for insects, mosses, and epiphytic plants within the cool forest understory.",
 
-    latitude: 4.392546,
-    longitude: 113.991240,
+    image: commonsImage(
+      "Cyathea contaminans var persquamulifera Alderw nmnhbotany 2148795 NMNH-00139202-000001.jpg"
+    ),
 
-    botanist: "Alice",
+    images: [
+      {
+        path: commonsImage(
+          "Cyathea contaminans var persquamulifera Alderw nmnhbotany 2148795 NMNH-00139202-000001.jpg"
+        ),
+        caption: "Tree fern specimen",
+      },
+      {
+        path: commonsImage("Cyathea.jpg"),
+        caption: "Tree fern botanical form",
+      },
+      {
+        path: commonsImage(
+          "Cyathea contaminans var persquamulifera Alderw nmnhbotany 2148795 NMNH-00139202-000001.jpg"
+        ),
+        caption: "Frond detail",
+      },
+    ],
 
-    status: "approved",
-
-    syncStatus: "Synced",
-
-    qrGenerated: false,
-    qrValue: null,
-
-    photo: null,
-
-    createdAt: "2026-10-05T10:00:00.000Z",
+    niahDistribution: {
+      knownOccurrences: 6,
+      zones: ["B", "C"],
+      publicNote:
+        "Occurrences are displayed at zone level only.",
+    },
   },
 
 
   {
-    id: "NIAH-PLANT-0004",
-
+    speciesId: "SP004",
     slug: "borneo-orchid",
-
     name: "Borneo Orchid",
-
     scientificName: "Phalaenopsis bellina",
-
+    genus: "Phalaenopsis",
     category: "Flowers",
+    family: "Orchidaceae",
+    localName: "Orkid Borneo",
+    conservationStatus: "Not evaluated",
+    sensitivityLevel: "Sensitive",
 
     description:
       "A fragrant native orchid with delicate pale petals and vivid magenta markings.",
@@ -171,6 +242,15 @@ export const plants = [
 
     habitat:
       "It prefers warm, humid lowland rainforest with filtered light and good air circulation, often growing on mossy branches above the forest floor.",
+
+    distribution:
+      "Native to Borneo, where it grows as an epiphyte in warm, humid lowland forest.",
+
+    ecologicalRole:
+      "As an epiphyte, this orchid adds diversity to the forest canopy and depends on specialised pollinators and healthy host trees.",
+
+    culturalSignificance:
+      "Native orchids are valued for their beauty and are important ambassadors for responsible plant conservation.",
 
     characteristics: [
       "Cream-green petals",
@@ -182,34 +262,51 @@ export const plants = [
     significance:
       "Borneo’s orchids demonstrate the extraordinary specialisation of rainforest plants and the importance of conserving mature forest habitat.",
 
-    latitude: 4.392556,
-    longitude: 113.991250,
+    image: commonsImage(
+      "Phalaenopsis bellina Orchi 201.jpg"
+    ),
 
-    botanist: "Bob",
+    images: [
+      {
+        path: commonsImage(
+          "Phalaenopsis bellina Orchi 201.jpg"
+        ),
+        caption: "Flower detail",
+      },
+      {
+        path: commonsImage(
+          "Phalaenopsis bellina (Rchb.f.) Christenson, Brittonia 47 58 (1995) (48320280212).jpg"
+        ),
+        caption: "Flower and leaves",
+      },
+      {
+        path: commonsImage(
+          "Phalaenopsis bellina '1901' (Rchb.f.) Christenson- Brittonia 47- 58 (1995). 20210706 210900.jpg"
+        ),
+        caption: "Mature flowering plant",
+      },
+    ],
 
-    status: "approved",
-
-    syncStatus: "Synced",
-
-    qrGenerated: false,
-    qrValue: null,
-
-    photo: null,
-
-    createdAt: "2026-10-05T10:00:00.000Z",
+    niahDistribution: {
+      knownOccurrences: 5,
+      zones: ["A", "C"],
+      publicNote:
+        "Exact locations are withheld to protect sensitive orchid occurrences.",
+    },
   },
 
 
   {
-    id: "NIAH-PLANT-0005",
-
+    speciesId: "SP005",
     slug: "rattan-palm",
-
     name: "Rattan Palm",
-
     scientificName: "Calamus manan",
-
+    genus: "Calamus",
     category: "Climbers",
+    family: "Arecaceae",
+    localName: "Rotan manau",
+    conservationStatus: "Not evaluated",
+    sensitivityLevel: "Standard",
 
     description:
       "A climbing palm that winds through the rainforest canopy using long, hooked stems.",
@@ -220,6 +317,15 @@ export const plants = [
     habitat:
       "It occurs in tropical lowland and hill rainforest, especially where established trees provide support for its climbing stems.",
 
+    distribution:
+      "Occurs in tropical forests of parts of Southeast Asia, climbing into surrounding vegetation in lowland and hill forest.",
+
+    ecologicalRole:
+      "Climbing rattan contributes to the structure of the forest understory and its fruits can provide food for wildlife.",
+
+    culturalSignificance:
+      "Its strong flexible cane has long been used for furniture, basketry, binding, and traditional handicrafts.",
+
     characteristics: [
       "Long flexible cane",
       "Hooked climbing structures",
@@ -228,36 +334,45 @@ export const plants = [
     ],
 
     significance:
-      "Rattan is ecologically valuable and has also been used for generations as a durable material for weaving, furniture, and handicrafts.",
+      "Rattan is ecologically valuable and has also been used for generations as a durable material for weaving and handicrafts.",
 
-    latitude: 4.392566,
-    longitude: 113.991260,
+    image: commonsImage("Buah Manau.JPG"),
 
-    botanist: "Alice",
+    images: [
+      {
+        path: commonsImage("Buah Manau.JPG"),
+        caption: "Rattan fruit and foliage",
+      },
+      {
+        path: commonsImage("Buah Manau.JPG"),
+        caption: "Climbing palm habit",
+      },
+      {
+        path: commonsImage("Buah Manau.JPG"),
+        caption: "Rattan identification detail",
+      },
+    ],
 
-    status: "approved",
-
-    syncStatus: "Synced",
-
-    qrGenerated: false,
-    qrValue: null,
-
-    photo: null,
-
-    createdAt: "2026-10-05T10:00:00.000Z",
+    niahDistribution: {
+      knownOccurrences: 9,
+      zones: ["A", "B", "C"],
+      publicNote:
+        "Occurrences are summarised by monitoring zone.",
+    },
   },
 
 
   {
-    id: "NIAH-PLANT-0006",
-
+    speciesId: "SP006",
     slug: "forest-shrub",
-
     name: "Forest Shrub",
-
     scientificName: "Syzygium grande",
-
+    genus: "Syzygium",
     category: "Trees",
+    family: "Myrtaceae",
+    localName: "Kelat",
+    conservationStatus: "Not evaluated",
+    sensitivityLevel: "Standard",
 
     description:
       "A tropical evergreen known for glossy leaves, copper-red new growth, and pale blossoms.",
@@ -267,6 +382,15 @@ export const plants = [
 
     habitat:
       "It grows in tropical forest and coastal environments, adapting well to warm temperatures, high rainfall, and bright forest openings.",
+
+    distribution:
+      "Occurs in tropical forest and coastal habitats in parts of Southeast Asia, including Borneo.",
+
+    ecologicalRole:
+      "Its flowers support pollinating insects and its fleshy fruits provide food for birds and other forest animals.",
+
+    culturalSignificance:
+      "Syzygium species are familiar components of regional forests and some relatives are valued for timber, shade, food, or traditional uses.",
 
     characteristics: [
       "Glossy evergreen foliage",
@@ -278,26 +402,391 @@ export const plants = [
     significance:
       "Its flowers and fruits provide food for insects, birds, and other forest wildlife, strengthening the rainforest food web.",
 
-    latitude: 4.392566,
-    longitude: 113.991260,
+    image: commonsImage("Syzygium grande bloom.jpg"),
 
-    botanist: "Bob",
+    images: [
+      {
+        path: commonsImage("Syzygium grande bloom.jpg"),
+        caption: "Flower clusters",
+      },
+      {
+        path: commonsImage("Fruits of Syzygium grande.jpg"),
+        caption: "Fruits and mature foliage",
+      },
+      {
+        path: commonsImage("Syzygium grande bloom.jpg"),
+        caption: "Mature flowering canopy",
+      },
+    ],
 
-    status: "approved",
-
-    syncStatus: "Synced",
-
-    qrGenerated: false,
-    qrValue: null,
-
-    photo: null,
-
-    createdAt: "2026-10-05T10:00:00.000Z",
+    niahDistribution: {
+      knownOccurrences: 7,
+      zones: ["B", "C"],
+      publicNote:
+        "Occurrences are based on approved prototype records and shown at zone level.",
+    },
   },
 ];
 
 
-// Botanists
+// =====================================================
+// PLANT RECORD IMAGES
+// Same logic as Vue plantRecords.ts
+// =====================================================
+
+const prototypeImages = {
+  "tropical-pitcher-plant": [
+    commonsImage("Nepenthes rafflesiana.jpg"),
+    commonsImage(
+      "Raffles' Pitcher Plant (Nepenthes rafflesiana) (15589450910).jpg"
+    ),
+  ],
+
+  "wild-ginger": [
+    commonsImage("Etlingera elatior-0001 09.jpg"),
+    commonsImage("MCBG Etlingera elatior 02.JPG"),
+  ],
+
+  "tree-fern": [
+    commonsImage(
+      "Cyathea contaminans var persquamulifera Alderw nmnhbotany 2148795 NMNH-00139202-000001.jpg"
+    ),
+    commonsImage("Cyathea.jpg"),
+  ],
+
+  "borneo-orchid": [
+    commonsImage("Phalaenopsis bellina Orchi 201.jpg"),
+    commonsImage(
+      "Phalaenopsis bellina (Rchb.f.) Christenson, Brittonia 47 58 (1995) (48320280212).jpg"
+    ),
+  ],
+
+  "rattan-palm": [
+    commonsImage("Buah Manau.JPG"),
+  ],
+
+  "forest-shrub": [
+    commonsImage("Syzygium grande bloom.jpg"),
+    commonsImage("Fruits of Syzygium grande.jpg"),
+  ],
+};
+
+
+// =====================================================
+// RECORD CREATOR
+// Same logic as Vue record()
+// =====================================================
+
+const record = (
+  plantId,
+  speciesSlug,
+  speciesId,
+  commonName,
+  speciesName,
+  zone,
+  heightCm,
+  healthStatus,
+  lifeStage,
+  offset
+) => {
+  const speciesImages =
+    prototypeImages[speciesSlug] || [];
+
+  const morphology =
+    `${lifeStage} specimen with field characteristics consistent with ${speciesName}.`;
+
+  const approvedDate =
+    `2026-09-${String(12 + offset).padStart(2, "0")}`;
+
+  const latestDate =
+    `2026-10-${String(3 + offset).padStart(2, "0")}`;
+
+  return {
+    plantId,
+
+    speciesSlug,
+
+    speciesId,
+
+    speciesName,
+
+    commonName,
+
+    latestApproved: {
+      date: latestDate,
+      heightCm,
+      healthStatus,
+      lifeStage,
+      morphology,
+      notes:
+        "Verified during routine zone monitoring; no immediate intervention required.",
+    },
+
+    location: {
+      zone: `Zone ${zone}`,
+      latitude: 3.8162 + offset * 0.0017,
+      longitude: 113.7814 + offset * 0.0013,
+      altitudeM: 34 + offset * 3,
+      accuracyM: 4 + (offset % 3),
+    },
+
+    qr: {
+      code: `QR-${plantId
+        .slice(2)
+        .padStart(6, "0")}`,
+      status: "Active",
+    },
+
+    registeredBy:
+      offset % 2
+        ? "Botanist02"
+        : "Botanist01",
+
+    registeredAt:
+      `2026-08-${String(10 + offset).padStart(2, "0")}`,
+
+    images: [
+      {
+        path:
+          speciesImages[
+            offset % speciesImages.length
+          ],
+        caption: "Whole plant field record",
+      },
+      {
+        path:
+          speciesImages[
+            (offset + 1) %
+              speciesImages.length
+          ],
+        caption: "Identification detail",
+      },
+    ],
+
+    observations: [
+      {
+        observationId: `OBS-${plantId}-01`,
+        date: approvedDate,
+        recordedBy: "Botanist01",
+        status: "Approved",
+        heightCm: Math.max(heightCm - 5, 8),
+        healthStatus: "Healthy",
+        lifeStage,
+        morphology,
+        notes:
+          "Initial approved monitoring observation.",
+      },
+
+      {
+        observationId: `OBS-${plantId}-02`,
+        date: latestDate,
+        recordedBy: "Botanist02",
+        status: "Approved",
+        heightCm,
+        healthStatus,
+        lifeStage,
+        morphology,
+        notes:
+          "Verified during routine zone monitoring; no immediate intervention required.",
+      },
+
+      {
+        observationId: `OBS-${plantId}-03`,
+        date: "2026-10-30",
+        recordedBy: "Botanist01",
+        status: "Pending",
+        heightCm: heightCm + 2,
+        healthStatus,
+        lifeStage,
+        morphology,
+        notes:
+          "Awaiting officer verification; not used as the official latest record.",
+      },
+    ],
+  };
+};
+
+
+// =====================================================
+// ALL PLANT RECORDS
+// Same records as Vue plantRecords.ts
+// =====================================================
+
+export const plantRecords = [
+  record(
+    "PL001",
+    "tropical-pitcher-plant",
+    "SP001",
+    "Tropical Pitcher Plant",
+    "Nepenthes rafflesiana",
+    "A",
+    80,
+    "Healthy",
+    "Mature",
+    1
+  ),
+
+  record(
+    "PL014",
+    "tropical-pitcher-plant",
+    "SP001",
+    "Tropical Pitcher Plant",
+    "Nepenthes rafflesiana",
+    "B",
+    64,
+    "Healthy",
+    "Juvenile",
+    2
+  ),
+
+  record(
+    "PL026",
+    "tropical-pitcher-plant",
+    "SP001",
+    "Tropical Pitcher Plant",
+    "Nepenthes rafflesiana",
+    "C",
+    91,
+    "Monitoring",
+    "Mature",
+    3
+  ),
+
+  record(
+    "PL032",
+    "wild-ginger",
+    "SP002",
+    "Wild Ginger",
+    "Etlingera elatior",
+    "A",
+    178,
+    "Healthy",
+    "Flowering",
+    4
+  ),
+
+  record(
+    "PL041",
+    "wild-ginger",
+    "SP002",
+    "Wild Ginger",
+    "Etlingera elatior",
+    "B",
+    152,
+    "Healthy",
+    "Mature",
+    5
+  ),
+
+  record(
+    "PL053",
+    "tree-fern",
+    "SP003",
+    "Tree Fern",
+    "Cyathea contaminans",
+    "B",
+    320,
+    "Healthy",
+    "Mature",
+    6
+  ),
+
+  record(
+    "PL061",
+    "tree-fern",
+    "SP003",
+    "Tree Fern",
+    "Cyathea contaminans",
+    "C",
+    245,
+    "Healthy",
+    "Juvenile",
+    7
+  ),
+
+  record(
+    "PL074",
+    "borneo-orchid",
+    "SP004",
+    "Borneo Orchid",
+    "Phalaenopsis bellina",
+    "A",
+    34,
+    "Healthy",
+    "Flowering",
+    8
+  ),
+
+  record(
+    "PL082",
+    "borneo-orchid",
+    "SP004",
+    "Borneo Orchid",
+    "Phalaenopsis bellina",
+    "C",
+    29,
+    "Monitoring",
+    "Mature",
+    9
+  ),
+
+  record(
+    "PL093",
+    "rattan-palm",
+    "SP005",
+    "Rattan Palm",
+    "Calamus manan",
+    "A",
+    410,
+    "Healthy",
+    "Mature",
+    10
+  ),
+
+  record(
+    "PL107",
+    "rattan-palm",
+    "SP005",
+    "Rattan Palm",
+    "Calamus manan",
+    "B",
+    285,
+    "Healthy",
+    "Juvenile",
+    11
+  ),
+
+  record(
+    "PL118",
+    "forest-shrub",
+    "SP006",
+    "Forest Shrub",
+    "Syzygium grande",
+    "B",
+    196,
+    "Healthy",
+    "Mature",
+    12
+  ),
+
+  record(
+    "PL126",
+    "forest-shrub",
+    "SP006",
+    "Forest Shrub",
+    "Syzygium grande",
+    "C",
+    143,
+    "Healthy",
+    "Juvenile",
+    13
+  ),
+];
+
+
+// =====================================================
+// BOTANISTS
+// =====================================================
 
 export const botanists = [
   {
@@ -312,3 +801,29 @@ export const botanists = [
     name: "Bob",
   },
 ];
+
+export const botanistPlantRecords = [];
+
+// =====================================================
+// HELPER FUNCTIONS
+// =====================================================
+
+export function getPlantById(plantId) {
+  return plantRecords.find(
+    (plant) => plant.plantId === plantId
+  );
+}
+
+
+export function getSpeciesBySlug(slug) {
+  return plants.find(
+    (species) => species.slug === slug
+  );
+}
+
+
+export function getPlantsBySpecies(slug) {
+  return plantRecords.filter(
+    (plant) => plant.speciesSlug === slug
+  );
+}

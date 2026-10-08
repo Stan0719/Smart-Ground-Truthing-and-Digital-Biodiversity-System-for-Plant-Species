@@ -1,106 +1,154 @@
 import React from "react";
+
 import {
   View,
   Text,
-  Image,
-  TouchableOpacity,
   StyleSheet,
+  TouchableOpacity,
+  Image,
 } from "react-native";
 
-export default function PlantCard({ plant, onPress }) {
-  return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.8}>
-      <Image source={plant.image} style={styles.image} />
+import { getSpeciesBySlug } from "../data/mockData";
 
-      <View style={styles.info}>
-        <Text style={styles.scientificName}>
-          {plant.scientificName}
+
+export default function PlantCard({
+  plant,
+  navigation,
+}) {
+  const species = getSpeciesBySlug(
+    plant.speciesSlug
+  );
+
+  return (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() =>
+        navigation.navigate("PlantDetails", {
+          plantId: plant.plantId,
+        })
+      }
+    >
+
+      {/* IMAGE */}
+      <View style={styles.imageContainer}>
+
+        {species?.image ? (
+          <Image
+            source={{
+              uri: species.image,
+            }}
+            style={styles.image}
+          />
+        ) : (
+          <View style={styles.placeholder}>
+            <Text style={styles.placeholderIcon}>
+              🌿
+            </Text>
+          </View>
+        )}
+
+      </View>
+
+
+      {/* CONTENT */}
+      <View style={styles.content}>
+
+        <Text style={styles.plantId}>
+          {plant.plantId}
         </Text>
 
-        <Text style={styles.commonName}>
+        <Text style={styles.plantName}>
           {plant.commonName}
         </Text>
 
-        <View style={styles.statusBox}>
-          <Text style={styles.statusLabel}>
-            Conservation Status
-          </Text>
-
-          <Text style={styles.status}>
-            {plant.conservationStatus}
-          </Text>
-        </View>
-
-        <Text style={styles.location}>
-          📍 {plant.latitude.toFixed(4)},{" "}
-          {plant.longitude.toFixed(4)}
+        <Text style={styles.plantZone}>
+          {plant.location.zone}
         </Text>
+
+        <Text style={styles.plantHealth}>
+          {plant.latestApproved.healthStatus}
+        </Text>
+
+        <Text style={styles.plantView}>
+          View Record →
+        </Text>
+
       </View>
+
     </TouchableOpacity>
   );
 }
 
+
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    marginBottom: 16,
+    flexDirection: "row",
+    marginBottom: 12,
     overflow: "hidden",
-    elevation: 4,
-    shadowColor: "#468585",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.12,
-    shadowRadius: 5,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    elevation: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+  },
+
+  imageContainer: {
+    width: 110,
+    height: 130,
+    backgroundColor: "#DCE8D6",
   },
 
   image: {
     width: "100%",
-    height: 190,
+    height: "100%",
+    resizeMode: "cover",
   },
 
-  info: {
-    padding: 16,
+  placeholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#DCE8D6",
   },
 
-  scientificName: {
-    fontSize: 19,
+  placeholderIcon: {
+    fontSize: 35,
+  },
+
+  content: {
+    flex: 1,
+    padding: 13,
+  },
+
+  plantId: {
+    color: "#234A3C",
+    fontSize: 14,
     fontWeight: "700",
-    fontStyle: "italic",
-    color: "#468585",
   },
 
-  commonName: {
-    fontSize: 15,
-    color: "#687568",
-    marginTop: 5,
-  },
-
-  statusBox: {
-    backgroundColor: "#DEF9C4",
-    borderRadius: 10,
-    padding: 9,
-    marginTop: 12,
-  },
-
-  statusLabel: {
+  plantName: {
+    marginTop: 3,
+    color: "#50675D",
     fontSize: 11,
-    color: "#468585",
-    fontWeight: "600",
   },
 
-  status: {
-    fontSize: 13,
-    color: "#468585",
+  plantZone: {
+    marginTop: 7,
+    color: "#75867E",
+    fontSize: 10,
+  },
+
+  plantHealth: {
+    marginTop: 5,
+    color: "#34785D",
+    fontSize: 10,
     fontWeight: "700",
-    marginTop: 2,
   },
 
-  location: {
-    fontSize: 12,
-    color: "#777",
+  plantView: {
     marginTop: 9,
+    color: "#315B49",
+    fontSize: 10,
+    fontWeight: "700",
   },
 });

@@ -1,80 +1,58 @@
+// screens/PlantDetail.js
+
 import React from "react";
 
 import {
   View,
   Text,
+  StyleSheet,
   ScrollView,
   TouchableOpacity,
-  StyleSheet,
+  Image,
 } from "react-native";
 
-import { plants } from "../data/mockData";
+import {
+  getPlantById,
+  getSpeciesBySlug,
+} from "../data/mockData";
 
 
-export default function PlantDetailScreen({
+export default function PlantDetail({
   route,
   navigation,
 }) {
+  const { plantId } = route.params || {};
 
-  const {
-    id,
-    slug,
-    plant: passedPlant,
-  } = route.params || {};
-
-
-  // =====================================================
-  // FIND PLANT
-  // =====================================================
-
-  let plant = passedPlant;
-
-
-  if (!plant) {
-
-    plant = plants.find(
-      (item) =>
-        (id && item.id === id) ||
-        (slug && item.slug === slug)
-    );
-
-  }
-
+  const plant = getPlantById(plantId);
 
   // =====================================================
   // PLANT NOT FOUND
   // =====================================================
 
   if (!plant) {
-
     return (
-
-      <View style={styles.notFound}>
+      <View style={styles.notFoundContainer}>
 
         <Text style={styles.notFoundIcon}>
           🌿
         </Text>
 
         <Text style={styles.notFoundTitle}>
-          Plant not found
+          Plant record not found
         </Text>
 
         <Text style={styles.notFoundText}>
-          The plant you are looking for is not in
-          the collection.
+          The plant record you are looking for
+          does not exist.
         </Text>
 
         <TouchableOpacity
-          style={styles.returnButton}
-          onPress={() =>
-            navigation.goBack()
-          }
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
         >
-
-          <Text style={styles.returnButtonText}>
-            Return to Plants
+          <Text style={styles.backButtonText}>
+            Go Back
           </Text>
-
         </TouchableOpacity>
 
       </View>
@@ -83,96 +61,171 @@ export default function PlantDetailScreen({
 
 
   // =====================================================
-  // ENSURE PLANT HAS AN ID
+  // FIND SPECIES
   // =====================================================
 
-  const plantId =
-    plant.id ||
-    `NIAH-${plant.slug}`;
+  const selectedSpecies = getSpeciesBySlug(
+    plant.speciesSlug
+  );
 
 
   // =====================================================
-  // PLANT DETAIL
+  // SORT OBSERVATIONS
+  // =====================================================
+
+  const sortedObservations = [
+    ...(plant.observations || []),
+  ].sort((a, b) => {
+    return (
+      new Date(b.date).getTime() -
+      new Date(a.date).getTime()
+    );
+  });
+
+
+  // =====================================================
+  // LATEST APPROVED OBSERVATION
+  // =====================================================
+
+  const latestApprovedObservation =
+    sortedObservations.find(
+      (observation) =>
+        observation.status === "Approved"
+    );
+
+
+  // =====================================================
+  // SCREEN
   // =====================================================
 
   return (
-
     <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
     >
 
       {/* =================================================
-          HERO SECTION
+          HEADER
       ================================================= */}
 
-      <View style={styles.heroSection}>
+      <View style={styles.header}>
 
-        {/* Plant Image */}
-
-        <View style={styles.plantPlaceholder}>
-
-          <Text style={styles.placeholderIcon}>
-            🌿
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backLink}
+        >
+          <Text style={styles.backLinkText}>
+            ← Back
           </Text>
-
-          <Text style={styles.placeholderText}>
-            PLANT IMAGE COMING SOON
-          </Text>
-
-        </View>
+        </TouchableOpacity>
 
 
-        {/* Hero Content */}
+        <Text style={styles.headerLabel}>
+          PLANT RECORD
+        </Text>
 
-        <View style={styles.heroContent}>
 
-          {/* Back Button */}
+        <Text style={styles.plantId}>
+          {plant.plantId}
+        </Text>
 
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() =>
-              navigation.goBack()
+
+        {selectedSpecies && (
+  <>
+        <Text style={styles.speciesName}>
+          {selectedSpecies.name}
+        </Text>
+
+        <Text style={styles.scientificName}>
+          {selectedSpecies.scientificName}
+        </Text>
+
+        {selectedSpecies?.image && (
+          <Image
+            source={{
+              uri: selectedSpecies.image,
+            }}
+            style={styles.plantImage}
+            resizeMode="cover"
+          />
+        )}
+      </>
+    )}
+
+      </View>
+
+
+      {/* =================================================
+          CURRENT VERIFIED RECORD
+      ================================================= */}
+
+      <View style={styles.section}>
+
+        <Text style={styles.sectionLabel}>
+          CURRENT VERIFIED RECORD
+        </Text>
+
+        <Text style={styles.sectionTitle}>
+          Plant information
+        </Text>
+
+
+        <View style={styles.card}>
+
+          <InfoRow
+            label="Plant ID"
+            value={plant.plantId}
+          />
+
+          <InfoRow
+            label="Species"
+            value={
+              selectedSpecies
+                ? selectedSpecies.name
+                : plant.speciesSlug
             }
-          >
+          />
 
-            <Text style={styles.backButtonText}>
-              ← Back
-            </Text>
+          <InfoRow
+            label="Scientific name"
+            value={
+              selectedSpecies
+                ? selectedSpecies.scientificName
+                : "-"
+            }
+            italic
+          />
 
-          </TouchableOpacity>
+          <InfoRow
+            label="Height"
+            value={`${plant.latestApproved.heightCm} cm`}
+          />
 
+          <InfoRow
+            label="Health status"
+            value={
+              plant.latestApproved.healthStatus
+            }
+          />
 
-          {/* Category */}
+          <InfoRow
+            label="Life stage"
+            value={
+              plant.latestApproved.lifeStage
+            }
+          />
 
-          <View style={styles.categoryBadge}>
+          <InfoRow
+            label="Location zone"
+            value={plant.location.zone}
+          />
 
-            <Text style={styles.categoryText}>
-              {plant.category}
-            </Text>
-
-          </View>
-
-
-          {/* Plant Name */}
-
-          <Text style={styles.plantName}>
-            {plant.name}
-          </Text>
-
-
-          {/* Scientific Name */}
-
-          <Text style={styles.scientificName}>
-            {plant.scientificName}
-          </Text>
-
-
-          {/* Description */}
-
-          <Text style={styles.summary}>
-            {plant.description}
-          </Text>
+          <InfoRow
+            label="Morphology"
+            value={
+              plant.latestApproved.morphology
+            }
+          />
 
         </View>
 
@@ -180,261 +233,443 @@ export default function PlantDetailScreen({
 
 
       {/* =================================================
-          INFORMATION
+          STAFF RECORD
       ================================================= */}
 
-      <View style={styles.informationSection}>
+      <View style={styles.staffSection}>
+
+        <Text style={styles.sectionLabel}>
+          STAFF RECORD
+        </Text>
+
+        <Text style={styles.sectionTitle}>
+          Registration and location
+        </Text>
 
 
-        {/* ABOUT */}
+        {/* GPS */}
 
-        <View style={styles.mainDescription}>
+        <View style={styles.subSection}>
+
+          <Text style={styles.subSectionTitle}>
+            GPS information
+          </Text>
+
+
+          <InfoRow
+            label="Latitude"
+            value={plant.location.latitude.toFixed(6)}
+          />
+
+          <InfoRow
+            label="Longitude"
+            value={plant.location.longitude.toFixed(6)}
+          />
+
+          <InfoRow
+            label="Altitude"
+            value={`${plant.location.altitudeM} m`}
+          />
+
+          <InfoRow
+            label="GPS accuracy"
+            value={`± ${plant.location.accuracyM} m`}
+          />
+
+        </View>
+
+
+        {/* QR CODE */}
+
+        <View style={styles.subSection}>
+
+          <Text style={styles.subSectionTitle}>
+            QR tag
+          </Text>
+
+
+          <InfoRow
+            label="QR code"
+            value={plant.qr.code}
+          />
+
+
+          <View
+            style={[
+              styles.qrStatus,
+              plant.qr.status === "Active"
+                ? styles.qrActive
+                : styles.qrInactive,
+            ]}
+          >
+
+            <Text
+              style={[
+                styles.qrStatusText,
+                plant.qr.status === "Active"
+                  ? styles.qrActiveText
+                  : styles.qrInactiveText,
+              ]}
+            >
+              {plant.qr.status}
+            </Text>
+
+          </View>
+
+        </View>
+
+
+        {/* REGISTRATION */}
+
+        <View style={styles.subSection}>
+
+          <Text style={styles.subSectionTitle}>
+            Registration
+          </Text>
+
+
+          <InfoRow
+            label="Registered by"
+            value={plant.registeredBy}
+          />
+
+          <InfoRow
+            label="Registered at"
+            value={formatDate(
+              plant.registeredAt
+            )}
+          />
+
+        </View>
+
+      </View>
+
+
+      {/* =================================================
+          LATEST VERIFIED OBSERVATION
+      ================================================= */}
+
+      {latestApprovedObservation && (
+        <View style={styles.section}>
 
           <Text style={styles.sectionLabel}>
-            ABOUT THIS PLANT
+            LATEST VERIFIED OBSERVATION
           </Text>
 
           <Text style={styles.sectionTitle}>
-            A remarkable rainforest species
-          </Text>
-
-          <Text style={styles.bodyText}>
-            {plant.overview ||
-              "No overview available."}
+            Observation details
           </Text>
 
 
-          {/* Habitat */}
-
-          <Text style={styles.subHeading}>
-            Natural habitat
-          </Text>
-
-          <Text style={styles.bodyText}>
-            {plant.habitat ||
-              "No habitat information available."}
-          </Text>
-
-
-          {/* Significance */}
-
-          <Text style={styles.subHeading}>
-            Ecological and cultural importance
-          </Text>
-
-          <Text style={styles.bodyText}>
-            {plant.significance ||
-              "No significance information available."}
-          </Text>
-
-        </View>
-
-
-        {/* =================================================
-            QUICK FACTS
-        ================================================= */}
-
-        <View style={styles.quickFacts}>
-
-          <Text style={styles.sectionLabel}>
-            QUICK IDENTIFICATION
-          </Text>
-
-          <Text style={styles.quickFactsTitle}>
-            Key characteristics
-          </Text>
-
-
-          {/* Characteristics */}
-
-          {plant.characteristics &&
-            plant.characteristics.map(
-              (characteristic, index) => (
-
-                <View
-                  key={index}
-                  style={styles.characteristicRow}
-                >
-
-                  <Text style={styles.check}>
-                    ✓
-                  </Text>
-
-                  <Text
-                    style={styles.characteristicText}
-                  >
-                    {characteristic}
-                  </Text>
-
-                </View>
-
-              )
-            )}
-
-
-          <View style={styles.divider} />
-
-
-          {/* ID */}
-
-          <View style={styles.factItem}>
-
-            <Text style={styles.factLabel}>
-              PLANT ID
-            </Text>
-
-            <Text style={styles.factValue}>
-              {plantId}
-            </Text>
-
-          </View>
-
-
-          {/* Scientific Name */}
-
-          <View style={styles.factItem}>
-
-            <Text style={styles.factLabel}>
-              SCIENTIFIC NAME
-            </Text>
-
-            <Text style={styles.factValueItalic}>
-              {plant.scientificName}
-            </Text>
-
-          </View>
-
-
-          {/* Family */}
-
-          {plant.family && (
-
-            <View style={styles.factItem}>
-
-              <Text style={styles.factLabel}>
-                FAMILY
-              </Text>
-
-              <Text style={styles.factValue}>
-                {plant.family}
-              </Text>
-
-            </View>
-
-          )}
-
-
-          {/* Plant Group */}
-
-          <View style={styles.factItem}>
-
-            <Text style={styles.factLabel}>
-              PLANT GROUP
-            </Text>
-
-            <Text style={styles.factValue}>
-              {plant.category}
-            </Text>
-
-          </View>
-
-
-          {/* Height */}
-
-          {plant.height && (
-
-            <View style={styles.factItem}>
-
-              <Text style={styles.factLabel}>
-                HEIGHT
-              </Text>
-
-              <Text style={styles.factValue}>
-                {plant.height}
-              </Text>
-
-            </View>
-
-          )}
-
-
-          {/* GPS */}
-
-          {plant.latitude != null &&
-            plant.longitude != null && (
-
-              <View style={styles.factItem}>
-
-                <Text style={styles.factLabel}>
-                  GPS LOCATION
-                </Text>
-
-                <Text style={styles.factValue}>
-                  {plant.latitude}, {plant.longitude}
-                </Text>
-
-              </View>
-
-            )}
-
-
-          {/* Location */}
-
-          <View style={styles.factItem}>
-
-            <Text style={styles.factLabel}>
-              LOCATION
-            </Text>
-
-            <Text style={styles.factValue}>
-              Niah National Park, Sarawak
-            </Text>
+          <View style={styles.observationCard}>
+
+            <InfoRow
+              label="Observation ID"
+              value={
+                latestApprovedObservation.observationId
+              }
+            />
+
+            <InfoRow
+              label="Recorded by"
+              value={
+                latestApprovedObservation.recordedBy
+              }
+            />
+
+            <InfoRow
+              label="Date"
+              value={formatDate(
+                latestApprovedObservation.date
+              )}
+            />
+
+            <InfoRow
+              label="Height"
+              value={`${latestApprovedObservation.heightCm} cm`}
+            />
+
+            <InfoRow
+              label="Health status"
+              value={
+                latestApprovedObservation.healthStatus
+              }
+            />
+
+            <InfoRow
+              label="Life stage"
+              value={
+                latestApprovedObservation.lifeStage
+              }
+            />
+
+            <InfoRow
+              label="Morphology"
+              value={
+                latestApprovedObservation.morphology
+              }
+            />
+
+            <InfoRow
+              label="Notes"
+              value={
+                latestApprovedObservation.notes
+              }
+            />
 
           </View>
 
         </View>
+      )}
+
+
+      {/* =================================================
+          OBSERVATION HISTORY
+      ================================================= */}
+
+      <View style={styles.historySection}>
+
+        <Text style={styles.sectionLabel}>
+          OBSERVATION HISTORY
+        </Text>
+
+        <Text style={styles.sectionTitle}>
+          Field record history
+        </Text>
+
+
+        {sortedObservations.length === 0 ? (
+
+          <View style={styles.emptyHistory}>
+
+            <Text style={styles.emptyText}>
+              No observation history available.
+            </Text>
+
+          </View>
+
+        ) : (
+
+          sortedObservations.map(
+            (observation) => (
+              <ObservationCard
+                key={observation.observationId}
+                observation={observation}
+              />
+            )
+          )
+
+        )}
 
       </View>
 
 
       {/* =================================================
-          EXPLORE MORE
+          FOOTER
       ================================================= */}
 
-      <View style={styles.exploreMore}>
+      <View style={styles.footer}>
 
-        <Text style={styles.exploreText}>
-          Continue discovering the remarkable
-          {"\n"}
-          flora of Niah.
+        <Text style={styles.footerTitle}>
+          {selectedSpecies?.name || "Plant"}
         </Text>
 
-        <TouchableOpacity
-          style={styles.exploreButton}
-          onPress={() =>
-            navigation.goBack()
-          }
-        >
-
-          <Text style={styles.exploreButtonText}>
-            Explore more plants →
-          </Text>
-
-        </TouchableOpacity>
+        <Text style={styles.footerText}>
+          Niah National Park Biodiversity System
+        </Text>
 
       </View>
-
-
-      <View style={styles.bottomSpace} />
 
     </ScrollView>
   );
 }
 
 
-// =======================================================
+// =====================================================
+// INFO ROW
+// =====================================================
+
+function InfoRow({
+  label,
+  value,
+  italic = false,
+}) {
+  return (
+    <View style={styles.infoRow}>
+
+      <Text style={styles.infoLabel}>
+        {label}
+      </Text>
+
+      <Text
+        style={[
+          styles.infoValue,
+          italic && styles.italicValue,
+        ]}
+      >
+        {value || "-"}
+      </Text>
+
+    </View>
+  );
+}
+
+
+// =====================================================
+// OBSERVATION CARD
+// =====================================================
+
+function ObservationCard({
+  observation,
+}) {
+  return (
+    <View style={styles.historyCard}>
+
+      {/* Header */}
+
+      <View style={styles.historyHeader}>
+
+        <View style={styles.historyHeaderText}>
+
+          <Text style={styles.observationDate}>
+            {formatDate(observation.date)}
+          </Text>
+
+          <Text style={styles.recordedBy}>
+            Recorded by {observation.recordedBy}
+          </Text>
+
+        </View>
+
+
+        <View
+          style={[
+            styles.statusBadge,
+            observation.status === "Approved"
+              ? styles.approvedBadge
+              : styles.pendingBadge,
+          ]}
+        >
+
+          <Text
+            style={[
+              styles.statusText,
+              observation.status === "Approved"
+                ? styles.approvedText
+                : styles.pendingText,
+            ]}
+          >
+            {observation.status}
+          </Text>
+
+        </View>
+
+      </View>
+
+
+      {/* Divider */}
+
+      <View style={styles.divider} />
+
+
+      {/* Observation ID */}
+
+      <Text style={styles.observationId}>
+        {observation.observationId}
+      </Text>
+
+
+      {/* Summary */}
+
+      <Text style={styles.observationSummary}>
+        {observation.heightCm} cm{" "}
+        •{" "}
+        {observation.healthStatus}{" "}
+        •{" "}
+        {observation.lifeStage}
+      </Text>
+
+
+      {/* Morphology */}
+
+      <Text style={styles.historyLabel}>
+        Morphology
+      </Text>
+
+      <Text style={styles.historyValue}>
+        {observation.morphology}
+      </Text>
+
+
+      {/* Notes */}
+
+      {observation.notes && (
+        <>
+          <Text style={styles.historyLabel}>
+            Notes
+          </Text>
+
+          <Text style={styles.notes}>
+            {observation.notes}
+          </Text>
+        </>
+      )}
+
+    </View>
+  );
+}
+
+
+// =====================================================
+// DATE FORMAT
+// =====================================================
+
+function formatDate(dateString) {
+  if (!dateString) {
+    return "-";
+  }
+
+  const parts = dateString.split("-");
+
+  if (parts.length !== 3) {
+    return dateString;
+  }
+
+  const year = parts[0];
+  const month = parts[1];
+  const day = parts[2];
+
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+
+  const monthIndex = Number(month) - 1;
+
+  if (
+    monthIndex < 0 ||
+    monthIndex > 11
+  ) {
+    return dateString;
+  }
+
+  return `${day} ${months[monthIndex]} ${year}`;
+}
+
+
+// =====================================================
 // STYLES
-// =======================================================
+// =====================================================
 
 const styles = StyleSheet.create({
 
@@ -443,310 +678,369 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8F6EE",
   },
 
-  heroSection: {
-    paddingHorizontal: 20,
-    paddingTop: 30,
-    paddingBottom: 55,
-    backgroundColor: "#E1EADB",
+
+  // ===================================================
+  // HEADER
+  // ===================================================
+
+  header: {
+    paddingHorizontal: 22,
+    paddingTop: 25,
+    paddingBottom: 30,
+    backgroundColor: "#E8EFE3",
   },
 
-  plantPlaceholder: {
-    height: 320,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#D0DFCA",
-    borderWidth: 1,
-    borderColor: "rgba(63, 104, 77, 0.15)",
-    shadowColor: "#254B3A",
-    shadowOffset: {
-      width: 0,
-      height: 12,
-    },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    elevation: 4,
-  },
-
-  placeholderIcon: {
-    fontSize: 75,
-    marginBottom: 15,
-  },
-
-  placeholderText: {
-    color: "#4E7060",
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 1.5,
-  },
-
-  heroContent: {
-    marginTop: 30,
-  },
-
-  backButton: {
+  backLink: {
     alignSelf: "flex-start",
     marginBottom: 25,
   },
 
-  backButtonText: {
-    color: "#477462",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-
-  categoryBadge: {
-    alignSelf: "flex-start",
-    paddingVertical: 7,
-    paddingHorizontal: 13,
-    borderRadius: 999,
-    backgroundColor: "#D4E4CF",
-    marginBottom: 14,
-  },
-
-  categoryText: {
-    color: "#35652F",
-    fontSize: 11,
+  backLinkText: {
+    color: "#315B49",
+    fontSize: 13,
     fontWeight: "700",
-    letterSpacing: 1,
-    textTransform: "uppercase",
   },
 
-  plantName: {
+  headerLabel: {
+    marginBottom: 7,
+    color: "#50A078",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1.8,
+  },
+
+  plantId: {
     color: "#234A3C",
-    fontSize: 43,
+    fontSize: 32,
     fontWeight: "600",
-    lineHeight: 48,
+  },
+
+  speciesName: {
+    marginTop: 7,
+    color: "#405F56",
+    fontSize: 17,
+    fontWeight: "600",
   },
 
   scientificName: {
-    color: "#7C6955",
-    fontSize: 21,
-    fontStyle: "italic",
-    marginTop: 12,
-    marginBottom: 22,
-  },
-
-  summary: {
-    color: "#50675D",
-    fontSize: 16,
-    lineHeight: 27,
-  },
-
-  statusContainer: {
-    marginTop: 20,
-  },
-
-  statusBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-  },
-
-  approvedStatus: {
-    backgroundColor: "#DEF9C4",
-  },
-
-  pendingStatus: {
-    backgroundColor: "#FFF3D6",
-  },
-
-  statusText: {
-    color: "#35652F",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-
-  qrButton: {
-    marginTop: 18,
-    backgroundColor: "#468585",
-    borderRadius: 14,
-    padding: 15,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  qrButtonIcon: {
-    color: "#FFFFFF",
-    fontSize: 27,
-    marginRight: 12,
-  },
-
-  qrButtonContent: {
-    flex: 1,
-  },
-
-  qrButtonTitle: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-
-  qrButtonSubtitle: {
-    color: "#DDF0E8",
-    fontSize: 11,
     marginTop: 3,
+    color: "#7C6955",
+    fontSize: 14,
+    fontStyle: "italic",
   },
 
-  qrArrow: {
-    color: "#FFFFFF",
-    fontSize: 22,
-    marginLeft: 8,
+  plantImage: {
+    width: "100%",
+    height: 220,
+    marginTop: 18,
+    borderRadius: 16,
+    backgroundColor: "#DCE8D6",
   },
 
-  informationSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 55,
-  },
+  // ===================================================
+  // SECTION
+  // ===================================================
 
-  mainDescription: {
-    marginBottom: 45,
+  section: {
+    padding: 22,
   },
 
   sectionLabel: {
+    marginBottom: 8,
     color: "#50A078",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
-    letterSpacing: 2.3,
-    marginBottom: 10,
+    letterSpacing: 1.7,
   },
 
   sectionTitle: {
-    color: "#234A3C",
-    fontSize: 31,
-    fontWeight: "600",
-    lineHeight: 39,
-    marginBottom: 22,
-  },
-
-  bodyText: {
-    color: "#405F56",
-    fontSize: 15,
-    lineHeight: 28,
-  },
-
-  subHeading: {
-    color: "#315F4E",
-    fontSize: 23,
-    fontWeight: "600",
-    marginTop: 35,
-    marginBottom: 10,
-  },
-
-  quickFacts: {
-    padding: 25,
-    borderRadius: 22,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "rgba(58, 96, 70, 0.12)",
-    shadowColor: "#254B3A",
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    elevation: 3,
-  },
-
-  quickFactsTitle: {
+    marginBottom: 18,
     color: "#234A3C",
     fontSize: 27,
     fontWeight: "600",
-    marginBottom: 22,
   },
 
-  characteristicRow: {
+
+  // ===================================================
+  // CARD
+  // ===================================================
+
+  card: {
+    padding: 18,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    elevation: 3,
+    shadowColor: "#21392C",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+  },
+
+  infoRow: {
+    marginBottom: 17,
+  },
+
+  infoLabel: {
+    marginBottom: 4,
+    color: "#7C8982",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+  },
+
+  infoValue: {
+    color: "#315447",
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+  },
+
+  italicValue: {
+    fontStyle: "italic",
+  },
+
+
+  // ===================================================
+  // STAFF
+  // ===================================================
+
+  staffSection: {
+    marginHorizontal: 20,
+    marginBottom: 10,
+    padding: 20,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    elevation: 3,
+    shadowColor: "#21392C",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+  },
+
+  subSection: {
+    marginTop: 8,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: "#E6E8E0",
+  },
+
+  subSectionTitle: {
+    marginBottom: 15,
+    color: "#315F4E",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+
+
+  // ===================================================
+  // QR STATUS
+  // ===================================================
+
+  qrStatus: {
+    alignSelf: "flex-start",
+    marginTop: -5,
+    marginBottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+
+  qrActive: {
+    backgroundColor: "#D8EBD9",
+  },
+
+  qrInactive: {
+    backgroundColor: "#F4E0DE",
+  },
+
+  qrStatusText: {
+    fontSize: 9,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+
+  qrActiveText: {
+    color: "#34785D",
+  },
+
+  qrInactiveText: {
+    color: "#A34E45",
+  },
+
+
+  // ===================================================
+  // LATEST OBSERVATION
+  // ===================================================
+
+  observationCard: {
+    padding: 18,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    elevation: 2,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+  },
+
+
+  // ===================================================
+  // HISTORY
+  // ===================================================
+
+  historySection: {
+    padding: 22,
+  },
+
+  historyCard: {
+    marginBottom: 14,
+    padding: 16,
+    borderRadius: 15,
+    backgroundColor: "#FFFFFF",
+    elevation: 2,
+    shadowColor: "#21392C",
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+  },
+
+  historyHeader: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 13,
+    alignItems: "center",
+    justifyContent: "space-between",
   },
 
-  check: {
-    width: 25,
-    color: "#50A078",
-    fontSize: 17,
-    fontWeight: "800",
-  },
-
-  characteristicText: {
+  historyHeaderText: {
     flex: 1,
-    color: "#405F56",
-    fontSize: 14,
-    lineHeight: 21,
+  },
+
+  observationDate: {
+    color: "#315447",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  recordedBy: {
+    marginTop: 4,
+    color: "#7C8982",
+    fontSize: 10,
+  },
+
+  statusBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+
+  approvedBadge: {
+    backgroundColor: "#D8EBD9",
+  },
+
+  pendingBadge: {
+    backgroundColor: "#F4E7D2",
+  },
+
+  statusText: {
+    fontSize: 8,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+
+  approvedText: {
+    color: "#34785D",
+  },
+
+  pendingText: {
+    color: "#8A6939",
   },
 
   divider: {
     height: 1,
+    marginVertical: 13,
     backgroundColor: "#E7E8E1",
-    marginVertical: 24,
   },
 
-  factItem: {
-    marginBottom: 18,
-  },
-
-  factLabel: {
-    color: "#7C8982",
-    fontSize: 10,
+  observationId: {
+    color: "#234A3C",
+    fontSize: 12,
     fontWeight: "700",
-    letterSpacing: 0.8,
-    marginBottom: 5,
   },
 
-  factValue: {
-    color: "#315447",
-    fontSize: 14,
+  observationSummary: {
+    marginTop: 6,
+    color: "#50675D",
+    fontSize: 11,
     fontWeight: "600",
-    lineHeight: 20,
   },
 
-  factValueItalic: {
-    color: "#315447",
-    fontSize: 14,
-    fontWeight: "600",
+  historyLabel: {
+    marginTop: 13,
+    marginBottom: 4,
+    color: "#7C8982",
+    fontSize: 8,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+
+  historyValue: {
+    color: "#405F56",
+    fontSize: 11,
+    lineHeight: 17,
+  },
+
+  notes: {
+    color: "#6C7973",
+    fontSize: 11,
+    lineHeight: 17,
     fontStyle: "italic",
   },
 
-  exploreMore: {
-    paddingHorizontal: 25,
-    paddingVertical: 45,
-    backgroundColor: "#214638",
+  emptyHistory: {
+    padding: 25,
     alignItems: "center",
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#BDC8BD",
+    borderRadius: 15,
   },
 
-  exploreText: {
-    color: "#FFFFFF",
-    fontSize: 21,
-    lineHeight: 29,
-    textAlign: "center",
-    marginBottom: 22,
+  emptyText: {
+    color: "#6A7B73",
+    fontSize: 12,
   },
 
-  exploreButton: {
-    paddingVertical: 12,
+
+  // ===================================================
+  // FOOTER
+  // ===================================================
+
+  footer: {
+    paddingVertical: 35,
     paddingHorizontal: 20,
-    borderRadius: 999,
-    backgroundColor: "#FFF4D8",
+    alignItems: "center",
+    backgroundColor: "#214638",
   },
 
-  exploreButtonText: {
-    color: "#315B49",
-    fontSize: 14,
-    fontWeight: "700",
+  footerTitle: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "600",
   },
 
-  bottomSpace: {
-    height: 20,
+  footerText: {
+    marginTop: 5,
+    color: "#D6E3CF",
+    fontSize: 10,
   },
 
-  notFound: {
+
+  // ===================================================
+  // NOT FOUND
+  // ===================================================
+
+  notFoundContainer: {
     flex: 1,
-    paddingHorizontal: 25,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F4F3E9",
+    padding: 30,
+    backgroundColor: "#F8F6EE",
   },
 
   notFoundIcon: {
@@ -754,31 +1048,30 @@ const styles = StyleSheet.create({
   },
 
   notFoundTitle: {
+    marginTop: 15,
     color: "#234A3C",
-    fontSize: 30,
-    fontWeight: "700",
-    marginTop: 16,
+    fontSize: 24,
+    fontWeight: "600",
   },
 
   notFoundText: {
-    color: "#50675D",
-    fontSize: 15,
-    lineHeight: 23,
-    textAlign: "center",
     marginTop: 8,
-    marginBottom: 24,
+    color: "#63736A",
+    fontSize: 12,
+    textAlign: "center",
   },
 
-  returnButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+  backButton: {
+    marginTop: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: "#35652F",
+    backgroundColor: "#315B49",
   },
 
-  returnButtonText: {
+  backButtonText: {
     color: "#FFFFFF",
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: "700",
   },
 

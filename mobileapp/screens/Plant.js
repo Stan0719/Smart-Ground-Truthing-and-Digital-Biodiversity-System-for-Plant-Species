@@ -1,210 +1,428 @@
+// screens/Plant.js
+
 import React, { useMemo, useState } from "react";
+
 import {
   View,
   Text,
-  TextInput,
-  ScrollView,
-  TouchableOpacity,
   StyleSheet,
-  ImageBackground,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  Image,
+  SafeAreaView,
 } from "react-native";
 
-import { plants } from "../data/mockData";
+import {
+  plants,
+  plantRecords,
+} from "../data/mockData";
 
-const categories = ["All", "Trees", "Flowers", "Ferns", "Climbers"];
+const categories = [
+  "All",
+  "Trees",
+  "Flowers",
+  "Ferns",
+  "Climbers",
+];
 
-export default function PlantScreen({ navigation }) {
+
+export default function Plant({ navigation }) {
   const [activeCategory, setActiveCategory] = useState("All");
+
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredPlants = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+  const [sortOption, setSortOption] = useState("default");
 
-    return plants.filter((plant) => {
-      const matchesCategory =
-        activeCategory === "All" ||
-        plant.category === activeCategory;
+  const [sortOpen, setSortOpen] = useState(false);
 
-      const matchesSearch =
-        !query ||
-        plant.name.toLowerCase().includes(query) ||
-        plant.scientificName.toLowerCase().includes(query) ||
-        plant.category.toLowerCase().includes(query) ||
-        plant.description.toLowerCase().includes(query);
 
-      return matchesCategory && matchesSearch;
-    });
-  }, [activeCategory, searchQuery]);
+  // =====================================================
+  // FILTER AND SORT
+  // =====================================================
 
-  return (
-    <ScrollView
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* ================= HERO ================= */}
-      <ImageBackground
-        source={require("../assets/park.jpg")}
-        style={styles.hero}
-        imageStyle={styles.heroImage}
-      >
-        <View style={styles.heroOverlay} />
+  const filteredSpecies = useMemo(() => {
+  const query = searchQuery.trim().toLowerCase();
 
-        <View style={styles.heroContent}>
-          <Text style={styles.eyebrow}>
-            NIAH NATIONAL PARK
-          </Text>
+  const filtered = plants.filter((item) => {
+    const matchesCategory =
+      activeCategory === "All" ||
+      item.category === activeCategory;
 
-          <Text style={styles.heroTitle}>
-            Plants of Niah
-          </Text>
+    const matchesSearch =
+      !query ||
+      item.name?.toLowerCase().includes(query) ||
+      item.scientificName?.toLowerCase().includes(query) ||
+      item.genus?.toLowerCase().includes(query) ||
+      item.category?.toLowerCase().includes(query) ||
+      item.family?.toLowerCase().includes(query) ||
+      item.description?.toLowerCase().includes(query);
 
-          <Text style={styles.heroLead}>
-            Explore the rich flora of Niah National Park.
-          </Text>
+    return matchesCategory && matchesSearch;
+  });
 
-          <Text style={styles.heroDescription}>
-            From towering rainforest trees to delicate orchids,
-            discover the remarkable plant life that makes Niah
-            a place of extraordinary beauty and ecological
-            significance.
-          </Text>
+  const sorted = [...filtered];
+
+  if (sortOption === "name-asc") {
+    sorted.sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }
+
+  if (sortOption === "name-desc") {
+    sorted.sort((a, b) =>
+      b.name.localeCompare(a.name)
+    );
+  }
+
+  if (sortOption === "scientific-asc") {
+    sorted.sort((a, b) =>
+      a.scientificName.localeCompare(
+        b.scientificName
+      )
+    );
+  }
+
+  return sorted;
+}, [
+  activeCategory,
+  searchQuery,
+  sortOption,
+]);
+
+  // =====================================================
+  // SPECIES CARD
+  // =====================================================
+
+  const renderSpeciesCard = ({ item }) => {
+    const plantCount = plantRecords.filter(
+      (plant) => plant.speciesSlug === item.slug
+    ).length;
+
+
+    return (
+      <View style={styles.card}>
+
+        {/* IMAGE */}
+
+        <View style={styles.imageWrapper}>
+
+          {item.image ? (
+            <Image
+              source={{ uri: item.image }}
+              style={styles.cardImage}
+            />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Text style={styles.placeholderIcon}>
+                🌿
+              </Text>
+
+              <Text style={styles.placeholderText}>
+                Image coming soon
+              </Text>
+            </View>
+          )}
+
+
+          {/* BADGES */}
+
+          <View style={styles.badgeContainer}>
+
+            <Text style={styles.categoryBadge}>
+              {item.category}
+            </Text>
+
+            {item.conservationStatus && (
+              <Text style={styles.statusBadge}>
+                {item.conservationStatus}
+              </Text>
+            )}
+
+          </View>
+
         </View>
-      </ImageBackground>
 
-      {/* ================= PLANT LIBRARY ================= */}
-      <View style={styles.library}>
-        <Text style={styles.sectionLabel}>
-          EXPLORE THE COLLECTION
-        </Text>
 
-        <View style={styles.headingRow}>
-          <Text style={styles.libraryTitle}>
-            Discover Niah's flora
+        {/* CONTENT */}
+
+        <View style={styles.cardContent}>
+
+          <Text style={styles.cardTitle}>
+            {item.name}
           </Text>
 
-          <Text style={styles.plantCount}>
-            {filteredPlants.length}{" "}
-            {filteredPlants.length === 1 ? "plant" : "plants"} found
+
+          <Text style={styles.scientificName}>
+            {item.scientificName}
           </Text>
-        </View>
 
-        {/* ================= SEARCH ================= */}
-        <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>⌕</Text>
 
-          <TextInput
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Search plants..."
-            placeholderTextColor="#8A968F"
-            style={styles.searchInput}
-          />
-        </View>
+          {item.family && (
+            <Text style={styles.family}>
+              Family: {item.family}
+            </Text>
+          )}
 
-        {/* ================= CATEGORY FILTER ================= */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoryScroll}
-          contentContainerStyle={styles.categoryContainer}
-        >
-          {categories.map((category) => (
+
+          <Text
+            style={styles.description}
+            numberOfLines={3}
+          >
+            {item.description}
+          </Text>
+
+
+          <Text style={styles.recordCount}>
+            {plantCount} verified{" "}
+            {plantCount === 1 ? "plant" : "plants"}
+          </Text>
+
+
+          {/* ACTIONS */}
+
+          <View style={styles.actions}>
+
             <TouchableOpacity
-              key={category}
-              style={[
-                styles.categoryButton,
-                activeCategory === category &&
-                  styles.categoryButtonActive,
-              ]}
-              onPress={() => setActiveCategory(category)}
+              style={styles.secondaryButton}
+              onPress={() =>
+                navigation.navigate(
+                  "SpeciesDetail",
+                  {
+                    slug: item.slug,
+                  }
+                )
+              }
             >
-              <Text
-                style={[
-                  styles.categoryButtonText,
-                  activeCategory === category &&
-                    styles.categoryButtonTextActive,
-                ]}
-              >
-                {category}
+              <Text style={styles.secondaryText}>
+                View Species
               </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
 
-        {/* ================= PLANT CARDS ================= */}
-        {filteredPlants.length > 0 ? (
-          filteredPlants.map((plant) => (
-            <View
-              key={plant.slug}
-              style={styles.plantCard}
+
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={() =>
+                navigation.navigate(
+                  "Species",
+                  {
+                    slug: item.slug,
+                  }
+                )
+              }
             >
-              {/* Plant image placeholder */}
-              <View style={styles.plantImage}>
-                <Text style={styles.leafIcon}>🌿</Text>
+              <Text style={styles.primaryText}>
+                View Plants →
+              </Text>
+            </TouchableOpacity>
 
-                <Text style={styles.imageComingSoon}>
-                  IMAGE COMING SOON
+          </View>
+
+        </View>
+
+      </View>
+    );
+  };
+
+
+  // =====================================================
+  // MAIN SCREEN
+  // =====================================================
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+
+      <FlatList
+        data={filteredSpecies}
+        keyExtractor={(item) => item.slug}
+        renderItem={renderSpeciesCard}
+
+        contentContainerStyle={styles.listContent}
+
+        showsVerticalScrollIndicator={false}
+
+        ListHeaderComponent={
+          <>
+            {/* HERO */}
+
+            <View style={styles.hero}>
+
+              <Text style={styles.eyebrow}>
+                NIAH NATIONAL PARK
+              </Text>
+
+              <Text style={styles.heroTitle}>
+                Plants of Niah
+              </Text>
+
+              <Text style={styles.heroLead}>
+                Explore the rich flora of Niah
+                National Park.
+              </Text>
+
+              <Text style={styles.heroDescription}>
+                Discover the remarkable plant life
+                that makes Niah a place of
+                extraordinary beauty and ecological
+                significance.
+              </Text>
+
+            </View>
+
+
+            {/* LIBRARY */}
+
+            <View style={styles.libraryHeader}>
+
+              <View>
+                <Text style={styles.sectionLabel}>
+                  EXPLORE THE COLLECTION
                 </Text>
 
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
-                    {plant.category}
-                  </Text>
-                </View>
+                <Text style={styles.sectionTitle}>
+                  Discover Niah's flora
+                </Text>
               </View>
 
-              {/* Card content */}
-              <View style={styles.cardContent}>
-                <Text style={styles.plantName}>
-                  {plant.name}
-                </Text>
 
-                <Text style={styles.scientificName}>
-                  {plant.scientificName}
-                </Text>
+              <Text style={styles.speciesCount}>
+                {filteredSpecies.length} species found
+              </Text>
 
-                <Text style={styles.description}>
-                  {plant.description}
-                </Text>
+            </View>
 
+
+            {/* SEARCH */}
+
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Search by name, scientific name or keyword..."
+              placeholderTextColor="#8A968F"
+              style={styles.searchInput}
+            />
+
+
+            {/* SORT */}
+
+            <TouchableOpacity
+              style={styles.sortButton}
+              onPress={() =>
+                setSortOpen(!sortOpen)
+              }
+            >
+              <Text style={styles.sortButtonText}>
+                ☷ Sort
+              </Text>
+            </TouchableOpacity>
+
+
+            {sortOpen && (
+              <View style={styles.sortMenu}>
+
+                <SortOption
+                  label="Default order"
+                  selected={
+                    sortOption === "default"
+                  }
+                  onPress={() => {
+                    setSortOption("default");
+                    setSortOpen(false);
+                  }}
+                />
+
+                <SortOption
+                  label="Name: A-Z"
+                  selected={
+                    sortOption === "name-asc"
+                  }
+                  onPress={() => {
+                    setSortOption("name-asc");
+                    setSortOpen(false);
+                  }}
+                />
+
+                <SortOption
+                  label="Name: Z-A"
+                  selected={
+                    sortOption === "name-desc"
+                  }
+                  onPress={() => {
+                    setSortOption("name-desc");
+                    setSortOpen(false);
+                  }}
+                />
+
+                <SortOption
+                  label="Scientific name: A-Z"
+                  selected={
+                    sortOption ===
+                    "scientific-asc"
+                  }
+                  onPress={() => {
+                    setSortOption(
+                      "scientific-asc"
+                    );
+
+                    setSortOpen(false);
+                  }}
+                />
+
+              </View>
+            )}
+
+
+            {/* CATEGORY */}
+
+            <FlatList
+              horizontal
+              data={categories}
+              keyExtractor={(item) => item}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={
+                styles.categoryList
+              }
+              renderItem={({ item }) => (
                 <TouchableOpacity
-                  style={styles.learnMoreButton}
+                  style={[
+                    styles.categoryButton,
+                    activeCategory === item &&
+                      styles.categoryButtonActive,
+                  ]}
                   onPress={() =>
-                    navigation.navigate(
-                      "PlantDetails",
-                      {
-                        slug: plant.slug,
-                      }
-                    )
+                    setActiveCategory(item)
                   }
                 >
-                  <View style={styles.arrowCircle}>
-                    <Text style={styles.arrow}>
-                      →
-                    </Text>
-                  </View>
-
-                  <Text style={styles.learnMoreText}>
-                    LEARN MORE
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      activeCategory === item &&
+                        styles.categoryTextActive,
+                    ]}
+                  >
+                    {item}
                   </Text>
                 </TouchableOpacity>
-              </View>
-            </View>
-          ))
-        ) : (
-          /* ================= EMPTY STATE ================= */
+              )}
+            />
+
+          </>
+        }
+
+        ListEmptyComponent={
           <View style={styles.emptyState}>
+
             <Text style={styles.emptyIcon}>
               🌿
             </Text>
 
             <Text style={styles.emptyTitle}>
-              No plants found
+              No species found
             </Text>
 
-            <Text style={styles.emptyText}>
-              Try another search term or select a
-              different category.
+            <Text style={styles.emptyDescription}>
+              Try another search term or select
+              a different category.
             </Text>
 
             <TouchableOpacity
@@ -215,389 +433,442 @@ export default function PlantScreen({ navigation }) {
               }}
             >
               <Text style={styles.clearButtonText}>
-                Clear filters
+                Clear Filters
               </Text>
             </TouchableOpacity>
+
           </View>
-        )}
-      </View>
+        }
 
-      {/* ================= QUOTE ================= */}
-      <View style={styles.quoteSection}>
-        <Text style={styles.quote}>
-          "Extraordinary plants.{"\n"}
-          A timeless rainforest."
-        </Text>
+        ListFooterComponent={
+          <View style={styles.quoteSection}>
 
-        <Text style={styles.quoteLabel}>
-          NIAH NATIONAL PARK
-        </Text>
-      </View>
+            <Text style={styles.quote}>
+              "Extraordinary plants.
+              {"\n"}A timeless rainforest."
+            </Text>
 
-      <View style={styles.bottomSpace} />
-    </ScrollView>
+            <Text style={styles.quoteLabel}>
+              NIAH NATIONAL PARK
+            </Text>
+
+          </View>
+        }
+      />
+
+    </SafeAreaView>
   );
 }
 
+
+// =====================================================
+// SORT OPTION
+// =====================================================
+
+function SortOption({
+  label,
+  selected,
+  onPress,
+}) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.sortOption,
+        selected && styles.sortOptionSelected,
+      ]}
+      onPress={onPress}
+    >
+      <Text
+        style={[
+          styles.sortOptionText,
+          selected &&
+            styles.sortOptionTextSelected,
+        ]}
+      >
+        {selected ? "✓ " : ""}
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+
+// =====================================================
+// STYLES
+// =====================================================
+
 const styles = StyleSheet.create({
-  container: {
+
+  safeArea: {
     flex: 1,
     backgroundColor: "#F8F6EE",
   },
 
-  /* ================= HERO ================= */
+  listContent: {
+    paddingBottom: 0,
+  },
 
   hero: {
-    height: 450,
-    width: '100%',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-
-  heroImage: {
-    resizeMode: "cover",
-  },
-
-  heroOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-
-    backgroundColor: 'rgba(30, 45, 40, 0.58)',
-  },
-
-  heroContent: {
-    paddingHorizontal: 25,
-    paddingBottom: 48,
+    paddingHorizontal: 22,
+    paddingTop: 45,
+    paddingBottom: 40,
+    backgroundColor: "#214638",
   },
 
   eyebrow: {
     color: "#9CDBA6",
     fontSize: 11,
     fontWeight: "700",
-    letterSpacing: 2.5,
-    marginBottom: 12,
+    letterSpacing: 2,
+    marginBottom: 10,
   },
 
   heroTitle: {
     color: "#FFFAF0",
-    fontSize: 52,
+    fontSize: 42,
     fontWeight: "600",
-    lineHeight: 56,
+    marginBottom: 10,
   },
 
   heroLead: {
     color: "#FFFFFF",
-    fontSize: 21,
-    lineHeight: 29,
-    marginTop: 14,
+    fontSize: 18,
+    lineHeight: 26,
     marginBottom: 8,
   },
 
   heroDescription: {
-    maxWidth: 650,
-    color: "#E9EEE4",
-    fontSize: 14,
-    lineHeight: 23,
+    color: "#DCE8DF",
+    fontSize: 13,
+    lineHeight: 21,
   },
 
-  /* ================= LIBRARY ================= */
-
-  library: {
+  libraryHeader: {
     paddingHorizontal: 20,
-    paddingTop: 48,
-    paddingBottom: 65,
+    paddingTop: 32,
+    paddingBottom: 18,
   },
 
   sectionLabel: {
     color: "#50A078",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
-    letterSpacing: 2.2,
-    marginBottom: 8,
+    letterSpacing: 1.8,
+    marginBottom: 7,
   },
 
-  headingRow: {
-    marginBottom: 24,
-  },
-
-  libraryTitle: {
+  sectionTitle: {
     color: "#254B42",
-    fontSize: 34,
+    fontSize: 28,
     fontWeight: "600",
-    lineHeight: 40,
   },
 
-  plantCount: {
-    color: "#6A7B73",
-    fontSize: 13,
-    fontWeight: "600",
+  speciesCount: {
     marginTop: 8,
-  },
-
-  /* ================= SEARCH ================= */
-
-  searchBox: {
-    height: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D9D9CF",
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    marginBottom: 15,
-
-    shadowColor: "#233F31",
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-
-    elevation: 2,
-  },
-
-  searchIcon: {
-    color: "#254B42",
-    fontSize: 27,
-    marginRight: 8,
+    color: "#6A7B73",
+    fontSize: 11,
   },
 
   searchInput: {
-    flex: 1,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderWidth: 1,
+    borderColor: "#D9D9CF",
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
     color: "#254B42",
-    fontSize: 14,
+    fontSize: 13,
   },
 
-  /* ================= CATEGORIES ================= */
-
-  categoryScroll: {
-    marginBottom: 25,
+  sortButton: {
+    alignSelf: "flex-end",
+    marginHorizontal: 20,
+    marginBottom: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#D9D9CF",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
   },
 
-  categoryContainer: {
-    paddingRight: 10,
+  sortButtonText: {
+    color: "#44564E",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+  sortMenu: {
+    marginHorizontal: 20,
+    marginBottom: 10,
+    padding: 6,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    elevation: 4,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+  },
+
+  sortOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderRadius: 8,
+  },
+
+  sortOptionSelected: {
+    backgroundColor: "#DFE8DA",
+  },
+
+  sortOptionText: {
+    color: "#44564E",
+    fontSize: 12,
+  },
+
+  sortOptionTextSelected: {
+    color: "#254B42",
+    fontWeight: "700",
+  },
+
+  categoryList: {
+    paddingHorizontal: 20,
+    paddingBottom: 18,
+    gap: 7,
   },
 
   categoryButton: {
-    paddingVertical: 11,
-    paddingHorizontal: 17,
+    paddingHorizontal: 15,
+    paddingVertical: 9,
     borderRadius: 999,
     backgroundColor: "#EEECE3",
-    marginRight: 8,
   },
 
   categoryButtonActive: {
     backgroundColor: "#35652F",
   },
 
-  categoryButtonText: {
+  categoryText: {
     color: "#44564E",
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: "600",
   },
 
-  categoryButtonTextActive: {
+  categoryTextActive: {
     color: "#FFFFFF",
   },
 
-  /* ================= PLANT CARD ================= */
-
-  plantCard: {
+  card: {
+    marginHorizontal: 20,
+    marginBottom: 15,
     overflow: "hidden",
+    borderRadius: 16,
     backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    marginBottom: 24,
-
-    borderWidth: 1,
-    borderColor: "rgba(49, 91, 70, 0.1)",
-
-    shadowColor: "#21392C",
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 15,
-
     elevation: 3,
+    shadowColor: "#21392C",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
   },
 
-  plantImage: {
-    height: 220,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#DCE8D6",
+  imageWrapper: {
+    height: 190,
     position: "relative",
   },
 
-  leafIcon: {
-    fontSize: 55,
-    marginBottom: 10,
+  cardImage: {
+    width: "100%",
+    height: "100%",
   },
 
-  imageComingSoon: {
+  imagePlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#DCE8D6",
+  },
+
+  placeholderIcon: {
+    fontSize: 45,
+    marginBottom: 8,
+  },
+
+  placeholderText: {
     color: "#577265",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
     letterSpacing: 1,
   },
 
-  badge: {
+  badgeContainer: {
     position: "absolute",
-    top: 14,
-    right: 14,
-    paddingVertical: 7,
-    paddingHorizontal: 11,
-    borderRadius: 999,
-    backgroundColor: "rgba(20, 54, 37, 0.84)",
+    top: 10,
+    left: 10,
+    right: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
 
-  badgeText: {
+  categoryBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: "#143625D9",
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: "#FFF6DC",
+    color: "#6F532E",
+    fontSize: 8,
+    fontWeight: "700",
+  },
+
+  cardContent: {
+    padding: 14,
+  },
+
+  cardTitle: {
+    color: "#203F35",
+    fontSize: 20,
+    fontWeight: "600",
+  },
+
+  scientificName: {
+    marginTop: 3,
+    color: "#7C6C5B",
+    fontSize: 12,
+    fontStyle: "italic",
+  },
+
+  family: {
+    marginTop: 7,
+    color: "#66786F",
+    fontSize: 9,
+  },
+
+  description: {
+    marginTop: 10,
+    color: "#617068",
+    fontSize: 11,
+    lineHeight: 17,
+  },
+
+  recordCount: {
+    marginTop: 8,
+    color: "#508A6A",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  actions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 13,
+  },
+
+  secondaryButton: {
+    flex: 1,
+    minHeight: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#B7C7BD",
+    borderRadius: 999,
+    backgroundColor: "#F7F6EF",
+  },
+
+  secondaryText: {
+    color: "#315B49",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  primaryButton: {
+    flex: 1,
+    minHeight: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: "#315B49",
+  },
+
+  primaryText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  emptyState: {
+    margin: 20,
+    padding: 40,
+    alignItems: "center",
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#BDC8BD",
+    borderRadius: 16,
+  },
+
+  emptyIcon: {
+    fontSize: 34,
+  },
+
+  emptyTitle: {
+    marginTop: 10,
+    color: "#254B42",
+    fontSize: 20,
+    fontWeight: "600",
+  },
+
+  emptyDescription: {
+    marginTop: 6,
+    color: "#63736A",
+    fontSize: 12,
+    textAlign: "center",
+  },
+
+  clearButton: {
+    marginTop: 15,
+    paddingHorizontal: 17,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: "#35652F",
+  },
+
+  clearButtonText: {
     color: "#FFFFFF",
     fontSize: 11,
     fontWeight: "700",
   },
 
-  cardContent: {
-    padding: 22,
-  },
-
-  plantName: {
-    color: "#203F35",
-    fontSize: 23,
-    fontWeight: "700",
-  },
-
-  scientificName: {
-    color: "#7C6C5B",
-    fontSize: 15,
-    fontStyle: "italic",
-    marginTop: 5,
-    marginBottom: 14,
-  },
-
-  description: {
-    color: "#617068",
-    fontSize: 13,
-    lineHeight: 21,
-    marginBottom: 20,
-  },
-
-  /* ================= LEARN MORE ================= */
-
-  learnMoreButton: {
-    height: 44,
-    width: 170,
-    borderRadius: 999,
-    backgroundColor: "#F3F0E7",
-    alignSelf: "center",
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  arrowCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#8A5727",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  arrow: {
-    color: "#FFFFFF",
-    fontSize: 21,
-    fontWeight: "600",
-  },
-
-  learnMoreText: {
-    flex: 1,
-    color: "#805020",
-    fontSize: 12,
-    fontWeight: "700",
-    textAlign: "center",
-    letterSpacing: 0.5,
-    marginRight: 10,
-  },
-
-  /* ================= EMPTY ================= */
-
-  emptyState: {
-    paddingVertical: 65,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderColor: "#BDC8BD",
-    borderRadius: 18,
-  },
-
-  emptyIcon: {
-    fontSize: 42,
-  },
-
-  emptyTitle: {
-    color: "#254B42",
-    fontSize: 25,
-    fontWeight: "700",
-    marginTop: 12,
-  },
-
-  emptyText: {
-    color: "#63736A",
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: "center",
-    marginTop: 7,
-    marginBottom: 20,
-  },
-
-  clearButton: {
-    backgroundColor: "#35652F",
-    paddingVertical: 11,
-    paddingHorizontal: 18,
-    borderRadius: 999,
-  },
-
-  clearButtonText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-
-  /* ================= QUOTE ================= */
-
   quoteSection: {
-    minHeight: 210,
-    paddingHorizontal: 25,
-    paddingVertical: 45,
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 40,
     alignItems: "center",
-    justifyContent: "center",
     backgroundColor: "#214638",
   },
 
   quote: {
     color: "#FFFFFF",
-    fontSize: 27,
-    lineHeight: 37,
+    fontSize: 23,
     fontStyle: "italic",
     textAlign: "center",
+    lineHeight: 32,
   },
 
   quoteLabel: {
+    marginTop: 15,
     color: "#D6E3CF",
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
-    letterSpacing: 4,
-    marginTop: 18,
+    letterSpacing: 3,
   },
 
-  bottomSpace: {
-    height: 20,
-  },
 });
