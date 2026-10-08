@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import PlantsView from '../views/PlantsView.vue'
-import SpeciesDetailView from '../views/SpeciesDetailView.vue'
+import PlantDetailView from '../views/PlantDetailView.vue'
 import AdminDashboardView from '../views/AdminDashboardView.vue'
 import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
@@ -10,13 +10,6 @@ import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  scrollBehavior(_to, _from, savedPosition) {
-    if (savedPosition) {
-      return savedPosition
-    }
-
-    return { top: 0, left: 0 }
-  },
   routes: [
     {
       path: '/',
@@ -24,28 +17,19 @@ const router = createRouter({
       component: HomeView,
     },
     {
-      path: '/species',
-      name: 'species',
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('../views/ForgotPasswordView.vue'),
+    },//forgot password route
+    {
+      path: '/plants',
+      name: 'plants',
       component: PlantsView,
     },
     {
-      path: '/plants',
-      redirect: '/species',
-    },
-    {
-      path: '/species/:slug/plants',
-      name: 'species-plants',
-      component: () => import('../views/SpeciesPlantsView.vue'),
-    },
-    {
-      path: '/species/:slug',
-      name: 'species-detail',
-      component: SpeciesDetailView,
-    },
-    {
-      path: '/plant/:plantId',
+      path: '/plants/:slug',
       name: 'plant-detail',
-      component: () => import('../views/PlantDetailView.vue'),
+      component: PlantDetailView,
     },
     {
       path: '/change-password',
@@ -186,16 +170,6 @@ const router = createRouter({
           meta: {
             title: 'Reports',
             section: 'ANALYSIS & EXPORT',
-          },
-        },
-        {
-          path: 'profile',
-          name: 'conservation-profile',
-          component: () =>
-            import('../views/conservation/ConservationProfileView.vue'),
-          meta: {
-            title: 'Profile Settings',
-            section: 'ACCOUNT',
           },
         },
       ],

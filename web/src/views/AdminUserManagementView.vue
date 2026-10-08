@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { sendTemporaryPasswordEmail } from '../services/accountEmail'
 import {
   createPrototypeUser,
   findPrototypeUserByEmail,
@@ -101,6 +102,8 @@ const locallyCreatedUsers = getPrototypeUsers().filter(
 const users = ref<UserRecord[]>([...existingUsers, ...locallyCreatedUsers])
 const createdUser = ref<PrototypeUser | null>(null)
 const copyLabel = ref('Copy Password')
+const emailState = ref<'idle' | 'sending' | 'sent' | 'error'>('idle')
+const emailError = ref('')
 const formError = ref('')
 const newUser = ref<{ name: string; email: string; role: PrototypeRole | '' }>({
   name: '',
@@ -113,6 +116,8 @@ const openAddUser = () => {
   formError.value = ''
   createdUser.value = null
   copyLabel.value = 'Copy Password'
+  emailState.value = 'idle'
+  emailError.value = ''
   addUserOpen.value = true
 }
 
@@ -156,7 +161,26 @@ const copyPassword = async () => {
   }
 }
 
+const sendAccountEmail = async () => {
+  if (!createdUser.value || emailState.value === 'sending' || emailState.value === 'sent') return
+  emailState.value = 'sending'
+  emailError.value = ''
+  try {
+    await sendTemporaryPasswordEmail(createdUser.value, {
+      serviceId: import.meta.env.VITE_EMAILJS_SERVICE_ID,
+      templateId: import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
+      publicKey: import.meta.env.VITE_EMAILJS_PUBLIC_KEY,
+      loginUrl: import.meta.env.VITE_ACCOUNT_LOGIN_URL || new URL(import.meta.env.BASE_URL, window.location.origin).href,
+    })
+    emailState.value = 'sent'
+  } catch (error) {
+    emailState.value = 'error'
+    emailError.value = error instanceof Error ? error.message : 'Email could not be sent. Please try again.'
+  }
+}
+
 const finishCreatingUser = () => {
+  if (emailState.value === 'sending') return
   addUserOpen.value = false
   createdUser.value = null
 }
@@ -375,14 +399,14 @@ const clearFilters = () => {
       </main>
     </div>
 
-    <div v-if="addUserOpen" class="modal-backdrop" @click.self="addUserOpen = false">
+    <div v-if="addUserOpen" class="modal-backdrop" @click.self="finishCreatingUser">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
         <div class="modal-heading">
           <div>
             <p>NEW ACCOUNT</p>
             <h2 id="add-user-title">Add New User</h2>
           </div>
-          <button type="button" aria-label="Close" @click="addUserOpen = false">×</button>
+          <button type="button" aria-label="Close" :disabled="emailState === 'sending'" @click="finishCreatingUser">×</button>
         </div>
         <div v-if="createdUser" class="creation-result">
           <strong>{{ createdUser.name }}</strong>
@@ -392,9 +416,14 @@ const clearFilters = () => {
             <small>Temporary password</small><code>{{ createdUser.password }}</code>
           </div>
           <p class="form-note">The user must change this password when signing in for the first time.</p>
+          <p v-if="emailState === 'sent'" class="form-note" role="status">Account email sent to {{ createdUser.email }}.</p>
+          <p v-else-if="emailState === 'error'" class="form-error" role="alert">{{ emailError }} The account is still created; you can retry sending.</p>
+          <button class="primary-button" type="button" :disabled="emailState === 'sending' || emailState === 'sent'" @click="sendAccountEmail">
+            {{ emailState === 'sending' ? 'Sending email…' : emailState === 'sent' ? 'Email Sent' : emailState === 'error' ? 'Retry Email' : 'Send Account Email' }}
+          </button>
           <div class="modal-actions">
             <button type="button" @click="copyPassword">{{ copyLabel }}</button>
-            <button class="primary-button" type="button" @click="finishCreatingUser">Done</button>
+            <button class="primary-button" type="button" :disabled="emailState === 'sending'" @click="finishCreatingUser">Done</button>
           </div>
         </div>
         <form v-else @submit.prevent="submitNewUser">
@@ -631,6 +660,10 @@ const clearFilters = () => {
 }
 .primary-button:hover {
   background: #28664f;
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .primary-button span {
   font-size: 17px;

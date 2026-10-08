@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { authenticatePrototypeUser } from '../data/prototypeAuth'
+import { useRouter } from 'vue-router' // Navigate to the forgot-password page
+const router = useRouter() //forgot password
 
 defineProps<{
   visible: boolean
@@ -26,6 +28,13 @@ const closeModal = () => {
   loginError.value = ''
   platformMessage.value = ''
 }
+
+// Open the forgot-password page
+const openForgotPassword = () => {
+  closeModal()
+  router.push({ name: 'forgot-password' })
+}
+
 //testing
 const handleLogin = () => {
   loginError.value = ''
@@ -145,12 +154,25 @@ const handleLogin = () => {
                 <div class="label-cut label-cut-password"></div>
                 <label class="floating-label" for="password">Password</label>
             </div>
-
-            <div class="forgot-password-row">
+ 
+            <!--
+              <div class="forgot-password-row">
                 <button type="button" class="forgot-password-button">
-                    Forget password?
+                  Forget password?
                 </button>
+              </div>
+              -->   <!-- This button has been replaced -->
+                       
+            <div class="forgot-password-row">
+              <button
+                type="button"
+                class="forgot-password-button"
+                @click="openForgotPassword"
+              >
+                Forgot password?
+              </button>
             </div>
+
 
             <p
                 v-if="loginError"
