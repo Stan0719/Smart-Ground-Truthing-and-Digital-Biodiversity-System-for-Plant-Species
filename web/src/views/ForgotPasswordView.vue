@@ -81,12 +81,30 @@ async function sendCode() {
       ? email.value.trim().toLowerCase()
       : accountEmail.value
 
-  const user = findPrototypeUserByEmail(targetEmail)
+  // const user = findPrototypeUserByEmail(targetEmail)
+  //
+  // if (!user) {
+  //   error.value = 'No locally created account was found for this email.'
+  //   return
+  // }
+
+  sending.value = true // for app
+
+  let user
+  try {
+    user = await findPrototypeUserByEmail(targetEmail)
+  } catch {
+    sending.value = false
+    error.value = 'Unable to load your account. Please try again.'
+    return
+  }
 
   if (!user) {
+    sending.value = false
     error.value = 'No locally created account was found for this email.'
     return
   }
+  
 
   // Invalidate the previous code before sending a new one.
   stopTimer()
@@ -97,9 +115,8 @@ async function sendCode() {
   verified.value = false
   sending.value = true
 
-  const code = generateOtp()
-
   try {
+    const code = generateOtp()
     await sendOtpEmail(user.email, user.name, code)
 
     accountEmail.value = user.email
@@ -156,7 +173,38 @@ function verifyCode() {
   enteredOtp.value = ''
 }
 
-function resetPassword() {
+// function resetPassword() {
+//   error.value = ''
+//
+//   if (!verified.value) {
+//     error.value = 'Verify your email code first.'
+//     return
+//   }
+//
+//   if (newPassword.value.length < 8) {
+//     error.value = 'Password must contain at least 8 characters.'
+//     return
+//   }
+//
+//   if (newPassword.value !== confirmPassword.value) {
+//     error.value = 'Passwords do not match.'
+//     return
+//   }
+//
+//   if (!updatePrototypePassword(accountEmail.value, newPassword.value)) {
+//     error.value = 'Account could not be updated.'
+//     return
+//   }
+//
+//   verified.value = false
+//   newPassword.value = ''
+//   confirmPassword.value = ''
+//   step.value = 'done'
+// }
+
+//replacement
+async function resetPassword() {
+  if (sending.value) return
   error.value = ''
 
   if (!verified.value) {
@@ -174,7 +222,22 @@ function resetPassword() {
     return
   }
 
-  if (!updatePrototypePassword(accountEmail.value, newPassword.value)) {
+  sending.value = true
+
+  let updated = false
+  try {
+    updated = await updatePrototypePassword(
+      accountEmail.value,
+      newPassword.value,
+    )
+  } catch {
+    error.value = 'Account could not be updated.'
+    return
+  } finally {
+    sending.value = false
+  }
+
+  if (!updated) {
     error.value = 'Account could not be updated.'
     return
   }
@@ -269,7 +332,10 @@ onUnmounted(stopTimer)
           required
         />
 
-        <button type="submit">Save new password</button>
+        <!-- <button type="submit">Save new password</button> -->
+        <button type="submit" :disabled="sending">
+          Save new password
+        </button>
       </form>
 
       <div v-else>

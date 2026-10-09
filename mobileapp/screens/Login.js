@@ -13,6 +13,8 @@ import {
   View,
 } from "react-native";
 
+import { router } from "expo-router";
+
 import { Ionicons } from "@expo/vector-icons";
 import { getVisitorAccounts } from "../utils/visitorStorage";
 
@@ -401,6 +403,7 @@ export default function LoginScreen({
               {/* Forgot password */}
               <TouchableOpacity
                 style={styles.forgotButton}
+                onPress={() => router.push("/forgot-password")}
                 activeOpacity={0.65}
                 accessibilityRole="button"
               >

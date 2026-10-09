@@ -13,7 +13,7 @@ import {
 
 import {
   useFocusEffect,
-} from "@react-navigation/native";
+} from "expo-router/react-navigation";
 
 import {
   botanistPlantRecords,

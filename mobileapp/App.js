@@ -1,16 +1,17 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 import {
   NavigationContainer,
-} from "@react-navigation/native";
+  useNavigationContainerRef,
+} from "expo-router/react-navigation";
 
 import {
   createBottomTabNavigator,
-} from "@react-navigation/bottom-tabs";
+} from "expo-router/js-tabs";
 
 import {
   createNativeStackNavigator,
-} from "@react-navigation/native-stack";
+} from "expo-router/native-stack";
 
 import { Ionicons } from "@expo/vector-icons";
 
@@ -444,7 +445,13 @@ function MainTabs({
    ROOT APP NAVIGATION
 ========================================================= */
 
-export default function App() {
+export default function App({ homeRequest }) {
+  const navigationRef = useNavigationContainerRef();
+  useEffect(() => {
+    if (homeRequest && navigationRef.isReady()) {
+      navigationRef.navigate("MainTabs");
+    }
+  }, [homeRequest, navigationRef]);
 
   const [user, setUser] = useState(null);
 
@@ -463,7 +470,12 @@ export default function App() {
 
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      ref={navigationRef}
+      onReady={() => {
+        if (homeRequest) navigationRef.navigate("MainTabs");
+      }}
+    >
 
       <RootStack.Navigator
         initialRouteName="Login"
