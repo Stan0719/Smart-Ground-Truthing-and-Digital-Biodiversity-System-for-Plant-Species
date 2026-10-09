@@ -8,7 +8,7 @@ export interface PrototypeUser {
   name: string
   email: string
   role: PrototypeRole
-  status: 'Active'
+  status: 'Active' | 'Inactive' | 'Suspended'
   lastLogin: 'Never'
   initials: string
   password: string
@@ -59,7 +59,10 @@ export function createPrototypeUser(input: {
     return match ? Math.max(highest, Number(match[1])) : highest
   }, 0)
   const words = input.name.trim().split(/\s+/)
-  const initials = words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join('')
+  const initials = words
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join('')
   const user: PrototypeUser = {
     id: `USR${String(highestId + 1).padStart(3, '0')}`,
     name: input.name.trim(),
@@ -88,5 +91,26 @@ export function updatePrototypePassword(email: string, password: string): boolea
   if (!user) return false
   users[index] = { ...user, password, mustChangePassword: false }
   savePrototypeUsers(users)
+  return true
+}
+
+export function updatePrototypeUser(
+  id: string,
+  changes: Pick<PrototypeUser, 'name' | 'email' | 'role' | 'status' | 'initials'>,
+): boolean {
+  const users = getPrototypeUsers()
+  const index = users.findIndex((user) => user.id === id)
+  const user = users[index]
+  if (!user) return false
+  users[index] = { ...user, ...changes, email: normaliseEmail(changes.email) }
+  savePrototypeUsers(users)
+  return true
+}
+
+export function deletePrototypeUser(id: string): boolean {
+  const users = getPrototypeUsers()
+  const remainingUsers = users.filter((user) => user.id !== id)
+  if (remainingUsers.length === users.length) return false
+  savePrototypeUsers(remainingUsers)
   return true
 }

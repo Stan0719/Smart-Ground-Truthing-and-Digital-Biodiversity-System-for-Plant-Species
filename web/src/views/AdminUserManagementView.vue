@@ -3,8 +3,10 @@ import { computed, ref } from 'vue'
 import { sendTemporaryPasswordEmail } from '../services/accountEmail'
 import {
   createPrototypeUser,
+  deletePrototypeUser,
   findPrototypeUserByEmail,
   getPrototypeUsers,
+  updatePrototypeUser,
   type PrototypeRole,
   type PrototypeUser,
 } from '../data/prototypeAuth'
@@ -27,6 +29,7 @@ const addUserOpen = ref(false)
 const search = ref('')
 const roleFilter = ref('All roles')
 const statusFilter = ref('All statuses')
+const USER_DIRECTORY_KEY = 'niahAdminUserDirectory'
 
 const existingUsers: UserRecord[] = [
   {
@@ -99,8 +102,33 @@ const existingIds = new Set(existingUsers.map((user) => user.id))
 const locallyCreatedUsers = getPrototypeUsers().filter(
   (user) => !existingEmails.has(user.email.toLowerCase()) && !existingIds.has(user.id),
 )
-const users = ref<UserRecord[]>([...existingUsers, ...locallyCreatedUsers])
+const loadUserDirectory = (): UserRecord[] => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(USER_DIRECTORY_KEY) ?? 'null')
+    if (Array.isArray(stored)) {
+      const storedIds = new Set(stored.map((user: UserRecord) => user.id))
+      return [...stored, ...locallyCreatedUsers.filter((user) => !storedIds.has(user.id))]
+    }
+  } catch {
+    // Fall back to the seeded directory when stored prototype data is invalid.
+  }
+  return [...existingUsers, ...locallyCreatedUsers]
+}
+const users = ref<UserRecord[]>(loadUserDirectory())
 const createdUser = ref<PrototypeUser | null>(null)
+const actionMode = ref<'view' | 'edit' | 'delete' | null>(null)
+const selectedUser = ref<UserRecord | null>(null)
+const actionError = ref('')
+const successMessage = ref('')
+const errorMessage = ref('')
+let successTimer: ReturnType<typeof setTimeout> | undefined
+let errorTimer: ReturnType<typeof setTimeout> | undefined
+const editUser = ref<{ name: string; email: string; role: UserRole; status: UserStatus }>({
+  name: '',
+  email: '',
+  role: 'Botanist',
+  status: 'Active',
+})
 const copyLabel = ref('Copy Password')
 const emailState = ref<'idle' | 'sending' | 'sent' | 'error'>('idle')
 const emailError = ref('')
@@ -110,6 +138,32 @@ const newUser = ref<{ name: string; email: string; role: PrototypeRole | '' }>({
   email: '',
   role: '',
 })
+
+const showSuccessMessage = (message: string) => {
+  if (errorTimer) clearTimeout(errorTimer)
+  errorTimer = undefined
+  errorMessage.value = ''
+
+  if (successTimer) clearTimeout(successTimer)
+  successMessage.value = message
+  successTimer = setTimeout(() => {
+    successMessage.value = ''
+    successTimer = undefined
+  }, 3500)
+}
+
+const showErrorMessage = (message: string) => {
+  if (successTimer) clearTimeout(successTimer)
+  successTimer = undefined
+  successMessage.value = ''
+
+  if (errorTimer) clearTimeout(errorTimer)
+  errorMessage.value = message
+  errorTimer = setTimeout(() => {
+    errorMessage.value = ''
+    errorTimer = undefined
+  }, 4000)
+}
 
 const openAddUser = () => {
   newUser.value = { name: '', email: '', role: '' }
@@ -128,10 +182,12 @@ const submitNewUser = () => {
 
   if (!name || !email || !newUser.value.role) {
     formError.value = 'Full name, email and role are required.'
+    showErrorMessage(formError.value)
     return
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     formError.value = 'Enter a valid email address.'
+    showErrorMessage(formError.value)
     return
   }
   if (
@@ -139,16 +195,158 @@ const submitNewUser = () => {
     findPrototypeUserByEmail(email)
   ) {
     formError.value = 'An account with this email already exists.'
+    showErrorMessage(formError.value)
     return
   }
 
-  createdUser.value = createPrototypeUser({
+  let createdAccount: PrototypeUser | null = null
+  try {
+    createdAccount = createPrototypeUser({
+      name,
+      email,
+      role: newUser.value.role,
+      existingIds: existingUsers.map((user) => user.id),
+    })
+    users.value.push(createdAccount)
+    saveUserDirectory()
+    createdUser.value = createdAccount
+  } catch {
+    if (createdAccount) {
+      users.value = users.value.filter((user) => user.id !== createdAccount?.id)
+      try {
+        deletePrototypeUser(createdAccount.id)
+      } catch {
+        // The visible directory is still restored if prototype storage is unavailable.
+      }
+    }
+    formError.value = 'Unable to create the user account. Please try again.'
+    showErrorMessage(formError.value)
+  }
+}
+
+const saveUserDirectory = () => {
+  localStorage.setItem(USER_DIRECTORY_KEY, JSON.stringify(users.value))
+}
+
+const initialsFor = (name: string) =>
+  name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join('')
+
+const openUserAction = (mode: 'view' | 'edit' | 'delete', user: UserRecord) => {
+  selectedUser.value = user
+  actionMode.value = mode
+  actionError.value = ''
+  editUser.value = { name: user.name, email: user.email, role: user.role, status: user.status }
+}
+
+const closeUserAction = () => {
+  actionMode.value = null
+  selectedUser.value = null
+  actionError.value = ''
+}
+
+const saveEditedUser = () => {
+  if (!selectedUser.value) return
+  const name = editUser.value.name.trim()
+  const email = editUser.value.email.trim().toLowerCase()
+  actionError.value = ''
+  if (!name || !email) {
+    actionError.value = 'Full name and email are required.'
+    showErrorMessage(actionError.value)
+    return
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    actionError.value = 'Enter a valid email address.'
+    showErrorMessage(actionError.value)
+    return
+  }
+  if (
+    users.value.some(
+      (user) => user.id !== selectedUser.value?.id && user.email.toLowerCase() === email,
+    )
+  ) {
+    actionError.value = 'An account with this email already exists.'
+    showErrorMessage(actionError.value)
+    return
+  }
+  const updated: UserRecord = {
+    ...selectedUser.value,
+    ...editUser.value,
     name,
     email,
-    role: newUser.value.role,
-    existingIds: existingUsers.map((user) => user.id),
-  })
-  users.value.push(createdUser.value)
+    initials: initialsFor(name),
+  }
+  const index = users.value.findIndex((user) => user.id === updated.id)
+  const originalUser = { ...selectedUser.value }
+  const prototypeUser = getPrototypeUsers().find((user) => user.id === updated.id)
+
+  try {
+    if (index === -1) throw new Error('User record not found')
+    users.value[index] = updated
+    if (prototypeUser && updated.role !== 'Administrator') {
+      if (
+        !updatePrototypeUser(updated.id, {
+          name: updated.name,
+          email: updated.email,
+          role: updated.role,
+          status: updated.status,
+          initials: updated.initials,
+        })
+      ) {
+        throw new Error('Prototype user could not be updated')
+      }
+    }
+    saveUserDirectory()
+    closeUserAction()
+    showSuccessMessage(`${updated.name}'s account was updated successfully.`)
+  } catch {
+    if (index !== -1) users.value[index] = originalUser
+    if (prototypeUser) {
+      try {
+        updatePrototypeUser(prototypeUser.id, {
+          name: prototypeUser.name,
+          email: prototypeUser.email,
+          role: prototypeUser.role,
+          status: prototypeUser.status,
+          initials: prototypeUser.initials,
+        })
+      } catch {
+        // Keep the modal open and report the original save failure.
+      }
+    }
+    actionError.value = 'Unable to update the user account. Please try again.'
+    showErrorMessage(actionError.value)
+  }
+}
+
+const confirmDeleteUser = () => {
+  if (!selectedUser.value) return
+
+  const deletedUser = selectedUser.value
+  const previousUsers = [...users.value]
+  const previousUserCount = users.value.length
+
+  try {
+    users.value = users.value.filter((user) => user.id !== deletedUser.id)
+
+    if (users.value.length === previousUserCount) {
+      showErrorMessage(`Unable to delete ${deletedUser.name}'s account. Please try again.`)
+      return
+    }
+
+    saveUserDirectory()
+    deletePrototypeUser(deletedUser.id)
+    closeUserAction()
+
+    showSuccessMessage(`${deletedUser.name}'s account was deleted successfully.`)
+  } catch {
+    users.value = previousUsers
+    showErrorMessage(`Unable to delete ${deletedUser.name}'s account. Please try again.`)
+  }
 }
 
 const copyPassword = async () => {
@@ -170,12 +368,16 @@ const sendAccountEmail = async () => {
       serviceId: import.meta.env.VITE_EMAILJS_SERVICE_ID,
       templateId: import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
       publicKey: import.meta.env.VITE_EMAILJS_PUBLIC_KEY,
-      loginUrl: import.meta.env.VITE_ACCOUNT_LOGIN_URL || new URL(import.meta.env.BASE_URL, window.location.origin).href,
+      loginUrl:
+        import.meta.env.VITE_ACCOUNT_LOGIN_URL ||
+        new URL(import.meta.env.BASE_URL, window.location.origin).href,
     })
     emailState.value = 'sent'
   } catch (error) {
     emailState.value = 'error'
-    emailError.value = error instanceof Error ? error.message : 'Email could not be sent. Please try again.'
+    emailError.value =
+      error instanceof Error ? error.message : 'Email could not be sent. Please try again.'
+    showErrorMessage(emailError.value || 'Account email could not be sent. Please try again.')
   }
 }
 
@@ -199,6 +401,11 @@ const filteredUsers = computed(() => {
     return matchesSearch && matchesRole && matchesStatus
   })
 })
+const selectedIsPrototype = computed(() =>
+  selectedUser.value
+    ? getPrototypeUsers().some((user) => user.id === selectedUser.value?.id)
+    : false,
+)
 
 const closeSidebar = () => {
   sidebarOpen.value = false
@@ -213,8 +420,20 @@ const clearFilters = () => {
 <template>
   <div class="admin-layout">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
-      <button class="sidebar-close-button" type="button" aria-label="Close navigation" @click="closeSidebar">×</button>
-      <RouterLink class="brand" to="/" data-tooltip="Go back to the public website" aria-label="Go back to the public website">
+      <button
+        class="sidebar-close-button"
+        type="button"
+        aria-label="Close navigation"
+        @click="closeSidebar"
+      >
+        ×
+      </button>
+      <RouterLink
+        class="brand"
+        to="/"
+        data-tooltip="Go back to the public website"
+        aria-label="Go back to the public website"
+      >
         <img src="/images/logo.png" alt="Niah Biodiversity" />
         <div><strong>NIAH</strong><span>ADMINISTRATION</span></div>
       </RouterLink>
@@ -224,11 +443,19 @@ const clearFilters = () => {
         <RouterLink to="/admin/users" class="active" @click="closeSidebar"
           ><span>♙</span> User Management</RouterLink
         >
-        <RouterLink to="/admin/roles" @click="closeSidebar"><span>◇</span> Role &amp; Permission</RouterLink>
+        <RouterLink to="/admin/roles" @click="closeSidebar"
+          ><span>◇</span> Role &amp; Permission</RouterLink
+        >
         <RouterLink to="/admin/iot" @click="closeSidebar"><span>⌁</span> IoT Monitoring</RouterLink>
-        <RouterLink to="/admin/sensors" @click="closeSidebar"><span>◉</span> Sensor Management</RouterLink>
-        <RouterLink to="/admin/alerts" @click="closeSidebar"><span>△</span> Threat Alerts <i>3</i></RouterLink>
-        <RouterLink to="/admin/activity" @click="closeSidebar"><span>↻</span> System Activity</RouterLink>
+        <RouterLink to="/admin/sensors" @click="closeSidebar"
+          ><span>◉</span> Sensor Management</RouterLink
+        >
+        <RouterLink to="/admin/alerts" @click="closeSidebar"
+          ><span>△</span> Threat Alerts <i>3</i></RouterLink
+        >
+        <RouterLink to="/admin/activity" @click="closeSidebar"
+          ><span>↻</span> System Activity</RouterLink
+        >
       </nav>
       <div class="sidebar-footer">
         <button type="button">Logout</button>
@@ -315,15 +542,18 @@ const clearFilters = () => {
           </div>
 
           <div class="filters">
-            <label class="search-box"
-              ><svg viewBox="0 0 24 24" aria-hidden="true">
+            <label class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="10.5" cy="10.5" r="6.5" />
-                <path d="m15.5 15.5 5 5" /></svg><span class="sr-only">Search users</span
-              ><input
+                <path d="m15.5 15.5 5 5" />
+              </svg>
+              <span class="sr-only">Search users</span>
+              <input
                 v-model="search"
                 type="search"
                 placeholder="Search name, email, ID or role..."
-            /></label>
+              />
+            </label>
             <select v-model="roleFilter" aria-label="Filter by role">
               <option>All roles</option>
               <option>Administrator</option>
@@ -378,9 +608,20 @@ const clearFilters = () => {
                   <td>{{ user.lastLogin }}</td>
                   <td>
                     <div class="row-actions">
-                      <button type="button" title="View user">View</button>
-                      <button type="button" title="Edit user">Edit</button>
-                      <button type="button" title="Delete user">Delete</button>
+                      <button type="button" title="View user" @click="openUserAction('view', user)">
+                        View
+                      </button>
+                      <button type="button" title="Edit user" @click="openUserAction('edit', user)">
+                        Edit
+                      </button>
+                      <button
+                        class="delete-action"
+                        type="button"
+                        title="Delete user"
+                        @click="openUserAction('delete', user)"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -397,6 +638,33 @@ const clearFilters = () => {
       </main>
     </div>
 
+    <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">
+      <svg class="success-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M9 12l2 2 4-4"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+      </svg>
+      <p>
+        <strong>Success</strong><span>{{ successMessage }}</span>
+      </p>
+    </div>
+
+    <div v-if="errorMessage" class="error-alert" role="alert" aria-live="assertive">
+      <svg class="error-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+        <path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        <circle cx="12" cy="16.5" r="1" fill="currentColor" />
+      </svg>
+      <p>
+        <strong>Error</strong><span>{{ errorMessage }}</span>
+      </p>
+    </div>
+
     <div v-if="addUserOpen" class="modal-backdrop" @click.self="finishCreatingUser">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
         <div class="modal-heading">
@@ -404,7 +672,14 @@ const clearFilters = () => {
             <p>NEW ACCOUNT</p>
             <h2 id="add-user-title">Add New User</h2>
           </div>
-          <button type="button" aria-label="Close" :disabled="emailState === 'sending'" @click="finishCreatingUser">×</button>
+          <button
+            type="button"
+            aria-label="Close"
+            :disabled="emailState === 'sending'"
+            @click="finishCreatingUser"
+          >
+            ×
+          </button>
         </div>
         <div v-if="createdUser" class="creation-result">
           <strong>{{ createdUser.name }}</strong>
@@ -413,32 +688,187 @@ const clearFilters = () => {
           <div class="temporary-password">
             <small>Temporary password</small><code>{{ createdUser.password }}</code>
           </div>
-          <p class="form-note">The user must change this password when signing in for the first time.</p>
-          <p v-if="emailState === 'sent'" class="form-note" role="status">Account email sent to {{ createdUser.email }}.</p>
-          <p v-else-if="emailState === 'error'" class="form-error" role="alert">{{ emailError }} The account is still created; you can retry sending.</p>
-          <button class="primary-button" type="button" :disabled="emailState === 'sending' || emailState === 'sent'" @click="sendAccountEmail">
-            {{ emailState === 'sending' ? 'Sending email…' : emailState === 'sent' ? 'Email Sent' : emailState === 'error' ? 'Retry Email' : 'Send Account Email' }}
+          <p class="form-note">
+            The user must change this password when signing in for the first time.
+          </p>
+          <p v-if="emailState === 'sent'" class="form-note" role="status">
+            Account email sent to {{ createdUser.email }}.
+          </p>
+          <p v-else-if="emailState === 'error'" class="form-error" role="alert">
+            {{ emailError }} The account is still created; you can retry sending.
+          </p>
+          <button
+            class="primary-button"
+            type="button"
+            :disabled="emailState === 'sending' || emailState === 'sent'"
+            @click="sendAccountEmail"
+          >
+            {{
+              emailState === 'sending'
+                ? 'Sending email…'
+                : emailState === 'sent'
+                  ? 'Email Sent'
+                  : emailState === 'error'
+                    ? 'Retry Email'
+                    : 'Send Account Email'
+            }}
           </button>
           <div class="modal-actions">
             <button type="button" @click="copyPassword">{{ copyLabel }}</button>
-            <button class="primary-button" type="button" :disabled="emailState === 'sending'" @click="finishCreatingUser">Done</button>
+            <button
+              class="primary-button"
+              type="button"
+              :disabled="emailState === 'sending'"
+              @click="finishCreatingUser"
+            >
+              Done
+            </button>
           </div>
         </div>
         <form v-else @submit.prevent="submitNewUser">
-          <label>Full name<input v-model="newUser.name" type="text" placeholder="Enter full name" /></label>
-          <label>Email address<input v-model="newUser.email" type="email" placeholder="name@example.com" /></label>
-          <label>Role<select v-model="newUser.role">
-            <option value="" disabled>Select role</option>
-            <option>Conservation Officer</option>
-            <option>Botanist</option>
-          </select></label>
+          <label
+            >Full name<input v-model="newUser.name" type="text" placeholder="Enter full name"
+          /></label>
+          <label
+            >Email address<input
+              v-model="newUser.email"
+              type="email"
+              placeholder="name@example.com"
+          /></label>
+          <label
+            >Role<select v-model="newUser.role">
+              <option value="" disabled>Select role</option>
+              <option>Conservation Officer</option>
+              <option>Botanist</option>
+            </select></label
+          >
           <p v-if="formError" class="form-error">{{ formError }}</p>
-          <p class="form-note">A temporary password will be generated for this frontend-only prototype.</p>
+          <p class="form-note">
+            A temporary password will be generated for this frontend-only prototype.
+          </p>
           <div class="modal-actions">
             <button type="button" @click="addUserOpen = false">Cancel</button
             ><button class="primary-button" type="submit">Create User</button>
           </div>
         </form>
+      </section>
+    </div>
+
+    <div v-if="actionMode && selectedUser" class="modal-backdrop" @click.self="closeUserAction">
+      <section
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="`user-action-${actionMode}`"
+      >
+        <div class="modal-heading">
+          <div>
+            <p>
+              {{
+                actionMode === 'view'
+                  ? 'ACCOUNT DETAILS'
+                  : actionMode === 'edit'
+                    ? 'UPDATE ACCOUNT'
+                    : 'REMOVE ACCOUNT'
+              }}
+            </p>
+            <h2 :id="`user-action-${actionMode}`">
+              {{
+                actionMode === 'view'
+                  ? 'User Details'
+                  : actionMode === 'edit'
+                    ? 'Edit User'
+                    : 'Delete User'
+              }}
+            </h2>
+          </div>
+          <button type="button" aria-label="Close" @click="closeUserAction">×</button>
+        </div>
+
+        <div v-if="actionMode === 'view'" class="user-details">
+          <div class="detail-identity">
+            <span>{{ selectedUser.initials }}</span>
+            <div>
+              <strong>{{ selectedUser.name }}</strong
+              ><small>{{ selectedUser.email }}</small>
+            </div>
+          </div>
+          <dl>
+            <div>
+              <dt>User ID</dt>
+              <dd>{{ selectedUser.id }}</dd>
+            </div>
+            <div>
+              <dt>Role</dt>
+              <dd>{{ selectedUser.role }}</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>{{ selectedUser.status }}</dd>
+            </div>
+            <div>
+              <dt>Last login</dt>
+              <dd>{{ selectedUser.lastLogin }}</dd>
+            </div>
+          </dl>
+          <div class="modal-actions">
+            <button type="button" @click="closeUserAction">Close</button
+            ><button
+              class="primary-button"
+              type="button"
+              @click="openUserAction('edit', selectedUser)"
+            >
+              Edit User
+            </button>
+          </div>
+        </div>
+
+        <form v-else-if="actionMode === 'edit'" @submit.prevent="saveEditedUser">
+          <label>Full name<input v-model="editUser.name" type="text" required /></label>
+          <label>Email address<input v-model="editUser.email" type="email" required /></label>
+          <div class="form-row">
+            <label
+              >Role<select v-model="editUser.role">
+                <option :disabled="selectedIsPrototype">Administrator</option>
+                <option>Conservation Officer</option>
+                <option>Botanist</option>
+              </select></label
+            >
+            <label
+              >Status<select v-model="editUser.status">
+                <option>Active</option>
+                <option>Inactive</option>
+                <option>Suspended</option>
+              </select></label
+            >
+          </div>
+          <p v-if="actionError" class="form-error" role="alert">{{ actionError }}</p>
+          <p v-if="selectedIsPrototype" class="form-note">
+            Prototype accounts can be assigned to Conservation Officer or Botanist roles.
+          </p>
+          <div class="modal-actions">
+            <button type="button" @click="closeUserAction">Cancel</button
+            ><button class="primary-button" type="submit">Save Changes</button>
+          </div>
+        </form>
+
+        <div v-else class="delete-confirmation">
+          <div class="warning-icon">!</div>
+          <p>
+            Delete <strong>{{ selectedUser.name }}</strong> ({{ selectedUser.id }})?
+          </p>
+          <small
+            >This removes the account from the directory<span v-if="selectedIsPrototype">
+              and prevents it from signing in</span
+            >. This action cannot be undone.</small
+          >
+          <div class="modal-actions">
+            <button type="button" @click="closeUserAction">Cancel</button
+            ><button class="danger-button" type="button" @click="confirmDeleteUser">
+              Delete User
+            </button>
+          </div>
+        </div>
       </section>
     </div>
   </div>
@@ -932,6 +1362,9 @@ code {
   font-size: 9px;
   font-weight: 700;
 }
+.row-actions .delete-action {
+  color: #a64b40;
+}
 .empty-state {
   padding: 60px 20px;
   text-align: center;
@@ -957,6 +1390,98 @@ code {
   color: #fff;
   font: inherit;
   font-size: 10px;
+}
+.success-alert {
+  position: fixed;
+  top: 96px;
+  left: 50%;
+  z-index: 1200;
+  width: min(380px, calc(100vw - 32px));
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-left: 4px solid #0c723a;
+  border-radius: 10px;
+  background: #abe7bf;
+  color: #245b3d;
+  box-shadow: 0 10px 28px rgba(36, 91, 61, 0.15);
+  transform: translateX(-50%);
+  animation: success-alert-in 180ms ease-out;
+}
+.success-alert-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  color: #2f8a5a;
+}
+.success-alert p {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.success-alert strong {
+  font-size: 11px;
+  font-weight: 800;
+}
+.success-alert span {
+  font-size: 10px;
+}
+.error-alert {
+  position: fixed;
+  top: 96px;
+  left: 50%;
+  z-index: 1201;
+  width: min(380px, calc(100vw - 32px));
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-left: 4px solid #b42318;
+  border-radius: 10px;
+  background: #fde8e7;
+  color: #7a271a;
+  box-shadow: 0 10px 28px rgba(122, 39, 26, 0.16);
+  transform: translateX(-50%);
+  animation: error-alert-in 180ms ease-out;
+}
+.error-alert-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  color: #c43228;
+}
+.error-alert p {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.error-alert strong {
+  font-size: 11px;
+  font-weight: 800;
+}
+.error-alert span {
+  font-size: 10px;
+}
+@keyframes success-alert-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@keyframes error-alert-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 .backdrop {
   display: none;
@@ -1049,6 +1574,100 @@ code {
 .creation-result > strong {
   color: #315749;
   font-size: 15px;
+}
+.user-details,
+.delete-confirmation {
+  display: grid;
+  gap: 16px;
+}
+.detail-identity {
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 10px;
+  background: #f1f5f1;
+}
+.detail-identity > span {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #dfece3;
+  color: #337258;
+  font-weight: 800;
+}
+.detail-identity div {
+  display: grid;
+  gap: 3px;
+}
+.detail-identity strong {
+  color: #315749;
+  font-size: 13px;
+}
+.detail-identity small {
+  color: #7c8e86;
+  font-size: 10px;
+}
+.user-details dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.user-details dl div {
+  padding: 11px;
+  border: 1px solid #e2e9e2;
+  border-radius: 8px;
+}
+.user-details dt {
+  color: #87958f;
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.user-details dd {
+  margin: 5px 0 0;
+  color: #36584b;
+  font-size: 10px;
+  font-weight: 700;
+}
+.delete-confirmation {
+  text-align: center;
+}
+.delete-confirmation p {
+  margin: 0;
+  color: #405e53;
+  font-size: 13px;
+}
+.delete-confirmation small {
+  color: #7a8b84;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.warning-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #f8e1dd;
+  color: #b84b3a;
+  font-size: 22px;
+  font-weight: 800;
+}
+.danger-button {
+  padding: 10px 15px;
+  border: 0;
+  border-radius: 8px;
+  background: #b84b3a;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
 }
 .temporary-password {
   margin-top: 9px;
@@ -1155,6 +1774,10 @@ code {
   }
 }
 @media (max-width: 560px) {
+  .success-alert,
+  .error-alert {
+    top: 82px;
+  }
   .topbar {
     min-height: 72px;
     padding: 0 4%;
