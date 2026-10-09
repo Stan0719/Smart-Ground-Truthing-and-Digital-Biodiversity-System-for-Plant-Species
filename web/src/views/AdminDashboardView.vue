@@ -141,9 +141,7 @@ const closeSidebar = () => {
           type="button"
           @click="closeSidebar"
         >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span
-          ><span>{{ item.label }}</span
-          ><span v-if="item.count" class="nav-count">{{ item.count }}</span>
+          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span><span>{{ item.label }}</span><span v-if="item.count" class="nav-count">{{ item.count }}</span>
         </button>
       </nav>
 
@@ -178,8 +176,8 @@ const closeSidebar = () => {
         <div class="topbar-actions">
           <button class="notification-button" type="button" aria-label="Notifications">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" /></svg
-            ><span>3</span>
+              <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" />
+            </svg><span>3</span>
           </button>
           <div class="profile-wrap">
             <button
@@ -188,9 +186,7 @@ const closeSidebar = () => {
               :aria-expanded="profileOpen"
               @click="profileOpen = !profileOpen"
             >
-              <span class="avatar">A</span
-              ><span class="profile-copy"><strong>Admin01</strong><small>Administrator</small></span
-              ><span class="chevron">⌄</span>
+              <span class="avatar">A</span><span class="profile-copy"><strong>Admin01</strong><small>Administrator</small></span><span class="chevron">⌄</span>
             </button>
             <div v-if="profileOpen" class="profile-menu">
               <button type="button">Profile settings</button><button type="button">Sign out</button>
@@ -218,8 +214,7 @@ const closeSidebar = () => {
             <div class="summary-icon" aria-hidden="true">{{ card.icon }}</div>
             <div>
               <p>{{ card.title }}</p>
-              <strong>{{ card.value }}</strong
-              ><small>{{ card.note }}</small>
+              <strong>{{ card.value }}</strong><small>{{ card.note }}</small>
             </div>
           </article>
         </section>
@@ -384,8 +379,7 @@ const closeSidebar = () => {
             <div class="role-list">
               <div v-for="role in userRoles" :key="role.label" class="role-row">
                 <div class="role-copy">
-                  <span>{{ role.label }}</span
-                  ><strong>{{ role.value }}</strong>
+                  <span>{{ role.label }}</span><strong>{{ role.value }}</strong>
                 </div>
                 <div class="role-track">
                   <span :style="{ width: `${role.percent}%`, background: role.color }"></span>
@@ -410,8 +404,7 @@ const closeSidebar = () => {
               >
                 <span class="timeline-dot"></span>
                 <div>
-                  <strong>{{ activity.title }}</strong
-                  ><time>{{ activity.time }}</time>
+                  <strong>{{ activity.title }}</strong><time>{{ activity.time }}</time>
                 </div>
               </div>
             </div>

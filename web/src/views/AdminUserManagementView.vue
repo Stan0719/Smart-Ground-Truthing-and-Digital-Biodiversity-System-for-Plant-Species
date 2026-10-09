@@ -318,8 +318,7 @@ const clearFilters = () => {
             <label class="search-box"
               ><svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="10.5" cy="10.5" r="6.5" />
-                <path d="m15.5 15.5 5 5" /></svg
-              ><span class="sr-only">Search users</span
+                <path d="m15.5 15.5 5 5" /></svg><span class="sr-only">Search users</span
               ><input
                 v-model="search"
                 type="search"
@@ -358,8 +357,8 @@ const clearFilters = () => {
                     <div class="user-cell">
                       <span>{{ user.initials }}</span>
                       <div>
-                        <strong>{{ user.name }}</strong
-                        ><small>{{ user.email }}</small>
+                        <strong>{{ user.name }}</strong>
+                        <small>{{ user.email }}</small>
                       </div>
                     </div>
                   </td>
@@ -379,10 +378,9 @@ const clearFilters = () => {
                   <td>{{ user.lastLogin }}</td>
                   <td>
                     <div class="row-actions">
-                      <button type="button" title="View user">View</button
-                      ><button type="button" title="More actions" aria-label="More actions">
-                        •••
-                      </button>
+                      <button type="button" title="View user">View</button>
+                      <button type="button" title="Edit user">Edit</button>
+                      <button type="button" title="Delete user">Delete</button>
                     </div>
                   </td>
                 </tr>
