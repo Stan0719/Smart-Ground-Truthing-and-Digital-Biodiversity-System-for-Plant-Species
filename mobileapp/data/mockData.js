@@ -803,6 +803,7 @@ export const botanists = [
 ];
 
 export const botanistPlantRecords = [];
+export const botanistSpeciesRequests = [];
 
 // =====================================================
 // HELPER FUNCTIONS

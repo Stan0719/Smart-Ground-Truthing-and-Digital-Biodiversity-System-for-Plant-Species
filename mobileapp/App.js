@@ -376,14 +376,16 @@ function MainTabs({
       />
 
 
-      {/* MAP */}
-      <Tab.Screen
-        name="MapTab"
-        component={MapStack}
-        options={{
-          title: "Map",
-        }}
-      />
+      {/* MAP - BOTANIST ONLY */}
+      {user?.role === "botanist" && (
+        <Tab.Screen
+          name="MapTab"
+          component={MapStack}
+          options={{
+            title: "Map",
+          }}
+        />
+      )}
 
 
       {/* ACCOUNT / BOTANIST DASHBOARD */}

@@ -61,3 +61,65 @@
   background: #b84d42;
   color: #fff;
 }
+
+.badge.not-assessed {
+  background: #eef1ef;
+  color: #6f7f77;
+}
+
+/* Biodiversity map marker interaction states. */
+.map-marker {
+  transition:
+    transform 0.2s ease,
+    filter 0.2s ease;
+}
+
+.map-marker:hover,
+.map-marker:focus-visible {
+  z-index: 5;
+  outline: none;
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+.map-marker.selected {
+  z-index: 6;
+  transform: translate(-50%, -50%) scale(1.26);
+}
+
+.map-marker span {
+  transition:
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+.map-marker:hover span,
+.map-marker:focus-visible span {
+  box-shadow:
+    0 4px 12px rgba(35, 68, 53, 0.28),
+    0 0 0 4px rgba(74, 149, 116, 0.12);
+}
+
+.map-marker.selected span {
+  box-shadow:
+    0 5px 16px rgba(35, 68, 53, 0.34),
+    0 0 0 6px rgba(74, 149, 116, 0.18);
+}
+
+.map-marker:hover small,
+.map-marker:focus-visible small {
+  background: #fff;
+}
+
+.map-marker.selected small {
+  background: #fff;
+  color: #244e3f;
+  font-weight: 800;
+  box-shadow: 0 4px 10px rgba(35, 68, 53, 0.12);
+}
+
+/*PlantSpeciesView.vue*/
+.readonly-field {
+  background: #eef2ee !important;
+  color: #6f7f77;
+  cursor: not-allowed;
+}
