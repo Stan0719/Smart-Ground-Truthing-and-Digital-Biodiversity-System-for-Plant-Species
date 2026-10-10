@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { conservationStore } from '../data/conservation'
+import {
+  conservationNotifications,
+  markAllConservationNotificationsRead,
+  unreadConservationNotificationCount,
+  type ConservationNotification,
+} from '../data/conservationNotifications'
 import { conservationProfile } from '../data/conservationProfile'
 
 const router = useRouter()
 const actionsWrap = ref<HTMLElement | null>(null)
 const notificationsOpen = ref(false)
 const profileOpen = ref(false)
-
-const activeAlerts = computed(() =>
-  conservationStore.alerts.filter((alert) => alert.status !== 'Resolved'),
-)
 
 const toggleNotifications = () => {
   notificationsOpen.value = !notificationsOpen.value
@@ -28,9 +29,10 @@ const closeMenus = () => {
   profileOpen.value = false
 }
 
-const openAlert = async (alertId: string) => {
+const openNotification = async (notification: ConservationNotification) => {
+  notification.read = true
   closeMenus()
-  await router.push({ name: 'conservation-alerts', query: { alert: alertId } })
+  if (notification.route) await router.push(notification.route)
 }
 
 const openProfileSettings = async () => {
@@ -59,30 +61,66 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
         class="notification-button"
         type="button"
         aria-label="Notifications"
-        aria-haspopup="menu"
         :aria-expanded="notificationsOpen"
+        aria-controls="conservation-notifications"
         @click="toggleNotifications"
       >
-        <span aria-hidden="true">♢</span>
-        <b v-if="activeAlerts.length">{{ activeAlerts.length }}</b>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" />
+        </svg>
+        <span v-if="unreadConservationNotificationCount" class="notification-count">
+          {{ unreadConservationNotificationCount }}
+        </span>
       </button>
-      <section v-if="notificationsOpen" class="notification-menu" aria-label="Notifications">
+
+      <section
+        v-if="notificationsOpen"
+        id="conservation-notifications"
+        class="notification-menu"
+        aria-label="Conservation Officer notifications"
+      >
         <header>
           <strong>Notifications</strong>
-          <RouterLink :to="{ name: 'conservation-alerts' }" @click="closeMenus"
-            >View all</RouterLink
+          <button
+            type="button"
+            :disabled="unreadConservationNotificationCount === 0"
+            @click="markAllConservationNotificationsRead"
           >
+            Mark all as read
+          </button>
         </header>
-        <button
-          v-for="alert in activeAlerts.slice(0, 5)"
-          :key="alert.id"
-          type="button"
-          @click="openAlert(alert.id)"
-        >
-          <strong>{{ alert.type }}</strong>
-          <small>{{ alert.id }} · {{ alert.plantId }} · {{ alert.severity }}</small>
-        </button>
-        <p v-if="!activeAlerts.length">No active notifications.</p>
+        <div v-if="conservationNotifications.length" class="notification-list">
+          <button
+            v-for="notification in conservationNotifications.slice(0, 5)"
+            :key="notification.id"
+            class="notification-item"
+            :class="{ unread: !notification.read }"
+            type="button"
+            @click="openNotification(notification)"
+          >
+            <span class="notification-type" :class="notification.type" aria-hidden="true">
+              {{
+                notification.type === 'review'
+                  ? '✓'
+                  : notification.type === 'species'
+                    ? '♧'
+                    : notification.type === 'threat'
+                      ? '!'
+                      : notification.type === 'sensor'
+                        ? '×'
+                        : '⌁'
+              }}
+            </span>
+            <span class="notification-copy">
+              <strong>{{ notification.title }}</strong>
+              <span>{{ notification.message }}</span>
+              <time>{{ notification.time }}</time>
+            </span>
+            <i v-if="!notification.read" aria-hidden="true"></i>
+          </button>
+        </div>
+        <p v-else class="notification-empty">No notifications.</p>
+        <footer>View relevant notifications by clicking an item.</footer>
       </section>
     </div>
 
@@ -130,10 +168,35 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   background: #fff;
   color: #527066;
   cursor: pointer;
-  font: inherit;
-  font-size: 18px;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.15s ease;
 }
-.notification-button b {
+.notification-button:hover {
+  border-color: #cfdcd3;
+  background: #f8faf7;
+}
+.notification-button:active {
+  transform: scale(0.95);
+}
+.notification-button:focus-visible {
+  outline: 2px solid #62a087;
+  outline-offset: 2px;
+}
+.notification-button svg {
+  width: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  transform-origin: top center;
+}
+.notification-button:hover svg {
+  animation: bell-ring 0.9s both;
+}
+.notification-count {
   position: absolute;
   top: -5px;
   right: -5px;
@@ -147,74 +210,141 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   background: #c95845;
   color: #fff;
   font-size: 8px;
-}
-.notification-button:focus-visible,
-.profile-button:focus-visible {
-  outline: 3px solid rgba(51, 116, 93, 0.2);
-  outline-offset: 2px;
+  font-weight: 800;
 }
 .notification-menu,
 .profile-menu {
   position: absolute;
-  top: 52px;
+  top: 49px;
   right: 0;
-  z-index: 30;
+  z-index: 120;
   border: 1px solid #e1e6e1;
-  border-radius: 11px;
+  border-radius: 13px;
   background: #fff;
-  box-shadow: 0 12px 30px rgba(28, 65, 51, 0.13);
+  box-shadow: 0 14px 36px rgba(28, 65, 51, 0.16);
 }
 .notification-menu {
-  width: min(330px, calc(100vw - 24px));
-  padding: 8px;
+  width: min(360px, calc(100vw - 24px));
+  overflow: hidden;
 }
 .notification-menu header {
-  padding: 5px 6px 9px;
+  padding: 13px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #edf0ed;
-  color: #34594b;
-  font-size: 11px;
+  gap: 12px;
+  border-bottom: 1px solid #e9eeea;
 }
-.notification-menu header a {
-  color: #3c7d64;
+.notification-menu header strong {
+  color: #294f41;
+  font-size: 12px;
+}
+.notification-menu header button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #3c8168;
+  cursor: pointer;
+  font: inherit;
   font-size: 9px;
   font-weight: 700;
-  text-decoration: none;
 }
-.notification-menu > button {
+.notification-menu header button:disabled {
+  color: #9ba7a1;
+  cursor: default;
+}
+.notification-list {
+  max-height: 350px;
+  overflow-y: auto;
+}
+.notification-item {
+  position: relative;
   width: 100%;
-  padding: 10px 7px;
+  padding: 12px 14px;
   display: grid;
-  gap: 3px;
+  grid-template-columns: 31px minmax(0, 1fr) 6px;
+  align-items: start;
+  gap: 10px;
   border: 0;
   border-bottom: 1px solid #edf0ed;
-  background: transparent;
-  color: #405e53;
+  background: #fff;
+  color: #425e54;
   cursor: pointer;
+  font: inherit;
   text-align: left;
 }
-.notification-menu > button:last-of-type {
-  border-bottom: 0;
+.notification-item:hover {
+  background: #f5f9f6;
 }
-.notification-menu > button:hover,
-.notification-menu > button:focus-visible {
-  border-radius: 7px;
-  background: #f3f7f3;
-  outline: none;
+.notification-item.unread {
+  background: #f0f7f2;
 }
-.notification-menu > button strong {
+.notification-type {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #e6efe9;
+  color: #3a795f;
+  font-size: 14px;
+  font-weight: 800;
+}
+.notification-type.species {
+  background: #e4f0e8;
+  color: #287a53;
+}
+.notification-type.threat,
+.notification-type.sensor {
+  background: #f8e4e0;
+  color: #b84b3a;
+}
+.notification-type.system {
+  background: #e8eff2;
+  color: #53727c;
+}
+.notification-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.notification-copy strong {
+  color: #35574a;
   font-size: 10px;
 }
-.notification-menu > button small,
-.notification-menu > p {
-  margin: 0;
-  color: #87958f;
+.notification-item.unread .notification-copy strong {
+  color: #204c3d;
+  font-weight: 800;
+}
+.notification-copy > span {
+  color: #6f8078;
+  font-size: 9px;
+  line-height: 1.45;
+}
+.notification-copy time {
+  color: #98a39e;
   font-size: 8px;
 }
-.notification-menu > p {
-  padding: 13px 7px;
+.notification-item > i {
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #c95845;
+}
+.notification-empty {
+  margin: 0;
+  padding: 28px 14px;
+  color: #82918a;
+  font-size: 10px;
+  text-align: center;
+}
+.notification-menu footer {
+  padding: 9px 14px;
+  background: #f8faf8;
+  color: #87958f;
+  font-size: 8px;
+  text-align: center;
 }
 .profile-button {
   padding: 5px 8px 5px 5px;
@@ -231,6 +361,10 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
 .profile-button:hover {
   border-color: #dfe6df;
   background: #f8faf7;
+}
+.profile-button:focus-visible {
+  outline: 3px solid rgba(51, 116, 93, 0.2);
+  outline-offset: 2px;
 }
 .avatar {
   width: 37px;
@@ -258,8 +392,11 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   color: #7a8b84;
 }
 .profile-menu {
+  top: 52px;
   width: 160px;
   padding: 7px;
+  border-radius: 11px;
+  box-shadow: 0 12px 30px rgba(28, 65, 51, 0.13);
 }
 .profile-menu button {
   width: 100%;
@@ -278,6 +415,27 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   background: #edf3ed;
   outline: none;
 }
+@keyframes bell-ring {
+  0%,
+  100% {
+    transform: rotateZ(0);
+  }
+  15% {
+    transform: rotateZ(10deg);
+  }
+  30% {
+    transform: rotateZ(-10deg);
+  }
+  45% {
+    transform: rotateZ(5deg);
+  }
+  60% {
+    transform: rotateZ(-5deg);
+  }
+  75% {
+    transform: rotateZ(2deg);
+  }
+}
 @media (max-width: 620px) {
   .profile-copy,
   .chevron {
@@ -289,6 +447,14 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   .avatar {
     width: 35px;
     height: 35px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notification-button:hover svg {
+    animation: none;
+  }
+  .notification-button:active {
+    transform: none;
   }
 }
 </style>

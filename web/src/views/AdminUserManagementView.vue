@@ -533,7 +533,7 @@ const clearFilters = () => {
           ><span>◉</span> Sensor Management</RouterLink
         >
         <RouterLink to="/admin/alerts" @click="handleNavigation"
-          ><span>△</span> Threat Alerts <i>3</i></RouterLink
+          ><span>△</span> Threat Alerts</RouterLink
         >
         <RouterLink to="/admin/activity" @click="handleNavigation"
           ><span>↻</span> System Activity</RouterLink
@@ -1063,18 +1063,6 @@ const clearFilters = () => {
   width: 21px;
   text-align: center;
   font-size: 18px;
-}
-.sidebar nav i {
-  margin-left: auto;
-  width: 21px;
-  height: 21px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #c95c4a;
-  color: #fff;
-  font-size: 10px;
-  font-style: normal;
 }
 .sidebar-footer {
   margin-top: auto;

@@ -19,7 +19,7 @@ const items = [
   { label: 'Role & Permission', icon: '◇', to: '/admin/roles' },
   { label: 'IoT Monitoring', icon: '⌁', to: '/admin/iot' },
   { label: 'Sensor Management', icon: '◉', to: '/admin/sensors' },
-  { label: 'Threat Alerts', icon: '△', to: '/admin/alerts', count: 3 },
+  { label: 'Threat Alerts', icon: '△', to: '/admin/alerts' },
   { label: 'System Activity', icon: '↻', to: '/admin/activity' },
 ]
 </script>
@@ -52,9 +52,8 @@ const items = [
           :class="{ active: active === item.label }"
           @click="handleNavigation"
         >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span
-          ><span>{{ item.label }}</span
-          ><i v-if="item.count" class="nav-count">{{ item.count }}</i>
+          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+          <span>{{ item.label }}</span>
         </RouterLink>
       </nav>
       <div class="sidebar-footer"><button type="button" @click="logout">Logout</button></div>
@@ -180,18 +179,6 @@ const items = [
   width: 21px;
   text-align: center;
   font-size: 18px;
-}
-.sidebar nav i {
-  margin-left: auto;
-  width: 21px;
-  height: 21px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #c95c4a;
-  color: #fff;
-  font-size: 10px;
-  font-style: normal;
 }
 .sidebar-footer {
   margin-top: auto;
@@ -368,9 +355,6 @@ const items = [
 .sidebar-footer button {
   padding: 10px 13px;
   font-size: 12px;
-}
-.nav-count {
-  min-width: 21px;
 }
 .sidebar-footer {
   display: block;

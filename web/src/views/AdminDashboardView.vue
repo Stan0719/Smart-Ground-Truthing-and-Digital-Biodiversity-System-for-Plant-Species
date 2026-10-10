@@ -32,7 +32,7 @@ const sidebarItems = [
   { label: 'Role & Permission', icon: '◇', to: '/admin/roles' },
   { label: 'IoT Monitoring', icon: '⌁', to: '/admin/iot' },
   { label: 'Sensor Management', icon: '◉', to: '/admin/sensors' },
-  { label: 'Threat Alerts', icon: '△', count: 3, to: '/admin/alerts' },
+  { label: 'Threat Alerts', icon: '△', to: '/admin/alerts' },
   { label: 'System Activity', icon: '↻', to: '/admin/activity' },
 ]
 
@@ -151,7 +151,6 @@ const activities = [
         >
           <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
           <span>{{ item.label }}</span>
-          <span v-if="item.count" class="nav-count">{{ item.count }}</span>
         </RouterLink>
         <button
           v-for="item in sidebarItems.filter((entry) => !entry.to)"
@@ -159,9 +158,8 @@ const activities = [
           type="button"
           @click="handleNavigation"
         >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span
-          ><span>{{ item.label }}</span
-          ><span v-if="item.count" class="nav-count">{{ item.count }}</span>
+          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+          <span>{{ item.label }}</span>
         </button>
       </nav>
 
@@ -603,17 +601,6 @@ const activities = [
   width: 21px;
   text-align: center;
   font-size: 18px;
-}
-.nav-count {
-  margin-left: auto;
-  min-width: 21px;
-  height: 21px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #c95c4a;
-  color: #fff;
-  font-size: 10px;
 }
 .sidebar-footer {
   margin-top: auto;

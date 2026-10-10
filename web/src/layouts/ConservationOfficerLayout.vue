@@ -11,10 +11,10 @@ const items = [
   { label: 'Dashboard', icon: '⌂', name: 'conservation-dashboard' },
   { label: 'Plant Species', icon: '♧', name: 'conservation-species' },
   { label: 'Observations', icon: '◎', name: 'conservation-observations' },
-  { label: 'Review Submissions', icon: '✓', name: 'conservation-reviews', count: 3 },
+  { label: 'Review Submissions', icon: '✓', name: 'conservation-reviews' },
   { label: 'Biodiversity Map', icon: '⌖', name: 'conservation-map' },
   { label: 'IoT Monitoring', icon: '⌁', name: 'conservation-iot' },
-  { label: 'Threat Alerts', icon: '△', name: 'conservation-alerts', count: 3 },
+  { label: 'Threat Alerts', icon: '△', name: 'conservation-alerts' },
   { label: 'Reports', icon: '▤', name: 'conservation-reports' },
 ]
 
@@ -60,7 +60,6 @@ const closeControl = () =>
         >
           <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
           <span>{{ item.label }}</span>
-          <span v-if="item.count" class="nav-count">{{ item.count }}</span>
         </RouterLink>
       </nav>
       <div class="sidebar-footer"><RouterLink to="/">Logout</RouterLink></div>
