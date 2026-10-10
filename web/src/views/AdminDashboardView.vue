@@ -1,8 +1,30 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 
+const router = useRouter()
 const sidebarOpen = ref(false)
 const profileOpen = ref(false)
+
+const openUserManagement = async () => {
+  await router.push({ name: 'admin-users' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
+
+const openIoTMonitoring = async () => {
+  await router.push({ name: 'admin-iot' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
+
+const openThreatAlerts = async () => {
+  await router.push({ name: 'admin-alerts' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
+
+const openSystemActivity = async () => {
+  await router.push({ name: 'admin-activity' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
 
 const sidebarItems = [
   { label: 'Dashboard', icon: '⌂', active: true, to: '/admin' },
@@ -419,19 +441,19 @@ const closeSidebar = () => {
             </div>
           </div>
           <div class="action-grid">
-            <button type="button">
+            <button type="button" @click="openUserManagement">
               <span>＋</span>
               <div><strong>Add User</strong><small>Create a new account</small></div>
             </button>
-            <button type="button">
+            <button type="button" @click="openIoTMonitoring">
               <span>⌁</span>
               <div><strong>View Sensors</strong><small>Open IoT monitoring</small></div>
             </button>
-            <button type="button">
+            <button type="button" @click="openThreatAlerts">
               <span>!</span>
               <div><strong>View Alerts</strong><small>Review active threats</small></div>
             </button>
-            <button type="button">
+            <button type="button" @click="openSystemActivity">
               <span>↻</span>
               <div><strong>System Activity</strong><small>View the audit trail</small></div>
             </button>
