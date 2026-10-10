@@ -826,7 +826,7 @@ td em {
   color: #fff;
   box-shadow: 0 5px 14px rgba(0, 0, 0, 0.2);
   content: attr(data-tooltip);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.2px;
   white-space: nowrap;
