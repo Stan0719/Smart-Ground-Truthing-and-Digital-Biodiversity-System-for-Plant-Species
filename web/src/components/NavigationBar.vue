@@ -76,6 +76,10 @@ const activeNavIndex = computed(() => {
       return route.path === '/'
     }
 
+    if (item.to === '/species') {
+      return route.path.startsWith('/species') || route.path.startsWith('/plant/')
+    }
+
     return route.path.startsWith(item.to)
   })
 

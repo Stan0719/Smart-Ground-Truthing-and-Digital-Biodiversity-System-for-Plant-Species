@@ -241,6 +241,9 @@ const speciesLabel = (plantId: string) => {
 .dashboard-lower {
   margin-top: 18px;
 }
+.two-column + .panel {
+  margin-top: 18px;
+}
 .mini {
   height: 285px;
 }

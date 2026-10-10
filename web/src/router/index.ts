@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import PlantsView from '../views/PlantsView.vue'
+import SpeciesDetailView from '../views/SpeciesDetailView.vue'
+import SpeciesPlantsView from '../views/SpeciesPlantsView.vue'
 import PlantDetailView from '../views/PlantDetailView.vue'
 import AdminDashboardView from '../views/AdminDashboardView.vue'
 import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
@@ -23,14 +25,28 @@ const router = createRouter({
       component: () => import('../views/ForgotPasswordView.vue'),
     },//forgot password route
     {
-      path: '/plants',
-      name: 'plants',
+      path: '/species',
+      name: 'species',
       component: PlantsView,
     },
     {
-      path: '/plants/:slug',
+      path: '/species/:slug',
+      name: 'species-detail',
+      component: SpeciesDetailView,
+    },
+    {
+      path: '/species/:slug/plants',
+      name: 'species-plants',
+      component: SpeciesPlantsView,
+    },
+    {
+      path: '/plant/:plantId',
       name: 'plant-detail',
       component: PlantDetailView,
+    },
+    {
+      path: '/plants',
+      redirect: '/species',
     },
     {
       path: '/change-password',
