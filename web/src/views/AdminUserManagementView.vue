@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import AdminNotificationBell from '../components/AdminNotificationBell.vue'
+import AdminTopbarActions from '../components/AdminTopbarActions.vue'
 import { useAdminSidebar } from '../composables/useAdminSidebar'
+import { isCurrentAdminAccount } from '../data/adminProfile'
 import { sendTemporaryPasswordEmail } from '../services/accountEmail'
 import {
   createPrototypeUser,
@@ -316,6 +317,10 @@ const saveEditedUser = () => {
     ...editUser.value,
     name,
     email,
+    role: isCurrentAdminAccount(selectedUser.value) ? selectedUser.value.role : editUser.value.role,
+    status: isCurrentAdminAccount(selectedUser.value)
+      ? selectedUser.value.status
+      : editUser.value.status,
     initials: initialsFor(name),
   }
   const index = users.value.findIndex((user) => user.id === updated.id)
@@ -326,10 +331,7 @@ const saveEditedUser = () => {
   try {
     if (index === -1) throw new Error('User record not found')
     users.value[index] = updated
-    if (
-      prototypeUser &&
-      (updated.role === 'Conservation Officer' || updated.role === 'Botanist')
-    ) {
+    if (prototypeUser && (updated.role === 'Conservation Officer' || updated.role === 'Botanist')) {
       if (
         !updatePrototypeUser(updated.id, {
           name: updated.name,
@@ -474,6 +476,9 @@ const selectedIsPrototype = computed(() =>
     : false,
 )
 const selectedIsVisitor = computed(() => selectedUser.value?.role === 'Visitor')
+const selectedIsCurrentAdmin = computed(() =>
+  selectedUser.value ? isCurrentAdminAccount(selectedUser.value) : false,
+)
 const totalUserCount = computed(() => users.value.length)
 const activeUserCount = computed(
   () => users.value.filter((user) => user.status === 'Active').length,
@@ -563,13 +568,7 @@ const clearFilters = () => {
           <p>ADMINISTRATION</p>
           <h1>User Management</h1>
         </div>
-        <div class="top-actions">
-          <AdminNotificationBell />
-          <div class="admin-profile">
-            <span>A</span>
-            <div><strong>Admin01</strong><small>Administrator</small></div>
-          </div>
-        </div>
+        <AdminTopbarActions />
       </header>
 
       <main class="content">
@@ -588,28 +587,32 @@ const clearFilters = () => {
             <span class="stat-icon">♙</span>
             <div>
               <p>Total Users</p>
-              <strong>{{ totalUserCount }}</strong><small>All registered accounts</small>
+              <strong>{{ totalUserCount }}</strong
+              ><small>All registered accounts</small>
             </div>
           </article>
           <article>
             <span class="stat-icon active-icon">✓</span>
             <div>
               <p>Active Users</p>
-              <strong>{{ activeUserCount }}</strong><small>Currently active accounts</small>
+              <strong>{{ activeUserCount }}</strong
+              ><small>Currently active accounts</small>
             </div>
           </article>
           <article>
             <span class="stat-icon officer-icon">◇</span>
             <div>
               <p>Staff Accounts</p>
-              <strong>{{ staffCount }}</strong><small>Administrators, officers and botanists</small>
+              <strong>{{ staffCount }}</strong
+              ><small>Administrators, officers and botanists</small>
             </div>
           </article>
           <article>
             <span class="stat-icon botanist-icon">♧</span>
             <div>
               <p>Visitors</p>
-              <strong>{{ visitorCount }}</strong><small>Self-registered accounts</small>
+              <strong>{{ visitorCount }}</strong
+              ><small>Self-registered accounts</small>
             </div>
           </article>
         </section>
@@ -911,7 +914,10 @@ const clearFilters = () => {
           <label>Email address<input v-model="editUser.email" type="email" required /></label>
           <div class="form-row">
             <label
-              >Role<select v-model="editUser.role" :disabled="selectedIsVisitor">
+              >Role<select
+                v-model="editUser.role"
+                :disabled="selectedIsVisitor || selectedIsCurrentAdmin"
+              >
                 <option v-if="selectedIsVisitor">Visitor</option>
                 <template v-else>
                   <option :disabled="selectedIsPrototype">Administrator</option>
@@ -921,7 +927,7 @@ const clearFilters = () => {
               </select></label
             >
             <label
-              >Status<select v-model="editUser.status">
+              >Status<select v-model="editUser.status" :disabled="selectedIsCurrentAdmin">
                 <option>Active</option>
                 <option>Inactive</option>
                 <option>Suspended</option>
@@ -933,8 +939,10 @@ const clearFilters = () => {
             Prototype accounts can be assigned to Conservation Officer or Botanist roles.
           </p>
           <p v-if="selectedIsVisitor" class="form-note">
-            Visitor accounts are self-registered. Their role cannot be changed from User
-            Management.
+            Visitor accounts are self-registered. Their role cannot be changed from User Management.
+          </p>
+          <p v-if="selectedIsCurrentAdmin" class="form-note">
+            Your own Administrator role and account status cannot be changed from User Management.
           </p>
           <div class="modal-actions">
             <button type="button" @click="closeUserAction">Cancel</button
@@ -1109,37 +1117,6 @@ const clearFilters = () => {
   margin: 0;
   color: #204c3d;
   font-size: 23px;
-}
-.admin-profile {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.top-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.admin-profile > span {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: #33745d;
-  color: #fff;
-  font-weight: 800;
-}
-.admin-profile div {
-  display: flex;
-  flex-direction: column;
-}
-.admin-profile strong {
-  font-size: 12px;
-}
-.admin-profile small {
-  color: #82918b;
-  font-size: 9px;
 }
 .menu-button {
   display: none;
@@ -1868,7 +1845,7 @@ code {
     height: 2px;
     background: #376354;
   }
-  .top-actions {
+  :deep(.admin-topbar-actions) {
     margin-left: auto;
   }
 }
@@ -1881,8 +1858,7 @@ code {
     min-height: 72px;
     padding: 0 4%;
   }
-  .topbar p,
-  .admin-profile div {
+  .topbar p {
     display: none;
   }
   .topbar h1 {

@@ -66,6 +66,12 @@ const router = createRouter({
       meta: { requiresAdmin: true },
     },
     {
+      path: '/admin/profile',
+      name: 'admin-profile',
+      component: () => import('../views/AdminProfileView.vue'),
+      meta: { requiresAdmin: true },
+    },
+    {
       path: '/admin/roles',
       name: 'admin-roles',
       component: AdminModuleView,

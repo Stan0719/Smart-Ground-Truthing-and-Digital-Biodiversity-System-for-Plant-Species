@@ -95,7 +95,7 @@ const page = computed(
         title: 'Role & Permission',
         eyebrow: 'ACCESS CONTROL',
         active: 'Role & Permission',
-        intro: 'Configure access levels and review what each system role can do.',
+        intro: 'Review the predefined system roles and their assigned access permissions.',
       },
       iot: {
         title: 'IoT Monitoring',
@@ -125,14 +125,14 @@ const page = computed(
 )
 
 const permissions = [
-  { module: 'Dashboard overview', admin: true, officer: true, botanist: true },
-  { module: 'User management', admin: true, officer: false, botanist: false },
-  { module: 'Role & permission', admin: true, officer: false, botanist: false },
-  { module: 'IoT monitoring', admin: true, officer: true, botanist: false },
-  { module: 'Sensor management', admin: true, officer: true, botanist: false },
-  { module: 'Threat alerts', admin: true, officer: true, botanist: false },
-  { module: 'Plant observations', admin: false, officer: true, botanist: true },
-  { module: 'System activity', admin: true, officer: false, botanist: false },
+  { module: 'Dashboard overview', admin: true, officer: true, botanist: true, visitor: false },
+  { module: 'User management', admin: true, officer: false, botanist: false, visitor: false },
+  { module: 'Role & permission', admin: true, officer: false, botanist: false, visitor: false },
+  { module: 'IoT monitoring', admin: true, officer: true, botanist: false, visitor: false },
+  { module: 'Sensor management', admin: true, officer: true, botanist: false, visitor: false },
+  { module: 'Threat alerts', admin: true, officer: true, botanist: false, visitor: false },
+  { module: 'Plant observations', admin: false, officer: true, botanist: true, visitor: false },
+  { module: 'System activity', admin: true, officer: false, botanist: false, visitor: false },
 ]
 
 const sensors = ref<IoTSensor[]>([
@@ -700,9 +700,8 @@ const confirmDeleteSensor = () => {
         <h2>{{ page.title }}</h2>
         <p>{{ page.intro }}</p>
       </div>
-      <button v-if="section === 'roles'" class="primary" type="button">＋ Create Role</button
-      ><button
-        v-else-if="section === 'sensors'"
+      <button
+        v-if="section === 'sensors'"
         class="primary"
         type="button"
         @click="openRegisterSensor"
@@ -719,7 +718,7 @@ const confirmDeleteSensor = () => {
           <span>◇</span>
           <div>
             <p>System Roles</p>
-            <strong>3</strong><small>Active access groups</small>
+            <strong>4</strong><small>Predefined access groups</small>
           </div>
         </article>
         <article>
@@ -748,7 +747,7 @@ const confirmDeleteSensor = () => {
             <b>3 users</b>
           </div>
           <p>Manages accounts, roles, sensors, alerts, and system activity.</p>
-          <button type="button">Edit permissions</button>
+          <span class="system-role-label">System-defined role</span>
         </article>
         <article>
           <div class="role-head">
@@ -760,7 +759,7 @@ const confirmDeleteSensor = () => {
             <b>5 users</b>
           </div>
           <p>Monitors sensors, handles threats, and reviews field observations.</p>
-          <button type="button">Edit permissions</button>
+          <span class="system-role-label">System-defined role</span>
         </article>
         <article>
           <div class="role-head">
@@ -772,9 +771,24 @@ const confirmDeleteSensor = () => {
             <b>10 users</b>
           </div>
           <p>Documents plant observations and contributes scientific information.</p>
-          <button type="button">Edit permissions</button>
+          <span class="system-role-label">System-defined role</span>
+        </article>
+        <article>
+          <div class="role-head">
+            <span>V</span>
+            <div>
+              <h3>Visitor</h3>
+              <p>Public access</p>
+            </div>
+            <b>Prototype</b>
+          </div>
+          <p>Browses public biodiversity information and uses visitor-facing features.</p>
+          <span class="system-role-label">System-defined role</span>
         </article>
       </section>
+      <p class="read-only-note">
+        Role permissions are predefined by the system and cannot be modified from this page.
+      </p>
       <section class="panel">
         <div class="panel-head">
           <div>
@@ -791,6 +805,7 @@ const confirmDeleteSensor = () => {
                 <th>Administrator</th>
                 <th>Conservation Officer</th>
                 <th>Botanist</th>
+                <th>Visitor</th>
               </tr>
             </thead>
             <tbody>
@@ -806,6 +821,9 @@ const confirmDeleteSensor = () => {
                 </td>
                 <td>
                   <i :class="{ allowed: row.botanist }">{{ row.botanist ? '✓' : '—' }}</i>
+                </td>
+                <td>
+                  <i :class="{ allowed: row.visitor }">{{ row.visitor ? '✓' : '—' }}</i>
                 </td>
               </tr>
             </tbody>
@@ -1880,7 +1898,7 @@ const confirmDeleteSensor = () => {
 .role-cards {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 14px;
 }
 .role-cards article {
@@ -1931,15 +1949,26 @@ const confirmDeleteSensor = () => {
   font-size: 10px;
   line-height: 1.55;
 }
-.role-cards button {
-  padding: 7px 10px;
-  border: 1px solid #d4e0d7;
-  border-radius: 7px;
-  background: #fff;
-  color: #3b775f;
-  font: inherit;
+.system-role-label {
+  width: fit-content;
+  padding: 5px 8px;
+  display: inline-block;
+  border-radius: 999px;
+  background: #edf3ee;
+  color: #5e786d;
   font-size: 9px;
   font-weight: 700;
+}
+.read-only-note {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #c7ddd2;
+  border-left: 3px solid #5f9f82;
+  border-radius: 7px;
+  background: #dfeee6;
+  color: #405f52;
+  font-size: 9px;
+  line-height: 1.5;
 }
 .table-scroll {
   overflow-x: auto;

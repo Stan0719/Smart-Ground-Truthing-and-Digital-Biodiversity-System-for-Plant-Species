@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import AdminNotificationBell from '../components/AdminNotificationBell.vue'
+import AdminTopbarActions from '../components/AdminTopbarActions.vue'
 import { useAdminSidebar } from '../composables/useAdminSidebar'
 
 const router = useRouter()
-const profileOpen = ref(false)
-const notificationBell = ref<{ closeNotifications: () => void } | null>(null)
 const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
 
 const openUserManagement = async () => {
@@ -120,17 +117,6 @@ const activities = [
   { title: 'Admin01 changed a user role', time: '29 Sep 2026, 12:10 PM', type: 'role' },
   { title: 'Sensor S003 went offline', time: '29 Sep 2026, 12:30 PM', type: 'warning' },
 ]
-
-const toggleProfile = () => {
-  profileOpen.value = !profileOpen.value
-  if (profileOpen.value) notificationBell.value?.closeNotifications()
-}
-
-const logout = () => {
-  sidebarOpen.value = false
-  profileOpen.value = false
-  router.push({ name: 'home' })
-}
 </script>
 
 <template>
@@ -180,7 +166,7 @@ const logout = () => {
       </nav>
 
       <div class="sidebar-footer">
-        <button type="button" @click="logout">Logout</button>
+        <button type="button" @click="router.push({ name: 'home' })">Logout</button>
       </div>
     </aside>
 
@@ -209,24 +195,7 @@ const logout = () => {
           <h1>Administrator Dashboard</h1>
         </div>
 
-        <div class="topbar-actions">
-          <AdminNotificationBell ref="notificationBell" @opened="profileOpen = false" />
-          <div class="profile-wrap">
-            <button
-              class="profile-button"
-              type="button"
-              :aria-expanded="profileOpen"
-              @click="toggleProfile"
-            >
-              <span class="avatar">A</span
-              ><span class="profile-copy"><strong>Admin01</strong><small>Administrator</small></span
-              ><span class="chevron">⌄</span>
-            </button>
-            <div v-if="profileOpen" class="profile-menu">
-              <button type="button">Profile settings</button><button type="button">Sign out</button>
-            </div>
-          </div>
-        </div>
+        <AdminTopbarActions />
       </header>
 
       <main class="dashboard">
@@ -690,81 +659,6 @@ const logout = () => {
   margin: 0;
   color: #204c3d;
   font-size: 23px;
-}
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-}
-.profile-wrap {
-  position: relative;
-}
-.profile-button {
-  padding: 5px 8px 5px 5px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  background: transparent;
-  color: #29483e;
-  cursor: pointer;
-  font: inherit;
-}
-.profile-button:hover {
-  border-color: #dfe6df;
-  background: #f8faf7;
-}
-.avatar {
-  width: 37px;
-  height: 37px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: #33745d;
-  color: #fff;
-  font-weight: 800;
-}
-.profile-copy {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-.profile-copy strong {
-  font-size: 12px;
-}
-.profile-copy small {
-  color: #82918b;
-  font-size: 9px;
-}
-.chevron {
-  color: #7a8b84;
-}
-.profile-menu {
-  position: absolute;
-  top: 52px;
-  right: 0;
-  width: 160px;
-  padding: 7px;
-  border: 1px solid #e1e6e1;
-  border-radius: 11px;
-  background: #fff;
-  box-shadow: 0 12px 30px rgba(28, 65, 51, 0.13);
-}
-.profile-menu button {
-  width: 100%;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #425e54;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.profile-menu button:hover {
-  background: #edf3ed;
 }
 .menu-button {
   width: 39px;
@@ -1328,7 +1222,7 @@ td strong {
   .topbar {
     justify-content: flex-start;
   }
-  .topbar-actions {
+  :deep(.admin-topbar-actions) {
     margin-left: auto;
   }
   .primary-grid,
@@ -1344,9 +1238,7 @@ td strong {
     min-height: 72px;
     padding: 0 4%;
   }
-  .page-heading p,
-  .profile-copy,
-  .chevron {
+  .page-heading p {
     display: none;
   }
   .page-heading h1 {
@@ -1388,13 +1280,6 @@ td strong {
   }
   .action-grid {
     grid-template-columns: 1fr;
-  }
-  .profile-button {
-    padding: 3px;
-  }
-  .profile-button .avatar {
-    width: 35px;
-    height: 35px;
   }
 }
 @media (max-width: 400px) {
