@@ -35,6 +35,37 @@ const CONSERVATION_STATUSES = [
   "Critically Endangered",
 ];
 
+const PHOTO_GUIDES = [
+  {
+    key: "wholePlant",
+    title: "Whole Plant",
+    description: "Capture the entire plant from a clear distance.",
+    required: true,
+  },
+  {
+    key: "leafCloseUp",
+    title: "Leaf Close-up",
+    description: "Capture the leaf shape and surface clearly.",
+    required: true,
+  },
+  {
+    key: "stemBark",
+    title: "Stem / Bark",
+    description: "Capture the stem, trunk, or bark texture clearly.",
+    required: true,
+  },
+  {
+    key: "flowerFruit",
+    title: "Flower / Fruit",
+    description: "Optional — capture only if currently present.",
+    required: false,
+  },
+];
+
+const REQUIRED_PHOTO_KEYS = PHOTO_GUIDES
+  .filter((guide) => guide.required)
+  .map((guide) => guide.key);
+
 // =====================================================
 // MAIN SCREEN
 // =====================================================
@@ -91,8 +122,18 @@ export default function AddPlantScreen({
   // PHOTOS
   // ===================================================
 
-  const [photos, setPhotos] =
-    useState([]);
+  const [guidedPhotos, setGuidedPhotos] = useState({
+    wholePlant: null,
+    leafCloseUp: null,
+    stemBark: null,
+    flowerFruit: null,
+  });
+
+  const [additionalPhotos, setAdditionalPhotos] = useState([]);
+
+  const completedRequiredPhotos = REQUIRED_PHOTO_KEYS.filter(
+    (key) => Boolean(guidedPhotos[key])
+  ).length;
 
 
   // ===================================================
@@ -233,7 +274,7 @@ export default function AddPlantScreen({
   // TAKE PHOTO
   // ===================================================
 
-  async function handleTakePhoto() {
+  async function handleTakeGuidedPhoto(photoKey) {
 
     try {
 
@@ -267,10 +308,10 @@ export default function AddPlantScreen({
           result.assets[0].uri;
 
 
-        setPhotos((current) => [
+        setGuidedPhotos((current) => ({
           ...current,
-          uri,
-        ]);
+          [photoKey]: uri,
+        }));
 
       }
 
@@ -289,10 +330,65 @@ export default function AddPlantScreen({
     }
   }
 
+  async function handleTakePhoto() {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+
+      if (status !== "granted") {
+        Alert.alert("Permission Required", "Camera permission is required.");
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setAdditionalPhotos((current) => [
+          ...current,
+          result.assets[0].uri,
+        ]);
+      }
+    } catch (error) {
+      console.log("Camera error:", error);
+      Alert.alert("Camera Error", "Unable to open the camera.");
+    }
+  }
+
 
   // ===================================================
   // PICK PHOTO FROM GALLERY
   // ===================================================
+
+  async function handlePickGuidedPhoto(photoKey) {
+
+    try {
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (status !== "granted") {
+        Alert.alert("Permission Required", "Gallery permission is required.");
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: false,
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setGuidedPhotos((current) => ({
+          ...current,
+          [photoKey]: result.assets[0].uri,
+        }));
+      }
+    } catch (error) {
+      console.log("Gallery error:", error);
+      Alert.alert("Gallery Error", "Unable to open the gallery.");
+    }
+  }
 
   async function handlePickPhoto() {
 
@@ -331,7 +427,7 @@ export default function AddPlantScreen({
           );
 
 
-        setPhotos((current) => [
+        setAdditionalPhotos((current) => [
           ...current,
           ...selectedPhotos,
         ]);
@@ -360,13 +456,20 @@ export default function AddPlantScreen({
 
   function handleRemovePhoto(index) {
 
-    setPhotos((current) =>
+    setAdditionalPhotos((current) =>
       current.filter(
         (_, photoIndex) =>
           photoIndex !== index
       )
     );
 
+  }
+
+  function handleRemoveGuidedPhoto(photoKey) {
+    setGuidedPhotos((current) => ({
+      ...current,
+      [photoKey]: null,
+    }));
   }
 
 
@@ -683,6 +786,15 @@ function handleRemoveSpeciesPhoto(index) {
       return;
     }
 
+    if (completedRequiredPhotos !== REQUIRED_PHOTO_KEYS.length) {
+      Alert.alert(
+        "Missing Required Photos",
+        "Please capture the Whole Plant, Leaf Close-up, and Stem / Bark photos before submitting."
+      );
+
+      return;
+    }
+
 
     const selectedQR =
       qrCodes.find(
@@ -858,8 +970,17 @@ function handleRemoveSpeciesPhoto(index) {
       // PHOTOS
       // -----------------------------------------------
 
-      photos:
-        photos,
+      photos: [
+        guidedPhotos.wholePlant,
+        guidedPhotos.leafCloseUp,
+        guidedPhotos.stemBark,
+        guidedPhotos.flowerFruit,
+        ...additionalPhotos,
+      ].filter(Boolean),
+
+      guidedPhotos: {
+        ...guidedPhotos,
+      },
 
 
       // -----------------------------------------------
@@ -2085,9 +2206,89 @@ function handleRemoveSpeciesPhoto(index) {
           <Text
             style={styles.sectionDescription}
           >
-            Add photos of the plant for identification
-            and documentation.
+            Capture the required views to support plant
+            identification and verification.
           </Text>
+
+          <View style={styles.photoProgress}>
+            <Text style={styles.photoProgressText}>
+              {completedRequiredPhotos} of {REQUIRED_PHOTO_KEYS.length} required photos completed
+            </Text>
+          </View>
+
+          {PHOTO_GUIDES.map((item) => {
+            const photo = guidedPhotos[item.key];
+
+            return (
+              <View key={item.key} style={styles.photoGuideCard}>
+                <View style={styles.photoGuideHeader}>
+                  <Text style={styles.photoGuideTitle}>{item.title}</Text>
+                  <Text
+                    style={
+                      photo
+                        ? styles.photoGuideCompleteBadge
+                        : item.required
+                          ? styles.photoGuideRequiredBadge
+                          : styles.photoGuideOptionalBadge
+                    }
+                  >
+                    {photo ? "✓ Captured" : item.required ? "Required" : "Optional"}
+                  </Text>
+                </View>
+
+                <Text style={styles.photoGuideDescription}>
+                  {item.description}
+                </Text>
+
+                {photo && (
+                  <Image
+                    source={{ uri: photo }}
+                    style={styles.guidedPhotoPreview}
+                    resizeMode="cover"
+                  />
+                )}
+
+                <View style={styles.guidedPhotoActions}>
+                  <TouchableOpacity
+                    style={styles.guidedPhotoActionButton}
+                    onPress={() => handleTakeGuidedPhoto(item.key)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.photoButtonText}>
+                      {photo ? "Retake" : "Take Photo"}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.guidedPhotoActionButton}
+                    onPress={() => handlePickGuidedPhoto(item.key)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.photoButtonText}>
+                      {photo ? "Choose Another" : "Gallery"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {photo && (
+                  <TouchableOpacity
+                    style={styles.removeGuidedPhotoButton}
+                    onPress={() => handleRemoveGuidedPhoto(item.key)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.removePhotoText}>Remove</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+
+          <View style={styles.additionalPhotosHeader}>
+            <Text style={styles.additionalPhotosTitle}>Additional Photos</Text>
+            <Text style={styles.photoGuideDescription}>
+              Optional — add any other useful plant views.
+            </Text>
+          </View>
 
 
           <View
@@ -2134,13 +2335,13 @@ function handleRemoveSpeciesPhoto(index) {
           </View>
 
 
-          {photos.length > 0 && (
+          {additionalPhotos.length > 0 && (
 
             <View
               style={styles.photoList}
             >
 
-              {photos.map(
+              {additionalPhotos.map(
                 (photo, index) => (
 
                   <View
@@ -2149,6 +2350,12 @@ function handleRemoveSpeciesPhoto(index) {
                       styles.photoItem
                     }
                   >
+
+                    <Image
+                      source={{ uri: photo }}
+                      style={styles.additionalPhotoPreview}
+                      resizeMode="cover"
+                    />
 
                     <Text
                       style={
@@ -2729,6 +2936,126 @@ const styles = StyleSheet.create({
   // PHOTOS
   // ===================================================
 
+  photoProgress: {
+    marginBottom: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: "#EAF6E7",
+  },
+
+  photoProgressText: {
+    color: "#234B3A",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  photoGuideCard: {
+    marginBottom: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#D5E8D1",
+    borderRadius: 12,
+    backgroundColor: "#FAFCF9",
+  },
+
+  photoGuideHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+
+  photoGuideTitle: {
+    flex: 1,
+    color: "#234B3A",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
+  photoGuideDescription: {
+    marginTop: 6,
+    color: "#6D7F75",
+    fontSize: 12,
+    lineHeight: 18,
+  },
+
+  photoGuideRequiredBadge: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    overflow: "hidden",
+    color: "#6E5A24",
+    backgroundColor: "#FFF8E8",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  photoGuideOptionalBadge: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    overflow: "hidden",
+    color: "#6D7F75",
+    backgroundColor: "#EDF2EA",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  photoGuideCompleteBadge: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    overflow: "hidden",
+    color: "#FFFFFF",
+    backgroundColor: "#50B498",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
+  guidedPhotoPreview: {
+    width: "100%",
+    height: 180,
+    marginTop: 12,
+    borderRadius: 10,
+    backgroundColor: "#E8EEE6",
+  },
+
+  guidedPhotoActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+
+  guidedPhotoActionButton: {
+    flex: 1,
+    minHeight: 46,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#D5E8D1",
+    backgroundColor: "#EAF6E7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  removeGuidedPhotoButton: {
+    minHeight: 44,
+    marginTop: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  additionalPhotosHeader: {
+    marginTop: 6,
+  },
+
+  additionalPhotosTitle: {
+    color: "#234B3A",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
   photoButtonRow: {
     flexDirection: "row",
     gap: 10,
@@ -2769,6 +3096,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F9F3",
     borderRadius: 10,
     marginBottom: 8,
+  },
+
+  additionalPhotoPreview: {
+    width: 54,
+    height: 54,
+    marginRight: 10,
+    borderRadius: 8,
+    backgroundColor: "#E8EEE6",
   },
 
 
