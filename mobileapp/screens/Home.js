@@ -181,64 +181,83 @@ export default function Home({ navigation }) {
   };
 
 
-  const openPlant = (plant) => {
-    navigation.navigate('PlantsTab', {
-      screen: 'PlantDetails',
+  
+
+const openPlant = (plant) => {
+  navigation
+    .getParent()
+    ?.navigate('PlantsTab', {
+      screen: 'SpeciesDetail',
       params: {
         slug: plant.slug,
       },
     });
-  };
+};
+
+
 
 
   // ==================================================
   // PLANT CARD
   // ==================================================
 
-  const renderPlant = ({ item }) => {
-    return (
-      <TouchableOpacity
-        activeOpacity={0.9}
-        style={styles.plantCard}
-        onPress={() => openPlant(item)}
-      >
+const renderPlant = ({ item }) => {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      style={styles.plantCard}
+      onPress={() => openPlant(item)}
+    >
+      <View style={styles.plantImage}>
+        <Image
+          source={{ uri: item.image }}
+          style={styles.plantImageActual}
+          resizeMode="cover"
+        />
 
-        <View style={styles.plantImage}>
-
-          <View style={styles.plantImagePlaceholder}>
-            <Text style={styles.plantPlaceholderIcon}>
-              🌿
-            </Text>
-          </View>
-
-          <View style={styles.categoryBadge}>
-            <Text style={styles.categoryText}>
-              {item.category}
-            </Text>
-          </View>
-
+        <View style={styles.categoryBadge}>
+          <Text style={styles.categoryText}>
+            {item.category}
+          </Text>
         </View>
+      </View>
 
+      <View style={styles.plantInfo}>
+        <Text style={styles.plantName}>
+          {item.name}
+        </Text>
 
-        <View style={styles.plantInfo}>
+        <Text style={styles.scientificName}>
+          {item.scientificName}
+        </Text>
 
-          <Text style={styles.plantName}>
-            {item.name}
-          </Text>
+        <Text style={styles.plantGenus}>
+          Genus: {item.genus}
+        </Text>
 
-          <Text style={styles.scientificName}>
-            {item.scientificName}
-          </Text>
+        <Text style={styles.plantFamily}>
+          Family: {item.family}
+        </Text>
 
-          <Text style={styles.viewPlant}>
-            VIEW PLANT →
-          </Text>
+        <Text style={styles.plantDescription} numberOfLines={3}>
+          {item.description}
+        </Text>
 
-        </View>
+        
+<TouchableOpacity
+  onPress={() => openPlant(item)}
+  activeOpacity={0.7}
+  style={styles.viewPlantButton}
+>
+  <Text style={styles.viewPlant}>
+    VIEW PLANT →
+  </Text>
+</TouchableOpacity>
 
-      </TouchableOpacity>
-    );
-  };
+      </View>
+    </TouchableOpacity>
+  );
+};
 
 
   return (
@@ -323,18 +342,31 @@ export default function Home({ navigation }) {
 
             {/* Image */}
 
-            <RevealView
-              direction="left"
-              style={styles.aboutImageWrapper}
-            >
+          
+<RevealView
+  direction="left"
+  style={styles.aboutImageWrapper}
+>
+  <View style={styles.imageStack}>
+    <Image
+      source={require('../assets/b1.jpg')}
+      style={styles.stackImageMain}
+      resizeMode="cover"
+    />
 
-              <Image
-                source={require('../assets/b1.jpg')}
-                style={styles.aboutImage}
-                resizeMode="cover"
-              />
+    <Image
+      source={require('../assets/greatcave.jpg')}
+      style={styles.stackImageTop}
+      resizeMode="cover"
+    />
 
-            </RevealView>
+    <Image
+      source={require('../assets/hero.jpg')}
+      style={styles.stackImageBottom}
+      resizeMode="cover"
+    />
+  </View>
+</RevealView>
 
 
             {/* Content */}
@@ -883,24 +915,22 @@ export default function Home({ navigation }) {
 
                 <RevealView>
                   <Text style={styles.sectionLabel}>
-                    EXPLORE THE FLORA
-                  </Text>
+  EXPLORE THE SPECIES
+</Text>
                 </RevealView>
 
+<RevealView delay={100}>
+  <Text style={styles.exploreTitle}>
+    Species of Niah
+  </Text>
+</RevealView>
 
-                <RevealView delay={100}>
-                  <Text style={styles.exploreTitle}>
-                    Plants of Niah
-                  </Text>
-                </RevealView>
-
-
-                <RevealView delay={200}>
-                  <Text style={styles.exploreDescription}>
-                    Discover the remarkable plants found
-                    throughout Niah National Park.
-                  </Text>
-                </RevealView>
+<RevealView delay={200}>
+  <Text style={styles.exploreDescription}>
+    Discover the diverse tree, flower, fern, and climber
+    species found throughout Niah National Park.
+  </Text>
+</RevealView>
 
               </View>
 
@@ -1187,6 +1217,7 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
   },
 
+  
 
   // ==================================================
   // HERO
@@ -1194,30 +1225,27 @@ const styles = StyleSheet.create({
 
   hero: {
     width: '100%',
-    height: SCREEN_WIDTH <= 500 ? 580 : 630,
+    height: SCREEN_WIDTH <= 500 ? 580 : 690,
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  
 
+  
   heroImage: {
     resizeMode: 'cover',
   },
 
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,
-
-    backgroundColor: 'rgba(30, 45, 40, 0.58)',
+    backgroundColor: 'rgba(15, 30, 24, 0.10)',
   },
 
+
   heroContent: {
-    width: '88%',
-    maxWidth: 620,
-
-    alignSelf: 'center',
-
-    paddingVertical: 80,
-
     alignItems: 'flex-start',
+    alignSelf: 'stretch',
+    paddingHorizontal: 24,
   },
 
   eyebrow: {
@@ -1231,6 +1259,7 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
   },
 
+  
   heroTitle: {
     color: COLORS.cream,
 
@@ -1334,6 +1363,49 @@ const styles = StyleSheet.create({
 
     borderRadius: 20,
   },
+
+aboutImageWrapper: {
+  width: '100%',
+  flex: 1,
+},
+
+imageStack: {
+  width: '100%',
+  height: SCREEN_WIDTH <= 900 ? 320 : 470,
+  position: 'relative',
+},
+
+stackImageMain: {
+  position: 'absolute',
+  width: '82%',
+  height: '85%',
+  top: 0,
+  left: 0,
+  borderRadius: 20,
+},
+
+stackImageTop: {
+  position: 'absolute',
+  width: '42%',
+  height: '38%',
+  top: 20,
+  right: 0,
+  borderRadius: 16,
+  borderWidth: 5,
+  borderColor: COLORS.paleGreen,
+},
+
+stackImageBottom: {
+  position: 'absolute',
+  width: '48%',
+  height: '38%',
+  bottom: 0,
+  right: 10,
+  borderRadius: 16,
+  borderWidth: 5,
+  borderColor: COLORS.paleGreen,
+},
+
 
   aboutContent: {
     width: '100%',
@@ -2146,6 +2218,31 @@ const styles = StyleSheet.create({
     paddingRight: 20,
   },
 
+plantImageActual: {
+  width: '100%',
+  height: '100%',
+},
+
+plantGenus: {
+  marginTop: 8,
+  color: COLORS.darkGreen,
+  fontSize: 12,
+  fontWeight: '600',
+},
+
+plantFamily: {
+  marginTop: 4,
+  color: COLORS.mutedText,
+  fontSize: 12,
+},
+
+plantDescription: {
+  marginTop: 10,
+  color: COLORS.textGreen,
+  fontSize: 12,
+  lineHeight: 18,
+},
+
   plantCard: {
     width: CARD_WIDTH,
 
@@ -2247,6 +2344,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.7,
   },
 
+  
+viewPlantButton: {
+  alignSelf: 'flex-start',
+  marginTop: 18,
+  paddingVertical: 8,
+  paddingRight: 12,
+},
+
+
 
   // ==================================================
   // CAROUSEL CONTROLS
@@ -2288,44 +2394,27 @@ const styles = StyleSheet.create({
   // ==================================================
   // BEFORE YOU EXPLORE
   // ==================================================
+  // ==================================================
+  // BEFORE YOU EXPLORE
+  // ==================================================
 
   beforeExplore: {
-    paddingVertical:
-      SCREEN_WIDTH < 500
-        ? 60
-        : 100,
-
-    backgroundColor: '#E8EFE3',
-
     width: '100%',
+    paddingVertical: SCREEN_WIDTH < 500 ? 48 : 100,
+    backgroundColor: COLORS.beforeBackground,
   },
 
   beforeExploreContainer: {
-    width:
-      SCREEN_WIDTH < 500
-        ? '90%'
-        : '88%',
-
+    width: SCREEN_WIDTH < 500 ? '90%' : '88%',
     maxWidth: 1200,
-
     alignSelf: 'center',
   },
 
   beforeExploreHeading: {
-    flexDirection:
-      SCREEN_WIDTH <= 900
-        ? 'column'
-        : 'row',
-
-    alignItems:
-      SCREEN_WIDTH <= 900
-        ? 'flex-start'
-        : 'flex-end',
-
-    gap:
-      SCREEN_WIDTH <= 900
-        ? 20
-        : 70,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: SCREEN_WIDTH < 500 ? 14 : 20,
+    marginBottom: SCREEN_WIDTH < 500 ? 28 : 42,
   },
 
   beforeExploreTitleContainer: {
@@ -2335,132 +2424,108 @@ const styles = StyleSheet.create({
 
   beforeExploreTitle: {
     color: '#315F5F',
-
     fontSize:
-      SCREEN_WIDTH < 500
-        ? 32
-        : 54,
-
+      SCREEN_WIDTH < 360
+        ? 28
+        : SCREEN_WIDTH < 500
+          ? 33
+          : SCREEN_WIDTH < 900
+            ? 42
+            : 54,
     lineHeight:
-      SCREEN_WIDTH < 500
-        ? 38
-        : 60,
-
+      SCREEN_WIDTH < 360
+        ? 35
+        : SCREEN_WIDTH < 500
+          ? 40
+          : SCREEN_WIDTH < 900
+            ? 50
+            : 60,
     fontWeight: '800',
   },
 
   beforeExploreDescription: {
-    flex:
-      SCREEN_WIDTH <= 900
-        ? undefined
-        : 0.72,
-
-    width:
-      SCREEN_WIDTH <= 900
-        ? '100%'
-        : undefined,
-
+    width: '100%',
     color: '#60756F',
-
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 14
-        : 15,
-
-    lineHeight:
-      SCREEN_WIDTH < 500
-        ? 22
-        : 26,
-
-    marginBottom: 3,
+    fontSize: SCREEN_WIDTH < 500 ? 14 : 16,
+    lineHeight: SCREEN_WIDTH < 500 ? 23 : 28,
+    marginBottom: 0,
   },
 
 
   // ==================================================
-  // PREPARATION
+  // PREPARATION GRID
   // ==================================================
 
-  preparationGrid: {
-    marginTop: 45,
+  // PREPARATION GRID
 
-    flexDirection:
-      SCREEN_WIDTH <= 700
-        ? 'column'
-        : 'row',
+preparationGrid: {
+  marginTop: SCREEN_WIDTH < 500 ? 0 : 12,
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  justifyContent: 'space-between',
+  rowGap: SCREEN_WIDTH < 500 ? 12 : 18,
+  columnGap: SCREEN_WIDTH < 500 ? 0 : 18,
+},
 
-    flexWrap: 'wrap',
+preparationItem: {
+  width:
+    SCREEN_WIDTH < 500
+      ? '48%'
+      : SCREEN_WIDTH < 900
+        ? '48%'
+        : '23%',
 
-    gap: 16,
-  },
+  flexGrow: 0,
+  flexShrink: 0,
+  minWidth: 0,
 
-  preparationItem: {
-    flex:
-      SCREEN_WIDTH <= 700
-        ? undefined
-        : 1,
+  paddingVertical: SCREEN_WIDTH < 500 ? 16 : 22,
+  paddingHorizontal: SCREEN_WIDTH < 500 ? 12 : 18,
 
-    minWidth:
-      SCREEN_WIDTH <= 700
-        ? undefined
-        : '22%',
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  gap: 12,
 
-    paddingVertical: 23,
-    paddingHorizontal: 20,
+  borderWidth: 1,
+  borderColor: 'rgba(70, 133, 133, 0.18)',
+  borderRadius: 16,
+  backgroundColor: 'rgba(255, 250, 235, 0.85)',
+},
 
-    flexDirection: 'row',
+preparationIcon: {
+  width: SCREEN_WIDTH < 500 ? 36 : 44,
+  height: SCREEN_WIDTH < 500 ? 36 : 44,
+  flexShrink: 0,
 
-    alignItems: 'flex-start',
+  alignItems: 'center',
+  justifyContent: 'center',
 
-    gap: 15,
+  borderRadius: 12,
+  backgroundColor: '#DCE9D9',
+},
 
-    borderWidth: 1,
-    borderColor:
-      'rgba(70, 133, 133, 0.15)',
+preparationIconText: {
+  color: '#3C7763',
+  fontSize: SCREEN_WIDTH < 500 ? 19 : 22,
+},
 
-    borderRadius: 16,
+preparationContent: {
+  width: '100%',
+  minWidth: 0,
+},
 
-    backgroundColor:
-      'rgba(255, 250, 235, 0.68)',
-  },
+preparationTitle: {
+  marginBottom: 7,
+  color: '#31584C',
+  fontSize: SCREEN_WIDTH < 500 ? 13 : 15,
+  lineHeight: SCREEN_WIDTH < 500 ? 18 : 22,
+  fontWeight: '700',
+},
 
-  preparationIcon: {
-    width: 42,
-    height: 42,
-
-    flexShrink: 0,
-
-    alignItems: 'center',
-    justifyContent: 'center',
-
-    borderRadius: 12,
-
-    backgroundColor: '#DCE9D9',
-  },
-
-  preparationIconText: {
-    color: '#3C7763',
-
-    fontSize: 22,
-  },
-
-  preparationContent: {
-    flex: 1,
-  },
-
-  preparationTitle: {
-    marginBottom: 7,
-
-    color: '#31584C',
-
-    fontSize: 15,
-    fontWeight: '700',
-  },
-
-  preparationDescription: {
-    color: '#71817A',
-
-    fontSize: 11,
-    lineHeight: 18,
-  },
+preparationDescription: {
+  color: '#71817A',
+  fontSize: SCREEN_WIDTH < 500 ? 11 : 13,
+  lineHeight: SCREEN_WIDTH < 500 ? 17 : 21,
+},
 
 });

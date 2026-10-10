@@ -410,29 +410,6 @@ export default function PlantQRCodeScreen({
   return (
     <View style={styles.container}>
 
-      {/* Header */}
-
-      <View style={styles.topBar}>
-
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.closeButtonText}>
-            ✕
-          </Text>
-        </TouchableOpacity>
-
-        <Text style={styles.topTitle}>
-          QR Code Management
-        </Text>
-
-        <View style={styles.topRightSpace} />
-
-      </View>
-
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={

@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  Image,
 } from "react-native";
 
 import * as Location from "expo-location";
@@ -19,11 +20,20 @@ import {
   botanistSpeciesRequests,
 } from "../data/mockData";
 
+
 import {
   qrCodes,
   assignQRCode,
 } from "../data/qrData";
 
+const CONSERVATION_STATUSES = [
+  "Not Assessed",
+  "Least Concern",
+  "Near Threatened",
+  "Vulnerable",
+  "Endangered",
+  "Critically Endangered",
+];
 
 // =====================================================
 // MAIN SCREEN
@@ -71,6 +81,10 @@ export default function AddPlantScreen({
   const [characteristics, setCharacteristics] =
     useState("");
 
+  const [healthStatus, setHealthStatus] = useState("Healthy");
+  const [growthStage, setGrowthStage] = useState("");
+  const [morphology, setMorphology] = useState("");
+  const [zone, setZone] = useState("");
 
   // ===================================================
   // LOCATION
@@ -84,7 +98,9 @@ export default function AddPlantScreen({
 
   const [loadingLocation, setLoadingLocation] =
     useState(false);
-
+  
+  const [altitude, setAltitude] = useState("");
+  const [gpsAccuracy, setGpsAccuracy] = useState("");
 
   // ===================================================
   // PHOTOS
@@ -115,29 +131,20 @@ export default function AddPlantScreen({
 
   // These fields belong ONLY to the species request.
 
-  const [speciesScientificName, setSpeciesScientificName] =
-    useState("");
+  const [speciesScientificName, setSpeciesScientificName] = useState("");
+  const [speciesCommonName, setSpeciesCommonName] = useState("");
+  const [speciesGenus, setSpeciesGenus] = useState("");
+  const [speciesFamily, setSpeciesFamily] = useState("");
 
-  const [speciesCommonName, setSpeciesCommonName] =
-    useState("");
+  const [showConservationDropdown, setShowConservationDropdown] =
+    useState(false);
 
-  const [speciesFamily, setSpeciesFamily] =
-    useState("");
+  const [speciesConservationStatus, setSpeciesConservationStatus] =
+    useState("Not Assessed");
 
-  const [speciesDescription, setSpeciesDescription] =
-    useState("");
-
-  const [speciesOverview, setSpeciesOverview] =
-    useState("");
-
-  const [speciesHabitat, setSpeciesHabitat] =
-    useState("");
-
-  const [speciesSignificance, setSpeciesSignificance] =
-    useState("");
-
-  const [speciesCharacteristics, setSpeciesCharacteristics] =
-    useState("");
+  const [speciesDescription, setSpeciesDescription] = useState("");
+  const [speciesHabitat, setSpeciesHabitat] = useState("");
+  const [speciesImages, setSpeciesImages] = useState([]);
 
 
   // ===================================================
@@ -199,15 +206,23 @@ export default function AddPlantScreen({
         });
 
 
-      const lat =
-        location.coords.latitude.toFixed(6);
-
-      const lng =
-        location.coords.longitude.toFixed(6);
-
+      const lat = location.coords.latitude.toFixed(6);
+      const lng = location.coords.longitude.toFixed(6);
 
       setLatitude(lat);
       setLongitude(lng);
+
+      setAltitude(
+        location.coords.altitude != null
+          ? location.coords.altitude.toFixed(2)
+          : ""
+      );
+
+      setGpsAccuracy(
+        location.coords.accuracy != null
+          ? location.coords.accuracy.toFixed(2)
+          : ""
+      );
 
     } catch (error) {
 
@@ -383,6 +398,79 @@ export default function AddPlantScreen({
   // "Submit Plant Record" is pressed.
   // ===================================================
 
+  
+async function handleTakeSpeciesPhoto() {
+  try {
+    const { status } =
+      await ImagePicker.requestCameraPermissionsAsync();
+
+    if (status !== "granted") {
+      Alert.alert(
+        "Permission Required",
+        "Camera permission is required to take a species photo."
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets?.length > 0) {
+      setSpeciesImages((current) => [
+        ...current,
+        result.assets[0].uri,
+      ]);
+    }
+  } catch (error) {
+    console.log("Species camera error:", error);
+    Alert.alert("Camera Error", "Unable to open the camera.");
+  }
+}
+
+async function handlePickSpeciesPhoto() {
+  try {
+    const { status } =
+      await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (status !== "granted") {
+      Alert.alert(
+        "Permission Required",
+        "Gallery permission is required to select species photos."
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets?.length > 0) {
+      const selectedImages = result.assets.map(
+        (asset) => asset.uri
+      );
+
+      setSpeciesImages((current) => [
+        ...current,
+        ...selectedImages,
+      ]);
+    }
+  } catch (error) {
+    console.log("Species gallery error:", error);
+    Alert.alert("Gallery Error", "Unable to open the gallery.");
+  }
+}
+
+function handleRemoveSpeciesPhoto(index) {
+  setSpeciesImages((current) =>
+    current.filter((_, imageIndex) => imageIndex !== index)
+  );
+}
+
+
   function handleAddSpeciesRequest() {
 
     // -------------------------------------------------
@@ -414,6 +502,15 @@ export default function AddPlantScreen({
       return;
     }
 
+    if (!speciesGenus.trim()) {
+      Alert.alert(
+        "Missing Information",
+        "Please enter the genus of the new species."
+      );
+
+      return;
+    }
+
 
     if (
       !speciesFamily.trim()
@@ -426,6 +523,8 @@ export default function AddPlantScreen({
 
       return;
     }
+
+    
     // -------------------------------------------------
     // CREATE SPECIES REQUEST ID
     // -------------------------------------------------
@@ -456,6 +555,8 @@ export default function AddPlantScreen({
       "The new species request has been added. It will be submitted together with the plant record."
     );
   }
+
+
 
 
   // ===================================================
@@ -507,29 +608,20 @@ export default function AddPlantScreen({
               ""
             );
 
+            setSpeciesGenus(
+              ""
+            );
+
             setSpeciesFamily(
               ""
             );
 
-            setSpeciesDescription(
-              ""
-            );
+            setSpeciesConservationStatus("Not Assessed");
 
-            setSpeciesOverview(
-              ""
-            );
-
-            setSpeciesHabitat(
-              ""
-            );
-
-            setSpeciesSignificance(
-              ""
-            );
-
-            setSpeciesCharacteristics(
-              ""
-            );
+            setSpeciesDescription("");
+            setSpeciesHabitat("");
+            setSpeciesImages([]);
+            setShowConservationDropdown(false);
 
           },
         },
@@ -906,38 +998,14 @@ export default function AddPlantScreen({
         // SPECIES INFORMATION
         // ---------------------------------------------
 
-        scientificName:
-          speciesScientificName.trim(),
-
-        commonName:
-          speciesCommonName.trim(),
-
-        family:
-          speciesFamily.trim(),
-
-        description:
-          speciesDescription.trim(),
-
-        overview:
-          speciesOverview.trim(),
-
-        habitat:
-          speciesHabitat.trim(),
-
-        significance:
-          speciesSignificance.trim(),
-
-        characteristics:
-          speciesCharacteristics
-            .split("\n")
-            .map(
-              (item) =>
-                item.trim()
-            )
-            .filter(
-              (item) =>
-                item.length > 0
-            ),
+        scientificName: speciesScientificName.trim(),
+        commonName: speciesCommonName.trim(),
+        genus: speciesGenus.trim(),
+        family: speciesFamily.trim(),
+        conservationStatus: speciesConservationStatus,
+        description: speciesDescription.trim(),
+        habitat: speciesHabitat.trim(),
+        images: speciesImages,
 
 
         // ---------------------------------------------
@@ -1065,53 +1133,11 @@ export default function AddPlantScreen({
 
     <View style={styles.container}>
 
-
-      {/* =================================================
-          HEADER
-      ================================================= */}
-
-      <View style={styles.header}>
-
-        <TouchableOpacity
-          onPress={handleCancel}
-          style={styles.backButton}
-        >
-
-          <Text
-            style={styles.backButtonText}
-          >
-            ←
-          </Text>
-
-        </TouchableOpacity>
-
-
-        <View
-          style={styles.headerTextContainer}
-        >
-
-          <Text
-            style={styles.headerTitle}
-          >
-            Add Plant Record
-          </Text>
-
-          <Text
-            style={styles.headerSubtitle}
-          >
-            Register a new plant found in Niah
-          </Text>
-
-        </View>
-
-      </View>
-
-
       {/* =================================================
           SCROLL FORM
       ================================================= */}
 
-      <ScrollView
+      <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={
           styles.scrollContent
@@ -1132,64 +1158,6 @@ export default function AddPlantScreen({
           >
             Plant Information
           </Text>
-
-
-          {/* ---------------------------------------------
-              Scientific Name
-          --------------------------------------------- */}
-
-          <Text style={styles.label}>
-            Scientific Name *
-          </Text>
-
-          <TextInput
-            style={styles.input}
-            value={scientificName}
-            onChangeText={
-              setScientificName
-            }
-            placeholder="e.g. Nepenthes rafflesiana"
-            placeholderTextColor="#9AA7A0"
-          />
-
-
-          {/* ---------------------------------------------
-              Common Name
-          --------------------------------------------- */}
-
-          <Text style={styles.label}>
-            Common Name *
-          </Text>
-
-          <TextInput
-            style={styles.input}
-            value={commonName}
-            onChangeText={
-              setCommonName
-            }
-            placeholder="e.g. Tropical Pitcher Plant"
-            placeholderTextColor="#9AA7A0"
-          />
-
-
-          {/* ---------------------------------------------
-              Family
-          --------------------------------------------- */}
-
-          <Text style={styles.label}>
-            Family *
-          </Text>
-
-          <TextInput
-            style={styles.input}
-            value={family}
-            onChangeText={
-              setFamily
-            }
-            placeholder="e.g. Nepenthaceae"
-            placeholderTextColor="#9AA7A0"
-          />
-
 
           {/* ---------------------------------------------
               Category
@@ -1386,6 +1354,20 @@ export default function AddPlantScreen({
                 placeholderTextColor="#9AA7A0"
               />
 
+              {/* Species Genus */}
+
+              <Text style={styles.label}>
+                Genus *
+              </Text>
+
+              <TextInput
+                style={styles.input}
+                value={speciesGenus}
+                onChangeText={setSpeciesGenus}
+                placeholder="e.g. Nepenthes"
+                placeholderTextColor="#9AA7A0"
+              />
+
 
               {/* -------------------------------------------
                   Species Family
@@ -1407,10 +1389,53 @@ export default function AddPlantScreen({
                 placeholderTextColor="#9AA7A0"
               />
 
+              
+              <Text style={styles.label}>Conservation Status</Text>
 
-              {/* -------------------------------------------
-                  Species Description
-              ------------------------------------------- */}
+              <TouchableOpacity
+                style={styles.qrSelector}
+                onPress={() =>
+                  setShowConservationDropdown((current) => !current)
+                }
+                activeOpacity={0.8}
+              >
+                <Text style={styles.qrSelectedText}>
+                  {speciesConservationStatus}
+                </Text>
+
+                <Text style={styles.dropdownArrow}>
+                  {showConservationDropdown ? "▲" : "▼"}
+                </Text>
+              </TouchableOpacity>
+
+              {showConservationDropdown && (
+                <View style={styles.qrDropdown}>
+                  {CONSERVATION_STATUSES.map((status) => (
+                    <TouchableOpacity
+                      key={status}
+                      style={styles.qrOption}
+                      onPress={() => {
+                        setSpeciesConservationStatus(status);
+                        setShowConservationDropdown(false);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.qrOptionText}>
+                        {status}
+                      </Text>
+
+                      <Text style={styles.dropdownArrow}>
+                        {speciesConservationStatus === status ? "✓" : ""}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+
+
+              
+              {/* Species Description */}
 
               <Text style={styles.label}>
                 Description
@@ -1418,117 +1443,92 @@ export default function AddPlantScreen({
 
               <TextInput
                 style={styles.textArea}
-                value={
-                  speciesDescription
-                }
-                onChangeText={
-                  setSpeciesDescription
-                }
-                placeholder="Describe the species..."
+                value={speciesDescription}
+                onChangeText={setSpeciesDescription}
+                placeholder="Describe the species and its identifying features..."
                 placeholderTextColor="#9AA7A0"
                 multiline
                 textAlignVertical="top"
               />
 
-
-              {/* -------------------------------------------
-                  Species Overview
-              ------------------------------------------- */}
+              {/* Habitat / Ecological Information */}
 
               <Text style={styles.label}>
-                Overview
+                Habitat / Ecological Information
               </Text>
 
               <TextInput
                 style={styles.textArea}
-                value={
-                  speciesOverview
-                }
-                onChangeText={
-                  setSpeciesOverview
-                }
-                placeholder="General information about the species..."
+                value={speciesHabitat}
+                onChangeText={setSpeciesHabitat}
+                placeholder="Describe its natural habitat, growing conditions, and ecological role..."
                 placeholderTextColor="#9AA7A0"
                 multiline
                 textAlignVertical="top"
               />
 
-
-              {/* -------------------------------------------
-                  Species Habitat
-              ------------------------------------------- */}
+              
+              {/* Species Photos */}
 
               <Text style={styles.label}>
-                Habitat
+                Species Photos
               </Text>
 
-              <TextInput
-                style={styles.textArea}
-                value={
-                  speciesHabitat
-                }
-                onChangeText={
-                  setSpeciesHabitat
-                }
-                placeholder="Describe the natural habitat..."
-                placeholderTextColor="#9AA7A0"
-                multiline
-                textAlignVertical="top"
-              />
+              <View style={styles.photoButtonRow}>
+                <TouchableOpacity
+                  style={styles.photoButton}
+                  onPress={handleTakeSpeciesPhoto}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.photoButtonText}>
+                    📷 Camera
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.photoButton}
+                  onPress={handlePickSpeciesPhoto}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.photoButtonText}>
+                    🖼 Gallery
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {speciesImages.length > 0 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.speciesPhotoScroll}
+                  contentContainerStyle={styles.speciesPhotoRow}
+                >
+                  {speciesImages.map((photo, index) => (
+                    <View
+                      key={`${photo}-${index}`}
+                      style={styles.speciesPhotoItem}
+                    >
+                      <Image
+                        source={{ uri: photo }}
+                        style={styles.speciesPhotoPreview}
+                        resizeMode="cover"
+                      />
+
+                      <TouchableOpacity
+                        style={styles.removeSpeciesPhotoButton}
+                        onPress={() => handleRemoveSpeciesPhoto(index)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.removeSpeciesPhotoText}>
+                          ✕ Remove
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
 
 
-              {/* -------------------------------------------
-                  Species Significance
-              ------------------------------------------- */}
-
-              <Text style={styles.label}>
-                Significance
-              </Text>
-
-              <TextInput
-                style={styles.textArea}
-                value={
-                  speciesSignificance
-                }
-                onChangeText={
-                  setSpeciesSignificance
-                }
-                placeholder="Why is this species important?"
-                placeholderTextColor="#9AA7A0"
-                multiline
-                textAlignVertical="top"
-              />
-
-
-              {/* -------------------------------------------
-                  Species Characteristics
-              ------------------------------------------- */}
-
-              <Text style={styles.label}>
-                Characteristics
-              </Text>
-
-              <Text
-                style={styles.helperText}
-              >
-                Enter one characteristic per line.
-              </Text>
-
-              <TextInput
-                style={styles.textArea}
-                value={
-                  speciesCharacteristics
-                }
-                onChangeText={
-                  setSpeciesCharacteristics
-                }
-                placeholder={
-                  "Large leaves\nClimbing stem\nCarnivorous"
-                }
-                placeholderTextColor="#9AA7A0"
-                multiline
-                textAlignVertical="top"
-              />
 
 
               {/* -------------------------------------------
@@ -1716,6 +1716,102 @@ export default function AddPlantScreen({
 
           )}
 
+
+          {/* ---------------------------------------------
+              Scientific Name
+          --------------------------------------------- */}
+
+          <Text style={styles.label}>
+            Scientific Name *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={scientificName}
+            onChangeText={
+              setScientificName
+            }
+            placeholder="e.g. Nepenthes rafflesiana"
+            placeholderTextColor="#9AA7A0"
+          />
+
+
+          {/* Height */}
+
+          <Text style={styles.label}>
+            Height (cm)
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={height}
+            onChangeText={setHeight}
+            placeholder="e.g. 80"
+            placeholderTextColor="#9AA7A0"
+            keyboardType="numeric"
+          />
+
+          {/* Health Status */}
+
+          <Text style={styles.label}>
+            Health Status *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={healthStatus}
+            onChangeText={setHealthStatus}
+            placeholder="e.g. Healthy, Monitoring, Poor"
+            placeholderTextColor="#9AA7A0"
+          />
+
+          {/* Growth Stage */}
+
+          <Text style={styles.label}>
+            Growth Stage *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={growthStage}
+            onChangeText={setGrowthStage}
+            placeholder="e.g. Seedling, Juvenile, Mature, Flowering"
+            placeholderTextColor="#9AA7A0"
+          />
+
+          {/* Morphology */}
+
+          <Text style={styles.label}>
+            Morphology *
+          </Text>
+
+          <TextInput
+            style={styles.textArea}
+            value={morphology}
+            onChangeText={setMorphology}
+            placeholder="Describe the plant's physical characteristics..."
+            placeholderTextColor="#9AA7A0"
+            multiline
+            textAlignVertical="top"
+          />
+
+          {/* Location Zone */}
+
+          <Text style={styles.label}>
+            Location (Zone) *
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={zone}
+            onChangeText={setZone}
+            placeholder="e.g. Zone A"
+            placeholderTextColor="#9AA7A0"
+          />
+
+
+          
+
         </View>
 
 
@@ -1725,135 +1821,16 @@ export default function AddPlantScreen({
 
         <View style={styles.card}>
 
-          <Text
-            style={styles.sectionTitle}
-          >
-            Additional Information
+          <Text style={styles.sectionTitle}>
+            Staff Record
           </Text>
 
-
-          {/* Height */}
-
-          <Text style={styles.label}>
-            Height
+          <Text style={styles.sectionDescription}>
+            Record the GPS information and assign a QR tag
+            to the plant.
           </Text>
 
-          <TextInput
-            style={styles.input}
-            value={height}
-            onChangeText={
-              setHeight
-            }
-            placeholder="e.g. 80 cm"
-            placeholderTextColor="#9AA7A0"
-          />
-
-
-          {/* Description */}
-
-          <Text style={styles.label}>
-            Description
-          </Text>
-
-          <TextInput
-            style={styles.textArea}
-            value={description}
-            onChangeText={
-              setDescription
-            }
-            placeholder="Describe this plant..."
-            placeholderTextColor="#9AA7A0"
-            multiline
-            textAlignVertical="top"
-          />
-
-
-          {/* Overview */}
-
-          <Text style={styles.label}>
-            Overview
-          </Text>
-
-          <TextInput
-            style={styles.textArea}
-            value={overview}
-            onChangeText={
-              setOverview
-            }
-            placeholder="General information..."
-            placeholderTextColor="#9AA7A0"
-            multiline
-            textAlignVertical="top"
-          />
-
-
-          {/* Habitat */}
-
-          <Text style={styles.label}>
-            Habitat
-          </Text>
-
-          <TextInput
-            style={styles.textArea}
-            value={habitat}
-            onChangeText={
-              setHabitat
-            }
-            placeholder="Describe the habitat..."
-            placeholderTextColor="#9AA7A0"
-            multiline
-            textAlignVertical="top"
-          />
-
-
-          {/* Significance */}
-
-          <Text style={styles.label}>
-            Significance
-          </Text>
-
-          <TextInput
-            style={styles.textArea}
-            value={significance}
-            onChangeText={
-              setSignificance
-            }
-            placeholder="Why is this plant important?"
-            placeholderTextColor="#9AA7A0"
-            multiline
-            textAlignVertical="top"
-          />
-
-
-          {/* Characteristics */}
-
-          <Text style={styles.label}>
-            Characteristics
-          </Text>
-
-          <Text
-            style={styles.helperText}
-          >
-            Enter one characteristic per line.
-          </Text>
-
-          <TextInput
-            style={styles.textArea}
-            value={characteristics}
-            onChangeText={
-              setCharacteristics
-            }
-            placeholder={
-              "Large leaves\nClimbing stem\nCarnivorous"
-            }
-            placeholderTextColor="#9AA7A0"
-            multiline
-            textAlignVertical="top"
-          />
-
-        </View>
-
-
+          
         {/* =================================================
             LOCATION
         ================================================= */}
@@ -1863,7 +1840,7 @@ export default function AddPlantScreen({
           <Text
             style={styles.sectionTitle}
           >
-            Plant Location
+            GPS Information
           </Text>
 
 
@@ -1944,131 +1921,35 @@ export default function AddPlantScreen({
 
           </TouchableOpacity>
 
-        </View>
-
-
-        {/* =================================================
-            PHOTOS
-        ================================================= */}
-
-        <View style={styles.card}>
-
-          <Text
-            style={styles.sectionTitle}
-          >
-            Plant Photos
+          <Text style={styles.label}>
+            Altitude (m)
           </Text>
 
+          <TextInput
+            style={styles.input}
+            value={altitude}
+            onChangeText={setAltitude}
+            placeholder="GPS altitude in metres"
+            placeholderTextColor="#9AA7A0"
+            keyboardType="numeric"
+          />
 
-          <Text
-            style={styles.sectionDescription}
-          >
-            Add photos of the plant for identification
-            and documentation.
+          <Text style={styles.label}>
+            GPS Accuracy (m)
           </Text>
 
-
-          <View
-            style={styles.photoButtonRow}
-          >
-
-            <TouchableOpacity
-              style={styles.photoButton}
-              onPress={
-                handleTakePhoto
-              }
-              activeOpacity={0.8}
-            >
-
-              <Text
-                style={
-                  styles.photoButtonText
-                }
-              >
-                📷 Camera
-              </Text>
-
-            </TouchableOpacity>
-
-
-            <TouchableOpacity
-              style={styles.photoButton}
-              onPress={
-                handlePickPhoto
-              }
-              activeOpacity={0.8}
-            >
-
-              <Text
-                style={
-                  styles.photoButtonText
-                }
-              >
-                🖼 Gallery
-              </Text>
-
-            </TouchableOpacity>
-
-          </View>
-
-
-          {photos.length > 0 && (
-
-            <View
-              style={styles.photoList}
-            >
-
-              {photos.map(
-                (photo, index) => (
-
-                  <View
-                    key={`${photo}-${index}`}
-                    style={
-                      styles.photoItem
-                    }
-                  >
-
-                    <Text
-                      style={
-                        styles.photoName
-                      }
-                      numberOfLines={1}
-                    >
-                      Photo {index + 1}
-                    </Text>
-
-
-                    <TouchableOpacity
-                      onPress={() =>
-                        handleRemovePhoto(
-                          index
-                        )
-                      }
-                    >
-
-                      <Text
-                        style={
-                          styles.removePhotoText
-                        }
-                      >
-                        Remove
-                      </Text>
-
-                    </TouchableOpacity>
-
-                  </View>
-
-                )
-              )}
-
-            </View>
-
-          )}
+          <TextInput
+            style={styles.input}
+            value={gpsAccuracy}
+            onChangeText={setGpsAccuracy}
+            placeholder="GPS accuracy in metres"
+            placeholderTextColor="#9AA7A0"
+            keyboardType="numeric"
+          />
 
         </View>
 
-
-        {/* =================================================
+         {/* =================================================
             QR CODE
         ================================================= */}
 
@@ -2195,6 +2076,135 @@ export default function AddPlantScreen({
           )}
 
         </View>
+        </View>
+
+
+
+
+
+
+        {/* =================================================
+            PHOTOS
+        ================================================= */}
+
+        <View style={styles.card}>
+
+          <Text
+            style={styles.sectionTitle}
+          >
+            Plant Photos
+          </Text>
+
+
+          <Text
+            style={styles.sectionDescription}
+          >
+            Add photos of the plant for identification
+            and documentation.
+          </Text>
+
+
+          <View
+            style={styles.photoButtonRow}
+          >
+
+            <TouchableOpacity
+              style={styles.photoButton}
+              onPress={
+                handleTakePhoto
+              }
+              activeOpacity={0.8}
+            >
+
+              <Text
+                style={
+                  styles.photoButtonText
+                }
+              >
+                📷 Camera
+              </Text>
+
+            </TouchableOpacity>
+
+
+            <TouchableOpacity
+              style={styles.photoButton}
+              onPress={
+                handlePickPhoto
+              }
+              activeOpacity={0.8}
+            >
+
+              <Text
+                style={
+                  styles.photoButtonText
+                }
+              >
+                🖼 Gallery
+              </Text>
+
+            </TouchableOpacity>
+
+          </View>
+
+
+          {photos.length > 0 && (
+
+            <View
+              style={styles.photoList}
+            >
+
+              {photos.map(
+                (photo, index) => (
+
+                  <View
+                    key={`${photo}-${index}`}
+                    style={
+                      styles.photoItem
+                    }
+                  >
+
+                    <Text
+                      style={
+                        styles.photoName
+                      }
+                      numberOfLines={1}
+                    >
+                      Photo {index + 1}
+                    </Text>
+
+
+                    <TouchableOpacity
+                      onPress={() =>
+                        handleRemovePhoto(
+                          index
+                        )
+                      }
+                    >
+
+                      <Text
+                        style={
+                          styles.removePhotoText
+                        }
+                      >
+                        Remove
+                      </Text>
+
+                    </TouchableOpacity>
+
+                  </View>
+
+                )
+              )}
+
+            </View>
+
+          )}
+
+        </View>
+
+
+       
 
 
         {/* =================================================
@@ -2335,7 +2345,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 55,
     paddingBottom: 18,
     backgroundColor: "#468585",
   },
@@ -2359,9 +2368,6 @@ const styles = StyleSheet.create({
   },
 
 
-  headerTextContainer: {
-    flex: 1,
-  },
 
 
   headerTitle: {
@@ -2722,6 +2728,50 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+
+  
+      speciesPhotoScroll: {
+        marginTop: 15,
+      },
+
+      speciesPhotoRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 12,
+        paddingRight: 5,
+      },
+
+      speciesPhotoItem: {
+        width: 240,
+        padding: 10,
+        backgroundColor: "#F5F9F3",
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "#DCE8D6",
+      },
+
+      speciesPhotoPreview: {
+        width: "100%",
+        height: 220,
+        borderRadius: 8,
+        backgroundColor: "#E8EEE6",
+      },
+
+      removeSpeciesPhotoButton: {
+        marginTop: 10,
+        minHeight: 38,
+        borderRadius: 8,
+        backgroundColor: "#FFF0F0",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+
+      removeSpeciesPhotoText: {
+        color: "#C85C5C",
+        fontSize: 12,
+        fontWeight: "600",
+      },
+
 
 
   // ===================================================
