@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import AdminNotificationBell from '../components/AdminNotificationBell.vue'
 import { sendTemporaryPasswordEmail } from '../services/accountEmail'
 import {
   createPrototypeUser,
@@ -484,9 +485,12 @@ const clearFilters = () => {
           <p>ADMINISTRATION</p>
           <h1>User Management</h1>
         </div>
-        <div class="admin-profile">
-          <span>A</span>
-          <div><strong>Admin01</strong><small>Administrator</small></div>
+        <div class="top-actions">
+          <AdminNotificationBell />
+          <div class="admin-profile">
+            <span>A</span>
+            <div><strong>Admin01</strong><small>Administrator</small></div>
+          </div>
         </div>
       </header>
 
@@ -1024,6 +1028,11 @@ const clearFilters = () => {
   display: flex;
   align-items: center;
   gap: 9px;
+}
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .admin-profile > span {
   width: 38px;
@@ -1769,7 +1778,7 @@ code {
     height: 2px;
     background: #376354;
   }
-  .admin-profile {
+  .top-actions {
     margin-left: auto;
   }
 }

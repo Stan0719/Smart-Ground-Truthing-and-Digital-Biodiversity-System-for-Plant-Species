@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import AdminNotificationBell from './AdminNotificationBell.vue'
 
 defineProps<{ title: string; eyebrow: string; active: string }>()
 
@@ -42,7 +43,7 @@ const items = [
         <button class="menu-button" type="button" aria-label="Open navigation" @click="sidebarOpen = true"><span></span><span></span><span></span></button>
         <div class="heading"><p>{{ eyebrow }}</p><h1>{{ title }}</h1></div>
         <div class="top-actions">
-          <button class="notification" type="button" aria-label="Notifications"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" /></svg><span>3</span></button>
+          <AdminNotificationBell @opened="profileOpen = false" />
           <div class="profile-wrap">
             <button class="profile" type="button" @click="profileOpen = !profileOpen"><b>A</b><span><strong>Admin01</strong><small>Administrator</small></span><i>⌄</i></button>
             <div v-if="profileOpen" class="profile-menu"><button type="button">Profile settings</button><button type="button">Sign out</button></div>

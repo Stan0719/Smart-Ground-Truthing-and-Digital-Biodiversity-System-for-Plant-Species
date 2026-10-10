@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import AdminNotificationBell from '../components/AdminNotificationBell.vue'
 
 const router = useRouter()
 const sidebarOpen = ref(false)
 const profileOpen = ref(false)
+const notificationBell = ref<{ closeNotifications: () => void } | null>(null)
 
 const openUserManagement = async () => {
   await router.push({ name: 'admin-users' })
@@ -121,6 +123,17 @@ const activities = [
 const closeSidebar = () => {
   sidebarOpen.value = false
 }
+
+const toggleProfile = () => {
+  profileOpen.value = !profileOpen.value
+  if (profileOpen.value) notificationBell.value?.closeNotifications()
+}
+
+const logout = () => {
+  sidebarOpen.value = false
+  profileOpen.value = false
+  router.push({ name: 'home' })
+}
 </script>
 
 <template>
@@ -163,12 +176,14 @@ const closeSidebar = () => {
           type="button"
           @click="closeSidebar"
         >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span><span>{{ item.label }}</span><span v-if="item.count" class="nav-count">{{ item.count }}</span>
+          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span
+          ><span>{{ item.label }}</span
+          ><span v-if="item.count" class="nav-count">{{ item.count }}</span>
         </button>
       </nav>
 
       <div class="sidebar-footer">
-        <button type="button">Logout</button>
+        <button type="button" @click="logout">Logout</button>
       </div>
     </aside>
 
@@ -196,19 +211,17 @@ const closeSidebar = () => {
         </div>
 
         <div class="topbar-actions">
-          <button class="notification-button" type="button" aria-label="Notifications">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" />
-            </svg><span>3</span>
-          </button>
+          <AdminNotificationBell ref="notificationBell" @opened="profileOpen = false" />
           <div class="profile-wrap">
             <button
               class="profile-button"
               type="button"
               :aria-expanded="profileOpen"
-              @click="profileOpen = !profileOpen"
+              @click="toggleProfile"
             >
-              <span class="avatar">A</span><span class="profile-copy"><strong>Admin01</strong><small>Administrator</small></span><span class="chevron">⌄</span>
+              <span class="avatar">A</span
+              ><span class="profile-copy"><strong>Admin01</strong><small>Administrator</small></span
+              ><span class="chevron">⌄</span>
             </button>
             <div v-if="profileOpen" class="profile-menu">
               <button type="button">Profile settings</button><button type="button">Sign out</button>
@@ -236,7 +249,8 @@ const closeSidebar = () => {
             <div class="summary-icon" aria-hidden="true">{{ card.icon }}</div>
             <div>
               <p>{{ card.title }}</p>
-              <strong>{{ card.value }}</strong><small>{{ card.note }}</small>
+              <strong>{{ card.value }}</strong
+              ><small>{{ card.note }}</small>
             </div>
           </article>
         </section>
@@ -401,7 +415,8 @@ const closeSidebar = () => {
             <div class="role-list">
               <div v-for="role in userRoles" :key="role.label" class="role-row">
                 <div class="role-copy">
-                  <span>{{ role.label }}</span><strong>{{ role.value }}</strong>
+                  <span>{{ role.label }}</span
+                  ><strong>{{ role.value }}</strong>
                 </div>
                 <div class="role-track">
                   <span :style="{ width: `${role.percent}%`, background: role.color }"></span>
@@ -426,7 +441,8 @@ const closeSidebar = () => {
               >
                 <span class="timeline-dot"></span>
                 <div>
-                  <strong>{{ activity.title }}</strong><time>{{ activity.time }}</time>
+                  <strong>{{ activity.title }}</strong
+                  ><time>{{ activity.time }}</time>
                 </div>
               </div>
             </div>
@@ -655,41 +671,6 @@ const closeSidebar = () => {
   display: flex;
   align-items: center;
   gap: 13px;
-}
-.notification-button {
-  position: relative;
-  width: 39px;
-  height: 39px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #dfe6df;
-  border-radius: 11px;
-  background: #fff;
-  color: #527066;
-  cursor: pointer;
-}
-.notification-button svg {
-  width: 19px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.8;
-}
-.notification-button span {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  background: #c95845;
-  color: #fff;
-  font-size: 8px;
-  font-weight: 800;
 }
 .profile-wrap {
   position: relative;

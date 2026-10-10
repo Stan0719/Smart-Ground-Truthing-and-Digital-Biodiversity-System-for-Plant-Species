@@ -19,7 +19,7 @@ interface IoTSensor {
   soilMoisture: string
   rainfall: string
   movement: string
-  status: 'Online' | 'Offline' | 'Alert'
+  status: 'Online' | 'Offline' | 'Maintenance' | 'Inactive'
   lastReading: string
   recordedAt: string
   gpsLatitude: string
@@ -28,7 +28,65 @@ interface IoTSensor {
   readingId: string
 }
 
+interface ThreatAlert {
+  id: string
+  plant: string
+  readingId: string
+  sensorId: string
+  type: string
+  severity: 'High' | 'Medium' | 'Low'
+  confidence: string
+  description: string
+  imagePath: string
+  status: 'New' | 'Reviewing' | 'Resolved'
+  createdAt: string
+  resolvedBy: string
+  resolvedAt: string
+  sensorLocation?: string
+  temperature?: string
+  humidity?: string
+  soilMoisture?: string
+  rainfall?: string
+  movement?: string
+  recordedAt?: string
+  gpsLatitude?: string
+  gpsLongitude?: string
+  plantLatitude?: string
+  plantLongitude?: string
+  plantAccuracy?: string
+}
+
 const selectedSensor = ref<IoTSensor | null>(null)
+const selectedAlert = ref<ThreatAlert | null>(null)
+const alertModal = ref<'view' | 'resolve' | null>(null)
+const alertStatusFilter = ref<'All Statuses' | ThreatAlert['status']>('All Statuses')
+const alertSeverityFilter = ref<'All Severities' | ThreatAlert['severity']>('All Severities')
+type SensorForm = Pick<
+  IoTSensor,
+  | 'id'
+  | 'deviceName'
+  | 'deviceType'
+  | 'serialNumber'
+  | 'locationDescription'
+  | 'status'
+  | 'installedAt'
+>
+
+const sensorModal = ref<'register' | 'view' | 'edit' | 'delete' | null>(null)
+const sensorFormError = ref('')
+const successMessage = ref('')
+const errorMessage = ref('')
+let successTimer: ReturnType<typeof setTimeout> | undefined
+let errorTimer: ReturnType<typeof setTimeout> | undefined
+const sensorForm = ref<SensorForm>({
+  id: '',
+  deviceName: '',
+  deviceType: '',
+  serialNumber: '',
+  locationDescription: '',
+  status: 'Online',
+  installedAt: '',
+})
 
 const page = computed(
   () =>
@@ -49,7 +107,7 @@ const page = computed(
         title: 'Sensor Management',
         eyebrow: 'DEVICE ADMINISTRATION',
         active: 'Sensor Management',
-        intro: 'Register, assign, and maintain the IoT sensors protecting documented plants.',
+        intro: 'Register and maintain IoT sensor devices used for plant monitoring.',
       },
       alerts: {
         title: 'Threat Alerts',
@@ -77,70 +135,7 @@ const permissions = [
   { module: 'System activity', admin: true, officer: false, botanist: false },
 ]
 
-const sensors = [
-  {
-    id: 'S001',
-    plant: 'PL001',
-    zone: 'Zone A',
-    type: 'Environment',
-    temp: '29°C',
-    humidity: '82%',
-    movement: 'No',
-    status: 'Online',
-    battery: '94%',
-    update: '2 mins ago',
-  },
-  {
-    id: 'S002',
-    plant: 'PL002',
-    zone: 'Zone A',
-    type: 'Motion',
-    temp: '31°C',
-    humidity: '75%',
-    movement: 'Yes',
-    status: 'Alert',
-    battery: '81%',
-    update: '5 mins ago',
-  },
-  {
-    id: 'S003',
-    plant: 'PL003',
-    zone: 'Zone B',
-    type: 'Environment',
-    temp: '28°C',
-    humidity: '85%',
-    movement: 'No',
-    status: 'Offline',
-    battery: '12%',
-    update: '20 mins ago',
-  },
-  {
-    id: 'S004',
-    plant: 'PL010',
-    zone: 'Zone B',
-    type: 'Temperature',
-    temp: '30°C',
-    humidity: '78%',
-    movement: 'No',
-    status: 'Online',
-    battery: '76%',
-    update: '3 mins ago',
-  },
-  {
-    id: 'S005',
-    plant: 'PL021',
-    zone: 'Zone C',
-    type: 'Motion',
-    temp: '27°C',
-    humidity: '88%',
-    movement: 'No',
-    status: 'Online',
-    battery: '89%',
-    update: '1 min ago',
-  },
-]
-
-const iotSensors: IoTSensor[] = [
+const sensors = ref<IoTSensor[]>([
   {
     id: 'S001',
     deviceName: 'Environmental Sensor 01',
@@ -173,7 +168,7 @@ const iotSensors: IoTSensor[] = [
     soilMoisture: '61%',
     rainfall: 'No',
     movement: 'Yes',
-    status: 'Alert',
+    status: 'Online',
     lastReading: '5 mins ago',
     recordedAt: '29 Sep 2026, 1:15 PM',
     gpsLatitude: '3.80841',
@@ -241,83 +236,120 @@ const iotSensors: IoTSensor[] = [
     installedAt: '22 Aug 2026',
     readingId: 'RD005',
   },
-]
+])
 
-const iotAlerts = [
+const alerts = ref<ThreatAlert[]>([
   {
     id: 'A001',
     plant: 'PL002',
     readingId: 'RD002',
+    sensorId: 'S002',
     type: 'Movement Detected',
     severity: 'High',
     confidence: '94%',
+    description: 'Movement was detected near protected plant PL002.',
+    imagePath: '',
     status: 'New',
     createdAt: '29 Sep 2026, 10:35 AM',
+    resolvedBy: '',
+    resolvedAt: '',
+    sensorLocation: 'Boardwalk beside PL002',
+    temperature: '31°C',
+    humidity: '75%',
+    soilMoisture: '61%',
+    rainfall: 'No',
+    movement: 'Yes',
+    recordedAt: '29 Sep 2026, 10:34 AM',
+    gpsLatitude: '3.80841',
+    gpsLongitude: '113.78912',
+    plantLatitude: '3.80838',
+    plantLongitude: '113.78908',
+    plantAccuracy: '4.2 m',
   },
   {
     id: 'A002',
     plant: 'PL010',
     readingId: 'RD004',
+    sensorId: 'S004',
     type: 'High Temperature',
     severity: 'Medium',
     confidence: '87%',
+    description: 'Temperature exceeded the configured monitoring threshold near PL010.',
+    imagePath: '',
     status: 'Reviewing',
     createdAt: '29 Sep 2026, 11:20 AM',
+    resolvedBy: '',
+    resolvedAt: '',
+    sensorLocation: 'Cave entrance near PL010',
+    temperature: '30°C',
+    humidity: '78%',
+    soilMoisture: '65%',
+    rainfall: 'No',
+    movement: 'No',
+    recordedAt: '29 Sep 2026, 11:19 AM',
+    gpsLatitude: '3.81015',
+    gpsLongitude: '113.79108',
+    plantLatitude: '3.81011',
+    plantLongitude: '113.79102',
+    plantAccuracy: '3.8 m',
   },
   {
     id: 'A003',
     plant: 'PL003',
     readingId: 'RD003',
+    sensorId: 'S003',
     type: 'Sensor Offline',
     severity: 'Low',
     confidence: '99%',
+    description: 'Sensor S003 stopped reporting readings.',
+    imagePath: '',
     status: 'New',
     createdAt: '29 Sep 2026, 12:05 PM',
-  },
-]
-
-const alerts = [
-  {
-    id: 'A001',
-    plant: 'PL002',
-    sensor: 'S002',
-    type: 'Movement Detected',
-    zone: 'Zone A',
-    time: '29 Sep 2026, 10:35 AM',
-    severity: 'High',
-    status: 'New',
-  },
-  {
-    id: 'A002',
-    plant: 'PL010',
-    sensor: 'S004',
-    type: 'High Temperature',
-    zone: 'Zone B',
-    time: '29 Sep 2026, 11:20 AM',
-    severity: 'Medium',
-    status: 'Reviewing',
-  },
-  {
-    id: 'A003',
-    plant: 'PL021',
-    sensor: 'S003',
-    type: 'Sensor Offline',
-    zone: 'Zone C',
-    time: '29 Sep 2026, 12:05 PM',
-    severity: 'Low',
-    status: 'New',
+    resolvedBy: '',
+    resolvedAt: '',
+    sensorLocation: 'Limestone path near PL003',
+    temperature: '28°C',
+    humidity: '85%',
+    soilMoisture: '74%',
+    rainfall: 'Yes',
+    movement: 'No',
+    recordedAt: '29 Sep 2026, 12:00 PM',
+    gpsLatitude: '3.80903',
+    gpsLongitude: '113.79024',
+    plantLatitude: '3.80900',
+    plantLongitude: '113.79019',
+    plantAccuracy: '5.1 m',
   },
   {
     id: 'A004',
-    plant: 'PL014',
-    sensor: 'S011',
-    type: 'Low Battery',
-    zone: 'Zone B',
-    time: '28 Sep 2026, 4:16 PM',
+    plant: 'PL021',
+    readingId: 'RD005',
+    sensorId: 'S005',
+    type: 'Rainfall Detected',
     severity: 'Low',
+    confidence: '91%',
+    description: 'Rainfall was detected at the southern research plot near PL021.',
+    imagePath: '',
     status: 'Resolved',
+    createdAt: '28 Sep 2026, 4:16 PM',
+    resolvedBy: 'Admin02',
+    resolvedAt: '28 Sep 2026, 5:02 PM',
+    sensorLocation: 'Southern research plot near PL021',
+    temperature: '27°C',
+    humidity: '88%',
+    soilMoisture: '79%',
+    rainfall: 'Yes',
+    movement: 'No',
+    recordedAt: '28 Sep 2026, 4:15 PM',
+    gpsLatitude: '3.80677',
+    gpsLongitude: '113.78753',
+    plantLatitude: '3.80672',
+    plantLongitude: '113.78748',
+    plantAccuracy: '4.7 m',
   },
-]
+])
+
+const recentAlerts = computed(() => alerts.value.slice(0, 3))
 
 const logs = [
   {
@@ -362,17 +394,25 @@ const logs = [
   },
 ]
 
-const filteredSensors = computed(() =>
-  sensors.filter(
-    (s) =>
-      (!search.value ||
-        Object.values(s).join(' ').toLowerCase().includes(search.value.toLowerCase())) &&
-      (filter.value === 'All' || s.status === filter.value),
-  ),
-)
+const filteredSensors = computed(() => {
+  const query = search.value.trim().toLowerCase()
+  return sensors.value.filter((sensor) => {
+    const matchesSearch =
+      !query ||
+      [
+        sensor.id,
+        sensor.deviceName,
+        sensor.deviceType,
+        sensor.serialNumber,
+        sensor.locationDescription,
+        sensor.plant,
+      ].some((value) => value.toLowerCase().includes(query))
+    return matchesSearch && (filter.value === 'All' || sensor.status === filter.value)
+  })
+})
 const filteredIoTSensors = computed(() => {
   const query = search.value.trim().toLowerCase()
-  return iotSensors.filter((sensor) => {
+  return sensors.value.filter((sensor) => {
     const matchesSearch =
       !query ||
       [
@@ -386,14 +426,28 @@ const filteredIoTSensors = computed(() => {
     return matchesSearch && (filter.value === 'All' || sensor.status === filter.value)
   })
 })
-const filteredAlerts = computed(() =>
-  alerts.filter(
-    (a) =>
-      (!search.value ||
-        Object.values(a).join(' ').toLowerCase().includes(search.value.toLowerCase())) &&
-      (filter.value === 'All' || a.status === filter.value || a.severity === filter.value),
-  ),
-)
+const filteredAlerts = computed(() => {
+  const query = search.value.trim().toLowerCase()
+  return alerts.value.filter((alert) => {
+    const matchesSearch =
+      !query ||
+      [
+        alert.id,
+        alert.plant,
+        alert.sensorId,
+        alert.readingId,
+        alert.type,
+        alert.description,
+        alert.status,
+        alert.severity,
+      ].some((value) => value.toLowerCase().includes(query))
+    const matchesStatus =
+      alertStatusFilter.value === 'All Statuses' || alert.status === alertStatusFilter.value
+    const matchesSeverity =
+      alertSeverityFilter.value === 'All Severities' || alert.severity === alertSeverityFilter.value
+    return matchesSearch && matchesStatus && matchesSeverity
+  })
+})
 const filteredLogs = computed(() =>
   logs.filter(
     (l) =>
@@ -403,12 +457,239 @@ const filteredLogs = computed(() =>
   ),
 )
 
+const onlineSensorCount = computed(() => sensors.value.filter((s) => s.status === 'Online').length)
+const offlineSensorCount = computed(
+  () => sensors.value.filter((s) => s.status === 'Offline').length,
+)
+const maintenanceSensorCount = computed(
+  () => sensors.value.filter((s) => s.status === 'Maintenance').length,
+)
+const activeAlertCount = computed(
+  () => alerts.value.filter((alert) => alert.status !== 'Resolved').length,
+)
+const highSeverityAlertCount = computed(
+  () =>
+    alerts.value.filter((alert) => alert.severity === 'High' && alert.status !== 'Resolved').length,
+)
+const reviewingAlertCount = computed(
+  () => alerts.value.filter((alert) => alert.status === 'Reviewing').length,
+)
+const resolvedAlertCount = computed(
+  () => alerts.value.filter((alert) => alert.status === 'Resolved').length,
+)
+const selectedAlertSensor = computed(() =>
+  selectedAlert.value
+    ? sensors.value.find((sensor) => sensor.id === selectedAlert.value?.sensorId)
+    : undefined,
+)
+
+const showSuccessMessage = (message: string) => {
+  if (errorTimer) clearTimeout(errorTimer)
+  errorTimer = undefined
+  errorMessage.value = ''
+  if (successTimer) clearTimeout(successTimer)
+  successMessage.value = message
+  successTimer = setTimeout(() => {
+    successMessage.value = ''
+    successTimer = undefined
+  }, 3500)
+}
+
+const showErrorMessage = (message: string) => {
+  if (successTimer) clearTimeout(successTimer)
+  successTimer = undefined
+  successMessage.value = ''
+  if (errorTimer) clearTimeout(errorTimer)
+  errorMessage.value = message
+  errorTimer = setTimeout(() => {
+    errorMessage.value = ''
+    errorTimer = undefined
+  }, 4000)
+}
+
+const openAlertDetails = (alert: ThreatAlert) => {
+  selectedAlert.value = alert
+  alertModal.value = 'view'
+}
+
+const closeAlertModal = () => {
+  selectedAlert.value = null
+  alertModal.value = null
+}
+
+const markAlertReviewing = () => {
+  const alert = selectedAlert.value
+  if (!alert || alert.status !== 'New') {
+    showErrorMessage(`Unable to update threat alert ${alert?.id ?? ''}. Please try again.`)
+    return
+  }
+  alert.status = 'Reviewing'
+  showSuccessMessage(`Threat alert ${alert.id} is now under review.`)
+}
+
+const openResolveConfirmation = () => {
+  if (!selectedAlert.value || selectedAlert.value.status === 'Resolved') return
+  alertModal.value = 'resolve'
+}
+
+const cancelResolveAlert = () => {
+  alertModal.value = 'view'
+}
+
+const confirmResolveAlert = () => {
+  const alert = selectedAlert.value
+  if (!alert || alert.status === 'Resolved') {
+    showErrorMessage(`Unable to resolve threat alert ${alert?.id ?? ''}. Please try again.`)
+    return
+  }
+  alert.status = 'Resolved'
+  alert.resolvedBy = 'Admin01'
+  alert.resolvedAt = new Intl.DateTimeFormat('en-MY', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date())
+  alertModal.value = 'view'
+  showSuccessMessage(`Threat alert ${alert.id} was resolved successfully.`)
+}
+
+const nextSensorId = () => {
+  const highestId = sensors.value.reduce((highest, sensor) => {
+    const match = sensor.id.match(/^S(\d+)$/i)
+    return match ? Math.max(highest, Number(match[1])) : highest
+  }, 0)
+  return `S${String(highestId + 1).padStart(3, '0')}`
+}
+
+const openRegisterSensor = () => {
+  sensorForm.value = {
+    id: nextSensorId(),
+    deviceName: '',
+    deviceType: '',
+    serialNumber: '',
+    locationDescription: '',
+    status: 'Online',
+    installedAt: '',
+  }
+  sensorFormError.value = ''
+  sensorModal.value = 'register'
+}
+
 const openSensorDetails = (sensor: IoTSensor) => {
   selectedSensor.value = sensor
+  sensorModal.value = 'view'
 }
 
 const closeSensorDetails = () => {
   selectedSensor.value = null
+  sensorModal.value = null
+  sensorFormError.value = ''
+}
+
+const openEditSensor = (sensor: IoTSensor) => {
+  selectedSensor.value = sensor
+  sensorForm.value = {
+    id: sensor.id,
+    deviceName: sensor.deviceName,
+    deviceType: sensor.deviceType,
+    serialNumber: sensor.serialNumber,
+    locationDescription: sensor.locationDescription,
+    status: sensor.status,
+    installedAt: sensor.installedAt,
+  }
+  sensorFormError.value = ''
+  sensorModal.value = 'edit'
+}
+
+const openDeleteSensor = (sensor: IoTSensor) => {
+  selectedSensor.value = sensor
+  sensorModal.value = 'delete'
+}
+
+const validateSensorForm = (editing = false) => {
+  const form = sensorForm.value
+  if (
+    !form.deviceName.trim() ||
+    !form.deviceType ||
+    !form.serialNumber.trim() ||
+    !form.status ||
+    !form.installedAt
+  ) {
+    return 'Device name, device type, serial number, status and installed date are required.'
+  }
+  const serial = form.serialNumber.trim().toLowerCase()
+  const duplicate = sensors.value.some(
+    (sensor) =>
+      sensor.serialNumber.trim().toLowerCase() === serial && (!editing || sensor.id !== form.id),
+  )
+  if (duplicate) {
+    return editing
+      ? 'Another sensor already uses this serial number.'
+      : 'A sensor with this serial number already exists.'
+  }
+  return ''
+}
+
+const saveSensor = (editing = false) => {
+  sensorFormError.value = validateSensorForm(editing)
+  if (sensorFormError.value) {
+    showErrorMessage(sensorFormError.value)
+    return
+  }
+  const form = { ...sensorForm.value }
+  if (editing) {
+    const sensor = sensors.value.find((item) => item.id === form.id)
+    if (!sensor) {
+      sensorFormError.value = 'Unable to update this sensor. Please try again.'
+      showErrorMessage(sensorFormError.value)
+      return
+    }
+    Object.assign(sensor, form, {
+      deviceName: form.deviceName.trim(),
+      serialNumber: form.serialNumber.trim(),
+      locationDescription: form.locationDescription.trim(),
+    })
+    closeSensorDetails()
+    showSuccessMessage(`${form.deviceName.trim()} was updated successfully.`)
+    return
+  }
+  sensors.value.push({
+    ...form,
+    deviceName: form.deviceName.trim(),
+    serialNumber: form.serialNumber.trim(),
+    locationDescription: form.locationDescription.trim(),
+    plant: '—',
+    temperature: '—',
+    humidity: '—',
+    soilMoisture: '—',
+    rainfall: '—',
+    movement: '—',
+    lastReading: 'No readings yet',
+    recordedAt: '—',
+    gpsLatitude: '—',
+    gpsLongitude: '—',
+    readingId: '—',
+  })
+  closeSensorDetails()
+  showSuccessMessage(`${form.deviceName.trim()} was registered successfully.`)
+}
+
+const confirmDeleteSensor = () => {
+  const sensor = selectedSensor.value
+  if (!sensor) {
+    showErrorMessage('Unable to delete this sensor. Please try again.')
+    return
+  }
+  const index = sensors.value.findIndex((item) => item.id === sensor.id)
+  if (index < 0) {
+    showErrorMessage(`Unable to delete ${sensor.deviceName}. Please try again.`)
+    return
+  }
+  sensors.value.splice(index, 1)
+  closeSensorDetails()
+  showSuccessMessage(`${sensor.deviceName} was deleted successfully.`)
 }
 </script>
 
@@ -420,7 +701,12 @@ const closeSensorDetails = () => {
         <p>{{ page.intro }}</p>
       </div>
       <button v-if="section === 'roles'" class="primary" type="button">＋ Create Role</button
-      ><button v-else-if="section === 'sensors'" class="primary" type="button">
+      ><button
+        v-else-if="section === 'sensors'"
+        class="primary"
+        type="button"
+        @click="openRegisterSensor"
+      >
         ＋ Register Sensor</button
       ><button v-else-if="section === 'activity'" class="secondary" type="button">
         Export Activity
@@ -534,28 +820,32 @@ const closeSensorDetails = () => {
           <span>⌁</span>
           <div>
             <p>Total Sensors</p>
-            <strong>27</strong><small>Registered devices</small>
+            <strong>{{ sensors.length }}</strong
+            ><small>Registered devices</small>
           </div>
         </article>
         <article>
           <span>✓</span>
           <div>
             <p>Online Sensors</p>
-            <strong>25</strong><small>92.6% available</small>
+            <strong>{{ onlineSensorCount }}</strong
+            ><small>Currently available</small>
           </div>
         </article>
         <article class="warning">
           <span>×</span>
           <div>
             <p>Offline Sensors</p>
-            <strong>2</strong><small>Needs attention</small>
+            <strong>{{ offlineSensorCount }}</strong
+            ><small>Needs attention</small>
           </div>
         </article>
         <article class="danger">
           <span>!</span>
           <div>
             <p>Active Threat Alerts</p>
-            <strong>3</strong><small>2 unreviewed</small>
+            <strong>{{ activeAlertCount }}</strong
+            ><small>2 unreviewed</small>
           </div>
         </article>
       </section>
@@ -568,10 +858,17 @@ const closeSensorDetails = () => {
           <span class="live"><i></i> Updating</span>
         </div>
         <div class="network-metrics">
-          <article><small>Online Sensors</small><strong>25</strong></article>
-          <article><small>Offline Sensors</small><strong>2</strong></article>
+          <article>
+            <small>Online Sensors</small><strong>{{ onlineSensorCount }}</strong>
+          </article>
+          <article>
+            <small>Offline Sensors</small><strong>{{ offlineSensorCount }}</strong>
+          </article>
           <article><small>Latest Reading</small><strong>2 mins ago</strong></article>
-          <article><small>Reporting Today</small><strong>25 / 27</strong></article>
+          <article>
+            <small>Reporting Today</small
+            ><strong>{{ onlineSensorCount }} / {{ sensors.length }}</strong>
+          </article>
         </div>
       </section>
       <section class="panel">
@@ -592,7 +889,8 @@ const closeSensorDetails = () => {
             <option>All</option>
             <option>Online</option>
             <option>Offline</option>
-            <option>Alert</option>
+            <option>Maintenance</option>
+            <option>Inactive</option>
           </select>
         </div>
         <div class="table-scroll">
@@ -661,7 +959,7 @@ const closeSensorDetails = () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="alert in iotAlerts" :key="alert.id">
+              <tr v-for="alert in recentAlerts" :key="alert.id">
                 <td>
                   <strong>{{ alert.id }}</strong>
                 </td>
@@ -691,28 +989,32 @@ const closeSensorDetails = () => {
           <span>◉</span>
           <div>
             <p>Registered</p>
-            <strong>27</strong><small>Total devices</small>
+            <strong>{{ sensors.length }}</strong
+            ><small>Total devices</small>
           </div>
         </article>
         <article>
           <span>✓</span>
           <div>
-            <p>Assigned</p>
-            <strong>26</strong><small>Linked to plants</small>
+            <p>Online</p>
+            <strong>{{ onlineSensorCount }}</strong
+            ><small>Connected devices</small>
           </div>
         </article>
         <article>
           <span>□</span>
           <div>
-            <p>Unassigned</p>
-            <strong>1</strong><small>Ready for setup</small>
+            <p>Offline</p>
+            <strong>{{ offlineSensorCount }}</strong
+            ><small>Needs attention</small>
           </div>
         </article>
         <article class="warning">
           <span>⌁</span>
           <div>
             <p>Maintenance</p>
-            <strong>2</strong><small>Service scheduled</small>
+            <strong>{{ maintenanceSensorCount }}</strong
+            ><small>Service scheduled</small>
           </div>
         </article>
       </section>
@@ -727,12 +1029,15 @@ const closeSensorDetails = () => {
         <div class="filters">
           <label
             ><span>⌕</span
-            ><input v-model="search" placeholder="Search sensor, plant, type or zone..." /></label
+            ><input
+              v-model="search"
+              placeholder="Search sensor, device, type or location..." /></label
           ><select v-model="filter">
             <option>All</option>
             <option>Online</option>
             <option>Offline</option>
-            <option>Alert</option>
+            <option>Maintenance</option>
+            <option>Inactive</option>
           </select>
         </div>
         <div class="table-scroll">
@@ -740,12 +1045,12 @@ const closeSensorDetails = () => {
             <thead>
               <tr>
                 <th>Sensor ID</th>
-                <th>Type</th>
-                <th>Assigned Plant</th>
-                <th>Zone</th>
-                <th>Battery</th>
+                <th>Device Name</th>
+                <th>Device Type</th>
+                <th>Serial Number</th>
+                <th>Location</th>
                 <th>Status</th>
-                <th>Last Update</th>
+                <th>Installed At</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -754,18 +1059,31 @@ const closeSensorDetails = () => {
                 <td>
                   <strong>{{ s.id }}</strong>
                 </td>
-                <td>{{ s.type }}</td>
-                <td>{{ s.plant }}</td>
-                <td>{{ s.zone }}</td>
-                <td>
-                  <div class="battery"><span :style="{ width: s.battery }"></span></div>
-                  <small>{{ s.battery }}</small>
-                </td>
+                <td>{{ s.deviceName }}</td>
+                <td>{{ s.deviceType }}</td>
+                <td>{{ s.serialNumber }}</td>
+                <td>{{ s.locationDescription || '—' }}</td>
                 <td>
                   <em class="badge" :class="s.status.toLowerCase()">{{ s.status }}</em>
                 </td>
-                <td>{{ s.update }}</td>
-                <td><button class="table-action">Manage</button></td>
+                <td>{{ s.installedAt }}</td>
+                <td>
+                  <div class="sensor-actions">
+                    <button class="table-action" type="button" @click="openSensorDetails(s)">
+                      View
+                    </button>
+                    <button class="table-action" type="button" @click="openEditSensor(s)">
+                      Edit
+                    </button>
+                    <button
+                      class="table-action delete-action"
+                      type="button"
+                      @click="openDeleteSensor(s)"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -779,28 +1097,32 @@ const closeSensorDetails = () => {
           <span>!</span>
           <div>
             <p>Active Alerts</p>
-            <strong>3</strong><small>Require review</small>
+            <strong>{{ activeAlertCount }}</strong
+            ><small>Require review</small>
           </div>
         </article>
         <article>
           <span>●</span>
           <div>
             <p>High Severity</p>
-            <strong>1</strong><small>Immediate action</small>
+            <strong>{{ highSeverityAlertCount }}</strong
+            ><small>Immediate action</small>
           </div>
         </article>
         <article>
           <span>⌕</span>
           <div>
-            <p>Reviewing</p>
-            <strong>1</strong><small>Being investigated</small>
+            <p>Under Review</p>
+            <strong>{{ reviewingAlertCount }}</strong
+            ><small>Being investigated</small>
           </div>
         </article>
         <article>
           <span>✓</span>
           <div>
-            <p>Resolved Today</p>
-            <strong>4</strong><small>Closed alerts</small>
+            <p>Resolved</p>
+            <strong>{{ resolvedAlertCount }}</strong
+            ><small>Closed alerts</small>
           </div>
         </article>
       </section>
@@ -810,19 +1132,21 @@ const closeSensorDetails = () => {
             <p>THREAT REGISTER</p>
             <h2>All Threat Alerts</h2>
           </div>
-          <button class="secondary">Export Alerts</button>
+          <button class="secondary" type="button">Export Alerts</button>
         </div>
-        <div class="filters">
+        <div class="filters alert-filters">
           <label
             ><span>⌕</span
-            ><input
-              v-model="search"
-              placeholder="Search alert, plant, sensor or location..." /></label
-          ><select v-model="filter">
-            <option>All</option>
+            ><input v-model="search" placeholder="Search alert, plant, sensor, reading or type..."
+          /></label>
+          <select v-model="alertStatusFilter" aria-label="Filter alerts by status">
+            <option>All Statuses</option>
             <option>New</option>
             <option>Reviewing</option>
             <option>Resolved</option>
+          </select>
+          <select v-model="alertSeverityFilter" aria-label="Filter alerts by severity">
+            <option>All Severities</option>
             <option>High</option>
             <option>Medium</option>
             <option>Low</option>
@@ -832,32 +1156,38 @@ const closeSensorDetails = () => {
           <table>
             <thead>
               <tr>
-                <th>Alert</th>
-                <th>Plant / Sensor</th>
-                <th>Threat Type</th>
-                <th>Zone</th>
-                <th>Date & Time</th>
+                <th>Alert ID</th>
+                <th>Plant ID</th>
+                <th>Sensor ID</th>
+                <th>Alert Type</th>
                 <th>Severity</th>
+                <th>Confidence</th>
                 <th>Status</th>
+                <th>Created At</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="a in filteredAlerts" :key="a.id">
+              <tr v-for="alert in filteredAlerts" :key="alert.id">
                 <td>
-                  <strong>{{ a.id }}</strong>
+                  <strong>{{ alert.id }}</strong>
                 </td>
-                <td>{{ a.plant }} / {{ a.sensor }}</td>
-                <td>{{ a.type }}</td>
-                <td>{{ a.zone }}</td>
-                <td>{{ a.time }}</td>
+                <td>{{ alert.plant }}</td>
+                <td>{{ alert.sensorId }}</td>
+                <td>{{ alert.type }}</td>
                 <td>
-                  <em class="badge" :class="a.severity.toLowerCase()">{{ a.severity }}</em>
+                  <em class="badge" :class="alert.severity.toLowerCase()">{{ alert.severity }}</em>
                 </td>
+                <td>{{ alert.confidence }}</td>
                 <td>
-                  <em class="badge" :class="a.status.toLowerCase()">{{ a.status }}</em>
+                  <em class="badge" :class="alert.status.toLowerCase()">{{ alert.status }}</em>
                 </td>
-                <td><button class="table-action">View</button></td>
+                <td>{{ alert.createdAt }}</td>
+                <td>
+                  <button class="table-action" type="button" @click="openAlertDetails(alert)">
+                    View
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -934,7 +1264,270 @@ const closeSensorDetails = () => {
     </template>
 
     <div
-      v-if="section === 'iot' && selectedSensor"
+      v-if="alertModal === 'view' && selectedAlert"
+      class="sensor-modal-backdrop"
+      @click.self="closeAlertModal"
+    >
+      <section
+        class="sensor-modal alert-detail-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="alert-details-title"
+      >
+        <header class="sensor-modal-head">
+          <div>
+            <p>THREAT ALERT</p>
+            <h2 id="alert-details-title">{{ selectedAlert.type }}</h2>
+          </div>
+          <button type="button" aria-label="Close alert details" @click="closeAlertModal">×</button>
+        </header>
+
+        <div class="detail-section">
+          <h3>ALERT DETAILS</h3>
+          <dl>
+            <div>
+              <dt>Alert ID</dt>
+              <dd>{{ selectedAlert.id }}</dd>
+            </div>
+            <div>
+              <dt>Alert Type</dt>
+              <dd>{{ selectedAlert.type }}</dd>
+            </div>
+            <div>
+              <dt>Severity</dt>
+              <dd>
+                <em class="badge" :class="selectedAlert.severity.toLowerCase()">{{
+                  selectedAlert.severity
+                }}</em>
+              </dd>
+            </div>
+            <div>
+              <dt>Confidence</dt>
+              <dd>{{ selectedAlert.confidence }}</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <em class="badge" :class="selectedAlert.status.toLowerCase()">{{
+                  selectedAlert.status
+                }}</em>
+              </dd>
+            </div>
+            <div>
+              <dt>Created At</dt>
+              <dd>{{ selectedAlert.createdAt }}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="detail-section">
+          <h3>RELATED RECORD</h3>
+          <dl>
+            <div>
+              <dt>Plant ID</dt>
+              <dd>{{ selectedAlert.plant }}</dd>
+            </div>
+            <div>
+              <dt>Reading ID</dt>
+              <dd>{{ selectedAlert.readingId }}</dd>
+            </div>
+            <div>
+              <dt>Sensor ID</dt>
+              <dd>{{ selectedAlert.sensorId }}</dd>
+            </div>
+            <div>
+              <dt>Device Name</dt>
+              <dd>{{ selectedAlertSensor?.deviceName || 'Unavailable' }}</dd>
+            </div>
+            <div>
+              <dt>Device Type</dt>
+              <dd>{{ selectedAlertSensor?.deviceType || 'Unavailable' }}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="detail-section">
+          <h3>TRIGGERING SENSOR READING</h3>
+          <dl>
+            <div>
+              <dt>Temperature</dt>
+              <dd>{{ selectedAlert.temperature || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Humidity</dt>
+              <dd>{{ selectedAlert.humidity || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Soil Moisture</dt>
+              <dd>{{ selectedAlert.soilMoisture || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Rainfall Detected</dt>
+              <dd>{{ selectedAlert.rainfall || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Motion Detected</dt>
+              <dd>{{ selectedAlert.movement || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Recorded At</dt>
+              <dd>{{ selectedAlert.recordedAt || '—' }}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="detail-section">
+          <h3>LOCATION</h3>
+          <dl>
+            <div class="detail-wide">
+              <dt>Sensor Location Description</dt>
+              <dd>{{ selectedAlert.sensorLocation || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Reading GPS</dt>
+              <dd>
+                {{
+                  selectedAlert.gpsLatitude && selectedAlert.gpsLongitude
+                    ? `${selectedAlert.gpsLatitude}, ${selectedAlert.gpsLongitude}`
+                    : '—'
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>Registered Plant GPS</dt>
+              <dd>
+                {{
+                  selectedAlert.plantLatitude && selectedAlert.plantLongitude
+                    ? `${selectedAlert.plantLatitude}, ${selectedAlert.plantLongitude}`
+                    : '—'
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>Accuracy</dt>
+              <dd>{{ selectedAlert.plantAccuracy || '—' }}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="detail-section">
+          <h3>DESCRIPTION</h3>
+          <p class="alert-description">{{ selectedAlert.description }}</p>
+        </div>
+
+        <div class="detail-section">
+          <h3>EVIDENCE IMAGE</h3>
+          <img
+            v-if="selectedAlert.imagePath"
+            class="alert-evidence"
+            :src="selectedAlert.imagePath"
+            alt="Threat alert evidence"
+          />
+          <p v-else class="empty-evidence">No image evidence available.</p>
+        </div>
+
+        <div v-if="selectedAlert.status === 'Resolved'" class="detail-section">
+          <h3>RESOLUTION</h3>
+          <dl>
+            <div>
+              <dt>Resolved By</dt>
+              <dd>{{ selectedAlert.resolvedBy }}</dd>
+            </div>
+            <div>
+              <dt>Resolved At</dt>
+              <dd>{{ selectedAlert.resolvedAt }}</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="sensor-modal-actions alert-modal-actions">
+          <button class="secondary" type="button" @click="closeAlertModal">Close</button>
+          <button
+            v-if="selectedAlert.status === 'New'"
+            class="secondary"
+            type="button"
+            @click="markAlertReviewing"
+          >
+            Mark as Reviewing
+          </button>
+          <button
+            v-if="selectedAlert.status !== 'Resolved'"
+            class="primary"
+            type="button"
+            @click="openResolveConfirmation"
+          >
+            Resolve Alert
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="alertModal === 'resolve' && selectedAlert"
+      class="sensor-modal-backdrop"
+      @click.self="cancelResolveAlert"
+    >
+      <section
+        class="sensor-modal delete-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="resolve-alert-title"
+      >
+        <header class="sensor-modal-head">
+          <div>
+            <p>CONFIRM RESOLUTION</p>
+            <h2 id="resolve-alert-title">Resolve Threat Alert</h2>
+          </div>
+          <button type="button" aria-label="Close resolve confirmation" @click="cancelResolveAlert">
+            ×
+          </button>
+        </header>
+        <div class="delete-confirmation resolve-confirmation">
+          <span class="resolution-icon">✓</span>
+          <p>
+            <strong>Alert {{ selectedAlert.id }}</strong
+            ><br />{{ selectedAlert.type }}<br />Plant {{ selectedAlert.plant }}
+          </p>
+          <small>Are you sure this threat has been investigated and resolved?</small>
+          <div class="sensor-modal-actions modal-button-group">
+            <button class="secondary" type="button" @click="cancelResolveAlert">Cancel</button>
+            <button class="primary" type="button" @click="confirmResolveAlert">
+              Resolve Alert
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">
+      <svg class="success-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M9 12l2 2 4-4"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+      </svg>
+      <p>
+        <strong>Success</strong><span>{{ successMessage }}</span>
+      </p>
+    </div>
+
+    <div v-if="errorMessage" class="error-alert" role="alert" aria-live="assertive">
+      <svg class="error-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+        <path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        <circle cx="12" cy="16.5" r="1" fill="currentColor" />
+      </svg>
+      <p>
+        <strong>Error</strong><span>{{ errorMessage }}</span>
+      </p>
+    </div>
+
+    <div
+      v-if="sensorModal === 'view' && selectedSensor"
       class="sensor-modal-backdrop"
       @click.self="closeSensorDetails"
     >
@@ -990,7 +1583,7 @@ const closeSensorDetails = () => {
             </div>
           </dl>
         </div>
-        <div class="detail-section">
+        <div v-if="selectedSensor.readingId !== '—'" class="detail-section">
           <h3>LATEST READING</h3>
           <dl>
             <div>
@@ -1027,7 +1620,7 @@ const closeSensorDetails = () => {
             </div>
           </dl>
         </div>
-        <div class="detail-section">
+        <div v-if="selectedSensor.readingId !== '—'" class="detail-section">
           <h3>SENSOR READING GPS POSITION</h3>
           <dl>
             <div>
@@ -1040,8 +1633,115 @@ const closeSensorDetails = () => {
             </div>
           </dl>
         </div>
+        <div v-else class="detail-section">
+          <h3>LATEST READING</h3>
+          <p class="empty-evidence">No sensor readings available yet.</p>
+        </div>
         <div class="sensor-modal-actions">
           <button class="primary" type="button" @click="closeSensorDetails">Close</button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="sensorModal === 'register' || sensorModal === 'edit'"
+      class="sensor-modal-backdrop"
+      @click.self="closeSensorDetails"
+    >
+      <section
+        class="sensor-modal sensor-form-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sensor-form-title"
+      >
+        <header class="sensor-modal-head">
+          <div>
+            <p>{{ sensorModal === 'register' ? 'NEW DEVICE' : 'DEVICE SETTINGS' }}</p>
+            <h2 id="sensor-form-title">
+              {{ sensorModal === 'register' ? 'Register Sensor' : 'Edit Sensor' }}
+            </h2>
+          </div>
+          <button type="button" aria-label="Close sensor form" @click="closeSensorDetails">
+            ×
+          </button>
+        </header>
+        <form class="sensor-form" @submit.prevent="saveSensor(sensorModal === 'edit')">
+          <div class="sensor-form-grid">
+            <label>Sensor ID<input v-model="sensorForm.id" type="text" readonly /></label>
+            <label>Device Name<input v-model="sensorForm.deviceName" type="text" /></label>
+            <label
+              >Device Type<select v-model="sensorForm.deviceType">
+                <option value="" disabled>Select device type</option>
+                <option>Environment</option>
+                <option>Motion</option>
+                <option>Temperature</option>
+                <option>Humidity</option>
+                <option>Soil Moisture</option>
+                <option>Rainfall</option>
+                <option>GPS</option>
+                <option>Multi-Sensor</option>
+              </select></label
+            >
+            <label>Serial Number<input v-model="sensorForm.serialNumber" type="text" /></label>
+            <label
+              >Status<select v-model="sensorForm.status">
+                <option>Online</option>
+                <option>Offline</option>
+                <option>Maintenance</option>
+                <option>Inactive</option>
+              </select></label
+            >
+            <label>Installed At<input v-model="sensorForm.installedAt" type="date" /></label>
+            <label class="form-wide"
+              >Location Description<input v-model="sensorForm.locationDescription" type="text"
+            /></label>
+          </div>
+          <p v-if="sensorFormError" class="form-error">{{ sensorFormError }}</p>
+          <div class="sensor-modal-actions modal-button-group">
+            <button class="secondary" type="button" @click="closeSensorDetails">Cancel</button>
+            <button class="primary" type="submit">
+              {{ sensorModal === 'register' ? 'Register Sensor' : 'Save Changes' }}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <div
+      v-if="sensorModal === 'delete' && selectedSensor"
+      class="sensor-modal-backdrop"
+      @click.self="closeSensorDetails"
+    >
+      <section
+        class="sensor-modal delete-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-sensor-title"
+      >
+        <header class="sensor-modal-head">
+          <div>
+            <p>CONFIRM REMOVAL</p>
+            <h2 id="delete-sensor-title">Delete Sensor</h2>
+          </div>
+          <button type="button" aria-label="Close delete confirmation" @click="closeSensorDetails">
+            ×
+          </button>
+        </header>
+        <div class="delete-confirmation">
+          <span class="warning-icon">!</span>
+          <p>
+            Delete <strong>{{ selectedSensor.deviceName }}</strong> ({{ selectedSensor.id }})?
+          </p>
+          <small
+            >This will remove the sensor from the prototype device directory. This action cannot be
+            undone.</small
+          >
+          <div class="sensor-modal-actions modal-button-group">
+            <button class="secondary" type="button" @click="closeSensorDetails">Cancel</button>
+            <button class="danger-button" type="button" @click="confirmDeleteSensor">
+              Delete Sensor
+            </button>
+          </div>
         </div>
       </section>
     </div>
@@ -1350,6 +2050,9 @@ td i {
   grid-template-columns: minmax(240px, 1fr) 180px;
   gap: 10px;
 }
+.filters.alert-filters {
+  grid-template-columns: minmax(240px, 1fr) 160px 160px;
+}
 .filters label {
   display: flex;
   align-items: center;
@@ -1541,6 +2244,9 @@ td i {
   .filters {
     grid-template-columns: 1fr;
   }
+  .filters.alert-filters {
+    grid-template-columns: 1fr;
+  }
   .filters select {
     min-height: 39px;
   }
@@ -1591,6 +2297,89 @@ td i {
 .action-link {
   display: inline-block;
   text-decoration: none;
+}
+.sensor-actions {
+  display: flex;
+  gap: 6px;
+}
+.sensor-actions .delete-action {
+  color: #a64b40;
+}
+.success-alert,
+.error-alert {
+  position: fixed;
+  top: 96px;
+  left: 50%;
+  z-index: 1200;
+  width: min(380px, calc(100vw - 32px));
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  transform: translateX(-50%);
+}
+.success-alert {
+  border-left: 4px solid #0c723a;
+  background: #abe7bf;
+  color: #245b3d;
+  box-shadow: 0 10px 28px rgba(36, 91, 61, 0.15);
+  animation: success-alert-in 180ms ease-out;
+}
+.error-alert {
+  z-index: 1201;
+  border-left: 4px solid #b42318;
+  background: #fde8e7;
+  color: #7a271a;
+  box-shadow: 0 10px 28px rgba(122, 39, 26, 0.16);
+  animation: error-alert-in 180ms ease-out;
+}
+.success-alert-icon,
+.error-alert-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+.success-alert-icon {
+  color: #2f8a5a;
+}
+.error-alert-icon {
+  color: #c43228;
+}
+.success-alert p,
+.error-alert p {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.success-alert strong,
+.error-alert strong {
+  font-size: 11px;
+  font-weight: 800;
+}
+.success-alert span,
+.error-alert span {
+  font-size: 10px;
+}
+@keyframes success-alert-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@keyframes error-alert-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 .sensor-modal-backdrop {
   position: fixed;
@@ -1682,21 +2471,149 @@ td i {
   display: flex;
   justify-content: flex-end;
 }
+.alert-modal-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.alert-description,
+.empty-evidence {
+  margin: 0;
+  color: #617169;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.empty-evidence {
+  color: #87958f;
+  font-style: italic;
+}
+.alert-evidence {
+  width: 100%;
+  max-height: 280px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.resolution-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #dff1e6;
+  color: #287a53;
+  font-size: 22px;
+  font-weight: 800;
+}
+.sensor-form {
+  display: grid;
+  gap: 14px;
+}
+.sensor-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 12px;
+}
+.sensor-form label {
+  display: grid;
+  gap: 6px;
+  color: #4a645a;
+  font-size: 10px;
+  font-weight: 700;
+}
+.sensor-form input,
+.sensor-form select {
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid #dce4dc;
+  border-radius: 8px;
+  outline: 0;
+  background: #fafcfa;
+  color: #355448;
+  font: inherit;
+  font-size: 10px;
+}
+.sensor-form input:focus,
+.sensor-form select:focus {
+  border-color: #62a087;
+  box-shadow: 0 0 0 3px rgba(98, 160, 135, 0.12);
+}
+.sensor-form input[readonly] {
+  background: #eef2ee;
+  color: #708078;
+}
+.form-wide {
+  grid-column: 1 / -1;
+}
+.form-error {
+  margin: 0;
+  color: #b84b3a;
+  font-size: 10px;
+  font-weight: 700;
+}
+.modal-button-group {
+  gap: 8px;
+}
+.danger-button {
+  padding: 10px 15px;
+  border: 0;
+  border-radius: 8px;
+  background: #b84b3a;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+.delete-confirmation {
+  display: grid;
+  gap: 16px;
+  text-align: center;
+}
+.delete-confirmation p {
+  margin: 0;
+  color: #405e53;
+  font-size: 13px;
+}
+.delete-confirmation small {
+  color: #7a8b84;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.warning-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #f8e1dd;
+  color: #b84b3a;
+  font-size: 22px;
+  font-weight: 800;
+}
 @media (max-width: 1000px) {
   .network-metrics {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 @media (max-width: 620px) {
+  .success-alert,
+  .error-alert {
+    top: 82px;
+  }
   .network-overview,
   .sensor-modal {
     padding: 17px;
   }
   .network-metrics,
-  .detail-section dl {
+  .detail-section dl,
+  .sensor-form-grid {
     grid-template-columns: 1fr;
   }
   .detail-section .detail-wide {
+    grid-column: auto;
+  }
+  .form-wide {
     grid-column: auto;
   }
 }
