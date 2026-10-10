@@ -82,7 +82,11 @@ const closeControl = () =>
         </div>
         <ConservationTopbarActions />
       </header>
-      <main class="conservation-page"><RouterView /></main>
+      <main class="conservation-page">
+        <RouterView v-slot="{ Component, route }">
+          <component :is="Component" :key="route.path" />
+        </RouterView>
+      </main>
     </div>
   </div>
 </template>

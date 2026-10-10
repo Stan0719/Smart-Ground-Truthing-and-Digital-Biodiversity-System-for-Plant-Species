@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import BiodiversityMapPreview from '../../components/conservation/BiodiversityMapPreview.vue'
 import { conservationStore, speciesForPlant, speciesRequestForPlant } from '../../data/conservation'
 const router = useRouter()
 const go = (name: string, query?: Record<string, string>) => router.push({ name, query })
@@ -170,22 +171,7 @@ const speciesLabel = (plantId: string) => {
         </div>
         <button class="secondary-button" @click="go('conservation-map')">Open Full Map →</button>
       </header>
-      <div class="map-panel mini">
-        <div class="river"></div>
-        <span class="zone-label" style="left: 8%; top: 13%">ZONE A</span
-        ><span class="zone-label" style="left: 48%; top: 16%">ZONE B</span
-        ><span class="zone-label" style="right: 8%; bottom: 12%">ZONE C</span
-        ><button
-          v-for="p in conservationStore.plants"
-          :key="p.id"
-          class="map-marker"
-          :class="speciesForPlant(p.id)?.status.toLowerCase().replaceAll(' ', '-')"
-          :style="{ left: p.x + '%', top: p.y + '%' }"
-          @click="go('conservation-map', { plant: p.id })"
-        >
-          <span></span><small>{{ p.id }}</small>
-        </button>
-      </div>
+      <BiodiversityMapPreview />
     </section>
     <section class="panel">
       <header class="panel-header">
@@ -244,9 +230,6 @@ const speciesLabel = (plantId: string) => {
 .two-column + .panel {
   margin-top: 18px;
 }
-.mini {
-  height: 285px;
-}
 .alert-preview {
   padding: 13px 0;
   display: flex;
@@ -283,6 +266,50 @@ const speciesLabel = (plantId: string) => {
   text-align: left;
   font-size: 18px;
 }
+.secondary-button,
+.action-button,
+.quick-grid button {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.15s ease,
+    box-shadow 0.2s ease;
+}
+.secondary-button:hover {
+  border-color: #9fc4ad;
+  background: #f1f7f3;
+  color: #2f6f56;
+  box-shadow: 0 4px 12px rgba(42, 91, 70, 0.08);
+  transform: translateY(-1px);
+}
+.action-button:hover {
+  border-color: #9fc4ad;
+  background: #edf6f0;
+  color: #28664e;
+  box-shadow: 0 3px 9px rgba(42, 91, 70, 0.08);
+  transform: translateY(-1px);
+}
+.quick-grid button:hover {
+  border-color: #b1cfbb;
+  background: #f1f7f3;
+  box-shadow: 0 6px 16px rgba(35, 70, 53, 0.09);
+  transform: translateY(-2px);
+}
+.quick-grid button:hover strong {
+  color: #244f3f;
+}
+.secondary-button:active,
+.action-button:active,
+.quick-grid button:active {
+  transform: translateY(0) scale(0.99);
+}
+.secondary-button:focus-visible,
+.action-button:focus-visible,
+.quick-grid button:focus-visible {
+  outline: 3px solid rgba(74, 145, 113, 0.3);
+  outline-offset: 2px;
+}
 .quick-grid span {
   display: grid;
 }
@@ -303,6 +330,25 @@ const speciesLabel = (plantId: string) => {
 @media (max-width: 450px) {
   .quick-grid {
     grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .secondary-button,
+  .action-button,
+  .quick-grid button {
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .secondary-button:hover,
+  .action-button:hover,
+  .quick-grid button:hover,
+  .secondary-button:active,
+  .action-button:active,
+  .quick-grid button:active {
+    transform: none;
   }
 }
 </style>

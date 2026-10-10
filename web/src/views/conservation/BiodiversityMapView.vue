@@ -23,6 +23,9 @@ const history = ref(false)
 const mapElement = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 let markerLayer: L.LayerGroup | null = null
+let resizeObserver: ResizeObserver | null = null
+let resizeFrame: number | null = null
+let settleTimer: ReturnType<typeof setTimeout> | null = null
 const markers = new Map<string, L.Marker>()
 
 const filtered = computed(() =>
@@ -126,12 +129,23 @@ const highlightSelectedMarker = () =>
   )
 const selectPlant = (plant: PlantRecord, center = true) => {
   if (!hasCoordinates(plant) || !map) return
+
   selected.value = plant
-  if (center)
-    map.flyTo([plant.latitude, plant.longitude], Math.max(map.getZoom(), 17), { duration: 0.7 })
-  markers.get(plant.id)?.openPopup()
-  highlightSelectedMarker()
+
+  if (center) {
+    // setView works even when the map does not yet have
+    // an initial center/zoom.
+    map.setView([plant.latitude, plant.longitude], 17, {
+      animate: false,
+    })
+  }
+
+  map.whenReady(() => {
+    markers.get(plant.id)?.openPopup()
+    highlightSelectedMarker()
+  })
 }
+
 const fitVisiblePlants = () => {
   if (!map || !mappedPlants.value.length) return
   const bounds = L.latLngBounds(
@@ -174,8 +188,20 @@ const selectFromRoute = () => {
   if (plant) selectPlant(plant)
 }
 
-onMounted(() => {
-  if (!mapElement.value) return
+const scheduleMapRefresh = (applyRouteSelection = false) => {
+  if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null
+    if (!map) return
+    map.invalidateSize({ pan: false })
+    if (applyRouteSelection && route.query.plant) selectFromRoute()
+    else if (applyRouteSelection) fitVisiblePlants()
+  })
+}
+
+onMounted(async () => {
+  await nextTick()
+  if (!mapElement.value || map) return
   map = L.map(mapElement.value, { zoomControl: true, minZoom: 3 })
   L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -188,21 +214,45 @@ onMounted(() => {
   ).addTo(map)
   markerLayer = L.layerGroup().addTo(map)
   renderMarkers()
-  if (route.query.plant) selectFromRoute()
-  else fitVisiblePlants()
+  resizeObserver = new ResizeObserver(() => scheduleMapRefresh())
+  resizeObserver.observe(mapElement.value)
+  await nextTick()
+  scheduleMapRefresh(true)
+  settleTimer = setTimeout(() => {
+    map?.invalidateSize({ pan: false })
+  }, 150)
 })
 watch(mappedPlants, () => {
   renderMarkers()
   if (selected.value && !mappedPlants.value.some((plant) => plant.id === selected.value?.id))
     selected.value = null
-  if (route.query.plant) selectFromRoute()
-  else fitVisiblePlants()
+  scheduleMapRefresh(true)
 })
-watch(() => route.query.plant, selectFromRoute)
+watch(
+  () => route.query.plant,
+  () => scheduleMapRefresh(true),
+)
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+
+  if (resizeFrame !== null) {
+    cancelAnimationFrame(resizeFrame)
+  }
+  resizeFrame = null
+
+  if (settleTimer) {
+    clearTimeout(settleTimer)
+  }
+  settleTimer = null
+
+  markerLayer?.clearLayers()
+  markerLayer = null
+
+  map?.off()
   map?.remove()
   map = null
-  markerLayer = null
+
   markers.clear()
 })
 </script>
