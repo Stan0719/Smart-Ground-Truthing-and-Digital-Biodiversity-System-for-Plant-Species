@@ -474,6 +474,53 @@ onBeforeUnmount(() => {
     </section>
 
     <!-- =========================
+         Experience Niah Video
+         ========================= -->
+
+    <section class="niah-video-section" aria-labelledby="niah-video-title">
+      <div class="niah-video-container">
+        <div class="niah-video-heading reveal reveal-left">
+          <p class="section-label">EXPERIENCE NIAH</p>
+          <h2 id="niah-video-title">See the Journey Come to Life</h2>
+          <p>
+            Take a closer look at the rainforest, caves, and extraordinary heritage that
+            make Niah National Park unforgettable.
+          </p>
+          <a
+            href="https://youtu.be/g6B1q-cVd90?si=4hAIw-VcScfm-uOA"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Watch on YouTube <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+
+        <div class="niah-video-card reveal reveal-right reveal-delay-1">
+          <div class="video-card-toolbar" aria-hidden="true">
+            <span class="video-card-label"><i></i> Niah National Park</span>
+            <span class="video-card-youtube">
+              <svg viewBox="0 0 24 24">
+                <path d="M21.2 7.1a2.8 2.8 0 0 0-2-2C17.4 4.6 12 4.6 12 4.6s-5.4 0-7.2.5a2.8 2.8 0 0 0-2 2A29 29 0 0 0 2.3 12a29 29 0 0 0 .5 4.9 2.8 2.8 0 0 0 2 2c1.8.5 7.2.5 7.2.5s5.4 0 7.2-.5a2.8 2.8 0 0 0 2-2 29 29 0 0 0 .5-4.9 29 29 0 0 0-.5-4.9Z" />
+                <path class="play-mark" d="m10 15.5 5-3.5-5-3.5v7Z" />
+              </svg>
+            </span>
+          </div>
+
+          <div class="video-frame">
+            <iframe
+              src="https://www.youtube-nocookie.com/embed/g6B1q-cVd90?rel=0"
+              title="Experience Niah National Park"
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerpolicy="strict-origin-when-cross-origin"
+              allowfullscreen
+            ></iframe>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================
          Journey to the Great Cave
          ========================= -->
 
@@ -1509,6 +1556,134 @@ onBeforeUnmount(() => {
 
 
 /* ==================================================
+   EXPERIENCE NIAH VIDEO
+   ================================================== */
+
+.niah-video-section {
+  padding: 105px 0;
+  overflow: hidden;
+  background: #173f34;
+}
+
+.niah-video-container {
+  width: min(1200px, 88%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  align-items: center;
+  gap: clamp(42px, 6vw, 86px);
+}
+
+.niah-video-heading .section-label {
+  color: #9cdba6;
+}
+
+.niah-video-heading h2 {
+  margin: 0 0 20px;
+  color: #fff8e9;
+  font-size: clamp(34px, 4.2vw, 56px);
+  line-height: 1.08;
+}
+
+.niah-video-heading > p:last-of-type {
+  margin: 0 0 27px;
+  color: #c8d8cf;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.niah-video-heading > a {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff6dc;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.niah-video-heading > a span {
+  transition: transform 0.2s ease;
+}
+
+.niah-video-heading > a:hover span {
+  transform: translate(3px, -3px);
+}
+
+.niah-video-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  background: #222a27;
+  box-shadow:
+    inset 0 0 1px rgba(255, 255, 255, 0.45),
+    0 28px 65px rgba(4, 18, 13, 0.34);
+}
+
+.video-card-toolbar {
+  min-height: 43px;
+  padding: 0 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #dce9e1;
+}
+
+.video-card-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+}
+
+.video-card-label i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9cdba6;
+  box-shadow: 0 0 0 4px rgba(156, 219, 166, 0.12);
+}
+
+.video-card-youtube {
+  width: 31px;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.video-card-youtube svg {
+  width: 18px;
+  fill: #e4eee8;
+}
+
+.video-card-youtube .play-mark {
+  fill: #222a27;
+}
+
+.video-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 13px;
+  background: #0d1512;
+}
+
+.video-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+/* ==================================================
    JOURNEY TO THE GREAT CAVE
    ================================================== */
 
@@ -2084,6 +2259,19 @@ onBeforeUnmount(() => {
 
 @media (max-width: 900px) {
 
+  .niah-video-section {
+    padding: 78px 0;
+  }
+
+  .niah-video-container {
+    grid-template-columns: 1fr;
+    gap: 34px;
+  }
+
+  .niah-video-heading {
+    max-width: 680px;
+  }
+
   .attraction-grid {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 420px 285px;
@@ -2095,38 +2283,60 @@ onBeforeUnmount(() => {
   }
 
   .journey-route {
-    padding-left: 9px;
-    display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: clamp(145px, 22vw, 190px);
     gap: 0;
+    padding: 8px 0 18px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .journey-route::-webkit-scrollbar {
+    display: none;
   }
 
   .journey-route::before {
-    top: 22px;
-    bottom: 22px;
-    left: 28px;
-    right: auto;
-    width: 2px;
-    height: auto;
+    display: none;
   }
 
   .journey-route li {
-    min-height: 88px;
-    flex-direction: row;
-    align-items: flex-start;
-    text-align: left;
+    min-height: 0;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    scroll-snap-align: start;
+  }
+
+  .journey-route li::after {
+    content: '';
+    position: absolute;
+    top: 27px;
+    left: calc(50% + 27px);
+    width: calc(100% - 54px);
+    height: 2px;
+    background: linear-gradient(to right, #4d9274, #a8c9b2);
+  }
+
+  .journey-route li:last-child::after {
+    display: none;
   }
 
   .journey-marker {
-    flex: 0 0 56px;
+    width: 48px;
+    height: 48px;
+    flex: 0 0 48px;
+    border-width: 5px;
   }
 
   .journey-route li div {
-    margin: 12px 0 0 19px;
+    margin: 13px 8px 0;
   }
 
   .journey-highlight .journey-marker {
-    transform: none;
+    transform: scale(1.08);
   }
 
   .before-explore-heading {
@@ -2157,6 +2367,50 @@ onBeforeUnmount(() => {
 
 
 @media (max-width: 500px) {
+
+  .niah-video-section {
+    padding: 62px 0;
+  }
+
+  .niah-video-container {
+    width: 86%;
+    gap: 27px;
+  }
+
+  .niah-video-heading h2 {
+    margin-bottom: 14px;
+    font-size: 34px;
+  }
+
+  .niah-video-heading > p:last-of-type {
+    margin-bottom: 20px;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .niah-video-card {
+    padding: 8px;
+    border-radius: 15px;
+  }
+
+  .video-card-toolbar {
+    min-height: 36px;
+    padding: 0 5px 7px;
+  }
+
+  .video-card-label {
+    font-size: 8px;
+    letter-spacing: 0.8px;
+  }
+
+  .video-card-youtube {
+    width: 27px;
+    height: 27px;
+  }
+
+  .video-frame {
+    border-radius: 10px;
+  }
 
   .explore-niah {
     width: 86%;
@@ -2199,6 +2453,83 @@ onBeforeUnmount(() => {
 
   .journey-heading {
     margin-bottom: 48px;
+  }
+
+  .journey-heading {
+    width: 86%;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .journey-container {
+    width: 100%;
+  }
+
+  .journey-route {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(145px, 42vw);
+    gap: 0;
+    padding: 8px 7% 18px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-padding-inline: 7%;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .journey-route::-webkit-scrollbar {
+    display: none;
+  }
+
+  .journey-route::before {
+    display: none;
+  }
+
+  .journey-route li {
+    min-height: 0;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    scroll-snap-align: start;
+  }
+
+  .journey-route li::after {
+    content: '';
+    position: absolute;
+    top: 27px;
+    left: calc(50% + 27px);
+    width: calc(100% - 54px);
+    height: 2px;
+    background: linear-gradient(to right, #4d9274, #a8c9b2);
+  }
+
+  .journey-route li:last-child::after {
+    display: none;
+  }
+
+  .journey-marker {
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
+    border-width: 5px;
+  }
+
+  .journey-route li div {
+    margin: 13px 8px 0;
+  }
+
+  .journey-route strong {
+    font-size: 11px;
+  }
+
+  .journey-route small {
+    margin-top: 4px;
+    font-size: 8px;
+  }
+
+  .journey-highlight .journey-marker {
+    transform: scale(1.08);
   }
 
   .before-explore {

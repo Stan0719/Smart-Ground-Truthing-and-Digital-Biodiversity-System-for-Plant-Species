@@ -895,8 +895,12 @@ const filteredSpecies = computed(() => {
 }
 
 @media (max-width: 620px) {
+  .plants-page {
+    overflow-x: hidden;
+  }
+
   .plants-hero {
-    min-height: 320px;
+    min-height: 310px;
   }
 
   .hero-content {
@@ -959,6 +963,10 @@ const filteredSpecies = computed(() => {
     gap: 8px;
   }
 
+  .filter-controls > * {
+    min-width: 0;
+  }
+
   .search-box {
     min-width: 0;
     gap: 8px;
@@ -971,8 +979,10 @@ const filteredSpecies = computed(() => {
   }
 
   .search-box input {
+    min-width: 0;
     padding: 11px 0;
     font-size: 13px;
+    text-overflow: ellipsis;
   }
 
   .sort-button {
@@ -986,8 +996,18 @@ const filteredSpecies = computed(() => {
     width: 16px;
   }
 
+  .sort-options {
+    width: min(220px, 88vw);
+    min-width: 0;
+  }
+
   .category-filters {
     gap: 6px;
+    scrollbar-width: none;
+  }
+
+  .category-filters::-webkit-scrollbar {
+    display: none;
   }
 
   .category-filters button {
@@ -1001,6 +1021,7 @@ const filteredSpecies = computed(() => {
   }
 
   .plant-card {
+    min-width: 0;
     display: flex;
     flex-direction: column;
     border-radius: 13px;
@@ -1008,7 +1029,23 @@ const filteredSpecies = computed(() => {
   }
 
   .plant-image-wrapper {
+    min-width: 0;
     aspect-ratio: 4 / 3;
+  }
+
+  .plant-image-placeholder {
+    gap: 7px;
+  }
+
+  .plant-image-placeholder svg {
+    width: 34px;
+  }
+
+  .plant-image-placeholder span {
+    padding: 0 5px;
+    font-size: 8px;
+    letter-spacing: 0.6px;
+    text-align: center;
   }
 
   .card-badges {
@@ -1030,6 +1067,7 @@ const filteredSpecies = computed(() => {
   }
 
   .plant-card-content {
+    min-width: 0;
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -1039,12 +1077,14 @@ const filteredSpecies = computed(() => {
   .plant-card h3 {
     font-size: 16px;
     line-height: 1.15;
+    overflow-wrap: anywhere;
   }
 
   .scientific-name {
     margin: 3px 0 5px;
     font-size: 11px;
     line-height: 1.3;
+    overflow-wrap: anywhere;
   }
 
   .plant-family {
@@ -1122,6 +1162,22 @@ const filteredSpecies = computed(() => {
 }
 
 @media (max-width: 360px) {
+  .plants-hero {
+    min-height: 300px;
+  }
+
+  .plants-hero h1 {
+    font-size: 38px;
+  }
+
+  .library-container {
+    width: 90%;
+  }
+
+  .plant-grid {
+    gap: 8px;
+  }
+
   .plant-card-content {
     padding: 9px;
   }

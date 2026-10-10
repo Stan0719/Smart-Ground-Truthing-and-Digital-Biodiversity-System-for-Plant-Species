@@ -20,12 +20,15 @@ const showSiteFooter = computed(
 
 <style scoped>
 .app-shell {
+  width: 100%;
+  min-width: 0;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
 }
 
 .app-content {
+  width: 100%;
   flex: 1;
   min-width: 0;
 }
