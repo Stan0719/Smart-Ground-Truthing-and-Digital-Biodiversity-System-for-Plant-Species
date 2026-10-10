@@ -245,33 +245,7 @@ export default function Plant({ navigation }) {
 
         ListHeaderComponent={
           <>
-            {/* HERO */}
-
-            <View style={styles.hero}>
-
-              <Text style={styles.eyebrow}>
-                NIAH NATIONAL PARK
-              </Text>
-
-              <Text style={styles.heroTitle}>
-                Plants of Niah
-              </Text>
-
-              <Text style={styles.heroLead}>
-                Explore the rich flora of Niah
-                National Park.
-              </Text>
-
-              <Text style={styles.heroDescription}>
-                Discover the remarkable plant life
-                that makes Niah a place of
-                extraordinary beauty and ecological
-                significance.
-              </Text>
-
-            </View>
-
-
+           
             {/* LIBRARY */}
 
             <View style={styles.libraryHeader}>
@@ -441,21 +415,6 @@ export default function Plant({ navigation }) {
 
           </View>
         }
-
-        ListFooterComponent={
-          <View style={styles.quoteSection}>
-
-            <Text style={styles.quote}>
-              "Extraordinary plants.
-              {"\n"}A timeless rainforest."
-            </Text>
-
-            <Text style={styles.quoteLabel}>
-              NIAH NATIONAL PARK
-            </Text>
-
-          </View>
-        }
       />
 
     </SafeAreaView>
@@ -507,7 +466,12 @@ const styles = StyleSheet.create({
   },
 
   listContent: {
-    paddingBottom: 0,
+    paddingButtom: 0,
+  },
+
+  columnWrapper: {
+    paddingHorizontal: 13,
+    gap: 3,
   },
 
   hero: {
@@ -661,17 +625,18 @@ const styles = StyleSheet.create({
   },
 
   card: {
-  flex: 1,
-  marginBottom: 15,
-  marginHorizontal: 5,
-  overflow: "hidden",
-  borderRadius: 16,
-  backgroundColor: "#FFFFFF",
-  elevation: 3,
-  shadowColor: "#21392C",
-  shadowOpacity: 0.08,
-  shadowRadius: 10,
-},
+    flex: 1,
+    height: 430,
+    marginBottom: 15,
+    marginHorizontal: 5,
+    overflow: "hidden",
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    elevation: 3,
+    shadowColor: "#21392C",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+  },
 
   imageWrapper: {
     height: 190,
@@ -734,6 +699,7 @@ const styles = StyleSheet.create({
   },
 
   cardContent: {
+    flex: 1,
     padding: 14,
   },
 
@@ -772,8 +738,9 @@ const styles = StyleSheet.create({
 
   actions: {
     flexDirection: "row",
-    gap: 8,
-    marginTop: 13,
+    gap: 4,
+    marginTop: "auto",
+    paddingTop: 13,
   },
 
   secondaryButton: {
@@ -789,7 +756,7 @@ const styles = StyleSheet.create({
 
   secondaryText: {
     color: "#315B49",
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
   },
 
@@ -804,7 +771,7 @@ const styles = StyleSheet.create({
 
   primaryText: {
     color: "#FFFFFF",
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
   },
 

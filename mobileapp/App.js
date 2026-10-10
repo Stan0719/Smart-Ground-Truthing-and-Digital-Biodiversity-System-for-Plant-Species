@@ -33,6 +33,7 @@ import FavouritePlantsScreen from "./screens/FavouritePlants";
 import ScanHistoryScreen from "./screens/ScanHistory";
 import SpeciesScreen from "./screens/Species";
 import SpeciesDetailScreen from "./screens/SpeciesDetail";
+import BotanistPlantDetailScreen from "./screens/BotanistPlantDetail";
 
 
 const Tab = createBottomTabNavigator();
@@ -573,6 +574,21 @@ export default function App({ homeRequest }) {
             },
           }}
         />
+
+        
+        <RootStack.Screen
+          name="BotanistPlantDetail"
+          component={BotanistPlantDetailScreen}
+          options={{
+            headerShown: true,
+            title: "Plant Details",
+            headerTintColor: theme.dark,
+            headerStyle: {
+              backgroundColor: theme.light,
+            },
+          }}
+        />
+
 
 
         {/* ================================================

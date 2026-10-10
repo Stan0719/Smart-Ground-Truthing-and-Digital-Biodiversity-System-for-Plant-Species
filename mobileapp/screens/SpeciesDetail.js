@@ -515,28 +515,6 @@ export default function SpeciesDetail({
         </View>
       )}
 
-
-      {/* FOOTER */}
-
-      <View style={styles.exploreMore}>
-
-        <Text style={styles.exploreText}>
-          Continue discovering the remarkable flora
-          of Niah.
-        </Text>
-
-        <TouchableOpacity
-          onPress={() =>
-            navigation.navigate("Plants")
-          }
-        >
-          <Text style={styles.exploreLink}>
-            Explore more species →
-          </Text>
-        </TouchableOpacity>
-
-      </View>
-
     </ScrollView>
   );
 }
@@ -577,6 +555,7 @@ const styles = StyleSheet.create({
 
   hero: {
     padding: 20,
+    paddingTop: 50,
     backgroundColor: "#E1EADB",
   },
 

@@ -54,12 +54,6 @@ export default function AddPlantScreen({
   const [scientificName, setScientificName] =
     useState("");
 
-  const [commonName, setCommonName] =
-    useState("");
-
-  const [family, setFamily] =
-    useState("");
-
   const [category, setCategory] =
     useState("");
 
@@ -67,15 +61,6 @@ export default function AddPlantScreen({
     useState("");
 
   const [description, setDescription] =
-    useState("");
-
-  const [overview, setOverview] =
-    useState("");
-
-  const [habitat, setHabitat] =
-    useState("");
-
-  const [significance, setSignificance] =
     useState("");
 
   const [characteristics, setCharacteristics] =
@@ -659,31 +644,7 @@ function handleRemoveSpeciesPhoto(index) {
       return;
     }
 
-
-    if (!commonName.trim()) {
-
-      Alert.alert(
-        "Missing Information",
-        "Please enter the common name."
-      );
-
-      return;
-    }
-
-
-    if (!family.trim()) {
-
-      Alert.alert(
-        "Missing Information",
-        "Please enter the family."
-      );
-
-      return;
-    }
-
-
-    if (!category) {
-
+    if (!speciesRequestId && !category) {
       Alert.alert(
         "Missing Information",
         "Please select a category."
@@ -820,54 +781,77 @@ function handleRemoveSpeciesPhoto(index) {
       // PLANT SPECIES INFORMATION
       // -----------------------------------------------
 
-      name:
-        commonName.trim(),
+      scientificName: scientificName.trim(),
 
-      commonName:
-        commonName.trim(),
+      speciesName: scientificName.trim(),
 
-      scientificName:
-        scientificName.trim(),
+      category: category.trim(),
 
-      family:
-        family.trim(),
-
-      category:
-        category.trim(),
-
-
+      speciesId: speciesRequestId
+        ? null
+        : (
+            plants.find(
+              (item) =>
+                item.scientificName?.toLowerCase().trim() ===
+                scientificName.trim().toLowerCase()
+            )?.speciesId ||
+            plants.find(
+              (item) =>
+                item.scientificName?.toLowerCase().trim() ===
+                scientificName.trim().toLowerCase()
+            )?.id ||
+            null
+          ),
+      
       // -----------------------------------------------
       // PLANT DETAILS
       // -----------------------------------------------
 
-      height:
-        height.trim(),
+      height: height.trim(),
 
-      description:
-        description.trim(),
+      description: description.trim(),
 
-      overview:
-        overview.trim(),
+      characteristics: characteristicList,
 
-      habitat:
-        habitat.trim(),
+      // -----------------------------------------------
+      // PLANT OBSERVATION DETAILS
+      // -----------------------------------------------
 
-      significance:
-        significance.trim(),
+      healthStatus: healthStatus.trim(),
 
-      characteristics:
-        characteristicList,
+      growthStage: growthStage.trim(),
+
+      morphology: morphology.trim(),
+
+      zone: zone.trim(),
+
+      // Keep the same data structure used by the
+      // existing mock plant records.
+      latestApproved: {
+        heightCm: height.trim(),
+        healthStatus: healthStatus.trim(),
+        lifeStage: growthStage.trim(),
+        morphology: morphology.trim(),
+        notes: description.trim(),
+      },
+
 
 
       // -----------------------------------------------
       // LOCATION
       // -----------------------------------------------
 
-      latitude:
-        Number(latitude),
+      latitude: Number(latitude),
 
-      longitude:
-        Number(longitude),
+      longitude: Number(longitude),
+
+      altitude: altitude.trim()
+        ? Number(altitude)
+        : null,
+
+      gpsAccuracy: gpsAccuracy.trim()
+        ? Number(gpsAccuracy)
+        : null,
 
 
       // -----------------------------------------------
@@ -1887,6 +1871,32 @@ function handleRemoveSpeciesPhoto(index) {
             keyboardType="numeric"
           />
 
+          <Text style={styles.label}>
+            Altitude (m)
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={altitude}
+            onChangeText={setAltitude}
+            placeholder="GPS altitude in metres"
+            placeholderTextColor="#9AA7A0"
+            keyboardType="numeric"
+          />
+
+          <Text style={styles.label}>
+            GPS Accuracy (m)
+          </Text>
+
+          <TextInput
+            style={styles.input}
+            value={gpsAccuracy}
+            onChangeText={setGpsAccuracy}
+            placeholder="GPS accuracy in metres"
+            placeholderTextColor="#9AA7A0"
+            keyboardType="numeric"
+          />
+
 
           <TouchableOpacity
             style={
@@ -1921,31 +1931,7 @@ function handleRemoveSpeciesPhoto(index) {
 
           </TouchableOpacity>
 
-          <Text style={styles.label}>
-            Altitude (m)
-          </Text>
-
-          <TextInput
-            style={styles.input}
-            value={altitude}
-            onChangeText={setAltitude}
-            placeholder="GPS altitude in metres"
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-          <Text style={styles.label}>
-            GPS Accuracy (m)
-          </Text>
-
-          <TextInput
-            style={styles.input}
-            value={gpsAccuracy}
-            onChangeText={setGpsAccuracy}
-            placeholder="GPS accuracy in metres"
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
+          
 
         </View>
 
@@ -2338,53 +2324,6 @@ const styles = StyleSheet.create({
 
 
   // ===================================================
-  // HEADER
-  // ===================================================
-
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingBottom: 18,
-    backgroundColor: "#468585",
-  },
-
-
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.15)",
-    marginRight: 12,
-  },
-
-
-  backButtonText: {
-    color: "#FFFFFF",
-    fontSize: 24,
-    fontWeight: "500",
-  },
-
-
-
-
-  headerTitle: {
-    color: "#FFFFFF",
-    fontSize: 21,
-    fontWeight: "700",
-  },
-
-
-  headerSubtitle: {
-    marginTop: 3,
-    color: "#E7F3EA",
-    fontSize: 12,
-  },
-
-
-  // ===================================================
   // CARD
   // ===================================================
 
@@ -2454,15 +2393,6 @@ const styles = StyleSheet.create({
     color: "#234B3A",
     fontSize: 14,
   },
-
-
-  helperText: {
-    marginTop: -2,
-    marginBottom: 7,
-    color: "#7C8A82",
-    fontSize: 11,
-  },
-
 
   // ===================================================
   // CATEGORY

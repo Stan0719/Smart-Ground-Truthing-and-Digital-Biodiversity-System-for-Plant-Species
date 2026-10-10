@@ -1,6 +1,6 @@
 // screens/PlantDetail.js
 
-import React from "react";
+import React, { useState } from "react";
 
 import {
   View,
@@ -105,54 +105,63 @@ export default function PlantDetail({
     >
 
       {/* =================================================
-          HEADER
-      ================================================= */}
+    PLANT HERO
+================================================= */}
 
-      <View style={styles.header}>
-
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backLink}
-        >
-          <Text style={styles.backLinkText}>
-            ← Back
+<View style={styles.header}>
+  <View style={styles.heroGrid}>
+    {/* Plant image */}
+    <View style={styles.imageFrame}>
+      {selectedSpecies?.image ? (
+        <Image
+          source={{ uri: selectedSpecies.image }}
+          style={styles.plantImage}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={styles.imagePlaceholder}>
+          <Text style={styles.placeholderIcon}>🌿</Text>
+          <Text style={styles.placeholderText}>
+            Field photograph coming soon
           </Text>
-        </TouchableOpacity>
+        </View>
+      )}
+    </View>
 
+    {/* Plant information */}
+    <View style={styles.heroCopy}>
+      <Text style={styles.headerLabel}>
+        VERIFIED PLANT RECORD
+      </Text>
 
-        <Text style={styles.headerLabel}>
-          PLANT RECORD
+      <Text style={styles.plantId}>
+        Plant {plant.plantId}
+      </Text>
+
+      <Text style={styles.speciesName}>
+        {selectedSpecies?.name || plant.speciesSlug}
+      </Text>
+
+      <Text style={styles.scientificName}>
+        {selectedSpecies?.scientificName || ""}
+      </Text>
+
+      <View style={styles.heroBadges}>
+        <Text style={styles.heroBadge}>
+          {plant.latestApproved.healthStatus}
         </Text>
 
-
-        <Text style={styles.plantId}>
-          {plant.plantId}
+        <Text style={styles.heroBadge}>
+          {plant.latestApproved.lifeStage}
         </Text>
 
-
-        {selectedSpecies && (
-  <>
-        <Text style={styles.speciesName}>
-          {selectedSpecies.name}
+        <Text style={styles.heroBadge}>
+          {plant.location.zone}
         </Text>
-
-        <Text style={styles.scientificName}>
-          {selectedSpecies.scientificName}
-        </Text>
-
-        {selectedSpecies?.image && (
-          <Image
-            source={{
-              uri: selectedSpecies.image,
-            }}
-            style={styles.plantImage}
-            resizeMode="cover"
-          />
-        )}
-      </>
-    )}
-
       </View>
+    </View>
+  </View>
+</View>
 
 
       {/* =================================================
@@ -240,10 +249,6 @@ export default function PlantDetail({
 
         <Text style={styles.sectionLabel}>
           STAFF RECORD
-        </Text>
-
-        <Text style={styles.sectionTitle}>
-          Registration and location
         </Text>
 
 
@@ -350,7 +355,7 @@ export default function PlantDetail({
       ================================================= */}
 
       {latestApprovedObservation && (
-        <View style={styles.section}>
+        <View style={styles.observesection}>
 
           <Text style={styles.sectionLabel}>
             LATEST VERIFIED OBSERVATION
@@ -434,7 +439,7 @@ export default function PlantDetail({
         </Text>
 
         <Text style={styles.sectionTitle}>
-          Field record history
+          Field record timeline
         </Text>
 
 
@@ -460,23 +465,6 @@ export default function PlantDetail({
           )
 
         )}
-
-      </View>
-
-
-      {/* =================================================
-          FOOTER
-      ================================================= */}
-
-      <View style={styles.footer}>
-
-        <Text style={styles.footerTitle}>
-          {selectedSpecies?.name || "Plant"}
-        </Text>
-
-        <Text style={styles.footerText}>
-          Niah National Park Biodiversity System
-        </Text>
 
       </View>
 
@@ -519,18 +507,17 @@ function InfoRow({
 // OBSERVATION CARD
 // =====================================================
 
-function ObservationCard({
-  observation,
-}) {
+function ObservationCard({ observation }) {
+  const [isOpen, setIsOpen] = useState(false);
+
   return (
     <View style={styles.historyCard}>
-
-      {/* Header */}
-
-      <View style={styles.historyHeader}>
-
+      <TouchableOpacity
+        style={styles.historyHeader}
+        onPress={() => setIsOpen(!isOpen)}
+        activeOpacity={0.8}
+      >
         <View style={styles.historyHeaderText}>
-
           <Text style={styles.observationDate}>
             {formatDate(observation.date)}
           </Text>
@@ -538,83 +525,72 @@ function ObservationCard({
           <Text style={styles.recordedBy}>
             Recorded by {observation.recordedBy}
           </Text>
-
         </View>
 
-
-        <View
-          style={[
-            styles.statusBadge,
-            observation.status === "Approved"
-              ? styles.approvedBadge
-              : styles.pendingBadge,
-          ]}
-        >
-
-          <Text
+        <View style={styles.observationHeaderRight}>
+          <View
             style={[
-              styles.statusText,
+              styles.statusBadge,
               observation.status === "Approved"
-                ? styles.approvedText
-                : styles.pendingText,
+                ? styles.approvedBadge
+                : styles.pendingBadge,
             ]}
           >
-            {observation.status}
-          </Text>
+            <Text
+              style={[
+                styles.statusText,
+                observation.status === "Approved"
+                  ? styles.approvedText
+                  : styles.pendingText,
+              ]}
+            >
+              {observation.status}
+            </Text>
+          </View>
 
+          <Text style={styles.observationArrow}>
+            {isOpen ? "▲" : "▼"}
+          </Text>
         </View>
+      </TouchableOpacity>
 
-      </View>
+      {isOpen && (
+        <View>
+          <View style={styles.divider} />
 
+          <Text style={styles.observationId}>
+            {observation.observationId}
+          </Text>
 
-      {/* Divider */}
+          <Text style={styles.observationSummary}>
+            {observation.heightCm} cm
+            {" • "}
+            {observation.healthStatus}
+            {" • "}
+            {observation.lifeStage}
+          </Text>
 
-      <View style={styles.divider} />
-
-
-      {/* Observation ID */}
-
-      <Text style={styles.observationId}>
-        {observation.observationId}
-      </Text>
-
-
-      {/* Summary */}
-
-      <Text style={styles.observationSummary}>
-        {observation.heightCm} cm{" "}
-        •{" "}
-        {observation.healthStatus}{" "}
-        •{" "}
-        {observation.lifeStage}
-      </Text>
-
-
-      {/* Morphology */}
-
-      <Text style={styles.historyLabel}>
-        Morphology
-      </Text>
-
-      <Text style={styles.historyValue}>
-        {observation.morphology}
-      </Text>
-
-
-      {/* Notes */}
-
-      {observation.notes && (
-        <>
           <Text style={styles.historyLabel}>
-            Notes
+            Morphology
           </Text>
 
-          <Text style={styles.notes}>
-            {observation.notes}
+          <Text style={styles.historyValue}>
+            {observation.morphology}
           </Text>
-        </>
+
+          {observation.notes && (
+            <>
+              <Text style={styles.historyLabel}>
+                Notes
+              </Text>
+
+              <Text style={styles.notes}>
+                {observation.notes}
+              </Text>
+            </>
+          )}
+        </View>
       )}
-
     </View>
   );
 }
@@ -683,59 +659,105 @@ const styles = StyleSheet.create({
   // HEADER
   // ===================================================
 
-  header: {
-    paddingHorizontal: 22,
-    paddingTop: 25,
-    paddingBottom: 30,
-    backgroundColor: "#E8EFE3",
-  },
+  
+header: {
+  paddingHorizontal: 20,
+  paddingTop: 16,
+  paddingBottom: 30,
+  backgroundColor: "#E8EFE3",
+},
 
-  backLink: {
-    alignSelf: "flex-start",
-    marginBottom: 25,
-  },
+heroGrid: {
+  flexDirection: "column",
+  gap: 22,
+},
 
-  backLinkText: {
-    color: "#315B49",
-    fontSize: 13,
-    fontWeight: "700",
-  },
+imageFrame: {
+  width: "100%",
+  height: 260,
+  borderRadius: 20,
+  overflow: "hidden",
+  backgroundColor: "#DCE8D6",
+},
 
-  headerLabel: {
-    marginBottom: 7,
-    color: "#50A078",
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 1.8,
-  },
+plantImage: {
+  width: "100%",
+  height: "100%",
+},
 
-  plantId: {
-    color: "#234A3C",
-    fontSize: 32,
-    fontWeight: "600",
-  },
+imagePlaceholder: {
+  flex: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+  backgroundColor: "#DCE8D6",
+},
 
-  speciesName: {
-    marginTop: 7,
-    color: "#405F56",
-    fontSize: 17,
-    fontWeight: "600",
-  },
+placeholderIcon: {
+  fontSize: 42,
+  marginBottom: 12,
+},
 
-  scientificName: {
-    marginTop: 3,
-    color: "#7C6955",
-    fontSize: 14,
-    fontStyle: "italic",
-  },
+placeholderText: {
+  color: "#577265",
+  fontSize: 12,
+  textAlign: "center",
+},
 
-  plantImage: {
-    width: "100%",
-    height: 220,
-    marginTop: 18,
-    borderRadius: 16,
-    backgroundColor: "#DCE8D6",
-  },
+heroCopy: {
+  paddingHorizontal: 2,
+},
+
+headerLabel: {
+  alignSelf: "flex-start",
+  marginBottom: 10,
+  color: "#438565",
+  fontSize: 10,
+  fontWeight: "700",
+  letterSpacing: 1.5,
+},
+
+plantId: {
+  color: "#234A3C",
+  fontSize: 30,
+  fontWeight: "700",
+  letterSpacing: -0.6,
+},
+
+speciesName: {
+  marginTop: 8,
+  color: "#405F56",
+  fontSize: 19,
+  fontWeight: "600",
+  lineHeight: 26,
+},
+
+scientificName: {
+  marginTop: 5,
+  color: "#7C6955",
+  fontSize: 14,
+  fontStyle: "italic",
+  lineHeight: 21,
+},
+
+heroBadges: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 8,
+  marginTop: 18,
+},
+
+heroBadge: {
+  overflow: "hidden",
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+  borderRadius: 20,
+  backgroundColor: "#D2E4D0",
+  color: "#315B49",
+  fontSize: 11,
+  fontWeight: "600",
+},
+
 
   // ===================================================
   // SECTION
@@ -744,6 +766,14 @@ const styles = StyleSheet.create({
   section: {
     padding: 22,
   },
+
+  observesection: {
+    padding: 22,
+    paddingTop:30,
+    paddingBottom: 50,
+    marginBottom:20,
+    backgroundColor: "#E0EBDD",
+  }, 
 
   sectionLabel: {
     marginBottom: 8,
@@ -806,7 +836,7 @@ const styles = StyleSheet.create({
 
   staffSection: {
     marginHorizontal: 20,
-    marginBottom: 10,
+    marginBottom: 50,
     padding: 20,
     borderRadius: 18,
     backgroundColor: "#FFFFFF",
@@ -879,6 +909,18 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 8,
   },
+
+  observationHeaderRight: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 10,
+},
+
+observationArrow: {
+  color: "#315B49",
+  fontSize: 10,
+  fontWeight: "700",
+},
 
 
   // ===================================================
@@ -1005,31 +1047,6 @@ const styles = StyleSheet.create({
     color: "#6A7B73",
     fontSize: 12,
   },
-
-
-  // ===================================================
-  // FOOTER
-  // ===================================================
-
-  footer: {
-    paddingVertical: 35,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    backgroundColor: "#214638",
-  },
-
-  footerTitle: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "600",
-  },
-
-  footerText: {
-    marginTop: 5,
-    color: "#D6E3CF",
-    fontSize: 10,
-  },
-
 
   // ===================================================
   // NOT FOUND
