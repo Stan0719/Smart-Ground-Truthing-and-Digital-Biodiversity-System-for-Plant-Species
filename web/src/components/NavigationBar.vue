@@ -34,7 +34,7 @@ const navItems = computed(() => {
       to: '/',
     },
     {
-      label: 'Species',
+      label: 'Explore Species',
       to: '/species',
     },
   ]
