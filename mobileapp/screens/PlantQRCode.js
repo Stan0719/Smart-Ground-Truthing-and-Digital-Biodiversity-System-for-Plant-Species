@@ -30,7 +30,7 @@ export default function PlantQRCodeScreen({
 }) {
   const botanist = route.params?.botanist;
 
-  const [numberOfCodes, setNumberOfCodes] = useState("5");
+  const [numberOfCodes, setNumberOfCodes] = useState("3");
 
   const [loadingPrint, setLoadingPrint] =
     useState(false);
@@ -52,11 +52,11 @@ export default function PlantQRCodeScreen({
     if (
       !amount ||
       amount < 1 ||
-      amount > 100
+      amount > 3
     ) {
       Alert.alert(
         "Invalid Number",
-        "Please enter a number between 1 and 100."
+        "Please enter a number between 1 and 3."
       );
 
       return;
@@ -452,8 +452,8 @@ export default function PlantQRCodeScreen({
           </Text>
 
           <Text style={styles.sectionDescription}>
-            Enter the number of QR codes you want
-            to prepare for your field survey.
+            Generate up to 3 QR codes at a time for
+            your field survey.
           </Text>
 
 
@@ -464,7 +464,7 @@ export default function PlantQRCodeScreen({
               value={numberOfCodes}
               onChangeText={setNumberOfCodes}
               keyboardType="number-pad"
-              maxLength={3}
+              maxLength={1}
             />
 
 

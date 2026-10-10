@@ -16,6 +16,7 @@ import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 
 import {
+  plants,
   botanistPlantRecords,
   botanistSpeciesRequests,
 } from "../data/mockData";

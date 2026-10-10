@@ -1707,20 +1707,32 @@ stackImageBottom: {
   // ==================================================
 
   visitorOverview: {
-    width: '88%',
+    width:
+      SCREEN_WIDTH < 500
+        ? '92%'
+        : '88%',
     maxWidth: 1200,
 
     alignSelf: 'center',
 
-    marginTop: 90,
+    marginTop:
+      SCREEN_WIDTH < 500
+        ? 45
+        : 90,
 
     overflow: 'hidden',
 
-    borderRadius: 28,
+    borderRadius:
+      SCREEN_WIDTH < 500
+        ? 20
+        : 28,
 
     backgroundColor: COLORS.deepGreen,
 
-    elevation: 8,
+    elevation:
+      SCREEN_WIDTH < 500
+        ? 4
+        : 8,
   },
 
   visitorBackground: {
@@ -1740,21 +1752,30 @@ stackImageBottom: {
   visitorContent: {
     padding:
       SCREEN_WIDTH < 500
-        ? 30
+        ? 18
         : 48,
   },
 
   whyNiah: {
-    gap: 14,
+    gap:
+      SCREEN_WIDTH < 500
+        ? 8
+        : 14,
   },
 
   visitorSectionLabel: {
     color: '#A9E7C4',
 
-    fontSize: 13,
+    fontSize:
+      SCREEN_WIDTH < 500
+        ? 10
+        : 13,
     fontWeight: '700',
 
-    letterSpacing: 3,
+    letterSpacing:
+      SCREEN_WIDTH < 500
+        ? 2
+        : 3,
   },
 
   whyNiahTitle: {
@@ -1762,21 +1783,27 @@ stackImageBottom: {
 
     fontSize:
       SCREEN_WIDTH < 500
-        ? 28
+        ? 23
         : 36,
 
     lineHeight:
       SCREEN_WIDTH < 500
-        ? 34
+        ? 28
         : 43,
 
     fontWeight: '800',
   },
 
   whyNiahDescription: {
-    marginTop: 12,
+    marginTop:
+      SCREEN_WIDTH < 500
+        ? 7
+        : 12,
 
-    paddingTop: 22,
+    paddingTop:
+      SCREEN_WIDTH < 500
+        ? 12
+        : 22,
 
     borderTopWidth: 1,
     borderTopColor:
@@ -1784,8 +1811,14 @@ stackImageBottom: {
 
     color: '#E0EBDD',
 
-    fontSize: 16,
-    lineHeight: 29,
+    fontSize:
+      SCREEN_WIDTH < 500
+        ? 12
+        : 16,
+    lineHeight:
+      SCREEN_WIDTH < 500
+        ? 18
+        : 29,
   },
 
 
@@ -1794,9 +1827,15 @@ stackImageBottom: {
   // ==================================================
 
   visitorInfo: {
-    marginTop: 38,
+    marginTop:
+      SCREEN_WIDTH < 500
+        ? 20
+        : 38,
 
-    paddingTop: 30,
+    paddingTop:
+      SCREEN_WIDTH < 500
+        ? 18
+        : 30,
 
     borderTopWidth: 1,
     borderTopColor:
@@ -1808,14 +1847,17 @@ stackImageBottom: {
 
     fontSize:
       SCREEN_WIDTH < 500
-        ? 28
+        ? 22
         : 34,
 
     fontWeight: '800',
   },
 
   visitorCards: {
-  marginTop: 22,
+  marginTop:
+    SCREEN_WIDTH < 500
+      ? 12
+      : 22,
 
   flexDirection: 'row',
 
@@ -1823,31 +1865,31 @@ stackImageBottom: {
 
   gap:
     SCREEN_WIDTH < 500
-      ? 12
+      ? 8
       : 15,
 },
 
   visitorCard: {
   minHeight:
     SCREEN_WIDTH < 500
-      ? 165
+      ? 126
       : 168,
 
   width:
     SCREEN_WIDTH < 600
-      ? '47.5%'
+      ? '48%'
       : SCREEN_WIDTH < 1000
         ? '47%'
         : '18%',
 
   paddingVertical:
     SCREEN_WIDTH < 500
-      ? 16
+      ? 11
       : 22,
 
   paddingHorizontal:
     SCREEN_WIDTH < 500
-      ? 14
+      ? 11
       : 20,
 
   borderWidth: 1,
@@ -1855,17 +1897,29 @@ stackImageBottom: {
   borderColor:
     'rgba(214, 229, 209, 0.72)',
 
-  borderRadius: 18,
+  borderRadius:
+    SCREEN_WIDTH < 500
+      ? 13
+      : 18,
 
   backgroundColor:
     'rgba(255, 250, 235, 0.94)',
 },
 
   visitorIcon: {
-    width: 44,
-    height: 44,
+    width:
+      SCREEN_WIDTH < 500
+        ? 32
+        : 44,
+    height:
+      SCREEN_WIDTH < 500
+        ? 32
+        : 44,
 
-    marginBottom: 19,
+    marginBottom:
+      SCREEN_WIDTH < 500
+        ? 9
+        : 19,
 
     alignItems: 'center',
     justifyContent: 'center',
@@ -1874,7 +1928,10 @@ stackImageBottom: {
     borderColor:
       'rgba(70, 133, 133, 0.2)',
 
-    borderRadius: 14,
+    borderRadius:
+      SCREEN_WIDTH < 500
+        ? 9
+        : 14,
 
     backgroundColor: '#E6EEE1',
   },
@@ -1882,36 +1939,64 @@ stackImageBottom: {
   iconText: {
     color: '#3F786B',
 
-    fontSize: 23,
+    fontSize:
+      SCREEN_WIDTH < 500
+        ? 17
+        : 23,
     fontWeight: '500',
   },
 
   visitorLabel: {
-    marginBottom: 7,
+    marginBottom:
+      SCREEN_WIDTH < 500
+        ? 4
+        : 7,
 
     color: '#607C75',
 
-    fontSize: 11,
+    fontSize:
+      SCREEN_WIDTH < 500
+        ? 9
+        : 11,
     fontWeight: '700',
 
-    letterSpacing: 0.7,
+    letterSpacing:
+      SCREEN_WIDTH < 500
+        ? 0.4
+        : 0.7,
   },
 
   visitorValue: {
     color: '#294F47',
 
-    fontSize: 15,
+    fontSize:
+      SCREEN_WIDTH < 500
+        ? 12
+        : 15,
     fontWeight: '700',
 
-    lineHeight: 22,
+    lineHeight:
+      SCREEN_WIDTH < 500
+        ? 16
+        : 22,
   },
 
   mapLink: {
-    marginTop: 12,
+    marginTop:
+      SCREEN_WIDTH < 500
+        ? 5
+        : 12,
 
     color: '#4B7F70',
 
-    fontSize: 11,
+    fontSize:
+      SCREEN_WIDTH < 500
+        ? 9
+        : 11,
+    lineHeight:
+      SCREEN_WIDTH < 500
+        ? 13
+        : 16,
     fontWeight: '700',
   },
 
