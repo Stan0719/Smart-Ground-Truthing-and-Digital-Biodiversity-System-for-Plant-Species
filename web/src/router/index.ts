@@ -23,7 +23,7 @@ const router = createRouter({
       path: '/forgot-password',
       name: 'forgot-password',
       component: () => import('../views/ForgotPasswordView.vue'),
-    },//forgot password route
+    }, //forgot password route
     {
       path: '/species',
       name: 'species',
@@ -118,18 +118,25 @@ const router = createRouter({
         {
           path: 'dashboard',
           name: 'conservation-dashboard',
-          component: () =>
-            import('../views/conservation/ConservationDashboardView.vue'),
+          component: () => import('../views/conservation/ConservationDashboardView.vue'),
           meta: {
-            title: 'Conservation Officer Dashboard',
+            title: 'Conservation Dashboard',
             section: 'OVERVIEW',
+          },
+        },
+        {
+          path: 'profile',
+          name: 'conservation-profile',
+          component: () => import('../views/conservation/ConservationProfileView.vue'),
+          meta: {
+            title: 'Profile Settings',
+            section: 'ACCOUNT',
           },
         },
         {
           path: 'species',
           name: 'conservation-species',
-          component: () =>
-            import('../views/conservation/PlantSpeciesView.vue'),
+          component: () => import('../views/conservation/PlantSpeciesView.vue'),
           meta: {
             title: 'Plant Species',
             section: 'KNOWLEDGE BASE',
@@ -138,8 +145,7 @@ const router = createRouter({
         {
           path: 'observations',
           name: 'conservation-observations',
-          component: () =>
-            import('../views/conservation/ObservationsView.vue'),
+          component: () => import('../views/conservation/ObservationsView.vue'),
           meta: {
             title: 'Observations',
             section: 'FIELD RECORDS',
@@ -157,8 +163,7 @@ const router = createRouter({
         {
           path: 'map',
           name: 'conservation-map',
-          component: () =>
-            import('../views/conservation/BiodiversityMapView.vue'),
+          component: () => import('../views/conservation/BiodiversityMapView.vue'),
           meta: {
             title: 'Biodiversity Map',
             section: 'SPATIAL RECORDS',
@@ -167,8 +172,7 @@ const router = createRouter({
         {
           path: 'iot',
           name: 'conservation-iot',
-          component: () =>
-            import('../views/conservation/IoTMonitoringView.vue'),
+          component: () => import('../views/conservation/IoTMonitoringView.vue'),
           meta: {
             title: 'IoT Monitoring',
             section: 'SENSOR NETWORK',
@@ -177,8 +181,7 @@ const router = createRouter({
         {
           path: 'alerts',
           name: 'conservation-alerts',
-          component: () =>
-            import('../views/conservation/ThreatAlertsView.vue'),
+          component: () => import('../views/conservation/ThreatAlertsView.vue'),
           meta: {
             title: 'Threat Alerts',
             section: 'INCIDENT RESPONSE',
@@ -187,8 +190,7 @@ const router = createRouter({
         {
           path: 'reports',
           name: 'conservation-reports',
-          component: () =>
-            import('../views/conservation/ReportsView.vue'),
+          component: () => import('../views/conservation/ReportsView.vue'),
           meta: {
             title: 'Reports',
             section: 'ANALYSIS & EXPORT',
