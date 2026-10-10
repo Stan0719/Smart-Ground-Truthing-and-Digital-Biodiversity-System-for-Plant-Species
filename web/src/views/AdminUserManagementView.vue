@@ -1,19 +1,26 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import AdminNotificationBell from '../components/AdminNotificationBell.vue'
+import { useAdminSidebar } from '../composables/useAdminSidebar'
 import { sendTemporaryPasswordEmail } from '../services/accountEmail'
 import {
   createPrototypeUser,
+  deletePrototypeVisitor,
   deletePrototypeUser,
   findPrototypeUserByEmail,
   getPrototypeUsers,
+  getPrototypeVisitors,
+  updatePrototypeVisitor,
   updatePrototypeUser,
   type PrototypeRole,
   type PrototypeUser,
 } from '../data/prototypeAuth'
 
 type UserStatus = 'Active' | 'Inactive' | 'Suspended'
-type UserRole = 'Administrator' | 'Conservation Officer' | 'Botanist'
+type UserRole = 'Administrator' | 'Conservation Officer' | 'Botanist' | 'Visitor'
+
+const router = useRouter()
 
 interface UserRecord {
   id: string
@@ -25,7 +32,7 @@ interface UserRecord {
   initials: string
 }
 
-const sidebarOpen = ref(false)
+const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
 const addUserOpen = ref(false)
 const search = ref('')
 const roleFilter = ref('All roles')
@@ -103,17 +110,46 @@ const existingIds = new Set(existingUsers.map((user) => user.id))
 const locallyCreatedUsers = getPrototypeUsers().filter(
   (user) => !existingEmails.has(user.email.toLowerCase()) && !existingIds.has(user.id),
 )
+const visitorUsers = getPrototypeVisitors().map<UserRecord>((visitor) => ({
+  id: visitor.id,
+  name: visitor.name,
+  email: visitor.email.trim().toLowerCase(),
+  role: 'Visitor',
+  status: visitor.status,
+  lastLogin: visitor.lastLogin || 'Never',
+  initials:
+    visitor.initials ||
+    visitor.name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((word) => word[0]?.toUpperCase())
+      .join(''),
+}))
+
+const mergeUniqueUsers = (baseUsers: UserRecord[], additionalUsers: UserRecord[]) => {
+  const merged = [...baseUsers]
+  additionalUsers.forEach((user) => {
+    const matchingIndex = merged.findIndex(
+      (candidate) =>
+        candidate.id === user.id || candidate.email.toLowerCase() === user.email.toLowerCase(),
+    )
+    if (matchingIndex === -1) merged.push(user)
+    else merged[matchingIndex] = user
+  })
+  return merged
+}
+
 const loadUserDirectory = (): UserRecord[] => {
   try {
     const stored = JSON.parse(localStorage.getItem(USER_DIRECTORY_KEY) ?? 'null')
     if (Array.isArray(stored)) {
-      const storedIds = new Set(stored.map((user: UserRecord) => user.id))
-      return [...stored, ...locallyCreatedUsers.filter((user) => !storedIds.has(user.id))]
+      return mergeUniqueUsers(stored, [...locallyCreatedUsers, ...visitorUsers])
     }
   } catch {
     // Fall back to the seeded directory when stored prototype data is invalid.
   }
-  return [...existingUsers, ...locallyCreatedUsers]
+  return mergeUniqueUsers([...existingUsers, ...locallyCreatedUsers], visitorUsers)
 }
 const users = ref<UserRecord[]>(loadUserDirectory())
 const createdUser = ref<PrototypeUser | null>(null)
@@ -193,7 +229,8 @@ const submitNewUser = () => {
   }
   if (
     existingUsers.some((user) => user.email.toLowerCase() === email) ||
-    findPrototypeUserByEmail(email)
+    findPrototypeUserByEmail(email) ||
+    getPrototypeVisitors().some((visitor) => visitor.email.toLowerCase() === email)
   ) {
     formError.value = 'An account with this email already exists.'
     showErrorMessage(formError.value)
@@ -284,11 +321,15 @@ const saveEditedUser = () => {
   const index = users.value.findIndex((user) => user.id === updated.id)
   const originalUser = { ...selectedUser.value }
   const prototypeUser = getPrototypeUsers().find((user) => user.id === updated.id)
+  const prototypeVisitor = getPrototypeVisitors().find((visitor) => visitor.id === updated.id)
 
   try {
     if (index === -1) throw new Error('User record not found')
     users.value[index] = updated
-    if (prototypeUser && updated.role !== 'Administrator') {
+    if (
+      prototypeUser &&
+      (updated.role === 'Conservation Officer' || updated.role === 'Botanist')
+    ) {
       if (
         !updatePrototypeUser(updated.id, {
           name: updated.name,
@@ -299,6 +340,18 @@ const saveEditedUser = () => {
         })
       ) {
         throw new Error('Prototype user could not be updated')
+      }
+    }
+    if (prototypeVisitor) {
+      if (
+        !updatePrototypeVisitor(updated.id, {
+          name: updated.name,
+          email: updated.email,
+          status: updated.status,
+          initials: updated.initials,
+        })
+      ) {
+        throw new Error('Prototype visitor could not be updated')
       }
     }
     saveUserDirectory()
@@ -314,6 +367,18 @@ const saveEditedUser = () => {
           role: prototypeUser.role,
           status: prototypeUser.status,
           initials: prototypeUser.initials,
+        })
+      } catch {
+        // Keep the modal open and report the original save failure.
+      }
+    }
+    if (prototypeVisitor) {
+      try {
+        updatePrototypeVisitor(prototypeVisitor.id, {
+          name: prototypeVisitor.name,
+          email: prototypeVisitor.email,
+          status: prototypeVisitor.status,
+          initials: prototypeVisitor.initials || initialsFor(prototypeVisitor.name),
         })
       } catch {
         // Keep the modal open and report the original save failure.
@@ -340,7 +405,8 @@ const confirmDeleteUser = () => {
     }
 
     saveUserDirectory()
-    deletePrototypeUser(deletedUser.id)
+    if (deletedUser.role === 'Visitor') deletePrototypeVisitor(deletedUser.id)
+    else deletePrototypeUser(deletedUser.id)
     closeUserAction()
 
     showSuccessMessage(`${deletedUser.name}'s account was deleted successfully.`)
@@ -407,9 +473,17 @@ const selectedIsPrototype = computed(() =>
     ? getPrototypeUsers().some((user) => user.id === selectedUser.value?.id)
     : false,
 )
+const selectedIsVisitor = computed(() => selectedUser.value?.role === 'Visitor')
+const totalUserCount = computed(() => users.value.length)
+const activeUserCount = computed(
+  () => users.value.filter((user) => user.status === 'Active').length,
+)
+const visitorCount = computed(() => users.value.filter((user) => user.role === 'Visitor').length)
+const staffCount = computed(() => users.value.filter((user) => user.role !== 'Visitor').length)
 
-const closeSidebar = () => {
+const logout = () => {
   sidebarOpen.value = false
+  router.push({ name: 'home' })
 }
 const clearFilters = () => {
   search.value = ''
@@ -419,7 +493,7 @@ const clearFilters = () => {
 </script>
 
 <template>
-  <div class="admin-layout">
+  <div class="admin-layout" :class="{ 'sidebar-open': sidebarOpen }">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <button
         class="sidebar-close-button"
@@ -440,31 +514,33 @@ const clearFilters = () => {
       </RouterLink>
       <p class="nav-label">MAIN MENU</p>
       <nav aria-label="Administrator navigation">
-        <RouterLink to="/admin" @click="closeSidebar"><span>⌂</span> Dashboard</RouterLink>
-        <RouterLink to="/admin/users" class="active" @click="closeSidebar"
+        <RouterLink to="/admin" @click="handleNavigation"><span>⌂</span> Dashboard</RouterLink>
+        <RouterLink to="/admin/users" class="active" @click="handleNavigation"
           ><span>♙</span> User Management</RouterLink
         >
-        <RouterLink to="/admin/roles" @click="closeSidebar"
+        <RouterLink to="/admin/roles" @click="handleNavigation"
           ><span>◇</span> Role &amp; Permission</RouterLink
         >
-        <RouterLink to="/admin/iot" @click="closeSidebar"><span>⌁</span> IoT Monitoring</RouterLink>
-        <RouterLink to="/admin/sensors" @click="closeSidebar"
+        <RouterLink to="/admin/iot" @click="handleNavigation"
+          ><span>⌁</span> IoT Monitoring</RouterLink
+        >
+        <RouterLink to="/admin/sensors" @click="handleNavigation"
           ><span>◉</span> Sensor Management</RouterLink
         >
-        <RouterLink to="/admin/alerts" @click="closeSidebar"
+        <RouterLink to="/admin/alerts" @click="handleNavigation"
           ><span>△</span> Threat Alerts <i>3</i></RouterLink
         >
-        <RouterLink to="/admin/activity" @click="closeSidebar"
+        <RouterLink to="/admin/activity" @click="handleNavigation"
           ><span>↻</span> System Activity</RouterLink
         >
       </nav>
       <div class="sidebar-footer">
-        <button type="button">Logout</button>
+        <button type="button" @click="logout">Logout</button>
       </div>
     </aside>
 
     <button
-      v-if="sidebarOpen"
+      v-if="isMobile && sidebarOpen"
       class="drawer-backdrop"
       type="button"
       aria-label="Close navigation"
@@ -477,7 +553,9 @@ const clearFilters = () => {
           class="menu-button"
           type="button"
           aria-label="Open navigation"
-          @click="sidebarOpen = true"
+          :aria-expanded="sidebarOpen"
+          v-if="!sidebarOpen"
+          @click="openSidebar"
         >
           <span></span><span></span><span></span>
         </button>
@@ -510,28 +588,28 @@ const clearFilters = () => {
             <span class="stat-icon">♙</span>
             <div>
               <p>Total Users</p>
-              <strong>18</strong><small>All registered accounts</small>
+              <strong>{{ totalUserCount }}</strong><small>All registered accounts</small>
             </div>
           </article>
           <article>
             <span class="stat-icon active-icon">✓</span>
             <div>
               <p>Active Users</p>
-              <strong>16</strong><small>88.9% of accounts</small>
+              <strong>{{ activeUserCount }}</strong><small>Currently active accounts</small>
             </div>
           </article>
           <article>
             <span class="stat-icon officer-icon">◇</span>
             <div>
-              <p>Officers</p>
-              <strong>5</strong><small>Conservation officers</small>
+              <p>Staff Accounts</p>
+              <strong>{{ staffCount }}</strong><small>Administrators, officers and botanists</small>
             </div>
           </article>
           <article>
             <span class="stat-icon botanist-icon">♧</span>
             <div>
-              <p>Botanists</p>
-              <strong>10</strong><small>Research accounts</small>
+              <p>Visitors</p>
+              <strong>{{ visitorCount }}</strong><small>Self-registered accounts</small>
             </div>
           </article>
         </section>
@@ -563,6 +641,7 @@ const clearFilters = () => {
               <option>Administrator</option>
               <option>Conservation Officer</option>
               <option>Botanist</option>
+              <option>Visitor</option>
             </select>
             <select v-model="statusFilter" aria-label="Filter by status">
               <option>All statuses</option>
@@ -832,10 +911,13 @@ const clearFilters = () => {
           <label>Email address<input v-model="editUser.email" type="email" required /></label>
           <div class="form-row">
             <label
-              >Role<select v-model="editUser.role">
-                <option :disabled="selectedIsPrototype">Administrator</option>
-                <option>Conservation Officer</option>
-                <option>Botanist</option>
+              >Role<select v-model="editUser.role" :disabled="selectedIsVisitor">
+                <option v-if="selectedIsVisitor">Visitor</option>
+                <template v-else>
+                  <option :disabled="selectedIsPrototype">Administrator</option>
+                  <option>Conservation Officer</option>
+                  <option>Botanist</option>
+                </template>
               </select></label
             >
             <label
@@ -849,6 +931,10 @@ const clearFilters = () => {
           <p v-if="actionError" class="form-error" role="alert">{{ actionError }}</p>
           <p v-if="selectedIsPrototype" class="form-note">
             Prototype accounts can be assigned to Conservation Officer or Botanist roles.
+          </p>
+          <p v-if="selectedIsVisitor" class="form-note">
+            Visitor accounts are self-registered. Their role cannot be changed from User
+            Management.
           </p>
           <div class="modal-actions">
             <button type="button" @click="closeUserAction">Cancel</button
@@ -1332,6 +1418,10 @@ code {
 .botanist {
   background: #f3ecd9;
   color: #876b26;
+}
+.visitor {
+  background: #e5eff1;
+  color: #4d737a;
 }
 .status-badge {
   display: inline-flex;
@@ -1899,7 +1989,68 @@ code {
 .drawer-backdrop {
   display: none;
 }
+.admin-layout {
+  grid-template-columns: 0 minmax(0, 1fr);
+  transition: grid-template-columns 0.2s ease;
+}
+.admin-layout.sidebar-open {
+  grid-template-columns: 258px minmax(0, 1fr);
+}
+.sidebar {
+  position: fixed;
+  left: 0;
+  transform: translateX(-100%);
+}
+.sidebar.open {
+  transform: translateX(0);
+}
+.main-area {
+  grid-column: 2;
+}
+.sidebar-close-button {
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  z-index: 2;
+  width: 30px;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #bfd7cd;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+.menu-button {
+  width: 39px;
+  height: 39px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #dfe6df;
+  border-radius: 9px;
+  background: #fff;
+}
+.menu-button span {
+  width: 18px;
+  height: 2px;
+  background: #376354;
+}
 @media (max-width: 920px) {
+  .admin-layout,
+  .admin-layout.sidebar-open {
+    grid-template-columns: 1fr;
+  }
+  .main-area {
+    grid-column: 1;
+  }
   .sidebar {
     transition: transform 0.2s ease;
   }

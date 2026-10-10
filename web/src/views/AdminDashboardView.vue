@@ -2,11 +2,12 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AdminNotificationBell from '../components/AdminNotificationBell.vue'
+import { useAdminSidebar } from '../composables/useAdminSidebar'
 
 const router = useRouter()
-const sidebarOpen = ref(false)
 const profileOpen = ref(false)
 const notificationBell = ref<{ closeNotifications: () => void } | null>(null)
+const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
 
 const openUserManagement = async () => {
   await router.push({ name: 'admin-users' })
@@ -120,10 +121,6 @@ const activities = [
   { title: 'Sensor S003 went offline', time: '29 Sep 2026, 12:30 PM', type: 'warning' },
 ]
 
-const closeSidebar = () => {
-  sidebarOpen.value = false
-}
-
 const toggleProfile = () => {
   profileOpen.value = !profileOpen.value
   if (profileOpen.value) notificationBell.value?.closeNotifications()
@@ -137,7 +134,7 @@ const logout = () => {
 </script>
 
 <template>
-  <div class="admin-layout">
+  <div class="admin-layout" :class="{ 'sidebar-open': sidebarOpen }">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <button
         class="sidebar-close-button"
@@ -164,7 +161,7 @@ const logout = () => {
           :key="item.label"
           :to="item.to!"
           :class="{ active: item.active }"
-          @click="closeSidebar"
+          @click="handleNavigation"
         >
           <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
           <span>{{ item.label }}</span>
@@ -174,7 +171,7 @@ const logout = () => {
           v-for="item in sidebarItems.filter((entry) => !entry.to)"
           :key="item.label"
           type="button"
-          @click="closeSidebar"
+          @click="handleNavigation"
         >
           <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span
           ><span>{{ item.label }}</span
@@ -188,7 +185,7 @@ const logout = () => {
     </aside>
 
     <button
-      v-if="sidebarOpen"
+      v-if="isMobile && sidebarOpen"
       class="drawer-backdrop"
       type="button"
       aria-label="Close navigation"
@@ -201,7 +198,9 @@ const logout = () => {
           class="menu-button"
           type="button"
           aria-label="Open navigation"
-          @click="sidebarOpen = true"
+          :aria-expanded="sidebarOpen"
+          v-if="!sidebarOpen"
+          @click="openSidebar"
         >
           <span></span><span></span><span></span>
         </button>
@@ -487,12 +486,16 @@ const logout = () => {
 .admin-layout {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 258px minmax(0, 1fr);
+  grid-template-columns: 0 minmax(0, 1fr);
   background: #f3f6f2;
   color: #29483e;
+  transition: grid-template-columns 0.2s ease;
+}
+.admin-layout.sidebar-open {
+  grid-template-columns: 258px minmax(0, 1fr);
 }
 .sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
   width: 258px;
   height: 100vh;
@@ -503,10 +506,30 @@ const logout = () => {
   background: #173f34;
   color: #fff;
   z-index: 100;
-  transition: 0.2s ease;
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+}
+.sidebar.open {
+  transform: translateX(0);
 }
 .sidebar-close-button {
-  display: none;
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  z-index: 2;
+  width: 30px;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #bfd7cd;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
 }
 .brand {
   position: relative;
@@ -640,6 +663,7 @@ const logout = () => {
 }
 .main-area {
   min-width: 0;
+  grid-column: 2;
 }
 .topbar {
   position: sticky;
@@ -743,7 +767,21 @@ const logout = () => {
   background: #edf3ed;
 }
 .menu-button {
-  display: none;
+  width: 39px;
+  height: 39px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #dfe6df;
+  border-radius: 9px;
+  background: #fff;
+}
+.menu-button span {
+  width: 18px;
+  height: 2px;
+  background: #376354;
 }
 .dashboard {
   width: min(1420px, 94%);
@@ -1226,6 +1264,12 @@ td strong {
 @media (max-width: 920px) {
   .admin-layout {
     grid-template-columns: 1fr;
+  }
+  .admin-layout.sidebar-open {
+    grid-template-columns: 1fr;
+  }
+  .main-area {
+    grid-column: 1;
   }
   .sidebar {
     position: fixed;

@@ -1,5 +1,6 @@
 export const PROTOTYPE_USERS_KEY = 'niahPrototypeUsers'
 export const PENDING_PASSWORD_CHANGE_KEY = 'niahPrototypePendingPasswordChange'
+export const VISITOR_ACCOUNTS_KEY = '@niah_biodiversity/visitor_accounts'
 
 export type PrototypeRole = 'Conservation Officer' | 'Botanist'
 
@@ -13,6 +14,17 @@ export interface PrototypeUser {
   initials: string
   password: string
   mustChangePassword: boolean
+}
+
+export interface PrototypeVisitor {
+  id: string
+  name: string
+  email: string
+  role: 'Visitor'
+  status: 'Active' | 'Inactive' | 'Suspended'
+  lastLogin?: string
+  initials?: string
+  password?: string
 }
 
 const normaliseEmail = (email: string) => email.trim().toLowerCase()
@@ -29,6 +41,42 @@ export function getPrototypeUsers(): PrototypeUser[] {
 function savePrototypeUsers(users: PrototypeUser[]) {
   // PROTOTYPE ONLY: replace localStorage/plain password with backend authentication and password hashing.
   localStorage.setItem(PROTOTYPE_USERS_KEY, JSON.stringify(users))
+}
+
+export function getPrototypeVisitors(): PrototypeVisitor[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(VISITOR_ACCOUNTS_KEY) ?? '[]')
+    return Array.isArray(stored)
+      ? stored.filter((visitor): visitor is PrototypeVisitor => visitor?.role === 'Visitor')
+      : []
+  } catch {
+    return []
+  }
+}
+
+function savePrototypeVisitors(visitors: PrototypeVisitor[]) {
+  localStorage.setItem(VISITOR_ACCOUNTS_KEY, JSON.stringify(visitors))
+}
+
+export function updatePrototypeVisitor(
+  id: string,
+  changes: Pick<PrototypeVisitor, 'name' | 'email' | 'status' | 'initials'>,
+): boolean {
+  const visitors = getPrototypeVisitors()
+  const index = visitors.findIndex((visitor) => visitor.id === id)
+  const visitor = visitors[index]
+  if (!visitor) return false
+  visitors[index] = { ...visitor, ...changes, email: normaliseEmail(changes.email) }
+  savePrototypeVisitors(visitors)
+  return true
+}
+
+export function deletePrototypeVisitor(id: string): boolean {
+  const visitors = getPrototypeVisitors()
+  const remainingVisitors = visitors.filter((visitor) => visitor.id !== id)
+  if (remainingVisitors.length === visitors.length) return false
+  savePrototypeVisitors(remainingVisitors)
+  return true
 }
 
 export function generateTemporaryPassword(): string {
