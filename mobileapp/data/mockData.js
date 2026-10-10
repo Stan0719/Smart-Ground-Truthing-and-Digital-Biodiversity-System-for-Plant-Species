@@ -802,7 +802,87 @@ export const botanists = [
   },
 ];
 
-export const botanistPlantRecords = [];
+export const botanistPlantRecords = plantRecords.map(
+  (plant) => {
+    const species = plants.find(
+      (item) => item.speciesId === plant.speciesId
+    );
+
+    const latest = plant.latestApproved || {};
+    const location = plant.location || {};
+    const qr = plant.qr || {};
+
+    return Object.assign(plant, {
+      // Record identifiers
+      id: plant.plantId,
+
+      // Species information
+      speciesId: plant.speciesId,
+      speciesSlug: plant.speciesSlug,
+      speciesName:
+        species?.scientificName ||
+        plant.speciesName ||
+        "",
+      scientificName:
+        species?.scientificName ||
+        plant.speciesName ||
+        "",
+      name:
+        species?.name ||
+        plant.commonName ||
+        "",
+      commonName:
+        species?.name ||
+        plant.commonName ||
+        "",
+      speciesDetails: species || null,
+
+      // Plant information
+      category: species?.category || "",
+      genus: species?.genus || "",
+      family: species?.family || "",
+      height: latest.heightCm ?? "",
+      healthStatus: latest.healthStatus || "",
+      growthStage: latest.lifeStage || "",
+      morphology: latest.morphology || "",
+      zone: location.zone || "",
+
+      // GPS information
+      latitude: location.latitude ?? "",
+      longitude: location.longitude ?? "",
+      altitude: location.altitudeM ?? "",
+      gpsAccuracy: location.accuracyM ?? "",
+
+      // QR code information
+      qrCode: qr.code || "",
+      qrStatus: qr.status || "",
+
+      // Map existing prototype accounts to app accounts
+      botanist:
+        plant.registeredBy === "Botanist01"
+          ? "Alice"
+          : plant.registeredBy === "Botanist02"
+            ? "Bob"
+            : plant.registeredBy,
+
+      // Approval and sync status
+      status: "approved",
+      syncStatus: "Synced",
+
+      // Keep original images available
+      photos: (plant.images || []).map((image) => ({
+        uri: image.path,
+        caption: image.caption || "",
+      })),
+    });
+  }
+);
+
+// =====================================================
+// BOTANIST SPECIES REQUESTS
+// =====================================================
+
+export const botanistSpeciesRequests = [];
 
 // =====================================================
 // HELPER FUNCTIONS
@@ -810,17 +890,17 @@ export const botanistPlantRecords = [];
 
 export function getPlantById(plantId) {
   return plantRecords.find(
-    (plant) => plant.plantId === plantId
+    (plant) =>
+      String(plant.plantId) === String(plantId) ||
+      String(plant.id) === String(plantId)
   );
 }
-
 
 export function getSpeciesBySlug(slug) {
   return plants.find(
     (species) => species.slug === slug
   );
 }
-
 
 export function getPlantsBySpecies(slug) {
   return plantRecords.filter(

@@ -34,7 +34,7 @@ const navItems = computed(() => {
       to: '/',
     },
     {
-      label: 'Species',
+      label: 'Explore Species',
       to: '/species',
     },
   ]
@@ -74,6 +74,10 @@ const activeNavIndex = computed(() => {
   const index = navItems.value.findIndex(item => {
     if (item.to === '/') {
       return route.path === '/'
+    }
+
+    if (item.to === '/species') {
+      return route.path.startsWith('/species') || route.path.startsWith('/plant/')
     }
 
     return route.path.startsWith(item.to)

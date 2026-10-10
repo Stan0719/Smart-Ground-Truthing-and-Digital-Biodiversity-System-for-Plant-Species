@@ -1,8 +1,30 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import AdminTopbarActions from '../components/AdminTopbarActions.vue'
+import { useAdminSidebar } from '../composables/useAdminSidebar'
 
-const sidebarOpen = ref(false)
-const profileOpen = ref(false)
+const router = useRouter()
+const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
+
+const openUserManagement = async () => {
+  await router.push({ name: 'admin-users' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
+
+const openIoTMonitoring = async () => {
+  await router.push({ name: 'admin-iot' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
+
+const openThreatAlerts = async () => {
+  await router.push({ name: 'admin-alerts' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
+
+const openSystemActivity = async () => {
+  await router.push({ name: 'admin-activity' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
 
 const sidebarItems = [
   { label: 'Dashboard', icon: '⌂', active: true, to: '/admin' },
@@ -10,7 +32,7 @@ const sidebarItems = [
   { label: 'Role & Permission', icon: '◇', to: '/admin/roles' },
   { label: 'IoT Monitoring', icon: '⌁', to: '/admin/iot' },
   { label: 'Sensor Management', icon: '◉', to: '/admin/sensors' },
-  { label: 'Threat Alerts', icon: '△', count: 3, to: '/admin/alerts' },
+  { label: 'Threat Alerts', icon: '△', to: '/admin/alerts' },
   { label: 'System Activity', icon: '↻', to: '/admin/activity' },
 ]
 
@@ -95,14 +117,10 @@ const activities = [
   { title: 'Admin01 changed a user role', time: '29 Sep 2026, 12:10 PM', type: 'role' },
   { title: 'Sensor S003 went offline', time: '29 Sep 2026, 12:30 PM', type: 'warning' },
 ]
-
-const closeSidebar = () => {
-  sidebarOpen.value = false
-}
 </script>
 
 <template>
-  <div class="admin-layout">
+  <div class="admin-layout" :class="{ 'sidebar-open': sidebarOpen }">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <button
         class="sidebar-close-button"
@@ -129,31 +147,29 @@ const closeSidebar = () => {
           :key="item.label"
           :to="item.to!"
           :class="{ active: item.active }"
-          @click="closeSidebar"
+          @click="handleNavigation"
         >
           <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
           <span>{{ item.label }}</span>
-          <span v-if="item.count" class="nav-count">{{ item.count }}</span>
         </RouterLink>
         <button
           v-for="item in sidebarItems.filter((entry) => !entry.to)"
           :key="item.label"
           type="button"
-          @click="closeSidebar"
+          @click="handleNavigation"
         >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span
-          ><span>{{ item.label }}</span
-          ><span v-if="item.count" class="nav-count">{{ item.count }}</span>
+          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+          <span>{{ item.label }}</span>
         </button>
       </nav>
 
       <div class="sidebar-footer">
-        <button type="button">Logout</button>
+        <button type="button" @click="router.push({ name: 'home' })">Logout</button>
       </div>
     </aside>
 
     <button
-      v-if="sidebarOpen"
+      v-if="isMobile && sidebarOpen"
       class="drawer-backdrop"
       type="button"
       aria-label="Close navigation"
@@ -166,7 +182,9 @@ const closeSidebar = () => {
           class="menu-button"
           type="button"
           aria-label="Open navigation"
-          @click="sidebarOpen = true"
+          :aria-expanded="sidebarOpen"
+          v-if="!sidebarOpen"
+          @click="openSidebar"
         >
           <span></span><span></span><span></span>
         </button>
@@ -175,28 +193,7 @@ const closeSidebar = () => {
           <h1>Administrator Dashboard</h1>
         </div>
 
-        <div class="topbar-actions">
-          <button class="notification-button" type="button" aria-label="Notifications">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" /></svg
-            ><span>3</span>
-          </button>
-          <div class="profile-wrap">
-            <button
-              class="profile-button"
-              type="button"
-              :aria-expanded="profileOpen"
-              @click="profileOpen = !profileOpen"
-            >
-              <span class="avatar">A</span
-              ><span class="profile-copy"><strong>Admin01</strong><small>Administrator</small></span
-              ><span class="chevron">⌄</span>
-            </button>
-            <div v-if="profileOpen" class="profile-menu">
-              <button type="button">Profile settings</button><button type="button">Sign out</button>
-            </div>
-          </div>
-        </div>
+        <AdminTopbarActions />
       </header>
 
       <main class="dashboard">
@@ -426,19 +423,19 @@ const closeSidebar = () => {
             </div>
           </div>
           <div class="action-grid">
-            <button type="button">
+            <button type="button" @click="openUserManagement">
               <span>＋</span>
               <div><strong>Add User</strong><small>Create a new account</small></div>
             </button>
-            <button type="button">
+            <button type="button" @click="openIoTMonitoring">
               <span>⌁</span>
               <div><strong>View Sensors</strong><small>Open IoT monitoring</small></div>
             </button>
-            <button type="button">
+            <button type="button" @click="openThreatAlerts">
               <span>!</span>
               <div><strong>View Alerts</strong><small>Review active threats</small></div>
             </button>
-            <button type="button">
+            <button type="button" @click="openSystemActivity">
               <span>↻</span>
               <div><strong>System Activity</strong><small>View the audit trail</small></div>
             </button>
@@ -456,12 +453,16 @@ const closeSidebar = () => {
 .admin-layout {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 258px minmax(0, 1fr);
+  grid-template-columns: 0 minmax(0, 1fr);
   background: #f3f6f2;
   color: #29483e;
+  transition: grid-template-columns 0.2s ease;
+}
+.admin-layout.sidebar-open {
+  grid-template-columns: 258px minmax(0, 1fr);
 }
 .sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
   width: 258px;
   height: 100vh;
@@ -472,10 +473,30 @@ const closeSidebar = () => {
   background: #173f34;
   color: #fff;
   z-index: 100;
-  transition: 0.2s ease;
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+}
+.sidebar.open {
+  transform: translateX(0);
 }
 .sidebar-close-button {
-  display: none;
+  position: absolute;
+  top: 12px;
+  right: 10px;
+  z-index: 2;
+  width: 30px;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #bfd7cd;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
 }
 .brand {
   position: relative;
@@ -581,17 +602,6 @@ const closeSidebar = () => {
   text-align: center;
   font-size: 18px;
 }
-.nav-count {
-  margin-left: auto;
-  min-width: 21px;
-  height: 21px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: #c95c4a;
-  color: #fff;
-  font-size: 10px;
-}
 .sidebar-footer {
   margin-top: auto;
   padding-top: 16px;
@@ -609,6 +619,7 @@ const closeSidebar = () => {
 }
 .main-area {
   min-width: 0;
+  grid-column: 2;
 }
 .topbar {
   position: sticky;
@@ -636,118 +647,22 @@ const closeSidebar = () => {
   color: #204c3d;
   font-size: 23px;
 }
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-}
-.notification-button {
-  position: relative;
+.menu-button {
   width: 39px;
   height: 39px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #dfe6df;
-  border-radius: 11px;
-  background: #fff;
-  color: #527066;
-  cursor: pointer;
-}
-.notification-button svg {
-  width: 19px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.8;
-}
-.notification-button span {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  background: #c95845;
-  color: #fff;
-  font-size: 8px;
-  font-weight: 800;
-}
-.profile-wrap {
-  position: relative;
-}
-.profile-button {
-  padding: 5px 8px 5px 5px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  background: transparent;
-  color: #29483e;
-  cursor: pointer;
-  font: inherit;
-}
-.profile-button:hover {
-  border-color: #dfe6df;
-  background: #f8faf7;
-}
-.avatar {
-  width: 37px;
-  height: 37px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: #33745d;
-  color: #fff;
-  font-weight: 800;
-}
-.profile-copy {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-}
-.profile-copy strong {
-  font-size: 12px;
-}
-.profile-copy small {
-  color: #82918b;
-  font-size: 9px;
-}
-.chevron {
-  color: #7a8b84;
-}
-.profile-menu {
-  position: absolute;
-  top: 52px;
-  right: 0;
-  width: 160px;
-  padding: 7px;
-  border: 1px solid #e1e6e1;
-  border-radius: 11px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid #dfe6df;
+  border-radius: 9px;
   background: #fff;
-  box-shadow: 0 12px 30px rgba(28, 65, 51, 0.13);
 }
-.profile-menu button {
-  width: 100%;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: #425e54;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.profile-menu button:hover {
-  background: #edf3ed;
-}
-.menu-button {
-  display: none;
+.menu-button span {
+  width: 18px;
+  height: 2px;
+  background: #376354;
 }
 .dashboard {
   width: min(1420px, 94%);
@@ -1231,6 +1146,12 @@ td strong {
   .admin-layout {
     grid-template-columns: 1fr;
   }
+  .admin-layout.sidebar-open {
+    grid-template-columns: 1fr;
+  }
+  .main-area {
+    grid-column: 1;
+  }
   .sidebar {
     position: fixed;
     left: 0;
@@ -1288,7 +1209,7 @@ td strong {
   .topbar {
     justify-content: flex-start;
   }
-  .topbar-actions {
+  :deep(.admin-topbar-actions) {
     margin-left: auto;
   }
   .primary-grid,
@@ -1304,9 +1225,7 @@ td strong {
     min-height: 72px;
     padding: 0 4%;
   }
-  .page-heading p,
-  .profile-copy,
-  .chevron {
+  .page-heading p {
     display: none;
   }
   .page-heading h1 {
@@ -1348,13 +1267,6 @@ td strong {
   }
   .action-grid {
     grid-template-columns: 1fr;
-  }
-  .profile-button {
-    padding: 3px;
-  }
-  .profile-button .avatar {
-    width: 35px;
-    height: 35px;
   }
 }
 @media (max-width: 400px) {

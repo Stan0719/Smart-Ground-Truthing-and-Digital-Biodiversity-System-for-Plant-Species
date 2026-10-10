@@ -41,3 +41,15 @@ export async function saveVisitorAccount(visitor) {
     JSON.stringify([...visitors, visitor])
   );
 }
+
+export async function updateVisitorPassword(email, password) {
+  const visitors = await getVisitorAccounts();
+  const index = visitors.findIndex(
+    (visitor) => visitor.email?.trim().toLowerCase() === email.trim().toLowerCase()
+      && visitor.role === "Visitor" && visitor.status === "Active"
+  );
+  if (index < 0) return false;
+  visitors[index] = { ...visitors[index], password };
+  await AsyncStorage.setItem(VISITOR_ACCOUNTS_KEY, JSON.stringify(visitors));
+  return true;
+}

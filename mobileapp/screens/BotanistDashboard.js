@@ -13,7 +13,7 @@ import {
 
 import {
   useFocusEffect,
-} from "@react-navigation/native";
+} from "expo-router/react-navigation";
 
 import {
   botanistPlantRecords,
@@ -109,23 +109,11 @@ export default function BotanistDashboardScreen({
   // PLANT PRESS
   // =====================================================
 
-  function handlePlantPress(
-    plant
-  ) {
-
-    /*
-      For now, we do not navigate to PlantDetails.
-
-      The new botanist plant record has a different
-      data structure from the existing public plantRecords.
-
-      We can create BotanistPlantDetail later.
-    */
-
-    console.log(
-      "Selected botanist plant:",
-      plant
-    );
+  function handlePlantPress(plant) {
+    navigation.navigate("BotanistPlantDetail", {
+      plantId: plant.id,
+      botanist,
+    });
   }
 
 

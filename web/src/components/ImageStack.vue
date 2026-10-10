@@ -10,7 +10,7 @@ interface Card {
 const cards = ref<Card[]>([
   {
     id: 1,
-    image: '/images/hero.jpg',
+    image: '/images/cave1.jpeg',
     alt: 'Niah Cave',
   },
   {

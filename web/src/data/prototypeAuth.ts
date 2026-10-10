@@ -1,5 +1,6 @@
 export const PROTOTYPE_USERS_KEY = 'niahPrototypeUsers'
 export const PENDING_PASSWORD_CHANGE_KEY = 'niahPrototypePendingPasswordChange'
+export const VISITOR_ACCOUNTS_KEY = '@niah_biodiversity/visitor_accounts'
 
 export type PrototypeRole = 'Conservation Officer' | 'Botanist'
 
@@ -8,11 +9,22 @@ export interface PrototypeUser {
   name: string
   email: string
   role: PrototypeRole
-  status: 'Active'
+  status: 'Active' | 'Inactive' | 'Suspended'
   lastLogin: 'Never'
   initials: string
   password: string
   mustChangePassword: boolean
+}
+
+export interface PrototypeVisitor {
+  id: string
+  name: string
+  email: string
+  role: 'Visitor'
+  status: 'Active' | 'Inactive' | 'Suspended'
+  lastLogin?: string
+  initials?: string
+  password?: string
 }
 
 const normaliseEmail = (email: string) => email.trim().toLowerCase()
@@ -29,6 +41,42 @@ export function getPrototypeUsers(): PrototypeUser[] {
 function savePrototypeUsers(users: PrototypeUser[]) {
   // PROTOTYPE ONLY: replace localStorage/plain password with backend authentication and password hashing.
   localStorage.setItem(PROTOTYPE_USERS_KEY, JSON.stringify(users))
+}
+
+export function getPrototypeVisitors(): PrototypeVisitor[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(VISITOR_ACCOUNTS_KEY) ?? '[]')
+    return Array.isArray(stored)
+      ? stored.filter((visitor): visitor is PrototypeVisitor => visitor?.role === 'Visitor')
+      : []
+  } catch {
+    return []
+  }
+}
+
+function savePrototypeVisitors(visitors: PrototypeVisitor[]) {
+  localStorage.setItem(VISITOR_ACCOUNTS_KEY, JSON.stringify(visitors))
+}
+
+export function updatePrototypeVisitor(
+  id: string,
+  changes: Pick<PrototypeVisitor, 'name' | 'email' | 'status' | 'initials'>,
+): boolean {
+  const visitors = getPrototypeVisitors()
+  const index = visitors.findIndex((visitor) => visitor.id === id)
+  const visitor = visitors[index]
+  if (!visitor) return false
+  visitors[index] = { ...visitor, ...changes, email: normaliseEmail(changes.email) }
+  savePrototypeVisitors(visitors)
+  return true
+}
+
+export function deletePrototypeVisitor(id: string): boolean {
+  const visitors = getPrototypeVisitors()
+  const remainingVisitors = visitors.filter((visitor) => visitor.id !== id)
+  if (remainingVisitors.length === visitors.length) return false
+  savePrototypeVisitors(remainingVisitors)
+  return true
 }
 
 export function generateTemporaryPassword(): string {
@@ -59,7 +107,10 @@ export function createPrototypeUser(input: {
     return match ? Math.max(highest, Number(match[1])) : highest
   }, 0)
   const words = input.name.trim().split(/\s+/)
-  const initials = words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join('')
+  const initials = words
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join('')
   const user: PrototypeUser = {
     id: `USR${String(highestId + 1).padStart(3, '0')}`,
     name: input.name.trim(),
@@ -88,5 +139,26 @@ export function updatePrototypePassword(email: string, password: string): boolea
   if (!user) return false
   users[index] = { ...user, password, mustChangePassword: false }
   savePrototypeUsers(users)
+  return true
+}
+
+export function updatePrototypeUser(
+  id: string,
+  changes: Pick<PrototypeUser, 'name' | 'email' | 'role' | 'status' | 'initials'>,
+): boolean {
+  const users = getPrototypeUsers()
+  const index = users.findIndex((user) => user.id === id)
+  const user = users[index]
+  if (!user) return false
+  users[index] = { ...user, ...changes, email: normaliseEmail(changes.email) }
+  savePrototypeUsers(users)
+  return true
+}
+
+export function deletePrototypeUser(id: string): boolean {
+  const users = getPrototypeUsers()
+  const remainingUsers = users.filter((user) => user.id !== id)
+  if (remainingUsers.length === users.length) return false
+  savePrototypeUsers(remainingUsers)
   return true
 }
