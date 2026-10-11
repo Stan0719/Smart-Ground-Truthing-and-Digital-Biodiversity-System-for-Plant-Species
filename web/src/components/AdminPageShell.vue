@@ -14,12 +14,12 @@ const logout = () => {
 }
 
 const items = [
-  { label: 'Dashboard', icon: '⌂', to: '/admin' },
-  { label: 'User Management', icon: '♙', to: '/admin/users' },
+  { label: 'Dashboard', icon: 'dashboard', to: '/admin' },
+  { label: 'User Management', icon: 'user', to: '/admin/users' },
   { label: 'Role & Permission', icon: '◇', to: '/admin/roles' },
-  { label: 'IoT Monitoring', icon: '⌁', to: '/admin/iot' },
+  { label: 'IoT Monitoring', icon: 'iot', to: '/admin/iot' },
   { label: 'Sensor Management', icon: '◉', to: '/admin/sensors' },
-  { label: 'Threat Alerts', icon: '△', to: '/admin/alerts' },
+  { label: 'Threat Alerts', icon: 'threat', to: '/admin/alerts' },
   { label: 'System Activity', icon: '↻', to: '/admin/activity' },
 ]
 </script>
@@ -52,7 +52,82 @@ const items = [
           :class="{ active: active === item.label }"
           @click="handleNavigation"
         >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+          <span class="nav-icon" aria-hidden="true">
+            <!-- Dashboard -->
+            <svg
+              v-if="item.icon === 'dashboard'"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="sidebar-nav-svg"
+            >
+              <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+              <path
+                d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+              />
+            </svg>
+
+            <!-- User Management -->
+            <svg
+              v-else-if="item.icon === 'user'"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="sidebar-nav-svg"
+            >
+              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+
+            <!-- IoT Monitoring -->
+            <svg
+              v-else-if="item.icon === 'iot'"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="sidebar-nav-svg"
+            >
+              <path
+                d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+              />
+            </svg>
+
+            <!-- Threat Alerts -->
+            <svg
+              v-else-if="item.icon === 'threat'"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="sidebar-nav-svg"
+            >
+              <path
+                d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"
+              />
+              <path d="M12 9v4" />
+              <path d="M12 17h.01" />
+            </svg>
+
+            <!-- Existing text icons -->
+            <template v-else>
+              {{ item.icon }}
+            </template>
+          </span>
           <span>{{ item.label }}</span>
         </RouterLink>
       </nav>
@@ -466,5 +541,23 @@ const items = [
   .main-area {
     grid-column: 1;
   }
+}
+
+.nav-icon {
+  width: 21px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 18px;
+}
+
+.sidebar-nav-svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex-shrink: 0;
+  overflow: visible;
 }
 </style>

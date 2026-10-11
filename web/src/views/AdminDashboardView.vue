@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import AdminTopbarActions from '../components/AdminTopbarActions.vue'
-import { useAdminSidebar } from '../composables/useAdminSidebar'
+import AdminPageShell from '../components/AdminPageShell.vue'
 
 const router = useRouter()
-const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
 
 const openUserManagement = async () => {
   await router.push({ name: 'admin-users' })
@@ -13,6 +11,11 @@ const openUserManagement = async () => {
 
 const openIoTMonitoring = async () => {
   await router.push({ name: 'admin-iot' })
+  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+}
+
+const openSensorManagement = async () => {
+  await router.push({ name: 'admin-sensors' })
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
 }
 
@@ -25,16 +28,6 @@ const openSystemActivity = async () => {
   await router.push({ name: 'admin-activity' })
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
 }
-
-const sidebarItems = [
-  { label: 'Dashboard', icon: '⌂', active: true, to: '/admin' },
-  { label: 'User Management', icon: '♙', to: '/admin/users' },
-  { label: 'Role & Permission', icon: '◇', to: '/admin/roles' },
-  { label: 'IoT Monitoring', icon: '⌁', to: '/admin/iot' },
-  { label: 'Sensor Management', icon: '◉', to: '/admin/sensors' },
-  { label: 'Threat Alerts', icon: '△', to: '/admin/alerts' },
-  { label: 'System Activity', icon: '↻', to: '/admin/activity' },
-]
 
 const summaryCards = [
   { title: 'Total Users', value: '18', note: '3 active roles', icon: '♙', tone: 'green' },
@@ -120,83 +113,8 @@ const activities = [
 </script>
 
 <template>
-  <div class="admin-layout" :class="{ 'sidebar-open': sidebarOpen }">
-    <aside class="sidebar" :class="{ open: sidebarOpen }">
-      <button
-        class="sidebar-close-button"
-        type="button"
-        aria-label="Close navigation"
-        @click="closeSidebar"
-      >
-        ×
-      </button>
-      <RouterLink
-        class="brand"
-        to="/"
-        data-tooltip="Go back to the public website"
-        aria-label="Go back to the public website"
-      >
-        <img src="/images/logo.png" alt="Niah Biodiversity" />
-        <div><strong>NIAH</strong><span>ADMINISTRATION</span></div>
-      </RouterLink>
-
-      <p class="nav-label">MAIN MENU</p>
-      <nav aria-label="Administrator navigation">
-        <RouterLink
-          v-for="item in sidebarItems.filter((entry) => entry.to)"
-          :key="item.label"
-          :to="item.to!"
-          :class="{ active: item.active }"
-          @click="handleNavigation"
-        >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-        </RouterLink>
-        <button
-          v-for="item in sidebarItems.filter((entry) => !entry.to)"
-          :key="item.label"
-          type="button"
-          @click="handleNavigation"
-        >
-          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-        </button>
-      </nav>
-
-      <div class="sidebar-footer">
-        <button type="button" @click="router.push({ name: 'home' })">Logout</button>
-      </div>
-    </aside>
-
-    <button
-      v-if="isMobile && sidebarOpen"
-      class="drawer-backdrop"
-      type="button"
-      aria-label="Close navigation"
-      @click="closeSidebar"
-    ></button>
-
-    <div class="main-area">
-      <header class="topbar">
-        <button
-          class="menu-button"
-          type="button"
-          aria-label="Open navigation"
-          :aria-expanded="sidebarOpen"
-          v-if="!sidebarOpen"
-          @click="openSidebar"
-        >
-          <span></span><span></span><span></span>
-        </button>
-        <div class="page-heading">
-          <p>OVERVIEW</p>
-          <h1>Administrator Dashboard</h1>
-        </div>
-
-        <AdminTopbarActions />
-      </header>
-
-      <main class="dashboard">
+  <AdminPageShell title="Administrator Dashboard" eyebrow="OVERVIEW" active="Dashboard">
+    <div class="dashboard">
         <section class="welcome-row">
           <div>
             <h2>Good afternoon, Administrator</h2>
@@ -228,7 +146,9 @@ const activities = [
                 <p class="section-kicker">LIVE OVERVIEW</p>
                 <h2>Sensor Status Overview</h2>
               </div>
-              <button class="text-action" type="button">View IoT Monitoring →</button>
+              <button class="secondary-button" type="button" @click="openIoTMonitoring">
+                View IoT Monitoring →
+              </button>
             </div>
             <div class="sensor-content">
               <div
@@ -285,7 +205,9 @@ const activities = [
               <p class="section-kicker danger-kicker">ATTENTION REQUIRED</p>
               <h2>Recent Threat Alerts</h2>
             </div>
-            <button class="text-action" type="button">View All Alerts →</button>
+            <button class="secondary-button" type="button" @click="openThreatAlerts">
+              View All Alerts →
+            </button>
           </div>
           <div class="table-scroll">
             <table>
@@ -333,7 +255,9 @@ const activities = [
               <p class="section-kicker">LATEST READINGS</p>
               <h2>Recent Sensor Activity</h2>
             </div>
-            <button class="text-action" type="button">View all sensors →</button>
+            <button class="secondary-button" type="button" @click="openSensorManagement">
+              View all sensors →
+            </button>
           </div>
           <div class="table-scroll">
             <table>
@@ -376,7 +300,9 @@ const activities = [
                 <p class="section-kicker">ACCESS OVERVIEW</p>
                 <h2>User Summary</h2>
               </div>
-              <button class="text-action" type="button">Manage Users →</button>
+              <button class="secondary-button" type="button" @click="openUserManagement">
+                Manage Users →
+              </button>
             </div>
             <div class="role-list">
               <div v-for="role in userRoles" :key="role.label" class="role-row">
@@ -441,233 +367,16 @@ const activities = [
             </button>
           </div>
         </section>
-      </main>
     </div>
-  </div>
+  </AdminPageShell>
 </template>
 
 <style scoped>
 * {
   box-sizing: border-box;
 }
-.admin-layout {
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: 0 minmax(0, 1fr);
-  background: #f3f6f2;
-  color: #29483e;
-  transition: grid-template-columns 0.2s ease;
-}
-.admin-layout.sidebar-open {
-  grid-template-columns: 258px minmax(0, 1fr);
-}
-.sidebar {
-  position: fixed;
-  top: 0;
-  width: 258px;
-  height: 100vh;
-  padding: 24px 16px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: #173f34;
-  color: #fff;
-  z-index: 100;
-  transform: translateX(-100%);
-  transition: transform 0.2s ease;
-}
-.sidebar.open {
-  transform: translateX(0);
-}
-.sidebar-close-button {
-  position: absolute;
-  top: 12px;
-  right: 10px;
-  z-index: 2;
-  width: 30px;
-  min-width: 0;
-  height: 30px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  color: #bfd7cd;
-  cursor: pointer;
-  font-size: 22px;
-  line-height: 1;
-}
-.brand {
-  position: relative;
-  margin: -8px -4px 0;
-  padding: 8px 12px 25px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  color: #fff;
-  text-decoration: none;
-}
-.brand img {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-.brand div {
-  display: flex;
-  flex-direction: column;
-}
-.brand strong {
-  font-size: 18px;
-  letter-spacing: 2px;
-}
-.brand span {
-  margin-top: 3px;
-  color: #9dd5ba;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-}
-.brand::after {
-  position: absolute;
-  bottom: -30px;
-  left: 12px;
-  z-index: 110;
-  padding: 6px 9px;
-  border-radius: 6px;
-  background: rgba(18, 25, 22, 0.96);
-  color: #fff;
-  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.2);
-  content: attr(data-tooltip);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transform: translateY(-3px);
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease,
-    visibility 180ms ease;
-}
-.brand:hover::after,
-.brand:focus-visible::after {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-.nav-label {
-  margin: 25px 13px 9px;
-  color: #75a392;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1.6px;
-}
-.sidebar nav {
-  display: grid;
-  gap: 4px;
-}
-.sidebar nav button,
-.sidebar nav a,
-.sidebar-footer button {
-  width: 100%;
-  padding: 10px 13px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: #bfd7cd;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-  text-decoration: none;
-  transition: 0.2s ease;
-}
-.sidebar nav button:hover,
-.sidebar nav a:hover,
-.sidebar nav a.active {
-  background: #2b6754;
-  color: #fff;
-}
-.nav-icon {
-  width: 21px;
-  text-align: center;
-  font-size: 18px;
-}
-.sidebar-footer {
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-.sidebar-footer button {
-  justify-content: center;
-  background: #fce8e6;
-  color: #b84d42;
-}
-.sidebar-footer button:hover,
-.sidebar-footer button:focus-visible {
-  background: #b84d42;
-  color: #fff;
-}
-.main-area {
-  min-width: 0;
-  grid-column: 2;
-}
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 80;
-  min-height: 82px;
-  padding: 0 3.5%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  border-bottom: 1px solid #dce4dc;
-  background: rgba(255, 255, 255, 0.93);
-  backdrop-filter: blur(12px);
-}
-.page-heading p {
-  margin: 0 0 3px;
-  color: #62a087;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1.8px;
-}
-.page-heading h1 {
-  margin: 0;
-  color: #204c3d;
-  font-size: 23px;
-}
-.menu-button {
-  width: 39px;
-  height: 39px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border: 1px solid #dfe6df;
-  border-radius: 9px;
-  background: #fff;
-}
-.menu-button span {
-  width: 18px;
-  height: 2px;
-  background: #376354;
-}
 .dashboard {
-  width: min(1420px, 94%);
-  margin: 0 auto;
-  padding: 31px 0 55px;
+  width: 100%;
 }
 .welcome-row {
   margin-bottom: 24px;
@@ -796,16 +505,38 @@ const activities = [
   color: #254c3e;
   font-size: 17px;
 }
-.text-action {
-  padding: 5px 0;
-  border: 0;
-  background: transparent;
-  color: #3c8168;
+.secondary-button {
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border: 1px solid #cddbd2;
+  border-radius: 8px;
+  background: #fff;
+  color: #3c7d64;
   cursor: pointer;
   font: inherit;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 800;
   white-space: nowrap;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.15s ease,
+    box-shadow 0.2s ease;
+}
+.secondary-button:hover {
+  border-color: #9fc4ad;
+  background: #f1f7f3;
+  color: #2f6f56;
+  box-shadow: 0 4px 12px rgba(42, 91, 70, 0.08);
+  transform: translateY(-1px);
+}
+.secondary-button:active {
+  transform: translateY(0) scale(0.99);
+}
+.secondary-button:focus-visible {
+  outline: 3px solid rgba(74, 145, 113, 0.3);
+  outline-offset: 2px;
 }
 .sensor-content {
   display: flex;
@@ -1134,84 +865,12 @@ td strong {
   color: #8c9993;
   font-size: 8px;
 }
-.drawer-backdrop {
-  display: none;
-}
 @media (max-width: 1250px) {
   .summary-grid {
     grid-template-columns: repeat(3, 1fr);
   }
 }
 @media (max-width: 920px) {
-  .admin-layout {
-    grid-template-columns: 1fr;
-  }
-  .admin-layout.sidebar-open {
-    grid-template-columns: 1fr;
-  }
-  .main-area {
-    grid-column: 1;
-  }
-  .sidebar {
-    position: fixed;
-    left: 0;
-    width: 258px;
-    transform: translateX(-100%);
-    transition: transform 0.2s ease;
-  }
-  .sidebar-close-button {
-    position: absolute;
-    top: 12px;
-    right: 10px;
-    z-index: 2;
-    width: 30px;
-    min-width: 0;
-    height: 30px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.07);
-    color: #bfd7cd;
-    cursor: pointer;
-    font-size: 22px;
-    line-height: 1;
-  }
-  .sidebar.open {
-    transform: translateX(0);
-  }
-  .drawer-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 90;
-    display: block;
-    border: 0;
-    background: rgba(12, 35, 27, 0.5);
-  }
-  .menu-button {
-    width: 39px;
-    height: 39px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    border: 1px solid #dfe6df;
-    border-radius: 9px;
-    background: #fff;
-  }
-  .menu-button span {
-    width: 18px;
-    height: 2px;
-    background: #376354;
-  }
-  .topbar {
-    justify-content: flex-start;
-  }
-  :deep(.admin-topbar-actions) {
-    margin-left: auto;
-  }
   .primary-grid,
   .lower-grid {
     grid-template-columns: 1fr;
@@ -1221,20 +880,6 @@ td strong {
   }
 }
 @media (max-width: 620px) {
-  .topbar {
-    min-height: 72px;
-    padding: 0 4%;
-  }
-  .page-heading p {
-    display: none;
-  }
-  .page-heading h1 {
-    font-size: 17px;
-  }
-  .dashboard {
-    width: 91%;
-    padding-top: 23px;
-  }
   .welcome-row {
     align-items: flex-start;
     flex-direction: column;
@@ -1272,6 +917,19 @@ td strong {
 @media (max-width: 400px) {
   .summary-grid {
     grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .secondary-button {
+    transition:
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .secondary-button:hover,
+  .secondary-button:active {
+    transform: none;
   }
 }
 </style>

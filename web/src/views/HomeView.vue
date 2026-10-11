@@ -136,14 +136,16 @@ const startCarouselDrag = (event: PointerEvent) => {
   dragStartX = event.clientX
   dragStartOffset = carouselOffset
   setCarouselMode('drag')
-  plantCarousel.value?.setPointerCapture(event.pointerId)
 }
 
 const dragCarousel = (event: PointerEvent) => {
   if (carouselMode !== 'drag') return
 
   const distance = event.clientX - dragStartX
-  if (Math.abs(distance) >= dragThreshold) carouselDragged = true
+  if (Math.abs(distance) >= dragThreshold && !carouselDragged) {
+    carouselDragged = true
+    plantCarousel.value?.setPointerCapture(event.pointerId)
+  }
   if (!carouselDragged) return
 
   if (event.cancelable) event.preventDefault()
@@ -618,12 +620,10 @@ onBeforeUnmount(() => {
           <div ref="plantTrack" class="plant-track">
 
             <!-- First set -->
-            <RouterLink
+            <article
               v-for="plant in plants"
               :key="`first-${plant.slug}`"
-              :to="`/species/${plant.slug}`"
               class="home-plant-card"
-              draggable="false"
             >
 
               <div class="home-plant-image">
@@ -650,24 +650,26 @@ onBeforeUnmount(() => {
                   {{ plant.scientificName }}
                 </p>
 
-                <span class="view-plant">
-                  View plant →
-                </span>
+                <RouterLink
+                  :to="{ name: 'species-detail', params: { slug: plant.slug } }"
+                  class="view-plant"
+                  :aria-label="`View species details for ${plant.scientificName}`"
+                  draggable="false"
+                >
+                  View species →
+                </RouterLink>
 
               </div>
 
-            </RouterLink>
+            </article>
 
 
             <!-- Duplicate set for continuous loop -->
-            <RouterLink
+            <article
               v-for="plant in plants"
               :key="`second-${plant.slug}`"
-              :to="`/species/${plant.slug}`"
               class="home-plant-card"
               aria-hidden="true"
-              tabindex="-1"
-              draggable="false"
             >
 
               <div class="home-plant-image">
@@ -693,13 +695,19 @@ onBeforeUnmount(() => {
                   {{ plant.scientificName }}
                 </p>
 
-                <span class="view-plant">
-                  View plant →
-                </span>
+                <RouterLink
+                  :to="{ name: 'species-detail', params: { slug: plant.slug } }"
+                  class="view-plant"
+                  :aria-label="`View species details for ${plant.scientificName}`"
+                  tabindex="-1"
+                  draggable="false"
+                >
+                  View species →
+                </RouterLink>
 
               </div>
 
-            </RouterLink>
+            </article>
 
           </div>
 
@@ -1489,7 +1497,7 @@ onBeforeUnmount(() => {
 }
 
 .attraction-card-painted {
-  background-image: url('/images/b1.jpg');
+  background-image: url('/images/paintedcave.png');
   background-position: 70% 35%;
 }
 
@@ -2200,6 +2208,7 @@ onBeforeUnmount(() => {
 /* Always stay at the bottom */
 
 .view-plant {
+  width: fit-content;
   margin-top: auto;
 
   padding-top: 18px;
@@ -2212,7 +2221,21 @@ onBeforeUnmount(() => {
 
   letter-spacing: 0.7px;
 
+  text-decoration: none;
   text-transform: uppercase;
+
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.view-plant:hover {
+  color: #315b49;
+  transform: translateX(3px);
+}
+
+.view-plant:focus-visible {
+  outline: 3px solid rgba(80, 138, 106, 0.25);
+  outline-offset: 4px;
+  border-radius: 3px;
 }
 
 
