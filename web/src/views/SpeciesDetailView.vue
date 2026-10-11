@@ -848,12 +848,46 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   }
 
   .quick-facts {
-    padding: 18px;
+    padding: 14px;
+    border-radius: 16px;
   }
 
   .quick-facts h2 {
-    margin-bottom: 18px;
-    font-size: 24px;
+    margin-bottom: 12px;
+    font-size: 20px;
+  }
+
+  .characteristics-title {
+    margin-bottom: 10px;
+    font-size: 13px;
+  }
+
+  .quick-facts ul {
+    gap: 8px;
+  }
+
+  .quick-facts li {
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .quick-facts dl {
+    margin-top: 16px;
+    padding-top: 14px;
+  }
+
+  .quick-facts dl div + div {
+    margin-top: 10px;
+  }
+
+  .quick-facts dt {
+    margin-bottom: 2px;
+    font-size: 9px;
+  }
+
+  .quick-facts dd {
+    font-size: 12px;
   }
 
   .section-heading {
@@ -876,9 +910,33 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     gap: 10px;
   }
 
-  .gallery-grid,
+  .view-all-row {
+    margin-top: 20px;
+  }
+
+  .view-all-row a {
+    padding: 9.5px 15.5px;
+    font-size: 10px;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
   .distribution-stats {
     grid-template-columns: 1fr;
+  }
+
+  .gallery-grid img,
+  .gallery-placeholder {
+    height: clamp(120px, 28vw, 170px);
+    aspect-ratio: auto;
+  }
+
+  .gallery-grid figcaption {
+    padding: 10px;
+    font-size: 10px;
   }
 
   .distribution-map {
@@ -972,24 +1030,31 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   }
 
   :deep(.learn-more) {
-    width: min(100%, 140px);
-    height: 36px;
+    width: min(100%, 118px);
+    height: 30px;
     margin-top: auto;
   }
 
   :deep(.learn-more .circle) {
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
   }
 
   :deep(.learn-more .button-arrow) {
-    left: 9px;
-    width: 14px;
+    left: 7px;
+    width: 12px;
+  }
+
+  :deep(.learn-more .button-arrow::before) {
+    top: -3px;
+    width: 6px;
+    height: 6px;
+    border-width: 1.5px;
   }
 
   :deep(.learn-more .button-text) {
-    padding: 8px 6px 8px 29px;
-    font-size: 10px;
+    padding: 5px 4px 5px 24px;
+    font-size: 8px;
     line-height: 20px;
   }
 }
@@ -1008,16 +1073,17 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   }
 
   :deep(.learn-more) {
-    height: 35px;
+    width: min(100%, 108px);
+    height: 29px;
   }
 
   :deep(.learn-more .circle) {
-    width: 35px;
-    height: 35px;
+    width: 29px;
+    height: 29px;
   }
 
   :deep(.learn-more .button-text) {
-    font-size: 9px;
+    font-size: 8px;
   }
 }
 </style>
