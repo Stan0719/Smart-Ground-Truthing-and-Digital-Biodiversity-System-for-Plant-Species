@@ -151,6 +151,7 @@ watch(
 )
 
 const mobileMenuOpen = ref(false)
+const mobileSearchOpen = ref(false)
 
 const loginModalOpen = ref(false)
 
@@ -159,7 +160,14 @@ const logoutModalOpen = ref(false)
 const closeMobileMenu = () => {
 
   mobileMenuOpen.value = false
+  mobileSearchOpen.value = false
 
+}
+
+const submitMobileSearch = () => {
+  submitNavSearch()
+  mobileSearchOpen.value = false
+  closeMobileMenu()
 }
 
 const handleLogoClick = (event: MouseEvent) => {
@@ -454,16 +462,37 @@ const logout = () => {
           <span>{{ item.label }}</span>
         </RouterLink>
 
-        <RouterLink
-          to="/search"
-          class="mobile-nav-link"
-          @click="closeMobileMenu"
+        <button
+          type="button"
+          class="mobile-nav-link mobile-search-toggle"
+          :aria-expanded="mobileSearchOpen"
+          aria-controls="mobile-search-panel"
+          @click="mobileSearchOpen = !mobileSearchOpen"
         >
           <span class="mobile-link-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg>
           </span>
           <span>Search</span>
-        </RouterLink>
+          <span class="mobile-search-chevron" aria-hidden="true">›</span>
+        </button>
+
+        <div v-if="mobileSearchOpen" id="mobile-search-panel" class="mobile-search-panel">
+          <form role="search" class="mobile-search-form" @submit.prevent="submitMobileSearch">
+            <input
+              v-model="navSearch"
+              type="search"
+              autocomplete="off"
+              placeholder="Search species..."
+              aria-label="Search species"
+            />
+            <button type="submit" aria-label="Search species">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6.5" />
+                <path d="m15.5 15.5 5 5" />
+              </svg>
+            </button>
+          </form>
+        </div>
 
 
         <div class="mobile-nav-divider" aria-hidden="true"></div>
@@ -1133,6 +1162,95 @@ const logout = () => {
   .mobile-nav-link.router-link-active {
     background: rgba(255, 255, 255, 0.13);
     color: #fff;
+  }
+
+  .mobile-search-toggle {
+    box-sizing: border-box;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+  }
+
+  .mobile-search-chevron {
+    margin-left: auto;
+    font-size: 20px;
+    line-height: 1;
+    transition: transform 0.2s ease;
+  }
+
+  .mobile-search-toggle[aria-expanded='true'] .mobile-search-chevron {
+    transform: rotate(90deg);
+  }
+
+  .mobile-search-panel {
+    padding: 7px 12px 12px 50px;
+  }
+
+  .mobile-search-form {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .mobile-search-form input {
+    min-width: 0;
+    flex: 1;
+    padding: 9px 11px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    outline: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font: inherit;
+    font-size: 12px;
+  }
+
+  .mobile-search-form input::placeholder {
+    color: rgba(255, 255, 255, 0.65);
+  }
+
+  .mobile-search-form input::-webkit-search-cancel-button {
+    cursor: pointer;
+    filter: brightness(0) invert(1);
+    opacity: 0.8;
+  }
+
+  .mobile-search-form input:focus-visible {
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+  }
+
+  .mobile-search-form button {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: #fff6dc;
+    color: #356f70;
+    cursor: pointer;
+  }
+
+  .mobile-search-form button:focus-visible {
+    outline: 3px solid rgba(255, 255, 255, 0.35);
+    outline-offset: 2px;
+  }
+
+  .mobile-search-form button svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .mobile-link-icon {
