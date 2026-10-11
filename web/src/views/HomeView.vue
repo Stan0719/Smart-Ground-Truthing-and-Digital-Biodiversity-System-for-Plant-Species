@@ -1497,7 +1497,7 @@ onBeforeUnmount(() => {
 }
 
 .attraction-card-painted {
-  background-image: url('/images/b1.jpg');
+  background-image: url('/images/paintedcave.png');
   background-position: 70% 35%;
 }
 
