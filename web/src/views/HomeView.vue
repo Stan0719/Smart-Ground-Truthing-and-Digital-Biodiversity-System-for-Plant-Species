@@ -655,7 +655,7 @@ onBeforeUnmount(() => {
                   :aria-label="`View species details for ${plant.scientificName}`"
                   draggable="false"
                 >
-                  View species →
+                  View Details →
                 </RouterLink>
 
               </div>
@@ -701,7 +701,7 @@ onBeforeUnmount(() => {
                   tabindex="-1"
                   draggable="false"
                 >
-                  View species →
+                  View Details →
                 </RouterLink>
 
               </div>
