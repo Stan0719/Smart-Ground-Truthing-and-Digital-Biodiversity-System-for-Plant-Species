@@ -1105,21 +1105,23 @@ const filteredSpecies = computed(() => {
   }
 
   .card-actions {
-    grid-template-columns: 1fr;
-    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
     margin-top: auto;
   }
 
   .card-action-link {
-    min-height: 36px;
+    min-height: 32px;
     width: 100%;
     box-sizing: border-box;
-    padding: 7px 8px;
-    font-size: 10px;
+    gap: 3px;
+    padding: 5px 4px;
+    font-size: 9px;
+    white-space: nowrap;
   }
 
   .action-arrow {
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .empty-state {
