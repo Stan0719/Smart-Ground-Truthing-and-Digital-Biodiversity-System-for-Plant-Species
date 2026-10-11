@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import NavigationBar from '../components/NavigationBar.vue'
+import { usePrototypeSession } from '../composables/usePrototypeSession'
 import { plants as species } from '../data/plants'
 
 const categories = ['All', 'Trees', 'Flowers', 'Ferns', 'Climbers'] as const
@@ -10,7 +11,14 @@ const sortOption = ref<'default' | 'name-asc' | 'name-desc' | 'scientific-asc'>(
 const sortMenuOpen = ref(false)
 const sortMenu = ref<HTMLElement | null>(null)
 const route = useRoute()
+const { isLoggedIn, userRole } = usePrototypeSession()
 const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search : '')
+
+const canViewConservationStatus = computed(
+  () =>
+    isLoggedIn.value &&
+    (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+)
 
 const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
   if (
@@ -204,7 +212,11 @@ const filteredSpecies = computed(() => {
               </div>
               <div class="card-badges">
                 <span class="category-badge">{{ item.category }}</span>
-                <span v-if="item.conservationStatus" class="status-badge">{{ item.conservationStatus }}</span>
+                <span
+                  v-if="canViewConservationStatus && item.conservationStatus"
+                  class="status-badge"
+                  >{{ item.conservationStatus }}</span
+                >
               </div>
             </div>
 

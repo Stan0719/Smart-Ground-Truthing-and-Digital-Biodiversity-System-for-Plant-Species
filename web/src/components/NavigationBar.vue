@@ -11,21 +11,16 @@ import {
 import { useRoute, useRouter } from 'vue-router'
 import LoginModal from './LoginModal.vue'
 import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
+import { usePrototypeSession, type PrototypeSessionRole } from '../composables/usePrototypeSession'
 
 const route = useRoute()
 const router = useRouter()
 const navSearch = ref('')
 
-type UserRole = 'admin' | 'conservation-officer' | null
-
-const isLoggedIn = ref(false)
-
 // TEMPORARY FRONTEND ROLE STATE.
 // Replace this with the authenticated user's role from the backend/database
 // when authentication is integrated.
-const userRole = ref<UserRole>(null)
-
-const username = ref('')
+const { isLoggedIn, userRole, username } = usePrototypeSession()
 
 const navItems = computed(() => {
   const items = [
@@ -197,7 +192,7 @@ const openLoginModal = () => {
 
 const handleLogin = (user: {
   username: string
-  role: Exclude<UserRole, null>
+  role: Exclude<PrototypeSessionRole, null>
   email?: string
   mustChangePassword?: boolean
 }) => {
