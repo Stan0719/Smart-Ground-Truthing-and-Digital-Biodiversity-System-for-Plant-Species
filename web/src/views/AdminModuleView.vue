@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import AdminPageShell from '../components/AdminPageShell.vue'
 
 type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity'
@@ -56,6 +58,20 @@ interface ThreatAlert {
   plantAccuracy?: string
 }
 
+type ActivityType = 'Info' | 'Security' | 'Warning' | 'Error'
+
+interface ActivityLog {
+  id: string
+  actor: string
+  role: string
+  action: string
+  target: string
+  module: string
+  ipAddress: string
+  timestamp: string
+  type: ActivityType
+}
+
 const selectedSensor = ref<IoTSensor | null>(null)
 const selectedAlert = ref<ThreatAlert | null>(null)
 const alertModal = ref<'view' | 'resolve' | null>(null)
@@ -76,6 +92,16 @@ const sensorModal = ref<'register' | 'view' | 'edit' | 'delete' | null>(null)
 const sensorFormError = ref('')
 const successMessage = ref('')
 const errorMessage = ref('')
+const exportButton = ref<HTMLButtonElement | null>(null)
+const exportDialog = ref<HTMLElement | null>(null)
+const exportModalOpen = ref(false)
+const exportFromDate = ref('')
+const exportToDate = ref('')
+const exportType = ref<'All' | ActivityType>('All')
+const exportModule = ref('All Modules')
+const exportScope = ref<'filtered' | 'all'>('filtered')
+const exportFormat = ref<'csv' | 'pdf'>('csv')
+const exportValidationMessage = ref('')
 let successTimer: ReturnType<typeof setTimeout> | undefined
 let errorTimer: ReturnType<typeof setTimeout> | undefined
 const sensorForm = ref<SensorForm>({
@@ -351,48 +377,72 @@ const alerts = ref<ThreatAlert[]>([
 
 const recentAlerts = computed(() => alerts.value.slice(0, 3))
 
-const logs = [
+const logs: ActivityLog[] = [
   {
+    id: 'ACT001',
     actor: 'Admin01',
-    action: 'Created Botanist account for Siti Hajar',
+    role: 'Administrator',
+    action: 'Created Botanist account',
+    target: 'Siti Hajar',
     module: 'User Management',
-    ip: '192.168.1.12',
-    time: '29 Sep 2026, 10:20 AM',
-    level: 'Info',
+    ipAddress: '192.168.1.12',
+    timestamp: '2026-09-29T10:20:00',
+    type: 'Info',
   },
   {
+    id: 'ACT002',
     actor: 'Admin02',
-    action: 'Updated configuration for Sensor S002',
+    role: 'Administrator',
+    action: 'Updated configuration',
+    target: 'Sensor S002',
     module: 'Sensor Management',
-    ip: '192.168.1.18',
-    time: '29 Sep 2026, 11:05 AM',
-    level: 'Info',
+    ipAddress: '192.168.1.18',
+    timestamp: '2026-09-29T11:05:00',
+    type: 'Info',
   },
   {
+    id: 'ACT003',
     actor: 'Admin01',
+    role: 'Administrator',
     action: 'Changed user role from Botanist to Officer',
+    target: 'User role',
     module: 'Role & Permission',
-    ip: '192.168.1.12',
-    time: '29 Sep 2026, 12:10 PM',
-    level: 'Security',
+    ipAddress: '192.168.1.12',
+    timestamp: '2026-09-29T12:10:00',
+    type: 'Security',
   },
   {
+    id: 'ACT004',
     actor: 'System',
+    role: 'System',
     action: 'Sensor S003 changed status to Offline',
+    target: 'Sensor S003',
     module: 'IoT Monitoring',
-    ip: 'System',
-    time: '29 Sep 2026, 12:30 PM',
-    level: 'Warning',
+    ipAddress: 'System',
+    timestamp: '2026-09-29T12:30:00',
+    type: 'Warning',
   },
   {
+    id: 'ACT005',
     actor: 'Admin02',
+    role: 'Administrator',
     action: 'Resolved threat alert A004',
+    target: 'Threat alert A004',
     module: 'Threat Alerts',
-    ip: '192.168.1.18',
-    time: '29 Sep 2026, 1:04 PM',
-    level: 'Info',
+    ipAddress: '192.168.1.18',
+    timestamp: '2026-09-29T13:04:00',
+    type: 'Info',
   },
 ]
+
+const formatActivityTimestamp = (timestamp: string) =>
+  new Intl.DateTimeFormat('en-MY', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(timestamp))
 
 const filteredSensors = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -453,7 +503,7 @@ const filteredLogs = computed(() =>
     (l) =>
       (!search.value ||
         Object.values(l).join(' ').toLowerCase().includes(search.value.toLowerCase())) &&
-      (filter.value === 'All' || l.level === filter.value),
+      (filter.value === 'All' || l.type === filter.value),
   ),
 )
 
@@ -505,6 +555,141 @@ const showErrorMessage = (message: string) => {
     errorMessage.value = ''
     errorTimer = undefined
   }, 4000)
+}
+
+const openExportModal = async () => {
+  exportValidationMessage.value = ''
+  exportModalOpen.value = true
+  await nextTick()
+  exportDialog.value?.focus()
+}
+
+const closeExportModal = async () => {
+  exportModalOpen.value = false
+  exportValidationMessage.value = ''
+  await nextTick()
+  exportButton.value?.focus()
+}
+
+const exportDateRangeLabel = () => {
+  if (exportFromDate.value && exportToDate.value) {
+    return `${exportFromDate.value} to ${exportToDate.value}`
+  }
+  if (exportFromDate.value) return `From ${exportFromDate.value}`
+  if (exportToDate.value) return `Through ${exportToDate.value}`
+  return 'All dates'
+}
+
+const activityRecordsForExport = () => {
+  const source = exportScope.value === 'filtered' ? filteredLogs.value : logs
+  return source.filter((log) => {
+    const activityDate = log.timestamp.slice(0, 10)
+    const matchesFrom = !exportFromDate.value || activityDate >= exportFromDate.value
+    const matchesTo = !exportToDate.value || activityDate <= exportToDate.value
+    const matchesType = exportType.value === 'All' || log.type === exportType.value
+    const matchesModule = exportModule.value === 'All Modules' || log.module === exportModule.value
+    return matchesFrom && matchesTo && matchesType && matchesModule
+  })
+}
+
+const generateExportFilename = (extension: 'csv' | 'pdf') => {
+  let datePart = new Date().toLocaleDateString('en-CA')
+  if (exportFromDate.value && exportToDate.value) {
+    datePart = `${exportFromDate.value}-to-${exportToDate.value}`
+  } else if (exportFromDate.value || exportToDate.value) {
+    datePart = exportFromDate.value || exportToDate.value
+  }
+  return `system-activity-${datePart}.${extension}`
+}
+
+const escapeCsvCell = (value: string) => `"${value.replace(/"/g, '""')}"`
+
+const exportActivitiesToCsv = (records: ActivityLog[]) => {
+  const rows = records.map((log) => [
+    formatActivityTimestamp(log.timestamp),
+    log.actor,
+    log.role,
+    log.action,
+    log.module,
+    log.target,
+    log.ipAddress,
+    log.type,
+  ])
+  const headings = [
+    'Date & Time',
+    'User',
+    'Role',
+    'Action',
+    'Module',
+    'Target',
+    'IP Address',
+    'Event Type',
+  ]
+  const csv = `\uFEFF${[headings, ...rows].map((row) => row.map(escapeCsvCell).join(',')).join('\r\n')}`
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = generateExportFilename('csv')
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+const exportActivitiesToPdf = (records: ActivityLog[]) => {
+  const document = new jsPDF({ orientation: 'landscape' })
+  document.setTextColor(37, 76, 62)
+  document.setFontSize(18)
+  document.text('System Activity Report', 14, 17)
+  document.setTextColor(90, 110, 101)
+  document.setFontSize(9)
+  const details = [
+    `Exported: ${formatActivityTimestamp(new Date().toISOString())}`,
+    `Date range: ${exportDateRangeLabel()}`,
+    `Activity type: ${exportType.value}`,
+    `Module: ${exportModule.value}`,
+    `Total records: ${records.length}`,
+  ]
+  details.forEach((detail, index) => document.text(detail, 14, 25 + index * 5))
+  autoTable(document, {
+    startY: 53,
+    head: [['Date/Time', 'User', 'Action', 'Module', 'IP Address', 'Type']],
+    body: records.map((log) => [
+      formatActivityTimestamp(log.timestamp),
+      log.actor,
+      `${log.action}${log.target ? ` — ${log.target}` : ''}`,
+      log.module,
+      log.ipAddress,
+      log.type,
+    ]),
+    headStyles: { fillColor: [50, 116, 91] },
+    styles: { fontSize: 8, cellPadding: 3 },
+    alternateRowStyles: { fillColor: [244, 248, 244] },
+  })
+  document.save(generateExportFilename('pdf'))
+}
+
+const exportActivity = async () => {
+  if (
+    exportFromDate.value &&
+    exportToDate.value &&
+    exportFromDate.value > exportToDate.value
+  ) {
+    exportValidationMessage.value = 'From Date cannot be later than To Date.'
+    return
+  }
+
+  const records = activityRecordsForExport()
+  if (!records.length) {
+    exportValidationMessage.value = 'No activity records match the selected export criteria.'
+    return
+  }
+
+  exportValidationMessage.value = ''
+  if (exportFormat.value === 'pdf') exportActivitiesToPdf(records)
+  else exportActivitiesToCsv(records)
+  await closeExportModal()
+  showSuccessMessage('System activity exported successfully.')
 }
 
 const openAlertDetails = (alert: ThreatAlert) => {
@@ -707,7 +892,13 @@ const confirmDeleteSensor = () => {
         @click="openRegisterSensor"
       >
         ＋ Register Sensor</button
-      ><button v-else-if="section === 'activity'" class="secondary" type="button">
+      ><button
+        v-else-if="section === 'activity'"
+        ref="exportButton"
+        class="secondary"
+        type="button"
+        @click="openExportModal"
+      >
         Export Activity
       </button>
     </section>
@@ -1264,22 +1455,100 @@ const confirmDeleteSensor = () => {
           </select>
         </div>
         <div class="activity-list">
-          <article v-for="log in filteredLogs" :key="log.time">
-            <span class="event-icon" :class="log.level.toLowerCase()">{{
-              log.level === 'Warning' ? '!' : log.level === 'Security' ? '◇' : '↻'
+          <article v-for="log in filteredLogs" :key="log.id">
+            <span class="event-icon" :class="log.type.toLowerCase()">{{
+              log.type === 'Warning' ? '!' : log.type === 'Security' ? '◇' : '↻'
             }}</span>
             <div class="event-main">
-              <strong>{{ log.action }}</strong>
+              <strong>{{ log.action }}{{ log.target ? ` — ${log.target}` : '' }}</strong>
               <p>
-                <b>{{ log.actor }}</b> · {{ log.module }} · {{ log.ip }}
+                <b>{{ log.actor }}</b> · {{ log.module }} · {{ log.ipAddress }}
               </p>
             </div>
-            <time>{{ log.time }}</time
-            ><em class="badge" :class="log.level.toLowerCase()">{{ log.level }}</em>
+            <time :datetime="log.timestamp">{{ formatActivityTimestamp(log.timestamp) }}</time
+            ><em class="badge" :class="log.type.toLowerCase()">{{ log.type }}</em>
           </article>
         </div>
       </section>
     </template>
+
+    <div
+      v-if="exportModalOpen"
+      class="sensor-modal-backdrop"
+      @click.self="closeExportModal"
+      @keydown.esc="closeExportModal"
+    >
+      <section
+        ref="exportDialog"
+        class="sensor-modal export-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-activity-title"
+        tabindex="-1"
+      >
+        <header class="sensor-modal-head">
+          <div>
+            <p>ACTIVITY EXPORT</p>
+            <h2 id="export-activity-title">Export System Activity</h2>
+          </div>
+          <button type="button" aria-label="Close export dialog" @click="closeExportModal">×</button>
+        </header>
+
+        <form class="export-form" @submit.prevent="exportActivity">
+          <fieldset>
+            <legend>Date Range</legend>
+            <div class="export-date-grid">
+              <label><span>From Date</span><input v-model="exportFromDate" type="date" /></label>
+              <label><span>To Date</span><input v-model="exportToDate" type="date" /></label>
+            </div>
+          </fieldset>
+
+          <div class="export-select-grid">
+            <label>
+              <span>Activity Type</span>
+              <select v-model="exportType">
+                <option>All</option><option>Info</option><option>Security</option><option>Warning</option><option>Error</option>
+              </select>
+            </label>
+            <label>
+              <span>Module</span>
+              <select v-model="exportModule">
+                <option>All Modules</option><option>User Management</option><option>Role &amp; Permission</option><option>IoT Monitoring</option><option>Sensor Management</option><option>Threat Alerts</option><option>System Activity</option>
+              </select>
+            </label>
+          </div>
+
+          <fieldset>
+            <legend>Export Scope</legend>
+            <div class="export-options">
+              <label>
+                <input v-model="exportScope" type="radio" value="filtered" />
+                <span><b>Current Filtered Results</b><small>Use the search and activity filter currently applied to this page.</small></span>
+              </label>
+              <label>
+                <input v-model="exportScope" type="radio" value="all" />
+                <span><b>All Activity Records</b><small>Ignore page filters and use only the export options above.</small></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>File Format</legend>
+            <div class="export-format-options">
+              <label><input v-model="exportFormat" type="radio" value="csv" /> CSV</label>
+              <label><input v-model="exportFormat" type="radio" value="pdf" /> PDF</label>
+            </div>
+          </fieldset>
+
+          <p v-if="exportValidationMessage" class="form-error" role="alert">{{ exportValidationMessage }}</p>
+
+          <div class="sensor-modal-actions modal-button-group">
+            <button class="secondary" type="button" @click="closeExportModal">Cancel</button>
+            <button class="primary" type="submit">Export</button>
+          </div>
+        </form>
+      </section>
+    </div>
 
     <div
       v-if="alertModal === 'view' && selectedAlert"
@@ -2570,6 +2839,105 @@ td i {
   background: #eef2ee;
   color: #708078;
 }
+.export-modal {
+  width: min(620px, 100%);
+  outline: 0;
+}
+.export-form {
+  display: grid;
+  gap: 16px;
+}
+.export-form fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #e2e9e2;
+  border-radius: 10px;
+}
+.export-form legend {
+  padding: 0 6px;
+  color: #4d7a68;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.export-date-grid,
+.export-select-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.export-form label {
+  color: #4a645a;
+  font-size: 10px;
+  font-weight: 700;
+}
+.export-date-grid label,
+.export-select-grid > label {
+  display: grid;
+  gap: 6px;
+}
+.export-form input[type='date'],
+.export-form select {
+  width: 100%;
+  min-height: 39px;
+  padding: 9px 10px;
+  border: 1px solid #dce4dc;
+  border-radius: 8px;
+  outline: 0;
+  background: #fafcfa;
+  color: #355448;
+  font: inherit;
+  font-size: 10px;
+}
+.export-form input[type='date']:focus,
+.export-form select:focus {
+  border-color: #62a087;
+  box-shadow: 0 0 0 3px rgba(98, 160, 135, 0.12);
+}
+.export-options {
+  display: grid;
+  gap: 9px;
+}
+.export-options label {
+  padding: 11px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #e4e9e4;
+  border-radius: 8px;
+  background: #fafcfa;
+  cursor: pointer;
+}
+.export-options input,
+.export-format-options input {
+  accent-color: #32745b;
+}
+.export-options span {
+  display: grid;
+  gap: 3px;
+}
+.export-options b {
+  color: #355448;
+  font-size: 10px;
+}
+.export-options small {
+  color: #83918b;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.export-format-options {
+  display: flex;
+  gap: 24px;
+}
+.export-format-options label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
 .form-wide {
   grid-column: 1 / -1;
 }
@@ -2636,8 +3004,26 @@ td i {
   }
   .network-metrics,
   .detail-section dl,
-  .sensor-form-grid {
+  .sensor-form-grid,
+  .export-date-grid,
+  .export-select-grid {
     grid-template-columns: 1fr;
+  }
+  .sensor-modal-backdrop {
+    padding: 12px;
+  }
+  .export-modal {
+    max-height: calc(100dvh - 24px);
+  }
+  .export-form {
+    gap: 13px;
+  }
+  .export-form fieldset {
+    padding: 12px;
+  }
+  .export-modal .sensor-modal-actions button {
+    min-height: 40px;
+    padding-inline: 18px;
   }
   .detail-section .detail-wide {
     grid-column: auto;

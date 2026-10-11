@@ -175,29 +175,6 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
       </div>
     </section>
 
-    <section v-if="selectedSpecies.niahDistribution" class="distribution-section">
-      <div class="detail-container distribution-grid">
-        <div class="distribution-copy">
-          <p class="section-label">DISTRIBUTION IN NIAH NATIONAL PARK</p>
-          <h2>Known species occurrence</h2>
-          <p>
-            This staff prototype summary represents approved species occurrence records at zone level.
-            Authorized coordinates are available on each individual plant record.
-          </p>
-          <div class="distribution-stats">
-            <div><strong>{{ selectedSpecies.niahDistribution.knownOccurrences }}</strong><span>Known verified occurrences</span></div>
-            <div><strong>{{ selectedSpecies.niahDistribution.zones.join(', ') }}</strong><span>Monitoring zones</span></div>
-          </div>
-          <small v-if="selectedSpecies.niahDistribution.publicNote">{{ selectedSpecies.niahDistribution.publicNote }}</small>
-        </div>
-
-        <div class="distribution-map" role="img" :aria-label="`Prototype distribution map for ${selectedSpecies.name}`">
-          <span v-for="zone in ['A', 'B', 'C']" :key="zone" :class="{ recorded: selectedSpecies.niahDistribution.zones.includes(zone) }">Zone {{ zone }}</span>
-          <p>Prototype zone-level distribution</p>
-        </div>
-      </div>
-    </section>
-
     <section class="explore-more">
       <p>Continue discovering the remarkable flora of Niah.</p>
       <RouterLink to="/species">Explore more species →</RouterLink>
@@ -505,16 +482,14 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   margin-bottom: 34px;
 }
 
-.section-heading h2,
-.distribution-copy h2 {
+.section-heading h2 {
   margin: 0;
   color: #234a3c;
   font-size: clamp(30px, 4vw, 42px);
   line-height: 1.15;
 }
 
-.section-heading > p:last-child,
-.distribution-copy > p:not(.section-label) {
+.section-heading > p:last-child {
   margin: 14px 0 0;
   color: #63776d;
   font-size: 14px;
@@ -582,11 +557,6 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   font-weight: 700;
 }
 
-.distribution-section {
-  padding: 90px 0;
-  background: #f8f6ee;
-}
-
 .individual-plants {
   padding: 90px 0;
   background: #e8efe3;
@@ -602,95 +572,6 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
 .view-all-row { margin-top: 30px; text-align: center; }
 .view-all-row a { display: inline-flex; padding: 12px 22px; border-radius: 999px; background: #315b49; color: #fff; font-size: 13px; font-weight: 700; text-decoration: none; transition: background .2s ease, transform .2s ease; }
 .view-all-row a:hover { background: #234a3c; transform: translateY(-2px); }
-
-.distribution-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
-  align-items: center;
-  gap: 70px;
-}
-
-.distribution-stats {
-  margin: 28px 0 18px;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-.distribution-stats div {
-  padding: 17px;
-  border: 1px solid rgba(58, 96, 70, 0.12);
-  border-radius: 13px;
-  background: #fff;
-}
-
-.distribution-stats strong {
-  display: block;
-  color: #2f7056;
-  font-size: 24px;
-}
-
-.distribution-stats span {
-  display: block;
-  margin-top: 4px;
-  color: #75867e;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.distribution-copy > small {
-  color: #83918b;
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-.distribution-map {
-  position: relative;
-  min-height: 350px;
-  overflow: hidden;
-  border: 1px solid rgba(58, 96, 70, 0.14);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at 25% 34%, rgba(58, 132, 91, 0.18) 0 8%, transparent 9%),
-    radial-gradient(circle at 70% 28%, rgba(58, 132, 91, 0.14) 0 12%, transparent 13%),
-    radial-gradient(circle at 56% 72%, rgba(58, 132, 91, 0.18) 0 15%, transparent 16%),
-    repeating-linear-gradient(35deg, transparent 0 38px, rgba(72, 123, 93, 0.06) 39px 40px),
-    #dfe9dc;
-  box-shadow: inset 0 0 60px rgba(46, 91, 66, 0.08);
-}
-
-.distribution-map > span {
-  position: absolute;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.82);
-  color: #7b8982;
-  font-size: 10px;
-  font-weight: 800;
-  box-shadow: 0 5px 14px rgba(37, 75, 58, 0.1);
-}
-
-.distribution-map > span:nth-child(1) { top: 25%; left: 18%; }
-.distribution-map > span:nth-child(2) { top: 48%; right: 18%; }
-.distribution-map > span:nth-child(3) { bottom: 19%; left: 38%; }
-
-.distribution-map > span.recorded {
-  background: #34785d;
-  color: #fff;
-}
-
-.distribution-map > p {
-  position: absolute;
-  right: 18px;
-  bottom: 15px;
-  margin: 0;
-  color: #6f8078;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
 
 .explore-more {
   padding: 54px 6%;
@@ -746,8 +627,7 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
 
 @media (max-width: 850px) {
   .hero-grid,
-  .information-grid,
-  .distribution-grid {
+  .information-grid {
     grid-template-columns: 1fr;
     gap: 48px;
   }
@@ -783,8 +663,7 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   .detail-hero,
   .plant-information,
   .individual-plants,
-  .botanical-gallery,
-  .distribution-section {
+  .botanical-gallery {
     padding: 38px 0;
   }
 
@@ -894,8 +773,7 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     margin-bottom: 22px;
   }
 
-  .section-heading h2,
-  .distribution-copy h2 {
+  .section-heading h2 {
     font-size: 28px;
   }
 
@@ -924,10 +802,6 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     gap: 10px;
   }
 
-  .distribution-stats {
-    grid-template-columns: 1fr;
-  }
-
   .gallery-grid img,
   .gallery-placeholder {
     height: clamp(120px, 28vw, 170px);
@@ -937,10 +811,6 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   .gallery-grid figcaption {
     padding: 10px;
     font-size: 10px;
-  }
-
-  .distribution-map {
-    min-height: 250px;
   }
 
   .explore-more {
