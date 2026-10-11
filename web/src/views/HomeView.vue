@@ -583,12 +583,11 @@ onBeforeUnmount(() => {
             </p>
 
             <h2 class="reveal reveal-delay-1">
-              Plants of Niah
+              Discover Niah’s Flora
             </h2>
 
             <p class="explore-plants-description reveal reveal-delay-2">
-              Discover the remarkable plants found throughout
-              Niah National Park.
+              Meet the remarkable plants that shape the rainforest of Niah National Park.
             </p>
 
           </div>
@@ -745,38 +744,38 @@ onBeforeUnmount(() => {
       <div class="before-explore-container">
         <div class="before-explore-heading">
           <div>
-            <p class="section-label reveal">BEFORE YOU EXPLORE</p>
-            <h2 class="reveal reveal-delay-1">Come Prepared for the Adventure</h2>
+            <p class="section-label">BEFORE YOU EXPLORE</p>
+            <h2>Come Prepared for the Adventure</h2>
           </div>
-          <p class="reveal reveal-delay-2">
+          <p>
             A little preparation will make your journey through Niah's rainforest and caves
             safer and more comfortable.
           </p>
         </div>
 
         <div class="preparation-grid">
-          <article class="preparation-item reveal">
+          <article class="preparation-item">
             <span class="preparation-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><path d="M5 5v8l-2 3c-.6 1 .1 2.3 1.3 2.3H18c1.7 0 3-1.3 3-3V14l-6-1.2-4-4V5H5Z"/><path d="M6 14h8M16 17.8v-2"/></svg>
             </span>
             <div><h3>Good Footwear</h3><p>Wear comfortable shoes with good grip as trails and cave surfaces can be slippery.</p></div>
           </article>
 
-          <article class="preparation-item reveal reveal-delay-1">
+          <article class="preparation-item">
             <span class="preparation-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><path d="m8 5 8 2-1 4-8-2 1-4ZM8 9l-2 9 6 1 3-8"/><path d="m16 7 4-1M16 9l4 1M17 5l2-2"/></svg>
             </span>
             <div><h3>Bring a Torch</h3><p>Some sections of the caves are naturally dark, so bring a reliable torch.</p></div>
           </article>
 
-          <article class="preparation-item reveal reveal-delay-2">
+          <article class="preparation-item">
             <span class="preparation-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><path d="M9 3h6v3l2 3v10c0 1.1-.9 2-2 2H9c-1.1 0-2-.9-2-2V9l2-3V3Z"/><path d="M7 12h10M10 6h4"/></svg>
             </span>
             <div><h3>Carry Water</h3><p>Stay hydrated during the walk through the tropical rainforest and cave system.</p></div>
           </article>
 
-          <article class="preparation-item reveal reveal-delay-3">
+          <article class="preparation-item">
             <span class="preparation-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="13" rx="4" ry="6"/><path d="M12 7V4M9.5 5.5 8 4M14.5 5.5 16 4M8 10 4 8M16 10l4-2M8 14H4M16 14h4M8.5 17.5 5 20M15.5 17.5 19 20"/></svg>
             </span>
