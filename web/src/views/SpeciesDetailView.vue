@@ -51,7 +51,7 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
           <div class="hero-copy">
             <div class="hero-badges">
               <span class="category">{{ selectedSpecies.category }}</span>
-              <span v-if="selectedSpecies.conservationStatus" class="conservation-status">{{ selectedSpecies.conservationStatus }}</span>
+              <span v-if="canViewSensitiveFacts && selectedSpecies.conservationStatus" class="conservation-status">{{ selectedSpecies.conservationStatus }}</span>
             </div>
             <h1>{{ selectedSpecies.name }}</h1>
             <p class="scientific-name">{{ selectedSpecies.scientificName }}</p>

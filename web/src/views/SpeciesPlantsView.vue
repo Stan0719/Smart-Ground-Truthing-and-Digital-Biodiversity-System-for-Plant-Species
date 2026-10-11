@@ -1,14 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import NavigationBar from '../components/NavigationBar.vue'
 import PlantRecordCard from '../components/PlantRecordCard.vue'
 import { plants as species } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
+import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 type SortOption = 'default' | 'id-asc' | 'verified-newest' | 'verified-oldest'
 
 const route = useRoute()
+const { isLoggedIn, userRole } = usePrototypeSession()
+const canViewStaffPlantData = computed(
+  () =>
+    isLoggedIn.value &&
+    (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+)
 const searchQuery = ref('')
 const healthFilter = ref('All')
 const lifeStageFilter = ref('All')
@@ -37,17 +44,18 @@ const filteredPlants = computed(() => {
     const matchesSearch =
       !query ||
       plant.plantId.toLowerCase().includes(query) ||
-      plant.location.zone.toLowerCase().includes(query) ||
-      plant.latestApproved.healthStatus.toLowerCase().includes(query) ||
-      plant.qr.code.toLowerCase().includes(query) ||
-      plant.qr.status.toLowerCase().includes(query)
+      (canViewStaffPlantData.value &&
+        (plant.location.zone.toLowerCase().includes(query) ||
+          plant.latestApproved.healthStatus.toLowerCase().includes(query) ||
+          plant.qr.code.toLowerCase().includes(query) ||
+          plant.qr.status.toLowerCase().includes(query)))
 
     return (
       matchesSearch &&
-      (healthFilter.value === 'All' || plant.latestApproved.healthStatus === healthFilter.value) &&
+      (!canViewStaffPlantData.value || healthFilter.value === 'All' || plant.latestApproved.healthStatus === healthFilter.value) &&
       (lifeStageFilter.value === 'All' || plant.latestApproved.lifeStage === lifeStageFilter.value) &&
-      (qrFilter.value === 'All' || plant.qr.status === qrFilter.value) &&
-      (zoneFilter.value === 'All' || plant.location.zone === zoneFilter.value)
+      (!canViewStaffPlantData.value || qrFilter.value === 'All' || plant.qr.status === qrFilter.value) &&
+      (!canViewStaffPlantData.value || zoneFilter.value === 'All' || plant.location.zone === zoneFilter.value)
     )
   })
 
@@ -61,19 +69,18 @@ const filteredPlants = computed(() => {
 const hasActiveFilters = computed(
   () =>
     Boolean(searchQuery.value) ||
-    healthFilter.value !== 'All' ||
     lifeStageFilter.value !== 'All' ||
-    qrFilter.value !== 'All' ||
-    zoneFilter.value !== 'All',
+    (canViewStaffPlantData.value &&
+      (healthFilter.value !== 'All' || qrFilter.value !== 'All' || zoneFilter.value !== 'All')),
 )
 
 const activeFilterCount = computed(
   () =>
     [
-      healthFilter.value !== 'All',
       lifeStageFilter.value !== 'All',
-      qrFilter.value !== 'All',
-      zoneFilter.value !== 'All',
+      canViewStaffPlantData.value && healthFilter.value !== 'All',
+      canViewStaffPlantData.value && qrFilter.value !== 'All',
+      canViewStaffPlantData.value && zoneFilter.value !== 'All',
     ].filter(Boolean).length,
 )
 
@@ -91,6 +98,18 @@ const clearFilters = () => {
   qrFilter.value = 'All'
   zoneFilter.value = 'All'
 }
+
+watch(
+  canViewStaffPlantData,
+  (canView) => {
+    if (!canView) {
+      healthFilter.value = 'All'
+      qrFilter.value = 'All'
+      zoneFilter.value = 'All'
+    }
+  },
+  { immediate: true },
+)
 
 </script>
 
@@ -142,11 +161,11 @@ const clearFilters = () => {
             </button>
           </div>
 
-          <div id="advanced-plant-filters" class="filter-grid" :class="{ 'mobile-filters-open': filtersOpen }">
-            <label><span>Health</span><select v-model="healthFilter"><option v-for="option in healthOptions" :key="option">{{ option }}</option></select></label>
+          <div id="advanced-plant-filters" class="filter-grid" :class="{ 'mobile-filters-open': filtersOpen, 'public-filters': !canViewStaffPlantData }">
+            <label v-if="canViewStaffPlantData"><span>Health</span><select v-model="healthFilter"><option v-for="option in healthOptions" :key="option">{{ option }}</option></select></label>
             <label><span>Life stage</span><select v-model="lifeStageFilter"><option v-for="option in lifeStageOptions" :key="option">{{ option }}</option></select></label>
-            <label><span>QR status</span><select v-model="qrFilter"><option v-for="option in qrOptions" :key="option">{{ option }}</option></select></label>
-            <label><span>Zone</span><select v-model="zoneFilter"><option v-for="option in zoneOptions" :key="option">{{ option }}</option></select></label>
+            <label v-if="canViewStaffPlantData"><span>QR status</span><select v-model="qrFilter"><option v-for="option in qrOptions" :key="option">{{ option }}</option></select></label>
+            <label v-if="canViewStaffPlantData"><span>Zone</span><select v-model="zoneFilter"><option v-for="option in zoneOptions" :key="option">{{ option }}</option></select></label>
             <label><span>Sort</span><select v-model="sortOption"><option value="default">Default</option><option value="id-asc">Plant ID: A–Z</option><option value="verified-newest">Latest Verified: Newest</option><option value="verified-oldest">Latest Verified: Oldest</option></select></label>
           </div>
           <button v-if="filtersOpen && activeFilterCount" type="button" class="mobile-clear-filters" @click="clearAdvancedFilters">Clear Filters</button>
@@ -193,6 +212,7 @@ const clearFilters = () => {
 .filter-toggle,.mobile-clear-filters { display: none; }
 .search-box { display: flex; align-items: center; gap: 10px; padding: 0 16px; border: 1px solid #d9d9cf; border-radius: 13px; }.search-box:focus-within { border-color: #508a6a; box-shadow: 0 0 0 3px rgba(80,138,106,.12); }.search-box svg { width: 20px; fill: none; stroke: #254b42; stroke-width: 2; }.search-box input { width: 100%; padding: 14px 0; border: 0; outline: 0; background: transparent; color: #254b42; font: inherit; }
 .filter-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px; }.filter-grid label span { display: block; margin: 0 0 5px 3px; color: #718078; font-size: 9px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; }.filter-grid select { width: 100%; padding: 11px 10px; border: 1px solid #d9d9cf; border-radius: 11px; background: #fdfdfb; color: #405f56; font: inherit; font-size: 12px; }
+.filter-grid.public-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
 .plant-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 22px; }
 .empty-state button,.not-found a { display: inline-flex; padding: 10px 17px; border: 0; border-radius: 999px; background: #315b49; color: #fff; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; text-decoration: none; }
 .empty-state { padding: 68px 24px; border: 1px dashed #aebfad; border-radius: 18px; text-align: center; }.empty-state > span { font-size: 42px; }.empty-state h3 { margin: 12px 0 20px; color: #315447; font-size: 22px; }
