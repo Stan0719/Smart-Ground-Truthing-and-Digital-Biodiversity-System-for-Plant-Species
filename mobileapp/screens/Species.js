@@ -16,6 +16,7 @@ import {
   getSpeciesBySlug,
   getPlantsBySpecies,
 } from "../data/mockData";
+import { getSpeciesImageSource } from "../data/speciesImages";
 
 
 const healthOptions = [
@@ -543,6 +544,7 @@ function PlantCard({
   const species = getSpeciesBySlug(
     plant.speciesSlug
   );
+  const imageSource = getSpeciesImageSource(species);
 
   return (
     <TouchableOpacity
@@ -560,11 +562,9 @@ function PlantCard({
       {/* IMAGE */}
       <View style={styles.cardImage}>
 
-        {species?.image ? (
+        {imageSource ? (
           <Image
-            source={{
-              uri: species.image,
-            }}
+            source={imageSource}
             style={styles.plantImage}
             resizeMode="cover"
             onError={(error) => {
@@ -718,31 +718,39 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
 
-  controls: {
-    padding: 20,
-  },
+controls: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  paddingHorizontal: 20,
+  paddingVertical: 20,
+},
 
-  search: {
-    paddingHorizontal: 15,
-    paddingVertical: 13,
-    borderWidth: 1,
-    borderColor: "#D9D9CF",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    color: "#254B42",
-    fontSize: 13,
-  },
+search: {
+  flex: 1,
+  minWidth: 0,
+  minHeight: 44,
+  paddingHorizontal: 12,
+  paddingVertical: 11,
+  borderWidth: 1,
+  borderColor: "#D9D9CF",
+  borderRadius: 11,
+  backgroundColor: "#FFFFFF",
+  color: "#254B42",
+  fontSize: 13,
+},
 
-  filterToggle: {
-    marginTop: 10,
-    alignSelf: "flex-start",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "#315B49",
-    borderRadius: 999,
-    backgroundColor: "#FFFFFF",
-  },
+filterToggle: {
+  minHeight: 44,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 14,
+  paddingVertical: 10,
+  borderWidth: 1,
+  borderColor: "#315B49",
+  borderRadius: 11,
+  backgroundColor: "#FFFFFF",
+},
 
   filterToggleActive: {
     backgroundColor: "#315B49",

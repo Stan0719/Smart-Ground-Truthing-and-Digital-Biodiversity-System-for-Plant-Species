@@ -21,7 +21,7 @@ export const plants = [
     category: "Climbers",
     family: "Nepenthaceae",
     localName: "Periuk kera",
-    conservationStatus: "Not evaluated",
+    conservationStatus: "Least Concern",
     sensitivityLevel: "Sensitive",
 
     description:
@@ -91,7 +91,7 @@ export const plants = [
     category: "Flowers",
     family: "Zingiberaceae",
     localName: "Kantan",
-    conservationStatus: "Not evaluated",
+    conservationStatus: "Not Assessed",
     sensitivityLevel: "Standard",
 
     description:
@@ -159,7 +159,7 @@ export const plants = [
     category: "Ferns",
     family: "Cyatheaceae",
     localName: "Paku tiang",
-    conservationStatus: "Not evaluated",
+    conservationStatus: "Least Concern",
     sensitivityLevel: "Standard",
 
     description:
@@ -190,25 +190,19 @@ export const plants = [
     significance:
       "Their trunks and fronds create shelter for insects, mosses, and epiphytic plants within the cool forest understory.",
 
-    image: commonsImage(
-      "Cyathea contaminans var persquamulifera Alderw nmnhbotany 2148795 NMNH-00139202-000001.jpg"
-    ),
+    image: "/images/treefern.png",
 
     images: [
       {
-        path: commonsImage(
-          "Cyathea contaminans var persquamulifera Alderw nmnhbotany 2148795 NMNH-00139202-000001.jpg"
-        ),
+        path: "/images/treefern.png",
         caption: "Tree fern specimen",
       },
       {
-        path: commonsImage("Cyathea.jpg"),
+        path: "/images/treefern.png",
         caption: "Tree fern botanical form",
       },
       {
-        path: commonsImage(
-          "Cyathea contaminans var persquamulifera Alderw nmnhbotany 2148795 NMNH-00139202-000001.jpg"
-        ),
+        path: "/images/treefern.png",
         caption: "Frond detail",
       },
     ],
@@ -231,7 +225,7 @@ export const plants = [
     category: "Flowers",
     family: "Orchidaceae",
     localName: "Orkid Borneo",
-    conservationStatus: "Not evaluated",
+    conservationStatus: "Not Assessed",
     sensitivityLevel: "Sensitive",
 
     description:
@@ -305,7 +299,7 @@ export const plants = [
     category: "Climbers",
     family: "Arecaceae",
     localName: "Rotan manau",
-    conservationStatus: "Not evaluated",
+    conservationStatus: "Not Assessed",
     sensitivityLevel: "Standard",
 
     description:
@@ -371,7 +365,7 @@ export const plants = [
     category: "Trees",
     family: "Myrtaceae",
     localName: "Kelat",
-    conservationStatus: "Not evaluated",
+    conservationStatus: "Vulnerable",
     sensitivityLevel: "Standard",
 
     description:
@@ -906,4 +900,36 @@ export function getPlantsBySpecies(slug) {
   return plantRecords.filter(
     (plant) => plant.speciesSlug === slug
   );
+}
+
+export function addPlantObservation(plantId, observation) {
+  const plant = getPlantById(plantId);
+
+  if (!plant) {
+    return null;
+  }
+
+  const observations = plant.observations || [];
+  const observationId = `OBS-${plant.plantId}-${String(
+    observations.length + 1
+  ).padStart(2, "0")}`;
+
+  const newObservation = {
+    observationId,
+    plantId: plant.plantId,
+    recordedBy: observation.recordedBy,
+    date: observation.date,
+    observedAt: observation.observedAt,
+    status: "Pending Review",
+    heightCm: observation.heightCm,
+    healthStatus: observation.healthStatus,
+    lifeStage: observation.lifeStage,
+    morphology: observation.morphology,
+    notes: observation.notes,
+  };
+
+  observations.push(newObservation);
+  plant.observations = observations;
+
+  return newObservation;
 }

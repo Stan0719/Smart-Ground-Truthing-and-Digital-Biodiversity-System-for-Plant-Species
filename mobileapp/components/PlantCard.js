@@ -9,6 +9,7 @@ import {
 } from "react-native";
 
 import { getSpeciesBySlug } from "../data/mockData";
+import { getSpeciesImageSource } from "../data/speciesImages";
 
 
 export default function PlantCard({
@@ -18,6 +19,7 @@ export default function PlantCard({
   const species = getSpeciesBySlug(
     plant.speciesSlug
   );
+  const imageSource = getSpeciesImageSource(species);
 
   return (
     <TouchableOpacity
@@ -32,11 +34,9 @@ export default function PlantCard({
       {/* IMAGE */}
       <View style={styles.imageContainer}>
 
-        {species?.image ? (
+        {imageSource ? (
           <Image
-            source={{
-              uri: species.image,
-            }}
+            source={imageSource}
             style={styles.image}
           />
         ) : (

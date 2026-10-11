@@ -1,6 +1,6 @@
 // screens/PlantDetail.js
 
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 
 import {
   View,
@@ -10,20 +10,31 @@ import {
   TouchableOpacity,
   Image,
 } from "react-native";
+import { useFocusEffect } from "expo-router/react-navigation";
 
 import {
   getPlantById,
   getSpeciesBySlug,
 } from "../data/mockData";
+import { getSpeciesImageSource } from "../data/speciesImages";
 
 
 export default function PlantDetail({
   route,
   navigation,
+  user,
 }) {
   const { plantId } = route.params || {};
+  const [, setRefreshKey] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      setRefreshKey((current) => current + 1);
+    }, [])
+  );
 
   const plant = getPlantById(plantId);
+  const isBotanist = user?.role === "botanist";
 
   // =====================================================
   // PLANT NOT FOUND
@@ -67,6 +78,7 @@ export default function PlantDetail({
   const selectedSpecies = getSpeciesBySlug(
     plant.speciesSlug
   );
+  const speciesImageSource = getSpeciesImageSource(selectedSpecies);
 
 
   // =====================================================
@@ -112,9 +124,9 @@ export default function PlantDetail({
   <View style={styles.heroGrid}>
     {/* Plant image */}
     <View style={styles.imageFrame}>
-      {selectedSpecies?.image ? (
+      {speciesImageSource ? (
         <Image
-          source={{ uri: selectedSpecies.image }}
+          source={speciesImageSource}
           style={styles.plantImage}
           resizeMode="cover"
         />
@@ -239,6 +251,24 @@ export default function PlantDetail({
         </View>
 
       </View>
+
+      {isBotanist && (
+        <View style={styles.addObservationSection}>
+          <TouchableOpacity
+            style={styles.addObservationButton}
+            activeOpacity={0.8}
+            onPress={() =>
+              navigation.navigate("AddObservation", {
+                plantId: plant.plantId,
+              })
+            }
+          >
+            <Text style={styles.addObservationButtonText}>
+              + Add New Observation
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
 
       {/* =================================================
@@ -803,6 +833,27 @@ heroBadge: {
     shadowColor: "#21392C",
     shadowOpacity: 0.08,
     shadowRadius: 10,
+  },
+
+  addObservationSection: {
+    paddingHorizontal: 22,
+    paddingBottom: 26,
+  },
+
+  addObservationButton: {
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "#315B49",
+  },
+
+  addObservationButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   infoRow: {

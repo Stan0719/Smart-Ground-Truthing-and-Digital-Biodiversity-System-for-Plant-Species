@@ -15,6 +15,7 @@ import {
   getSpeciesBySlug,
   getPlantsBySpecies,
 } from "../data/mockData";
+import { getSpeciesImageSource } from "../data/speciesImages";
 
 import PlantCard from "../components/PlantCard";
 
@@ -27,6 +28,7 @@ export default function SpeciesDetail({
 
   const selectedSpecies =
     getSpeciesBySlug(slug);
+  const primaryImageSource = getSpeciesImageSource(selectedSpecies);
 
   if (!selectedSpecies) {
     return (
@@ -91,11 +93,9 @@ export default function SpeciesDetail({
 
         <View style={styles.heroImage}>
 
-          {selectedSpecies.image ? (
+          {primaryImageSource ? (
             <Image
-              source={{
-                uri: selectedSpecies.image,
-              }}
+              source={primaryImageSource}
               style={styles.image}
             />
           ) : (
@@ -388,9 +388,9 @@ export default function SpeciesDetail({
                 style={styles.galleryCard}
               >
 
-                {image.path ? (
+                {getSpeciesImageSource(selectedSpecies, image.path) ? (
                   <Image
-                    source={{ uri: image.path }}
+                    source={getSpeciesImageSource(selectedSpecies, image.path)}
                     style={styles.galleryImage}
                   />
                 ) : (
@@ -420,100 +420,7 @@ export default function SpeciesDetail({
       </View>
 
 
-      {/* DISTRIBUTION */}
 
-      {selectedSpecies.niahDistribution && (
-        <View style={styles.distribution}>
-
-          <Text style={styles.sectionLabel}>
-            DISTRIBUTION IN NIAH NATIONAL PARK
-          </Text>
-
-          <Text style={styles.sectionTitle}>
-            Known species occurrence
-          </Text>
-
-          <Text style={styles.paragraph}>
-            This staff prototype summary represents
-            approved species occurrence records at
-            zone level. Authorized coordinates are
-            available on each individual plant record.
-          </Text>
-
-
-          <View style={styles.statsRow}>
-
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>
-                {
-                  selectedSpecies
-                    .niahDistribution
-                    .knownOccurrences
-                }
-              </Text>
-
-              <Text style={styles.statLabel}>
-                Known verified occurrences
-              </Text>
-            </View>
-
-
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>
-                {
-                  selectedSpecies
-                    .niahDistribution
-                    .zones
-                    .join(", ")
-                }
-              </Text>
-
-              <Text style={styles.statLabel}>
-                Monitoring zones
-              </Text>
-            </View>
-
-          </View>
-
-
-          <View style={styles.mapPlaceholder}>
-
-            {["A", "B", "C"].map((zone, index) => {
-
-            const recorded =
-                selectedSpecies.niahDistribution.zones.includes(zone);
-
-            return (
-                <View
-                key={zone}
-                style={[
-                    styles.zone,
-                    index === 0 && styles.zoneA,
-                    index === 1 && styles.zoneB,
-                    index === 2 && styles.zoneC,
-                    recorded && styles.zoneRecorded,
-                ]}
-                >
-                <Text
-                    style={[
-                    styles.zoneText,
-                    recorded && styles.zoneTextRecorded,
-                    ]}
-                >
-                    Zone {zone}
-                </Text>
-                </View>
-            );
-            })}
-
-            <Text style={styles.mapLabel}>
-              Prototype zone-level distribution
-            </Text>
-
-          </View>
-
-        </View>
-      )}
 
     </ScrollView>
   );

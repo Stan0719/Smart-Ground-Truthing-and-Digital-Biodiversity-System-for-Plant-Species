@@ -34,6 +34,7 @@ import ScanHistoryScreen from "./screens/ScanHistory";
 import SpeciesScreen from "./screens/Species";
 import SpeciesDetailScreen from "./screens/SpeciesDetail";
 import BotanistPlantDetailScreen from "./screens/BotanistPlantDetail";
+import AddObservationScreen from "./screens/AddObservation";
 
 
 const Tab = createBottomTabNavigator();
@@ -74,17 +75,23 @@ function HomeStack() {
    PLANTS STACK
 ========================================================= */
 
-function PlantsStack() {
+function PlantsStack({ user }) {
   return (
     <Stack.Navigator>
 
       <Stack.Screen
         name="Plants"
-        component={PlantsScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => (
+          <PlantsScreen
+            {...props}
+            user={user}
+          />
+        )}
+      </Stack.Screen>
 
       <Stack.Screen
         name="SpeciesDetail"
@@ -104,7 +111,6 @@ function PlantsStack() {
 
       <Stack.Screen
         name="PlantDetails"
-        component={PlantDetailsScreen}
         options={{
           title: "Plant Details",
           headerTintColor: theme.dark,
@@ -112,7 +118,14 @@ function PlantsStack() {
             backgroundColor: theme.light,
           },
         }}
-      />
+      >
+        {(props) => (
+          <PlantDetailsScreen
+            {...props}
+            user={user}
+          />
+        )}
+      </Stack.Screen>
 
     </Stack.Navigator>
   );
@@ -123,7 +136,7 @@ function PlantsStack() {
    SCAN STACK
 ========================================================= */
 
-function ScanStack() {
+function ScanStack({ user }) {
   return (
     <Stack.Navigator>
 
@@ -137,7 +150,6 @@ function ScanStack() {
 
       <Stack.Screen
         name="PlantDetails"
-        component={PlantDetailsScreen}
         options={{
           title: "Plant Details",
 
@@ -147,7 +159,14 @@ function ScanStack() {
             backgroundColor: theme.light,
           },
         }}
-      />
+      >
+        {(props) => (
+          <PlantDetailsScreen
+            {...props}
+            user={user}
+          />
+        )}
+      </Stack.Screen>
 
     </Stack.Navigator>
   );
@@ -158,7 +177,7 @@ function ScanStack() {
    MAP STACK
 ========================================================= */
 
-function MapStack() {
+function MapStack({ user }) {
   return (
     <Stack.Navigator>
 
@@ -172,7 +191,6 @@ function MapStack() {
 
       <Stack.Screen
         name="PlantDetails"
-        component={PlantDetailsScreen}
         options={{
           title: "Plant Details",
 
@@ -182,7 +200,14 @@ function MapStack() {
             backgroundColor: theme.light,
           },
         }}
-      />
+      >
+        {(props) => (
+          <PlantDetailsScreen
+            {...props}
+            user={user}
+          />
+        )}
+      </Stack.Screen>
 
     </Stack.Navigator>
   );
@@ -225,7 +250,6 @@ function AccountStack({
       {/* Plant Details */}
       <Stack.Screen
         name="PlantDetails"
-        component={PlantDetailsScreen}
         options={{
           title: "Plant Details",
           headerTintColor: theme.dark,
@@ -233,7 +257,14 @@ function AccountStack({
             backgroundColor: theme.light,
           },
         }}
-      />
+      >
+        {(props) => (
+          <PlantDetailsScreen
+            {...props}
+            user={user}
+          />
+        )}
+      </Stack.Screen>
 
       <Stack.Screen
         name="ScanHistory"
@@ -360,32 +391,50 @@ function MainTabs({
       {/* PLANTS */}
       <Tab.Screen
         name="PlantsTab"
-        component={PlantsStack}
         options={{
           title: "Plants",
         }}
-      />
+      >
+        {(props) => (
+          <PlantsStack
+            {...props}
+            user={user}
+          />
+        )}
+      </Tab.Screen>
 
 
       {/* SCAN */}
       <Tab.Screen
         name="ScanTab"
-        component={ScanStack}
         options={{
           title: "Scan",
         }}
-      />
+      >
+        {(props) => (
+          <ScanStack
+            {...props}
+            user={user}
+          />
+        )}
+      </Tab.Screen>
 
 
       {/* MAP - BOTANIST ONLY */}
       {user?.role === "botanist" && (
         <Tab.Screen
           name="MapTab"
-          component={MapStack}
           options={{
             title: "Map",
           }}
-        />
+        >
+          {(props) => (
+            <MapStack
+              {...props}
+              user={user}
+            />
+          )}
+        </Tab.Screen>
       )}
 
 
@@ -588,6 +637,25 @@ export default function App({ homeRequest }) {
             },
           }}
         />
+
+        <RootStack.Screen
+          name="AddObservation"
+          options={{
+            headerShown: true,
+            title: "Add New Observation",
+            headerTintColor: theme.dark,
+            headerStyle: {
+              backgroundColor: theme.light,
+            },
+          }}
+        >
+          {(props) => (
+            <AddObservationScreen
+              {...props}
+              user={user}
+            />
+          )}
+        </RootStack.Screen>
 
 
 
