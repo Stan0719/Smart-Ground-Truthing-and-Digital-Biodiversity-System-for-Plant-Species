@@ -1515,7 +1515,7 @@ onBeforeUnmount(() => {
 }
 
 .attraction-card-rainforest {
-  background-image: url('/images/cave2.png');
+  background-image: url('/images/rainforesttrails.png');
   background-position: center 38%;
 }
 
