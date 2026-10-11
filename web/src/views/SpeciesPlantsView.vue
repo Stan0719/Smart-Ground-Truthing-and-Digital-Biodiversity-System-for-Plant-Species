@@ -215,12 +215,12 @@ const clearFilters = () => {
   .section-heading h2 { font-size: 28px; }
   .section-heading > p { font-size: 11px; }
   .plant-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
-  .controls { margin-bottom: 20px; padding: 12px; border-radius: 14px; }
+  .controls { margin-bottom: 20px; padding: 9px; border-radius: 13px; }
   .mobile-control-row { display: flex; align-items: stretch; gap: 8px; }
-  .search-box { min-width: 0; flex: 1; padding: 0 11px; }
-  .search-box input { min-width: 0; padding: 11px 0; font-size: 13px; }
-  .search-box svg { width: 17px; flex: 0 0 17px; }
-  .filter-toggle { min-height: 42px; padding: 0 13px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #b7c7bd; border-radius: 11px; background: #f7f6ef; color: #315b49; cursor: pointer; font-size: 11px; font-weight: 700; }
+  .search-box { min-width: 0; flex: 1; padding: 0 9px; border-radius: 10px; }
+  .search-box input { min-width: 0; padding: 8px 0; font-size: 12px; }
+  .search-box svg { width: 15px; flex: 0 0 15px; }
+  .filter-toggle { min-height: 36px; padding: 0 11px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #b7c7bd; border-radius: 10px; background: #f7f6ef; color: #315b49; cursor: pointer; font-size: 10px; font-weight: 700; }
   .filter-toggle.active { border-color: #759785; background: #e9f0e8; color: #234a3c; }
   .filter-toggle:focus-visible,.mobile-clear-filters:focus-visible { outline: 3px solid rgba(49,91,73,.2); outline-offset: 2px; }
   .filter-count { min-width: 18px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: #315b49; color: #fff; font-size: 9px; font-weight: 800; }
@@ -246,10 +246,11 @@ const clearFilters = () => {
   :deep(.record-copy dl) { margin-bottom: 12px; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px 5px; }
   :deep(.record-copy dt) { font-size: 7px; letter-spacing: .35px; }
   :deep(.record-copy dd) { margin-top: 2px; overflow-wrap: anywhere; font-size: 9px; line-height: 1.25; }
-  :deep(.learn-more) { width: min(100%,140px); height: 36px; margin-top: auto; }
-  :deep(.learn-more .circle) { width: 36px; height: 36px; }
-  :deep(.learn-more .button-arrow) { left: 9px; width: 14px; }
-  :deep(.learn-more .button-text) { padding: 8px 6px 8px 29px; font-size: 10px; line-height: 20px; }
+  :deep(.learn-more) { width: min(100%,120px); height: 32px; margin-top: auto; }
+  :deep(.learn-more .circle) { width: 32px; height: 32px; }
+  :deep(.learn-more .button-arrow) { left: 8px; width: 12px; }
+  :deep(.learn-more .button-arrow::before) { top: -3px; width: 7px; height: 7px; }
+  :deep(.learn-more .button-text) { padding: 6px 4px 6px 26px; font-size: 9px; line-height: 20px; }
 }
 
 @media (max-width: 360px) {
@@ -257,8 +258,8 @@ const clearFilters = () => {
   .plant-grid { gap: 8px; }
   :deep(.record-image) { height: 110px; }
   :deep(.record-copy) { padding: 8px; }
-  :deep(.learn-more) { height: 35px; }
-  :deep(.learn-more .circle) { width: 35px; height: 35px; }
-  :deep(.learn-more .button-text) { font-size: 9px; }
+  :deep(.learn-more) { width: min(100%,116px); height: 31px; }
+  :deep(.learn-more .circle) { width: 31px; height: 31px; }
+  :deep(.learn-more .button-text) { font-size: 8px; }
 }
 </style>

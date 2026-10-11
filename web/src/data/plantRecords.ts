@@ -41,8 +41,8 @@ const prototypeImages: Record<string, string[]> = {
     commonsImage('MCBG Etlingera elatior 02.JPG'),
   ],
   'tree-fern': [
-    commonsImage('Cyathea contaminans var persquamulifera Alderw nmnhbotany 2148795 NMNH-00139202-000001.jpg'),
-    commonsImage('Cyathea.jpg'),
+    '/images/treefern.png',
+    '/images/treefern.png',
   ],
   'borneo-orchid': [
     commonsImage('Phalaenopsis bellina Orchi 201.jpg'),
