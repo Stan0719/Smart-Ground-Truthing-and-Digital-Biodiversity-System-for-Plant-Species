@@ -36,8 +36,8 @@ const COLORS = {
   beforeBackground: '#E8EFE3',
 };
 
-const CARD_WIDTH = SCREEN_WIDTH < 500 ? 235 : 280;
-const CARD_GAP = 22;
+const CARD_WIDTH = SCREEN_WIDTH < 500 ? 190 : 240;
+const CARD_GAP = SCREEN_WIDTH < 500 ? 14 : 18;
 
 
 // ==================================================
@@ -231,26 +231,14 @@ const renderPlant = ({ item }) => {
           {item.scientificName}
         </Text>
 
-        <Text style={styles.plantGenus}>
-          Genus: {item.genus}
-        </Text>
-
-        <Text style={styles.plantFamily}>
-          Family: {item.family}
-        </Text>
-
-        <Text style={styles.plantDescription} numberOfLines={3}>
-          {item.description}
-        </Text>
-
-        
 <TouchableOpacity
   onPress={() => openPlant(item)}
   activeOpacity={0.7}
   style={styles.viewPlantButton}
+  hitSlop={5}
 >
   <Text style={styles.viewPlant}>
-    VIEW PLANT →
+    View Details →
   </Text>
 </TouchableOpacity>
 
@@ -318,6 +306,7 @@ const renderPlant = ({ item }) => {
                   style={styles.exploreButton}
                   onPress={goToPlants}
                   activeOpacity={0.8}
+                  hitSlop={5}
                 >
                   <Text style={styles.exploreButtonText}>
                     Explore Plants
@@ -710,6 +699,7 @@ const renderPlant = ({ item }) => {
                       <TouchableOpacity
                         onPress={openGoogleMaps}
                         activeOpacity={0.7}
+                        hitSlop={8}
                       >
                         <Text style={styles.mapLink}>
                           View on Google Maps →
@@ -941,10 +931,11 @@ const renderPlant = ({ item }) => {
                   style={styles.exploreMoreButton}
                   onPress={goToPlants}
                   activeOpacity={0.8}
+                  hitSlop={5}
                 >
 
                   <Text style={styles.exploreMoreText}>
-                    Explore More Plants
+                    Explore More Plant Species
                   </Text>
 
                   <Text style={styles.buttonArrow}>
@@ -992,6 +983,7 @@ const renderPlant = ({ item }) => {
                 style={styles.carouselButton}
                 onPress={() => moveCarousel(-1)}
                 activeOpacity={0.7}
+                hitSlop={5}
               >
                 <Text style={styles.carouselButtonText}>
                   ←
@@ -1003,6 +995,7 @@ const renderPlant = ({ item }) => {
                 style={styles.carouselButton}
                 onPress={() => moveCarousel(1)}
                 activeOpacity={0.7}
+                hitSlop={5}
               >
                 <Text style={styles.carouselButtonText}>
                   →
@@ -1301,10 +1294,10 @@ const styles = StyleSheet.create({
   },
 
   exploreButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 28,
+    paddingVertical: SCREEN_WIDTH < 500 ? 10 : 14,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 20 : 28,
 
-    borderRadius: 30,
+    borderRadius: SCREEN_WIDTH < 500 ? 22 : 30,
 
     backgroundColor: COLORS.cream,
   },
@@ -1312,7 +1305,7 @@ const styles = StyleSheet.create({
   exploreButtonText: {
     color: COLORS.darkGreen,
 
-    fontSize: 14,
+    fontSize: SCREEN_WIDTH < 500 ? 12 : 14,
     fontWeight: '700',
 
     textAlign: 'center',
@@ -2265,10 +2258,10 @@ stackImageBottom: {
 
     alignItems: 'center',
 
-    gap: 14,
+    gap: SCREEN_WIDTH < 500 ? 8 : 14,
 
-    paddingVertical: 14,
-    paddingHorizontal: 22,
+    paddingVertical: SCREEN_WIDTH < 500 ? 10 : 14,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 15 : 22,
 
     borderWidth: 1,
     borderColor:
@@ -2282,14 +2275,14 @@ stackImageBottom: {
   exploreMoreText: {
     color: COLORS.darkGreen,
 
-    fontSize: 13,
+    fontSize: SCREEN_WIDTH < 500 ? 11 : 13,
     fontWeight: '700',
   },
 
   buttonArrow: {
     color: COLORS.darkGreen,
 
-    fontSize: 18,
+    fontSize: SCREEN_WIDTH < 500 ? 15 : 18,
   },
 
 
@@ -2308,26 +2301,6 @@ plantImageActual: {
   height: '100%',
 },
 
-plantGenus: {
-  marginTop: 8,
-  color: COLORS.darkGreen,
-  fontSize: 12,
-  fontWeight: '600',
-},
-
-plantFamily: {
-  marginTop: 4,
-  color: COLORS.mutedText,
-  fontSize: 12,
-},
-
-plantDescription: {
-  marginTop: 10,
-  color: COLORS.textGreen,
-  fontSize: 12,
-  lineHeight: 18,
-},
-
   plantCard: {
     width: CARD_WIDTH,
 
@@ -2337,7 +2310,7 @@ plantDescription: {
     borderColor:
       'rgba(49, 91, 70, 0.1)',
 
-    borderRadius: 20,
+    borderRadius: 18,
 
     backgroundColor: COLORS.white,
 
@@ -2347,7 +2320,7 @@ plantDescription: {
   plantImage: {
     width: '100%',
 
-    height: CARD_WIDTH * 0.75,
+    height: CARD_WIDTH * 0.68,
 
     position: 'relative',
 
@@ -2372,11 +2345,11 @@ plantDescription: {
   categoryBadge: {
     position: 'absolute',
 
-    top: 14,
-    right: 14,
+    top: 10,
+    right: 10,
 
-    paddingVertical: 7,
-    paddingHorizontal: 11,
+    paddingVertical: 5,
+    paddingHorizontal: 9,
 
     borderRadius: 999,
 
@@ -2387,43 +2360,39 @@ plantDescription: {
   categoryText: {
     color: COLORS.white,
 
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
 
     letterSpacing: 0.5,
   },
 
   plantInfo: {
-    minHeight: 115,
-
-    paddingVertical: 20,
-    paddingHorizontal: 20,
+    paddingVertical: SCREEN_WIDTH < 500 ? 13 : 15,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 14 : 16,
   },
 
   plantName: {
     color: COLORS.darkText,
 
-    fontSize: 22,
+    fontSize: SCREEN_WIDTH < 500 ? 17 : 19,
     fontWeight: '600',
 
-    lineHeight: 27,
+    lineHeight: SCREEN_WIDTH < 500 ? 21 : 23,
   },
 
   scientificName: {
-    marginTop: 7,
+    marginTop: 4,
 
     color: '#88735D',
 
-    fontSize: 14,
+    fontSize: SCREEN_WIDTH < 500 ? 12 : 13,
     fontStyle: 'italic',
   },
 
   viewPlant: {
-    marginTop: 18,
-
     color: '#508A6A',
 
-    fontSize: 12,
+    fontSize: SCREEN_WIDTH < 500 ? 10 : 11,
     fontWeight: '700',
 
     letterSpacing: 0.7,
@@ -2432,9 +2401,11 @@ plantDescription: {
   
 viewPlantButton: {
   alignSelf: 'flex-start',
-  marginTop: 18,
-  paddingVertical: 8,
-  paddingRight: 12,
+  minHeight: SCREEN_WIDTH < 500 ? 34 : 40,
+  marginTop: SCREEN_WIDTH < 500 ? 4 : 7,
+  paddingVertical: SCREEN_WIDTH < 500 ? 7 : 10,
+  paddingRight: SCREEN_WIDTH < 500 ? 8 : 10,
+  justifyContent: 'center',
 },
 
 
@@ -2448,14 +2419,14 @@ viewPlantButton: {
 
     flexDirection: 'row',
 
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
 
     gap: 9,
   },
 
   carouselButton: {
-    width: 38,
-    height: 38,
+    width: SCREEN_WIDTH < 500 ? 34 : 38,
+    height: SCREEN_WIDTH < 500 ? 34 : 38,
 
     alignItems: 'center',
     justifyContent: 'center',
@@ -2464,7 +2435,7 @@ viewPlantButton: {
     borderColor:
       'rgba(70, 133, 133, 0.24)',
 
-    borderRadius: 12,
+    borderRadius: SCREEN_WIDTH < 500 ? 10 : 12,
 
     backgroundColor: COLORS.cream,
   },
@@ -2472,7 +2443,7 @@ viewPlantButton: {
   carouselButtonText: {
     color: COLORS.darkGreen,
 
-    fontSize: 18,
+    fontSize: SCREEN_WIDTH < 500 ? 16 : 18,
   },
 
 
