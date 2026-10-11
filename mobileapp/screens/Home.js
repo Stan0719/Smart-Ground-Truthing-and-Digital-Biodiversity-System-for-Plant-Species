@@ -1394,12 +1394,12 @@ const styles = StyleSheet.create({
   // HERO
   // ==================================================
 
-  hero: {
-    width: '100%',
-    height: SCREEN_WIDTH <= 500 ? 580 : 690,
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
+hero: {
+  width: '100%',
+  height: SCREEN_WIDTH <= 500 ? 430 : 690,
+  justifyContent: 'center',
+  overflow: 'hidden',
+},
   
 
   
@@ -1413,111 +1413,96 @@ const styles = StyleSheet.create({
   },
 
 
-  heroContent: {
-    alignItems: 'flex-start',
-    alignSelf: 'stretch',
-    paddingHorizontal: 24,
-  },
+heroContent: {
+  alignItems: 'flex-start',
+  alignSelf: 'stretch',
+  paddingHorizontal: SCREEN_WIDTH < 500 ? 20 : 24,
+},
 
-  eyebrow: {
-    marginBottom: 20,
-
-    color: COLORS.lightGreen,
-
-    fontSize: SCREEN_WIDTH < 500 ? 12 : 14,
-    fontWeight: '700',
-
-    letterSpacing: 4,
-  },
+eyebrow: {
+  marginBottom: SCREEN_WIDTH < 500 ? 13 : 20,
+  color: COLORS.lightGreen,
+  fontSize: SCREEN_WIDTH < 500 ? 10 : 14,
+  fontWeight: '700',
+  letterSpacing: SCREEN_WIDTH < 500 ? 2.8 : 4,
+},
 
   
-  heroTitle: {
-    color: COLORS.cream,
+heroTitle: {
+  color: COLORS.cream,
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 36
+      : SCREEN_WIDTH < 900
+        ? 58
+        : 72,
+  lineHeight:
+    SCREEN_WIDTH < 500
+      ? 41
+      : SCREEN_WIDTH < 900
+        ? 62
+        : 76,
+  fontWeight: '800',
+},
 
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 42
-        : SCREEN_WIDTH < 900
-          ? 58
-          : 72,
+heroDescription: {
+  maxWidth: 560,
+  marginTop: SCREEN_WIDTH < 500 ? 18 : 28,
+  marginBottom: SCREEN_WIDTH < 500 ? 24 : 36,
+  color: '#E0EBDD',
+  fontSize: SCREEN_WIDTH < 500 ? 14 : 17,
+  lineHeight: SCREEN_WIDTH < 500 ? 22 : 30,
+},
 
-    lineHeight:
-      SCREEN_WIDTH < 500
-        ? 47
-        : SCREEN_WIDTH < 900
-          ? 62
-          : 76,
-
-    fontWeight: '800',
-  },
 
   heroHighlight: {
     color: '#7DD1B9',
-  },
-
-  heroDescription: {
-    maxWidth: 560,
-
-    marginTop: 28,
-    marginBottom: 36,
-
-    color: '#E0EBDD',
-
-    fontSize: SCREEN_WIDTH < 500 ? 15 : 17,
-    lineHeight: SCREEN_WIDTH < 500 ? 25 : 30,
   },
 
   heroActions: {
     flexDirection: 'row',
   },
 
-  exploreButton: {
-    paddingVertical: SCREEN_WIDTH < 500 ? 10 : 14,
-    paddingHorizontal: SCREEN_WIDTH < 500 ? 20 : 28,
+exploreButton: {
+  minHeight: SCREEN_WIDTH < 500 ? 44 : undefined,
+  paddingVertical: SCREEN_WIDTH < 500 ? 11 : 14,
+  paddingHorizontal: SCREEN_WIDTH < 500 ? 21 : 28,
+  borderRadius: SCREEN_WIDTH < 500 ? 24 : 30,
+  backgroundColor: COLORS.cream,
+  justifyContent: 'center',
+},
 
-    borderRadius: SCREEN_WIDTH < 500 ? 22 : 30,
-
-    backgroundColor: COLORS.cream,
-  },
-
-  exploreButtonText: {
-    color: COLORS.darkGreen,
-
-    fontSize: SCREEN_WIDTH < 500 ? 12 : 14,
-    fontWeight: '700',
-
-    textAlign: 'center',
-  },
+exploreButtonText: {
+  color: COLORS.darkGreen,
+  fontSize: SCREEN_WIDTH < 500 ? 13 : 14,
+  fontWeight: '700',
+  textAlign: 'center',
+},
 
 
   // ==================================================
   // ABOUT
   // ==================================================
 
-  aboutSection: {
-    paddingVertical:
-      SCREEN_WIDTH < 500
-        ? 70
-        : 100,
+aboutSection: {
+  paddingVertical:
+    SCREEN_WIDTH < 500
+      ? 52
+      : 100,
+  backgroundColor: COLORS.paleGreen,
+},
 
-    backgroundColor: COLORS.paleGreen,
-  },
-
-  aboutContainer: {
-    width: '88%',
-    maxWidth: 1200,
-
-    alignSelf: 'center',
-
-    flexDirection:
-      SCREEN_WIDTH <= 900
-        ? 'column'
-        : 'row',
-
-    alignItems: 'center',
-
-    gap: 50,
-  },
+aboutContainer: {
+  width: '88%',
+  maxWidth: 1200,
+  alignSelf: 'center',
+  flexDirection:
+    SCREEN_WIDTH <= 900
+      ? 'column'
+      : 'row',
+  alignItems: 'center',
+  gap: SCREEN_WIDTH < 500 ? 30 : 50,
+},
 
   aboutImageWrapper: {
     width: '100%',
@@ -1542,7 +1527,7 @@ aboutImageWrapper: {
 
 aboutStackWrapper: {
   width: '100%',
-  height: SCREEN_WIDTH <= 900 ? 320 : 470,
+  height: SCREEN_WIDTH <= 500 ? 292 : SCREEN_WIDTH <= 900 ? 320 : 470,
   position: 'relative',
   alignItems: 'center',
   justifyContent: 'center',
@@ -1550,7 +1535,7 @@ aboutStackWrapper: {
 },
 
 aboutStackDeck: {
-  width: SCREEN_WIDTH < 500 ? '82%' : '80%',
+  width: SCREEN_WIDTH < 500 ? '80%' : '80%',
   maxWidth: 430,
   aspectRatio: 1,
   position: 'relative',
@@ -1564,7 +1549,7 @@ aboutStackCard: {
   bottom: 0,
   left: 0,
   overflow: 'hidden',
-  borderRadius: SCREEN_WIDTH < 500 ? 20 : 24,
+  borderRadius: SCREEN_WIDTH < 500 ? 18 : 24,
   backgroundColor: COLORS.paleGreen,
   shadowColor: COLORS.darkGreen,
   shadowOffset: { width: 0, height: 9 },
@@ -1586,9 +1571,9 @@ aboutStackImage: {
 aboutStackArrow: {
   position: 'absolute',
   top: '50%',
-  width: SCREEN_WIDTH < 500 ? 40 : 44,
-  height: SCREEN_WIDTH < 500 ? 40 : 44,
-  marginTop: SCREEN_WIDTH < 500 ? -20 : -22,
+  width: 44,
+  height: 44,
+  marginTop: -22,
   alignItems: 'center',
   justifyContent: 'center',
   borderWidth: 1,
@@ -1614,8 +1599,8 @@ aboutStackArrowRight: {
 aboutStackArrowText: {
   marginTop: -2,
   color: COLORS.darkGreen,
-  fontSize: SCREEN_WIDTH < 500 ? 28 : 31,
-  lineHeight: SCREEN_WIDTH < 500 ? 30 : 33,
+  fontSize: SCREEN_WIDTH < 500 ? 25 : 31,
+  lineHeight: SCREEN_WIDTH < 500 ? 28 : 33,
   fontWeight: '500',
 },
 
@@ -1625,195 +1610,163 @@ aboutStackArrowText: {
     flex: 1,
   },
 
-  sectionLabel: {
-    marginBottom: 14,
+sectionLabel: {
+  marginBottom: SCREEN_WIDTH < 500 ? 9 : 14,
+  color: COLORS.green,
+  fontSize: SCREEN_WIDTH < 500 ? 10 : 13,
+  fontWeight: '700',
+  letterSpacing: SCREEN_WIDTH < 500 ? 2 : 3,
+},
 
-    color: COLORS.green,
+aboutTitle: {
+  marginBottom: SCREEN_WIDTH < 500 ? 16 : 24,
+  color: COLORS.darkGreen,
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 30
+      : 52,
+  lineHeight:
+    SCREEN_WIDTH < 500
+      ? 35
+      : 58,
+  fontWeight: '800',
+},
 
-    fontSize: 13,
-    fontWeight: '700',
-
-    letterSpacing: 3,
-  },
-
-  aboutTitle: {
-    marginBottom: 24,
-
-    color: COLORS.darkGreen,
-
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 38
-        : 52,
-
-    lineHeight:
-      SCREEN_WIDTH < 500
-        ? 43
-        : 58,
-
-    fontWeight: '800',
-  },
-
-  aboutDescription: {
-    marginBottom: 18,
-
-    color: COLORS.textGreen,
-
-    fontSize: 16,
-    lineHeight: 29,
-  },
+aboutDescription: {
+  marginBottom: SCREEN_WIDTH < 500 ? 14 : 18,
+  color: COLORS.textGreen,
+  fontSize: SCREEN_WIDTH < 500 ? 14 : 16,
+  lineHeight: SCREEN_WIDTH < 500 ? 22 : 29,
+},
 
 
   // ==================================================
   // FACTS
   // ==================================================
 
-  aboutFacts: {
-    flexDirection:
-      SCREEN_WIDTH < 600
-        ? 'column'
-        : 'row',
+aboutFacts: {
+  flexDirection: 'row',
+  gap: SCREEN_WIDTH < 500 ? 8 : 12,
+  marginTop: SCREEN_WIDTH < 500 ? 14 : 20,
+},
 
-    gap: 12,
+flexDirection:
+  SCREEN_WIDTH < 600
+    ? 'column'
+    : 'row',
 
-    marginTop: 20,
-  },
+factCard: {
+  flex: 1,
+  paddingVertical: SCREEN_WIDTH < 500 ? 12 : 18,
+  paddingHorizontal: SCREEN_WIDTH < 500 ? 8 : 14,
+  borderRadius: SCREEN_WIDTH < 500 ? 10 : 14,
+  backgroundColor: 'rgba(255, 246, 220, 0.7)',
+  borderWidth: 1,
+  borderColor: 'rgba(70, 133, 133, 0.12)',
+},
 
-  factCard: {
-    flex: 1,
+factNumber: {
+  marginBottom: 6,
+  color: COLORS.darkGreen,
+  fontSize: SCREEN_WIDTH < 500 ? 16 : 20,
+  fontWeight: '800',
+},
 
-    paddingVertical: 18,
-    paddingHorizontal: 14,
-
-    borderRadius: 14,
-
-    backgroundColor: 'rgba(255, 246, 220, 0.7)',
-
-    borderWidth: 1,
-    borderColor: 'rgba(70, 133, 133, 0.12)',
-  },
-
-  factNumber: {
-    marginBottom: 6,
-
-    color: COLORS.darkGreen,
-
-    fontSize: 20,
-    fontWeight: '800',
-  },
-
-  factLabel: {
-    color: '#55716D',
-
-    fontSize: 11,
-    lineHeight: 16,
-  },
+factLabel: {
+  color: '#55716D',
+  fontSize: SCREEN_WIDTH < 500 ? 10 : 11,
+  lineHeight: SCREEN_WIDTH < 500 ? 14 : 16,
+},
 
 
   // ==================================================
   // EXPLORE NIAH
   // ==================================================
 
-  exploreNiah: {
-    width: '88%',
-    maxWidth: 1200,
+exploreNiah: {
+  width: '88%',
+  maxWidth: 1200,
+  alignSelf: 'center',
+  marginTop:
+    SCREEN_WIDTH < 500
+      ? 54
+      : 100,
+},
 
-    alignSelf: 'center',
+exploreNiahHeading: {
+  maxWidth: 760,
+  marginBottom: SCREEN_WIDTH < 500 ? 28 : 42,
+},
 
-    marginTop:
-      SCREEN_WIDTH < 500
-        ? 70
-        : 100,
-  },
+exploreNiahTitle: {
+  color: '#315F5F',
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 30
+      : 54,
+  lineHeight:
+    SCREEN_WIDTH < 500
+      ? 36
+      : 60,
+  fontWeight: '800',
+},
 
-  exploreNiahHeading: {
-    maxWidth: 760,
-
-    marginBottom: 42,
-  },
-
-  exploreNiahTitle: {
-    color: '#315F5F',
-
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 36
-        : 54,
-
-    lineHeight:
-      SCREEN_WIDTH < 500
-        ? 41
-        : 60,
-
-    fontWeight: '800',
-  },
-
-  exploreNiahDescription: {
-    maxWidth: 680,
-
-    marginTop: 18,
-
-    color: '#60756F',
-
-    fontSize: 16,
-    lineHeight: 28,
-  },
+exploreNiahDescription: {
+  maxWidth: 680,
+  marginTop: SCREEN_WIDTH < 500 ? 12 : 18,
+  color: '#60756F',
+  fontSize: SCREEN_WIDTH < 500 ? 14 : 16,
+  lineHeight: SCREEN_WIDTH < 500 ? 22 : 28,
+},
 
 
   // ==================================================
   // ATTRACTIONS
   // ==================================================
 
-  attractionGrid: {
-    flexDirection:
-      SCREEN_WIDTH <= 500
-        ? 'column'
-        : 'row',
+attractionGrid: {
+  flexDirection:
+    SCREEN_WIDTH <= 500
+      ? 'column'
+      : 'row',
+  flexWrap: 'wrap',
+  gap: SCREEN_WIDTH < 500 ? 14 : 20,
+},
 
-    flexWrap: 'wrap',
+attractionCard: {
+  overflow: 'hidden',
+  borderRadius: SCREEN_WIDTH < 500 ? 20 : 24,
+  backgroundColor: '#315F54',
+  elevation: 6,
+},
 
-    gap: 20,
-  },
-
-  attractionCard: {
-    overflow: 'hidden',
-
-    borderRadius: 24,
-
-    backgroundColor: '#315F54',
-
-    elevation: 6,
-  },
-
-  attractionFeatured: {
-    width:
-      SCREEN_WIDTH <= 500
+attractionFeatured: {
+  width:
+    SCREEN_WIDTH <= 500
+      ? '100%'
+      : SCREEN_WIDTH <= 900
         ? '100%'
-        : SCREEN_WIDTH <= 900
-          ? '100%'
-          : '55%',
+        : '55%',
+  height:
+    SCREEN_WIDTH <= 500
+      ? 315
+      : SCREEN_WIDTH <= 900
+        ? 420
+        : 530,
+},
 
-    height:
-      SCREEN_WIDTH <= 500
-        ? 390
-        : SCREEN_WIDTH <= 900
-          ? 420
-          : 530,
-  },
-
-  attractionSmall: {
-    width:
-      SCREEN_WIDTH <= 500
-        ? '100%'
-        : SCREEN_WIDTH <= 900
-          ? '47%'
-          : '40%',
-
-    height:
-      SCREEN_WIDTH <= 500
-        ? 280
-        : 255,
-  },
+attractionSmall: {
+  width:
+    SCREEN_WIDTH <= 500
+      ? '100%'
+      : SCREEN_WIDTH <= 900
+        ? '47%'
+        : '40%',
+  height:
+    SCREEN_WIDTH <= 500
+      ? 225
+      : 255,
+},
 
   attractionBackground: {
     flex: 1,
@@ -1837,116 +1790,92 @@ aboutStackArrowText: {
     backgroundColor: 'rgba(11, 37, 29, 0.52)',
   },
 
-  attractionContent: {
-    position: 'absolute',
+attractionContent: {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  bottom: 0,
+  padding:
+    SCREEN_WIDTH < 500
+      ? 20
+      : 38,
+},
 
-    left: 0,
-    right: 0,
-    bottom: 0,
+attractionContentSmall: {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  bottom: 0,
+  padding: SCREEN_WIDTH < 500 ? 18 : 30,
+},
 
-    padding:
-      SCREEN_WIDTH < 500
-        ? 24
-        : 38,
-  },
+featuredLabel: {
+  marginBottom: SCREEN_WIDTH < 500 ? 7 : 10,
+  color: '#BCE8C9',
+  fontSize: SCREEN_WIDTH < 500 ? 9 : 10,
+  fontWeight: '700',
+  letterSpacing: SCREEN_WIDTH < 500 ? 1.5 : 2,
+},
 
-  attractionContentSmall: {
-    position: 'absolute',
+attractionTitle: {
+  color: COLORS.cream,
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 26
+      : 36,
+  lineHeight: SCREEN_WIDTH < 500 ? 31 : 40,
+  fontWeight: '800',
+},
 
-    left: 0,
-    right: 0,
-    bottom: 0,
+attractionTitleSmall: {
+  color: COLORS.cream,
+  fontSize: SCREEN_WIDTH < 500 ? 21 : 27,
+  lineHeight: SCREEN_WIDTH < 500 ? 26 : 32,
+  fontWeight: '800',
+},
 
-    padding: 30,
-  },
+attractionDescription: {
+  maxWidth: 590,
+  marginTop: 8,
+  color: '#E3EEE7',
+  fontSize: SCREEN_WIDTH < 500 ? 12 : 13,
+  lineHeight: SCREEN_WIDTH < 500 ? 18 : 21,
+},
 
-  featuredLabel: {
-    marginBottom: 10,
-
-    color: '#BCE8C9',
-
-    fontSize: 10,
-    fontWeight: '700',
-
-    letterSpacing: 2,
-  },
-
-  attractionTitle: {
-    color: COLORS.cream,
-
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 30
-        : 36,
-
-    lineHeight: 40,
-
-    fontWeight: '800',
-  },
-
-  attractionTitleSmall: {
-    color: COLORS.cream,
-
-    fontSize: 27,
-
-    lineHeight: 32,
-
-    fontWeight: '800',
-  },
-
-  attractionDescription: {
-    maxWidth: 590,
-
-    marginTop: 10,
-
-    color: '#E3EEE7',
-
-    fontSize: 13,
-    lineHeight: 21,
-  },
-
-  attractionDescriptionSmall: {
-    marginTop: 10,
-
-    color: '#E3EEE7',
-
-    fontSize: 13,
-    lineHeight: 21,
-  },
+attractionDescriptionSmall: {
+  marginTop: 8,
+  color: '#E3EEE7',
+  fontSize: SCREEN_WIDTH < 500 ? 12 : 13,
+  lineHeight: SCREEN_WIDTH < 500 ? 18 : 21,
+},
 
 
   // ==================================================
   // VISITOR OVERVIEW
   // ==================================================
 
-  visitorOverview: {
-    width:
-      SCREEN_WIDTH < 500
-        ? '92%'
-        : '88%',
-    maxWidth: 1200,
-
-    alignSelf: 'center',
-
-    marginTop:
-      SCREEN_WIDTH < 500
-        ? 45
-        : 90,
-
-    overflow: 'hidden',
-
-    borderRadius:
-      SCREEN_WIDTH < 500
-        ? 20
-        : 28,
-
-    backgroundColor: COLORS.deepGreen,
-
-    elevation:
-      SCREEN_WIDTH < 500
-        ? 4
-        : 8,
-  },
+visitorOverview: {
+  width:
+    SCREEN_WIDTH < 500
+      ? '92%'
+      : '88%',
+  maxWidth: 1200,
+  alignSelf: 'center',
+  marginTop:
+    SCREEN_WIDTH < 500
+      ? 40
+      : 90,
+  overflow: 'hidden',
+  borderRadius:
+    SCREEN_WIDTH < 500
+      ? 18
+      : 28,
+  backgroundColor: COLORS.deepGreen,
+  elevation:
+    SCREEN_WIDTH < 500
+      ? 4
+      : 8,
+},
 
   visitorBackground: {
     width: '100%',
@@ -1962,19 +1891,25 @@ aboutStackArrowText: {
     backgroundColor: 'rgba(15, 51, 40, 0.84)',
   },
 
-  visitorContent: {
-    padding:
-      SCREEN_WIDTH < 500
-        ? 18
-        : 48,
-  },
+visitorContent: {
+  padding:
+    SCREEN_WIDTH < 500
+      ? 16
+      : 48,
+},
 
-  whyNiah: {
-    gap:
-      SCREEN_WIDTH < 500
-        ? 8
-        : 14,
-  },
+whyNiahTitle: {
+  color: COLORS.cream,
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 22
+      : 36,
+  lineHeight:
+    SCREEN_WIDTH < 500
+      ? 27
+      : 43,
+  fontWeight: '800',
+},
 
   visitorSectionLabel: {
     color: '#A9E7C4',
@@ -2007,33 +1942,27 @@ aboutStackArrowText: {
     fontWeight: '800',
   },
 
-  whyNiahDescription: {
-    marginTop:
-      SCREEN_WIDTH < 500
-        ? 7
-        : 12,
-
-    paddingTop:
-      SCREEN_WIDTH < 500
-        ? 12
-        : 22,
-
-    borderTopWidth: 1,
-    borderTopColor:
-      'rgba(224, 235, 221, 0.24)',
-
-    color: '#E0EBDD',
-
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 12
-        : 16,
-    lineHeight:
-      SCREEN_WIDTH < 500
-        ? 18
-        : 29,
-  },
-
+whyNiahDescription: {
+  marginTop:
+    SCREEN_WIDTH < 500
+      ? 7
+      : 12,
+  paddingTop:
+    SCREEN_WIDTH < 500
+      ? 12
+      : 22,
+  borderTopWidth: 1,
+  borderTopColor: 'rgba(224, 235, 221, 0.24)',
+  color: '#E0EBDD',
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 13
+      : 16,
+  lineHeight:
+    SCREEN_WIDTH < 500
+      ? 20
+      : 29,
+},
 
   // ==================================================
   // VISITOR INFO
@@ -2055,16 +1984,14 @@ aboutStackArrowText: {
       'rgba(224, 235, 221, 0.2)',
   },
 
-  visitorTitle: {
-    color: COLORS.cream,
-
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 22
-        : 34,
-
-    fontWeight: '800',
-  },
+visitorTitle: {
+  color: COLORS.cream,
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 21
+      : 34,
+  fontWeight: '800',
+},
 
   visitorCards: {
   marginTop:
@@ -2218,14 +2145,13 @@ aboutStackArrowText: {
   // JOURNEY
   // ==================================================
 
-  journeySection: {
-    paddingVertical:
-      SCREEN_WIDTH < 500
-        ? 75
-        : 110,
-
-    backgroundColor: COLORS.journeyBackground,
-  },
+journeySection: {
+  paddingVertical:
+    SCREEN_WIDTH < 500
+      ? 54
+      : 110,
+  backgroundColor: COLORS.journeyBackground,
+},
 
   journeyContainer: {
     width: '88%',
@@ -2234,41 +2160,34 @@ aboutStackArrowText: {
     alignSelf: 'center',
   },
 
-  journeyHeading: {
-    maxWidth: 760,
+journeyHeading: {
+  maxWidth: 760,
+  marginBottom:
+    SCREEN_WIDTH < 500
+      ? 32
+      : 75,
+},
 
-    marginBottom:
-      SCREEN_WIDTH < 500
-        ? 48
-        : 75,
-  },
+journeyTitle: {
+  color: '#315F5F',
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 30
+      : 54,
+  lineHeight:
+    SCREEN_WIDTH < 500
+      ? 36
+      : 60,
+  fontWeight: '800',
+},
 
-  journeyTitle: {
-    color: '#315F5F',
-
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 36
-        : 54,
-
-    lineHeight:
-      SCREEN_WIDTH < 500
-        ? 41
-        : 60,
-
-    fontWeight: '800',
-  },
-
-  journeyDescription: {
-    maxWidth: 680,
-
-    marginTop: 18,
-
-    color: '#60756F',
-
-    fontSize: 16,
-    lineHeight: 28,
-  },
+journeyDescription: {
+  maxWidth: 680,
+  marginTop: SCREEN_WIDTH < 500 ? 12 : 18,
+  color: '#60756F',
+  fontSize: SCREEN_WIDTH < 500 ? 14 : 16,
+  lineHeight: SCREEN_WIDTH < 500 ? 22 : 28,
+},
 
   journeyRoute: {
     flexDirection:
@@ -2305,22 +2224,17 @@ aboutStackArrowText: {
     textAlign: 'center',
   },
 
-  journeyMarker: {
-    width: 56,
-    height: 56,
-
-    borderWidth: 7,
-    borderColor: COLORS.journeyBackground,
-
-    borderRadius: 50,
-
-    alignItems: 'center',
-    justifyContent: 'center',
-
-    backgroundColor: '#D9E8D9',
-
-    elevation: 2,
-  },
+journeyMarker: {
+  width: SCREEN_WIDTH < 500 ? 48 : 56,
+  height: SCREEN_WIDTH < 500 ? 48 : 56,
+  borderWidth: SCREEN_WIDTH < 500 ? 6 : 7,
+  borderColor: COLORS.journeyBackground,
+  borderRadius: 50,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#D9E8D9',
+  elevation: 2,
+},
 
   journeyMarkerHighlight: {
     backgroundColor: '#2F7358',
@@ -2341,27 +2255,24 @@ aboutStackArrowText: {
     color: COLORS.white,
   },
 
-  journeyItemText: {
-    marginTop:
-      SCREEN_WIDTH <= 700
-        ? 0
-        : 17,
-
-    marginLeft:
-      SCREEN_WIDTH <= 700
-        ? 19
-        : 0,
-
-    marginBottom:
-      SCREEN_WIDTH <= 700
-        ? 25
-        : 0,
-
-    alignItems:
-      SCREEN_WIDTH <= 700
-        ? 'flex-start'
-        : 'center',
-  },
+journeyItemText: {
+  marginTop:
+    SCREEN_WIDTH <= 700
+      ? 0
+      : 17,
+  marginLeft:
+    SCREEN_WIDTH <= 700
+      ? 15
+      : 0,
+  marginBottom:
+    SCREEN_WIDTH <= 700
+      ? 20
+      : 0,
+  alignItems:
+    SCREEN_WIDTH <= 700
+      ? 'flex-start'
+      : 'center',
+},
 
   journeyItemTitle: {
     color: '#31584C',
@@ -2389,7 +2300,7 @@ aboutStackArrowText: {
 
     color: '#85958E',
 
-    fontSize: 9,
+    fontSize: 11,
 
     lineHeight: 14,
 
@@ -2404,16 +2315,14 @@ aboutStackArrowText: {
   // EXPLORE PLANTS
   // ==================================================
 
-  exploreSection: {
-    paddingVertical:
-      SCREEN_WIDTH < 500
-        ? 70
-        : 110,
-
-    backgroundColor: COLORS.offWhite,
-
-    overflow: 'hidden',
-  },
+exploreSection: {
+  paddingVertical:
+    SCREEN_WIDTH < 500
+      ? 56
+      : 110,
+  backgroundColor: COLORS.offWhite,
+  overflow: 'hidden',
+},
 
   exploreContainer: {
     width: '88%',
@@ -2422,82 +2331,65 @@ aboutStackArrowText: {
     alignSelf: 'center',
   },
 
-  exploreHeader: {
-    flexDirection:
-      SCREEN_WIDTH < 900
-        ? 'column'
-        : 'row',
-
-    alignItems:
-      SCREEN_WIDTH < 900
-        ? 'flex-start'
-        : 'flex-end',
-
-    justifyContent: 'space-between',
-
-    gap: 30,
-
-    marginBottom: 48,
-  },
-
+exploreHeader: {
+  flexDirection:
+    SCREEN_WIDTH < 900
+      ? 'column'
+      : 'row',
+  alignItems:
+    SCREEN_WIDTH < 900
+      ? 'flex-start'
+      : 'flex-end',
+  justifyContent: 'space-between',
+  gap: SCREEN_WIDTH < 500 ? 18 : 30,
+  marginBottom: SCREEN_WIDTH < 500 ? 30 : 48,
+},
   exploreHeading: {
     maxWidth: 650,
 
     flex: 1,
   },
 
-  exploreTitle: {
-    color: '#315F5F',
+exploreTitle: {
+  color: '#315F5F',
+  fontSize:
+    SCREEN_WIDTH < 500
+      ? 30
+      : 54,
+  lineHeight:
+    SCREEN_WIDTH < 500
+      ? 36
+      : 60,
+  fontWeight: '800',
+},
 
-    fontSize:
-      SCREEN_WIDTH < 500
-        ? 38
-        : 54,
+exploreDescription: {
+  maxWidth: 560,
+  marginTop: SCREEN_WIDTH < 500 ? 12 : 18,
+  color: COLORS.mutedText,
+  fontSize: SCREEN_WIDTH < 500 ? 14 : 16,
+  lineHeight: SCREEN_WIDTH < 500 ? 22 : 27,
+},
 
-    lineHeight:
-      SCREEN_WIDTH < 500
-        ? 44
-        : 60,
+exploreMoreButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: SCREEN_WIDTH < 500 ? 8 : 14,
+  minHeight: SCREEN_WIDTH < 500 ? 44 : undefined,
+  paddingVertical: SCREEN_WIDTH < 500 ? 11 : 14,
+  paddingHorizontal: SCREEN_WIDTH < 500 ? 16 : 22,
+  borderWidth: 1,
+  borderColor: 'rgba(70, 133, 133, 0.25)',
+  borderRadius: 999,
+  backgroundColor: COLORS.cream,
+},
 
-    fontWeight: '800',
-  },
-
-  exploreDescription: {
-    maxWidth: 560,
-
-    marginTop: 18,
-
-    color: COLORS.mutedText,
-
-    fontSize: 16,
-    lineHeight: 27,
-  },
-
-  exploreMoreButton: {
-    flexDirection: 'row',
-
-    alignItems: 'center',
-
-    gap: SCREEN_WIDTH < 500 ? 8 : 14,
-
-    paddingVertical: SCREEN_WIDTH < 500 ? 10 : 14,
-    paddingHorizontal: SCREEN_WIDTH < 500 ? 15 : 22,
-
-    borderWidth: 1,
-    borderColor:
-      'rgba(70, 133, 133, 0.25)',
-
-    borderRadius: 999,
-
-    backgroundColor: COLORS.cream,
-  },
-
-  exploreMoreText: {
-    color: COLORS.darkGreen,
-
-    fontSize: SCREEN_WIDTH < 500 ? 11 : 13,
-    fontWeight: '700',
-  },
+exploreMoreText: {
+  color: COLORS.darkGreen,
+  fontSize: SCREEN_WIDTH < 500 ? 12 : 13,
+  fontWeight: '700',
+},
 
   buttonArrow: {
     color: COLORS.darkGreen,
@@ -2644,27 +2536,21 @@ viewPlantButton: {
     gap: 9,
   },
 
-  carouselButton: {
-    width: SCREEN_WIDTH < 500 ? 34 : 38,
-    height: SCREEN_WIDTH < 500 ? 34 : 38,
+carouselButton: {
+  width: SCREEN_WIDTH < 500 ? 42 : 38,
+  height: SCREEN_WIDTH < 500 ? 42 : 38,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 1,
+  borderColor: 'rgba(70, 133, 133, 0.24)',
+  borderRadius: SCREEN_WIDTH < 500 ? 12 : 12,
+  backgroundColor: COLORS.cream,
+},
 
-    alignItems: 'center',
-    justifyContent: 'center',
-
-    borderWidth: 1,
-    borderColor:
-      'rgba(70, 133, 133, 0.24)',
-
-    borderRadius: SCREEN_WIDTH < 500 ? 10 : 12,
-
-    backgroundColor: COLORS.cream,
-  },
-
-  carouselButtonText: {
-    color: COLORS.darkGreen,
-
-    fontSize: SCREEN_WIDTH < 500 ? 16 : 18,
-  },
+carouselButtonText: {
+  color: COLORS.darkGreen,
+  fontSize: SCREEN_WIDTH < 500 ? 17 : 18,
+},
 
 
   // ==================================================
@@ -2674,11 +2560,18 @@ viewPlantButton: {
   // BEFORE YOU EXPLORE
   // ==================================================
 
-  beforeExplore: {
-    width: '100%',
-    paddingVertical: SCREEN_WIDTH < 500 ? 48 : 100,
-    backgroundColor: COLORS.beforeBackground,
-  },
+beforeExplore: {
+  width: '100%',
+  paddingVertical: SCREEN_WIDTH < 500 ? 48 : 100,
+  backgroundColor: COLORS.beforeBackground,
+},
+
+beforeExploreHeading: {
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  gap: SCREEN_WIDTH < 500 ? 12 : 20,
+  marginBottom: SCREEN_WIDTH < 500 ? 26 : 42,
+},
 
   beforeExploreContainer: {
     width: SCREEN_WIDTH < 500 ? '90%' : '88%',
@@ -2686,46 +2579,41 @@ viewPlantButton: {
     alignSelf: 'center',
   },
 
-  beforeExploreHeading: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    gap: SCREEN_WIDTH < 500 ? 14 : 20,
-    marginBottom: SCREEN_WIDTH < 500 ? 28 : 42,
-  },
+
 
   beforeExploreTitleContainer: {
     width: '100%',
     flex: 1,
   },
 
-  beforeExploreTitle: {
-    color: '#315F5F',
-    fontSize:
-      SCREEN_WIDTH < 360
-        ? 28
-        : SCREEN_WIDTH < 500
-          ? 33
-          : SCREEN_WIDTH < 900
-            ? 42
-            : 54,
-    lineHeight:
-      SCREEN_WIDTH < 360
-        ? 35
-        : SCREEN_WIDTH < 500
-          ? 40
-          : SCREEN_WIDTH < 900
-            ? 50
-            : 60,
-    fontWeight: '800',
-  },
+beforeExploreTitle: {
+  color: '#315F5F',
+  fontSize:
+    SCREEN_WIDTH < 360
+      ? 27
+      : SCREEN_WIDTH < 500
+        ? 30
+        : SCREEN_WIDTH < 900
+          ? 42
+          : 54,
+  lineHeight:
+    SCREEN_WIDTH < 360
+      ? 33
+      : SCREEN_WIDTH < 500
+        ? 36
+        : SCREEN_WIDTH < 900
+          ? 50
+          : 60,
+  fontWeight: '800',
+},
 
-  beforeExploreDescription: {
-    width: '100%',
-    color: '#60756F',
-    fontSize: SCREEN_WIDTH < 500 ? 14 : 16,
-    lineHeight: SCREEN_WIDTH < 500 ? 23 : 28,
-    marginBottom: 0,
-  },
+beforeExploreDescription: {
+  width: '100%',
+  color: '#60756F',
+  fontSize: SCREEN_WIDTH < 500 ? 14 : 16,
+  lineHeight: SCREEN_WIDTH < 500 ? 22 : 28,
+  marginBottom: 0,
+},
 
 
   // ==================================================
