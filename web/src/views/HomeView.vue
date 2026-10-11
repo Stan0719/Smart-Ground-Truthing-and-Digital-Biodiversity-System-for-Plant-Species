@@ -197,13 +197,14 @@ onMounted(() => {
     revealObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          if (!entry.isIntersecting) return
+          const hasReachedViewport = entry.boundingClientRect.top < window.innerHeight * 0.95
+          if (!entry.isIntersecting && !hasReachedViewport) return
 
           entry.target.classList.add('is-visible')
           revealObserver?.unobserve(entry.target)
         })
       },
-      { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
+      { threshold: 0.01, rootMargin: '0px' },
     )
 
     revealElements.forEach((element) => revealObserver?.observe(element))
@@ -1501,7 +1502,7 @@ onBeforeUnmount(() => {
 }
 
 .attraction-card-rainforest {
-  background-image: url('/images/hero.jpg');
+  background-image: url('/images/cave2.png');
   background-position: center 38%;
 }
 

@@ -25,8 +25,8 @@ const cards = ref<Card[]>([
   },
   {
     id: 4,
-    image: '/images/hero.jpg',
-    alt: 'Wildlife in Niah National Park',
+    image: '/images/cave2.png',
+    alt: 'Interior of Niah Cave',
   },
 ])
 
