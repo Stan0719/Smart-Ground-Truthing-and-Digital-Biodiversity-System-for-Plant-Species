@@ -34,7 +34,7 @@ export default function PlantDetail({
   );
 
   const plant = getPlantById(plantId);
-  const isBotanist = user?.role === "botanist";
+  const isBotanist = user?.role?.toLowerCase() === "botanist";
 
   // =====================================================
   // PLANT NOT FOUND
@@ -159,17 +159,21 @@ export default function PlantDetail({
       </Text>
 
       <View style={styles.heroBadges}>
-        <Text style={styles.heroBadge}>
-          {plant.latestApproved.healthStatus}
-        </Text>
+        {isBotanist && (
+          <Text style={styles.heroBadge}>
+            {plant.latestApproved.healthStatus}
+          </Text>
+        )}
 
         <Text style={styles.heroBadge}>
           {plant.latestApproved.lifeStage}
         </Text>
 
-        <Text style={styles.heroBadge}>
-          {plant.location.zone}
-        </Text>
+        {isBotanist && (
+          <Text style={styles.heroBadge}>
+            {plant.location.zone}
+          </Text>
+        )}
       </View>
     </View>
   </View>
@@ -222,12 +226,12 @@ export default function PlantDetail({
             value={`${plant.latestApproved.heightCm} cm`}
           />
 
-          <InfoRow
-            label="Health status"
-            value={
-              plant.latestApproved.healthStatus
-            }
-          />
+          {isBotanist && (
+            <InfoRow
+              label="Health status"
+              value={plant.latestApproved.healthStatus}
+            />
+          )}
 
           <InfoRow
             label="Life stage"
@@ -237,9 +241,21 @@ export default function PlantDetail({
           />
 
           <InfoRow
-            label="Location zone"
-            value={plant.location.zone}
+            label="Genus"
+            value={selectedSpecies?.genus}
           />
+
+          <InfoRow
+            label="Last verified"
+            value={formatDate(plant.latestApproved.date)}
+          />
+
+          {isBotanist && (
+            <InfoRow
+              label="Location zone"
+              value={plant.location.zone}
+            />
+          )}
 
           <InfoRow
             label="Morphology"
@@ -275,6 +291,7 @@ export default function PlantDetail({
           STAFF RECORD
       ================================================= */}
 
+      {isBotanist && (
       <View style={styles.staffSection}>
 
         <Text style={styles.sectionLabel}>
@@ -378,13 +395,14 @@ export default function PlantDetail({
         </View>
 
       </View>
+      )}
 
 
       {/* =================================================
           LATEST VERIFIED OBSERVATION
       ================================================= */}
 
-      {latestApprovedObservation && (
+      {isBotanist && latestApprovedObservation && (
         <View style={styles.observesection}>
 
           <Text style={styles.sectionLabel}>
@@ -462,6 +480,7 @@ export default function PlantDetail({
           OBSERVATION HISTORY
       ================================================= */}
 
+      {isBotanist && (
       <View style={styles.historySection}>
 
         <Text style={styles.sectionLabel}>
@@ -497,6 +516,7 @@ export default function PlantDetail({
         )}
 
       </View>
+      )}
 
     </ScrollView>
   );

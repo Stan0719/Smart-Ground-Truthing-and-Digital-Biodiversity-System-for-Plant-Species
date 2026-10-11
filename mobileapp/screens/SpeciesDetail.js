@@ -22,9 +22,11 @@ import PlantCard from "../components/PlantCard";
 export default function SpeciesDetail({
   route,
   navigation,
+  user,
 }) {
 
   const { slug } = route.params || {};
+  const isBotanist = user?.role?.toLowerCase() === "botanist";
 
   const selectedSpecies =
     getSpeciesBySlug(slug);
@@ -121,7 +123,7 @@ export default function SpeciesDetail({
               {selectedSpecies.category}
             </Text>
 
-            {selectedSpecies.conservationStatus && (
+            {isBotanist && selectedSpecies.conservationStatus && (
               <Text style={styles.conservation}>
                 {selectedSpecies.conservationStatus}
               </Text>
@@ -279,23 +281,18 @@ export default function SpeciesDetail({
           value={selectedSpecies.localName}
         />
 
-        <Fact
-          label="Conservation status"
-          value={selectedSpecies.conservationStatus}
-        />
+        {isBotanist && (
+          <>
+            <Fact
+              label="Conservation status"
+              value={selectedSpecies.conservationStatus}
+            />
 
-        <Fact
-          label="Sensitivity level"
-          value={selectedSpecies.sensitivityLevel}
-        />
-
-        {selectedSpecies.niahDistribution && (
-          <Fact
-            label="Distribution in Niah"
-            value={`Zones ${selectedSpecies.niahDistribution.zones.join(
-              ", "
-            )}`}
-          />
+            <Fact
+              label="Sensitivity level"
+              value={selectedSpecies.sensitivityLevel}
+            />
+          </>
         )}
 
       </View>
@@ -335,6 +332,7 @@ export default function SpeciesDetail({
                   key={plant.plantId}
                   plant={plant}
                   navigation={navigation}
+                user={user}
                 />
               ))}
 

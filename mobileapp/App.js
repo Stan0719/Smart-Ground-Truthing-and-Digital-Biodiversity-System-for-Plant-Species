@@ -95,19 +95,31 @@ function PlantsStack({ user }) {
 
       <Stack.Screen
         name="SpeciesDetail"
-        component={SpeciesDetailScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => (
+          <SpeciesDetailScreen
+            {...props}
+            user={user}
+          />
+        )}
+      </Stack.Screen>
 
       <Stack.Screen
         name="Species"
-        component={SpeciesScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => (
+          <SpeciesScreen
+            {...props}
+            user={user}
+          />
+        )}
+      </Stack.Screen>
 
       <Stack.Screen
         name="PlantDetails"

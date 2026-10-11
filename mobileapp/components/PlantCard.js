@@ -15,11 +15,14 @@ import { getSpeciesImageSource } from "../data/speciesImages";
 export default function PlantCard({
   plant,
   navigation,
+  user,
 }) {
   const species = getSpeciesBySlug(
     plant.speciesSlug
   );
   const imageSource = getSpeciesImageSource(species);
+  const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const lastVerified = formatDate(plant.latestApproved?.date);
 
   return (
     <TouchableOpacity
@@ -61,13 +64,36 @@ export default function PlantCard({
           {plant.commonName}
         </Text>
 
-        <Text style={styles.plantZone}>
-          {plant.location.zone}
-        </Text>
+        {isBotanist ? (
+          <>
+            <Text style={styles.plantZone}>
+              {plant.location.zone}
+            </Text>
 
-        <Text style={styles.plantHealth}>
-          {plant.latestApproved.healthStatus}
-        </Text>
+            <Text style={styles.plantHealth}>
+              {plant.latestApproved.healthStatus}
+            </Text>
+          </>
+        ) : (
+          <View style={styles.infoGrid}>
+            <PublicFact
+              label="Height"
+              value={`${plant.latestApproved.heightCm} cm`}
+            />
+            <PublicFact
+              label="Life stage"
+              value={plant.latestApproved.lifeStage}
+            />
+            <PublicFact
+              label="Genus"
+              value={species?.genus}
+            />
+            <PublicFact
+              label="Last verified"
+              value={lastVerified}
+            />
+          </View>
+        )}
 
         <Text style={styles.plantView}>
           View Record →
@@ -77,6 +103,32 @@ export default function PlantCard({
 
     </TouchableOpacity>
   );
+}
+
+function PublicFact({ label, value }) {
+  return (
+    <View style={styles.infoItem}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue} numberOfLines={1}>
+        {value || "-"}
+      </Text>
+    </View>
+  );
+}
+
+function formatDate(dateString) {
+  if (!dateString) return "-";
+
+  const [year, month, day] = dateString.split("-");
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const monthName = months[Number(month) - 1];
+
+  if (!year || !monthName || !day) return dateString;
+
+  return `${Number(day)} ${monthName} ${year}`;
 }
 
 
@@ -143,6 +195,32 @@ const styles = StyleSheet.create({
     color: "#34785D",
     fontSize: 10,
     fontWeight: "700",
+  },
+
+  infoGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 8,
+    rowGap: 7,
+  },
+
+  infoItem: {
+    width: "50%",
+    paddingRight: 5,
+  },
+
+  infoLabel: {
+    color: "#89958F",
+    fontSize: 8,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+
+  infoValue: {
+    marginTop: 2,
+    color: "#405F56",
+    fontSize: 9,
+    fontWeight: "600",
   },
 
   plantView: {
