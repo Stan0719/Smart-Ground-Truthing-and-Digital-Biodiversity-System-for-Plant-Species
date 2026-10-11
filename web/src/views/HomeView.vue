@@ -597,7 +597,7 @@ onBeforeUnmount(() => {
             to="/plants"
             class="explore-more-button reveal reveal-delay-3"
           >
-            <span>Explore More Plants</span>
+            <span>Explore More Plant Species</span>
             <span class="button-arrow">→</span>
           </RouterLink>
 
@@ -628,8 +628,14 @@ onBeforeUnmount(() => {
 
               <div class="home-plant-image">
 
-                <!-- Temporary image area -->
-                <div class="plant-image-placeholder">
+                <img
+                  v-if="plant.image || plant.images?.find((image) => image.path)?.path"
+                  :src="plant.image || plant.images?.find((image) => image.path)?.path"
+                  :alt="plant.name"
+                  class="home-plant-photo"
+                  draggable="false"
+                />
+                <div v-else class="plant-image-placeholder">
                   <span>🌿</span>
                 </div>
 
@@ -674,7 +680,14 @@ onBeforeUnmount(() => {
 
               <div class="home-plant-image">
 
-                <div class="plant-image-placeholder">
+                <img
+                  v-if="plant.image || plant.images?.find((image) => image.path)?.path"
+                  :src="plant.image || plant.images?.find((image) => image.path)?.path"
+                  :alt="plant.name"
+                  class="home-plant-photo"
+                  draggable="false"
+                />
+                <div v-else class="plant-image-placeholder">
                   <span>🌿</span>
                 </div>
 
@@ -2119,6 +2132,14 @@ onBeforeUnmount(() => {
   background: #dce8d6;
 }
 
+.home-plant-photo {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform 0.45s ease;
+}
+
 .plant-image-placeholder {
   width: 100%;
   height: 100%;
@@ -2137,6 +2158,7 @@ onBeforeUnmount(() => {
   transition: transform 0.45s ease;
 }
 
+.home-plant-card:hover .home-plant-photo,
 .home-plant-card:hover .plant-image-placeholder {
   transform: scale(1.05);
 }
@@ -2863,6 +2885,7 @@ onBeforeUnmount(() => {
   .explore-more-button,
   .button-arrow,
   .home-plant-card,
+  .home-plant-photo,
   .plant-image-placeholder,
   .about-image {
     transition: none;
