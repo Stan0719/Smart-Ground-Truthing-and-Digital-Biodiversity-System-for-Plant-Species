@@ -4,6 +4,7 @@ import time
 
 import cv2
 from ultralytics import YOLO
+from plant_contact import PlantContactMonitor
 
 try:
     import winsound
@@ -11,12 +12,15 @@ except ImportError:
     winsound = None
 
 
-WINDOW_NAME = "Human and Animal Detection"
+WINDOW_NAME = "Plant Contact Monitor"
 CAMERA_INDEX = 0
 FRAME_SIZE = (960, 540)
 PANEL_WIDTH = 300
 ALERT_COOLDOWN_SECONDS = 3
 RECORD_AFTER_HUMAN_GONE_SECONDS = 5
+WRIST_CONFIDENCE = 0.5
+CONTACT_HOLD_SECONDS = 0.6
+CONTACT_MIN_FRAMES = 3
 
 animal_classes = {
     "bird",
@@ -59,6 +63,8 @@ def build_ui_frame(
     video_frame,
     human_count,
     animal_count,
+    plant_count,
+    contact_count,
     recording,
     paused,
     clip_count,
@@ -90,11 +96,16 @@ def build_ui_frame(
     cv2.circle(ui_frame, (panel_x + 32, 156), 8, recording_color, -1)
     put_text(ui_frame, recording_text, (panel_x + 50, 163), 0.58, recording_color, 2)
 
-    cv2.rectangle(ui_frame, (panel_x + 20, 195), (panel_x + 280, 295), (42, 47, 54), -1)
-    put_text(ui_frame, "Humans", (panel_x + 42, 232), 0.62, (185, 235, 195), 1)
-    put_text(ui_frame, str(human_count), (panel_x + 215, 236), 0.9, (70, 220, 120), 2)
-    put_text(ui_frame, "Animals", (panel_x + 42, 272), 0.62, (190, 210, 255), 1)
-    put_text(ui_frame, str(animal_count), (panel_x + 215, 276), 0.9, (255, 170, 80), 2)
+    cv2.rectangle(ui_frame, (panel_x + 20, 195), (panel_x + 280, 310), (42, 47, 54), -1)
+    for row, (label, count, color) in enumerate([
+        ("Humans", human_count, (70, 220, 120)),
+        ("Animals", animal_count, (255, 170, 80)),
+        ("Plant areas", plant_count, (80, 210, 210)),
+        ("Possible contacts", contact_count, (80, 80, 255)),
+    ]):
+        y = 219 + row * 27
+        put_text(ui_frame, label, (panel_x + 32, y), 0.52, color, 1)
+        put_text(ui_frame, str(count), (panel_x + 235, y), 0.6, color, 2)
 
     cv2.rectangle(ui_frame, (panel_x + 20, 325), (panel_x + 280, 405), (42, 47, 54), -1)
     put_text(ui_frame, "Saved clips", (panel_x + 42, 358), 0.58, (210, 215, 220), 1)
@@ -107,7 +118,6 @@ def build_ui_frame(
 
     draw_button(ui_frame, "Space  Pause", (panel_x + 22, 445), (120, 42), (58, 69, 82))
     draw_button(ui_frame, "Q  Quit", (panel_x + 158, 445), (100, 42), (125, 55, 60))
-    put_text(ui_frame, "Human detection auto-saves video clips.", (panel_x + 22, 522), 0.4, (155, 165, 175), 1)
 
     return ui_frame
 
@@ -127,14 +137,42 @@ def start_recording(recordings_dir, fps, frame_size):
     return writer, str(recording_path)
 
 
-model = YOLO("yolov8n.pt")
+def select_plant_area(frame, previous_area=None):
+    print("Draw a box around the plant. Enter/Space confirms; Esc cancels.")
+    x, y, width, height = cv2.selectROI(
+        WINDOW_NAME, frame, showCrosshair=True, fromCenter=False,
+    )
+    if width > 0 and height > 0:
+        return (int(x), int(y), int(x + width), int(y + height))
+    return previous_area
+
+
+model_dir = Path(__file__).resolve().parent
+model = YOLO(str(model_dir / "yolov8n.pt"))
+pose_model = YOLO(str(model_dir / "yolov8n-pose.pt"))
+contact_monitor = PlantContactMonitor(CONTACT_HOLD_SECONDS, CONTACT_MIN_FRAMES)
 cap = cv2.VideoCapture(CAMERA_INDEX)
 
 if not cap.isOpened():
     print("Error: Could not open camera.")
     exit()
 
-cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+try:
+    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+except cv2.error as error:
+    cap.release()
+    raise SystemExit(
+        "OpenCV window support is unavailable. Install the desktop opencv-python "
+        "package in this Python environment, rather than opencv-python-headless."
+    ) from error
+
+ret, frame = cap.read()
+if not ret:
+    cap.release()
+    cv2.destroyAllWindows()
+    raise SystemExit("Error: Could not read camera frame.")
+frame = cv2.resize(frame, FRAME_SIZE)
+plant_area = select_plant_area(frame)
 
 camera_fps = cap.get(cv2.CAP_PROP_FPS)
 recording_fps = camera_fps if camera_fps and camera_fps > 1 else 20
@@ -143,11 +181,12 @@ recordings_dir = Path(__file__).resolve().parent / "recordings"
 
 delay = 30
 paused = False
-last_human_alert_time = 0
+last_contact_alert_time = float("-inf")
 last_human_seen_time = 0
 video_writer = None
 recording_path = ""
 saved_clip_count = 0
+display_frame = None
 
 unique_person_ids = set()
 unique_animal_ids = set()
@@ -156,14 +195,16 @@ print("""
 Controls:
 [SPACE] = Pause / Play
 [q]     = Quit
+[r]     = Mark / replace the plant area
+[c]     = Clear the plant area
 
 When a human is detected, recording starts automatically.
 Recording stops 5 seconds after the human is no longer detected.
+Possible plant contact beeps after repeated wrist overlap with the marked area.
+Re-mark the area if the camera or plant moves.
 """)
 
 while True:
-    display_frame = None
-
     if not paused:
         ret, frame = cap.read()
 
@@ -183,6 +224,8 @@ while True:
 
         human_count_frame = 0
         animal_count_frame = 0
+        plants = [(1, plant_area)] if plant_area is not None else []
+        plant_count_frame = len(plants)
         human_detected = False
 
         annotated_frame = frame.copy()
@@ -230,26 +273,52 @@ while True:
                     2,
                 )
 
-        now = time.time()
+        if plant_area is not None:
+            x1, y1, x2, y2 = plant_area
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (80, 210, 210), 2)
+            put_text(annotated_frame, "Plant area", (x1, max(y1 - 10, 24)),
+                     0.6, (80, 210, 210), 2)
+
+        people = []
+        if human_detected and plants:
+            pose_results = pose_model.track(
+                frame, conf=0.5, imgsz=640, persist=True, verbose=False,
+            )
+            if pose_results:
+                pose = pose_results[0]
+                if (pose.boxes is not None and pose.boxes.id is not None
+                        and pose.keypoints is not None and pose.keypoints.conf is not None):
+                    for person_id, points, confidences in zip(
+                        pose.boxes.id.int().cpu().tolist(),
+                        pose.keypoints.xy.cpu().tolist(),
+                        pose.keypoints.conf.cpu().tolist(),
+                    ):
+                        wrists = []
+                        # COCO pose indices 9 and 10 are left and right wrists.
+                        for index in (9, 10):
+                            x, y = points[index]
+                            if confidences[index] >= WRIST_CONFIDENCE and (x > 0 or y > 0):
+                                wrists.append((x, y))
+                                cv2.circle(annotated_frame, (int(x), int(y)), 6, (255, 0, 255), -1)
+                        people.append((person_id, wrists))
+
+        now = time.monotonic()
+        contacts = contact_monitor.update(people, plants, now)
+        if contacts:
+            put_text(annotated_frame, "ALERT: POSSIBLE PLANT CONTACT", (20, 44),
+                     0.85, (0, 0, 255), 2)
+            for plant_id, bounds in plants:
+                if any(pair[1] == plant_id for pair in contacts):
+                    x1, y1, x2, y2 = bounds
+                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+            if now - last_contact_alert_time >= ALERT_COOLDOWN_SECONDS:
+                print(f"ALERT: Possible plant contact! Pose person/plant area IDs: {sorted(contacts)}")
+                if winsound is not None:
+                    winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS | winsound.SND_ASYNC)
+                last_contact_alert_time = now
 
         if human_detected:
             last_human_seen_time = now
-            put_text(
-                annotated_frame,
-                "ALERT: HUMAN DETECTED",
-                (20, 44),
-                1,
-                (0, 0, 255),
-                3,
-            )
-
-            if now - last_human_alert_time >= ALERT_COOLDOWN_SECONDS:
-                print("ALERT: Human detected!")
-
-                if winsound is not None:
-                    winsound.Beep(1000, 300)
-
-                last_human_alert_time = now
 
             if video_writer is None:
                 video_writer, recording_path = start_recording(
@@ -275,6 +344,8 @@ while True:
             annotated_frame,
             human_count_frame,
             animal_count_frame,
+            plant_count_frame,
+            len(contacts),
             video_writer is not None,
             paused,
             saved_clip_count,
@@ -296,7 +367,15 @@ while True:
 
     if key == 32:
         paused = not paused
+        contact_monitor.pending.clear()
         print("Paused" if paused else "Playing")
+
+    if key in (ord("r"), ord("c")):
+        plant_area = select_plant_area(frame, plant_area) if key == ord("r") else None
+        contact_monitor.pending.clear()
+        last_contact_alert_time = float("-inf")
+        # Render the new area immediately, including when selection began paused.
+        paused = False
 
 if video_writer is not None:
     video_writer.release()
