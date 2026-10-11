@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   Dimensions,
   Animated,
+  PanResponder,
   Linking,
   FlatList,
 } from 'react-native';
@@ -38,6 +39,32 @@ const COLORS = {
 
 const CARD_WIDTH = SCREEN_WIDTH < 500 ? 190 : 240;
 const CARD_GAP = SCREEN_WIDTH < 500 ? 14 : 18;
+
+const ABOUT_STACK_IMAGES = [
+  {
+    id: 'niah-cave',
+    source: require('../assets/cave1.jpeg'),
+    accessibilityLabel: 'Niah Cave',
+  },
+  {
+    id: 'niah-cave-interior',
+    source: require('../assets/cave4.png'),
+    accessibilityLabel: 'Niah Cave interior',
+  },
+  {
+    id: 'niah-landscape',
+    source: require('../assets/cave3.png'),
+    accessibilityLabel: 'Niah Cave landscape',
+  },
+  {
+    id: 'niah-cave-interior-secondary',
+    source: require('../assets/cave2.png'),
+    accessibilityLabel: 'Interior of Niah Cave',
+  },
+];
+
+const ABOUT_STACK_SWIPE_THRESHOLD = 75;
+const ABOUT_STACK_ANIMATION_DURATION = 300;
 
 
 // ==================================================
@@ -92,6 +119,175 @@ const RevealView = ({
     >
       {children}
     </Animated.View>
+  );
+};
+
+
+// ==================================================
+// ABOUT IMAGE STACK
+// ==================================================
+
+const AboutImageStack = () => {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isAnimating, setIsAnimating] = useState(false);
+
+  const translateX = useRef(new Animated.Value(0)).current;
+  const isAnimatingRef = useRef(false);
+  const didDrag = useRef(false);
+
+  const resetTopCard = () => {
+    Animated.spring(translateX, {
+      toValue: 0,
+      tension: 90,
+      friction: 10,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const changeImage = (direction) => {
+    if (isAnimatingRef.current) return;
+
+    isAnimatingRef.current = true;
+    setIsAnimating(true);
+
+    Animated.timing(translateX, {
+      toValue: direction === 'next' ? -SCREEN_WIDTH : SCREEN_WIDTH,
+      duration: ABOUT_STACK_ANIMATION_DURATION,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setActiveIndex((current) => (
+          direction === 'next'
+            ? (current + 1) % ABOUT_STACK_IMAGES.length
+            : (current - 1 + ABOUT_STACK_IMAGES.length) % ABOUT_STACK_IMAGES.length
+        ));
+      }
+
+      translateX.setValue(0);
+      didDrag.current = false;
+      isAnimatingRef.current = false;
+      setIsAnimating(false);
+    });
+  };
+
+  const panResponder = PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gestureState) => (
+      !isAnimatingRef.current &&
+      Math.abs(gestureState.dx) > 6 &&
+      Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
+    ),
+    onPanResponderGrant: () => {
+      didDrag.current = true;
+      translateX.stopAnimation();
+    },
+    onPanResponderMove: (_, gestureState) => {
+      translateX.setValue(gestureState.dx);
+    },
+    onPanResponderRelease: (_, gestureState) => {
+      if (Math.abs(gestureState.dx) >= ABOUT_STACK_SWIPE_THRESHOLD) {
+        changeImage(gestureState.dx < 0 ? 'next' : 'previous');
+      } else {
+        resetTopCard();
+      }
+    },
+    onPanResponderTerminate: resetTopCard,
+  });
+
+  const topCardRotation = translateX.interpolate({
+    inputRange: [-SCREEN_WIDTH, 0, SCREEN_WIDTH],
+    outputRange: ['-10deg', '0deg', '10deg'],
+    extrapolate: 'clamp',
+  });
+
+  const topCardOpacity = translateX.interpolate({
+    inputRange: [-SCREEN_WIDTH * 0.75, 0, SCREEN_WIDTH * 0.75],
+    outputRange: [0, 1, 0],
+    extrapolate: 'clamp',
+  });
+
+  const visibleCards = [2, 1, 0];
+
+  return (
+    <View style={styles.aboutStackWrapper}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Previous Niah image"
+        activeOpacity={0.75}
+        disabled={isAnimating}
+        hitSlop={6}
+        onPress={() => changeImage('previous')}
+        style={[styles.aboutStackArrow, styles.aboutStackArrowLeft]}
+      >
+        <Text style={styles.aboutStackArrowText}>‹</Text>
+      </TouchableOpacity>
+
+      <View style={styles.aboutStackDeck}>
+        {visibleCards.map((depth) => {
+          const imageIndex = (activeIndex + depth) % ABOUT_STACK_IMAGES.length;
+          const image = ABOUT_STACK_IMAGES[imageIndex];
+          const isTopCard = depth === 0;
+
+          const cardStyle = isTopCard
+            ? {
+                opacity: topCardOpacity,
+                transform: [
+                  { translateX },
+                  { rotate: topCardRotation },
+                ],
+                zIndex: 3,
+              }
+            : {
+                transform: [
+                  { translateX: depth * 7 },
+                  { translateY: depth * 7 },
+                  { rotate: `${depth * 4}deg` },
+                  { scale: 1 - depth * 0.06 },
+                ],
+                zIndex: 3 - depth,
+              };
+
+          return (
+            <Animated.View
+              key={`${image.id}-${depth}`}
+              style={[styles.aboutStackCard, cardStyle]}
+              {...(isTopCard ? panResponder.panHandlers : {})}
+            >
+              <TouchableOpacity
+                activeOpacity={0.96}
+                disabled={!isTopCard || isAnimating}
+                onPressIn={() => {
+                  didDrag.current = false;
+                }}
+                onPress={() => {
+                  if (!didDrag.current) changeImage('next');
+                }}
+                style={styles.aboutStackCardPressable}
+              >
+                <Image
+                  source={image.source}
+                  style={styles.aboutStackImage}
+                  resizeMode="cover"
+                  accessible={isTopCard}
+                  accessibilityLabel={isTopCard ? image.accessibilityLabel : undefined}
+                />
+              </TouchableOpacity>
+            </Animated.View>
+          );
+        })}
+      </View>
+
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Next Niah image"
+        activeOpacity={0.75}
+        disabled={isAnimating}
+        hitSlop={6}
+        onPress={() => changeImage('next')}
+        style={[styles.aboutStackArrow, styles.aboutStackArrowRight]}
+      >
+        <Text style={styles.aboutStackArrowText}>›</Text>
+      </TouchableOpacity>
+    </View>
   );
 };
 
@@ -336,25 +532,7 @@ const renderPlant = ({ item }) => {
   direction="left"
   style={styles.aboutImageWrapper}
 >
-  <View style={styles.imageStack}>
-    <Image
-      source={require('../assets/b1.jpg')}
-      style={styles.stackImageMain}
-      resizeMode="cover"
-    />
-
-    <Image
-      source={require('../assets/greatcave.jpg')}
-      style={styles.stackImageTop}
-      resizeMode="cover"
-    />
-
-    <Image
-      source={require('../assets/hero.jpg')}
-      style={styles.stackImageBottom}
-      resizeMode="cover"
-    />
-  </View>
+  <AboutImageStack />
 </RevealView>
 
 
@@ -1362,41 +1540,83 @@ aboutImageWrapper: {
   flex: 1,
 },
 
-imageStack: {
+aboutStackWrapper: {
   width: '100%',
   height: SCREEN_WIDTH <= 900 ? 320 : 470,
   position: 'relative',
+  alignItems: 'center',
+  justifyContent: 'center',
+  overflow: 'visible',
 },
 
-stackImageMain: {
+aboutStackDeck: {
+  width: SCREEN_WIDTH < 500 ? '82%' : '80%',
+  maxWidth: 430,
+  aspectRatio: 1,
+  position: 'relative',
+  overflow: 'visible',
+},
+
+aboutStackCard: {
   position: 'absolute',
-  width: '82%',
-  height: '85%',
   top: 0,
-  left: 0,
-  borderRadius: 20,
-},
-
-stackImageTop: {
-  position: 'absolute',
-  width: '42%',
-  height: '38%',
-  top: 20,
   right: 0,
-  borderRadius: 16,
-  borderWidth: 5,
-  borderColor: COLORS.paleGreen,
+  bottom: 0,
+  left: 0,
+  overflow: 'hidden',
+  borderRadius: SCREEN_WIDTH < 500 ? 20 : 24,
+  backgroundColor: COLORS.paleGreen,
+  shadowColor: COLORS.darkGreen,
+  shadowOffset: { width: 0, height: 9 },
+  shadowOpacity: 0.18,
+  shadowRadius: 14,
+  elevation: 6,
 },
 
-stackImageBottom: {
+aboutStackCardPressable: {
+  width: '100%',
+  height: '100%',
+},
+
+aboutStackImage: {
+  width: '100%',
+  height: '100%',
+},
+
+aboutStackArrow: {
   position: 'absolute',
-  width: '48%',
-  height: '38%',
-  bottom: 0,
-  right: 10,
-  borderRadius: 16,
-  borderWidth: 5,
-  borderColor: COLORS.paleGreen,
+  top: '50%',
+  width: SCREEN_WIDTH < 500 ? 40 : 44,
+  height: SCREEN_WIDTH < 500 ? 40 : 44,
+  marginTop: SCREEN_WIDTH < 500 ? -20 : -22,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 1,
+  borderColor: 'rgba(70, 133, 133, 0.2)',
+  borderRadius: 999,
+  backgroundColor: COLORS.cream,
+  shadowColor: COLORS.darkGreen,
+  shadowOffset: { width: 0, height: 5 },
+  shadowOpacity: 0.15,
+  shadowRadius: 8,
+  elevation: 5,
+  zIndex: 10,
+},
+
+aboutStackArrowLeft: {
+  left: 0,
+},
+
+aboutStackArrowRight: {
+  right: 0,
+},
+
+aboutStackArrowText: {
+  marginTop: -2,
+  color: COLORS.darkGreen,
+  fontSize: SCREEN_WIDTH < 500 ? 28 : 31,
+  lineHeight: SCREEN_WIDTH < 500 ? 30 : 33,
+  fontWeight: '500',
 },
 
 
