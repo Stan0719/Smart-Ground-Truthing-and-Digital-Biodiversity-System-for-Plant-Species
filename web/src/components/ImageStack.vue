@@ -15,13 +15,13 @@ const cards = ref<Card[]>([
   },
   {
     id: 2,
-    image: '/images/logo.png',
-    alt: 'Niah rainforest',
+    image: '/images/cave4.png',
+    alt: 'Niah Cave interior',
   },
   {
     id: 3,
-    image: '/images/hero.jpg',
-    alt: 'Plants in Niah National Park',
+    image: '/images/cave3.png',
+    alt: 'Niah Cave landscape',
   },
   {
     id: 4,
