@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import AdminTopbarActions from '../components/AdminTopbarActions.vue'
-import { useAdminSidebar } from '../composables/useAdminSidebar'
+import AdminPageShell from '../components/AdminPageShell.vue'
 import { isCurrentAdminAccount } from '../data/adminProfile'
 import { sendTemporaryPasswordEmail } from '../services/accountEmail'
 import {
@@ -21,8 +19,6 @@ import {
 type UserStatus = 'Active' | 'Inactive' | 'Suspended'
 type UserRole = 'Administrator' | 'Conservation Officer' | 'Botanist' | 'Visitor'
 
-const router = useRouter()
-
 interface UserRecord {
   id: string
   name: string
@@ -33,7 +29,6 @@ interface UserRecord {
   initials: string
 }
 
-const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
 const addUserOpen = ref(false)
 const search = ref('')
 const roleFilter = ref('All roles')
@@ -486,10 +481,6 @@ const activeUserCount = computed(
 const visitorCount = computed(() => users.value.filter((user) => user.role === 'Visitor').length)
 const staffCount = computed(() => users.value.filter((user) => user.role !== 'Visitor').length)
 
-const logout = () => {
-  sidebarOpen.value = false
-  router.push({ name: 'home' })
-}
 const clearFilters = () => {
   search.value = ''
   roleFilter.value = 'All roles'
@@ -498,80 +489,8 @@ const clearFilters = () => {
 </script>
 
 <template>
-  <div class="admin-layout" :class="{ 'sidebar-open': sidebarOpen }">
-    <aside class="sidebar" :class="{ open: sidebarOpen }">
-      <button
-        class="sidebar-close-button"
-        type="button"
-        aria-label="Close navigation"
-        @click="closeSidebar"
-      >
-        ×
-      </button>
-      <RouterLink
-        class="brand"
-        to="/"
-        data-tooltip="Go back to the public website"
-        aria-label="Go back to the public website"
-      >
-        <img src="/images/logo.png" alt="Niah Biodiversity" />
-        <div><strong>NIAH</strong><span>ADMINISTRATION</span></div>
-      </RouterLink>
-      <p class="nav-label">MAIN MENU</p>
-      <nav aria-label="Administrator navigation">
-        <RouterLink to="/admin" @click="handleNavigation"><span>⌂</span> Dashboard</RouterLink>
-        <RouterLink to="/admin/users" class="active" @click="handleNavigation"
-          ><span>♙</span> User Management</RouterLink
-        >
-        <RouterLink to="/admin/roles" @click="handleNavigation"
-          ><span>◇</span> Role &amp; Permission</RouterLink
-        >
-        <RouterLink to="/admin/iot" @click="handleNavigation"
-          ><span>⌁</span> IoT Monitoring</RouterLink
-        >
-        <RouterLink to="/admin/sensors" @click="handleNavigation"
-          ><span>◉</span> Sensor Management</RouterLink
-        >
-        <RouterLink to="/admin/alerts" @click="handleNavigation"
-          ><span>△</span> Threat Alerts</RouterLink
-        >
-        <RouterLink to="/admin/activity" @click="handleNavigation"
-          ><span>↻</span> System Activity</RouterLink
-        >
-      </nav>
-      <div class="sidebar-footer">
-        <button type="button" @click="logout">Logout</button>
-      </div>
-    </aside>
-
-    <button
-      v-if="isMobile && sidebarOpen"
-      class="drawer-backdrop"
-      type="button"
-      aria-label="Close navigation"
-      @click="closeSidebar"
-    ></button>
-
-    <div class="main-area">
-      <header class="topbar">
-        <button
-          class="menu-button"
-          type="button"
-          aria-label="Open navigation"
-          :aria-expanded="sidebarOpen"
-          v-if="!sidebarOpen"
-          @click="openSidebar"
-        >
-          <span></span><span></span><span></span>
-        </button>
-        <div>
-          <p>ADMINISTRATION</p>
-          <h1>User Management</h1>
-        </div>
-        <AdminTopbarActions />
-      </header>
-
-      <main class="content">
+  <AdminPageShell title="User Management" eyebrow="ADMINISTRATION" active="User Management">
+    <div class="content">
         <section class="page-intro">
           <div>
             <h2>Manage system users</h2>
@@ -721,7 +640,6 @@ const clearFilters = () => {
             <button type="button" @click="clearFilters">Clear filters</button>
           </div>
         </section>
-      </main>
     </div>
 
     <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">
@@ -969,150 +887,15 @@ const clearFilters = () => {
         </div>
       </section>
     </div>
-  </div>
+  </AdminPageShell>
 </template>
 
 <style scoped>
 * {
   box-sizing: border-box;
 }
-.admin-layout {
-  min-height: 100vh;
-  display: grid;
-  grid-template-columns: 258px minmax(0, 1fr);
-  background: #f3f6f2;
-  color: #29483e;
-}
-.sidebar {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  height: 100vh;
-  padding: 24px 16px;
-  display: flex;
-  flex-direction: column;
-  background: #173f34;
-  color: #fff;
-}
-.brand {
-  padding: 0 8px 25px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-}
-.brand img {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-.brand div {
-  display: flex;
-  flex-direction: column;
-}
-.brand strong {
-  font-size: 18px;
-  letter-spacing: 2px;
-}
-.brand span {
-  margin-top: 3px;
-  color: #9dd5ba;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-}
-.nav-label {
-  margin: 25px 13px 9px;
-  color: #75a392;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1.6px;
-}
-.sidebar nav {
-  display: grid;
-  gap: 5px;
-}
-.sidebar nav a,
-.sidebar nav button,
-.sidebar-footer button {
-  width: 100%;
-  padding: 11px 13px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: #bfd7cd;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  text-align: left;
-  text-decoration: none;
-}
-.sidebar nav a:hover,
-.sidebar nav button:hover,
-.sidebar nav a.active {
-  background: #2b6754;
-  color: #fff;
-}
-.sidebar nav span,
-.sidebar-footer span {
-  width: 21px;
-  text-align: center;
-  font-size: 18px;
-}
-.sidebar-footer {
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  display: grid;
-  gap: 5px;
-}
-.sidebar-footer a {
-  padding: 10px 13px;
-  color: #96c3b1;
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
-}
-.main-area {
-  min-width: 0;
-}
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 80;
-  min-height: 82px;
-  padding: 0 3.5%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #dce4dc;
-  background: rgba(255, 255, 255, 0.93);
-  backdrop-filter: blur(12px);
-}
-.topbar p {
-  margin: 0 0 3px;
-  color: #62a087;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1.8px;
-}
-.topbar h1 {
-  margin: 0;
-  color: #204c3d;
-  font-size: 23px;
-}
-.menu-button {
-  display: none;
-}
 .content {
-  width: min(1400px, 94%);
-  margin: 0 auto;
-  padding: 32px 0 60px;
+  width: 100%;
 }
 .page-intro {
   margin-bottom: 23px;
@@ -1790,71 +1573,10 @@ code {
     grid-column: 1/-1;
   }
 }
-@media (max-width: 920px) {
-  .admin-layout {
-    grid-template-columns: 1fr;
-  }
-  .sidebar {
-    position: fixed;
-    left: 0;
-    width: 258px;
-    transform: translateX(-100%);
-    transition: transform 0.25s ease;
-  }
-  .sidebar.open {
-    transform: translateX(0);
-  }
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 90;
-    display: block;
-    border: 0;
-    background: rgba(12, 35, 27, 0.5);
-  }
-  .topbar {
-    justify-content: flex-start;
-    gap: 15px;
-  }
-  .menu-button {
-    width: 39px;
-    height: 39px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    border: 1px solid #dfe6df;
-    border-radius: 9px;
-    background: #fff;
-  }
-  .menu-button span {
-    width: 18px;
-    height: 2px;
-    background: #376354;
-  }
-  :deep(.admin-topbar-actions) {
-    margin-left: auto;
-  }
-}
 @media (max-width: 560px) {
   .success-alert,
   .error-alert {
     top: 82px;
-  }
-  .topbar {
-    min-height: 72px;
-    padding: 0 4%;
-  }
-  .topbar p {
-    display: none;
-  }
-  .topbar h1 {
-    font-size: 17px;
-  }
-  .content {
-    width: 91%;
-    padding-top: 23px;
   }
   .page-intro {
     align-items: flex-start;
@@ -1881,169 +1603,4 @@ code {
   }
 }
 
-/* Match the Administrator Dashboard sidebar. */
-.sidebar {
-  width: 258px;
-  overflow: hidden;
-  transition: 0.2s ease;
-}
-.sidebar-close-button {
-  display: none;
-}
-.brand {
-  position: relative;
-  margin: -8px -4px 0;
-  padding: 8px 12px 25px;
-  color: #fff;
-  text-decoration: none;
-}
-.brand::after {
-  position: absolute;
-  bottom: -30px;
-  left: 12px;
-  z-index: 110;
-  padding: 6px 9px;
-  border-radius: 6px;
-  background: rgba(18, 25, 22, 0.96);
-  color: #fff;
-  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.2);
-  content: attr(data-tooltip);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transform: translateY(-3px);
-  transition:
-    opacity 180ms ease,
-    transform 180ms ease,
-    visibility 180ms ease;
-}
-.brand:hover::after,
-.brand:focus-visible::after {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-.sidebar nav {
-  gap: 4px;
-}
-.sidebar nav a,
-.sidebar nav button,
-.sidebar-footer button {
-  padding: 10px 13px;
-  font-size: 12px;
-  transition: 0.2s ease;
-}
-.sidebar-footer {
-  display: block;
-}
-.sidebar-footer button {
-  justify-content: center;
-  background: #fce8e6;
-  color: #b84d42;
-}
-.sidebar-footer button:hover,
-.sidebar-footer button:focus-visible {
-  background: #b84d42;
-  color: #fff;
-}
-.drawer-backdrop {
-  display: none;
-}
-.admin-layout {
-  grid-template-columns: 0 minmax(0, 1fr);
-  transition: grid-template-columns 0.2s ease;
-}
-.admin-layout.sidebar-open {
-  grid-template-columns: 258px minmax(0, 1fr);
-}
-.sidebar {
-  position: fixed;
-  left: 0;
-  transform: translateX(-100%);
-}
-.sidebar.open {
-  transform: translateX(0);
-}
-.main-area {
-  grid-column: 2;
-}
-.sidebar-close-button {
-  position: absolute;
-  top: 12px;
-  right: 10px;
-  z-index: 2;
-  width: 30px;
-  min-width: 0;
-  height: 30px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  color: #bfd7cd;
-  cursor: pointer;
-  font-size: 22px;
-  line-height: 1;
-}
-.menu-button {
-  width: 39px;
-  height: 39px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border: 1px solid #dfe6df;
-  border-radius: 9px;
-  background: #fff;
-}
-.menu-button span {
-  width: 18px;
-  height: 2px;
-  background: #376354;
-}
-@media (max-width: 920px) {
-  .admin-layout,
-  .admin-layout.sidebar-open {
-    grid-template-columns: 1fr;
-  }
-  .main-area {
-    grid-column: 1;
-  }
-  .sidebar {
-    transition: transform 0.2s ease;
-  }
-  .sidebar-close-button {
-    position: absolute;
-    top: 12px;
-    right: 10px;
-    z-index: 2;
-    width: 30px;
-    min-width: 0;
-    height: 30px;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.07);
-    color: #bfd7cd;
-    cursor: pointer;
-    font-size: 22px;
-    line-height: 1;
-  }
-  .drawer-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 90;
-    display: block;
-    border: 0;
-    background: rgba(12, 35, 27, 0.5);
-  }
-}
 </style>

@@ -188,7 +188,9 @@ const speciesLabel = (plantId: string) => {
           <strong>{{ a.type }}</strong
           ><small>{{ a.id }} · {{ a.plantId }} · {{ a.zone }}</small>
         </div>
-        <span class="badge" :class="a.severity.toLowerCase()">{{ a.severity }}</span>
+        <span class="badge alert-severity-badge" :class="a.severity.toLowerCase()">
+          {{ a.severity }}
+        </span>
       </article>
     </section>
   </div>
@@ -210,7 +212,26 @@ const speciesLabel = (plantId: string) => {
       ><button @click="go('conservation-observations')">
         ⌕ <span><strong>Search Plants</strong><small>Find observation records</small></span></button
       ><button @click="go('conservation-reports')">
-        ▤ <span><strong>Generate Report</strong><small>Create a summary</small></span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="lucide lucide-file-text preview-icon"
+          aria-hidden="true"
+        >
+          <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/>
+          <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+          <path d="M10 9H8" />
+          <path d="M16 13H8" />
+          <path d="M16 17H8" />
+        </svg>
+        <span><strong>Generate Report</strong><small>Create a summary</small></span>
       </button>
     </div>
   </section>
@@ -248,6 +269,19 @@ const speciesLabel = (plantId: string) => {
   color: #8a9992;
   font-size: 9px;
 }
+.alert-severity-badge {
+  width: auto;
+  min-width: 48px;
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 5px 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  line-height: 1;
+  white-space: nowrap;
+}
 .quick-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -265,6 +299,12 @@ const speciesLabel = (plantId: string) => {
   cursor: pointer;
   text-align: left;
   font-size: 18px;
+}
+.quick-grid .preview-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  overflow: visible;
 }
 .secondary-button,
 .action-button,
