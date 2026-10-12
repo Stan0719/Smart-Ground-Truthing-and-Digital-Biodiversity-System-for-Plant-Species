@@ -75,18 +75,25 @@ app.get('/api/tables', async (req, res) => {
  // Get all plant species (read-only)
 app.get('/api/species', async (req, res) => {
   try {
+    
     const result = await pool.query(`
-      SELECT
-        species_id,
-        scientific_name,
-        common_name,
-        genus_id,
-        status_id,
-        description,
-        registered_by,
-        registered_at
-      FROM public.species
-      ORDER BY scientific_name ASC;
+    SELECT
+        s.species_id,
+        s.scientific_name,
+        s.common_name,
+        g.genus_name,
+        f.family_name,
+        cs.status_name AS conservation_status,
+        s.description,
+        s.registered_at
+    FROM public.species AS s
+    LEFT JOIN public.genus AS g
+        ON s.genus_id = g.genus_id
+    LEFT JOIN public.family AS f
+        ON g.family_id = f.family_id
+    LEFT JOIN public.conservation_status AS cs
+        ON s.status_id = cs.status_id
+    ORDER BY s.scientific_name ASC;
     `);
 
     res.json({
