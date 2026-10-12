@@ -1,0 +1,14 @@
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Node.js dependencies
+node_modules/
+
+# Python virtual environment
+.venv/
+
+# Build output
+dist/
