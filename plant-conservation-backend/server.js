@@ -72,6 +72,37 @@ app.get('/api/tables', async (req, res) => {
   }
 });
 
+ // Get all plant species (read-only)
+app.get('/api/species', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        species_id,
+        scientific_name,
+        common_name,
+        genus_id,
+        status_id,
+        description,
+        registered_by,
+        registered_at
+      FROM public.species
+      ORDER BY scientific_name ASC;
+    `);
+
+    res.json({
+      message: 'Species retrieved successfully!',
+      count: result.rows.length,
+      species: result.rows,
+    });
+  } catch (error) {
+    console.error('Species query error:', error.message);
+
+    res.status(500).json({
+      message: 'Unable to retrieve species.',
+    });
+  }
+});
+
 // Start the server (only once)
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
