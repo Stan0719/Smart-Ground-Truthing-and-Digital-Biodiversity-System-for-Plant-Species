@@ -1,4 +1,7 @@
 {
   "python.defaultInterpreterPath": "${env:LOCALAPPDATA}/Microsoft/WindowsApps/PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0/python.exe",
-  "python-envs.defaultEnvManager": "ms-python.python:system"
+  "python-envs.defaultEnvManager": "ms-python.python:system",
+  "python.analysis.extraPaths": [
+    "./Ai/Ai_duplication_Prevention/src"
+  ]
 }
