@@ -110,6 +110,125 @@ app.get('/api/species', async (req, res) => {
   }
 });
 
+app.post('/api/plants', async (req, res) => {
+  const {
+    species_id,
+    registered_by,
+    latitude,
+    longitude,
+    accuracy_m
+  } = req.body;
+
+  // Validate required values
+  if (
+    !Number.isSafeInteger(species_id) ||
+    species_id <= 0 ||
+    !Number.isSafeInteger(registered_by) ||
+    registered_by <= 0 ||
+    typeof latitude !== 'number' ||
+    typeof longitude !== 'number' ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return res.status(400).json({
+      message: 'Please provide valid species_id, registered_by, latitude and longitude.'
+    });
+  }
+
+  if (
+    accuracy_m !== undefined &&
+    accuracy_m !== null &&
+    (
+      typeof accuracy_m !== 'number' ||
+      !Number.isFinite(accuracy_m) ||
+      accuracy_m < 0
+    )
+  ) {
+    return res.status(400).json({
+      message: 'accuracy_m must be a non-negative number.'
+    });
+  }
+
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  try {
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    // Create the plant record
+    const plantResult = await client.query(
+    `INSERT INTO public.plant_record
+        (species_id, registered_by)
+    VALUES ($1::bigint, $2::bigint)
+    RETURNING plant_id, species_id, registered_by,
+                current_status, registered_at`,
+    [species_id, registered_by]
+    );
+
+    const plant = plantResult.rows[0];
+
+    // Create its GPS location and PostGIS point
+    const locationResult = await client.query(
+      `INSERT INTO public.plant_location
+         (plant_id, latitude, longitude, accuracy_m, geometry)
+       VALUES (
+        $1, $2, $3, $4,
+        ST_SetSRID(
+        ST_MakePoint(
+            ($3::numeric)::double precision,
+            ($2::numeric)::double precision
+        ),
+        4326
+        )
+       )
+       RETURNING location_id, plant_id, latitude, longitude,
+                 accuracy_m, recorded_at`,
+      [
+        plant.plant_id,
+        latitude,
+        longitude,
+        accuracy_m ?? null
+      ]
+    );
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+
+    return res.status(201).json({
+      message: 'Plant registered successfully!',
+      plant,
+      location: locationResult.rows[0]
+    });
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Transaction rollback failed:', rollbackError.message);
+      }
+    }
+
+    console.error('Plant registration error:', error.message);
+
+    if (error.code === '23503') {
+      return res.status(400).json({
+        message: 'The supplied species_id or registered_by does not exist.'
+      });
+    }
+
+    return res.status(500).json({
+      message: 'Unable to register the plant.'
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // Start the server (only once)
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
