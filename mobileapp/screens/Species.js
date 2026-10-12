@@ -16,6 +16,7 @@ import {
   getSpeciesBySlug,
   getPlantsBySpecies,
 } from "../data/mockData";
+import { getSpeciesImageSource } from "../data/speciesImages";
 
 
 const healthOptions = [
@@ -55,9 +56,11 @@ const zoneOptions = [
 export default function Species({
   route,
   navigation,
+  user,
 }) {
 
   const { slug } = route.params || {};
+  const isBotanist = user?.role?.toLowerCase() === "botanist";
 
   const selectedSpecies =
     getSpeciesBySlug(slug);
@@ -109,6 +112,7 @@ export default function Species({
 
 
         const matchesHealth =
+          !isBotanist ||
           healthFilter === "All" ||
           plant.latestApproved.healthStatus ===
             healthFilter;
@@ -121,11 +125,13 @@ export default function Species({
 
 
         const matchesQr =
+          !isBotanist ||
           qrFilter === "All" ||
           plant.qr.status === qrFilter;
 
 
         const matchesZone =
+            !isBotanist ||
             zoneFilter === "All" ||
             plant.location.zone === `Zone ${zoneFilter}`;
 
@@ -178,15 +184,16 @@ export default function Species({
     qrFilter,
     zoneFilter,
     sortOption,
+    isBotanist,
   ]);
 
 
   const activeFilterCount =
     [
-      healthFilter !== "All",
+      isBotanist && healthFilter !== "All",
       lifeStageFilter !== "All",
-      qrFilter !== "All",
-      zoneFilter !== "All",
+      isBotanist && qrFilter !== "All",
+      isBotanist && zoneFilter !== "All",
       sortOption !== "default",
     ].filter(Boolean).length;
 
@@ -318,12 +325,14 @@ export default function Species({
       {filtersOpen && (
         <View style={styles.filters}>
 
-          <FilterSelector
-            label="Health"
-            options={healthOptions}
-            value={healthFilter}
-            setValue={setHealthFilter}
-          />
+          {isBotanist && (
+            <FilterSelector
+              label="Health"
+              options={healthOptions}
+              value={healthFilter}
+              setValue={setHealthFilter}
+            />
+          )}
 
           <FilterSelector
             label="Life stage"
@@ -332,19 +341,23 @@ export default function Species({
             setValue={setLifeStageFilter}
           />
 
-          <FilterSelector
-            label="QR status"
-            options={qrOptions}
-            value={qrFilter}
-            setValue={setQrFilter}
-          />
+          {isBotanist && (
+            <>
+              <FilterSelector
+                label="QR status"
+                options={qrOptions}
+                value={qrFilter}
+                setValue={setQrFilter}
+              />
 
-          <FilterSelector
-            label="Zone"
-            options={zoneOptions}
-            value={zoneFilter}
-            setValue={setZoneFilter}
-          />
+              <FilterSelector
+                label="Zone"
+                options={zoneOptions}
+                value={zoneFilter}
+                setValue={setZoneFilter}
+              />
+            </>
+          )}
 
           <FilterSelector
             label="Sort"
@@ -417,6 +430,7 @@ export default function Species({
               key={plant.plantId}
               plant={plant}
               navigation={navigation}
+              user={user}
             />
           ))
 
@@ -538,11 +552,14 @@ function FilterSelector({
 function PlantCard({
   plant,
   navigation,
+  user,
 }) {
 
   const species = getSpeciesBySlug(
     plant.speciesSlug
   );
+  const imageSource = getSpeciesImageSource(species);
+  const isBotanist = user?.role?.toLowerCase() === "botanist";
 
   return (
     <TouchableOpacity
@@ -560,11 +577,9 @@ function PlantCard({
       {/* IMAGE */}
       <View style={styles.cardImage}>
 
-        {species?.image ? (
+        {imageSource ? (
           <Image
-            source={{
-              uri: species.image,
-            }}
+            source={imageSource}
             style={styles.plantImage}
             resizeMode="cover"
             onError={(error) => {
@@ -580,9 +595,11 @@ function PlantCard({
           </Text>
         )}
 
-        <Text style={styles.zoneBadge}>
-          {plant.location.zone}
-        </Text>
+        {isBotanist && (
+          <Text style={styles.zoneBadge}>
+            {plant.location.zone}
+          </Text>
+        )}
 
       </View>
 
@@ -601,29 +618,51 @@ function PlantCard({
 
         <View style={styles.infoGrid}>
 
-          <Info
-            label="Health"
-            value={
-              plant.latestApproved.healthStatus
-            }
-          />
+          {isBotanist ? (
+            <>
+              <Info
+                label="Health"
+                value={plant.latestApproved.healthStatus}
+              />
 
-          <Info
-            label="Life Stage"
-            value={
-              plant.latestApproved.lifeStage
-            }
-          />
+              <Info
+                label="Life Stage"
+                value={plant.latestApproved.lifeStage}
+              />
 
-          <Info
-            label="QR Status"
-            value={plant.qr.status}
-          />
+              <Info
+                label="QR Status"
+                value={plant.qr.status}
+              />
 
-          <Info
-            label="Height"
-            value={`${plant.latestApproved.heightCm} cm`}
-          />
+              <Info
+                label="Height"
+                value={`${plant.latestApproved.heightCm} cm`}
+              />
+            </>
+          ) : (
+            <>
+              <Info
+                label="Height"
+                value={`${plant.latestApproved.heightCm} cm`}
+              />
+
+              <Info
+                label="Life Stage"
+                value={plant.latestApproved.lifeStage}
+              />
+
+              <Info
+                label="Genus"
+                value={species?.genus || "-"}
+              />
+
+              <Info
+                label="Last Verified"
+                value={formatDate(plant.latestApproved.date)}
+              />
+            </>
+          )}
 
         </View>
 
@@ -659,6 +698,21 @@ function Info({ label, value }) {
       </Text>
     </View>
   );
+}
+
+function formatDate(dateString) {
+  if (!dateString) return "-";
+
+  const [year, month, day] = dateString.split("-");
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const monthName = months[Number(month) - 1];
+
+  if (!year || !monthName || !day) return dateString;
+
+  return `${Number(day)} ${monthName} ${year}`;
 }
 
 
@@ -718,31 +772,39 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
 
-  controls: {
-    padding: 20,
-  },
+controls: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  paddingHorizontal: 20,
+  paddingVertical: 20,
+},
 
-  search: {
-    paddingHorizontal: 15,
-    paddingVertical: 13,
-    borderWidth: 1,
-    borderColor: "#D9D9CF",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    color: "#254B42",
-    fontSize: 13,
-  },
+search: {
+  flex: 1,
+  minWidth: 0,
+  minHeight: 44,
+  paddingHorizontal: 12,
+  paddingVertical: 11,
+  borderWidth: 1,
+  borderColor: "#D9D9CF",
+  borderRadius: 11,
+  backgroundColor: "#FFFFFF",
+  color: "#254B42",
+  fontSize: 13,
+},
 
-  filterToggle: {
-    marginTop: 10,
-    alignSelf: "flex-start",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "#315B49",
-    borderRadius: 999,
-    backgroundColor: "#FFFFFF",
-  },
+filterToggle: {
+  minHeight: 44,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 14,
+  paddingVertical: 10,
+  borderWidth: 1,
+  borderColor: "#315B49",
+  borderRadius: 11,
+  backgroundColor: "#FFFFFF",
+},
 
   filterToggleActive: {
     backgroundColor: "#315B49",

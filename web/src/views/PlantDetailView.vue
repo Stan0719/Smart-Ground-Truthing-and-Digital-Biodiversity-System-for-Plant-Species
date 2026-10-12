@@ -4,8 +4,15 @@ import { useRoute } from 'vue-router'
 import NavigationBar from '../components/NavigationBar.vue'
 import { plantRecords } from '../data/plantRecords'
 import { plants as species } from '../data/plants'
+import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 const route = useRoute()
+const { isLoggedIn, userRole } = usePrototypeSession()
+const canViewStaffPlantData = computed(
+  () =>
+    isLoggedIn.value &&
+    (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+)
 const plant = computed(() => plantRecords.find((item) => item.plantId === route.params.plantId))
 const selectedSpecies = computed(() => species.find((item) => item.slug === plant.value?.speciesSlug))
 const primaryImage = computed(() => plant.value?.images.find((image) => image.path)?.path)
@@ -38,14 +45,14 @@ const formatDate = (value: string) =>
             <h1>Plant {{ plant.plantId }}</h1>
             <h2>{{ selectedSpecies.name }}</h2>
             <p class="scientific-name">{{ selectedSpecies.scientificName }}</p>
-            <div class="hero-badges"><span>{{ plant.latestApproved.healthStatus }}</span><span>{{ plant.latestApproved.lifeStage }}</span><span>{{ plant.location.zone }}</span></div>
+            <div class="hero-badges"><span v-if="canViewStaffPlantData">{{ plant.latestApproved.healthStatus }}</span><span>{{ plant.latestApproved.lifeStage }}</span><span v-if="canViewStaffPlantData">{{ plant.location.zone }}</span></div>
           </div>
         </div>
       </div>
     </section>
 
     <section class="content-section">
-      <div class="container content-grid">
+      <div class="container content-grid" :class="{ 'public-content-grid': !canViewStaffPlantData }">
         <div>
           <p class="eyebrow">PLANT INFORMATION</p>
           <h2>Current verified record</h2>
@@ -54,14 +61,16 @@ const formatDate = (value: string) =>
             <div><span>Species</span><strong>{{ selectedSpecies.name }}</strong></div>
             <div><span>Scientific name</span><strong><em>{{ selectedSpecies.scientificName }}</em></strong></div>
             <div><span>Height</span><strong>{{ plant.latestApproved.heightCm }} cm</strong></div>
-            <div><span>Health</span><strong>{{ plant.latestApproved.healthStatus }}</strong></div>
+            <div v-if="canViewStaffPlantData"><span>Health</span><strong>{{ plant.latestApproved.healthStatus }}</strong></div>
             <div><span>Growth stage</span><strong>{{ plant.latestApproved.lifeStage }}</strong></div>
+            <div><span>Genus</span><strong>{{ selectedSpecies.genus || '-' }}</strong></div>
+            <div><span>Last verified</span><strong>{{ formatDate(plant.latestApproved.date) }}</strong></div>
             <div class="wide"><span>Morphology</span><strong>{{ plant.latestApproved.morphology }}</strong></div>
-            <div><span>Location</span><strong>{{ plant.location.zone }}</strong></div>
+            <div v-if="canViewStaffPlantData"><span>Location</span><strong>{{ plant.location.zone }}</strong></div>
           </div>
         </div>
 
-        <aside class="staff-panel">
+        <aside v-if="canViewStaffPlantData" class="staff-panel">
           <p class="eyebrow">STAFF RECORD</p>
           <section><h3>GPS information</h3><dl><div><dt>Latitude</dt><dd>{{ plant.location.latitude.toFixed(6) }}</dd></div><div><dt>Longitude</dt><dd>{{ plant.location.longitude.toFixed(6) }}</dd></div><div><dt>Altitude</dt><dd>{{ plant.location.altitudeM }} m</dd></div><div><dt>GPS accuracy</dt><dd>± {{ plant.location.accuracyM }} m</dd></div></dl></section>
           <section><h3>QR tag</h3><p class="qr-code">{{ plant.qr.code }}</p><span class="status">{{ plant.qr.status }}</span></section>
@@ -70,7 +79,7 @@ const formatDate = (value: string) =>
       </div>
     </section>
 
-    <section v-if="latestApprovedObservation" class="latest-section">
+    <section v-if="canViewStaffPlantData && latestApprovedObservation" class="latest-section">
       <div class="container">
         <p class="eyebrow">LATEST VERIFIED OBSERVATION</p>
         <h2>{{ latestApprovedObservation.observationId }}</h2>
@@ -86,7 +95,7 @@ const formatDate = (value: string) =>
       </div>
     </section>
 
-    <section class="history-section">
+    <section v-if="canViewStaffPlantData" class="history-section">
       <div class="container">
         <p class="eyebrow">OBSERVATION HISTORY</p>
         <h2>Field record timeline</h2>
@@ -117,6 +126,7 @@ const formatDate = (value: string) =>
 .hero-copy h1 { margin: 0; color: #234a3c; font-size: clamp(44px,5vw,66px); line-height: 1.05; }.hero-copy h2 { margin: 18px 0 5px; color: #315f4e; font-size: 26px; }.scientific-name { margin: 0 0 26px; color: #7c6955; font-size: 20px; font-style: italic; }
 .hero-badges { display: flex; flex-wrap: wrap; gap: 8px; }.hero-badges span,.status { padding: 7px 12px; border-radius: 999px; background: #d4e4cf; color: #35652f; font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .content-section,.latest-section,.history-section { padding: 86px 0; }.content-grid { display: grid; grid-template-columns: 1.35fr .65fr; align-items: start; gap: 64px; }.content-section h2,.latest-section h2,.history-section h2 { margin: 0 0 26px; color: #234a3c; font-size: 36px; }
+.content-grid.public-content-grid { grid-template-columns: 1fr; }
 .fact-grid,.observation-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }.fact-grid > div,.observation-summary > div { padding: 17px; border: 1px solid rgba(58,96,70,.12); border-radius: 13px; background: #fff; }.wide { grid-column: 1 / -1; }.fact-grid span,.observation-summary span { display: block; margin-bottom: 5px; color: #7c8982; font-size: 10px; font-weight: 800; text-transform: uppercase; }.fact-grid strong,.observation-summary strong { color: #315447; font-size: 14px; line-height: 1.55; }
 .staff-panel { padding: 28px; border-radius: 22px; background: #fff; box-shadow: 0 14px 40px rgba(37,75,58,.08); }.staff-panel section + section { margin-top: 24px; padding-top: 22px; border-top: 1px solid #e7e8e1; }.staff-panel h3 { margin: 0 0 13px; color: #315f4e; }.staff-panel dl { margin: 0; display: grid; grid-template-columns: repeat(2,1fr); gap: 13px; }.staff-panel dt { color: #7c8982; font-size: 9px; font-weight: 800; text-transform: uppercase; }.staff-panel dd { margin: 3px 0 0; color: #315447; font-size: 13px; font-weight: 700; }.qr-code { color: #234a3c; font-size: 21px; font-weight: 800; letter-spacing: 1px; }
 .latest-section { background: #e8efe3; }.observation-summary { grid-template-columns: repeat(3,minmax(0,1fr)); }

@@ -5,8 +5,15 @@ import NavigationBar from '../components/NavigationBar.vue'
 import PlantRecordCard from '../components/PlantRecordCard.vue'
 import { plants as species } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
+import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 const route = useRoute()
+const { isLoggedIn, userRole } = usePrototypeSession()
+const canViewSensitiveFacts = computed(
+  () =>
+    isLoggedIn.value &&
+    (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+)
 const selectedSpecies = computed(() => species.find((item) => item.slug === route.params.slug))
 const primaryImage = computed(() =>
   selectedSpecies.value?.image || selectedSpecies.value?.images?.find((image) => image.path)?.path,
@@ -44,7 +51,7 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
           <div class="hero-copy">
             <div class="hero-badges">
               <span class="category">{{ selectedSpecies.category }}</span>
-              <span v-if="selectedSpecies.conservationStatus" class="conservation-status">{{ selectedSpecies.conservationStatus }}</span>
+              <span v-if="canViewSensitiveFacts && selectedSpecies.conservationStatus" class="conservation-status">{{ selectedSpecies.conservationStatus }}</span>
             </div>
             <h1>{{ selectedSpecies.name }}</h1>
             <p class="scientific-name">{{ selectedSpecies.scientificName }}</p>
@@ -114,18 +121,16 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
               <dt>Local name</dt>
               <dd>{{ selectedSpecies.localName }}</dd>
             </div>
-            <div v-if="selectedSpecies.conservationStatus">
-              <dt>Conservation status</dt>
-              <dd>{{ selectedSpecies.conservationStatus }}</dd>
-            </div>
-            <div v-if="selectedSpecies.sensitivityLevel">
-              <dt>Sensitivity level</dt>
-              <dd>{{ selectedSpecies.sensitivityLevel }}</dd>
-            </div>
-            <div v-if="selectedSpecies.niahDistribution">
-              <dt>Distribution in Niah</dt>
-              <dd>Zones {{ selectedSpecies.niahDistribution.zones.join(', ') }}</dd>
-            </div>
+            <template v-if="canViewSensitiveFacts">
+              <div v-if="selectedSpecies.conservationStatus">
+                <dt>Conservation status</dt>
+                <dd>{{ selectedSpecies.conservationStatus }}</dd>
+              </div>
+              <div v-if="selectedSpecies.sensitivityLevel">
+                <dt>Sensitivity level</dt>
+                <dd>{{ selectedSpecies.sensitivityLevel }}</dd>
+              </div>
+            </template>
           </dl>
         </aside>
       </div>

@@ -11,12 +11,21 @@ import {
   FlatList,
   Image,
   SafeAreaView,
+  Dimensions,
 } from "react-native";
 
 import {
   plants,
   plantRecords,
 } from "../data/mockData";
+import { getSpeciesImageSource } from "../data/speciesImages";
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
+const GRID_HORIZONTAL_PADDING = SCREEN_WIDTH < 500 ? 12 : 13;
+const GRID_GAP = SCREEN_WIDTH < 500 ? 8 : 10;
+const SPECIES_CARD_WIDTH =
+  (SCREEN_WIDTH - GRID_HORIZONTAL_PADDING * 2 - GRID_GAP) / 2;
 
 const categories = [
   "All",
@@ -27,7 +36,9 @@ const categories = [
 ];
 
 
-export default function Plant({ navigation }) {
+export default function Plant({ navigation, user }) {
+  const isBotanist = user?.role?.toLowerCase() === "botanist";
+
   const [activeCategory, setActiveCategory] = useState("All");
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -98,6 +109,7 @@ export default function Plant({ navigation }) {
     const plantCount = plantRecords.filter(
       (plant) => plant.speciesSlug === item.slug
     ).length;
+    const imageSource = getSpeciesImageSource(item);
 
 
     return (
@@ -107,10 +119,11 @@ export default function Plant({ navigation }) {
 
         <View style={styles.imageWrapper}>
 
-          {item.image ? (
+          {imageSource ? (
             <Image
-              source={{ uri: item.image }}
+              source={imageSource}
               style={styles.cardImage}
+              resizeMode="cover"
             />
           ) : (
             <View style={styles.imagePlaceholder}>
@@ -133,7 +146,7 @@ export default function Plant({ navigation }) {
               {item.category}
             </Text>
 
-            {item.conservationStatus && (
+            {isBotanist && item.conservationStatus && (
               <Text style={styles.statusBadge}>
                 {item.conservationStatus}
               </Text>
@@ -268,29 +281,30 @@ export default function Plant({ navigation }) {
             </View>
 
 
-            {/* SEARCH */}
+            {/* SEARCH + SORT */}
 
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Search by name, scientific name or keyword..."
-              placeholderTextColor="#8A968F"
-              style={styles.searchInput}
-            />
+            <View style={styles.filterControls}>
 
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search by name..."
+                placeholderTextColor="#8A968F"
+                style={styles.searchInput}
+              />
 
-            {/* SORT */}
+              <TouchableOpacity
+                style={styles.sortButton}
+                onPress={() =>
+                  setSortOpen(!sortOpen)
+                }
+              >
+                <Text style={styles.sortButtonText}>
+                  ☷ Sort
+                </Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.sortButton}
-              onPress={() =>
-                setSortOpen(!sortOpen)
-              }
-            >
-              <Text style={styles.sortButtonText}>
-                ☷ Sort
-              </Text>
-            </TouchableOpacity>
+            </View>
 
 
             {sortOpen && (
@@ -466,99 +480,111 @@ const styles = StyleSheet.create({
   },
 
   listContent: {
-    paddingButtom: 0,
+    paddingBottom: 0,
   },
 
   columnWrapper: {
-    paddingHorizontal: 13,
-    gap: 3,
+    paddingHorizontal: GRID_HORIZONTAL_PADDING,
+    gap: GRID_GAP,
   },
 
   hero: {
-    paddingHorizontal: 22,
-    paddingTop: 45,
-    paddingBottom: 40,
+    minHeight: SCREEN_WIDTH < 500 ? 250 : 310,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 20 : 22,
+    paddingTop: SCREEN_WIDTH < 500 ? 32 : 45,
+    paddingBottom: SCREEN_WIDTH < 500 ? 28 : 40,
     backgroundColor: "#214638",
   },
 
   eyebrow: {
     color: "#9CDBA6",
-    fontSize: 11,
+    fontSize: SCREEN_WIDTH < 500 ? 10 : 11,
     fontWeight: "700",
-    letterSpacing: 2,
-    marginBottom: 10,
+    letterSpacing: SCREEN_WIDTH < 500 ? 2 : 2.5,
+    marginBottom: 8,
   },
 
   heroTitle: {
     color: "#FFFAF0",
-    fontSize: 42,
+    fontSize: SCREEN_WIDTH < 500 ? 34 : 42,
+    lineHeight: SCREEN_WIDTH < 500 ? 39 : 47,
     fontWeight: "600",
     marginBottom: 10,
   },
 
   heroLead: {
     color: "#FFFFFF",
-    fontSize: 18,
-    lineHeight: 26,
-    marginBottom: 8,
+    fontSize: SCREEN_WIDTH < 500 ? 15 : 18,
+    lineHeight: SCREEN_WIDTH < 500 ? 21 : 26,
+    marginBottom: 6,
   },
 
   heroDescription: {
     color: "#DCE8DF",
-    fontSize: 13,
-    lineHeight: 21,
+    fontSize: SCREEN_WIDTH < 500 ? 12 : 13,
+    lineHeight: SCREEN_WIDTH < 500 ? 18 : 21,
   },
 
   libraryHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 32,
-    paddingBottom: 18,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 18 : 20,
+    paddingTop: SCREEN_WIDTH < 500 ? 26 : 32,
+    paddingBottom: SCREEN_WIDTH < 500 ? 14 : 18,
   },
 
   sectionLabel: {
     color: "#50A078",
     fontSize: 10,
     fontWeight: "700",
-    letterSpacing: 1.8,
+    letterSpacing: 2,
     marginBottom: 7,
   },
 
   sectionTitle: {
     color: "#254B42",
-    fontSize: 28,
+    fontSize: SCREEN_WIDTH < 500 ? 26 : 28,
+    lineHeight: SCREEN_WIDTH < 500 ? 32 : 34,
     fontWeight: "600",
   },
 
   speciesCount: {
-    marginTop: 8,
+    marginTop: 6,
     color: "#6A7B73",
     fontSize: 11,
   },
 
-  searchInput: {
-    marginHorizontal: 20,
-    marginBottom: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    borderWidth: 1,
-    borderColor: "#D9D9CF",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    color: "#254B42",
-    fontSize: 13,
-  },
+  filterControls: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  paddingHorizontal: SCREEN_WIDTH < 500 ? 18 : 20,
+  marginBottom: 10,
+},
 
-  sortButton: {
-    alignSelf: "flex-end",
-    marginHorizontal: 20,
-    marginBottom: 10,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: "#D9D9CF",
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-  },
+searchInput: {
+  flex: 1,
+  minWidth: 0,
+  minHeight: 44,
+  paddingHorizontal: 12,
+  paddingVertical: SCREEN_WIDTH < 500 ? 10 : 13,
+  borderWidth: 1,
+  borderColor: "#D9D9CF",
+  borderRadius: 11,
+  backgroundColor: "#FFFFFF",
+  color: "#254B42",
+  fontSize: 13,
+},
+
+sortButton: {
+  minHeight: 44,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 13,
+  paddingVertical: 10,
+  borderWidth: 1,
+  borderColor: "#D9D9CF",
+  borderRadius: 11,
+  backgroundColor: "#FFFFFF",
+},
 
   sortButtonText: {
     color: "#44564E",
@@ -567,7 +593,7 @@ const styles = StyleSheet.create({
   },
 
   sortMenu: {
-    marginHorizontal: 20,
+    marginHorizontal: SCREEN_WIDTH < 500 ? 18 : 20,
     marginBottom: 10,
     padding: 6,
     borderRadius: 12,
@@ -579,7 +605,7 @@ const styles = StyleSheet.create({
 
   sortOption: {
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 10,
     borderRadius: 8,
   },
 
@@ -598,14 +624,14 @@ const styles = StyleSheet.create({
   },
 
   categoryList: {
-    paddingHorizontal: 20,
-    paddingBottom: 18,
-    gap: 7,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 18 : 20,
+    paddingBottom: 14,
+    gap: 6,
   },
 
   categoryButton: {
-    paddingHorizontal: 15,
-    paddingVertical: 9,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 12 : 15,
+    paddingVertical: SCREEN_WIDTH < 500 ? 7 : 9,
     borderRadius: 999,
     backgroundColor: "#EEECE3",
   },
@@ -616,7 +642,7 @@ const styles = StyleSheet.create({
 
   categoryText: {
     color: "#44564E",
-    fontSize: 11,
+    fontSize: SCREEN_WIDTH < 500 ? 10 : 11,
     fontWeight: "600",
   },
 
@@ -625,12 +651,13 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    flex: 1,
-    height: 430,
-    marginBottom: 15,
-    marginHorizontal: 5,
+    width: SPECIES_CARD_WIDTH,
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 0,
+    marginBottom: SCREEN_WIDTH < 500 ? 11 : 15,
     overflow: "hidden",
-    borderRadius: 16,
+    borderRadius: SCREEN_WIDTH < 500 ? 13 : 16,
     backgroundColor: "#FFFFFF",
     elevation: 3,
     shadowColor: "#21392C",
@@ -639,7 +666,8 @@ const styles = StyleSheet.create({
   },
 
   imageWrapper: {
-    height: 190,
+    width: "100%",
+    aspectRatio: 4 / 3,
     position: "relative",
   },
 
@@ -656,96 +684,98 @@ const styles = StyleSheet.create({
   },
 
   placeholderIcon: {
-    fontSize: 45,
+    fontSize: SCREEN_WIDTH < 500 ? 30 : 45,
     marginBottom: 8,
   },
 
   placeholderText: {
     color: "#577265",
-    fontSize: 10,
+    fontSize: SCREEN_WIDTH < 500 ? 8 : 10,
     fontWeight: "700",
     letterSpacing: 1,
   },
 
   badgeContainer: {
     position: "absolute",
-    top: 10,
-    left: 10,
-    right: 10,
+    top: SCREEN_WIDTH < 500 ? 8 : 10,
+    left: SCREEN_WIDTH < 500 ? 8 : 10,
+    right: SCREEN_WIDTH < 500 ? 8 : 10,
     flexDirection: "row",
     justifyContent: "space-between",
   },
 
   categoryBadge: {
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 7 : 9,
+    paddingVertical: SCREEN_WIDTH < 500 ? 4 : 5,
     overflow: "hidden",
     borderRadius: 999,
     backgroundColor: "#143625D9",
     color: "#FFFFFF",
-    fontSize: 9,
+    fontSize: SCREEN_WIDTH < 500 ? 8 : 9,
     fontWeight: "700",
   },
 
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 6 : 8,
+    paddingVertical: SCREEN_WIDTH < 500 ? 4 : 5,
     overflow: "hidden",
     borderRadius: 999,
     backgroundColor: "#FFF6DC",
     color: "#6F532E",
-    fontSize: 8,
+    fontSize: SCREEN_WIDTH < 500 ? 7 : 8,
     fontWeight: "700",
   },
 
   cardContent: {
     flex: 1,
-    padding: 14,
+    padding: SCREEN_WIDTH < 500 ? 10 : 14,
   },
 
   cardTitle: {
     color: "#203F35",
-    fontSize: 20,
+    fontSize: SCREEN_WIDTH < 360 ? 15 : SCREEN_WIDTH < 500 ? 16 : 20,
+    lineHeight: SCREEN_WIDTH < 360 ? 19 : SCREEN_WIDTH < 500 ? 20 : 24,
     fontWeight: "600",
   },
 
   scientificName: {
     marginTop: 3,
     color: "#7C6C5B",
-    fontSize: 12,
+    fontSize: SCREEN_WIDTH < 500 ? 10 : 12,
+    lineHeight: SCREEN_WIDTH < 500 ? 14 : 16,
     fontStyle: "italic",
   },
 
   family: {
-    marginTop: 7,
+    marginTop: SCREEN_WIDTH < 500 ? 5 : 7,
     color: "#66786F",
-    fontSize: 9,
+    fontSize: SCREEN_WIDTH < 500 ? 8 : 9,
   },
 
   description: {
-    marginTop: 10,
+    marginTop: SCREEN_WIDTH < 500 ? 7 : 10,
     color: "#617068",
-    fontSize: 11,
-    lineHeight: 17,
+    fontSize: SCREEN_WIDTH < 500 ? 9 : 11,
+    lineHeight: SCREEN_WIDTH < 500 ? 14 : 17,
   },
 
   recordCount: {
-    marginTop: 8,
+    marginTop: SCREEN_WIDTH < 500 ? 6 : 8,
     color: "#508A6A",
-    fontSize: 10,
+    fontSize: SCREEN_WIDTH < 500 ? 9 : 10,
     fontWeight: "700",
   },
 
   actions: {
     flexDirection: "row",
-    gap: 4,
+    gap: SCREEN_WIDTH < 500 ? 4 : 6,
     marginTop: "auto",
-    paddingTop: 13,
+    paddingTop: SCREEN_WIDTH < 500 ? 10 : 13,
   },
 
   secondaryButton: {
     flex: 1,
-    minHeight: 38,
+    minHeight: SCREEN_WIDTH < 500 ? 36 : 38,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -756,13 +786,13 @@ const styles = StyleSheet.create({
 
   secondaryText: {
     color: "#315B49",
-    fontSize: 9,
+    fontSize: SCREEN_WIDTH < 360 ? 7.5 : SCREEN_WIDTH < 500 ? 8.5 : 9,
     fontWeight: "700",
   },
 
   primaryButton: {
     flex: 1,
-    minHeight: 38,
+    minHeight: SCREEN_WIDTH < 500 ? 36 : 38,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 999,
@@ -771,13 +801,13 @@ const styles = StyleSheet.create({
 
   primaryText: {
     color: "#FFFFFF",
-    fontSize: 9,
+    fontSize: SCREEN_WIDTH < 360 ? 7.5 : SCREEN_WIDTH < 500 ? 8.5 : 9,
     fontWeight: "700",
   },
 
   emptyState: {
-    margin: 20,
-    padding: 40,
+    margin: SCREEN_WIDTH < 500 ? 18 : 20,
+    padding: SCREEN_WIDTH < 500 ? 28 : 40,
     alignItems: "center",
     borderWidth: 1,
     borderStyle: "dashed",
@@ -786,27 +816,30 @@ const styles = StyleSheet.create({
   },
 
   emptyIcon: {
-    fontSize: 34,
+    fontSize: SCREEN_WIDTH < 500 ? 30 : 34,
   },
 
   emptyTitle: {
     marginTop: 10,
     color: "#254B42",
-    fontSize: 20,
+    fontSize: SCREEN_WIDTH < 500 ? 18 : 20,
     fontWeight: "600",
   },
 
   emptyDescription: {
     marginTop: 6,
     color: "#63736A",
-    fontSize: 12,
+    fontSize: SCREEN_WIDTH < 500 ? 11 : 12,
+    lineHeight: SCREEN_WIDTH < 500 ? 17 : 18,
     textAlign: "center",
   },
 
   clearButton: {
+    minHeight: 42,
     marginTop: 15,
     paddingHorizontal: 17,
     paddingVertical: 9,
+    justifyContent: "center",
     borderRadius: 999,
     backgroundColor: "#35652F",
   },
@@ -820,17 +853,17 @@ const styles = StyleSheet.create({
   quoteSection: {
     marginTop: 20,
     paddingHorizontal: 20,
-    paddingVertical: 40,
+    paddingVertical: SCREEN_WIDTH < 500 ? 32 : 40,
     alignItems: "center",
     backgroundColor: "#214638",
   },
 
   quote: {
     color: "#FFFFFF",
-    fontSize: 23,
+    fontSize: SCREEN_WIDTH < 500 ? 20 : 23,
     fontStyle: "italic",
     textAlign: "center",
-    lineHeight: 32,
+    lineHeight: SCREEN_WIDTH < 500 ? 27 : 32,
   },
 
   quoteLabel: {

@@ -1,6 +1,6 @@
 // screens/PlantDetail.js
 
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 
 import {
   View,
@@ -10,20 +10,31 @@ import {
   TouchableOpacity,
   Image,
 } from "react-native";
+import { useFocusEffect } from "expo-router/react-navigation";
 
 import {
   getPlantById,
   getSpeciesBySlug,
 } from "../data/mockData";
+import { getSpeciesImageSource } from "../data/speciesImages";
 
 
 export default function PlantDetail({
   route,
   navigation,
+  user,
 }) {
   const { plantId } = route.params || {};
+  const [, setRefreshKey] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      setRefreshKey((current) => current + 1);
+    }, [])
+  );
 
   const plant = getPlantById(plantId);
+  const isBotanist = user?.role?.toLowerCase() === "botanist";
 
   // =====================================================
   // PLANT NOT FOUND
@@ -67,6 +78,7 @@ export default function PlantDetail({
   const selectedSpecies = getSpeciesBySlug(
     plant.speciesSlug
   );
+  const speciesImageSource = getSpeciesImageSource(selectedSpecies);
 
 
   // =====================================================
@@ -112,9 +124,9 @@ export default function PlantDetail({
   <View style={styles.heroGrid}>
     {/* Plant image */}
     <View style={styles.imageFrame}>
-      {selectedSpecies?.image ? (
+      {speciesImageSource ? (
         <Image
-          source={{ uri: selectedSpecies.image }}
+          source={speciesImageSource}
           style={styles.plantImage}
           resizeMode="cover"
         />
@@ -147,17 +159,21 @@ export default function PlantDetail({
       </Text>
 
       <View style={styles.heroBadges}>
-        <Text style={styles.heroBadge}>
-          {plant.latestApproved.healthStatus}
-        </Text>
+        {isBotanist && (
+          <Text style={styles.heroBadge}>
+            {plant.latestApproved.healthStatus}
+          </Text>
+        )}
 
         <Text style={styles.heroBadge}>
           {plant.latestApproved.lifeStage}
         </Text>
 
-        <Text style={styles.heroBadge}>
-          {plant.location.zone}
-        </Text>
+        {isBotanist && (
+          <Text style={styles.heroBadge}>
+            {plant.location.zone}
+          </Text>
+        )}
       </View>
     </View>
   </View>
@@ -210,12 +226,12 @@ export default function PlantDetail({
             value={`${plant.latestApproved.heightCm} cm`}
           />
 
-          <InfoRow
-            label="Health status"
-            value={
-              plant.latestApproved.healthStatus
-            }
-          />
+          {isBotanist && (
+            <InfoRow
+              label="Health status"
+              value={plant.latestApproved.healthStatus}
+            />
+          )}
 
           <InfoRow
             label="Life stage"
@@ -225,9 +241,21 @@ export default function PlantDetail({
           />
 
           <InfoRow
-            label="Location zone"
-            value={plant.location.zone}
+            label="Genus"
+            value={selectedSpecies?.genus}
           />
+
+          <InfoRow
+            label="Last verified"
+            value={formatDate(plant.latestApproved.date)}
+          />
+
+          {isBotanist && (
+            <InfoRow
+              label="Location zone"
+              value={plant.location.zone}
+            />
+          )}
 
           <InfoRow
             label="Morphology"
@@ -240,11 +268,30 @@ export default function PlantDetail({
 
       </View>
 
+      {isBotanist && (
+        <View style={styles.addObservationSection}>
+          <TouchableOpacity
+            style={styles.addObservationButton}
+            activeOpacity={0.8}
+            onPress={() =>
+              navigation.navigate("AddObservation", {
+                plantId: plant.plantId,
+              })
+            }
+          >
+            <Text style={styles.addObservationButtonText}>
+              + Add New Observation
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
 
       {/* =================================================
           STAFF RECORD
       ================================================= */}
 
+      {isBotanist && (
       <View style={styles.staffSection}>
 
         <Text style={styles.sectionLabel}>
@@ -348,13 +395,14 @@ export default function PlantDetail({
         </View>
 
       </View>
+      )}
 
 
       {/* =================================================
           LATEST VERIFIED OBSERVATION
       ================================================= */}
 
-      {latestApprovedObservation && (
+      {isBotanist && latestApprovedObservation && (
         <View style={styles.observesection}>
 
           <Text style={styles.sectionLabel}>
@@ -432,6 +480,7 @@ export default function PlantDetail({
           OBSERVATION HISTORY
       ================================================= */}
 
+      {isBotanist && (
       <View style={styles.historySection}>
 
         <Text style={styles.sectionLabel}>
@@ -467,6 +516,7 @@ export default function PlantDetail({
         )}
 
       </View>
+      )}
 
     </ScrollView>
   );
@@ -803,6 +853,27 @@ heroBadge: {
     shadowColor: "#21392C",
     shadowOpacity: 0.08,
     shadowRadius: 10,
+  },
+
+  addObservationSection: {
+    paddingHorizontal: 22,
+    paddingBottom: 26,
+  },
+
+  addObservationButton: {
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "#315B49",
+  },
+
+  addObservationButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   infoRow: {

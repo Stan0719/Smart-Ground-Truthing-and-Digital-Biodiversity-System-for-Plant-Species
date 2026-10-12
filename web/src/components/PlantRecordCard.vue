@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { PlantRecord } from '../data/plantRecords'
+import { plants as species } from '../data/plants'
+import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 const props = withDefaults(
   defineProps<{
@@ -11,6 +13,15 @@ const props = withDefaults(
 )
 
 const primaryImage = computed(() => props.plant.images.find((image) => image.path)?.path)
+const selectedSpecies = computed(() =>
+  species.find((item) => item.slug === props.plant.speciesSlug),
+)
+const { isLoggedIn, userRole } = usePrototypeSession()
+const canViewStaffPlantData = computed(
+  () =>
+    isLoggedIn.value &&
+    (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+)
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('en-MY', { day: 'numeric', month: 'short', year: 'numeric' }).format(
@@ -30,10 +41,16 @@ const formatDate = (value: string) =>
       <h3>{{ plant.plantId }}</h3>
       <p class="record-common-name">{{ plant.commonName }}</p>
       <p class="record-species">{{ plant.speciesName }}</p>
-      <dl>
+      <dl v-if="canViewStaffPlantData">
         <div><dt>Location</dt><dd>{{ plant.location.zone }}</dd></div>
         <div><dt>Height</dt><dd>{{ plant.latestApproved.heightCm }} cm</dd></div>
         <div><dt>Life stage</dt><dd>{{ plant.latestApproved.lifeStage }}</dd></div>
+        <div><dt>{{ compact ? 'Verified' : 'Last verified' }}</dt><dd>{{ formatDate(plant.latestApproved.date) }}</dd></div>
+      </dl>
+      <dl v-else>
+        <div><dt>Height</dt><dd>{{ plant.latestApproved.heightCm }} cm</dd></div>
+        <div><dt>Life stage</dt><dd>{{ plant.latestApproved.lifeStage }}</dd></div>
+        <div><dt>Genus</dt><dd>{{ selectedSpecies?.genus || '-' }}</dd></div>
         <div><dt>{{ compact ? 'Verified' : 'Last verified' }}</dt><dd>{{ formatDate(plant.latestApproved.date) }}</dd></div>
       </dl>
 

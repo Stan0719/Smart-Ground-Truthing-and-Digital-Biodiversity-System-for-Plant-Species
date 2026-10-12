@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import { plants } from '../data/mockData';
+import { getSpeciesImageSource } from '../data/speciesImages';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -406,7 +407,7 @@ const renderPlant = ({ item }) => {
     >
       <View style={styles.plantImage}>
         <Image
-          source={{ uri: item.image }}
+          source={getSpeciesImageSource(item)}
           style={styles.plantImageActual}
           resizeMode="cover"
         />
