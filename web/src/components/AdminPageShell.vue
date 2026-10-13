@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logout as serverLogout } from '../services/auth'
 import { useRouter } from 'vue-router'
 import AdminTopbarActions from './AdminTopbarActions.vue'
 import { useAdminSidebar } from '../composables/useAdminSidebar'
@@ -8,7 +9,8 @@ defineProps<{ title: string; eyebrow: string; active: string }>()
 const router = useRouter()
 const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
 
-const logout = () => {
+const logout = async () => {
+  await serverLogout()
   sidebarOpen.value = false
   router.push({ name: 'home' })
 }

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import { faceDiagnostic } from "./utils/faceApi";
+import React, { useEffect, useRef, useState } from "react";
 
 import {
   NavigationContainer,
@@ -13,6 +14,8 @@ import {
   createNativeStackNavigator,
 } from "expo-router/native-stack";
 
+import { ActivityIndicator, AppState, View, Text } from "react-native";
+import { faceSession } from "./utils/faceSession";
 import { Ionicons } from "@expo/vector-icons";
 
 
@@ -518,26 +521,84 @@ export default function App({ homeRequest }) {
   }, [homeRequest, navigationRef]);
 
   const [user, setUser] = useState(null);
+  const [restoringSession, setRestoringSession] = useState(true);
+  const authGeneration = useRef(0);
+  const faceNavigationReference = useRef(null);
+  const restoredUser = useRef(null);
+  const applyServerUser = (verifiedUser) => {
+    setUser(verifiedUser);
+    if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "MainTabs", params: { screen: verifiedUser.role === "botanist" ? "AccountTab" : "HomeTab" } }] });
+    else restoredUser.current = verifiedUser;
+  };
+  useEffect(() => {
+    let active = true;
+    const generation = authGeneration.current;
+    faceSession.restore().then((verifiedUser) => {
+      if (active && generation === authGeneration.current && verifiedUser) applyServerUser(verifiedUser);
+    }).catch(() => {}).finally(() => { if (active) setRestoringSession(false); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    async function revalidate() {
+      if (!faceSession.hasSession()) return;
+      const generation = authGeneration.current;
+      try {
+        const verifiedUser = await faceSession.restore();
+        if (active && generation === authGeneration.current && verifiedUser) setUser(verifiedUser);
+      } catch {
+        if (active && generation === authGeneration.current) {
+          setUser(null);
+          if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+        }
+      }
+    }
+    const listener = AppState.addEventListener("change", (state) => { if (state === "active") revalidate(); });
+    const timer = setInterval(revalidate, 60000);
+    return () => { active = false; listener.remove(); clearInterval(timer); };
+  }, [navigationRef]);
 
 
   /* =======================================================
      LOGIN
   ======================================================= */
 
-  function handleLogin(loggedInUser) {
+  function handleLogin(loggedInUser, metadata) {
+    faceNavigationReference.current = metadata?.reference || null;
+    authGeneration.current += 1;
     setUser(loggedInUser);
+    if (metadata?.reference) faceDiagnostic("auth_context_updated", metadata.reference);
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    authGeneration.current += 1;
+    restoredUser.current = null;
     setUser(null);
+    if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+    try { await faceSession.logout(); }
+    catch { /* Local session is already deleted; offline server session expires normally. */ }
   }
 
+
+  if (restoringSession) return <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#244B47" }}><ActivityIndicator color="#DEF9C4" /><Text style={{ color: "white", padding: 16 }}>Checking saved login…</Text></View>;
 
   return (
     <NavigationContainer
       ref={navigationRef}
+      onStateChange={() => {
+        if (!faceNavigationReference.current) return;
+        const current = navigationRef.getCurrentRoute();
+        if (current?.name === "AccountTab" || current?.name === "HomeTab") {
+          faceDiagnostic("navigation_observed", faceNavigationReference.current, { screen: current.name });
+          faceNavigationReference.current = null;
+        }
+      }}
       onReady={() => {
-        if (homeRequest) navigationRef.navigate("MainTabs");
+        if (restoredUser.current) {
+          const verifiedUser = restoredUser.current;
+          restoredUser.current = null;
+          applyServerUser(verifiedUser);
+        } else if (homeRequest) navigationRef.navigate("MainTabs");
       }}
     >
 
@@ -562,12 +623,12 @@ export default function App({ homeRequest }) {
 
             <LoginScreen
               {...props}
-              onLogin={(loggedInUser) => {
+              onLogin={(loggedInUser, metadata) => {
 
-                setUser(loggedInUser);
+                handleLogin(loggedInUser, metadata);
 
                 props.navigation.replace(
-                  "MainTabs"
+                  "MainTabs", { screen: loggedInUser.role === "botanist" ? "AccountTab" : "HomeTab" }
                 );
 
               }}
@@ -599,15 +660,7 @@ export default function App({ homeRequest }) {
             <MainTabs
               user={user}
               onLogin={handleLogin}
-              onLogout={() => {
-
-                setUser(null);
-
-                props.navigation.replace(
-                  "Login"
-                );
-
-              }}
+              onLogout={handleLogout}
             />
 
           )}

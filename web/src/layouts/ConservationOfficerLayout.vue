@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { logout } from '../services/auth'
+import { useRouter } from 'vue-router'
+const router = useRouter()
+const signOut = async () => { await logout(); await router.replace('/') }
+
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import ConservationTopbarActions from '../components/ConservationTopbarActions.vue'
@@ -195,7 +200,7 @@ const closeControl = () =>
           <span>{{ item.label }}</span>
         </RouterLink>
       </nav>
-      <div class="sidebar-footer"><RouterLink to="/">Logout</RouterLink></div>
+      <div class="sidebar-footer"><button type="button" @click="signOut">Logout</button></div>
     </aside>
     <button
       v-if="sidebarOpen"

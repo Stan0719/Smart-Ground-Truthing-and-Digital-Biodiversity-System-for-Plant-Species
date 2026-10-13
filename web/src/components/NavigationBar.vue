@@ -1,26 +1,22 @@
 <script setup lang="ts">
-import {
-  ref,
-  computed,
-  nextTick,
-  onMounted,
-  onBeforeUnmount,
-  watch
-} from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 
 import { useRoute, useRouter } from 'vue-router'
 import LoginModal from './LoginModal.vue'
-import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
-import { usePrototypeSession, type PrototypeSessionRole } from '../composables/usePrototypeSession'
+import { currentUser, logout as serverLogout } from '../services/auth'
 
 const route = useRoute()
 const router = useRouter()
 const navSearch = ref('')
 
-// TEMPORARY FRONTEND ROLE STATE.
-// Replace this with the authenticated user's role from the backend/database
-// when authentication is integrated.
-const { isLoggedIn, userRole, username } = usePrototypeSession()
+type UserRole = 'admin' | 'conservation-officer' | null
+
+const isLoggedIn = ref(false)
+
+// Display state; the backend enforces account status and permissions.
+const userRole = ref<UserRole>(null)
+
+const username = ref('')
 
 const navItems = computed(() => {
   const items = [
@@ -56,7 +52,7 @@ const submitNavSearch = () => {
 
   router.push({
     path: '/species',
-    query: query ? { search: query } : {}
+    query: query ? { search: query } : {},
   })
 }
 
@@ -66,7 +62,7 @@ const thumbLeft = ref(0)
 const thumbWidth = ref(0)
 
 const activeNavIndex = computed(() => {
-  const index = navItems.value.findIndex(item => {
+  const index = navItems.value.findIndex((item) => {
     if (item.to === '/') {
       return route.path === '/'
     }
@@ -90,60 +86,51 @@ const updateNavThumb = async () => {
     return
   }
 
-  const links =
-    track.querySelectorAll<HTMLElement>('.nav-link')
+  const links = track.querySelectorAll<HTMLElement>('.nav-link')
 
-  const activeLink =
-    links[activeNavIndex.value]
+  const activeLink = links[activeNavIndex.value]
 
   if (!activeLink) {
     return
   }
 
-  const trackRect =
-    track.getBoundingClientRect()
+  const trackRect = track.getBoundingClientRect()
 
-  const linkRect =
-    activeLink.getBoundingClientRect()
+  const linkRect = activeLink.getBoundingClientRect()
 
-  thumbLeft.value =
-    linkRect.left - trackRect.left
+  thumbLeft.value = linkRect.left - trackRect.left
 
-  thumbWidth.value =
-    linkRect.width
+  thumbWidth.value = linkRect.width
 }
 
 const navThumbStyle = computed(() => ({
   transform: `translateX(${thumbLeft.value}px)`,
-  width: `${thumbWidth.value}px`
+  width: `${thumbWidth.value}px`,
 }))
 
 const handleResize = () => {
   updateNavThumb()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  const user = await currentUser()
+  if (user && !user.mustChangePassword && user.role !== 'Botanist') {
+    isLoggedIn.value = true
+    userRole.value = user.role === 'Administrator' ? 'admin' : 'conservation-officer'
+    username.value = user.name
+  }
   updateNavThumb()
 
-  window.addEventListener(
-    'resize',
-    handleResize
-  )
+  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener(
-    'resize',
-    handleResize
-  )
+  window.removeEventListener('resize', handleResize)
 })
 
-watch(
-  [() => route.path, isLoggedIn, userRole],
-  () => {
-    updateNavThumb()
-  }
-)
+watch([() => route.path, isLoggedIn, userRole], () => {
+  updateNavThumb()
+})
 
 const mobileMenuOpen = ref(false)
 const mobileSearchOpen = ref(false)
@@ -153,7 +140,6 @@ const loginModalOpen = ref(false)
 const logoutModalOpen = ref(false)
 
 const closeMobileMenu = () => {
-
   mobileMenuOpen.value = false
   mobileSearchOpen.value = false
 
@@ -174,7 +160,7 @@ const handleLogoClick = (event: MouseEvent) => {
 
     window.scrollTo({
       top: 0,
-      behavior: 'smooth'
+      behavior: 'smooth',
     })
   }
 }
@@ -183,57 +169,42 @@ const toggleMobileMenu = () => {
   mobileMenuOpen.value = !mobileMenuOpen.value
 }
 
-
 const openLoginModal = () => {
   mobileMenuOpen.value = false
   loginModalOpen.value = true
-
 }
 
 const handleLogin = (user: {
   username: string
-  role: Exclude<PrototypeSessionRole, null>
+  role: Exclude<UserRole, null>
   email?: string
   mustChangePassword?: boolean
 }) => {
-  if (user.mustChangePassword && user.email) {
-    sessionStorage.setItem(PENDING_PASSWORD_CHANGE_KEY, user.email)
-    loginModalOpen.value = false
-    router.push({ name: 'change-password' })
-    return
-  }
-
   username.value = user.username
   userRole.value = user.role
   isLoggedIn.value = true
   loginModalOpen.value = false
-  router.push(user.role === 'admin' ? { name: 'admin-dashboard' } : { name: 'conservation-dashboard' })
+  router.push(
+    user.role === 'admin' ? { name: 'admin-dashboard' } : { name: 'conservation-dashboard' },
+  )
 }
 
 const closeLoginModal = () => {
-
   loginModalOpen.value = false
-
 }
 
-
 const openLogoutModal = () => {
-
   mobileMenuOpen.value = false
 
   logoutModalOpen.value = true
-
 }
-
 
 const closeLogoutModal = () => {
-
   logoutModalOpen.value = false
-
 }
 
-
-const logout = () => {
+const logout = async () => {
+  await serverLogout()
 
   isLoggedIn.value = false
 
@@ -242,28 +213,15 @@ const logout = () => {
   username.value = ''
 
   logoutModalOpen.value = false
-
 }
-
-
-
 </script>
 
 <template>
   <header class="navbar">
     <div class="navbar-container">
-
       <!-- Logo -->
-      <RouterLink
-        to="/"
-        class="logo"
-        @click="handleLogoClick"
-      >
-        <img
-          src="/images/logo2.png"
-          alt="Niah Biodiversity Logo"
-          class="logo-image"
-        />
+      <RouterLink to="/" class="logo" @click="handleLogoClick">
+        <img src="/images/logo2.png" alt="Niah Biodiversity Logo" class="logo-image" />
 
         <div class="logo-text">
           <span class="logo-title">NIAH</span>
@@ -273,15 +231,8 @@ const logout = () => {
 
       <!-- Desktop Navigation -->
       <nav class="desktop-nav" aria-label="Main navigation">
-        <div
-          ref="navTrack"
-          class="nav-track"
-        >
-          <div
-            class="nav-thumb"
-            :style="navThumbStyle"
-            aria-hidden="true"
-          ></div>
+        <div ref="navTrack" class="nav-track">
+          <div class="nav-thumb" :style="navThumbStyle" aria-hidden="true"></div>
 
           <RouterLink
             v-for="(item, index) in navItems"
@@ -319,7 +270,6 @@ const logout = () => {
            ========================= -->
 
       <div class="auth-area">
-
         <!-- Logged Out -->
 
         <button
@@ -330,7 +280,6 @@ const logout = () => {
           title="Login"
           @click="openLoginModal"
         >
-
           <!-- User Icon -->
 
           <svg
@@ -339,27 +288,17 @@ const logout = () => {
             viewBox="0 0 448 512"
             aria-hidden="true"
           >
-
             <path
               d="M224 248a120 120 0 1 0 0-240 120 120 0 1 0 0 240zm-29.7 56C95.8 304 16 383.8 16 482.3 16 498.7 29.3 512 45.7 512l356.6 0c16.4 0 29.7-13.3 29.7-29.7 0-98.5-79.8-178.3-178.3-178.3l-59.4 0z"
             />
-
           </svg>
 
           <span class="login-button-text">Login</span>
-
         </button>
-
 
         <!-- Logged In -->
 
-        <button
-          v-else
-          class="logout-button"
-          type="button"
-          @click="openLogoutModal"
-        >
-
+        <button v-else class="logout-button" type="button" @click="openLogoutModal">
           <span>
             {{ username }}
           </span>
@@ -373,7 +312,6 @@ const logout = () => {
             fill="none"
             aria-hidden="true"
           >
-
             <path
               d="M16 17L21 12M21 12L16 7M21 12H9M12 17C12 17.93 12 18.395 11.8978 18.7765C11.6204 19.8117 10.8117 20.6204 9.77646 20.8978C9.39496 21 8.92997 21 8 21H7.5C6.10218 21 5.40326 21 4.85195 20.7716C4.11687 20.4672 3.53284 19.8831 3.22836 19.1481C3 18.5967 3 17.8978 3 16.5V7.5C3 6.10217 3 5.40326 3.22836 4.85195C3.53284 4.11687 4.11687 3.53284 4.85195 3.22836C5.40326 3 6.10218 3 7.5 3H8C8.92997 3 9.39496 3 9.77646 3.10222C10.8117 3.37962 11.6204 4.18827 11.8978 5.22354C12 5.60504 12 6.07003 12 7"
               stroke="currentColor"
@@ -381,13 +319,10 @@ const logout = () => {
               stroke-linecap="round"
               stroke-linejoin="round"
             />
-
           </svg>
 
           Logout
-
         </button>
-
       </div>
 
       <button
@@ -421,7 +356,6 @@ const logout = () => {
         :class="{ open: mobileMenuOpen }"
         aria-label="Mobile navigation"
       >
-
         <div class="mobile-drawer-header">
           <RouterLink to="/" class="mobile-drawer-brand" @click="closeMobileMenu">
             <img src="/images/logo.png" alt="" />
@@ -451,8 +385,12 @@ const logout = () => {
           @click="closeMobileMenu"
         >
           <span class="mobile-link-icon" aria-hidden="true">
-            <svg v-if="item.to === '/'" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8M5 10v10h14V10M9 20v-6h6v6" /></svg>
-            <svg v-else viewBox="0 0 24 24"><path d="M20 4C10 4 5 9 5 16c5-4 9-6 13-8-5 3-9 7-11 12" /></svg>
+            <svg v-if="item.to === '/'" viewBox="0 0 24 24">
+              <path d="m3 11 9-8 9 8M5 10v10h14V10M9 20v-6h6v6" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24">
+              <path d="M20 4C10 4 5 9 5 16c5-4 9-6 13-8-5 3-9 7-11 12" />
+            </svg>
           </span>
           <span>{{ item.label }}</span>
         </RouterLink>
@@ -465,7 +403,10 @@ const logout = () => {
           @click="mobileSearchOpen = !mobileSearchOpen"
         >
           <span class="mobile-link-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg>
+            <svg viewBox="0 0 24 24">
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="m15.5 15.5 5 5" />
+            </svg>
           </span>
           <span>Search</span>
           <span class="mobile-search-chevron" aria-hidden="true">›</span>
@@ -489,7 +430,6 @@ const logout = () => {
           </form>
         </div>
 
-
         <div class="mobile-nav-divider" aria-hidden="true"></div>
 
         <!-- Mobile Authentication: reuses the shared login/logout state. -->
@@ -500,22 +440,18 @@ const logout = () => {
           type="button"
           @click="openLoginModal"
         >
-
           <svg
             class="login-icon"
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 448 512"
             aria-hidden="true"
           >
-
             <path
               d="M224 248a120 120 0 1 0 0-240 120 120 0 1 0 0 240zm-29.7 56C95.8 304 16 383.8 16 482.3 16 498.7 29.3 512 45.7 512l356.6 0c16.4 0 29.7-13.3 29.7-29.7 0-98.5-79.8-178.3-178.3-178.3l-59.4 0z"
             />
-
           </svg>
 
           Login
-
         </button>
         <div v-else class="mobile-authenticated">
           <div class="mobile-user">
@@ -532,11 +468,7 @@ const logout = () => {
             <span>{{ username }}</span>
           </div>
 
-          <button
-            class="mobile-logout-button"
-            type="button"
-            @click="openLogoutModal"
-          >
+          <button class="mobile-logout-button" type="button" @click="openLogoutModal">
             <svg
               class="logout-icon"
               xmlns="http://www.w3.org/2000/svg"
@@ -555,7 +487,6 @@ const logout = () => {
             Logout
           </button>
         </div>
-
       </nav>
     </div>
   </header>
@@ -563,34 +494,16 @@ const logout = () => {
        Login Modal
   ========================= -->
 
-  <LoginModal
-    :visible="loginModalOpen"
-    @close="closeLoginModal"
-    @login="handleLogin"
-  />
-
+  <LoginModal :visible="loginModalOpen" @close="closeLoginModal" @login="handleLogin" />
 
   <!-- =========================
        Logout Confirmation Modal
   ========================= -->
 
-  <div
-    v-if="logoutModalOpen"
-    class="modal-overlay"
-    @click.self="closeLogoutModal"
-  >
-
+  <div v-if="logoutModalOpen" class="modal-overlay" @click.self="closeLogoutModal">
     <div class="logout-modal">
-
       <div class="modal-icon">
-
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden="true"
-        >
-
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
             d="M16 17L21 12M21 12L16 7M21 12H9M12 17C12 17.93 12 18.395 11.8978 18.7765C11.6204 19.8117 10.8117 20.6204 9.77646 20.8978C9.39496 21 8.92997 21 8 21H7.5C6.10218 21 5.40326 21 4.85195 20.7716C4.11687 20.4672 3.53284 19.8831 3.22836 19.1481C3 18.5967 3 17.8978 3 16.5V7.5C3 6.10217 3 5.40326 3.22836 4.85195C3.53284 4.11687 4.11687 3.53284 4.85195 3.22836C5.40326 3 6.10218 3 7.5 3H8C8.92997 3 9.39496 3 9.77646 3.10222C10.8117 3.37962 11.6204 4.18827 11.8978 5.22354C12 5.60504 12 6.07003 12 7"
             stroke="currentColor"
@@ -598,39 +511,18 @@ const logout = () => {
             stroke-linecap="round"
             stroke-linejoin="round"
           />
-
         </svg>
-
       </div>
 
-      <h2>
-        Log out?
-      </h2>
+      <h2>Log out?</h2>
 
-      <p>
-        Are you sure you want to log out of your account?
-      </p>
+      <p>Are you sure you want to log out of your account?</p>
 
       <div class="modal-actions">
+        <button class="cancel-button" type="button" @click="closeLogoutModal">Cancel</button>
 
-        <button
-          class="cancel-button"
-          type="button"
-          @click="closeLogoutModal"
-        >
-          Cancel
-        </button>
-
-        <button
-          class="confirm-logout-button"
-          type="button"
-          @click="logout"
-        >
-          Log Out
-        </button>
-
+        <button class="confirm-logout-button" type="button" @click="logout">Log Out</button>
       </div>
-
     </div>
   </div>
 </template>
@@ -754,8 +646,7 @@ const logout = () => {
 
   background: #468585;
 
-  box-shadow:
-    0 2px 8px rgba(70, 133, 133, 0.25);
+  box-shadow: 0 2px 8px rgba(70, 133, 133, 0.25);
 
   pointer-events: none;
 
@@ -799,7 +690,7 @@ const logout = () => {
 
 @media (hover: hover) and (pointer: fine) {
   .nav-link:not(.is-active):hover {
-    color: #50B498;
+    color: #50b498;
     background: rgba(80, 180, 152, 0.08);
   }
 }
@@ -809,7 +700,7 @@ const logout = () => {
 }
 
 .nav-link:focus-visible {
-  outline: 2px solid #50B498;
+  outline: 2px solid #50b498;
   outline-offset: 3px;
 }
 
@@ -846,7 +737,9 @@ const logout = () => {
 .nav-search input:focus {
   width: 185px;
   border-color: #50b498;
-  box-shadow: 0 5px 16px rgba(80, 180, 152, 0.28), 0 0 0 2px rgba(80, 180, 152, 0.14);
+  box-shadow:
+    0 5px 16px rgba(80, 180, 152, 0.28),
+    0 0 0 2px rgba(80, 180, 152, 0.14);
 }
 
 .nav-search button {
@@ -917,7 +810,7 @@ const logout = () => {
 }
 
 .login-button:hover {
-  background: #50B498;
+  background: #50b498;
 
   transform: translateY(-1px);
 }
@@ -962,12 +855,14 @@ const logout = () => {
 
   background: #468585;
 
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
 }
 
 .menu-button:hover,
 .menu-button:focus-visible {
-  background: #E0EBDD ;
+  background: #e0ebdd;
 }
 
 .menu-button[aria-expanded='true'] span:nth-child(1) {
@@ -1150,7 +1045,9 @@ const logout = () => {
     border-bottom: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 8px;
 
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition:
+      background-color 0.2s ease,
+      color 0.2s ease;
   }
 
   .mobile-nav-link:hover,
@@ -1305,7 +1202,9 @@ const logout = () => {
 
     cursor: pointer;
 
-    transition: background 0.2s ease, transform 0.2s ease;
+    transition:
+      background 0.2s ease,
+      transform 0.2s ease;
   }
 
   .mobile-login-button:hover,
@@ -1376,7 +1275,7 @@ const logout = () => {
 }
 
 .login-button:hover {
-  background: #50B498;
+  background: #50b498;
 
   transform: translateY(-1px);
 }
@@ -1400,7 +1299,6 @@ const logout = () => {
   gap: 10px;
 }
 
-
 /* Login Icon */
 
 .login-icon {
@@ -1408,7 +1306,6 @@ const logout = () => {
   height: 14px;
   fill: currentColor;
 }
-
 
 /* Logout Icon */
 
@@ -1418,7 +1315,6 @@ const logout = () => {
   flex: 0 0 19px;
   fill: none;
 }
-
 
 /* Login Button */
 
@@ -1449,10 +1345,9 @@ const logout = () => {
     transform 0.2s ease;
 }
 
-
 .login-button:hover,
 .logout-button:hover {
-  background: #50B498;
+  background: #50b498;
 
   transform: translateY(-1px);
 }
@@ -1504,7 +1399,6 @@ const logout = () => {
   transform: translateX(0);
 }
 
-
 /* =========================
    Logout Modal
    ========================= */
@@ -1528,7 +1422,6 @@ const logout = () => {
   backdrop-filter: blur(5px);
 }
 
-
 .logout-modal {
   width: min(420px, 100%);
 
@@ -1536,14 +1429,12 @@ const logout = () => {
 
   border-radius: 24px;
 
-  background: #FFF6DC;
+  background: #fff6dc;
 
-  box-shadow:
-    0 25px 70px rgba(30, 45, 40, 0.25);
+  box-shadow: 0 25px 70px rgba(30, 45, 40, 0.25);
 
   text-align: center;
 }
-
 
 .modal-icon {
   width: 52px;
@@ -1558,11 +1449,10 @@ const logout = () => {
 
   border-radius: 50%;
 
-  background: #E0EBDD;
+  background: #e0ebdd;
 
   color: #468585;
 }
-
 
 .modal-icon svg {
   width: 22px;
@@ -1570,7 +1460,6 @@ const logout = () => {
 
   fill: none;
 }
-
 
 .logout-modal h2 {
   margin: 0 0 10px;
@@ -1580,17 +1469,15 @@ const logout = () => {
   font-size: 26px;
 }
 
-
 .logout-modal p {
   margin: 0;
 
-  color: #55716D;
+  color: #55716d;
 
   font-size: 15px;
 
   line-height: 1.6;
 }
-
 
 .modal-actions {
   display: flex;
@@ -1601,7 +1488,6 @@ const logout = () => {
 
   margin-top: 28px;
 }
-
 
 .cancel-button,
 .confirm-logout-button {
@@ -1619,7 +1505,6 @@ const logout = () => {
   transition: 0.2s ease;
 }
 
-
 .cancel-button {
   border: 1px solid rgba(70, 133, 133, 0.25);
 
@@ -1628,11 +1513,9 @@ const logout = () => {
   color: #468585;
 }
 
-
 .cancel-button:hover {
-  background: #E0EBDD;
+  background: #e0ebdd;
 }
-
 
 .confirm-logout-button {
   border: none;
@@ -1642,9 +1525,8 @@ const logout = () => {
   color: white;
 }
 
-
 .confirm-logout-button:hover {
-  background: #50B498;
+  background: #50b498;
 
   transform: translateY(-1px);
 }

@@ -14,11 +14,7 @@ import {
 } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
-import {
-  getNextVisitorId,
-  getVisitorAccounts,
-  saveVisitorAccount,
-} from "../utils/visitorStorage";
+import { faceApi } from "../utils/faceApi";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -120,7 +116,7 @@ export default function VisitorRegisterScreen({ navigation }) {
     if (!normalizedEmail) nextErrors.email = "Email is required.";
     else if (!EMAIL_PATTERN.test(normalizedEmail)) nextErrors.email = "Enter a valid email address.";
     if (!password) nextErrors.password = "Password is required.";
-    else if (password.length < 8) nextErrors.password = "Password must be at least 8 characters.";
+    else if (password.length < 15 || password.length > 128) nextErrors.password = "Password must have 15 to 128 characters.";
     if (!confirmPassword) nextErrors.confirmPassword = "Confirm Password is required.";
     else if (password !== confirmPassword) nextErrors.confirmPassword = "Passwords do not match.";
 
@@ -132,31 +128,13 @@ export default function VisitorRegisterScreen({ navigation }) {
     setIsSubmitting(true);
 
     try {
-      const visitors = await getVisitorAccounts();
-      const emailExists = visitors.some(
-        (visitor) => visitor.email.trim().toLowerCase() === normalizedEmail
-      );
-
-      if (emailExists) {
-        setErrors({ email: "An account with this email already exists." });
-        return;
-      }
-
-      // PROTOTYPE ONLY: replace local password storage with backend authentication and password hashing.
-      const visitor = {
-        id: getNextVisitorId(visitors),
-        name: trimmedName,
-        email: normalizedEmail,
-        password,
-        role: "Visitor",
-        status: "Active",
-        createdAt: new Date().toISOString(),
-      };
-
-      await saveVisitorAccount(visitor);
+      const result = await faceApi("/register", { name: trimmedName, email: normalizedEmail, password });
+      if (!result.user?.id || result.user.email !== normalizedEmail || result.user.role !== "visitor" || result.user.status !== "Active") throw new Error("Server did not confirm Visitor registration.");
+      setPassword("");
+      setConfirmPassword("");
       setRegisteredEmail(normalizedEmail);
-    } catch {
-      setErrors({ form: "Unable to create the account. Please try again." });
+    } catch (error) {
+      setErrors({ form: error.message || "Unable to create the account. Please try again." });
     } finally {
       setIsSubmitting(false);
     }
