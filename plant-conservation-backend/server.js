@@ -10,14 +10,20 @@ const PORT = process.env.PORT || 3000;
 // Parse incoming JSON requests
 app.use(express.json());
 
-// Connect to your PostgreSQL database
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-});
+// Connect to Supabase when DATABASE_URL is configured.
+// Otherwise, continue using existing local PostgreSQL settings.
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    })
+  : new Pool({
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT),
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+    });
 
 // Basic test route
 app.get('/', (req, res) => {
