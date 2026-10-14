@@ -14,7 +14,9 @@ export function recoveryConfig(database,env=process.env){
  const path=settings.AUTH_RESET_KEY_FILE??join(dirname(database),'recovery.key')
  mkdirSync(dirname(path),{recursive:true,mode:0o700})
  try{const fd=openSync(path,'wx',0o600);try{writeFileSync(fd,randomBytes(32))}finally{closeSync(fd)}}catch(error){if(error.code!=='EEXIST')throw error}
- if(statSync(path).mode&0o077)throw Error('Recovery key permissions must be 600')
+ if (process.platform !== 'win32' && (statSync(path).mode & 0o077)) {
+  throw Error('Recovery key permissions must be 600')
+}
  if(env.AUTH_RECOVERY_DELIVERY_DISABLED==='1')delete settings.EMAILJS_SERVICE_ID
  return {settings,key:readFileSync(path)}
 }

@@ -1,6 +1,6 @@
 // screens/Plant.js
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import {
   View,
@@ -15,10 +15,12 @@ import {
 } from "react-native";
 
 import {
-  plants,
+  plants as mockPlants,
   plantRecords,
 } from "../data/mockData";
 import { getSpeciesImageSource } from "../data/speciesImages";
+
+const API_URL = "https://smart-ground-truthing-and-digital.onrender.com";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -38,6 +40,140 @@ const categories = [
 
 export default function Plant({ navigation, user }) {
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+
+  const [plants, setPlants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchSpecies = async () => {
+      try {
+        setLoading(true);
+        setErrorMessage("");
+
+        const response = await fetch(`${API_URL}/api/species`);
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Support either an array response or { species: [...] }
+        const speciesList = Array.isArray(data)
+          ? data
+          : Array.isArray(data.species)
+            ? data.species
+            : Array.isArray(data.data)
+              ? data.data
+              : Array.isArray(data.results)
+                ? data.results
+                : Array.isArray(data.plants)
+                  ? data.plants
+                  : null
+
+        if (!Array.isArray(speciesList)) {
+          throw new Error("Unexpected species API response.");
+        }
+
+        const formattedPlants = speciesList.map((species) => {
+          const scientificName =
+            species.scientific_name ??
+            species.scientificName ??
+            "";
+
+          const commonName =
+            species.common_name ??
+            species.name ??
+            "Unknown species";
+
+          // Match API species to existing mock data.
+          const existingSpecies = mockPlants.find((plant) => {
+            const sameScientificName =
+              plant.scientificName.toLowerCase() ===
+              scientificName.toLowerCase();
+
+            const sameCommonName =
+              plant.name.toLowerCase() ===
+              commonName.toLowerCase();
+
+            return sameScientificName || sameCommonName;
+          });
+
+          const identifier =
+            species.species_id ??
+            species.id ??
+            scientificName ??
+            commonName;
+
+          return {
+            ...existingSpecies,
+
+            id: String(identifier),
+
+            // Preserve the original slug when a match exists.
+            slug:
+              existingSpecies?.slug ??
+              `api-species-${String(identifier)}`,
+
+            name: commonName,
+
+            scientificName:
+              scientificName ||
+              existingSpecies?.scientificName ||
+              "",
+
+            genus:
+              species.genus_name ??
+              existingSpecies?.genus ??
+              "",
+
+            family:
+              species.family_name ??
+              existingSpecies?.family ??
+              "",
+
+            category:
+              species.category ??
+              existingSpecies?.category ??
+              "All",
+
+            conservationStatus:
+              species.conservation_status ??
+              existingSpecies?.conservationStatus ??
+              "Not recorded",
+
+            description:
+              species.description ??
+              existingSpecies?.description ??
+              "",
+          };
+        });
+
+        if (isMounted) {
+          setPlants(formattedPlants);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(
+            error.message || "Unable to load species."
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchSpecies();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const [activeCategory, setActiveCategory] = useState("All");
 
@@ -114,11 +250,7 @@ export default function Plant({ navigation, user }) {
 
     return (
       <View style={styles.card}>
-
-        {/* IMAGE */}
-
         <View style={styles.imageWrapper}>
-
           {imageSource ? (
             <Image
               source={imageSource}
@@ -127,21 +259,14 @@ export default function Plant({ navigation, user }) {
             />
           ) : (
             <View style={styles.imagePlaceholder}>
-              <Text style={styles.placeholderIcon}>
-                🌿
-              </Text>
-
+              <Text style={styles.placeholderIcon}>🌿</Text>
               <Text style={styles.placeholderText}>
                 Image coming soon
               </Text>
             </View>
           )}
 
-
-          {/* BADGES */}
-
           <View style={styles.badgeContainer}>
-
             <Text style={styles.categoryBadge}>
               {item.category}
             </Text>
@@ -151,25 +276,15 @@ export default function Plant({ navigation, user }) {
                 {item.conservationStatus}
               </Text>
             )}
-
           </View>
-
         </View>
 
-
-        {/* CONTENT */}
-
         <View style={styles.cardContent}>
-
-          <Text style={styles.cardTitle}>
-            {item.name}
-          </Text>
-
+          <Text style={styles.cardTitle}>{item.name}</Text>
 
           <Text style={styles.scientificName}>
             {item.scientificName}
           </Text>
-
 
           {item.family && (
             <Text style={styles.family}>
@@ -177,34 +292,22 @@ export default function Plant({ navigation, user }) {
             </Text>
           )}
 
-
-          <Text
-            style={styles.description}
-            numberOfLines={3}
-          >
+          <Text style={styles.description} numberOfLines={3}>
             {item.description}
           </Text>
-
 
           <Text style={styles.recordCount}>
             {plantCount} verified{" "}
             {plantCount === 1 ? "plant" : "plants"}
           </Text>
 
-
-          {/* ACTIONS */}
-
           <View style={styles.actions}>
-
             <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() =>
-                navigation.navigate(
-                  "SpeciesDetail",
-                  {
-                    slug: item.slug,
-                  }
-                )
+                navigation.navigate("SpeciesDetail", {
+                  slug: item.slug,
+                })
               }
             >
               <Text style={styles.secondaryText}>
@@ -212,27 +315,20 @@ export default function Plant({ navigation, user }) {
               </Text>
             </TouchableOpacity>
 
-
             <TouchableOpacity
               style={styles.primaryButton}
               onPress={() =>
-                navigation.navigate(
-                  "Species",
-                  {
-                    slug: item.slug,
-                  }
-                )
+                navigation.navigate("Species", {
+                  slug: item.slug,
+                })
               }
             >
               <Text style={styles.primaryText}>
                 View Plants →
               </Text>
             </TouchableOpacity>
-
           </View>
-
         </View>
-
       </View>
     );
   };
@@ -241,28 +337,21 @@ export default function Plant({ navigation, user }) {
   // =====================================================
   // MAIN SCREEN
   // =====================================================
-
   return (
     <SafeAreaView style={styles.safeArea}>
-
       <FlatList
         data={filteredSpecies}
         keyExtractor={(item) => item.slug}
         renderItem={renderSpeciesCard}
         numColumns={2}
         columnWrapperStyle={styles.columnWrapper}
-
         contentContainerStyle={styles.listContent}
-
         showsVerticalScrollIndicator={false}
-
         ListHeaderComponent={
           <>
-           
-            {/* LIBRARY */}
+            {/* LIBRARY HEADER */}
 
             <View style={styles.libraryHeader}>
-
               <View>
                 <Text style={styles.sectionLabel}>
                   EXPLORE THE COLLECTION
@@ -273,18 +362,36 @@ export default function Plant({ navigation, user }) {
                 </Text>
               </View>
 
-
               <Text style={styles.speciesCount}>
                 {filteredSpecies.length} species found
               </Text>
-
             </View>
 
+            {/* LOADING AND ERROR MESSAGES */}
 
-            {/* SEARCH + SORT */}
+            {loading && (
+              <Text style={styles.messageText}>
+                Loading species...
+              </Text>
+            )}
+
+            {!loading && errorMessage !== "" && (
+              <Text style={styles.errorText}>
+                {errorMessage}
+              </Text>
+            )}
+
+            {!loading &&
+              !errorMessage &&
+              plants.length === 0 && (
+                <Text style={styles.messageText}>
+                  No species found.
+                </Text>
+              )}
+
+            {/* SEARCH AND SORT */}
 
             <View style={styles.filterControls}>
-
               <TextInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -295,26 +402,19 @@ export default function Plant({ navigation, user }) {
 
               <TouchableOpacity
                 style={styles.sortButton}
-                onPress={() =>
-                  setSortOpen(!sortOpen)
-                }
+                onPress={() => setSortOpen(!sortOpen)}
               >
                 <Text style={styles.sortButtonText}>
                   ☷ Sort
                 </Text>
               </TouchableOpacity>
-
             </View>
-
 
             {sortOpen && (
               <View style={styles.sortMenu}>
-
                 <SortOption
                   label="Default order"
-                  selected={
-                    sortOption === "default"
-                  }
+                  selected={sortOption === "default"}
                   onPress={() => {
                     setSortOption("default");
                     setSortOpen(false);
@@ -323,9 +423,7 @@ export default function Plant({ navigation, user }) {
 
                 <SortOption
                   label="Name: A-Z"
-                  selected={
-                    sortOption === "name-asc"
-                  }
+                  selected={sortOption === "name-asc"}
                   onPress={() => {
                     setSortOption("name-asc");
                     setSortOpen(false);
@@ -334,9 +432,7 @@ export default function Plant({ navigation, user }) {
 
                 <SortOption
                   label="Name: Z-A"
-                  selected={
-                    sortOption === "name-desc"
-                  }
+                  selected={sortOption === "name-desc"}
                   onPress={() => {
                     setSortOption("name-desc");
                     setSortOpen(false);
@@ -345,33 +441,23 @@ export default function Plant({ navigation, user }) {
 
                 <SortOption
                   label="Scientific name: A-Z"
-                  selected={
-                    sortOption ===
-                    "scientific-asc"
-                  }
+                  selected={sortOption === "scientific-asc"}
                   onPress={() => {
-                    setSortOption(
-                      "scientific-asc"
-                    );
-
+                    setSortOption("scientific-asc");
                     setSortOpen(false);
                   }}
                 />
-
               </View>
             )}
 
-
-            {/* CATEGORY */}
+            {/* CATEGORY FILTER */}
 
             <FlatList
               horizontal
               data={categories}
               keyExtractor={(item) => item}
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={
-                styles.categoryList
-              }
+              contentContainerStyle={styles.categoryList}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[
@@ -379,9 +465,7 @@ export default function Plant({ navigation, user }) {
                     activeCategory === item &&
                       styles.categoryButtonActive,
                   ]}
-                  onPress={() =>
-                    setActiveCategory(item)
-                  }
+                  onPress={() => setActiveCategory(item)}
                 >
                   <Text
                     style={[
@@ -395,42 +479,37 @@ export default function Plant({ navigation, user }) {
                 </TouchableOpacity>
               )}
             />
-
           </>
         }
-
         ListEmptyComponent={
-          <View style={styles.emptyState}>
+          !loading && !errorMessage ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>🌿</Text>
 
-            <Text style={styles.emptyIcon}>
-              🌿
-            </Text>
-
-            <Text style={styles.emptyTitle}>
-              No species found
-            </Text>
-
-            <Text style={styles.emptyDescription}>
-              Try another search term or select
-              a different category.
-            </Text>
-
-            <TouchableOpacity
-              style={styles.clearButton}
-              onPress={() => {
-                setSearchQuery("");
-                setActiveCategory("All");
-              }}
-            >
-              <Text style={styles.clearButtonText}>
-                Clear Filters
+              <Text style={styles.emptyTitle}>
+                No matching species
               </Text>
-            </TouchableOpacity>
 
-          </View>
+              <Text style={styles.emptyDescription}>
+                Try another search term or select a
+                different category.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.clearButton}
+                onPress={() => {
+                  setSearchQuery("");
+                  setActiveCategory("All");
+                }}
+              >
+                <Text style={styles.clearButtonText}>
+                  Clear Filters
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null
         }
       />
-
     </SafeAreaView>
   );
 }
@@ -440,11 +519,9 @@ export default function Plant({ navigation, user }) {
 // SORT OPTION
 // =====================================================
 
-function SortOption({
-  label,
-  selected,
-  onPress,
-}) {
+// SORT OPTION
+
+function SortOption({ label, selected, onPress }) {
   return (
     <TouchableOpacity
       style={[
@@ -456,8 +533,7 @@ function SortOption({
       <Text
         style={[
           styles.sortOptionText,
-          selected &&
-            styles.sortOptionTextSelected,
+          selected && styles.sortOptionTextSelected,
         ]}
       >
         {selected ? "✓ " : ""}
@@ -467,13 +543,9 @@ function SortOption({
   );
 }
 
-
-// =====================================================
 // STYLES
-// =====================================================
 
 const styles = StyleSheet.create({
-
   safeArea: {
     flex: 1,
     backgroundColor: "#F8F6EE",
@@ -486,43 +558,6 @@ const styles = StyleSheet.create({
   columnWrapper: {
     paddingHorizontal: GRID_HORIZONTAL_PADDING,
     gap: GRID_GAP,
-  },
-
-  hero: {
-    minHeight: SCREEN_WIDTH < 500 ? 250 : 310,
-    paddingHorizontal: SCREEN_WIDTH < 500 ? 20 : 22,
-    paddingTop: SCREEN_WIDTH < 500 ? 32 : 45,
-    paddingBottom: SCREEN_WIDTH < 500 ? 28 : 40,
-    backgroundColor: "#214638",
-  },
-
-  eyebrow: {
-    color: "#9CDBA6",
-    fontSize: SCREEN_WIDTH < 500 ? 10 : 11,
-    fontWeight: "700",
-    letterSpacing: SCREEN_WIDTH < 500 ? 2 : 2.5,
-    marginBottom: 8,
-  },
-
-  heroTitle: {
-    color: "#FFFAF0",
-    fontSize: SCREEN_WIDTH < 500 ? 34 : 42,
-    lineHeight: SCREEN_WIDTH < 500 ? 39 : 47,
-    fontWeight: "600",
-    marginBottom: 10,
-  },
-
-  heroLead: {
-    color: "#FFFFFF",
-    fontSize: SCREEN_WIDTH < 500 ? 15 : 18,
-    lineHeight: SCREEN_WIDTH < 500 ? 21 : 26,
-    marginBottom: 6,
-  },
-
-  heroDescription: {
-    color: "#DCE8DF",
-    fontSize: SCREEN_WIDTH < 500 ? 12 : 13,
-    lineHeight: SCREEN_WIDTH < 500 ? 18 : 21,
   },
 
   libraryHeader: {
@@ -552,39 +587,53 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
 
+  messageText: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    color: "#315B49",
+    fontSize: 13,
+  },
+
+  errorText: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    color: "#B42318",
+    fontSize: 13,
+  },
+
   filterControls: {
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 8,
-  paddingHorizontal: SCREEN_WIDTH < 500 ? 18 : 20,
-  marginBottom: 10,
-},
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: SCREEN_WIDTH < 500 ? 18 : 20,
+    marginBottom: 10,
+  },
 
-searchInput: {
-  flex: 1,
-  minWidth: 0,
-  minHeight: 44,
-  paddingHorizontal: 12,
-  paddingVertical: SCREEN_WIDTH < 500 ? 10 : 13,
-  borderWidth: 1,
-  borderColor: "#D9D9CF",
-  borderRadius: 11,
-  backgroundColor: "#FFFFFF",
-  color: "#254B42",
-  fontSize: 13,
-},
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: SCREEN_WIDTH < 500 ? 10 : 13,
+    borderWidth: 1,
+    borderColor: "#D9D9CF",
+    borderRadius: 11,
+    backgroundColor: "#FFFFFF",
+    color: "#254B42",
+    fontSize: 13,
+  },
 
-sortButton: {
-  minHeight: 44,
-  alignItems: "center",
-  justifyContent: "center",
-  paddingHorizontal: 13,
-  paddingVertical: 10,
-  borderWidth: 1,
-  borderColor: "#D9D9CF",
-  borderRadius: 11,
-  backgroundColor: "#FFFFFF",
-},
+  sortButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#D9D9CF",
+    borderRadius: 11,
+    backgroundColor: "#FFFFFF",
+  },
 
   sortButtonText: {
     color: "#44564E",
@@ -733,8 +782,10 @@ sortButton: {
 
   cardTitle: {
     color: "#203F35",
-    fontSize: SCREEN_WIDTH < 360 ? 15 : SCREEN_WIDTH < 500 ? 16 : 20,
-    lineHeight: SCREEN_WIDTH < 360 ? 19 : SCREEN_WIDTH < 500 ? 20 : 24,
+    fontSize:
+      SCREEN_WIDTH < 360 ? 15 : SCREEN_WIDTH < 500 ? 16 : 20,
+    lineHeight:
+      SCREEN_WIDTH < 360 ? 19 : SCREEN_WIDTH < 500 ? 20 : 24,
     fontWeight: "600",
   },
 
@@ -849,29 +900,4 @@ sortButton: {
     fontSize: 11,
     fontWeight: "700",
   },
-
-  quoteSection: {
-    marginTop: 20,
-    paddingHorizontal: 20,
-    paddingVertical: SCREEN_WIDTH < 500 ? 32 : 40,
-    alignItems: "center",
-    backgroundColor: "#214638",
-  },
-
-  quote: {
-    color: "#FFFFFF",
-    fontSize: SCREEN_WIDTH < 500 ? 20 : 23,
-    fontStyle: "italic",
-    textAlign: "center",
-    lineHeight: SCREEN_WIDTH < 500 ? 27 : 32,
-  },
-
-  quoteLabel: {
-    marginTop: 15,
-    color: "#D6E3CF",
-    fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 3,
-  },
-
 });

@@ -1,8 +1,34 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AdminPageShell from '../components/AdminPageShell.vue'
 
 const router = useRouter()
+
+const speciesCount = ref<number | null>(null)
+const speciesLoading = ref(true)
+
+
+onMounted(async () => {
+  try {
+    const response = await fetch(
+      '/api/species'
+    )
+
+    if (!response.ok) {
+      throw new Error(`Failed to load species: ${response.status}`)
+    }
+
+    const data = await response.json()
+    console.log('Species API response:', data)
+
+    speciesCount.value = Number(data.count)
+  } catch (error) {
+    console.error('Could not load species count:', error)
+  } finally {
+    speciesLoading.value = false
+  }
+})
 
 const openUserManagement = async () => {
   await router.push({ name: 'admin-users' })
@@ -31,7 +57,7 @@ const openSystemActivity = async () => {
 
 const summaryCards = [
   { title: 'Total Users', value: '18', note: '3 active roles', icon: '♙', tone: 'green' },
-  { title: 'Plant Records', value: '350', note: 'Digital collection', icon: '♧', tone: 'green' },
+  { title: 'Plant Records', value: 'Loading...', note: 'Digital collection', icon: '♧', tone: 'green' },
   { title: 'IoT Sensors', value: '27', note: 'Across 3 zones', icon: '⌁', tone: 'blue' },
   { title: 'Active Sensors', value: '25', note: '92.6% online', icon: '✓', tone: 'success' },
   { title: 'Offline Sensors', value: '2', note: 'Requires attention', icon: '×', tone: 'neutral' },
@@ -133,7 +159,17 @@ const activities = [
             <div class="summary-icon" aria-hidden="true">{{ card.icon }}</div>
             <div>
               <p>{{ card.title }}</p>
-              <strong>{{ card.value }}</strong
+              <strong>
+                {{
+                  card.title === 'Plant Records'
+                    ? speciesLoading
+                      ? '...'
+                      : speciesCount !== null
+                        ? speciesCount
+                        : 'Unavailable'
+                    : card.value
+                }}
+              </strong>
               ><small>{{ card.note }}</small>
             </div>
           </article>

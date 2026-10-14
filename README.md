@@ -27,3 +27,39 @@ npx expo install expo-location
 npx expo install expo-image-picker
 
 npx expo start
+
+
+
+
+
+## Plant Database Integration
+
+The plant species API is deployed on Render and connected to a Supabase PostgreSQL database. The Admin Dashboard retrieves the plant species count from the API.
+
+**Backend URL:** https://smart-ground-truthing-and-digital.onrender.com
+
+### How to Run Locally
+1. Install [Node.js](https://nodejs.org/) and Git.
+
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/Stan0719/Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species.git
+   ```
+
+3. Open the project folder in VS Code and run:
+   ```bash
+   cd web
+   npm install
+   npm run dev
+   ```
+
+4. Open the local URL shown in the terminal, usually `http://localhost:5173`.
+
+### Test the API
+Open the following URL to check whether the plant species API is working:
+
+https://smart-ground-truthing-and-digital.onrender.com/api/species
+
+The API currently returns two sample species: Mango and Pitcher plant.
+
+**Note:** The Vite proxy in `web/vite.config.ts` forwards `/api/species` requests to the deployed backend during local development. Local authentication uses a separate SQLite database and may require additional setup.

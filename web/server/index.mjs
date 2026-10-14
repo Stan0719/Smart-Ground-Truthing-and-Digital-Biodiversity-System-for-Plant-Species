@@ -4,11 +4,12 @@ import { recoveryConfig } from './recovery-config.mjs'
 import { createRecovery, emailJsDelivery } from './recovery.mjs'
 import { createFaceServiceHandler } from './face-service.mjs'
 import { createAuth, digest, LOGIN_ERROR } from './auth.mjs'
+import { fileURLToPath } from 'node:url'
 mkdirSync(new URL('./data/', import.meta.url), { recursive: true, mode: 0o700 })
 const auth = await createAuth(
-  process.env.AUTH_DB ?? new URL('./data/auth.sqlite', import.meta.url).pathname,
+  process.env.AUTH_DB ?? fileURLToPath(new URL('./data/auth.sqlite', import.meta.url)),
 )
-const resetConfiguration=recoveryConfig(process.env.AUTH_DB??new URL('./data/auth.sqlite',import.meta.url).pathname)
+const resetConfiguration=recoveryConfig(process.env.AUTH_DB??fileURLToPath(new URL('./data/auth.sqlite',import.meta.url)))
 const recovery = createRecovery({auth,deliver:emailJsDelivery(resetConfiguration.settings),key:resetConfiguration.key})
 const faceHandler = createFaceServiceHandler({ auth, recovery, key: process.env.FACE_ACCOUNT_SERVICE_KEY_FILE ? readFileSync(process.env.FACE_ACCOUNT_SERVICE_KEY_FILE) : null })
 const origin = process.env.APP_ORIGIN ?? 'http://localhost:5173'
