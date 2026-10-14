@@ -1,10 +1,36 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AdminPageShell from '../components/AdminPageShell.vue'
 
 const router = useRouter()
 const { t, te } = useI18n()
+
+const speciesCount = ref<number | null>(null)
+const speciesLoading = ref(true)
+
+
+onMounted(async () => {
+  try {
+    const response = await fetch(
+      '/api/species'
+    )
+
+    if (!response.ok) {
+      throw new Error(`Failed to load species: ${response.status}`)
+    }
+
+    const data = await response.json()
+    console.log('Species API response:', data)
+
+    speciesCount.value = Number(data.count)
+  } catch (error) {
+    console.error('Could not load species count:', error)
+  } finally {
+    speciesLoading.value = false
+  }
+})
 
 const openUserManagement = async () => {
   await router.push({ name: 'admin-users' })
@@ -32,12 +58,21 @@ const openSystemActivity = async () => {
 }
 
 const summaryCards = [
+<<<<<<< HEAD
   { title: 'totalUsers', value: '18', note: 'activeRoles', icon: '♙', tone: 'green' },
   { title: 'plantRecords', value: '350', note: 'digitalCollection', icon: '♧', tone: 'green' },
   { title: 'iotSensors', value: '27', note: 'threeZones', icon: '⌁', tone: 'blue' },
   { title: 'activeSensors', value: '25', note: 'onlinePercent', icon: '✓', tone: 'success' },
   { title: 'offlineSensors', value: '2', note: 'requiresAttention', icon: '×', tone: 'neutral' },
   { title: 'threatAlerts', value: '3', note: 'needReview', icon: '!', tone: 'danger' },
+=======
+  { title: 'Total Users', value: '18', note: '3 active roles', icon: '♙', tone: 'green' },
+  { title: 'Plant Records', value: 'Loading...', note: 'Digital collection', icon: '♧', tone: 'green' },
+  { title: 'IoT Sensors', value: '27', note: 'Across 3 zones', icon: '⌁', tone: 'blue' },
+  { title: 'Active Sensors', value: '25', note: '92.6% online', icon: '✓', tone: 'success' },
+  { title: 'Offline Sensors', value: '2', note: 'Requires attention', icon: '×', tone: 'neutral' },
+  { title: 'Threat Alerts', value: '3', note: '2 need review', icon: '!', tone: 'danger' },
+>>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
 ]
 
 const threatAlerts = [
@@ -153,8 +188,24 @@ const dataLabel = (value: string) => {
         <section class="panel sensor-overview">
           <div class="panel-header">
             <div>
+<<<<<<< HEAD
               <p class="section-kicker">{{ t('adminDashboard.liveOverview') }}</p>
               <h2>{{ t('adminDashboard.sensorStatusOverview') }}</h2>
+=======
+              <p>{{ card.title }}</p>
+              <strong>
+                {{
+                  card.title === 'Plant Records'
+                    ? speciesLoading
+                      ? '...'
+                      : speciesCount !== null
+                        ? speciesCount
+                        : 'Unavailable'
+                    : card.value
+                }}
+              </strong>
+              ><small>{{ card.note }}</small>
+>>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
             </div>
             <button class="secondary-button" type="button" @click="openIoTMonitoring">
               {{ t('adminDashboard.viewIotMonitoring') }} →

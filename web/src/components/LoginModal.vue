@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { authenticatePrototypeUser } from '../data/prototypeAuth'
+import { api, type AuthUser } from '../services/auth'
 import { useRouter } from 'vue-router' // Navigate to the forgot-password page
 const router = useRouter() //forgot password
 
@@ -10,12 +10,14 @@ defineProps<{
 
 const emit = defineEmits<{
   close: []
-  login: [user: {
-    username: string
-    role: 'admin' | 'conservation-officer'
-    email?: string
-    mustChangePassword?: boolean
-  }]
+  login: [
+    user: {
+      username: string
+      role: 'admin' | 'conservation-officer'
+      email?: string
+      mustChangePassword?: boolean
+    },
+  ]
 }>()
 
 const email = ref('')
@@ -35,64 +37,40 @@ const openForgotPassword = () => {
   router.push({ name: 'forgot-password' })
 }
 
-//testing
-const handleLogin = () => {
+const submitting = ref(false)
+const handleLogin = async () => {
+  if (submitting.value) return
+  submitting.value = true
   loginError.value = ''
   platformMessage.value = ''
-  const prototypeUser = authenticatePrototypeUser(email.value, password.value)
-
-  if (prototypeUser?.role === 'Botanist') {
-    platformMessage.value = 'This Botanist account is intended for the Niah mobile application.'
-    return
-  }
-
-  if (prototypeUser) {
+  try {
+    const { user } = await api<{ user: AuthUser }>('/auth/login', 'POST', {
+      email: email.value,
+      password: password.value,
+    })
+    if (user.mustChangePassword) {
+      closeModal()
+      await router.push({ name: 'change-password' })
+      return
+    }
+    if (user.role === 'Botanist' || user.role === 'Visitor') {
+      platformMessage.value = 'This account is intended for the Niah mobile application.'
+      return
+    }
     emit('login', {
-      username: prototypeUser.name,
-      role: 'conservation-officer',
-      email: prototypeUser.email,
-      mustChangePassword: prototypeUser.mustChangePassword,
+      username: user.name,
+      role: user.role === 'Administrator' ? 'admin' : 'conservation-officer',
+      email: user.email,
     })
     emit('close')
     email.value = ''
+  } catch (error) {
+    loginError.value =
+      error instanceof Error ? error.message : 'Unable to sign in. Please try again.'
+  } finally {
     password.value = ''
-    return
+    submitting.value = false
   }
-
-  const mockUsers = [
-    {
-      email: 'admin@niah.com',
-      password: 'admin123',
-      username: 'Admin01',
-      role: 'admin' as const,
-    },
-    {
-      email: 'officer@niah.com',
-      password: 'officer123',
-      username: 'Officer01',
-      role: 'conservation-officer' as const,
-    },
-  ]
-
-  const mockUser = mockUsers.find(
-    (user) => user.email === email.value && user.password === password.value,
-  )
-
-  if (mockUser) {
-    emit('login', {
-      username: mockUser.username,
-      role: mockUser.role,
-    })
-    emit('close')
-
-    email.value = ''
-    password.value = ''
-    loginError.value = ''
-
-    return
-  }
-
-  loginError.value = 'Invalid email or password.'
 }
 </script>
 
@@ -100,89 +78,75 @@ const handleLogin = () => {
   <Transition name="modal-fade">
     <div v-if="visible" class="modal-backdrop" @click.self="closeModal">
       <div class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
-        <button
-          type="button"
-          class="close-button"
-          aria-label="Close login"
-          @click="closeModal"
-        >
+        <button type="button" class="close-button" aria-label="Close login" @click="closeModal">
           &times;
         </button>
 
         <div class="modal-header">
-            <div class="login-icon-circle">
-                <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 448 512"
-                aria-hidden="true"
-                >
-                <path
-                    d="M224 248a120 120 0 1 0 0-240 120 120 0 1 0 0 240zm-29.7 56C95.8 304 16 383.8 16 482.3 16 498.7 29.3 512 45.7 512l356.6 0c16.4 0 29.7-13.3 29.7-29.7 0-98.5-79.8-178.3-178.3-178.3l-59.4 0z"
-                />
-                </svg>
-            </div>
+          <div class="login-icon-circle">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" aria-hidden="true">
+              <path
+                d="M224 248a120 120 0 1 0 0-240 120 120 0 1 0 0 240zm-29.7 56C95.8 304 16 383.8 16 482.3 16 498.7 29.3 512 45.7 512l356.6 0c16.4 0 29.7-13.3 29.7-29.7 0-98.5-79.8-178.3-178.3-178.3l-59.4 0z"
+              />
+            </svg>
+          </div>
 
-            <h2 id="login-title">Welcome Back</h2>
-            <p>Sign in to access the Niah Biodiversity System.</p>
+          <h2 id="login-title">Welcome Back</h2>
+          <p>Sign in to access the Niah Biodiversity System.</p>
         </div>
 
         <form class="login-form" @submit.prevent="handleLogin">
-            <div class="input-container">
-                <input
-                id="email"
-                v-model="email"
-                class="form-input"
-                type="email"
-                placeholder=" "
-                autocomplete="email"
-                required
-                />
-                <div class="label-cut label-cut-email"></div>
-                <label class="floating-label" for="email">Email</label>
-            </div>
+          <div class="input-container">
+            <input
+              id="email"
+              v-model="email"
+              class="form-input"
+              type="email"
+              placeholder=" "
+              autocomplete="email"
+              required
+            />
+            <div class="label-cut label-cut-email"></div>
+            <label class="floating-label" for="email">Email</label>
+          </div>
 
-            <div class="input-container">
-                <input
-                id="password"
-                v-model="password"
-                class="form-input"
-                type="password"
-                placeholder=" "
-                autocomplete="current-password"
-                required
-                />
-                <div class="label-cut label-cut-password"></div>
-                <label class="floating-label" for="password">Password</label>
-            </div>
- 
-            <!--
+          <div class="input-container">
+            <input
+              id="password"
+              v-model="password"
+              class="form-input"
+              type="password"
+              placeholder=" "
+              autocomplete="current-password"
+              required
+            />
+            <div class="label-cut label-cut-password"></div>
+            <label class="floating-label" for="password">Password</label>
+          </div>
+
+          <!--
               <div class="forgot-password-row">
                 <button type="button" class="forgot-password-button">
                   Forget password?
                 </button>
               </div>
-              -->   <!-- This button has been replaced -->
-                       
-            <div class="forgot-password-row">
-              <button
-                type="button"
-                class="forgot-password-button"
-                @click="openForgotPassword"
-              >
-                Forgot password?
-              </button>
-            </div>
+              -->
+          <!-- This button has been replaced -->
 
+          <div class="forgot-password-row">
+            <button type="button" class="forgot-password-button" @click="openForgotPassword">
+              Forgot password?
+            </button>
+          </div>
 
-            <p
-                v-if="loginError"
-                class="login-error"
-            >
-                {{ loginError }}
-            </p>
-            <p v-if="platformMessage" class="platform-message">{{ platformMessage }}</p>
+          <p v-if="loginError" class="login-error">
+            {{ loginError }}
+          </p>
+          <p v-if="platformMessage" class="platform-message">{{ platformMessage }}</p>
 
-            <button type="submit" class="login-submit">Login</button>
+          <button type="submit" class="login-submit" :disabled="submitting">
+            {{ submitting ? 'Signing in…' : 'Login' }}
+          </button>
         </form>
       </div>
     </div>
@@ -242,7 +206,10 @@ const handleLogin = () => {
   font-size: 26px;
   line-height: 34px;
   cursor: pointer;
-  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+  transition:
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
 }
 
 .close-button:hover {
@@ -275,7 +242,9 @@ const handleLogin = () => {
   background: #50b498;
   color: white;
   box-shadow: 0 8px 22px rgba(15, 48, 41, 0.32);
-  transition: transform 220ms ease, box-shadow 220ms ease;
+  transition:
+    transform 220ms ease,
+    box-shadow 220ms ease;
 }
 
 .login-modal:hover .login-icon-circle {
@@ -327,7 +296,10 @@ const handleLogin = () => {
   color: #fff6dc;
   font: inherit;
   font-size: 16px;
-  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background 200ms ease;
 }
 
 .form-input:hover {
@@ -350,7 +322,9 @@ const handleLogin = () => {
   background: #2b5651;
   opacity: 0;
   transform: scaleX(0.7);
-  transition: opacity 200ms ease, transform 200ms ease;
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
   pointer-events: none;
 }
 
@@ -371,7 +345,9 @@ const handleLogin = () => {
   line-height: 16px;
   pointer-events: none;
   transform-origin: left center;
-  transition: color 200ms ease, transform 200ms ease;
+  transition:
+    color 200ms ease,
+    transform 200ms ease;
 }
 
 .form-input:focus ~ .label-cut,
@@ -424,7 +400,10 @@ const handleLogin = () => {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 8px 18px rgba(12, 40, 34, 0.24);
-  transition: background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  transition:
+    background 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
 }
 
 .login-submit:hover {
@@ -446,7 +425,9 @@ const handleLogin = () => {
 
 .modal-fade-enter-active .login-modal,
 .modal-fade-leave-active .login-modal {
-  transition: opacity 200ms ease, transform 200ms ease;
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
 }
 
 .modal-fade-enter-from,
@@ -481,7 +462,7 @@ const handleLogin = () => {
 /*login error */
 .login-error {
   margin: 18px 0 -18px;
-  color: #B84A4A;
+  color: #b84a4a;
   font-size: 13px;
   font-weight: 500;
   text-align: center;

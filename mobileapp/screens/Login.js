@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 
 import {
   Animated,
+  Alert,
+  Switch,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -16,16 +18,24 @@ import {
 import { router } from "expo-router";
 
 import { Ionicons } from "@expo/vector-icons";
-import { getVisitorAccounts } from "../utils/visitorStorage";
+import * as LocalAuthentication from "expo-local-authentication";
+import * as SecureStore from "expo-secure-store";
+import Constants from "expo-constants";
+import { createFaceCameraController, FACE_CAPTURE_VERSION } from "../utils/faceCaptureFlow";
+import { completeFaceLogin } from "../utils/completeFaceLogin";
+import { faceSession } from "../utils/faceSession";
+import { faceApi, validateFaceSession, faceDiagnostic, faceReference } from "../utils/faceApi";
+import FaceCameraModal, { faceCameraConfigured } from "../components/FaceCameraModal";
 
-const TEST_BOTANIST = {
-  id: 1,
-  name: "Admin",
-  email: "admin@niah.com",
-  password: "admin123",
-  role: "botanist",
-  status: "Active",
+
+const BIOMETRIC_KEY = "niah.biometric.credentials";
+const BIOMETRIC_OPTIONS = {
+  requireAuthentication: true,
+  keychainService: "niah.biometric.login",
+  authenticationPrompt: "Unlock your saved Niah login",
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
+
 
 
 function FloatingInput({
@@ -37,6 +47,8 @@ function FloatingInput({
   autoComplete,
   returnKeyType,
   onSubmitEditing,
+  onFocus,
+  editable = true,
 }) {
   const [isFocused, setIsFocused] = useState(false);
 
@@ -99,7 +111,8 @@ function FloatingInput({
         ]}
         value={value}
         onChangeText={onChangeText}
-        onFocus={() => setIsFocused(true)}
+        onFocus={() => { setIsFocused(true); onFocus?.(); }}
+        editable={editable}
         onBlur={() => setIsFocused(false)}
         secureTextEntry={secureTextEntry}
         keyboardType={keyboardType}
@@ -139,6 +152,118 @@ export default function LoginScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [faceRequest, setFaceRequest] = useState(null);
+  const [registerCameraFace, setRegisterCameraFace] = useState(false);
+  const [cameraMessage, setCameraMessage] = useState("");
+  const [manageLegacy, setManageLegacy] = useState(false);
+  const [legacyEmail, setLegacyEmail] = useState("");
+  const [legacyPassword, setLegacyPassword] = useState("");
+  const faceCompletion = useRef(null);
+  const faceCameraController = useRef(null);
+  if (!faceCameraController.current) faceCameraController.current = createFaceCameraController({
+    reference: faceReference, onChange: setFaceRequest, diagnostic: faceDiagnostic,
+    clearMessages: () => { setCameraMessage(""); setLoginError(""); },
+  });
+  useEffect(() => {
+    faceCameraController.current.reset();
+    faceCompletion.current?.(null);
+    faceCompletion.current = null;
+    faceDiagnostic("login_screen_loaded", undefined, { flowVersion: FACE_CAPTURE_VERSION });
+  }, []);
+  const cameraEnabled = faceCameraConfigured() && Platform.OS !== "web";
+  useEffect(() => () => {
+    faceCameraController.current.reset();
+    faceCompletion.current?.(null);
+    faceCompletion.current = null;
+  }, []);
+
+  function finishFaceCamera(result, requestId) {
+    const completed = faceCameraController.current.finish(requestId);
+    if (!completed) return;
+    if (completed.mode === "recognize" && result?.token && result?.user) {
+      loginLock.current = true;
+      completeFaceLogin({ result, session: faceSession, onLogin, navigation, diagnostic: faceDiagnostic }).then(() => {
+        setEmail("");
+        setPassword("");
+        setLoginError("");
+      }).catch((error) => {
+        faceDiagnostic("session_or_navigation_failed", result.requestId, { code: error.code || "session_or_navigation_error" });
+        setCameraMessage(error.message || "Session verification failed. Use email/password or retry face login.");
+      }).finally(() => { loginLock.current = false; });
+    } else if (result?.error) setCameraMessage(result.error);
+    if (completed.mode === "enroll") {
+      faceCompletion.current?.(result);
+      faceCompletion.current = null;
+    }
+  }
+
+
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [saveBiometric, setSaveBiometric] = useState(false);
+  const [biometricBusy, setBiometricBusy] = useState(false);
+  const [biometricMessage, setBiometricMessage] = useState("");
+  const biometricLock = useRef(false);
+  const loginLock = useRef(false);
+  const autoPrompted = useRef(false);
+
+  useEffect(() => {
+    // Face ID needs a native build with the permission configured.
+    if (Platform.OS === "web" || Constants.appOwnership === "expo") return;
+    let active = true;
+    LocalAuthentication.isEnrolledAsync()
+      .then((enrolled) => {
+        if (active) setBiometricAvailable(enrolled && SecureStore.canUseBiometricAuthentication());
+      })
+      .catch(() => { if (active) setBiometricAvailable(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function fillFromBiometrics(automatic = false) {
+    if (cameraEnabled || !biometricAvailable || biometricLock.current || loginLock.current) return;
+    if (automatic && (autoPrompted.current || email || password)) return;
+    autoPrompted.current = true;
+    biometricLock.current = true;
+    setBiometricBusy(true);
+    setBiometricMessage("");
+    try {
+      const saved = await SecureStore.getItemAsync(BIOMETRIC_KEY, BIOMETRIC_OPTIONS);
+      if (!saved) {
+        setBiometricMessage("Sign in with your password and enable biometric autofill first. If your biometrics changed, enable it again.");
+        return;
+      }
+      const credentials = JSON.parse(saved);
+      if (typeof credentials.email !== "string" || typeof credentials.password !== "string") {
+        throw new Error("Invalid saved credentials");
+      }
+      setEmail(credentials.email);
+      setPassword(credentials.password);
+      setLoginError("");
+      setBiometricMessage("Login details filled. Tap Login to continue.");
+    } catch {
+      setBiometricMessage("Biometric autofill was cancelled or unavailable. Enter your details manually, or try again.");
+    } finally {
+      biometricLock.current = false;
+      setBiometricBusy(false);
+    }
+  }
+
+  async function forgetBiometricLogin() {
+    if (biometricLock.current || loginLock.current) return;
+    biometricLock.current = true;
+    setBiometricBusy(true);
+    try {
+      await SecureStore.deleteItemAsync(BIOMETRIC_KEY, BIOMETRIC_OPTIONS);
+      setEmail("");
+      setPassword("");
+      setSaveBiometric(false);
+      setBiometricMessage("Saved biometric login removed from this device.");
+    } catch {
+      setBiometricMessage("Unable to remove saved login. Please try again.");
+    } finally {
+      biometricLock.current = false;
+      setBiometricBusy(false);
+    }
+  }
 
   const screenFade = useRef(new Animated.Value(0)).current;
   const screenSlide = useRef(new Animated.Value(12)).current;
@@ -205,9 +330,65 @@ export default function LoginScreen({
     }
   }
 
+  async function recoverLegacyFace(reenroll) {
+    if (loginLock.current || biometricLock.current || faceRequest) return;
+    if (!email.trim() || !password || !legacyEmail.trim() || !legacyPassword) {
+      setCameraMessage("Enter your real account credentials above and your original enrollment credentials below.");
+      return;
+    }
+    loginLock.current = true;
+    let authenticated;
+    try {
+      const consent = await new Promise(resolve => Alert.alert(
+        reenroll ? "Save a new enrollment?" : "Link existing enrollment?",
+        reenroll
+          ? "I own both accounts and consent to linking them and saving a new live template. The old template remains preserved but will leave active matching. Roles and permissions stay the same."
+          : "I own both accounts and consent to linking the existing facial template to my real account. Linking does not improve recognition or confirm historical model compatibility.",
+        [{ text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+          { text: "I own both accounts and agree", onPress: () => resolve(true) }],
+        { cancelable: true, onDismiss: () => resolve(false) }
+      ));
+      if (!consent) return;
+      authenticated = await faceApi("/password", { email: email.trim().toLowerCase(), password });
+      validateFaceSession(authenticated);
+      const proof = { realPassword: password, legacyEmail: legacyEmail.trim().toLowerCase(), legacyPassword };
+      // Credentials exist only in transient memory and are cleared from the form.
+      setPassword(""); setLegacyPassword("");
+      let result;
+      if (reenroll) {
+        result = await new Promise(resolve => {
+          faceCompletion.current = resolve;
+          faceCameraController.current.openEnrollment({ ...authenticated, legacyProof: proof });
+        });
+      } else result = await faceApi("/legacy-link", { ...proof, consent: true }, authenticated.token);
+      if (result?.enrolled === true) {
+        setCameraMessage(reenroll
+          ? "New enrollment saved; old template preserved. Log in with Face ID to verify a different capture."
+          : "Existing enrollment linked. Face Login still requires a successful match.");
+        setManageLegacy(false);
+      } else if (result?.alreadyEnrolled) setCameraMessage("Your account already has a facial enrollment. It was not replaced.");
+    } catch (error) {
+      setCameraMessage(error.message || "Enrollment recovery failed. No authentication bypass was used.");
+    } finally {
+      setPassword(""); setLegacyPassword("");
+      if (authenticated?.token) {
+        try { await faceApi("/logout", {}, authenticated.token); }
+        catch { setCameraMessage("Unable to confirm recovery-session logout. Use password login to check your account."); }
+      }
+      loginLock.current = false;
+    }
+  }
+
 
   async function handleLogin() {
+  if (loginLock.current || biometricLock.current || faceRequest) return;
+  loginLock.current = true;
+  try {
   const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !password) {
+    setLoginError("Enter your account email and password.");
+    return;
+  }
 
   let user = null;
 
@@ -216,47 +397,15 @@ export default function LoginScreen({
   // BOTANIST LOGIN
   // =====================================================
 
-  if (
-    normalizedEmail === TEST_BOTANIST.email.toLowerCase() &&
-    password === TEST_BOTANIST.password
-  ) {
-    user = {
-      id: TEST_BOTANIST.id,
-      name: TEST_BOTANIST.name,
-      email: TEST_BOTANIST.email,
-      role: TEST_BOTANIST.role,
-    };
-  }
-
-
-  // =====================================================
-  // VISITOR LOGIN
-  // =====================================================
-
-  if (!user) {
-    try {
-      const visitors = await getVisitorAccounts();
-
-      const visitor = visitors.find(
-        (visitor) =>
-          visitor.email?.trim().toLowerCase() === normalizedEmail &&
-          visitor.password === password &&
-          visitor.role === "Visitor" &&
-          visitor.status === "Active"
-      );
-
-      if (visitor) {
-        user = {
-          id: visitor.id,
-          name: visitor.name,
-          email: visitor.email,
-          role: "visitor",
-        };
-      }
-
-    } catch (error) {
-      console.log("Unable to load visitor accounts:", error);
-    }
+  let serverToken;
+  try {
+    const result = await faceApi("/password", { email: normalizedEmail, password });
+    validateFaceSession(result);
+    user = result.user;
+    serverToken = result.token;
+  } catch (error) {
+    setLoginError(error.message || "Account service is unavailable.");
+    return;
   }
 
 
@@ -274,18 +423,57 @@ export default function LoginScreen({
   // LOGIN SUCCESS
   // =====================================================
 
+  if (!cameraEnabled && saveBiometric && biometricAvailable) {
+    try {
+      await SecureStore.setItemAsync(
+        BIOMETRIC_KEY,
+        JSON.stringify({ email: normalizedEmail, password }),
+        BIOMETRIC_OPTIONS
+      );
+    } catch {
+      Alert.alert("Biometric autofill not saved", "You can still sign in normally. Try enabling biometric autofill next time.");
+    }
+  }
+
+  if (registerCameraFace && cameraEnabled) {
+    try {
+      const status = await faceApi("/enrollment-status", {}, serverToken);
+      if (status.user?.id !== user.id || typeof status.enrolled !== "boolean") throw new Error("Unable to confirm enrollment for this account.");
+      const result = status.enrolled ? { alreadyEnrolled: true } : await new Promise((resolve) => {
+        faceCompletion.current = resolve;
+        faceCameraController.current.openEnrollment({ token: serverToken, user });
+      });
+      if (result?.alreadyEnrolled) {
+        setRegisterCameraFace(false);
+        setCameraMessage("Your face is already registered. You can now use Face Login.");
+        Alert.alert("Face Login ready", "Your face is already registered. You can now use Face Login.");
+      } else if (result?.enrolled === true) Alert.alert("Face registered", "You can use Login with Face ID next time.");
+      else Alert.alert("Face registration not completed", "Your password login will continue. You can register your face next time.");
+    } catch (error) {
+      Alert.alert("Unable to check face registration", error.message || "Your password login will continue. Try again later.");
+    }
+  }
+
+  if (serverToken) {
+    try { user = await faceSession.establish({ token: serverToken, user }); }
+    catch (error) { setLoginError(error.message || "Unable to securely store your session."); return; }
+  }
   setEmail("");
   setPassword("");
   setLoginError("");
 
 
-  console.log("LOGGED IN USER:", user);
+  // Do not log account details or session credentials.
 
   if (onLogin) {
     onLogin(user);
   } else {
-    navigation.replace("MainTabs");
-  }}
+    navigation.replace("MainTabs", { screen: user.role === "botanist" ? "AccountTab" : "HomeTab" });
+  }
+  } finally {
+    loginLock.current = false;
+  }
+  }
 
 
   function handleGuest() {
@@ -299,6 +487,7 @@ export default function LoginScreen({
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <FaceCameraModal request={faceRequest} onClose={(requestId) => finishFaceCamera(null, requestId)} onResult={finishFaceCamera} isCurrent={(id) => faceCameraController.current.isCurrent(id)} />
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -379,6 +568,8 @@ export default function LoginScreen({
 
               {/* Email */}
               <FloatingInput
+                onFocus={() => fillFromBiometrics(true)}
+                editable={!biometricBusy}
                 label="Email"
                 value={email}
                 onChangeText={updateEmail}
@@ -390,6 +581,7 @@ export default function LoginScreen({
 
               {/* Password */}
               <FloatingInput
+                editable={!biometricBusy}
                 label="Password"
                 value={password}
                 onChangeText={updatePassword}
@@ -399,6 +591,62 @@ export default function LoginScreen({
                 onSubmitEditing={handleLogin}
               />
 
+
+              {!cameraEnabled && <View style={{ gap: 10 }}>
+                <Text style={styles.biometricHelp}>
+                  {biometricAvailable
+                    ? "Sign in once and enable biometric autofill. Next time, tap Email to unlock your saved email and password with Face ID or fingerprint."
+                    : "Biometric autofill needs a native app build and Face ID or fingerprint enabled in your phone settings. You can always sign in manually."}
+                </Text>
+                {biometricAvailable && <>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={[styles.biometricHelp, { flex: 1 }]}>Save this login for biometric autofill on this device</Text>
+                    <Switch value={saveBiometric} onValueChange={setSaveBiometric} disabled={biometricBusy} accessibilityLabel="Save login for biometric autofill" />
+                  </View>
+                  <TouchableOpacity onPress={() => fillFromBiometrics()} disabled={biometricBusy} accessibilityRole="button">
+                    <Text style={styles.guestButtonText}>{biometricBusy ? "Unlocking…" : "Autofill with biometrics"}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={forgetBiometricLogin} disabled={biometricBusy} accessibilityRole="button">
+                    <Text style={styles.biometricHelp}>Remove saved biometric login</Text>
+                  </TouchableOpacity>
+                </>}
+                {!!biometricMessage && <Text style={styles.biometricHelp} accessibilityLiveRegion="polite">{biometricMessage}</Text>}
+              </View>}
+
+              {cameraEnabled && <View style={{ gap: 12 }}>
+                <Text style={styles.biometricHelp}>Register once for your eligible account, then use Login with Face ID without typing your email or password.</Text>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <Text style={[styles.biometricHelp, { flex: 1 }]}>Register my face after password login</Text>
+                  <Switch value={registerCameraFace} onValueChange={setRegisterCameraFace} accessibilityLabel="Register face after login" />
+                </View>
+                <TouchableOpacity accessibilityRole="button" onPress={() => {
+                  if (!loginLock.current && !biometricLock.current && !faceRequest) {
+                    setRegisterCameraFace(false);
+                    faceCameraController.current.openLogin();
+                  }
+                }}>
+                  <Text style={styles.guestButtonText}>Login with Face ID</Text>
+                </TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" onPress={() => {
+                  if (!loginLock.current && !faceRequest) { setManageLegacy(!manageLegacy); setLegacyPassword(""); }
+                }}><Text style={styles.biometricHelp}>Manage my existing facial enrollment</Text></TouchableOpacity>
+                {manageLegacy && <View style={{ gap: 16 }}>
+                  <Text style={styles.biometricHelp}>Enter your eligible real account email/password above. Enter your original face-enrollment credentials below. Never use another person's enrollment.</Text>
+                  <FloatingInput label="Legacy email" value={legacyEmail} onChangeText={setLegacyEmail} keyboardType="email-address" />
+                  <FloatingInput label="Legacy password" value={legacyPassword} onChangeText={setLegacyPassword} secureTextEntry />
+                  <TouchableOpacity accessibilityRole="button" onPress={() => recoverLegacyFace(false)}><Text style={styles.guestButtonText}>Link my existing enrollment</Text></TouchableOpacity>
+                  <TouchableOpacity accessibilityRole="button" onPress={() => recoverLegacyFace(true)}><Text style={styles.guestButtonText}>Enroll a new capture, preserve my old template</Text></TouchableOpacity>
+                </View>}
+                <TouchableOpacity accessibilityRole="button" onPress={async () => {
+                  if (loginLock.current || biometricLock.current || faceRequest) return;
+                  try {
+                    const session = await faceApi("/password", { email: email.trim().toLowerCase(), password });
+                    await faceApi("/delete-face", {}, session.token);
+                    setCameraMessage("Face registration removed and sessions revoked.");
+                  } catch (error) { setCameraMessage(error.message); }
+                }}><Text style={styles.biometricHelp}>Remove my face (enter email and password above)</Text></TouchableOpacity>
+                {!!cameraMessage && <Text style={styles.biometricHelp} accessibilityLiveRegion="polite">{cameraMessage}</Text>}
+              </View>}
 
               {/* Forgot password */}
               <TouchableOpacity
@@ -426,13 +674,14 @@ export default function LoginScreen({
 
               {/* Login */}
               <TouchableOpacity
+                disabled={biometricBusy}
                 style={styles.loginButton}
                 onPress={handleLogin}
                 activeOpacity={0.75}
                 accessibilityRole="button"
               >
                 <Text style={styles.loginButtonText}>
-                  Login
+                  Login with Email and Password
                 </Text>
               </TouchableOpacity>
 
@@ -493,6 +742,8 @@ export default function LoginScreen({
 
 
 const styles = StyleSheet.create({
+
+  biometricHelp: { color: "#C9DDD6", fontSize: 12, lineHeight: 18 },
 
   safeArea: {
     flex: 1,

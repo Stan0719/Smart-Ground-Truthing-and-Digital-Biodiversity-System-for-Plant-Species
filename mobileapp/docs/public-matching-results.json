@@ -1,0 +1,252 @@
+{
+  "source": "DeepFace v0.0.93 tests/test_verify.py labels",
+  "publicFixturesOnly": true,
+  "pairs": 10,
+  "identities": 4,
+  "independentCalibration": false,
+  "decision": "No production threshold change; small correlated development sample cannot establish FAR.",
+  "variants": {
+    "aligned": {
+      "processed": 8,
+      "rejectedFixtures": {
+        "5": "SpoofDetected"
+      },
+      "metrics": [
+        {
+          "threshold": 0.3,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 4,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.6666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 5,
+          "eligibleImpostorPairs": 4,
+          "conditionalFRR": 0.6,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.4,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 1,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.16666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 5,
+          "eligibleImpostorPairs": 4,
+          "conditionalFRR": 0.0,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.5,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 1,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.16666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 5,
+          "eligibleImpostorPairs": 4,
+          "conditionalFRR": 0.0,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.593,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 1,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.16666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 5,
+          "eligibleImpostorPairs": 4,
+          "conditionalFRR": 0.0,
+          "conditionalFAR": 0.0
+        }
+      ]
+    },
+    "unaligned": {
+      "processed": 7,
+      "rejectedFixtures": {
+        "5": "SpoofDetected",
+        "8": "multiple_faces"
+      },
+      "metrics": [
+        {
+          "threshold": 0.3,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 6,
+          "falseAcceptances": 0,
+          "endToEndFRR": 1.0,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 4,
+          "eligibleImpostorPairs": 3,
+          "conditionalFRR": 1.0,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.4,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 4,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.6666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 4,
+          "eligibleImpostorPairs": 3,
+          "conditionalFRR": 0.5,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.5,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 4,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.6666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 4,
+          "eligibleImpostorPairs": 3,
+          "conditionalFRR": 0.5,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.593,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 3,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.5,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 4,
+          "eligibleImpostorPairs": 3,
+          "conditionalFRR": 0.25,
+          "conditionalFAR": 0.0
+        }
+      ]
+    },
+    "mirrored": {
+      "processed": 8,
+      "rejectedFixtures": {
+        "5": "SpoofDetected"
+      },
+      "metrics": [
+        {
+          "threshold": 0.3,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 3,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.5,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 5,
+          "eligibleImpostorPairs": 4,
+          "conditionalFRR": 0.4,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.4,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 1,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.16666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 5,
+          "eligibleImpostorPairs": 4,
+          "conditionalFRR": 0.0,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.5,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 1,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.16666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 5,
+          "eligibleImpostorPairs": 4,
+          "conditionalFRR": 0.0,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.593,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 1,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.16666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 5,
+          "eligibleImpostorPairs": 4,
+          "conditionalFRR": 0.0,
+          "conditionalFAR": 0.0
+        }
+      ]
+    },
+    "exif6": {
+      "processed": 7,
+      "rejectedFixtures": {
+        "5": "SpoofDetected",
+        "8": "multiple_faces"
+      },
+      "metrics": [
+        {
+          "threshold": 0.3,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 4,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.6666666666666666,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 4,
+          "eligibleImpostorPairs": 3,
+          "conditionalFRR": 0.5,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.4,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 3,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.5,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 4,
+          "eligibleImpostorPairs": 3,
+          "conditionalFRR": 0.25,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.5,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 2,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.3333333333333333,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 4,
+          "eligibleImpostorPairs": 3,
+          "conditionalFRR": 0.0,
+          "conditionalFAR": 0.0
+        },
+        {
+          "threshold": 0.593,
+          "genuinePairs": 6,
+          "impostorPairs": 4,
+          "falseRejections": 2,
+          "falseAcceptances": 0,
+          "endToEndFRR": 0.3333333333333333,
+          "endToEndFAR": 0.0,
+          "eligibleGenuinePairs": 4,
+          "eligibleImpostorPairs": 3,
+          "conditionalFRR": 0.0,
+          "conditionalFAR": 0.0
+        }
+      ]
+    }
+  }
+}

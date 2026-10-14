@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logout as serverLogout } from '../services/auth'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AdminTopbarActions from './AdminTopbarActions.vue'
@@ -12,7 +13,8 @@ const { t } = useI18n()
 const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
 useAuthenticatedPageTranslation('.admin-shell')
 
-const logout = () => {
+const logout = async () => {
+  await serverLogout()
   sidebarOpen.value = false
   router.push({ name: 'home' })
 }

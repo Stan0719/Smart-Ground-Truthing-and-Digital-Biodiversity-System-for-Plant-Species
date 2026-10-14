@@ -1646,15 +1646,10 @@ aboutDescription: {
   // ==================================================
 
 aboutFacts: {
-  flexDirection: 'row',
+  flexDirection: SCREEN_WIDTH < 600 ? 'column' : 'row',
   gap: SCREEN_WIDTH < 500 ? 8 : 12,
   marginTop: SCREEN_WIDTH < 500 ? 14 : 20,
 },
-
-flexDirection:
-  SCREEN_WIDTH < 600
-    ? 'column'
-    : 'row',
 
 factCard: {
   flex: 1,

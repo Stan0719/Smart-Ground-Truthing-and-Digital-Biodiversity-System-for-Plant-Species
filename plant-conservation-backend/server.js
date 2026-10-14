@@ -1,23 +1,37 @@
-
 require('dotenv').config();
 
 const express = require('express');
 const { Pool } = require('pg');
+const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Allow the local Expo web app to access the API
+app.use(cors({
+  origin: [
+    'http://localhost:8081',
+    'http://127.0.0.1:8081'
+  ]
+}));
+
 // Parse incoming JSON requests
 app.use(express.json());
 
-// Connect to your PostgreSQL database
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-});
+// Connect to Supabase when DATABASE_URL is configured.
+// Otherwise, continue using existing local PostgreSQL settings.
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    })
+  : new Pool({
+      host: process.env.DB_HOST,
+      port: Number(process.env.DB_PORT),
+      database: process.env.DB_NAME,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+    });
 
 // Basic test route
 app.get('/', (req, res) => {
@@ -72,12 +86,11 @@ app.get('/api/tables', async (req, res) => {
   }
 });
 
- // Get all plant species (read-only)
+// Get all plant species (read-only)
 app.get('/api/species', async (req, res) => {
   try {
-    
     const result = await pool.query(`
-    SELECT
+      SELECT
         s.species_id,
         s.scientific_name,
         s.common_name,
@@ -86,14 +99,14 @@ app.get('/api/species', async (req, res) => {
         cs.status_name AS conservation_status,
         s.description,
         s.registered_at
-    FROM public.species AS s
-    LEFT JOIN public.genus AS g
+      FROM public.species AS s
+      LEFT JOIN public.genus AS g
         ON s.genus_id = g.genus_id
-    LEFT JOIN public.family AS f
+      LEFT JOIN public.family AS f
         ON g.family_id = f.family_id
-    LEFT JOIN public.conservation_status AS cs
+      LEFT JOIN public.conservation_status AS cs
         ON s.status_id = cs.status_id
-    ORDER BY s.scientific_name ASC;
+      ORDER BY s.scientific_name ASC;
     `);
 
     res.json({
@@ -110,6 +123,7 @@ app.get('/api/species', async (req, res) => {
   }
 });
 
+// Register a plant and its GPS location
 app.post('/api/plants', async (req, res) => {
   const {
     species_id,
@@ -162,12 +176,12 @@ app.post('/api/plants', async (req, res) => {
 
     // Create the plant record
     const plantResult = await client.query(
-    `INSERT INTO public.plant_record
+      `INSERT INTO public.plant_record
         (species_id, registered_by)
-    VALUES ($1::bigint, $2::bigint)
-    RETURNING plant_id, species_id, registered_by,
-                current_status, registered_at`,
-    [species_id, registered_by]
+       VALUES ($1::bigint, $2::bigint)
+       RETURNING plant_id, species_id, registered_by,
+                 current_status, registered_at`,
+      [species_id, registered_by]
     );
 
     const plant = plantResult.rows[0];
@@ -177,14 +191,14 @@ app.post('/api/plants', async (req, res) => {
       `INSERT INTO public.plant_location
          (plant_id, latitude, longitude, accuracy_m, geometry)
        VALUES (
-        $1, $2, $3, $4,
-        ST_SetSRID(
-        ST_MakePoint(
-            ($3::numeric)::double precision,
-            ($2::numeric)::double precision
-        ),
-        4326
-        )
+         $1, $2, $3, $4,
+         ST_SetSRID(
+           ST_MakePoint(
+             ($3::numeric)::double precision,
+             ($2::numeric)::double precision
+           ),
+           4326
+         )
        )
        RETURNING location_id, plant_id, latitude, longitude,
                  accuracy_m, recorded_at`,
@@ -209,7 +223,10 @@ app.post('/api/plants', async (req, res) => {
       try {
         await client.query('ROLLBACK');
       } catch (rollbackError) {
-        console.error('Transaction rollback failed:', rollbackError.message);
+        console.error(
+          'Transaction rollback failed:',
+          rollbackError.message
+        );
       }
     }
 
@@ -229,7 +246,7 @@ app.post('/api/plants', async (req, res) => {
   }
 });
 
-// Start the server (only once)
+// Start the server
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });

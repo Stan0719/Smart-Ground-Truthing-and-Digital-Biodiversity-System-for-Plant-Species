@@ -9,7 +9,7 @@ import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
 import ReviewSubmissionsView from '../views/conservation/ReviewSubmissionsView.vue'
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
 import AdminModuleView from '../views/AdminModuleView.vue'
-import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
+import { currentUser } from '../services/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -208,11 +208,19 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
-  const passwordChangePending = sessionStorage.getItem(PENDING_PASSWORD_CHANGE_KEY)
-  if (passwordChangePending && to.path.startsWith('/conservation')) {
-    return { name: 'change-password' }
-  }
+router.beforeEach(async (to) => {
+  if (
+    !to.path.startsWith('/admin') &&
+    !to.path.startsWith('/conservation') &&
+    to.name !== 'change-password'
+  )
+    return
+  const user = await currentUser()
+  if (!user) return { name: 'home' }
+  if (user.mustChangePassword && to.name !== 'change-password') return { name: 'change-password' }
+  if (to.path.startsWith('/admin') && user.role !== 'Administrator') return { name: 'home' }
+  if (to.path.startsWith('/conservation') && user.role !== 'Conservation Officer')
+    return { name: 'home' }
 })
 
 export default router

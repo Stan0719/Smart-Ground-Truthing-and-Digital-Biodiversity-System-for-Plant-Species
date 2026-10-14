@@ -1,65 +1,40 @@
-import React, { useRef } from 'react';
+import React, { useState } from 'react';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
-import recoveryHtml from '../../generated/recoveryHtml';
-import { getVisitorAccounts, updateVisitorPassword } from '../../utils/visitorStorage';
-
-const settings = {
-  serviceId: process.env.EXPO_PUBLIC_EMAILJS_SERVICE_ID,
-  templateId: process.env.EXPO_PUBLIC_EMAILJS_OTP_TEMPLATE_ID,
-  publicKey: process.env.EXPO_PUBLIC_EMAILJS_PUBLIC_KEY,
-};
-const source = {
-  html: recoveryHtml.replace('__OTP_SETTINGS__', JSON.stringify(settings).replace(/</g, '\\u003c')),
-  baseUrl: 'https://localhost/',
-};
-
+import { ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
+import { faceApi } from '../../utils/faceApi';
 export default function ForgotPassword() {
-  const webView = useRef(null);
-  async function onMessage(event) {
-    let request;
-    try {
-      request = JSON.parse(event.nativeEvent.data);
-    } catch {
-      return;
-    }
-    if (request.action === 'home') {
-      router.dismissTo({ pathname: '/', params: { recoveryHome: String(Date.now()) } });
-      return;
-    }
-    if (!Number.isInteger(request.id) || !Array.isArray(request.args)) return;
-    const reply = { id: request.id };
-    try {
-      const [email, password] = request.args;
-      if (typeof email !== 'string') throw new Error('Invalid account request.');
-      if (request.action === 'find') {
-        const accounts = await getVisitorAccounts();
-        const user = accounts.find((account) => account.email?.trim().toLowerCase() === email.trim().toLowerCase() && account.status === 'Active' && account.role === 'Visitor');
-        // Never send stored passwords into the WebView.
-        reply.result = user ? { email: user.email, name: user.name } : null;
-      } else if (request.action === 'update' && typeof password === 'string' && password.length >= 8) {
-        reply.result = await updateVisitorPassword(email, password);
-      } else {
-        throw new Error('Invalid account request.');
+  const [email,setEmail]=useState(''),[requestId,setRequestId]=useState('');
+  const [code,setCode]=useState(''),[password,setPassword]=useState(''),[confirm,setConfirm]=useState('');
+  const [message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[done,setDone]=useState(false);
+  async function submit(){
+    if(busy)return;setBusy(true);setError('');
+    try{
+      if(!requestId){
+        const result=await faceApi('/recovery/request',{email:email.trim().toLowerCase()});
+        if(!/^[a-f0-9]{32}$/.test(result.recoveryId||''))throw Error('Invalid recovery response.');
+        setRequestId(result.recoveryId);setMessage(result.message);
+      }else{
+        if(password!==confirm)throw Error('Passwords do not match.');
+        const result=await faceApi('/recovery/confirm',{recoveryId:requestId,code,password});
+        if(result.reset!==true)throw Error('Password reset was not confirmed.');
+        setPassword('');setConfirm('');setCode('');setRequestId('');setDone(true);setMessage('Password updated. Return to Login and use your new password.');
       }
-    } catch {
-      reply.error = 'Account could not be updated. Please try again.';
-    }
-    webView.current?.injectJavaScript(`window.__recoveryReply(${JSON.stringify(reply).replace(/</g, '\\u003c')}); true;`);
+    }catch(failure){setError(failure.message||'Recovery request failed.');}finally{setBusy(false);}
   }
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#f3f6f2' }}>
-      <WebView
-        ref={webView}
-        source={source}
-        originWhitelist={['*']}
-        onMessage={onMessage}
-        onShouldStartLoadWithRequest={({ url }) => url === 'about:blank' || url === 'https://localhost/'}
-        javaScriptEnabled
-        domStorageEnabled={false}
-        style={{ flex: 1, backgroundColor: '#f3f6f2' }}
-      />
-    </SafeAreaView>
-  );
+  const inputStyle={borderWidth:1,borderColor:'#aaa',borderRadius:8,padding:14,marginVertical:8};
+  return <SafeAreaView style={{flex:1,backgroundColor:'#f3f6f2'}}><ScrollView contentContainerStyle={{padding:24,gap:12}} keyboardShouldPersistTaps="handled">
+    <Text style={{fontSize:26,color:'#244b47'}}>Forgot Password</Text>
+    {!done&&(!requestId?<TextInput style={inputStyle} accessibilityLabel="Account email" placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address"/>:<>
+      <Text>Enter the six-digit email code within five minutes. Use a new password with 15 to 128 characters.</Text>
+      <TextInput style={inputStyle} accessibilityLabel="Recovery code" placeholder="Recovery code" value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6}/>
+      <TextInput style={inputStyle} accessibilityLabel="New password" placeholder="New password" secureTextEntry value={password} onChangeText={setPassword}/>
+      <TextInput style={inputStyle} accessibilityLabel="Confirm new password" placeholder="Confirm password" secureTextEntry value={confirm} onChangeText={setConfirm}/>
+    </>)}
+    {!!message&&<Text accessibilityLiveRegion="polite">{message}</Text>}
+    {!!error&&<Text accessibilityRole="alert" style={{color:'#b42318'}}>{error}</Text>}
+    {!done&&<TouchableOpacity disabled={busy} onPress={submit}><Text style={{padding:16,backgroundColor:'#28745a',color:'white'}}>{busy?'Please wait…':requestId?'Reset password':'Request recovery code'}</Text></TouchableOpacity>}
+    {!!requestId&&<TouchableOpacity disabled={busy} onPress={()=>{setRequestId('');setCode('');setPassword('');setConfirm('');setMessage('');setError('');}}><Text>Request a new code</Text></TouchableOpacity>}
+    <TouchableOpacity onPress={()=>router.back()}><Text>Return to Login</Text></TouchableOpacity>
+  </ScrollView></SafeAreaView>;
 }

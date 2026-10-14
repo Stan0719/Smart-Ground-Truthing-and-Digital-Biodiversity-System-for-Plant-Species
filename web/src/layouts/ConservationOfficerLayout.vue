@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { logout } from '../services/auth'
+import { useRouter } from 'vue-router'
+const router = useRouter()
+const signOut = async () => { await logout(); await router.replace('/') }
+
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -204,9 +209,13 @@ const closeControl = () =>
           <span>{{ t(item.labelKey) }}</span>
         </RouterLink>
       </nav>
+<<<<<<< HEAD
       <div class="sidebar-footer">
         <RouterLink to="/">{{ t('nav.logout') }}</RouterLink>
       </div>
+=======
+      <div class="sidebar-footer"><button type="button" @click="signOut">Logout</button></div>
+>>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
     </aside>
     <button
       v-if="sidebarOpen"

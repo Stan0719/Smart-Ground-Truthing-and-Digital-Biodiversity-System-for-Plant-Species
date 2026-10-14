@@ -7,7 +7,10 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Niah Biodiversity to use the camera for optional face registration and recognition."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,7 +24,20 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Allow Niah Biodiversity to use Face ID to unlock your saved login."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Niah Biodiversity to capture a photo for optional face login.",
+          "recordAudioAndroid": false
+        }
+      ]
     ],
     "scheme": "niahbiodiversity"
   }

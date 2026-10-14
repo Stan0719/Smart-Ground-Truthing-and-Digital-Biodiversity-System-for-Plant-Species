@@ -1,22 +1,15 @@
 <script setup lang="ts">
+<<<<<<< HEAD
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+=======
+import { computed, ref, onMounted } from 'vue'
+>>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
 import AdminPageShell from '../components/AdminPageShell.vue'
-import { isCurrentAdminAccount } from '../data/adminProfile'
+import { api, currentUser, type AuthUser } from '../services/auth'
+type PrototypeRole = 'Conservation Officer' | 'Botanist'
+type PrototypeUser = AuthUser & { password: string }
 import { sendTemporaryPasswordEmail } from '../services/accountEmail'
-import {
-  createPrototypeUser,
-  deletePrototypeVisitor,
-  deletePrototypeUser,
-  findPrototypeUserByEmail,
-  getPrototypeUsers,
-  getPrototypeVisitors,
-  updatePrototypeVisitor,
-  updatePrototypeUser,
-  type PrototypeRole,
-  type PrototypeUser,
-} from '../data/prototypeAuth'
-
 type UserStatus = 'Active' | 'Inactive' | 'Suspended'
 type UserRole = 'Administrator' | 'Conservation Officer' | 'Botanist' | 'Visitor'
 
@@ -46,121 +39,34 @@ const addUserOpen = ref(false)
 const search = ref('')
 const roleFilter = ref('All roles')
 const statusFilter = ref('All statuses')
-const USER_DIRECTORY_KEY = 'niahAdminUserDirectory'
-
-const existingUsers: UserRecord[] = [
-  {
-    id: 'USR001',
-    name: 'Aina Rahman',
-    email: 'aina@niah.my',
-    role: 'Administrator',
-    status: 'Active',
-    lastLogin: 'Today, 9:42 AM',
-    initials: 'AR',
-  },
-  {
-    id: 'USR002',
-    name: 'Daniel Lee',
-    email: 'daniel@niah.my',
-    role: 'Administrator',
-    status: 'Active',
-    lastLogin: 'Today, 8:15 AM',
-    initials: 'DL',
-  },
-  {
-    id: 'USR003',
-    name: 'Nur Izzati',
-    email: 'izzati@niah.my',
-    role: 'Conservation Officer',
-    status: 'Active',
-    lastLogin: 'Yesterday, 4:30 PM',
-    initials: 'NI',
-  },
-  {
-    id: 'USR004',
-    name: 'Michael Jawan',
-    email: 'michael@niah.my',
-    role: 'Conservation Officer',
-    status: 'Active',
-    lastLogin: 'Yesterday, 2:18 PM',
-    initials: 'MJ',
-  },
-  {
-    id: 'USR005',
-    name: 'Siti Hajar',
-    email: 'siti@niah.my',
-    role: 'Botanist',
-    status: 'Active',
-    lastLogin: '29 Sep, 11:05 AM',
-    initials: 'SH',
-  },
-  {
-    id: 'USR006',
-    name: 'Kelvin Ting',
-    email: 'kelvin@niah.my',
-    role: 'Botanist',
-    status: 'Inactive',
-    lastLogin: '25 Sep, 3:20 PM',
-    initials: 'KT',
-  },
-  {
-    id: 'USR007',
-    name: 'Farah Nabila',
-    email: 'farah@niah.my',
-    role: 'Botanist',
-    status: 'Suspended',
-    lastLogin: '18 Sep, 10:10 AM',
-    initials: 'FN',
-  },
-]
-
-const existingEmails = new Set(existingUsers.map((user) => user.email.toLowerCase()))
-const existingIds = new Set(existingUsers.map((user) => user.id))
-const locallyCreatedUsers = getPrototypeUsers().filter(
-  (user) => !existingEmails.has(user.email.toLowerCase()) && !existingIds.has(user.id),
-)
-const visitorUsers = getPrototypeVisitors().map<UserRecord>((visitor) => ({
-  id: visitor.id,
-  name: visitor.name,
-  email: visitor.email.trim().toLowerCase(),
-  role: 'Visitor',
-  status: visitor.status,
-  lastLogin: visitor.lastLogin || 'Never',
-  initials:
-    visitor.initials ||
-    visitor.name
-      .trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((word) => word[0]?.toUpperCase())
-      .join(''),
-}))
-
-const mergeUniqueUsers = (baseUsers: UserRecord[], additionalUsers: UserRecord[]) => {
-  const merged = [...baseUsers]
-  additionalUsers.forEach((user) => {
-    const matchingIndex = merged.findIndex(
-      (candidate) =>
-        candidate.id === user.id || candidate.email.toLowerCase() === user.email.toLowerCase(),
-    )
-    if (matchingIndex === -1) merged.push(user)
-    else merged[matchingIndex] = user
-  })
-  return merged
-}
-
-const loadUserDirectory = (): UserRecord[] => {
+const users = ref<UserRecord[]>([])
+const loadError = ref('')
+const currentAdminId = ref('')
+const loadUsers = async () => {
+  loadError.value = ''
   try {
-    const stored = JSON.parse(localStorage.getItem(USER_DIRECTORY_KEY) ?? 'null')
-    if (Array.isArray(stored)) {
-      return mergeUniqueUsers(stored, [...locallyCreatedUsers, ...visitorUsers])
-    }
-  } catch {
-    // Fall back to the seeded directory when stored prototype data is invalid.
+    users.value = (await api<{ users: AuthUser[] }>('/admin/users')).users
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'Unable to load users.'
   }
-  return mergeUniqueUsers([...existingUsers, ...locallyCreatedUsers], visitorUsers)
 }
-const users = ref<UserRecord[]>(loadUserDirectory())
+onMounted(async () => {
+  currentAdminId.value = (await currentUser())?.id ?? ''
+  await loadUsers()
+})
+const setStatus = async (user: UserRecord, event: Event) => {
+  const target = event.target as HTMLSelectElement
+  target.disabled = true
+  try {
+    await api(`/admin/users/${user.id}/status`, 'PATCH', { status: target.value })
+    await loadUsers()
+  } catch (error) {
+    target.value = user.status
+    loadError.value = error instanceof Error ? error.message : 'Unable to change status.'
+  } finally {
+    target.disabled = false
+  }
+}
 const createdUser = ref<PrototypeUser | null>(null)
 const actionMode = ref<'view' | 'edit' | 'delete' | null>(null)
 const selectedUser = ref<UserRecord | null>(null)
@@ -221,7 +127,7 @@ const openAddUser = () => {
   addUserOpen.value = true
 }
 
-const submitNewUser = () => {
+const submitNewUser = async () => {
   const name = newUser.value.name.trim()
   const email = newUser.value.email.trim().toLowerCase()
   formError.value = ''
@@ -236,52 +142,20 @@ const submitNewUser = () => {
     showErrorMessage(formError.value)
     return
   }
-  if (
-    existingUsers.some((user) => user.email.toLowerCase() === email) ||
-    findPrototypeUserByEmail(email) ||
-    getPrototypeVisitors().some((visitor) => visitor.email.toLowerCase() === email)
-  ) {
-    formError.value = 'An account with this email already exists.'
-    showErrorMessage(formError.value)
-    return
-  }
-
-  let createdAccount: PrototypeUser | null = null
   try {
-    createdAccount = createPrototypeUser({
-      name,
-      email,
-      role: newUser.value.role,
-      existingIds: existingUsers.map((user) => user.id),
-    })
-    users.value.push(createdAccount)
-    saveUserDirectory()
-    createdUser.value = createdAccount
-  } catch {
-    if (createdAccount) {
-      users.value = users.value.filter((user) => user.id !== createdAccount?.id)
-      try {
-        deletePrototypeUser(createdAccount.id)
-      } catch {
-        // The visible directory is still restored if prototype storage is unavailable.
-      }
-    }
-    formError.value = 'Unable to create the user account. Please try again.'
+    createdUser.value = (
+      await api<{ user: PrototypeUser }>('/admin/users', 'POST', {
+        name,
+        email,
+        role: newUser.value.role,
+      })
+    ).user
+    users.value.push(createdUser.value)
+  } catch (error) {
+    formError.value = error instanceof Error ? error.message : 'Unable to create user.'
     showErrorMessage(formError.value)
   }
 }
-
-const saveUserDirectory = () => {
-  localStorage.setItem(USER_DIRECTORY_KEY, JSON.stringify(users.value))
-}
-
-const initialsFor = (name: string) =>
-  name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((word) => word[0]?.toUpperCase())
-    .join('')
 
 const openUserAction = (mode: 'view' | 'edit' | 'delete', user: UserRecord) => {
   selectedUser.value = user
@@ -296,133 +170,30 @@ const closeUserAction = () => {
   actionError.value = ''
 }
 
-const saveEditedUser = () => {
+const saveEditedUser = async () => {
   if (!selectedUser.value) return
-  const name = editUser.value.name.trim()
-  const email = editUser.value.email.trim().toLowerCase()
   actionError.value = ''
-  if (!name || !email) {
-    actionError.value = 'Full name and email are required.'
-    showErrorMessage(actionError.value)
-    return
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    actionError.value = 'Enter a valid email address.'
-    showErrorMessage(actionError.value)
-    return
-  }
-  if (
-    users.value.some(
-      (user) => user.id !== selectedUser.value?.id && user.email.toLowerCase() === email,
-    )
-  ) {
-    actionError.value = 'An account with this email already exists.'
-    showErrorMessage(actionError.value)
-    return
-  }
-  const updated: UserRecord = {
-    ...selectedUser.value,
-    ...editUser.value,
-    name,
-    email,
-    role: isCurrentAdminAccount(selectedUser.value) ? selectedUser.value.role : editUser.value.role,
-    status: isCurrentAdminAccount(selectedUser.value)
-      ? selectedUser.value.status
-      : editUser.value.status,
-    initials: initialsFor(name),
-  }
-  const index = users.value.findIndex((user) => user.id === updated.id)
-  const originalUser = { ...selectedUser.value }
-  const prototypeUser = getPrototypeUsers().find((user) => user.id === updated.id)
-  const prototypeVisitor = getPrototypeVisitors().find((visitor) => visitor.id === updated.id)
-
   try {
-    if (index === -1) throw new Error('User record not found')
-    users.value[index] = updated
-    if (prototypeUser && (updated.role === 'Conservation Officer' || updated.role === 'Botanist')) {
-      if (
-        !updatePrototypeUser(updated.id, {
-          name: updated.name,
-          email: updated.email,
-          role: updated.role,
-          status: updated.status,
-          initials: updated.initials,
-        })
-      ) {
-        throw new Error('Prototype user could not be updated')
-      }
-    }
-    if (prototypeVisitor) {
-      if (
-        !updatePrototypeVisitor(updated.id, {
-          name: updated.name,
-          email: updated.email,
-          status: updated.status,
-          initials: updated.initials,
-        })
-      ) {
-        throw new Error('Prototype visitor could not be updated')
-      }
-    }
-    saveUserDirectory()
+    await api(`/admin/users/${selectedUser.value.id}`, 'PATCH', { ...editUser.value })
+    await loadUsers()
     closeUserAction()
-    showSuccessMessage(`${updated.name}'s account was updated successfully.`)
-  } catch {
-    if (index !== -1) users.value[index] = originalUser
-    if (prototypeUser) {
-      try {
-        updatePrototypeUser(prototypeUser.id, {
-          name: prototypeUser.name,
-          email: prototypeUser.email,
-          role: prototypeUser.role,
-          status: prototypeUser.status,
-          initials: prototypeUser.initials,
-        })
-      } catch {
-        // Keep the modal open and report the original save failure.
-      }
-    }
-    if (prototypeVisitor) {
-      try {
-        updatePrototypeVisitor(prototypeVisitor.id, {
-          name: prototypeVisitor.name,
-          email: prototypeVisitor.email,
-          status: prototypeVisitor.status,
-          initials: prototypeVisitor.initials || initialsFor(prototypeVisitor.name),
-        })
-      } catch {
-        // Keep the modal open and report the original save failure.
-      }
-    }
-    actionError.value = 'Unable to update the user account. Please try again.'
+    showSuccessMessage('Account updated successfully.')
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : 'Unable to update account.'
     showErrorMessage(actionError.value)
   }
 }
 
-const confirmDeleteUser = () => {
+const confirmDeleteUser = async () => {
   if (!selectedUser.value) return
-
-  const deletedUser = selectedUser.value
-  const previousUsers = [...users.value]
-  const previousUserCount = users.value.length
-
   try {
-    users.value = users.value.filter((user) => user.id !== deletedUser.id)
-
-    if (users.value.length === previousUserCount) {
-      showErrorMessage(`Unable to delete ${deletedUser.name}'s account. Please try again.`)
-      return
-    }
-
-    saveUserDirectory()
-    if (deletedUser.role === 'Visitor') deletePrototypeVisitor(deletedUser.id)
-    else deletePrototypeUser(deletedUser.id)
+    await api(`/admin/users/${selectedUser.value.id}`, 'DELETE', {})
+    await loadUsers()
     closeUserAction()
-
-    showSuccessMessage(`${deletedUser.name}'s account was deleted successfully.`)
-  } catch {
-    users.value = previousUsers
-    showErrorMessage(`Unable to delete ${deletedUser.name}'s account. Please try again.`)
+    showSuccessMessage('Account deleted successfully.')
+  } catch (error) {
+    actionError.value = error instanceof Error ? error.message : 'Unable to delete account.'
+    showErrorMessage(actionError.value)
   }
 }
 
@@ -478,14 +249,10 @@ const filteredUsers = computed(() => {
     return matchesSearch && matchesRole && matchesStatus
   })
 })
-const selectedIsPrototype = computed(() =>
-  selectedUser.value
-    ? getPrototypeUsers().some((user) => user.id === selectedUser.value?.id)
-    : false,
-)
+const selectedIsPrototype = computed(() => Boolean(selectedUser.value))
 const selectedIsVisitor = computed(() => selectedUser.value?.role === 'Visitor')
 const selectedIsCurrentAdmin = computed(() =>
-  selectedUser.value ? isCurrentAdminAccount(selectedUser.value) : false,
+  selectedUser.value ? selectedUser.value.id === currentAdminId.value : false,
 )
 const totalUserCount = computed(() => users.value.length)
 const activeUserCount = computed(
@@ -588,6 +355,7 @@ const clearFilters = () => {
           </button>
         </div>
 
+<<<<<<< HEAD
         <div v-if="filteredUsers.length" class="table-scroll">
           <table>
             <thead>
@@ -654,6 +422,155 @@ const clearFilters = () => {
           <button type="button" @click="clearFilters">Clear filters</button>
         </div>
       </section>
+=======
+        <section class="stats-grid" aria-label="User summary">
+          <article>
+            <span class="stat-icon">♙</span>
+            <div>
+              <p>Total Users</p>
+              <strong>{{ totalUserCount }}</strong
+              ><small>All registered accounts</small>
+            </div>
+          </article>
+          <article>
+            <span class="stat-icon active-icon">✓</span>
+            <div>
+              <p>Active Users</p>
+              <strong>{{ activeUserCount }}</strong
+              ><small>Currently active accounts</small>
+            </div>
+          </article>
+          <article>
+            <span class="stat-icon officer-icon">◇</span>
+            <div>
+              <p>Staff Accounts</p>
+              <strong>{{ staffCount }}</strong
+              ><small>Administrators, officers and botanists</small>
+            </div>
+          </article>
+          <article>
+            <span class="stat-icon botanist-icon">♧</span>
+            <div>
+              <p>Visitors</p>
+              <strong>{{ visitorCount }}</strong
+              ><small>Self-registered accounts</small>
+            </div>
+          </article>
+        </section>
+
+        <section class="users-panel">
+          <div class="panel-heading">
+            <div>
+              <p>ACCOUNT DIRECTORY</p>
+              <h2>All Users</h2>
+            </div>
+            <span>{{ filteredUsers.length }} records shown</span>
+          </div>
+
+          <div class="filters">
+            <label class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6.5" />
+                <path d="m15.5 15.5 5 5" />
+              </svg>
+              <span class="sr-only">Search users</span>
+              <input
+                v-model="search"
+                type="search"
+                placeholder="Search name, email, ID or role..."
+              />
+            </label>
+            <select v-model="roleFilter" aria-label="Filter by role">
+              <option>All roles</option>
+              <option>Administrator</option>
+              <option>Conservation Officer</option>
+              <option>Botanist</option>
+              <option>Visitor</option>
+            </select>
+            <select v-model="statusFilter" aria-label="Filter by status">
+              <option>All statuses</option>
+              <option>Active</option>
+              <option>Inactive</option>
+              <option>Suspended</option>
+            </select>
+            <button class="clear-button" type="button" @click="clearFilters">Clear</button>
+          </div>
+
+          <div v-if="filteredUsers.length" class="table-scroll">
+            <p v-if="loadError" role="alert">{{ loadError }}</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>User ID</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Last Login</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="user in filteredUsers" :key="user.id">
+                  <td>
+                    <div class="user-cell">
+                      <span>{{ user.initials }}</span>
+                      <div>
+                        <strong>{{ user.name }}</strong>
+                        <small>{{ user.email }}</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <code>{{ user.id }}</code>
+                  </td>
+                  <td>
+                    <span class="role-badge" :class="user.role.toLowerCase().replace(' ', '-')">{{
+                      user.role
+                    }}</span>
+                  </td>
+                  <td>
+                    <select
+                      :value="user.status"
+                      :aria-label="`Status for ${user.name}`"
+                      @change="setStatus(user, $event)"
+                    >
+                      <option>Active</option>
+                      <option>Inactive</option>
+                      <option>Suspended</option>
+                    </select>
+                  </td>
+                  <td>{{ user.lastLogin }}</td>
+                  <td>
+                    <div class="row-actions">
+                      <button type="button" title="View user" @click="openUserAction('view', user)">
+                        View
+                      </button>
+                      <button type="button" title="Edit user" @click="openUserAction('edit', user)">
+                        Edit
+                      </button>
+                      <button
+                        class="delete-action"
+                        type="button"
+                        title="Delete user"
+                        @click="openUserAction('delete', user)"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty-state">
+            <p v-if="loadError" role="alert">{{ loadError }}</p>
+            <span>♙</span>
+            <h3>No users found</h3>
+            <p>Try changing or clearing your filters.</p>
+            <button type="button" @click="clearFilters">Clear filters</button>
+          </div>
+        </section>
+>>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
     </div>
 
     <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">

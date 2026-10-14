@@ -4,8 +4,14 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
-import { plants as species } from '../data/plants'
+import {
+plants as prototypePlants,
+  type Plant,
+} from '../data/plants'
 
+const species = ref<Plant[]>([])
+const isLoading = ref(true)
+const loadError = ref('')
 const categories = ['All', 'Trees', 'Flowers', 'Ferns', 'Climbers'] as const
 const activeCategory = ref<(typeof categories)[number]>('All')
 const sortOption = ref<'default' | 'name-asc' | 'name-desc' | 'scientific-asc'>('default')
@@ -16,6 +22,7 @@ const { t } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
 const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search : '')
 
+<<<<<<< HEAD
 const selectSort = (option: typeof sortOption.value) => {
   sortOption.value = option
   sortMenuOpen.value = false
@@ -24,6 +31,80 @@ const selectSort = (option: typeof sortOption.value) => {
 const clearFilters = () => {
   searchQuery.value = ''
   activeCategory.value = 'All'
+=======
+interface ApiSpecies {
+  species_id: string | number
+  scientific_name: string
+  common_name: string
+  genus_name?: string
+  family_name?: string
+  conservation_status?: string
+  description?: string
+}
+
+interface SpeciesResponse {
+  species: ApiSpecies[]
+}
+
+const loadSpecies = async () => {
+  isLoading.value = true
+  loadError.value = ''
+
+  try {
+    const response = await fetch('/api/species')
+
+    if (!response.ok) {
+      throw new Error('Unable to load plant species.')
+    }
+
+    const result: SpeciesResponse = await response.json()
+
+    
+    const apiPlants: Plant[] = result.species.map((item): Plant => {
+      const name = item.common_name || item.scientific_name
+      const scientificName = item.scientific_name || 'Unknown species'
+      const genus = item.genus_name || ''
+
+      const slug = `${name}-${item.species_id}`
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+
+      return {
+        speciesId: String(item.species_id),
+        slug,
+        name,
+        scientificName,
+        genus,
+        category: genus === 'Nepenthes' ? 'Climbers' : 'Trees',
+        family: item.family_name || '',
+        conservationStatus: item.conservation_status || '',
+        description: item.description || 'No description available yet.',
+        overview: item.description || '',
+        habitat: 'Habitat information has not been added yet.',
+        characteristics: [],
+        significance: item.description || '',
+      }
+    })
+
+    const prototypeNames = new Set(
+      prototypePlants.map((plant) => plant.scientificName.toLowerCase()),
+    )
+
+    species.value = [
+      ...prototypePlants,
+      ...apiPlants.filter(
+        (plant) => !prototypeNames.has(plant.scientificName.toLowerCase()),
+      ),
+    ]
+
+  } catch (error) {
+    loadError.value =
+      error instanceof Error ? error.message : 'An unexpected error occurred.'
+  } finally {
+    isLoading.value = false
+  }
+>>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
 }
 
 const canViewConservationStatus = computed(
@@ -44,6 +125,7 @@ const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
 onMounted(() => {
   document.addEventListener('click', closeSortMenu)
   document.addEventListener('keydown', closeSortMenu)
+  void loadSpecies()
 })
 
 onBeforeUnmount(() => {
@@ -61,7 +143,7 @@ watch(
 const filteredSpecies = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
 
-  const filtered = species.filter((item) => {
+  const filtered = species.value.filter((item) => {
     const matchesCategory = activeCategory.value === 'All' || item.category === activeCategory.value
     const matchesSearch =
       !query ||
@@ -203,7 +285,16 @@ const filteredSpecies = computed(() => {
           </div>
         </div>
 
-        <div v-if="filteredSpecies.length" class="plant-grid">
+        <p v-if="isLoading" role="status">
+          Loading plant species...
+        </p>
+
+        <p v-else-if="loadError" role="alert">
+          {{ loadError }}
+          <button type="button" @click="loadSpecies">Try again</button>
+        </p>
+
+        <div v-else-if="filteredSpecies.length" class="plant-grid">
           <article v-for="item in filteredSpecies" :key="item.slug" class="plant-card">
             <div class="plant-image-wrapper">
               <img
