@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { conservationProfile as profile } from '../../data/conservationProfile'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const profileErrors = reactive({ fullName: '', email: '' })
 const profileSuccess = ref('')
@@ -10,30 +13,28 @@ const passwordErrors = reactive({ current: '', next: '', confirm: '' })
 const passwordSuccess = ref('')
 
 const saveProfile = () => {
-  profileErrors.fullName = profile.fullName.trim() ? '' : 'Full name is required.'
+  profileErrors.fullName = profile.fullName.trim() ? '' : 'adminProfile.validation.fullNameRequired'
   profileErrors.email = !profile.email.trim()
-    ? 'Email is required.'
+    ? 'adminProfile.validation.emailRequired'
     : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email)
       ? ''
-      : 'Enter a valid email address.'
+      : 'adminProfile.validation.emailInvalid'
 
   profileSuccess.value =
-    profileErrors.fullName || profileErrors.email
-      ? ''
-      : 'Profile changes saved locally for this prototype.'
+    profileErrors.fullName || profileErrors.email ? '' : 'adminProfile.messages.profileSaved'
 }
 
 const updatePassword = () => {
-  passwordErrors.current = password.current ? '' : 'Current password is required.'
+  passwordErrors.current = password.current ? '' : 'adminProfile.validation.currentRequired'
   passwordErrors.next = !password.next
-    ? 'New password is required.'
+    ? 'adminProfile.validation.newRequired'
     : password.next.length < 8
-      ? 'New password must be at least 8 characters.'
+      ? 'adminProfile.validation.minimumLength'
       : ''
   passwordErrors.confirm = !password.confirm
-    ? 'Confirm your new password.'
+    ? 'adminProfile.validation.confirmRequired'
     : password.next !== password.confirm
-      ? 'New password and confirmation must match.'
+      ? 'adminProfile.validation.passwordMismatch'
       : ''
 
   if (passwordErrors.current || passwordErrors.next || passwordErrors.confirm) {
@@ -41,7 +42,7 @@ const updatePassword = () => {
     return
   }
 
-  passwordSuccess.value = 'Password validation completed successfully for this prototype.'
+  passwordSuccess.value = 'adminProfile.messages.passwordValidated'
   password.current = ''
   password.next = ''
   password.confirm = ''
@@ -50,26 +51,28 @@ const updatePassword = () => {
 
 <template>
   <section class="profile-intro">
-    <p class="page-kicker">ACCOUNT</p>
-    <h2>Profile Settings</h2>
-    <p>Manage your account details and security preferences.</p>
+    <p class="page-kicker">{{ t('conservationProfile.eyebrow') }}</p>
+    <h2>{{ t('conservationProfile.title') }}</h2>
+    <p>{{ t('conservationProfile.intro') }}</p>
   </section>
 
   <div class="profile-settings">
     <form class="settings-card" novalidate @submit.prevent="saveProfile">
       <header>
-        <h2>Profile Information</h2>
-        <p>Manage your Conservation Officer account information.</p>
+        <h2>{{ t('adminProfile.profileInformation') }}</h2>
+        <p>{{ t('conservationProfile.profileDescription') }}</p>
       </header>
 
       <div class="settings-fields">
         <label class="settings-field">
-          <span>Account ID <small>Read only</small></span>
+          <span
+            >{{ t('adminProfile.accountId') }} <small>{{ t('adminProfile.readOnly') }}</small></span
+          >
           <input :value="profile.accountId" type="text" readonly aria-readonly="true" />
         </label>
 
         <label class="settings-field">
-          <span>Full Name</span>
+          <span>{{ t('adminProfile.fullName') }}</span>
           <input
             v-model="profile.fullName"
             type="text"
@@ -80,12 +83,12 @@ const updatePassword = () => {
             aria-describedby="full-name-error"
           />
           <small v-if="profileErrors.fullName" id="full-name-error" class="field-error">{{
-            profileErrors.fullName
+            t(profileErrors.fullName)
           }}</small>
         </label>
 
         <label class="settings-field">
-          <span>Email</span>
+          <span>{{ t('adminProfile.email') }}</span>
           <input
             v-model="profile.email"
             type="email"
@@ -96,31 +99,33 @@ const updatePassword = () => {
             aria-describedby="email-error"
           />
           <small v-if="profileErrors.email" id="email-error" class="field-error">{{
-            profileErrors.email
+            t(profileErrors.email)
           }}</small>
         </label>
 
         <label class="settings-field">
-          <span>Role <small>Read only</small></span>
-          <input :value="profile.role" type="text" readonly aria-readonly="true" />
+          <span
+            >{{ t('adminProfile.role') }} <small>{{ t('adminProfile.readOnly') }}</small></span
+          >
+          <input :value="t('nav.officer')" type="text" readonly aria-readonly="true" />
         </label>
       </div>
 
       <div class="form-footer">
-        <p v-if="profileSuccess" class="success-message" role="status">{{ profileSuccess }}</p>
-        <button class="primary-button" type="submit">Save Changes</button>
+        <p v-if="profileSuccess" class="success-message" role="status">{{ t(profileSuccess) }}</p>
+        <button class="primary-button" type="submit">{{ t('adminProfile.saveChanges') }}</button>
       </div>
     </form>
 
     <form class="settings-card" novalidate @submit.prevent="updatePassword">
       <header>
-        <h2>Change Password</h2>
-        <p>Update your password to keep your account secure.</p>
+        <h2>{{ t('adminProfile.changePassword') }}</h2>
+        <p>{{ t('conservationProfile.passwordDescription') }}</p>
       </header>
 
       <div class="settings-fields">
         <label class="settings-field">
-          <span>Current Password</span>
+          <span>{{ t('adminProfile.currentPassword') }}</span>
           <input
             v-model="password.current"
             type="password"
@@ -129,12 +134,12 @@ const updatePassword = () => {
             aria-describedby="current-password-error"
           />
           <small v-if="passwordErrors.current" id="current-password-error" class="field-error">{{
-            passwordErrors.current
+            t(passwordErrors.current)
           }}</small>
         </label>
 
         <label class="settings-field">
-          <span>New Password</span>
+          <span>{{ t('adminProfile.newPassword') }}</span>
           <input
             v-model="password.next"
             type="password"
@@ -143,12 +148,12 @@ const updatePassword = () => {
             aria-describedby="new-password-error"
           />
           <small v-if="passwordErrors.next" id="new-password-error" class="field-error">{{
-            passwordErrors.next
+            t(passwordErrors.next)
           }}</small>
         </label>
 
         <label class="settings-field">
-          <span>Confirm New Password</span>
+          <span>{{ t('adminProfile.confirmPassword') }}</span>
           <input
             v-model="password.confirm"
             type="password"
@@ -157,18 +162,17 @@ const updatePassword = () => {
             aria-describedby="confirm-password-error"
           />
           <small v-if="passwordErrors.confirm" id="confirm-password-error" class="field-error">{{
-            passwordErrors.confirm
+            t(passwordErrors.confirm)
           }}</small>
         </label>
       </div>
 
       <p class="prototype-note">
-        Prototype only: the current password is not verified and no account data is sent to a
-        server.
+        {{ t('adminProfile.prototypeNote') }}
       </p>
       <div class="form-footer">
-        <p v-if="passwordSuccess" class="success-message" role="status">{{ passwordSuccess }}</p>
-        <button class="primary-button" type="submit">Update Password</button>
+        <p v-if="passwordSuccess" class="success-message" role="status">{{ t(passwordSuccess) }}</p>
+        <button class="primary-button" type="submit">{{ t('adminProfile.updatePassword') }}</button>
       </div>
     </form>
   </div>

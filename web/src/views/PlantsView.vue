@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 import { plants as species } from '../data/plants'
@@ -11,13 +12,23 @@ const sortOption = ref<'default' | 'name-asc' | 'name-desc' | 'scientific-asc'>(
 const sortMenuOpen = ref(false)
 const sortMenu = ref<HTMLElement | null>(null)
 const route = useRoute()
+const { t } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
 const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search : '')
 
+const selectSort = (option: typeof sortOption.value) => {
+  sortOption.value = option
+  sortMenuOpen.value = false
+}
+
+const clearFilters = () => {
+  searchQuery.value = ''
+  activeCategory.value = 'All'
+}
+
 const canViewConservationStatus = computed(
   () =>
-    isLoggedIn.value &&
-    (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
 )
 
 const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
@@ -55,6 +66,7 @@ const filteredSpecies = computed(() => {
     const matchesSearch =
       !query ||
       item.name.toLowerCase().includes(query) ||
+      t(`plantNames.${item.slug}`).toLowerCase().includes(query) ||
       item.scientificName.toLowerCase().includes(query) ||
       item.genus?.toLowerCase().includes(query) ||
       item.category.toLowerCase().includes(query) ||
@@ -91,12 +103,9 @@ const filteredSpecies = computed(() => {
 
       <div class="hero-content">
         <p class="eyebrow">NIAH NATIONAL PARK</p>
-        <h1>Plants of Niah</h1>
-        <p class="hero-lead">Explore the rich flora of Niah National Park.</p>
-        <p class="hero-copy">
-          From towering rainforest trees to delicate orchids, discover the remarkable plant
-          life that makes Niah a place of extraordinary beauty and ecological significance.
-        </p>
+        <h1>{{ t('species.heroTitle') }}</h1>
+        <p class="hero-lead">{{ t('species.heroLead') }}</p>
+        <p class="hero-copy">{{ t('species.heroDescription') }}</p>
       </div>
     </section>
 
@@ -104,10 +113,10 @@ const filteredSpecies = computed(() => {
       <div class="library-container">
         <div class="library-heading">
           <div>
-            <p class="section-label">EXPLORE THE COLLECTION</p>
-            <h2 id="plant-library-title">Discover Niah's flora</h2>
+            <p class="section-label">{{ t('species.libraryEyebrow') }}</p>
+            <h2 id="plant-library-title">{{ t('species.libraryTitle') }}</h2>
           </div>
-          <p>{{ filteredSpecies.length }} species found</p>
+          <p>{{ t('species.found', { count: filteredSpecies.length }) }}</p>
         </div>
 
         <div class="filter-bar">
@@ -116,11 +125,11 @@ const filteredSpecies = computed(() => {
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="m21 21-4.35-4.35m2.35-5.15A7.5 7.5 0 1 1 4 11.5a7.5 7.5 0 0 1 15 0Z" />
               </svg>
-              <span class="sr-only">Search species</span>
+              <span class="sr-only">{{ t('nav.searchSpecies') }}</span>
               <input
                 v-model="searchQuery"
                 type="search"
-                placeholder="Search by name, scientific name or keyword..."
+                :placeholder="t('species.searchPlaceholder')"
               />
             </label>
 
@@ -128,7 +137,7 @@ const filteredSpecies = computed(() => {
               <button
                 type="button"
                 class="sort-button"
-                aria-label="Sort species"
+                :aria-label="t('species.sortLabel')"
                 aria-haspopup="menu"
                 :aria-expanded="sortMenuOpen"
                 aria-controls="plant-sort-menu"
@@ -137,7 +146,7 @@ const filteredSpecies = computed(() => {
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M8 6h12M4 6h.01M11 12h9M4 12h3M14 18h6M4 18h6" />
                 </svg>
-                <span>Sort</span>
+                <span>{{ t('common.sort') }}</span>
               </button>
 
               <div v-if="sortMenuOpen" id="plant-sort-menu" class="sort-options" role="menu">
@@ -146,36 +155,36 @@ const filteredSpecies = computed(() => {
                   role="menuitemradio"
                   :aria-checked="sortOption === 'default'"
                   :class="{ selected: sortOption === 'default' }"
-                  @click="sortOption = 'default'; sortMenuOpen = false"
+                  @click="selectSort('default')"
                 >
-                  Default order
+                  {{ t('species.sortDefault') }}
                 </button>
                 <button
                   type="button"
                   role="menuitemradio"
                   :aria-checked="sortOption === 'name-asc'"
                   :class="{ selected: sortOption === 'name-asc' }"
-                  @click="sortOption = 'name-asc'; sortMenuOpen = false"
+                  @click="selectSort('name-asc')"
                 >
-                  Name: A–Z
+                  {{ t('species.sortNameAsc') }}
                 </button>
                 <button
                   type="button"
                   role="menuitemradio"
                   :aria-checked="sortOption === 'name-desc'"
                   :class="{ selected: sortOption === 'name-desc' }"
-                  @click="sortOption = 'name-desc'; sortMenuOpen = false"
+                  @click="selectSort('name-desc')"
                 >
-                  Name: Z–A
+                  {{ t('species.sortNameDesc') }}
                 </button>
                 <button
                   type="button"
                   role="menuitemradio"
                   :aria-checked="sortOption === 'scientific-asc'"
                   :class="{ selected: sortOption === 'scientific-asc' }"
-                  @click="sortOption = 'scientific-asc'; sortMenuOpen = false"
+                  @click="selectSort('scientific-asc')"
                 >
-                  Scientific name: A–Z
+                  {{ t('species.sortScientific') }}
                 </button>
               </div>
             </div>
@@ -189,7 +198,7 @@ const filteredSpecies = computed(() => {
               :class="{ active: activeCategory === category }"
               @click="activeCategory = category"
             >
-              {{ category }}
+              {{ t(`species.categories.${category.toLowerCase()}`) }}
             </button>
           </div>
         </div>
@@ -201,17 +210,24 @@ const filteredSpecies = computed(() => {
                 v-if="item.image || item.images?.find((image) => image.path)?.path"
                 class="plant-card-image"
                 :src="item.image || item.images?.find((image) => image.path)?.path"
-                :alt="item.name"
+                :alt="t(`plantNames.${item.slug}`)"
               />
-              <div v-else class="plant-image-placeholder" role="img" :aria-label="`${item.name} image placeholder`">
+              <div
+                v-else
+                class="plant-image-placeholder"
+                role="img"
+                :aria-label="t(`plantNames.${item.slug}`) + ' image placeholder'"
+              >
                 <svg viewBox="0 0 64 64" aria-hidden="true">
                   <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
                   <path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" />
                 </svg>
-                <span>Image coming soon</span>
+                <span>{{ t('species.imageComingSoon') }}</span>
               </div>
               <div class="card-badges">
-                <span class="category-badge">{{ item.category }}</span>
+                <span class="category-badge">{{
+                  t(`categories.${item.category.toLowerCase()}`)
+                }}</span>
                 <span
                   v-if="canViewConservationStatus && item.conservationStatus"
                   class="status-badge"
@@ -221,10 +237,12 @@ const filteredSpecies = computed(() => {
             </div>
 
             <div class="plant-card-content">
-              <h3>{{ item.name }}</h3>
-              <p class="scientific-name">{{ item.scientificName }}</p>
-              <p v-if="item.family" class="plant-family"><span>Family:</span> {{ item.family }}</p>
-              <p class="plant-description">{{ item.description }}</p>
+              <h3>{{ t(`plantNames.${item.slug}`) }}</h3>
+              <p class="scientific-name">{{ t(`scientificNames.${item.slug}`) }}</p>
+              <p v-if="item.family" class="plant-family">
+                <span>{{ t('common.family') }}:</span> {{ t(`familyNames.${item.slug}`) }}
+              </p>
+              <p class="plant-description">{{ t(`plantDescriptions.${item.slug}`) }}</p>
 
               <div class="card-actions">
                 <RouterLink
@@ -232,7 +250,7 @@ const filteredSpecies = computed(() => {
                   class="card-action-link card-action-secondary"
                   :aria-label="`View species information for ${item.scientificName}`"
                 >
-                  <span>View Species</span>
+                  <span>{{ t('common.viewSpecies') }}</span>
                 </RouterLink>
 
                 <RouterLink
@@ -240,7 +258,7 @@ const filteredSpecies = computed(() => {
                   class="card-action-link card-action-primary"
                   :aria-label="`View individual plants for ${item.scientificName}`"
                 >
-                  <span>View Plants</span>
+                  <span>{{ t('common.viewPlants') }}</span>
                   <span class="action-arrow" aria-hidden="true">→</span>
                 </RouterLink>
               </div>
@@ -250,16 +268,18 @@ const filteredSpecies = computed(() => {
 
         <div v-else class="empty-state">
           <span aria-hidden="true">🌿</span>
-          <h3>No species found</h3>
-          <p>Try another search term or select a different category.</p>
-          <button type="button" @click="searchQuery = ''; activeCategory = 'All'">Clear filters</button>
+          <h3>{{ t('species.notFound') }}</h3>
+          <p>{{ t('species.noMatch') }}</p>
+          <button type="button" @click="clearFilters">
+            {{ t('common.clearFilters') }}
+          </button>
         </div>
       </div>
     </section>
 
     <section class="plants-quote">
-      <p>“Extraordinary plants. A timeless rainforest.”</p>
-      <span>NIAH NATIONAL PARK</span>
+      <p>{{ t('species.quote') }}</p>
+      <span>{{ t('species.quoteAttribution') }}</span>
     </section>
   </main>
 </template>
@@ -280,13 +300,16 @@ const filteredSpecies = computed(() => {
   overflow: hidden;
 }
 
-
-
 .hero-overlay {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, rgba(8, 24, 17, 0.86) 0%, rgba(8, 24, 17, 0.6) 44%, rgba(8, 24, 17, 0.15) 78%),
+    linear-gradient(
+      90deg,
+      rgba(8, 24, 17, 0.86) 0%,
+      rgba(8, 24, 17, 0.6) 44%,
+      rgba(8, 24, 17, 0.15) 78%
+    ),
     linear-gradient(0deg, rgba(8, 24, 17, 0.35), transparent 55%);
 }
 
@@ -522,7 +545,9 @@ const filteredSpecies = computed(() => {
   border-radius: 18px;
   background: #fff;
   box-shadow: 0 10px 30px rgba(33, 57, 44, 0.08);
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease;
 }
 
 .plant-card:hover {

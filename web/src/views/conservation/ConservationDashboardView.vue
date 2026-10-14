@@ -1,77 +1,93 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import BiodiversityMapPreview from '../../components/conservation/BiodiversityMapPreview.vue'
 import { conservationStore, speciesForPlant, speciesRequestForPlant } from '../../data/conservation'
 const router = useRouter()
+const { t, te } = useI18n()
 const go = (name: string, query?: Record<string, string>) => router.push({ name, query })
 const summaries = [
-  ['Plant Species', conservationStore.species.length, 'Digital knowledge base'],
-  ['Plant Records', conservationStore.plants.length, 'Registered plants'],
+  ['plantSpecies', conservationStore.species.length, 'digitalKnowledgeBase'],
+  ['plantRecords', conservationStore.plants.length, 'registeredPlants'],
   [
-    'Pending Reviews',
+    'pendingReviews',
     conservationStore.observations.filter((o) => o.status === 'Pending Review').length,
-    'Requires verification',
+    'requiresVerification',
   ],
   [
-    'Endangered Species',
+    'endangeredSpecies',
     conservationStore.species.filter((s) => s.status.includes('Endangered')).length,
-    'Under monitoring',
+    'underMonitoring',
   ],
   [
-    'Active Threats',
+    'activeThreats',
     conservationStore.alerts.filter((a) => a.status !== 'Resolved').length,
-    'Needs attention',
+    'needsAttention',
   ],
-  ['Recent Observations', conservationStore.observations.length, 'Current mock dataset'],
+  ['recentObservations', conservationStore.observations.length, 'currentDataset'],
 ]
 const pending = conservationStore.observations
   .filter((o) => o.status === 'Pending Review')
   .slice(0, 4)
+const translatedScientificName = (id: string, fallback: string) => {
+  const key = `conservationSpecies.scientific.${id}`
+  return te(key) ? t(key) : fallback
+}
 const speciesLabel = (plantId: string) => {
   const officialSpecies = speciesForPlant(plantId)
-  if (officialSpecies) return officialSpecies.scientificName
+  if (officialSpecies)
+    return translatedScientificName(officialSpecies.id, officialSpecies.scientificName)
   const request = speciesRequestForPlant(plantId)
-  return request ? `Proposed: ${request.proposedScientificName}` : 'Species unavailable'
+  const proposedName = request
+    ? translatedScientificName('proposedShoreaNiahensis', request.proposedScientificName)
+    : ''
+  return request
+    ? t('conservationDashboard.proposedSpecies', { name: proposedName })
+    : t('conservationDashboard.speciesUnavailable')
+}
+const dataLabel = (value: string) => {
+  const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
+  return te(key) ? t(key) : value
 }
 </script>
 <template>
   <section class="page-intro">
     <div>
-      <p class="page-kicker">OVERVIEW</p>
-      <h2>Good afternoon, Conservation Officer</h2>
-      <p>Here is the latest overview of biodiversity records and conservation activities.</p>
+      <p class="page-kicker">{{ t('conservationDashboard.overview') }}</p>
+      <h2>{{ t('conservationDashboard.greeting') }}</h2>
+      <p>{{ t('conservationDashboard.intro') }}</p>
     </div>
-    <time datetime="2026-10-03">Saturday, 3 October 2026</time>
+    <time datetime="2026-10-03">{{ t('conservationDashboard.date') }}</time>
   </section>
   <section class="summary-grid">
     <article v-for="card in summaries" :key="String(card[0])" class="summary-card">
-      <p>{{ card[0] }}</p>
+      <p>{{ t(`conservationDashboard.summary.${card[0]}`) }}</p>
       <strong>{{ card[1] }}</strong
-      ><small>{{ card[2] }}</small>
+      ><small>{{ t(`conservationDashboard.summary.${card[2]}`) }}</small>
     </article>
   </section>
   <div class="two-column">
     <section class="panel">
       <header class="panel-header">
         <div>
-          <p class="section-kicker">REQUIRES REVIEW</p>
-          <h2>Pending Observation Reviews</h2>
-          <span class="panel-description">Recent field observations submitted by botanists</span>
+          <p class="section-kicker">{{ t('conservationDashboard.requiresReview') }}</p>
+          <h2>{{ t('conservationDashboard.pendingObservationReviews') }}</h2>
+          <span class="panel-description">{{ t('conservationDashboard.pendingDescription') }}</span>
         </div>
         <button class="secondary-button" @click="go('conservation-reviews')">
-          View All Submissions →
+          {{ t('conservationDashboard.viewAllSubmissions') }} →
         </button>
       </header>
       <div class="table-scroll">
         <table>
           <thead>
             <tr>
-              <th>Observation ID</th>
-              <th>Plant ID</th>
-              <th>Species</th>
-              <th>Submitted By</th>
-              <th>Status</th>
-              <th>Action</th>
+              <th>{{ t('conservationDashboard.table.observationId') }}</th>
+              <th>{{ t('conservationDashboard.table.plantId') }}</th>
+              <th>{{ t('conservationDashboard.table.species') }}</th>
+              <th>{{ t('conservationDashboard.table.submittedBy') }}</th>
+              <th>{{ t('conservationDashboard.table.status') }}</th>
+              <th>{{ t('conservationDashboard.table.action') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -85,11 +101,11 @@ const speciesLabel = (plantId: string) => {
               </td>
               <td>{{ o.recordedBy }}</td>
               <td>
-                <span class="badge pending-review">{{ o.status }}</span>
+                <span class="badge pending-review">{{ dataLabel(o.status) }}</span>
               </td>
               <td>
                 <button class="action-button" @click="go('conservation-reviews', { review: o.id })">
-                  Review
+                  {{ t('conservationDashboard.review') }}
                 </button>
               </td>
             </tr>
@@ -100,8 +116,8 @@ const speciesLabel = (plantId: string) => {
     <section class="panel">
       <header class="panel-header">
         <div>
-          <p class="section-kicker">SPECIES HEALTH</p>
-          <h2>Biodiversity Overview</h2>
+          <p class="section-kicker">{{ t('conservationDashboard.speciesHealth') }}</p>
+          <h2>{{ t('conservationDashboard.biodiversityOverview') }}</h2>
         </div>
       </header>
       <div
@@ -116,7 +132,7 @@ const speciesLabel = (plantId: string) => {
         :key="status"
         class="overview-row"
       >
-        <span>{{ status }}</span
+        <span>{{ dataLabel(status) }}</span
         ><strong>{{ conservationStore.species.filter((s) => s.status === status).length }}</strong>
       </div>
     </section>
@@ -124,23 +140,23 @@ const speciesLabel = (plantId: string) => {
   <section class="panel">
     <header class="panel-header">
       <div>
-        <p class="section-kicker">LATEST RECORDS</p>
-        <h2>Recent Plant Records</h2>
+        <p class="section-kicker">{{ t('conservationDashboard.latestRecords') }}</p>
+        <h2>{{ t('conservationDashboard.recentPlantRecords') }}</h2>
       </div>
       <button class="secondary-button" @click="go('conservation-observations')">
-        View All Plants →
+        {{ t('conservationDashboard.viewAllPlants') }} →
       </button>
     </header>
     <div class="table-scroll">
       <table>
         <thead>
           <tr>
-            <th>Plant ID</th>
-            <th>Species</th>
-            <th>Location</th>
-            <th>Recorded By</th>
-            <th>Last Observation</th>
-            <th>Status</th>
+            <th>{{ t('conservationDashboard.table.plantId') }}</th>
+            <th>{{ t('conservationDashboard.table.species') }}</th>
+            <th>{{ t('conservationDashboard.table.location') }}</th>
+            <th>{{ t('conservationDashboard.table.recordedBy') }}</th>
+            <th>{{ t('conservationDashboard.table.lastObservation') }}</th>
+            <th>{{ t('conservationDashboard.table.status') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -149,13 +165,13 @@ const speciesLabel = (plantId: string) => {
               <strong>{{ p.id }}</strong>
             </td>
             <td>
-              <em>{{ speciesForPlant(p.id)?.scientificName }}</em>
+              <em>{{ speciesLabel(p.id) }}</em>
             </td>
-            <td>{{ p.location }}</td>
+            <td>{{ dataLabel(p.location) }}</td>
             <td>{{ p.registeredBy }}</td>
             <td>{{ p.lastObservation }}</td>
             <td>
-              <span class="badge approved">{{ p.status }}</span>
+              <span class="badge approved">{{ dataLabel(p.status) }}</span>
             </td>
           </tr>
         </tbody>
@@ -166,30 +182,32 @@ const speciesLabel = (plantId: string) => {
     <section class="panel">
       <header class="panel-header">
         <div>
-          <p class="section-kicker">PARK COVERAGE</p>
-          <h2>Species Distribution</h2>
+          <p class="section-kicker">{{ t('conservationDashboard.parkCoverage') }}</p>
+          <h2>{{ t('conservationDashboard.speciesDistribution') }}</h2>
         </div>
-        <button class="secondary-button" @click="go('conservation-map')">Open Full Map →</button>
+        <button class="secondary-button" @click="go('conservation-map')">
+          {{ t('conservationDashboard.openFullMap') }} →
+        </button>
       </header>
       <BiodiversityMapPreview />
     </section>
     <section class="panel">
       <header class="panel-header">
         <div>
-          <p class="section-kicker">ATTENTION REQUIRED</p>
-          <h2>Conservation Alerts</h2>
+          <p class="section-kicker">{{ t('conservationDashboard.attentionRequired') }}</p>
+          <h2>{{ t('conservationDashboard.conservationAlerts') }}</h2>
         </div>
         <button class="secondary-button" @click="go('conservation-alerts')">
-          View All Alerts →
+          {{ t('conservationDashboard.viewAllAlerts') }} →
         </button>
       </header>
       <article v-for="a in conservationStore.alerts.slice(0, 3)" :key="a.id" class="alert-preview">
         <div>
-          <strong>{{ a.type }}</strong
-          ><small>{{ a.id }} · {{ a.plantId }} · {{ a.zone }}</small>
+          <strong>{{ dataLabel(a.type) }}</strong
+          ><small>{{ a.id }} · {{ a.plantId }} · {{ dataLabel(a.zone) }}</small>
         </div>
         <span class="badge alert-severity-badge" :class="a.severity.toLowerCase()">
-          {{ a.severity }}
+          {{ dataLabel(a.severity) }}
         </span>
       </article>
     </section>
@@ -197,20 +215,29 @@ const speciesLabel = (plantId: string) => {
   <section class="panel">
     <header class="panel-header">
       <div>
-        <p class="section-kicker">SHORTCUTS</p>
-        <h2>Quick Actions</h2>
+        <p class="section-kicker">{{ t('conservationDashboard.shortcuts') }}</p>
+        <h2>{{ t('conservationDashboard.quickActions') }}</h2>
       </div>
     </header>
     <div class="quick-grid">
       <button @click="go('conservation-species', { action: 'add' })">
         ＋
         <span
-          ><strong>Add Plant Species</strong><small>Create a species record</small></span
+          ><strong>{{ t('conservationDashboard.actions.addSpecies') }}</strong
+          ><small>{{ t('conservationDashboard.actions.createSpecies') }}</small></span
         ></button
       ><button @click="go('conservation-reviews')">
-        ✓ <span><strong>Review Observations</strong><small>Verify submissions</small></span></button
+        ✓
+        <span
+          ><strong>{{ t('conservationDashboard.actions.reviewObservations') }}</strong
+          ><small>{{ t('conservationDashboard.actions.verifySubmissions') }}</small></span
+        ></button
       ><button @click="go('conservation-observations')">
-        ⌕ <span><strong>Search Plants</strong><small>Find observation records</small></span></button
+        ⌕
+        <span
+          ><strong>{{ t('conservationDashboard.actions.searchPlants') }}</strong
+          ><small>{{ t('conservationDashboard.actions.findRecords') }}</small></span
+        ></button
       ><button @click="go('conservation-reports')">
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -225,13 +252,18 @@ const speciesLabel = (plantId: string) => {
           class="lucide lucide-file-text preview-icon"
           aria-hidden="true"
         >
-          <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/>
+          <path
+            d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"
+          />
           <path d="M14 2v5a1 1 0 0 0 1 1h5" />
           <path d="M10 9H8" />
           <path d="M16 13H8" />
           <path d="M16 17H8" />
         </svg>
-        <span><strong>Generate Report</strong><small>Create a summary</small></span>
+        <span
+          ><strong>{{ t('conservationDashboard.actions.generateReport') }}</strong
+          ><small>{{ t('conservationDashboard.actions.createSummary') }}</small></span
+        >
       </button>
     </div>
   </section>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import {
   adminNotifications,
   markAllAdminNotificationsRead,
@@ -10,8 +11,11 @@ import {
 
 const emit = defineEmits<{ opened: [] }>()
 const router = useRouter()
+const { t } = useI18n()
 const notificationOpen = ref(false)
 const notificationWrap = ref<HTMLElement | null>(null)
+const notificationText = (notification: AdminNotification, field: 'title' | 'message' | 'time') =>
+  t(`dashboardNotifications.admin.${notification.id}.${field}`)
 
 const toggleNotifications = () => {
   notificationOpen.value = !notificationOpen.value
@@ -48,7 +52,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
     <button
       class="notification-button"
       type="button"
-      aria-label="Notifications"
+      :aria-label="t('dashboardNav.notifications')"
       :aria-expanded="notificationOpen"
       aria-controls="admin-notifications"
       @click="toggleNotifications"
@@ -65,16 +69,16 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
       v-if="notificationOpen"
       id="admin-notifications"
       class="notification-menu"
-      aria-label="Admin notifications"
+      :aria-label="t('dashboardNav.adminNotifications')"
     >
       <header>
-        <strong>Notifications</strong>
+        <strong>{{ t('dashboardNav.notifications') }}</strong>
         <button
           type="button"
           :disabled="unreadAdminNotificationCount === 0"
           @click="markAllAdminNotificationsRead"
         >
-          Mark all as read
+          {{ t('dashboardNav.markAllRead') }}
         </button>
       </header>
       <div v-if="adminNotifications.length" class="notification-list">
@@ -90,15 +94,15 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
             notification.type === 'sensor' ? '×' : notification.type === 'system' ? '⌁' : '!'
           }}</span>
           <span class="notification-copy">
-            <strong>{{ notification.title }}</strong>
-            <span>{{ notification.message }}</span>
-            <time>{{ notification.time }}</time>
+            <strong>{{ notificationText(notification, 'title') }}</strong>
+            <span>{{ notificationText(notification, 'message') }}</span>
+            <time>{{ notificationText(notification, 'time') }}</time>
           </span>
           <i v-if="!notification.read" aria-hidden="true"></i>
         </button>
       </div>
-      <p v-else class="notification-empty">No notifications.</p>
-      <footer>View relevant notifications by clicking an item.</footer>
+      <p v-else class="notification-empty">{{ t('dashboardNav.noNotifications') }}</p>
+      <footer>{{ t('dashboardNav.notificationHint') }}</footer>
     </section>
   </div>
 </template>

@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 const currentYear = new Date().getFullYear()
+const { t } = useI18n()
 </script>
 
 <template>
@@ -17,52 +20,55 @@ const currentYear = new Date().getFullYear()
             </span>
           </RouterLink>
 
-          <p>
-            Discover the plants, landscapes, and extraordinary human history preserved
-            within Niah National Park.
-          </p>
+          <p>{{ t('footer.description') }}</p>
 
-          <span class="heritage-label">Nature · Heritage · Discovery</span>
+          <span class="heritage-label">{{ t('footer.tagline') }}</span>
         </div>
 
         <nav class="footer-column" aria-label="Footer navigation">
-          <h2>Explore</h2>
-          <RouterLink to="/">Home</RouterLink>
-          <RouterLink to="/plants">Explore Plants</RouterLink>
-          <a href="#journey-to-cave">Journey to the Cave</a>
+          <h2>{{ t('footer.explore') }}</h2>
+          <RouterLink to="/">{{ t('nav.home') }}</RouterLink>
+          <RouterLink to="/plants">{{ t('home.hero.cta') }}</RouterLink>
+          <a href="#journey-to-cave">{{ t('footer.journey') }}</a>
         </nav>
 
         <div class="footer-column visitor-details">
-          <h2>Plan Your Visit</h2>
+          <h2>{{ t('footer.plan') }}</h2>
           <p>
             <span class="detail-icon" aria-hidden="true">◷</span>
-            <span><small>Opening hours</small>Daily, 8 AM–5 PM</span>
+            <span
+              ><small>{{ t('homeContent.opening') }}</small
+              >{{ t('homeContent.hours') }}</span
+            >
           </p>
           <p>
             <span class="detail-icon" aria-hidden="true">⌖</span>
-            <span><small>Location</small>Niah, Miri Division, Sarawak</span>
+            <span
+              ><small>{{ t('homeContent.location') }}</small
+              >{{ t('footer.locationValue') }}</span
+            >
           </p>
           <p>
             <span class="detail-icon" aria-hidden="true">↗</span>
-            <span><small>From Miri</small>Approximately 1.5 hours</span>
+            <span
+              ><small>{{ t('homeContent.fromMiri') }}</small
+              >{{ t('footer.travelTime') }}</span
+            >
           </p>
         </div>
 
         <div class="footer-column footer-note">
-          <h2>Before You Go</h2>
-          <p>
-            Wear suitable footwear, carry drinking water, and bring a reliable torch for
-            your cave journey.
-          </p>
+          <h2>{{ t('footer.before') }}</h2>
+          <p>{{ t('footer.advice') }}</p>
           <RouterLink to="/plants" class="footer-button">
-            Discover Niah's Plants <span aria-hidden="true">→</span>
+            {{ t('footer.discoverPlants') }} <span aria-hidden="true">→</span>
           </RouterLink>
         </div>
       </div>
 
       <div class="footer-bottom">
-        <p>© {{ currentYear }} Niah Biodiversity. All rights reserved.</p>
-        <p>Smart Ground-Truthing &amp; Digital Biodiversity System</p>
+        <p>{{ t('footer.copyright', { year: currentYear }) }}</p>
+        <p>{{ t('footer.systemName') }}</p>
       </div>
     </div>
   </footer>
@@ -182,7 +188,9 @@ const currentYear = new Date().getFullYear()
   color: #b8cec3;
   font-size: 11px;
   text-decoration: none;
-  transition: color 0.2s ease, transform 0.2s ease;
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
 }
 
 .footer-column > a:not(.footer-button):hover {
@@ -246,7 +254,9 @@ const currentYear = new Date().getFullYear()
   font-size: 10px;
   font-weight: 700;
   text-decoration: none;
-  transition: background-color 0.2s ease, transform 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    transform 0.2s ease;
 }
 
 .footer-button:hover {

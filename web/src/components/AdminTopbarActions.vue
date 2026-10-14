@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { adminProfile } from '../data/adminProfile'
 import AdminNotificationBell from './AdminNotificationBell.vue'
+import LanguageSwitcher from './LanguageSwitcher.vue'
 
 const router = useRouter()
+const { t } = useI18n()
 const profileOpen = ref(false)
 const actionsWrap = ref<HTMLElement | null>(null)
 const notificationBell = ref<{ closeNotifications: () => void } | null>(null)
@@ -39,6 +42,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
 
 <template>
   <div ref="actionsWrap" class="admin-topbar-actions">
+    <div class="dashboard-language"><LanguageSwitcher /></div>
     <AdminNotificationBell ref="notificationBell" @opened="closeProfile" />
     <div class="profile-wrap">
       <button
@@ -51,13 +55,17 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
         <span class="avatar">A</span>
         <span class="profile-copy">
           <strong>{{ adminProfile.fullName }}</strong>
-          <small>{{ adminProfile.role }}</small>
+          <small>{{ t('dashboardNav.administrator') }}</small>
         </span>
         <span class="chevron" aria-hidden="true">⌄</span>
       </button>
       <div v-if="profileOpen" class="profile-menu" role="menu">
-        <button type="button" role="menuitem" @click="openProfileSettings">Profile settings</button>
-        <button type="button" role="menuitem" @click="signOut">Sign out</button>
+        <button type="button" role="menuitem" @click="openProfileSettings">
+          {{ t('dashboardNav.profileSettings') }}
+        </button>
+        <button type="button" role="menuitem" @click="signOut">
+          {{ t('dashboardNav.signOut') }}
+        </button>
       </div>
     </div>
   </div>
@@ -68,6 +76,11 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   display: flex;
   align-items: center;
   gap: 13px;
+}
+.dashboard-language :deep(.language-trigger) {
+  min-height: 39px;
+  border-radius: 11px;
+  background: #fff;
 }
 .profile-wrap {
   position: relative;
@@ -147,6 +160,21 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   outline: none;
 }
 @media (max-width: 620px) {
+  .dashboard-language :deep(.language-switcher),
+  .dashboard-language :deep(.language-trigger) {
+    width: auto;
+  }
+  .dashboard-language :deep(.language-trigger) {
+    min-height: 35px;
+    padding-inline: 9px;
+    color: #3f7777;
+  }
+  .dashboard-language :deep(.language-full) {
+    display: none;
+  }
+  .dashboard-language :deep(.language-short) {
+    display: inline;
+  }
   .profile-copy,
   .chevron {
     display: none;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import PlantRecordCard from '../components/PlantRecordCard.vue'
 import { plants as species } from '../data/plants'
@@ -8,21 +9,32 @@ import { plantRecords } from '../data/plantRecords'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 const route = useRoute()
+const { t, te } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
 const canViewSensitiveFacts = computed(
   () =>
-    isLoggedIn.value &&
-    (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
 )
 const selectedSpecies = computed(() => species.find((item) => item.slug === route.params.slug))
-const primaryImage = computed(() =>
-  selectedSpecies.value?.image || selectedSpecies.value?.images?.find((image) => image.path)?.path,
+const primaryImage = computed(
+  () =>
+    selectedSpecies.value?.image ||
+    selectedSpecies.value?.images?.find((image) => image.path)?.path,
 )
 const speciesPlants = computed(() =>
   plantRecords.filter((plant) => plant.speciesSlug === selectedSpecies.value?.slug),
 )
 const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
 
+const speciesText = (field: string, fallback = '') => {
+  const key = `speciesContent.${selectedSpecies.value?.slug}.${field}`
+  return te(key) ? t(key) : fallback
+}
+
+const characteristicText = (index: number, fallback: string) =>
+  speciesText(`characteristics.${index}`, fallback)
+
+const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${index}`, fallback)
 </script>
 
 <template>
@@ -33,29 +45,46 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
       <div class="detail-container">
         <RouterLink to="/species" class="back-link">
           <span class="back-arrow" aria-hidden="true">←</span>
-          <span>Back to Species</span>
+          <span>{{ t('common.backToSpecies') }}</span>
         </RouterLink>
 
         <div class="hero-grid">
           <div v-if="primaryImage" class="species-image-card">
-            <img class="plant-image" :src="primaryImage" :alt="selectedSpecies.name" />
+            <img
+              class="plant-image"
+              :src="primaryImage"
+              :alt="t(`plantNames.${selectedSpecies.slug}`)"
+            />
           </div>
-          <div v-else class="plant-placeholder" role="img" :aria-label="`${selectedSpecies.name} image placeholder`">
+          <div
+            v-else
+            class="plant-placeholder"
+            role="img"
+            :aria-label="t(`plantNames.${selectedSpecies.slug}`) + ' image placeholder'"
+          >
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
               <path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" />
             </svg>
-            <span>Plant image coming soon</span>
+            <span>{{ t('speciesLabels.plantImageSoon') }}</span>
           </div>
 
           <div class="hero-copy">
             <div class="hero-badges">
-              <span class="category">{{ selectedSpecies.category }}</span>
-              <span v-if="canViewSensitiveFacts && selectedSpecies.conservationStatus" class="conservation-status">{{ selectedSpecies.conservationStatus }}</span>
+              <span class="category">{{
+                t(`categories.${selectedSpecies.category.toLowerCase()}`)
+              }}</span>
+              <span
+                v-if="canViewSensitiveFacts && selectedSpecies.conservationStatus"
+                class="conservation-status"
+                >{{
+                  speciesText('conservationStatus', selectedSpecies.conservationStatus || '')
+                }}</span
+              >
             </div>
-            <h1>{{ selectedSpecies.name }}</h1>
-            <p class="scientific-name">{{ selectedSpecies.scientificName }}</p>
-            <p class="summary">{{ selectedSpecies.description }}</p>
+            <h1>{{ t(`plantNames.${selectedSpecies.slug}`) }}</h1>
+            <p class="scientific-name">{{ t(`scientificNames.${selectedSpecies.slug}`) }}</p>
+            <p class="summary">{{ t(`plantDescriptions.${selectedSpecies.slug}`) }}</p>
           </div>
         </div>
       </div>
@@ -64,71 +93,84 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     <section class="plant-information">
       <div class="detail-container information-grid">
         <article class="main-description">
-          <p class="section-label">ABOUT THIS SPECIES</p>
-          <h2>About {{ selectedSpecies.name }}</h2>
-          <p>{{ selectedSpecies.overview }}</p>
+          <p class="section-label">{{ t('species.detail.aboutEyebrow') }}</p>
+          <h2>
+            {{ t('species.detail.about', { name: t(`plantNames.${selectedSpecies.slug}`) }) }}
+          </h2>
+          <p>{{ speciesText('overview', selectedSpecies.overview) }}</p>
 
-          <h3>Natural habitat</h3>
-          <p>{{ selectedSpecies.habitat }}</p>
+          <h3>{{ t('speciesLabels.habitat') }}</h3>
+          <p>{{ speciesText('habitat', selectedSpecies.habitat) }}</p>
 
           <template v-if="selectedSpecies.distribution">
-            <h3>Distribution</h3>
-            <p>{{ selectedSpecies.distribution }}</p>
+            <h3>{{ t('speciesLabels.distribution') }}</h3>
+            <p>{{ speciesText('distribution', selectedSpecies.distribution || '') }}</p>
           </template>
 
-          <h3>Ecological importance</h3>
-          <p>{{ selectedSpecies.ecologicalRole || selectedSpecies.significance }}</p>
+          <h3>{{ t('speciesLabels.ecology') }}</h3>
+          <p>
+            {{
+              speciesText('ecology', selectedSpecies.ecologicalRole || selectedSpecies.significance)
+            }}
+          </p>
 
           <template v-if="selectedSpecies.culturalSignificance">
-            <h3>Traditional and cultural importance</h3>
-            <p>{{ selectedSpecies.culturalSignificance }}</p>
+            <h3>{{ t('speciesLabels.culture') }}</h3>
+            <p>{{ speciesText('culture', selectedSpecies.culturalSignificance || '') }}</p>
           </template>
         </article>
 
         <aside class="quick-facts">
-          <p class="section-label">TAXONOMY &amp; QUICK FACTS</p>
-          <h2>Species reference</h2>
-          <h3 class="characteristics-title">Key characteristics</h3>
+          <p class="section-label">{{ t('species.detail.referenceEyebrow') }}</p>
+          <h2>{{ t('species.detail.referenceTitle') }}</h2>
+          <h3 class="characteristics-title">{{ t('speciesLabels.characteristics') }}</h3>
           <ul>
-            <li v-for="characteristic in selectedSpecies.characteristics" :key="characteristic">
+            <li
+              v-for="(characteristic, index) in selectedSpecies.characteristics"
+              :key="characteristic"
+            >
               <span aria-hidden="true">✓</span>
-              {{ characteristic }}
+              {{ characteristicText(index, characteristic) }}
             </li>
           </ul>
 
           <dl>
             <div>
-              <dt>Common name</dt>
-              <dd>{{ selectedSpecies.name }}</dd>
+              <dt>{{ t('speciesLabels.commonName') }}</dt>
+              <dd>{{ t(`plantNames.${selectedSpecies.slug}`) }}</dd>
             </div>
             <div>
-              <dt>Scientific name</dt>
-              <dd>{{ selectedSpecies.scientificName }}</dd>
+              <dt>{{ t('speciesLabels.scientificName') }}</dt>
+              <dd>{{ t(`scientificNames.${selectedSpecies.slug}`) }}</dd>
             </div>
             <div v-if="selectedSpecies.family">
-              <dt>Family</dt>
-              <dd>{{ selectedSpecies.family }}</dd>
+              <dt>{{ t('speciesLabels.family') }}</dt>
+              <dd>{{ t(`familyNames.${selectedSpecies.slug}`) }}</dd>
             </div>
             <div v-if="selectedSpecies.genus">
-              <dt>Genus</dt>
-              <dd>{{ selectedSpecies.genus }}</dd>
+              <dt>{{ t('speciesLabels.genus') }}</dt>
+              <dd>{{ speciesText('genus', selectedSpecies.genus || '') }}</dd>
             </div>
             <div>
-              <dt>Plant group</dt>
-              <dd>{{ selectedSpecies.category }}</dd>
+              <dt>{{ t('speciesLabels.plantGroup') }}</dt>
+              <dd>{{ t(`categories.${selectedSpecies.category.toLowerCase()}`) }}</dd>
             </div>
             <div v-if="selectedSpecies.localName">
-              <dt>Local name</dt>
-              <dd>{{ selectedSpecies.localName }}</dd>
+              <dt>{{ t('speciesLabels.localName') }}</dt>
+              <dd>{{ speciesText('localName', selectedSpecies.localName || '') }}</dd>
             </div>
             <template v-if="canViewSensitiveFacts">
               <div v-if="selectedSpecies.conservationStatus">
-                <dt>Conservation status</dt>
-                <dd>{{ selectedSpecies.conservationStatus }}</dd>
+                <dt>{{ t('speciesLabels.conservation') }}</dt>
+                <dd>
+                  {{ speciesText('conservationStatus', selectedSpecies.conservationStatus || '') }}
+                </dd>
               </div>
               <div v-if="selectedSpecies.sensitivityLevel">
-                <dt>Sensitivity level</dt>
-                <dd>{{ selectedSpecies.sensitivityLevel }}</dd>
+                <dt>{{ t('speciesLabels.sensitivity') }}</dt>
+                <dd>
+                  {{ speciesText('sensitivityLevel', selectedSpecies.sensitivityLevel || '') }}
+                </dd>
               </div>
             </template>
           </dl>
@@ -139,9 +181,9 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     <section class="individual-plants" aria-labelledby="individual-plants-title">
       <div class="detail-container">
         <div class="section-heading">
-          <p class="section-label">INDIVIDUAL PLANTS OF THIS SPECIES</p>
-          <h2 id="individual-plants-title">Verified plants in Niah</h2>
-          <p>{{ speciesPlants.length }} tagged plant records are linked to this species in the prototype.</p>
+          <p class="section-label">{{ t('species.detail.individualEyebrow') }}</p>
+          <h2 id="individual-plants-title">{{ t('species.detail.verifiedTitle') }}</h2>
+          <p>{{ t('species.detail.recordCount', { count: speciesPlants.length }) }}</p>
         </div>
 
         <div v-if="speciesPlants.length" class="individual-plant-grid">
@@ -152,9 +194,11 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
             compact
           />
         </div>
-        <p v-else class="no-records">No verified individual plant records are linked yet.</p>
+        <p v-else class="no-records">{{ t('speciesLabels.noRecords') }}</p>
         <div v-if="speciesPlants.length" class="view-all-row">
-          <RouterLink :to="`/species/${selectedSpecies.slug}/plants`">View All Plants →</RouterLink>
+          <RouterLink :to="`/species/${selectedSpecies.slug}/plants`"
+            >{{ t('species.detail.viewAll') }} →</RouterLink
+          >
         </div>
       </div>
     </section>
@@ -162,35 +206,57 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     <section class="botanical-gallery">
       <div class="detail-container">
         <div class="section-heading">
-          <p class="section-label">BOTANICAL PHOTOGRAPHS</p>
-          <h2>Identification from different views</h2>
-          <p>Photographs support species identification by showing important botanical features and growth form.</p>
+          <p class="section-label">{{ t('species.detail.galleryEyebrow') }}</p>
+          <h2>{{ t('species.detail.galleryTitle') }}</h2>
+          <p>{{ t('species.detail.galleryDescription') }}</p>
         </div>
 
         <div class="gallery-grid">
-          <figure v-for="(image, index) in selectedSpecies.images || []" :key="`${image.caption}-${index}`">
-            <img v-if="image.path" :src="image.path" :alt="image.caption || `${selectedSpecies.name} botanical photograph`" />
-            <div v-else class="gallery-placeholder" role="img" :aria-label="`${image.caption || 'Botanical photograph'} placeholder`">
-              <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25"/><path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17"/></svg>
-              <span>Photograph coming soon</span>
+          <figure
+            v-for="(image, index) in selectedSpecies.images || []"
+            :key="`${image.caption}-${index}`"
+          >
+            <img
+              v-if="image.path"
+              :src="image.path"
+              :alt="galleryCaption(index, image.caption || '') || t('speciesLabels.botanicalPhoto')"
+            />
+            <div
+              v-else
+              class="gallery-placeholder"
+              role="img"
+              :aria-label="
+                t('speciesLabels.photoPlaceholder', {
+                  caption:
+                    galleryCaption(index, image.caption || '') || t('speciesLabels.botanicalPhoto'),
+                })
+              "
+            >
+              <svg viewBox="0 0 64 64" aria-hidden="true">
+                <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
+                <path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" />
+              </svg>
+              <span>{{ t('speciesLabels.photoSoon') }}</span>
             </div>
-            <figcaption v-if="image.caption">{{ image.caption }}</figcaption>
+            <figcaption v-if="image.caption">
+              {{ galleryCaption(index, image.caption || '') }}
+            </figcaption>
           </figure>
         </div>
       </div>
     </section>
 
     <section class="explore-more">
-      <p>Continue discovering the remarkable flora of Niah.</p>
-      <RouterLink to="/species">Explore more species →</RouterLink>
+      <p>{{ t('species.detail.continue') }}</p>
+      <RouterLink to="/species">{{ t('common.exploreMoreSpecies') }} →</RouterLink>
     </section>
   </main>
 
   <main v-else class="not-found">
     <span aria-hidden="true">🌿</span>
-    <h1>Species not found</h1>
-    <p>The species you are looking for is not in the collection.</p>
-    <RouterLink to="/species">Return to Species</RouterLink>
+    <h1>{{ t('species.notFound') }}</h1>
+    <p>{{ t('species.notFoundDescription') }}</p>
+    <RouterLink to="/species">{{ t('common.returnToSpecies') }}</RouterLink>
   </main>
 </template>
 
@@ -317,7 +383,6 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   outline: 3px solid rgba(80, 160, 120, 0.22);
   outline-offset: 3px;
 }
-
 
 .back-link:focus-visible {
   outline: 3px solid rgba(80, 160, 120, 0.25);
@@ -573,10 +638,33 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
   gap: 20px;
 }
 
-.no-records { padding: 30px; border: 1px dashed #aebfad; border-radius: 16px; text-align: center; }
-.view-all-row { margin-top: 30px; text-align: center; }
-.view-all-row a { display: inline-flex; padding: 12px 22px; border-radius: 999px; background: #315b49; color: #fff; font-size: 13px; font-weight: 700; text-decoration: none; transition: background .2s ease, transform .2s ease; }
-.view-all-row a:hover { background: #234a3c; transform: translateY(-2px); }
+.no-records {
+  padding: 30px;
+  border: 1px dashed #aebfad;
+  border-radius: 16px;
+  text-align: center;
+}
+.view-all-row {
+  margin-top: 30px;
+  text-align: center;
+}
+.view-all-row a {
+  display: inline-flex;
+  padding: 12px 22px;
+  border-radius: 999px;
+  background: #315b49;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+.view-all-row a:hover {
+  background: #234a3c;
+  transform: translateY(-2px);
+}
 
 .explore-more {
   padding: 54px 6%;
@@ -657,7 +745,9 @@ const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .individual-plant-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .individual-plant-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {

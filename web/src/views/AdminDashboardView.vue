@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import AdminPageShell from '../components/AdminPageShell.vue'
 
 const router = useRouter()
+const { t, te } = useI18n()
 
 const openUserManagement = async () => {
   await router.push({ name: 'admin-users' })
@@ -30,12 +32,12 @@ const openSystemActivity = async () => {
 }
 
 const summaryCards = [
-  { title: 'Total Users', value: '18', note: '3 active roles', icon: '♙', tone: 'green' },
-  { title: 'Plant Records', value: '350', note: 'Digital collection', icon: '♧', tone: 'green' },
-  { title: 'IoT Sensors', value: '27', note: 'Across 3 zones', icon: '⌁', tone: 'blue' },
-  { title: 'Active Sensors', value: '25', note: '92.6% online', icon: '✓', tone: 'success' },
-  { title: 'Offline Sensors', value: '2', note: 'Requires attention', icon: '×', tone: 'neutral' },
-  { title: 'Threat Alerts', value: '3', note: '2 need review', icon: '!', tone: 'danger' },
+  { title: 'totalUsers', value: '18', note: 'activeRoles', icon: '♙', tone: 'green' },
+  { title: 'plantRecords', value: '350', note: 'digitalCollection', icon: '♧', tone: 'green' },
+  { title: 'iotSensors', value: '27', note: 'threeZones', icon: '⌁', tone: 'blue' },
+  { title: 'activeSensors', value: '25', note: 'onlinePercent', icon: '✓', tone: 'success' },
+  { title: 'offlineSensors', value: '2', note: 'requiresAttention', icon: '×', tone: 'neutral' },
+  { title: 'threatAlerts', value: '3', note: 'needReview', icon: '!', tone: 'danger' },
 ]
 
 const threatAlerts = [
@@ -99,274 +101,307 @@ const sensorActivity = [
 ]
 
 const userRoles = [
-  { label: 'Administrators', value: 3, percent: 17, color: '#28745a' },
-  { label: 'Conservation Officers', value: 5, percent: 28, color: '#55a781' },
-  { label: 'Botanists', value: 10, percent: 55, color: '#91c7a8' },
+  { label: 'administrators', value: 3, percent: 17, color: '#28745a' },
+  { label: 'conservationOfficers', value: 5, percent: 28, color: '#55a781' },
+  { label: 'botanists', value: 10, percent: 55, color: '#91c7a8' },
 ]
 
 const activities = [
-  { title: 'Admin01 created a Botanist account', time: '29 Sep 2026, 10:20 AM', type: 'user' },
-  { title: 'Admin02 updated Sensor S002', time: '29 Sep 2026, 11:05 AM', type: 'sensor' },
-  { title: 'Admin01 changed a user role', time: '29 Sep 2026, 12:10 PM', type: 'role' },
-  { title: 'Sensor S003 went offline', time: '29 Sep 2026, 12:30 PM', type: 'warning' },
+  { title: 'createdBotanist', time: '29 Sep 2026, 10:20 AM', type: 'user' },
+  { title: 'updatedSensor', time: '29 Sep 2026, 11:05 AM', type: 'sensor' },
+  { title: 'changedRole', time: '29 Sep 2026, 12:10 PM', type: 'role' },
+  { title: 'sensorOffline', time: '29 Sep 2026, 12:30 PM', type: 'warning' },
 ]
+const dataLabel = (value: string) => {
+  const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
+  return te(key) ? t(key) : value
+}
 </script>
 
 <template>
-  <AdminPageShell title="Administrator Dashboard" eyebrow="OVERVIEW" active="Dashboard">
+  <AdminPageShell
+    :title="t('adminDashboard.title')"
+    :eyebrow="t('adminDashboard.overview')"
+    active="Dashboard"
+  >
     <div class="dashboard">
-        <section class="welcome-row">
+      <section class="welcome-row">
+        <div>
+          <h2>{{ t('adminDashboard.greeting') }}</h2>
+          <p>{{ t('adminDashboard.intro') }}</p>
+        </div>
+        <time datetime="2026-09-29">{{ t('adminDashboard.date') }}</time>
+      </section>
+
+      <section class="summary-grid" :aria-label="t('adminDashboard.systemSummary')">
+        <article
+          v-for="card in summaryCards"
+          :key="card.title"
+          class="summary-card"
+          :class="`tone-${card.tone}`"
+        >
+          <div class="summary-icon" aria-hidden="true">{{ card.icon }}</div>
           <div>
-            <h2>Good afternoon, Administrator</h2>
-            <p>Here is the latest overview of the biodiversity monitoring system.</p>
+            <p>{{ t(`adminDashboard.summary.${card.title}`) }}</p>
+            <strong>{{ card.value }}</strong
+            ><small>{{ t(`adminDashboard.summary.${card.note}`) }}</small>
           </div>
-          <time datetime="2026-09-29">Monday, 29 September 2026</time>
-        </section>
+        </article>
+      </section>
 
-        <section class="summary-grid" aria-label="System summary">
-          <article
-            v-for="card in summaryCards"
-            :key="card.title"
-            class="summary-card"
-            :class="`tone-${card.tone}`"
-          >
-            <div class="summary-icon" aria-hidden="true">{{ card.icon }}</div>
+      <div class="dashboard-grid primary-grid">
+        <section class="panel sensor-overview">
+          <div class="panel-header">
             <div>
-              <p>{{ card.title }}</p>
-              <strong>{{ card.value }}</strong
-              ><small>{{ card.note }}</small>
+              <p class="section-kicker">{{ t('adminDashboard.liveOverview') }}</p>
+              <h2>{{ t('adminDashboard.sensorStatusOverview') }}</h2>
             </div>
-          </article>
+            <button class="secondary-button" type="button" @click="openIoTMonitoring">
+              {{ t('adminDashboard.viewIotMonitoring') }} →
+            </button>
+          </div>
+          <div class="sensor-content">
+            <div class="donut" role="img" :aria-label="t('adminDashboard.sensorChartLabel')">
+              <div>
+                <strong>27</strong><span>{{ t('adminDashboard.totalSensors') }}</span>
+              </div>
+            </div>
+            <div class="sensor-legend">
+              <div>
+                <span class="dot active-dot"></span>
+                <p>
+                  {{ t('adminDashboard.activeSensors')
+                  }}<small>{{ t('adminDashboard.operatingNormally') }}</small>
+                </p>
+                <strong>25</strong>
+              </div>
+              <div>
+                <span class="dot offline-dot"></span>
+                <p>
+                  {{ t('adminDashboard.offlineSensors')
+                  }}<small>{{ t('adminDashboard.requiresAttention') }}</small>
+                </p>
+                <strong>2</strong>
+              </div>
+              <div class="uptime">
+                <span>{{ t('adminDashboard.networkAvailability') }}</span
+                ><strong>92.6%</strong>
+              </div>
+            </div>
+          </div>
         </section>
 
-        <div class="dashboard-grid primary-grid">
-          <section class="panel sensor-overview">
-            <div class="panel-header">
-              <div>
-                <p class="section-kicker">LIVE OVERVIEW</p>
-                <h2>Sensor Status Overview</h2>
-              </div>
-              <button class="secondary-button" type="button" @click="openIoTMonitoring">
-                View IoT Monitoring →
-              </button>
+        <section class="panel system-status">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">{{ t('adminDashboard.services') }}</p>
+              <h2>{{ t('adminDashboard.systemStatus') }}</h2>
             </div>
-            <div class="sensor-content">
-              <div
-                class="donut"
-                role="img"
-                aria-label="25 active and 2 offline sensors out of 27 total"
-              >
-                <div><strong>27</strong><span>Total sensors</span></div>
-              </div>
-              <div class="sensor-legend">
-                <div>
-                  <span class="dot active-dot"></span>
-                  <p>Active sensors<small>Operating normally</small></p>
-                  <strong>25</strong>
-                </div>
-                <div>
-                  <span class="dot offline-dot"></span>
-                  <p>Offline sensors<small>Requires attention</small></p>
-                  <strong>2</strong>
-                </div>
-                <div class="uptime"><span>Network availability</span><strong>92.6%</strong></div>
-              </div>
+            <span class="all-operational">{{ t('adminDashboard.allSystemsNormal') }}</span>
+          </div>
+          <div class="service-list">
+            <div>
+              <span><i></i>{{ t('adminDashboard.webSystem') }}</span
+              ><strong>{{ t('adminDashboard.operational') }}</strong>
             </div>
-          </section>
+            <div>
+              <span><i></i>{{ t('adminDashboard.iotService') }}</span
+              ><strong>{{ t('adminDashboard.operational') }}</strong>
+            </div>
+            <div>
+              <span><i></i>{{ t('adminDashboard.sensorNetwork') }}</span
+              ><strong>{{ t('adminDashboard.onlineCount') }}</strong>
+            </div>
+            <div>
+              <span><i></i>{{ t('adminDashboard.lastSync') }}</span
+              ><strong>{{ t('adminDashboard.twoMinutesAgo') }}</strong>
+            </div>
+          </div>
+        </section>
+      </div>
 
-          <section class="panel system-status">
-            <div class="panel-header">
-              <div>
-                <p class="section-kicker">SERVICES</p>
-                <h2>System Status</h2>
-              </div>
-              <span class="all-operational">All systems normal</span>
-            </div>
-            <div class="service-list">
-              <div>
-                <span><i></i>Web System</span><strong>Operational</strong>
-              </div>
-              <div>
-                <span><i></i>IoT Service</span><strong>Operational</strong>
-              </div>
-              <div>
-                <span><i></i>Sensor Network</span><strong>25/27 Online</strong>
-              </div>
-              <div>
-                <span><i></i>Last Sync</span><strong>2 minutes ago</strong>
-              </div>
-            </div>
-          </section>
+      <section class="panel table-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker danger-kicker">{{ t('adminDashboard.attentionRequired') }}</p>
+            <h2>{{ t('adminDashboard.recentThreatAlerts') }}</h2>
+          </div>
+          <button class="secondary-button" type="button" @click="openThreatAlerts">
+            {{ t('adminDashboard.viewAllAlerts') }} →
+          </button>
         </div>
-
-        <section class="panel table-panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker danger-kicker">ATTENTION REQUIRED</p>
-              <h2>Recent Threat Alerts</h2>
-            </div>
-            <button class="secondary-button" type="button" @click="openThreatAlerts">
-              View All Alerts →
-            </button>
-          </div>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Alert ID</th>
-                  <th>Plant ID</th>
-                  <th>Alert Type</th>
-                  <th>Location</th>
-                  <th>Date / Time</th>
-                  <th>Severity</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="alert in threatAlerts" :key="alert.id">
-                  <td>
-                    <strong>{{ alert.id }}</strong>
-                  </td>
-                  <td>{{ alert.plant }}</td>
-                  <td>{{ alert.type }}</td>
-                  <td>{{ alert.location }}</td>
-                  <td>{{ alert.time }}</td>
-                  <td>
-                    <span class="badge" :class="alert.severity.toLowerCase()">{{
-                      alert.severity
-                    }}</span>
-                  </td>
-                  <td>
-                    <span class="badge" :class="alert.status.toLowerCase()">{{
-                      alert.status
-                    }}</span>
-                  </td>
-                  <td><button class="view-button" type="button">View</button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel table-panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">LATEST READINGS</p>
-              <h2>Recent Sensor Activity</h2>
-            </div>
-            <button class="secondary-button" type="button" @click="openSensorManagement">
-              View all sensors →
-            </button>
-          </div>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Sensor ID</th>
-                  <th>Plant ID</th>
-                  <th>Temperature</th>
-                  <th>Humidity</th>
-                  <th>Movement</th>
-                  <th>Status</th>
-                  <th>Last Update</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="sensor in sensorActivity" :key="sensor.sensor">
-                  <td>
-                    <strong>{{ sensor.sensor }}</strong>
-                  </td>
-                  <td>{{ sensor.plant }}</td>
-                  <td>{{ sensor.temperature }}</td>
-                  <td>{{ sensor.humidity }}</td>
-                  <td>{{ sensor.movement }}</td>
-                  <td>
-                    <span class="badge" :class="sensor.status.toLowerCase()">{{
-                      sensor.status
-                    }}</span>
-                  </td>
-                  <td>{{ sensor.update }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <div class="dashboard-grid lower-grid">
-          <section class="panel user-summary">
-            <div class="panel-header">
-              <div>
-                <p class="section-kicker">ACCESS OVERVIEW</p>
-                <h2>User Summary</h2>
-              </div>
-              <button class="secondary-button" type="button" @click="openUserManagement">
-                Manage Users →
-              </button>
-            </div>
-            <div class="role-list">
-              <div v-for="role in userRoles" :key="role.label" class="role-row">
-                <div class="role-copy">
-                  <span>{{ role.label }}</span
-                  ><strong>{{ role.value }}</strong>
-                </div>
-                <div class="role-track">
-                  <span :style="{ width: `${role.percent}%`, background: role.color }"></span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section class="panel activity-panel">
-            <div class="panel-header">
-              <div>
-                <p class="section-kicker">AUDIT TRAIL</p>
-                <h2>Recent System Activity</h2>
-              </div>
-            </div>
-            <div class="timeline">
-              <div
-                v-for="activity in activities"
-                :key="activity.title"
-                class="timeline-item"
-                :class="activity.type"
-              >
-                <span class="timeline-dot"></span>
-                <div>
-                  <strong>{{ activity.title }}</strong
-                  ><time>{{ activity.time }}</time>
-                </div>
-              </div>
-            </div>
-          </section>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>{{ t('adminDashboard.table.alertId') }}</th>
+                <th>{{ t('adminDashboard.table.plantId') }}</th>
+                <th>{{ t('adminDashboard.table.alertType') }}</th>
+                <th>{{ t('adminDashboard.table.location') }}</th>
+                <th>{{ t('adminDashboard.table.dateTime') }}</th>
+                <th>{{ t('adminDashboard.table.severity') }}</th>
+                <th>{{ t('adminDashboard.table.status') }}</th>
+                <th>{{ t('adminDashboard.table.action') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="alert in threatAlerts" :key="alert.id">
+                <td>
+                  <strong>{{ alert.id }}</strong>
+                </td>
+                <td>{{ alert.plant }}</td>
+                <td>{{ dataLabel(alert.type) }}</td>
+                <td>{{ dataLabel(alert.location) }}</td>
+                <td>{{ alert.time }}</td>
+                <td>
+                  <span class="badge" :class="alert.severity.toLowerCase()">{{
+                    dataLabel(alert.severity)
+                  }}</span>
+                </td>
+                <td>
+                  <span class="badge" :class="alert.status.toLowerCase()">{{
+                    dataLabel(alert.status)
+                  }}</span>
+                </td>
+                <td>
+                  <button class="view-button" type="button">{{ t('adminDashboard.view') }}</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+      </section>
 
-        <section class="panel quick-actions">
+      <section class="panel table-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker">{{ t('adminDashboard.latestReadings') }}</p>
+            <h2>{{ t('adminDashboard.recentSensorActivity') }}</h2>
+          </div>
+          <button class="secondary-button" type="button" @click="openSensorManagement">
+            {{ t('adminDashboard.viewAllSensors') }} →
+          </button>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>{{ t('adminDashboard.table.sensorId') }}</th>
+                <th>{{ t('adminDashboard.table.plantId') }}</th>
+                <th>{{ t('adminDashboard.table.temperature') }}</th>
+                <th>{{ t('adminDashboard.table.humidity') }}</th>
+                <th>{{ t('adminDashboard.table.movement') }}</th>
+                <th>{{ t('adminDashboard.table.status') }}</th>
+                <th>{{ t('adminDashboard.table.lastUpdate') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="sensor in sensorActivity" :key="sensor.sensor">
+                <td>
+                  <strong>{{ sensor.sensor }}</strong>
+                </td>
+                <td>{{ sensor.plant }}</td>
+                <td>{{ sensor.temperature }}</td>
+                <td>{{ sensor.humidity }}</td>
+                <td>{{ dataLabel(sensor.movement) }}</td>
+                <td>
+                  <span class="badge" :class="sensor.status.toLowerCase()">{{
+                    dataLabel(sensor.status)
+                  }}</span>
+                </td>
+                <td>{{ dataLabel(sensor.update) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="dashboard-grid lower-grid">
+        <section class="panel user-summary">
           <div class="panel-header">
             <div>
-              <p class="section-kicker">SHORTCUTS</p>
-              <h2>Quick Actions</h2>
+              <p class="section-kicker">{{ t('adminDashboard.accessOverview') }}</p>
+              <h2>{{ t('adminDashboard.userSummary') }}</h2>
+            </div>
+            <button class="secondary-button" type="button" @click="openUserManagement">
+              {{ t('adminDashboard.manageUsers') }} →
+            </button>
+          </div>
+          <div class="role-list">
+            <div v-for="role in userRoles" :key="role.label" class="role-row">
+              <div class="role-copy">
+                <span>{{ t(`adminDashboard.roles.${role.label}`) }}</span
+                ><strong>{{ role.value }}</strong>
+              </div>
+              <div class="role-track">
+                <span :style="{ width: `${role.percent}%`, background: role.color }"></span>
+              </div>
             </div>
           </div>
-          <div class="action-grid">
-            <button type="button" @click="openUserManagement">
-              <span>＋</span>
-              <div><strong>Add User</strong><small>Create a new account</small></div>
-            </button>
-            <button type="button" @click="openIoTMonitoring">
-              <span>⌁</span>
-              <div><strong>View Sensors</strong><small>Open IoT monitoring</small></div>
-            </button>
-            <button type="button" @click="openThreatAlerts">
-              <span>!</span>
-              <div><strong>View Alerts</strong><small>Review active threats</small></div>
-            </button>
-            <button type="button" @click="openSystemActivity">
-              <span>↻</span>
-              <div><strong>System Activity</strong><small>View the audit trail</small></div>
-            </button>
+        </section>
+
+        <section class="panel activity-panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">{{ t('adminDashboard.auditTrail') }}</p>
+              <h2>{{ t('adminDashboard.recentSystemActivity') }}</h2>
+            </div>
+          </div>
+          <div class="timeline">
+            <div
+              v-for="activity in activities"
+              :key="activity.title"
+              class="timeline-item"
+              :class="activity.type"
+            >
+              <span class="timeline-dot"></span>
+              <div>
+                <strong>{{ t(`adminDashboard.activities.${activity.title}`) }}</strong
+                ><time>{{ activity.time }}</time>
+              </div>
+            </div>
           </div>
         </section>
+      </div>
+
+      <section class="panel quick-actions">
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker">{{ t('adminDashboard.shortcuts') }}</p>
+            <h2>{{ t('adminDashboard.quickActions') }}</h2>
+          </div>
+        </div>
+        <div class="action-grid">
+          <button type="button" @click="openUserManagement">
+            <span>＋</span>
+            <div>
+              <strong>{{ t('adminDashboard.actions.addUser') }}</strong
+              ><small>{{ t('adminDashboard.actions.createAccount') }}</small>
+            </div>
+          </button>
+          <button type="button" @click="openIoTMonitoring">
+            <span>⌁</span>
+            <div>
+              <strong>{{ t('adminDashboard.actions.viewSensors') }}</strong
+              ><small>{{ t('adminDashboard.actions.openIot') }}</small>
+            </div>
+          </button>
+          <button type="button" @click="openThreatAlerts">
+            <span>!</span>
+            <div>
+              <strong>{{ t('adminDashboard.actions.viewAlerts') }}</strong
+              ><small>{{ t('adminDashboard.actions.reviewThreats') }}</small>
+            </div>
+          </button>
+          <button type="button" @click="openSystemActivity">
+            <span>↻</span>
+            <div>
+              <strong>{{ t('adminDashboard.actions.systemActivity') }}</strong
+              ><small>{{ t('adminDashboard.actions.viewAuditTrail') }}</small>
+            </div>
+          </button>
+        </div>
+      </section>
     </div>
   </AdminPageShell>
 </template>

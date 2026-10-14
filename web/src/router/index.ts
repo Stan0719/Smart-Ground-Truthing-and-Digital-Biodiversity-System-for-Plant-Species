@@ -135,6 +135,7 @@ const router = createRouter({
           name: 'conservation-profile',
           component: () => import('../views/conservation/ConservationProfileView.vue'),
           meta: {
+            titleKey: 'nav.profileSettings',
             title: 'Profile Settings',
             section: 'ACCOUNT',
           },

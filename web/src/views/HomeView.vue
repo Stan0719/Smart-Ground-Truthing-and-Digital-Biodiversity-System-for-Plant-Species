@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import ImageStack from '../components/ImageStack.vue'
 import { plants } from '../data/plants'
+
+const { t } = useI18n()
 
 let revealObserver: IntersectionObserver | null = null
 const plantCarousel = ref<HTMLElement | null>(null)
@@ -230,116 +233,93 @@ onBeforeUnmount(() => {
   <NavigationBar />
 
   <main>
-
     <!-- =========================
          Hero Section
     ========================= -->
 
     <section class="hero">
-
       <!-- Left Content Panel -->
       <div class="hero-left">
         <div class="hero-content">
-
           <p class="eyebrow">
-            NIAH NATIONAL PARK
+            {{ t('home.hero.eyebrow') }}
           </p>
 
           <h1>
-            Discover the
-            <span class="highlight">Biodiversity</span>
-            of Niah
+            {{ t('home.hero.titleStart') }}
+            <span class="highlight">{{ t('home.hero.titleHighlight') }}</span>
+            {{ t('home.hero.titleEnd') }}
           </h1>
 
           <p class="hero-description">
-            Explore the plants, biodiversity, and natural heritage
-            of one of Sarawak's most remarkable national parks.
+            {{ t('home.hero.description') }}
           </p>
 
           <div class="hero-actions">
-
             <RouterLink to="/plants" class="explore-button">
-              Explore Plants
+              {{ t('home.hero.cta') }}
             </RouterLink>
-
           </div>
-
         </div>
       </div>
 
       <!-- Right Image Area -->
       <div class="hero-right"></div>
-
     </section>
-
 
     <!-- =========================
          About Niah Section
          ========================= -->
 
     <section class="about-niah">
-
       <div class="about-container">
-
         <!-- Image -->
         <div class="about-image-wrapper reveal reveal-left">
           <ImageStack />
         </div>
 
-
         <!-- Content -->
         <div class="about-content reveal reveal-right reveal-delay-1">
-
           <p class="section-label">
-            ABOUT NIAH
+            {{ t('home.about.eyebrow') }}
           </p>
 
           <h2>
-            Niah National Park
+            {{ t('home.about.title') }}
           </h2>
 
           <p class="about-description">
-            Niah National Park is a UNESCO World Heritage Site
-            known for its remarkable archaeological significance,
-            extensive cave systems, prehistoric remains, rock art,
-            and rich biodiversity.
+            {{ t('homeContent.about1') }}
           </p>
 
           <p class="about-description">
-            The park is home to the famous Niah Caves, where
-            evidence of prehistoric human settlement provides
-            valuable insight into the early history of Borneo.
+            {{ t('homeContent.about2') }}
           </p>
-
 
           <!-- Key Facts -->
           <div class="about-facts">
-
             <div class="fact-card reveal">
               <span class="fact-number">40,000+</span>
               <span class="fact-label">
-                Years of Human History
+                {{ t('homeContent.years') }}
               </span>
             </div>
 
             <div class="fact-card reveal reveal-delay-1">
               <span class="fact-number">UNESCO</span>
               <span class="fact-label">
-                World Heritage Site
+                {{ t('homeContent.heritage') }}
               </span>
             </div>
 
             <div class="fact-card reveal reveal-delay-2">
-              <span class="fact-number">Rich</span>
+              <span class="fact-number">{{ t('homeContent.rich') }}</span>
               <span class="fact-label">
-                Natural Biodiversity
+                {{ t('homeContent.biodiversity') }}
               </span>
             </div>
-
           </div>
-
         </div>
-
       </div>
 
       <!-- =========================
@@ -348,41 +328,38 @@ onBeforeUnmount(() => {
 
       <section class="explore-niah" aria-labelledby="explore-niah-title">
         <div class="explore-niah-heading">
-          <p class="section-label reveal">EXPLORE NIAH</p>
+          <p class="section-label reveal">{{ t('home.explore.eyebrow') }}</p>
           <h2 id="explore-niah-title" class="reveal reveal-delay-1">
-            Discover Niah's Remarkable Landscapes
+            {{ t('homeContent.landscapeTitle') }}
           </h2>
           <p class="reveal reveal-delay-2">
-            From vast limestone caves to ancient rock art and tropical rainforest, discover
-            the places that make Niah National Park extraordinary.
+            {{ t('homeContent.landscapeText') }}
           </p>
         </div>
 
         <div class="attraction-grid">
           <article class="attraction-card attraction-card-featured reveal">
             <div class="attraction-content">
-              <span>Featured landscape</span>
-              <h3>Great Cave</h3>
+              <span>{{ t('homeContent.featured') }}</span>
+              <h3>{{ t('homeContent.greatCave') }}</h3>
               <p>
-                Step inside Niah's spectacular limestone cave system and explore one of its
-                most important archaeological landscapes.
+                {{ t('homeContent.greatCaveText') }}
               </p>
             </div>
           </article>
 
           <article class="attraction-card attraction-card-painted reveal reveal-delay-1">
             <div class="attraction-content">
-              <h3>Painted Cave</h3>
-              <p>Discover prehistoric rock paintings and traces of Niah's ancient human story.</p>
+              <h3>{{ t('homeContent.paintedCave') }}</h3>
+              <p>{{ t('homeContent.paintedText') }}</p>
             </div>
           </article>
 
           <article class="attraction-card attraction-card-rainforest reveal reveal-delay-2">
             <div class="attraction-content">
-              <h3>Rainforest Trails</h3>
+              <h3>{{ t('homeContent.rainforest') }}</h3>
               <p>
-                Walk through lush tropical rainforest and boardwalks on the journey towards
-                Niah's caves.
+                {{ t('homeContent.rainforestText') }}
               </p>
             </div>
           </article>
@@ -391,20 +368,17 @@ onBeforeUnmount(() => {
 
       <div class="visitor-overview">
         <div class="why-niah">
-          <p class="section-label reveal">WHY NIAH?</p>
+          <p class="section-label reveal">{{ t('home.explore.why') }}</p>
 
-          <h3 class="reveal reveal-delay-1">Where nature meets human history</h3>
+          <h3 class="reveal reveal-delay-1">{{ t('homeContent.whyTitle') }}</h3>
 
           <p class="reveal reveal-delay-2">
-            Hidden within the rainforests of northern Sarawak, Niah National Park is a
-            remarkable meeting point of nature and human history. Its vast limestone caves
-            preserve archaeological discoveries, prehistoric paintings, and evidence of
-            people who lived here thousands of years ago.
+            {{ t('homeContent.whyText') }}
           </p>
         </div>
 
         <div class="visitor-info">
-          <h3 class="reveal">Plan your visit</h3>
+          <h3 class="reveal">{{ t('homeContent.plan') }}</h3>
 
           <div class="visitor-cards">
             <article class="visitor-card reveal">
@@ -414,8 +388,8 @@ onBeforeUnmount(() => {
                   <path d="M12 7.5V12l3 2" />
                 </svg>
               </span>
-              <span class="visitor-label">Opening hours</span>
-              <strong>Daily, 8 AM–5 PM</strong>
+              <span class="visitor-label">{{ t('homeContent.opening') }}</span>
+              <strong>{{ t('homeContent.hours') }}</strong>
             </article>
 
             <article class="visitor-card reveal reveal-delay-visitor-1">
@@ -425,8 +399,8 @@ onBeforeUnmount(() => {
                   <circle cx="12" cy="10" r="2.25" />
                 </svg>
               </span>
-              <span class="visitor-label">Location</span>
-              <strong>Niah, Miri Division</strong>
+              <span class="visitor-label">{{ t('homeContent.location') }}</span>
+              <strong>{{ t('homeContent.niahMiri') }}</strong>
               <a
                 class="visitor-map-link"
                 href="https://www.google.com/maps/search/?api=1&amp;query=Niah+National+Park%2C+Sarawak%2C+Malaysia"
@@ -444,19 +418,21 @@ onBeforeUnmount(() => {
                   <path d="M3.5 18.5h17M8.8 10.5 10.5 8l1.8 2.3" />
                 </svg>
               </span>
-              <span class="visitor-label">Main experience</span>
-              <strong>Cave &amp; rainforest trekking</strong>
+              <span class="visitor-label">{{ t('homeContent.mainExperience') }}</span>
+              <strong>{{ t('homeContent.trekking') }}</strong>
             </article>
 
             <article class="visitor-card reveal reveal-delay-visitor-3">
               <span class="visitor-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="3.5" />
-                  <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4" />
+                  <path
+                    d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"
+                  />
                 </svg>
               </span>
-              <span class="visitor-label">Best period</span>
-              <strong>March–September</strong>
+              <span class="visitor-label">{{ t('homeContent.bestPeriod') }}</span>
+              <strong>{{ t('homeContent.period') }}</strong>
             </article>
 
             <article class="visitor-card reveal reveal-delay-visitor-4">
@@ -467,13 +443,12 @@ onBeforeUnmount(() => {
                   <path d="M8.5 16c2-1.25 1.5-3.75 3.5-5s2.5 1.25 4.5-3M6.5 12.5v-2M17.5 13.5v2" />
                 </svg>
               </span>
-              <span class="visitor-label">From Miri</span>
-              <strong>About 1.5 hours</strong>
+              <span class="visitor-label">{{ t('homeContent.fromMiri') }}</span>
+              <strong>{{ t('homeContent.travelTime') }}</strong>
             </article>
           </div>
         </div>
       </div>
-
     </section>
 
     <!-- =========================
@@ -483,18 +458,17 @@ onBeforeUnmount(() => {
     <section class="niah-video-section" aria-labelledby="niah-video-title">
       <div class="niah-video-container">
         <div class="niah-video-heading reveal reveal-left">
-          <p class="section-label">EXPERIENCE NIAH</p>
-          <h2 id="niah-video-title">See the Journey Come to Life</h2>
+          <p class="section-label">{{ t('home.experience.eyebrow') }}</p>
+          <h2 id="niah-video-title">{{ t('home.experience.title') }}</h2>
           <p>
-            Take a closer look at the rainforest, caves, and extraordinary heritage that
-            make Niah National Park unforgettable.
+            {{ t('homeContent.videoText') }}
           </p>
           <a
             href="https://youtu.be/g6B1q-cVd90?si=4hAIw-VcScfm-uOA"
             target="_blank"
             rel="noopener noreferrer"
           >
-            Watch on YouTube <span aria-hidden="true">↗</span>
+            {{ t('homeContent.watch') }} <span aria-hidden="true">↗</span>
           </a>
         </div>
 
@@ -503,7 +477,9 @@ onBeforeUnmount(() => {
             <span class="video-card-label"><i></i> Niah National Park</span>
             <span class="video-card-youtube">
               <svg viewBox="0 0 24 24">
-                <path d="M21.2 7.1a2.8 2.8 0 0 0-2-2C17.4 4.6 12 4.6 12 4.6s-5.4 0-7.2.5a2.8 2.8 0 0 0-2 2A29 29 0 0 0 2.3 12a29 29 0 0 0 .5 4.9 2.8 2.8 0 0 0 2 2c1.8.5 7.2.5 7.2.5s5.4 0 7.2-.5a2.8 2.8 0 0 0 2-2 29 29 0 0 0 .5-4.9 29 29 0 0 0-.5-4.9Z" />
+                <path
+                  d="M21.2 7.1a2.8 2.8 0 0 0-2-2C17.4 4.6 12 4.6 12 4.6s-5.4 0-7.2.5a2.8 2.8 0 0 0-2 2A29 29 0 0 0 2.3 12a29 29 0 0 0 .5 4.9 2.8 2.8 0 0 0 2 2c1.8.5 7.2.5 7.2.5s5.4 0 7.2-.5a2.8 2.8 0 0 0 2-2 29 29 0 0 0 .5-4.9 29 29 0 0 0-.5-4.9Z"
+                />
                 <path class="play-mark" d="m10 15.5 5-3.5-5-3.5v7Z" />
               </svg>
             </span>
@@ -514,7 +490,15 @@ onBeforeUnmount(() => {
               src="https://www.youtube-nocookie.com/embed/g6B1q-cVd90?rel=0"
               title="Experience Niah National Park"
               loading="lazy"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allow="
+                accelerometer;
+                autoplay;
+                clipboard-write;
+                encrypted-media;
+                gyroscope;
+                picture-in-picture;
+                web-share;
+              "
               referrerpolicy="strict-origin-when-cross-origin"
               allowfullscreen
             ></iframe>
@@ -530,79 +514,89 @@ onBeforeUnmount(() => {
     <section id="journey-to-cave" class="journey-section">
       <div class="journey-container">
         <div class="journey-heading">
-          <p class="section-label reveal">YOUR JOURNEY</p>
-          <h2 class="reveal reveal-delay-1">The Adventure Begins Before the Cave</h2>
+          <p class="section-label reveal">{{ t('home.journey.eyebrow') }}</p>
+          <h2 class="reveal reveal-delay-1">{{ t('home.journey.title') }}</h2>
           <p class="reveal reveal-delay-2">
-            Follow the journey from the park headquarters through rainforest, heritage sites
-            and caves towards some of Niah's most remarkable landmarks.
+            {{ t('homeContent.journeyText') }}
           </p>
         </div>
 
-        <ol class="journey-route" aria-label="Journey from Park Headquarters to Painted Cave">
+        <ol class="journey-route" :aria-label="t('homeContent.journeyAria')">
           <li class="reveal">
             <span class="journey-marker">01</span>
-            <div><strong>Park HQ</strong><small>Begin your visit</small></div>
+            <div>
+              <strong>{{ t('homeContent.parkHq') }}</strong
+              ><small>{{ t('homeContent.beginVisit') }}</small>
+            </div>
           </li>
           <li class="reveal reveal-delay-1">
             <span class="journey-marker">02</span>
-            <div><strong>River Crossing</strong><small>Cross into the forest</small></div>
+            <div>
+              <strong>{{ t('homeContent.riverCrossing') }}</strong
+              ><small>{{ t('homeContent.crossForest') }}</small>
+            </div>
           </li>
           <li class="reveal reveal-delay-2">
             <span class="journey-marker">03</span>
-            <div><strong>Archaeology Museum</strong><small>Discover Niah's story</small></div>
+            <div>
+              <strong>{{ t('homeContent.museum') }}</strong
+              ><small>{{ t('homeContent.discoverStory') }}</small>
+            </div>
           </li>
           <li class="reveal reveal-delay-3">
             <span class="journey-marker">04</span>
-            <div><strong>Rainforest Boardwalk</strong><small>Walk beneath the canopy</small></div>
+            <div>
+              <strong>{{ t('homeContent.boardwalk') }}</strong
+              ><small>{{ t('homeContent.beneathCanopy') }}</small>
+            </div>
           </li>
           <li class="reveal">
             <span class="journey-marker">05</span>
-            <div><strong>Trader's Cave</strong><small>Enter the cave landscape</small></div>
+            <div>
+              <strong>{{ t('homeContent.tradersCave') }}</strong
+              ><small>{{ t('homeContent.enterCave') }}</small>
+            </div>
           </li>
           <li class="journey-highlight reveal reveal-delay-1">
             <span class="journey-marker">06</span>
-            <div><strong>Great Cave</strong><small>The main destination</small></div>
+            <div>
+              <strong>{{ t('homeContent.greatCave') }}</strong
+              ><small>{{ t('homeContent.mainDestination') }}</small>
+            </div>
           </li>
           <li class="reveal reveal-delay-2">
             <span class="journey-marker">07</span>
-            <div><strong>Painted Cave</strong><small>Ancient art awaits</small></div>
+            <div>
+              <strong>{{ t('homeContent.paintedCave') }}</strong
+              ><small>{{ t('homeContent.ancientArt') }}</small>
+            </div>
           </li>
         </ol>
       </div>
     </section>
 
     <section class="explore-plants">
-
       <div class="explore-plants-container">
-
         <div class="explore-plants-header">
-
           <div class="explore-plants-heading">
-
             <p class="section-label reveal">
-              EXPLORE THE FLORA
+              {{ t('home.flora.eyebrow') }}
             </p>
 
             <h2 class="reveal reveal-delay-1">
-              Discover Niah’s Flora
+              {{ t('home.flora.title') }}
             </h2>
 
             <p class="explore-plants-description reveal reveal-delay-2">
-              Meet the remarkable plants that shape the rainforest of Niah National Park.
+              {{ t('home.flora.subtitle') }}
             </p>
-
           </div>
 
-          <RouterLink
-            to="/plants"
-            class="explore-more-button reveal reveal-delay-3"
-          >
-            <span>Explore More Plant Species</span>
+          <RouterLink to="/plants" class="explore-more-button reveal reveal-delay-3">
+            <span>{{ t('home.flora.more') }}</span>
             <span class="button-arrow">→</span>
           </RouterLink>
-
         </div>
-
 
         <div
           ref="plantCarousel"
@@ -616,22 +610,14 @@ onBeforeUnmount(() => {
           @click.capture="preventCarouselClick"
           @dragstart.prevent
         >
-
           <div ref="plantTrack" class="plant-track">
-
             <!-- First set -->
-            <article
-              v-for="plant in plants"
-              :key="`first-${plant.slug}`"
-              class="home-plant-card"
-            >
-
+            <article v-for="plant in plants" :key="`first-${plant.slug}`" class="home-plant-card">
               <div class="home-plant-image">
-
                 <img
                   v-if="plant.image || plant.images?.find((image) => image.path)?.path"
                   :src="plant.image || plant.images?.find((image) => image.path)?.path"
-                  :alt="plant.name"
+                  :alt="t(`plantNames.${plant.slug}`)"
                   class="home-plant-photo"
                   draggable="false"
                 />
@@ -640,20 +626,17 @@ onBeforeUnmount(() => {
                 </div>
 
                 <span class="home-plant-category">
-                  {{ plant.category }}
+                  {{ t(`categories.${plant.category.toLowerCase()}`) }}
                 </span>
-
               </div>
 
-
               <div class="home-plant-info">
-
                 <h3>
-                  {{ plant.name }}
+                  {{ t(`plantNames.${plant.slug}`) }}
                 </h3>
 
                 <p class="home-plant-scientific">
-                  {{ plant.scientificName }}
+                  {{ t(`scientificNames.${plant.slug}`) }}
                 </p>
 
                 <RouterLink
@@ -662,13 +645,10 @@ onBeforeUnmount(() => {
                   :aria-label="`View species details for ${plant.scientificName}`"
                   draggable="false"
                 >
-                  View Details →
+                  {{ t('common.viewDetails') }} →
                 </RouterLink>
-
               </div>
-
             </article>
-
 
             <!-- Duplicate set for continuous loop -->
             <article
@@ -677,13 +657,11 @@ onBeforeUnmount(() => {
               class="home-plant-card"
               aria-hidden="true"
             >
-
               <div class="home-plant-image">
-
                 <img
                   v-if="plant.image || plant.images?.find((image) => image.path)?.path"
                   :src="plant.image || plant.images?.find((image) => image.path)?.path"
-                  :alt="plant.name"
+                  :alt="t(`plantNames.${plant.slug}`)"
                   class="home-plant-photo"
                   draggable="false"
                 />
@@ -692,20 +670,17 @@ onBeforeUnmount(() => {
                 </div>
 
                 <span class="home-plant-category">
-                  {{ plant.category }}
+                  {{ t(`categories.${plant.category.toLowerCase()}`) }}
                 </span>
-
               </div>
 
-
               <div class="home-plant-info">
-
                 <h3>
-                  {{ plant.name }}
+                  {{ t(`plantNames.${plant.slug}`) }}
                 </h3>
 
                 <p class="home-plant-scientific">
-                  {{ plant.scientificName }}
+                  {{ t(`scientificNames.${plant.slug}`) }}
                 </p>
 
                 <RouterLink
@@ -715,15 +690,11 @@ onBeforeUnmount(() => {
                   tabindex="-1"
                   draggable="false"
                 >
-                  View Details →
+                  {{ t('common.viewDetails') }} →
                 </RouterLink>
-
               </div>
-
             </article>
-
           </div>
-
         </div>
 
         <div class="carousel-controls" aria-label="Plant carousel controls">
@@ -745,9 +716,7 @@ onBeforeUnmount(() => {
             <span aria-hidden="true">→</span>
           </button>
         </div>
-
       </div>
-
     </section>
 
     <!-- =========================
@@ -758,54 +727,73 @@ onBeforeUnmount(() => {
       <div class="before-explore-container">
         <div class="before-explore-heading">
           <div>
-            <p class="section-label">BEFORE YOU EXPLORE</p>
-            <h2>Come Prepared for the Adventure</h2>
+            <p class="section-label">{{ t('home.prepare.eyebrow') }}</p>
+            <h2>{{ t('home.prepare.title') }}</h2>
           </div>
-          <p>
-            A little preparation will make your journey through Niah's rainforest and caves
-            safer and more comfortable.
-          </p>
+          <p>{{ t('homeContent.prepareText') }}</p>
         </div>
 
         <div class="preparation-grid">
           <article class="preparation-item">
             <span class="preparation-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M5 5v8l-2 3c-.6 1 .1 2.3 1.3 2.3H18c1.7 0 3-1.3 3-3V14l-6-1.2-4-4V5H5Z"/><path d="M6 14h8M16 17.8v-2"/></svg>
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M5 5v8l-2 3c-.6 1 .1 2.3 1.3 2.3H18c1.7 0 3-1.3 3-3V14l-6-1.2-4-4V5H5Z" />
+                <path d="M6 14h8M16 17.8v-2" />
+              </svg>
             </span>
-            <div><h3>Good Footwear</h3><p>Wear comfortable shoes with good grip as trails and cave surfaces can be slippery.</p></div>
+            <div>
+              <h3>{{ t('homeContent.footwear') }}</h3>
+              <p>{{ t('homeContent.footwearText') }}</p>
+            </div>
           </article>
 
           <article class="preparation-item">
             <span class="preparation-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="m8 5 8 2-1 4-8-2 1-4ZM8 9l-2 9 6 1 3-8"/><path d="m16 7 4-1M16 9l4 1M17 5l2-2"/></svg>
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="m8 5 8 2-1 4-8-2 1-4ZM8 9l-2 9 6 1 3-8" />
+                <path d="m16 7 4-1M16 9l4 1M17 5l2-2" />
+              </svg>
             </span>
-            <div><h3>Bring a Torch</h3><p>Some sections of the caves are naturally dark, so bring a reliable torch.</p></div>
+            <div>
+              <h3>{{ t('homeContent.torch') }}</h3>
+              <p>{{ t('homeContent.torchText') }}</p>
+            </div>
           </article>
 
           <article class="preparation-item">
             <span class="preparation-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M9 3h6v3l2 3v10c0 1.1-.9 2-2 2H9c-1.1 0-2-.9-2-2V9l2-3V3Z"/><path d="M7 12h10M10 6h4"/></svg>
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M9 3h6v3l2 3v10c0 1.1-.9 2-2 2H9c-1.1 0-2-.9-2-2V9l2-3V3Z" />
+                <path d="M7 12h10M10 6h4" />
+              </svg>
             </span>
-            <div><h3>Carry Water</h3><p>Stay hydrated during the walk through the tropical rainforest and cave system.</p></div>
+            <div>
+              <h3>{{ t('homeContent.water') }}</h3>
+              <p>{{ t('homeContent.waterText') }}</p>
+            </div>
           </article>
 
           <article class="preparation-item">
             <span class="preparation-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="13" rx="4" ry="6"/><path d="M12 7V4M9.5 5.5 8 4M14.5 5.5 16 4M8 10 4 8M16 10l4-2M8 14H4M16 14h4M8.5 17.5 5 20M15.5 17.5 19 20"/></svg>
+              <svg viewBox="0 0 24 24" fill="none">
+                <ellipse cx="12" cy="13" rx="4" ry="6" />
+                <path
+                  d="M12 7V4M9.5 5.5 8 4M14.5 5.5 16 4M8 10 4 8M16 10l4-2M8 14H4M16 14h4M8.5 17.5 5 20M15.5 17.5 19 20"
+                />
+              </svg>
             </span>
-            <div><h3>Insect Repellent</h3><p>Bring insect repellent for greater comfort while travelling through the rainforest.</p></div>
+            <div>
+              <h3>{{ t('homeContent.repellent') }}</h3>
+              <p>{{ t('homeContent.repellentText') }}</p>
+            </div>
           </article>
         </div>
-
       </div>
     </section>
-
   </main>
-
 </template>
 
 <style scoped>
-
 /* ==================================================
    HERO
    ================================================== */
@@ -828,20 +816,33 @@ onBeforeUnmount(() => {
 }
 
 @keyframes hero-image-zoom {
-  from { background-size: 100%; }
-  to { background-size: 106%; }
+  from {
+    background-size: 100%;
+  }
+  to {
+    background-size: 106%;
+  }
 }
 
 @keyframes hero-image-scale {
-  from { transform: scale(1); }
-  to { transform: scale(1.06); }
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.06);
+  }
 }
 
 @keyframes hero-content-enter {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-
 
 /* =========================
    Hero Left Side
@@ -870,16 +871,15 @@ onBeforeUnmount(() => {
     rgba(30, 45, 40, 0.82) 0%,
     rgba(30, 45, 40, 0.72) 25%,
     rgba(30, 45, 40, 0.55) 40%,
-    rgba(30, 45, 40, 0.30) 55%,
-    rgba(30, 45, 40, 0.10) 68%,
-    rgba(30, 45, 40, 0.00) 80%
+    rgba(30, 45, 40, 0.3) 55%,
+    rgba(30, 45, 40, 0.1) 68%,
+    rgba(30, 45, 40, 0) 80%
   );
 
   z-index: 0;
 
   pointer-events: none;
 }
-
 
 /* =========================
    Hero Content
@@ -891,13 +891,12 @@ onBeforeUnmount(() => {
   color: white;
 }
 
-
 /* Eyebrow */
 
 .eyebrow {
   margin: 0 0 20px;
 
-  color: #DEF9C4;
+  color: #def9c4;
 
   font-size: 14px;
   font-weight: 700;
@@ -908,13 +907,12 @@ onBeforeUnmount(() => {
   animation: hero-content-enter 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-
 /* Main Heading */
 
 .hero h1 {
   margin: 0;
 
-  color: #FFF6DC;
+  color: #fff6dc;
 
   font-size: clamp(44px, 5vw, 76px);
   line-height: 1.05;
@@ -927,13 +925,11 @@ onBeforeUnmount(() => {
   animation: hero-content-enter 0.65s 0.12s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-
 /* Highlight */
 
 .highlight {
   color: #7dd1b9;
 }
-
 
 /* Description */
 
@@ -951,7 +947,6 @@ onBeforeUnmount(() => {
   animation: hero-content-enter 0.65s 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-
 /* =========================
    Hero Buttons
    ========================= */
@@ -968,7 +963,6 @@ onBeforeUnmount(() => {
   animation: hero-content-enter 0.65s 0.36s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-
 .explore-button {
   display: inline-block;
 
@@ -976,7 +970,7 @@ onBeforeUnmount(() => {
 
   border-radius: 30px;
 
-  background: #FFF6DC;
+  background: #fff6dc;
   color: #468585;
 
   text-decoration: none;
@@ -987,13 +981,11 @@ onBeforeUnmount(() => {
   transition: 0.25s ease;
 }
 
-
 .explore-button:hover {
-  background: #9cdbA6;
+  background: #9cdba6;
 
   transform: translateY(-2px);
 }
-
 
 .learn-button {
   display: inline-block;
@@ -1016,17 +1008,15 @@ onBeforeUnmount(() => {
   transition: 0.25s ease;
 }
 
-
 .learn-button:hover {
   background: rgba(224, 235, 221, 0.12);
 
-  border-color: #9cdbA6;
+  border-color: #9cdba6;
 
-  color: #9cdbA6;
+  color: #9cdba6;
 
   transform: translateY(-2px);
 }
-
 
 /* =========================
    Hero Right Side
@@ -1037,7 +1027,6 @@ onBeforeUnmount(() => {
   z-index: 1;
 }
 
-
 /* ==================================================
    ABOUT NIAH
    ================================================== */
@@ -1045,9 +1034,8 @@ onBeforeUnmount(() => {
 .about-niah {
   padding: 120px 0;
 
-  background: #E0EBDD;
+  background: #e0ebdd;
 }
-
 
 .about-container {
   width: min(1200px, 88%);
@@ -1062,7 +1050,6 @@ onBeforeUnmount(() => {
   gap: 80px;
 }
 
-
 /* =========================
    About Image
    ========================= */
@@ -1072,7 +1059,6 @@ onBeforeUnmount(() => {
   justify-content: center;
   align-items: center;
 }
-
 
 .about-image {
   width: 100%;
@@ -1086,11 +1072,9 @@ onBeforeUnmount(() => {
   transition: transform 0.5s ease;
 }
 
-
 .about-image-wrapper:hover .about-image {
   transform: scale(1.03);
 }
-
 
 /* =========================
    About Content
@@ -1100,18 +1084,16 @@ onBeforeUnmount(() => {
   max-width: 560px;
 }
 
-
 .section-label {
   margin: 0 0 14px;
 
-  color: #50B498;
+  color: #50b498;
 
   font-size: 13px;
   font-weight: 700;
 
   letter-spacing: 3px;
 }
-
 
 .about-content h2 {
   margin: 0 0 24px;
@@ -1125,7 +1107,6 @@ onBeforeUnmount(() => {
   font-weight: 800;
 }
 
-
 .about-description {
   margin: 0 0 18px;
 
@@ -1135,7 +1116,6 @@ onBeforeUnmount(() => {
 
   line-height: 1.8;
 }
-
 
 /* =========================
    Key Facts
@@ -1151,7 +1131,6 @@ onBeforeUnmount(() => {
   margin-top: 35px;
 }
 
-
 .fact-card {
   padding: 18px 14px;
 
@@ -1161,7 +1140,6 @@ onBeforeUnmount(() => {
 
   border: 1px solid rgba(70, 133, 133, 0.12);
 }
-
 
 .fact-number {
   display: block;
@@ -1174,7 +1152,6 @@ onBeforeUnmount(() => {
   font-weight: 800;
 }
 
-
 .fact-label {
   display: block;
 
@@ -1184,7 +1161,6 @@ onBeforeUnmount(() => {
 
   line-height: 1.4;
 }
-
 
 /* =========================
    Visitor Overview
@@ -1210,7 +1186,6 @@ onBeforeUnmount(() => {
   box-shadow: 0 18px 45px rgba(31, 65, 50, 0.16);
 }
 
-
 .visitor-overview::before,
 .visitor-overview::after {
   content: '';
@@ -1219,7 +1194,6 @@ onBeforeUnmount(() => {
 
   pointer-events: none;
 }
-
 
 .visitor-overview::before {
   inset: 0;
@@ -1234,17 +1208,14 @@ onBeforeUnmount(() => {
   z-index: 0;
 }
 
-
 .visitor-overview::after {
   display: none;
 }
-
 
 .visitor-overview > * {
   position: relative;
   z-index: 1;
 }
-
 
 .why-niah {
   display: grid;
@@ -1254,7 +1225,6 @@ onBeforeUnmount(() => {
   column-gap: 64px;
 }
 
-
 .why-niah .section-label {
   grid-column: 1;
 
@@ -1262,7 +1232,6 @@ onBeforeUnmount(() => {
 
   color: #a9e7c4;
 }
-
 
 .why-niah h3,
 .visitor-info h3 {
@@ -1273,7 +1242,6 @@ onBeforeUnmount(() => {
   font-size: clamp(26px, 3vw, 36px);
   line-height: 1.2;
 }
-
 
 .why-niah p:last-child {
   grid-column: 2;
@@ -1293,7 +1261,6 @@ onBeforeUnmount(() => {
   border-left: 1px solid rgba(224, 235, 221, 0.3);
 }
 
-
 .visitor-info {
   margin-top: 38px;
 
@@ -1302,14 +1269,12 @@ onBeforeUnmount(() => {
   border-top: 1px solid rgba(224, 235, 221, 0.2);
 }
 
-
 .visitor-info h3 {
   display: flex;
   align-items: center;
 
   gap: 16px;
 }
-
 
 .visitor-info h3::after {
   content: '';
@@ -1322,7 +1287,6 @@ onBeforeUnmount(() => {
   background: #9cdba6;
 }
 
-
 .visitor-cards {
   margin-top: 22px;
 
@@ -1331,7 +1295,6 @@ onBeforeUnmount(() => {
 
   gap: 15px;
 }
-
 
 .visitor-card {
   min-height: 168px;
@@ -1360,7 +1323,6 @@ onBeforeUnmount(() => {
   box-shadow: 0 12px 24px rgba(10, 36, 28, 0.17);
 }
 
-
 .visitor-icon {
   width: 44px;
   height: 44px;
@@ -1379,7 +1341,6 @@ onBeforeUnmount(() => {
   color: #3f786b;
 }
 
-
 .visitor-icon svg {
   width: 22px;
   height: 22px;
@@ -1389,7 +1350,6 @@ onBeforeUnmount(() => {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-
 
 .visitor-label {
   margin-bottom: 7px;
@@ -1402,7 +1362,6 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-
 .visitor-card strong {
   color: #294f47;
 
@@ -1410,7 +1369,6 @@ onBeforeUnmount(() => {
   font-weight: 700;
   line-height: 1.5;
 }
-
 
 .visitor-map-link {
   margin-top: auto;
@@ -1428,11 +1386,9 @@ onBeforeUnmount(() => {
   transition: color 0.2s ease;
 }
 
-
 .visitor-map-link:hover {
   color: #285f52;
 }
-
 
 /* ==================================================
    EXPLORE NIAH
@@ -1483,7 +1439,9 @@ onBeforeUnmount(() => {
   background-size: cover;
   box-shadow: 0 14px 34px rgba(31, 65, 50, 0.14);
   isolation: isolate;
-  transition: transform 0.35s ease, box-shadow 0.35s ease;
+  transition:
+    transform 0.35s ease,
+    box-shadow 0.35s ease;
 }
 
 .attraction-card::before {
@@ -1574,7 +1532,6 @@ onBeforeUnmount(() => {
 .attraction-content a:hover span {
   transform: translateX(4px);
 }
-
 
 /* ==================================================
    EXPERIENCE NIAH VIDEO
@@ -1799,7 +1756,6 @@ onBeforeUnmount(() => {
   font-size: 14px;
 }
 
-
 /* ==================================================
    BEFORE YOU EXPLORE
    ================================================== */
@@ -1843,7 +1799,9 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(70, 133, 133, 0.15);
   border-radius: 16px;
   background: rgba(255, 250, 235, 0.68);
-  transition: transform 0.25s ease, background-color 0.25s ease;
+  transition:
+    transform 0.25s ease,
+    background-color 0.25s ease;
 }
 
 .preparation-item:hover {
@@ -1898,25 +1856,15 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease;
 }
 
 .visitor-guide-link:hover {
   transform: translateY(-2px);
   box-shadow: 0 10px 22px rgba(40, 85, 64, 0.1);
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 /* ==================================================
    EXPLORE PLANTS
@@ -1969,7 +1917,6 @@ onBeforeUnmount(() => {
   line-height: 1.7;
 }
 
-
 /* Explore More Button */
 
 .explore-more-button {
@@ -1981,7 +1928,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(70, 133, 133, 0.25);
   border-radius: 999px;
 
-  background: #FFF6DC;
+  background: #fff6dc;
   color: #468585;
 
   text-decoration: none;
@@ -2007,7 +1954,6 @@ onBeforeUnmount(() => {
 .explore-more-button:hover .button-arrow {
   transform: translateX(4px);
 }
-
 
 /* Carousel */
 
@@ -2038,7 +1984,6 @@ onBeforeUnmount(() => {
   will-change: transform;
 }
 
-
 .carousel-controls {
   margin-top: 22px;
 
@@ -2047,7 +1992,6 @@ onBeforeUnmount(() => {
 
   gap: 9px;
 }
-
 
 .carousel-control {
   width: 38px;
@@ -2076,19 +2020,16 @@ onBeforeUnmount(() => {
     border-color 0.2s ease;
 }
 
-
 .carousel-control:hover {
   transform: translateY(-2px);
   border-color: rgba(70, 133, 133, 0.42);
   background: #9cdba6;
 }
 
-
 .carousel-control:focus-visible {
   outline: 3px solid rgba(80, 180, 152, 0.3);
   outline-offset: 3px;
 }
-
 
 /* Plant Card */
 
@@ -2117,7 +2058,6 @@ onBeforeUnmount(() => {
   transform: translateY(-8px);
   box-shadow: 0 18px 40px rgba(33, 57, 44, 0.15);
 }
-
 
 /* Image */
 
@@ -2148,12 +2088,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
 
-  background:
-    linear-gradient(
-      135deg,
-      #dce8d6,
-      #b9d4bd
-    );
+  background: linear-gradient(135deg, #dce8d6, #b9d4bd);
 
   transition: transform 0.45s ease;
 }
@@ -2166,7 +2101,6 @@ onBeforeUnmount(() => {
 .plant-image-placeholder span {
   font-size: 55px;
 }
-
 
 /* Category */
 
@@ -2191,7 +2125,6 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
-
 /* Information */
 
 .home-plant-info {
@@ -2203,29 +2136,24 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
-
 .home-plant-info h3 {
   margin: 0;
 
   color: #254b42;
-
 
   font-size: 22px;
   font-weight: 600;
   line-height: 1.2;
 }
 
-
 .home-plant-scientific {
   margin: 7px 0 0;
 
   color: #88735d;
 
-
   font-size: 14px;
   font-style: italic;
 }
-
 
 /* Always stay at the bottom */
 
@@ -2246,7 +2174,9 @@ onBeforeUnmount(() => {
   text-decoration: none;
   text-transform: uppercase;
 
-  transition: color 0.2s ease, transform 0.2s ease;
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
 }
 
 .view-plant:hover {
@@ -2259,7 +2189,6 @@ onBeforeUnmount(() => {
   outline-offset: 4px;
   border-radius: 3px;
 }
-
 
 /* ==================================================
    SCROLL REVEALS
@@ -2275,21 +2204,39 @@ onBeforeUnmount(() => {
   will-change: opacity, transform;
 }
 
-.reveal-left { transform: translateX(-24px); }
-.reveal-right { transform: translateX(24px); }
+.reveal-left {
+  transform: translateX(-24px);
+}
+.reveal-right {
+  transform: translateX(24px);
+}
 
 .reveal.is-visible {
   opacity: 1;
   transform: translate(0, 0);
 }
 
-.reveal-delay-1 { transition-delay: 0.1s; }
-.reveal-delay-2 { transition-delay: 0.2s; }
-.reveal-delay-3 { transition-delay: 0.3s; }
-.reveal-delay-visitor-1 { transition-delay: 0.08s; }
-.reveal-delay-visitor-2 { transition-delay: 0.16s; }
-.reveal-delay-visitor-3 { transition-delay: 0.24s; }
-.reveal-delay-visitor-4 { transition-delay: 0.32s; }
+.reveal-delay-1 {
+  transition-delay: 0.1s;
+}
+.reveal-delay-2 {
+  transition-delay: 0.2s;
+}
+.reveal-delay-3 {
+  transition-delay: 0.3s;
+}
+.reveal-delay-visitor-1 {
+  transition-delay: 0.08s;
+}
+.reveal-delay-visitor-2 {
+  transition-delay: 0.16s;
+}
+.reveal-delay-visitor-3 {
+  transition-delay: 0.24s;
+}
+.reveal-delay-visitor-4 {
+  transition-delay: 0.32s;
+}
 
 .visitor-card.reveal {
   transition:
@@ -2299,11 +2246,9 @@ onBeforeUnmount(() => {
     border-color 0.3s ease;
 }
 
-
 /* Responsive */
 
 @media (max-width: 900px) {
-
   .niah-video-section {
     padding: 78px 0;
   }
@@ -2407,12 +2352,9 @@ onBeforeUnmount(() => {
     width: 260px;
     flex-basis: 260px;
   }
-
 }
 
-
 @media (max-width: 500px) {
-
   .niah-video-section {
     padding: 62px 0;
   }
@@ -2614,28 +2556,13 @@ onBeforeUnmount(() => {
   .home-plant-info h3 {
     font-size: 20px;
   }
-
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /* ==================================================
    RESPONSIVE
    ================================================== */
 
 @media (max-width: 900px) {
-
   /* Hero */
 
   .hero {
@@ -2647,7 +2574,6 @@ onBeforeUnmount(() => {
 
     animation: none;
   }
-
 
   .hero::after {
     content: '';
@@ -2666,40 +2592,34 @@ onBeforeUnmount(() => {
     pointer-events: none;
   }
 
-
   .hero::before {
     background: linear-gradient(
       to top,
       rgba(30, 45, 40, 0.78) 0%,
       rgba(30, 45, 40, 0.55) 45%,
-      rgba(30, 45, 40, 0.10) 80%,
-      rgba(30, 45, 40, 0.00) 100%
+      rgba(30, 45, 40, 0.1) 80%,
+      rgba(30, 45, 40, 0) 100%
     );
 
     z-index: 1;
   }
-
 
   .hero-left,
   .hero-right {
     z-index: 2;
   }
 
-
   .hero-right {
     display: none;
   }
-
 
   .hero h1 {
     font-size: clamp(42px, 10vw, 64px);
   }
 
-
   .hero-description {
     font-size: 16px;
   }
-
 
   /* About */
 
@@ -2707,23 +2627,19 @@ onBeforeUnmount(() => {
     padding: 80px 0;
   }
 
-
   .about-container {
     grid-template-columns: 1fr;
 
     gap: 50px;
   }
 
-
   .about-content {
     max-width: none;
   }
 
-
   .about-image {
     aspect-ratio: 16 / 10;
   }
-
 
   .visitor-overview {
     margin-top: 70px;
@@ -2731,19 +2647,16 @@ onBeforeUnmount(() => {
     padding: 38px;
   }
 
-
   .why-niah {
     grid-template-columns: 1fr;
     grid-template-rows: auto;
   }
-
 
   .why-niah .section-label,
   .why-niah p:last-child {
     grid-column: 1;
     grid-row: auto;
   }
-
 
   .why-niah p:last-child {
     margin-top: 22px;
@@ -2754,20 +2667,15 @@ onBeforeUnmount(() => {
     border-left: 0;
   }
 
-
   .visitor-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
 }
 
-
 @media (max-width: 500px) {
-
   .hero-left {
     padding: 60px 7%;
   }
-
 
   .eyebrow {
     font-size: 12px;
@@ -2775,11 +2683,9 @@ onBeforeUnmount(() => {
     letter-spacing: 3px;
   }
 
-
   .hero h1 {
     font-size: 42px;
   }
-
 
   .hero-actions {
     flex-direction: column;
@@ -2787,12 +2693,10 @@ onBeforeUnmount(() => {
     align-items: stretch;
   }
 
-
   .explore-button,
   .learn-button {
     text-align: center;
   }
-
 
   /* About */
 
@@ -2800,21 +2704,17 @@ onBeforeUnmount(() => {
     padding: 70px 0;
   }
 
-
   .about-container {
     width: 86%;
   }
-
 
   .about-content h2 {
     font-size: 38px;
   }
 
-
   .about-facts {
     grid-template-columns: 1fr;
   }
-
 
   .visitor-overview {
     width: 86%;
@@ -2826,11 +2726,9 @@ onBeforeUnmount(() => {
     border-radius: 22px;
   }
 
-
   .visitor-overview::before {
     background-position: 56% center;
   }
-
 
   .visitor-info {
     margin-top: 32px;
@@ -2838,22 +2736,18 @@ onBeforeUnmount(() => {
     padding-top: 26px;
   }
 
-
   .visitor-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
 
   .visitor-card {
     min-height: 0;
 
     padding: 19px;
   }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   .hero,
   .hero::after,
   .eyebrow,
@@ -2890,7 +2784,5 @@ onBeforeUnmount(() => {
   .about-image {
     transition: none;
   }
-
 }
-
 </style>

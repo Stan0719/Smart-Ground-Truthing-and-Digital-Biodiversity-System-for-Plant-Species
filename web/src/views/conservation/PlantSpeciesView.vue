@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import AppModal from '../../components/conservation/AppModal.vue'
 import {
   conservationStore,
@@ -10,6 +11,32 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const { t, te, locale } = useI18n()
+const speciesValue = (
+  species: SpeciesRecord,
+  field: 'scientific' | 'common' | 'genus' | 'family',
+) => {
+  const key = `conservationSpecies.${field}.${species.id}`
+  const fallback =
+    field === 'scientific'
+      ? species.scientificName
+      : species[field === 'common' ? 'commonName' : field]
+  return te(key) ? t(key) : fallback
+}
+const statusLabel = (value: string) => {
+  const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
+  return te(key) ? t(key) : value
+}
+const formattedDate = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const dateLocale = locale.value === 'zh-CN' ? 'zh-CN' : locale.value === 'ms' ? 'ms-MY' : 'en-MY'
+  return new Intl.DateTimeFormat(dateLocale, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date)
+}
 
 const search = ref('')
 const family = ref('')
@@ -126,7 +153,7 @@ onMounted(() => {
 <template>
   <section class="page-intro">
     <div>
-      <p class="page-kicker">KNOWLEDGE BASE</p>
+      <p class="page-kicker">{{ t('conservationPages.species.knowledgeBase') }}</p>
       <h2>Plant Species</h2>
       <p>Manage official taxonomic, ecological and conservation information.</p>
     </div>
@@ -134,8 +161,8 @@ onMounted(() => {
 
   <div class="control-bar">
     <label class="field search-field">
-      <span>Search species</span>
-      <input v-model="search" placeholder="Scientific name, common name or family" />
+      <span>{{ t('conservationPages.species.searchSpecies') }}</span>
+      <input v-model="search" :placeholder="t('conservationPages.species.searchPlaceholder')" />
     </label>
 
     <label class="field">
@@ -177,13 +204,13 @@ onMounted(() => {
         <thead>
           <tr>
             <th>Species ID</th>
-            <th>Scientific Name</th>
-            <th>Common Name</th>
+            <th>{{ t('speciesLabels.scientificName') }}</th>
+            <th>{{ t('speciesLabels.commonName') }}</th>
             <th>Genus</th>
             <th>Family</th>
             <th>Conservation Status</th>
-            <th>Plant Records</th>
-            <th>Last Updated</th>
+            <th>{{ t('conservationPages.species.plantRecords') }}</th>
+            <th>{{ t('conservationPages.species.lastUpdated') }}</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -195,21 +222,21 @@ onMounted(() => {
             </td>
 
             <td>
-              <em>{{ s.scientificName }}</em>
+              <em>{{ speciesValue(s, 'scientific') }}</em>
             </td>
 
-            <td>{{ s.commonName }}</td>
-            <td>{{ s.genus }}</td>
-            <td>{{ s.family }}</td>
+            <td>{{ speciesValue(s, 'common') }}</td>
+            <td>{{ speciesValue(s, 'genus') }}</td>
+            <td>{{ speciesValue(s, 'family') }}</td>
 
             <td>
               <span class="badge" :class="s.status.toLowerCase().replaceAll(' ', '-')">
-                {{ s.status }}
+                {{ statusLabel(s.status) }}
               </span>
             </td>
 
             <td>{{ s.plantCount }}</td>
-            <td>{{ s.updated }}</td>
+            <td>{{ formattedDate(s.updated) }}</td>
 
             <td>
               <div class="action-group">

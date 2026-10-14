@@ -1,25 +1,34 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import ConservationTopbarActions from '../components/ConservationTopbarActions.vue'
+import { useAuthenticatedPageTranslation } from '../composables/useAuthenticatedPageTranslation'
 
 const route = useRoute()
+const { t, te } = useI18n()
 const sidebarOpen = ref(false)
 const collapsed = ref(false)
+useAuthenticatedPageTranslation('.officer-layout')
 
 const items = [
-  { label: 'Dashboard', icon: 'dashboard', name: 'conservation-dashboard' },
-  { label: 'Plant Species', icon: 'species', name: 'conservation-species' },
-  { label: 'Observations', icon: 'observation', name: 'conservation-observations' },
-  { label: 'Review Submissions', icon: '✓', name: 'conservation-reviews' },
-  { label: 'Biodiversity Map', icon: 'map', name: 'conservation-map' },
-  { label: 'IoT Monitoring', icon: 'iot', name: 'conservation-iot' },
-  { label: 'Threat Alerts', icon: 'threat', name: 'conservation-alerts' },
-  { label: 'Reports', icon: 'report', name: 'conservation-reports' },
+  { labelKey: 'dashboardNav.dashboard', icon: 'dashboard', name: 'conservation-dashboard' },
+  { labelKey: 'dashboardNav.plantSpecies', icon: 'species', name: 'conservation-species' },
+  { labelKey: 'dashboardNav.observations', icon: 'observation', name: 'conservation-observations' },
+  { labelKey: 'dashboardNav.reviewSubmissions', icon: '✓', name: 'conservation-reviews' },
+  { labelKey: 'dashboardNav.biodiversityMap', icon: 'map', name: 'conservation-map' },
+  { labelKey: 'dashboardNav.iotMonitoring', icon: 'iot', name: 'conservation-iot' },
+  { labelKey: 'dashboardNav.threatAlerts', icon: 'threat', name: 'conservation-alerts' },
+  { labelKey: 'dashboardNav.reports', icon: 'report', name: 'conservation-reports' },
 ]
 
-const title = computed(() => String(route.meta.title || 'Conservation Officer'))
-const section = computed(() => String(route.meta.section || 'CONSERVATION'))
+const title = computed(() => {
+  const titleKey = route.meta.titleKey
+  if (typeof titleKey === 'string' && te(titleKey)) return t(titleKey)
+  const key = `dashboardNav.titles.${String(route.name)}`
+  return te(key) ? t(key) : String(route.meta.title || t('dashboardNav.conservationOfficer'))
+})
+const section = computed(() => t('dashboardNav.conservation'))
 const toggle = () =>
   window.matchMedia('(max-width: 920px)').matches
     ? (sidebarOpen.value = !sidebarOpen.value)
@@ -36,7 +45,7 @@ const closeControl = () =>
       <button
         class="sidebar-close-button"
         type="button"
-        aria-label="Close navigation"
+        :aria-label="t('dashboardNav.closeNavigation')"
         @click="closeControl"
       >
         ×
@@ -44,14 +53,14 @@ const closeControl = () =>
       <RouterLink
         class="brand"
         to="/"
-        data-tooltip="Go back to the public website"
-        aria-label="Go back to the public website"
+        :data-tooltip="t('dashboardNav.backToWebsite')"
+        :aria-label="t('dashboardNav.backToWebsite')"
       >
         <img src="/images/logo.png" alt="Niah Biodiversity" />
         <div><strong>NIAH</strong><span>CONSERVATION</span></div>
       </RouterLink>
-      <p class="nav-label">MAIN MENU</p>
-      <nav aria-label="Conservation Officer navigation">
+      <p class="nav-label">{{ t('dashboardNav.mainMenu') }}</p>
+      <nav :aria-label="t('dashboardNav.conservationNavigation')">
         <RouterLink
           v-for="item in items"
           :key="item.name"
@@ -160,9 +169,7 @@ const closeControl = () =>
               stroke-linejoin="round"
               class="sidebar-nav-svg"
             >
-              <path
-                d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"
-              />
+              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
               <path d="M12 9v4" />
               <path d="M12 17h.01" />
             </svg>
@@ -181,7 +188,9 @@ const closeControl = () =>
               stroke-linejoin="round"
               class="sidebar-report-icon"
             >
-              <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+              <path
+                d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"
+              />
               <path d="M14 2v5a1 1 0 0 0 1 1h5" />
               <path d="M10 9H8" />
               <path d="M16 13H8" />
@@ -192,21 +201,28 @@ const closeControl = () =>
               {{ item.icon }}
             </template>
           </span>
-          <span>{{ item.label }}</span>
+          <span>{{ t(item.labelKey) }}</span>
         </RouterLink>
       </nav>
-      <div class="sidebar-footer"><RouterLink to="/">Logout</RouterLink></div>
+      <div class="sidebar-footer">
+        <RouterLink to="/">{{ t('nav.logout') }}</RouterLink>
+      </div>
     </aside>
     <button
       v-if="sidebarOpen"
       class="drawer-backdrop"
       type="button"
-      aria-label="Close navigation"
+      :aria-label="t('dashboardNav.closeNavigation')"
       @click="sidebarOpen = false"
     ></button>
     <div class="main-area">
       <header class="topbar">
-        <button class="menu-button" type="button" aria-label="Toggle navigation" @click="toggle">
+        <button
+          class="menu-button"
+          type="button"
+          :aria-label="t('dashboardNav.toggleNavigation')"
+          @click="toggle"
+        >
           <span></span><span></span><span></span>
         </button>
         <div class="page-heading">

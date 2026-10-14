@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import AdminTopbarActions from './AdminTopbarActions.vue'
 import { useAdminSidebar } from '../composables/useAdminSidebar'
+import { useAuthenticatedPageTranslation } from '../composables/useAuthenticatedPageTranslation'
 
 defineProps<{ title: string; eyebrow: string; active: string }>()
 
 const router = useRouter()
+const { t } = useI18n()
 const { sidebarOpen, isMobile, openSidebar, closeSidebar, handleNavigation } = useAdminSidebar()
+useAuthenticatedPageTranslation('.admin-shell')
 
 const logout = () => {
   sidebarOpen.value = false
@@ -14,13 +18,38 @@ const logout = () => {
 }
 
 const items = [
-  { label: 'Dashboard', icon: 'dashboard', to: '/admin' },
-  { label: 'User Management', icon: 'user', to: '/admin/users' },
-  { label: 'Role & Permission', icon: '◇', to: '/admin/roles' },
-  { label: 'IoT Monitoring', icon: 'iot', to: '/admin/iot' },
-  { label: 'Sensor Management', icon: '◉', to: '/admin/sensors' },
-  { label: 'Threat Alerts', icon: 'threat', to: '/admin/alerts' },
-  { label: 'System Activity', icon: '↻', to: '/admin/activity' },
+  { id: 'Dashboard', labelKey: 'dashboardNav.dashboard', icon: 'dashboard', to: '/admin' },
+  {
+    id: 'User Management',
+    labelKey: 'dashboardNav.userManagement',
+    icon: 'user',
+    to: '/admin/users',
+  },
+  {
+    id: 'Role & Permission',
+    labelKey: 'dashboardNav.rolesPermissions',
+    icon: '◇',
+    to: '/admin/roles',
+  },
+  { id: 'IoT Monitoring', labelKey: 'dashboardNav.iotMonitoring', icon: 'iot', to: '/admin/iot' },
+  {
+    id: 'Sensor Management',
+    labelKey: 'dashboardNav.sensorManagement',
+    icon: '◉',
+    to: '/admin/sensors',
+  },
+  {
+    id: 'Threat Alerts',
+    labelKey: 'dashboardNav.threatAlerts',
+    icon: 'threat',
+    to: '/admin/alerts',
+  },
+  {
+    id: 'System Activity',
+    labelKey: 'dashboardNav.systemActivity',
+    icon: '↻',
+    to: '/admin/activity',
+  },
 ]
 </script>
 
@@ -30,7 +59,7 @@ const items = [
       <button
         class="sidebar-close-button"
         type="button"
-        aria-label="Close navigation"
+        :aria-label="t('dashboardNav.closeNavigation')"
         @click="closeSidebar"
       >
         ×
@@ -38,18 +67,18 @@ const items = [
       <RouterLink
         class="brand"
         to="/"
-        data-tooltip="Go back to the public website"
-        aria-label="Go back to the public website"
+        :data-tooltip="t('dashboardNav.backToWebsite')"
+        :aria-label="t('dashboardNav.backToWebsite')"
         ><img src="/images/logo.png" alt="Niah Biodiversity" />
         <div><strong>NIAH</strong><span>ADMINISTRATION</span></div></RouterLink
       >
-      <p class="nav-label">MAIN MENU</p>
-      <nav aria-label="Administrator navigation">
+      <p class="nav-label">{{ t('dashboardNav.mainMenu') }}</p>
+      <nav :aria-label="t('dashboardNav.adminNavigation')">
         <RouterLink
           v-for="item in items"
           :key="item.to"
           :to="item.to"
-          :class="{ active: active === item.label }"
+          :class="{ active: active === item.id }"
           @click="handleNavigation"
         >
           <span class="nav-icon" aria-hidden="true">
@@ -116,9 +145,7 @@ const items = [
               stroke-linejoin="round"
               class="sidebar-nav-svg"
             >
-              <path
-                d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"
-              />
+              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
               <path d="M12 9v4" />
               <path d="M12 17h.01" />
             </svg>
@@ -128,17 +155,19 @@ const items = [
               {{ item.icon }}
             </template>
           </span>
-          <span>{{ item.label }}</span>
+          <span>{{ t(item.labelKey) }}</span>
         </RouterLink>
       </nav>
-      <div class="sidebar-footer"><button type="button" @click="logout">Logout</button></div>
+      <div class="sidebar-footer">
+        <button type="button" @click="logout">{{ t('nav.logout') }}</button>
+      </div>
     </aside>
 
     <button
       v-if="isMobile && sidebarOpen"
       class="drawer-backdrop"
       type="button"
-      aria-label="Close navigation"
+      :aria-label="t('dashboardNav.closeNavigation')"
       @click="closeSidebar"
     ></button>
 
@@ -148,7 +177,7 @@ const items = [
           v-if="!sidebarOpen"
           class="menu-button"
           type="button"
-          aria-label="Open navigation"
+          :aria-label="t('dashboardNav.openNavigation')"
           :aria-expanded="sidebarOpen"
           @click="openSidebar"
         >

@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import AdminPageShell from '../components/AdminPageShell.vue'
 
 type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity'
 const props = defineProps<{ section: Section }>()
+const { t, te, locale } = useI18n()
+const dataLabel = (value: string) => {
+  const key = `adminModules.values.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
+  return te(key) ? t(key) : value
+}
 const search = ref('')
 const filter = ref('All')
 
@@ -118,47 +124,47 @@ const page = computed(
   () =>
     ({
       roles: {
-        title: 'Role & Permission',
-        eyebrow: 'ACCESS CONTROL',
+        title: t('adminRoles.title'),
+        eyebrow: t('adminRoles.eyebrow'),
         active: 'Role & Permission',
-        intro: 'Review the predefined system roles and their assigned access permissions.',
+        intro: t('adminRoles.intro'),
       },
       iot: {
         title: 'IoT Monitoring',
-        eyebrow: 'LIVE MONITORING',
+        eyebrow: t('adminModules.iot.eyebrow'),
         active: 'IoT Monitoring',
-        intro: 'Monitor live environmental readings and sensor connectivity across Niah.',
+        intro: t('adminModules.iot.intro'),
       },
       sensors: {
         title: 'Sensor Management',
-        eyebrow: 'DEVICE ADMINISTRATION',
+        eyebrow: t('adminModules.sensors.eyebrow'),
         active: 'Sensor Management',
-        intro: 'Register and maintain IoT sensor devices used for plant monitoring.',
+        intro: t('adminModules.sensors.intro'),
       },
       alerts: {
         title: 'Threat Alerts',
-        eyebrow: 'RISK MONITORING',
+        eyebrow: t('adminModules.alerts.eyebrow'),
         active: 'Threat Alerts',
-        intro: 'Review and track environmental, movement, and connectivity threats.',
+        intro: t('adminModules.alerts.intro'),
       },
       activity: {
         title: 'System Activity',
-        eyebrow: 'AUDIT & SECURITY',
+        eyebrow: t('adminModules.activity.eyebrow'),
         active: 'System Activity',
-        intro: 'Review administrative actions, account events, and system changes.',
+        intro: t('adminModules.activity.intro'),
       },
     })[props.section],
 )
 
 const permissions = [
-  { module: 'Dashboard overview', admin: true, officer: true, botanist: true, visitor: false },
-  { module: 'User management', admin: true, officer: false, botanist: false, visitor: false },
-  { module: 'Role & permission', admin: true, officer: false, botanist: false, visitor: false },
-  { module: 'IoT monitoring', admin: true, officer: true, botanist: false, visitor: false },
-  { module: 'Sensor management', admin: true, officer: true, botanist: false, visitor: false },
-  { module: 'Threat alerts', admin: true, officer: true, botanist: false, visitor: false },
-  { module: 'Plant observations', admin: false, officer: true, botanist: true, visitor: false },
-  { module: 'System activity', admin: true, officer: false, botanist: false, visitor: false },
+  { module: 'dashboardOverview', admin: true, officer: true, botanist: true, visitor: false },
+  { module: 'userManagement', admin: true, officer: false, botanist: false, visitor: false },
+  { module: 'rolePermission', admin: true, officer: false, botanist: false, visitor: false },
+  { module: 'iotMonitoring', admin: true, officer: true, botanist: false, visitor: false },
+  { module: 'sensorManagement', admin: true, officer: true, botanist: false, visitor: false },
+  { module: 'threatAlerts', admin: true, officer: true, botanist: false, visitor: false },
+  { module: 'plantObservations', admin: false, officer: true, botanist: true, visitor: false },
+  { module: 'systemActivity', admin: true, officer: false, botanist: false, visitor: false },
 ]
 
 const sensors = ref<IoTSensor[]>([
@@ -436,13 +442,16 @@ const logs: ActivityLog[] = [
 ]
 
 const formatActivityTimestamp = (timestamp: string) =>
-  new Intl.DateTimeFormat('en-MY', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(new Date(timestamp))
+  new Intl.DateTimeFormat(
+    locale.value === 'zh-CN' ? 'zh-CN' : locale.value === 'ms' ? 'ms-MY' : 'en-MY',
+    {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    },
+  ).format(new Date(timestamp))
 
 const filteredSensors = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -670,18 +679,14 @@ const exportActivitiesToPdf = (records: ActivityLog[]) => {
 }
 
 const exportActivity = async () => {
-  if (
-    exportFromDate.value &&
-    exportToDate.value &&
-    exportFromDate.value > exportToDate.value
-  ) {
-    exportValidationMessage.value = 'From Date cannot be later than To Date.'
+  if (exportFromDate.value && exportToDate.value && exportFromDate.value > exportToDate.value) {
+    exportValidationMessage.value = t('adminModules.export.dateValidation')
     return
   }
 
   const records = activityRecordsForExport()
   if (!records.length) {
-    exportValidationMessage.value = 'No activity records match the selected export criteria.'
+    exportValidationMessage.value = t('adminModules.export.noRecords')
     return
   }
 
@@ -689,7 +694,7 @@ const exportActivity = async () => {
   if (exportFormat.value === 'pdf') exportActivitiesToPdf(records)
   else exportActivitiesToCsv(records)
   await closeExportModal()
-  showSuccessMessage('System activity exported successfully.')
+  showSuccessMessage(t('adminModules.export.success'))
 }
 
 const openAlertDetails = (alert: ThreatAlert) => {
@@ -908,22 +913,22 @@ const confirmDeleteSensor = () => {
         <article>
           <span>◇</span>
           <div>
-            <p>System Roles</p>
-            <strong>4</strong><small>Predefined access groups</small>
+            <p>{{ t('adminRoles.systemRoles') }}</p>
+            <strong>4</strong><small>{{ t('adminRoles.predefinedGroups') }}</small>
           </div>
         </article>
         <article>
           <span>♙</span>
           <div>
-            <p>Assigned Users</p>
-            <strong>18</strong><small>Across all roles</small>
+            <p>{{ t('adminRoles.assignedUsers') }}</p>
+            <strong>18</strong><small>{{ t('adminRoles.acrossAllRoles') }}</small>
           </div>
         </article>
         <article>
           <span>✓</span>
           <div>
-            <p>Permissions</p>
-            <strong>24</strong><small>Configured rules</small>
+            <p>{{ t('adminRoles.permissions') }}</p>
+            <strong>24</strong><small>{{ t('adminRoles.configuredRules') }}</small>
           </div>
         </article>
       </section>
@@ -932,77 +937,77 @@ const confirmDeleteSensor = () => {
           <div class="role-head">
             <span>A</span>
             <div>
-              <h3>Administrator</h3>
-              <p>Full system access</p>
+              <h3>{{ t('adminRoles.roles.administrator.name') }}</h3>
+              <p>{{ t('adminRoles.roles.administrator.access') }}</p>
             </div>
-            <b>3 users</b>
+            <b>{{ t('adminRoles.userCount', { count: 3 }) }}</b>
           </div>
-          <p>Manages accounts, roles, sensors, alerts, and system activity.</p>
-          <span class="system-role-label">System-defined role</span>
+          <p>{{ t('adminRoles.roles.administrator.description') }}</p>
+          <span class="system-role-label">{{ t('adminRoles.systemDefined') }}</span>
         </article>
         <article>
           <div class="role-head">
             <span>C</span>
             <div>
-              <h3>Conservation Officer</h3>
-              <p>Conservation operations</p>
+              <h3>{{ t('adminRoles.roles.officer.name') }}</h3>
+              <p>{{ t('adminRoles.roles.officer.access') }}</p>
             </div>
-            <b>5 users</b>
+            <b>{{ t('adminRoles.userCount', { count: 5 }) }}</b>
           </div>
-          <p>Monitors sensors, handles threats, and reviews field observations.</p>
-          <span class="system-role-label">System-defined role</span>
+          <p>{{ t('adminRoles.roles.officer.description') }}</p>
+          <span class="system-role-label">{{ t('adminRoles.systemDefined') }}</span>
         </article>
         <article>
           <div class="role-head">
             <span>B</span>
             <div>
-              <h3>Botanist</h3>
-              <p>Research access</p>
+              <h3>{{ t('adminRoles.roles.botanist.name') }}</h3>
+              <p>{{ t('adminRoles.roles.botanist.access') }}</p>
             </div>
-            <b>10 users</b>
+            <b>{{ t('adminRoles.userCount', { count: 10 }) }}</b>
           </div>
-          <p>Documents plant observations and contributes scientific information.</p>
-          <span class="system-role-label">System-defined role</span>
+          <p>{{ t('adminRoles.roles.botanist.description') }}</p>
+          <span class="system-role-label">{{ t('adminRoles.systemDefined') }}</span>
         </article>
         <article>
           <div class="role-head">
             <span>V</span>
             <div>
-              <h3>Visitor</h3>
-              <p>Public access</p>
+              <h3>{{ t('adminRoles.roles.visitor.name') }}</h3>
+              <p>{{ t('adminRoles.roles.visitor.access') }}</p>
             </div>
-            <b>Prototype</b>
+            <b>{{ t('adminRoles.prototype') }}</b>
           </div>
-          <p>Browses public biodiversity information and uses visitor-facing features.</p>
-          <span class="system-role-label">System-defined role</span>
+          <p>{{ t('adminRoles.roles.visitor.description') }}</p>
+          <span class="system-role-label">{{ t('adminRoles.systemDefined') }}</span>
         </article>
       </section>
       <p class="read-only-note">
-        Role permissions are predefined by the system and cannot be modified from this page.
+        {{ t('adminRoles.readOnlyNotice') }}
       </p>
       <section class="panel">
         <div class="panel-head">
           <div>
-            <p>ACCESS MATRIX</p>
-            <h2>Module Permissions</h2>
+            <p>{{ t('adminRoles.matrixEyebrow') }}</p>
+            <h2>{{ t('adminRoles.modulePermissions') }}</h2>
           </div>
-          <span>✓ Allowed &nbsp; — Restricted</span>
+          <span>{{ t('adminRoles.allowedRestricted') }}</span>
         </div>
         <div class="table-scroll">
           <table>
             <thead>
               <tr>
-                <th>System module</th>
-                <th>Administrator</th>
-                <th>Conservation Officer</th>
-                <th>Botanist</th>
-                <th>Visitor</th>
+                <th>{{ t('adminRoles.systemModule') }}</th>
+                <th>{{ t('adminRoles.roles.administrator.name') }}</th>
+                <th>{{ t('adminRoles.roles.officer.name') }}</th>
+                <th>{{ t('adminRoles.roles.botanist.name') }}</th>
+                <th>{{ t('adminRoles.roles.visitor.name') }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="row in permissions" :key="row.module">
                 <td>
-                  <strong>{{ row.module }}</strong>
+                  <strong>{{ t(`adminRoles.modules.${row.module}`) }}</strong>
                 </td>
                 <td>
                   <i :class="{ allowed: row.admin }">{{ row.admin ? '✓' : '—' }}</i>
@@ -1028,54 +1033,59 @@ const confirmDeleteSensor = () => {
         <article>
           <span>⌁</span>
           <div>
-            <p>Total Sensors</p>
+            <p>{{ t('adminModules.iot.totalSensors') }}</p>
             <strong>{{ sensors.length }}</strong
-            ><small>Registered devices</small>
+            ><small>{{ t('adminModules.iot.registeredDevices') }}</small>
           </div>
         </article>
         <article>
           <span>✓</span>
           <div>
-            <p>Online Sensors</p>
+            <p>{{ t('adminModules.iot.onlineSensors') }}</p>
             <strong>{{ onlineSensorCount }}</strong
-            ><small>Currently available</small>
+            ><small>{{ t('adminModules.iot.currentlyAvailable') }}</small>
           </div>
         </article>
         <article class="warning">
           <span>×</span>
           <div>
-            <p>Offline Sensors</p>
+            <p>{{ t('adminModules.iot.offlineSensors') }}</p>
             <strong>{{ offlineSensorCount }}</strong
-            ><small>Needs attention</small>
+            ><small>{{ t('adminModules.common.needsAttention') }}</small>
           </div>
         </article>
         <article class="danger">
           <span>!</span>
           <div>
-            <p>Active Threat Alerts</p>
+            <p>{{ t('adminModules.iot.activeThreatAlerts') }}</p>
             <strong>{{ activeAlertCount }}</strong
-            ><small>2 unreviewed</small>
+            ><small>{{ t('adminModules.iot.unreviewed', { count: 2 }) }}</small>
           </div>
         </article>
       </section>
       <section class="network-overview">
         <div class="panel-head">
           <div>
-            <p>SENSOR NETWORK OVERVIEW</p>
-            <h2>Connectivity Summary</h2>
+            <p>{{ t('adminModules.iot.networkEyebrow') }}</p>
+            <h2>{{ t('adminModules.iot.connectivitySummary') }}</h2>
           </div>
           <span class="live"><i></i> Updating</span>
         </div>
         <div class="network-metrics">
           <article>
-            <small>Online Sensors</small><strong>{{ onlineSensorCount }}</strong>
+            <small>{{ t('adminModules.iot.onlineSensors') }}</small
+            ><strong>{{ onlineSensorCount }}</strong>
           </article>
           <article>
-            <small>Offline Sensors</small><strong>{{ offlineSensorCount }}</strong>
+            <small>{{ t('adminModules.iot.offlineSensors') }}</small
+            ><strong>{{ offlineSensorCount }}</strong>
           </article>
-          <article><small>Latest Reading</small><strong>2 mins ago</strong></article>
           <article>
-            <small>Reporting Today</small
+            <small>{{ t('adminModules.iot.latestReading') }}</small
+            ><strong>{{ t('adminModules.iot.minutesAgo', { count: 2 }) }}</strong>
+          </article>
+          <article>
+            <small>{{ t('adminModules.iot.reportingToday') }}</small
             ><strong>{{ onlineSensorCount }} / {{ sensors.length }}</strong>
           </article>
         </div>
@@ -1083,8 +1093,8 @@ const confirmDeleteSensor = () => {
       <section class="panel">
         <div class="panel-head">
           <div>
-            <p>LIVE SENSOR FEED</p>
-            <h2>Current Readings</h2>
+            <p>{{ t('adminModules.iot.liveFeed') }}</p>
+            <h2>{{ t('adminModules.iot.currentReadings') }}</h2>
           </div>
           <span class="live"><i></i> Updating</span>
         </div>
@@ -1093,7 +1103,7 @@ const confirmDeleteSensor = () => {
             ><span>⌕</span
             ><input
               v-model="search"
-              placeholder="Search sensor, device, plant or location..." /></label
+              :placeholder="t('adminModules.iot.searchPlaceholder')" /></label
           ><select v-model="filter">
             <option>All</option>
             <option>Online</option>
@@ -1111,11 +1121,11 @@ const confirmDeleteSensor = () => {
                 <th>Plant</th>
                 <th>Temperature</th>
                 <th>Humidity</th>
-                <th>Soil Moisture</th>
+                <th>{{ t('adminModules.columns.soilMoisture') }}</th>
                 <th>Rainfall</th>
                 <th>Motion</th>
                 <th>Status</th>
-                <th>Last Reading</th>
+                <th>{{ t('adminModules.columns.lastReading') }}</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -1124,17 +1134,17 @@ const confirmDeleteSensor = () => {
                 <td>
                   <strong>{{ s.id }}</strong>
                 </td>
-                <td>{{ s.deviceName }}</td>
+                <td>{{ dataLabel(s.deviceName) }}</td>
                 <td>{{ s.plant }}</td>
                 <td>{{ s.temperature }}</td>
                 <td>{{ s.humidity }}</td>
                 <td>{{ s.soilMoisture }}</td>
-                <td>{{ s.rainfall }}</td>
-                <td>{{ s.movement }}</td>
+                <td>{{ dataLabel(s.rainfall) }}</td>
+                <td>{{ dataLabel(s.movement) }}</td>
                 <td>
                   <em class="badge" :class="s.status.toLowerCase()">{{ s.status }}</em>
                 </td>
-                <td>{{ s.lastReading }}</td>
+                <td>{{ dataLabel(s.lastReading) }}</td>
                 <td>
                   <button class="table-action" type="button" @click="openSensorDetails(s)">
                     View
@@ -1148,7 +1158,7 @@ const confirmDeleteSensor = () => {
       <section class="panel">
         <div class="panel-head">
           <div>
-            <p>RECENT THREAT ALERTS</p>
+            <p>{{ t('adminModules.iot.recentAlerts') }}</p>
             <h2>Latest Alerts</h2>
           </div>
           <RouterLink class="secondary panel-link" to="/admin/alerts">View All Alerts</RouterLink>
@@ -1163,7 +1173,7 @@ const confirmDeleteSensor = () => {
                 <th>Severity</th>
                 <th>Confidence</th>
                 <th>Status</th>
-                <th>Created At</th>
+                <th>{{ t('adminModules.columns.createdAt') }}</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -1173,7 +1183,7 @@ const confirmDeleteSensor = () => {
                   <strong>{{ alert.id }}</strong>
                 </td>
                 <td>{{ alert.plant }}</td>
-                <td>{{ alert.type }}</td>
+                <td>{{ dataLabel(alert.type) }}</td>
                 <td>
                   <em class="badge" :class="alert.severity.toLowerCase()">{{ alert.severity }}</em>
                 </td>
@@ -1181,7 +1191,7 @@ const confirmDeleteSensor = () => {
                 <td>
                   <em class="badge" :class="alert.status.toLowerCase()">{{ alert.status }}</em>
                 </td>
-                <td>{{ alert.createdAt }}</td>
+                <td>{{ dataLabel(alert.createdAt) }}</td>
                 <td>
                   <RouterLink class="table-action action-link" to="/admin/alerts">View</RouterLink>
                 </td>
@@ -1199,7 +1209,7 @@ const confirmDeleteSensor = () => {
           <div>
             <p>Registered</p>
             <strong>{{ sensors.length }}</strong
-            ><small>Total devices</small>
+            ><small>{{ t('adminModules.sensors.totalDevices') }}</small>
           </div>
         </article>
         <article>
@@ -1207,7 +1217,7 @@ const confirmDeleteSensor = () => {
           <div>
             <p>Online</p>
             <strong>{{ onlineSensorCount }}</strong
-            ><small>Connected devices</small>
+            ><small>{{ t('adminModules.sensors.connectedDevices') }}</small>
           </div>
         </article>
         <article>
@@ -1215,7 +1225,7 @@ const confirmDeleteSensor = () => {
           <div>
             <p>Offline</p>
             <strong>{{ offlineSensorCount }}</strong
-            ><small>Needs attention</small>
+            ><small>{{ t('adminModules.common.needsAttention') }}</small>
           </div>
         </article>
         <article class="warning">
@@ -1223,15 +1233,15 @@ const confirmDeleteSensor = () => {
           <div>
             <p>Maintenance</p>
             <strong>{{ maintenanceSensorCount }}</strong
-            ><small>Service scheduled</small>
+            ><small>{{ t('adminModules.sensors.serviceScheduled') }}</small>
           </div>
         </article>
       </section>
       <section class="panel">
         <div class="panel-head">
           <div>
-            <p>DEVICE INVENTORY</p>
-            <h2>All Sensors</h2>
+            <p>{{ t('adminModules.sensors.inventoryEyebrow') }}</p>
+            <h2>{{ t('adminModules.sensors.allSensors') }}</h2>
           </div>
           <span>{{ filteredSensors.length }} records</span>
         </div>
@@ -1240,7 +1250,7 @@ const confirmDeleteSensor = () => {
             ><span>⌕</span
             ><input
               v-model="search"
-              placeholder="Search sensor, device, type or location..." /></label
+              :placeholder="t('adminModules.sensors.searchPlaceholder')" /></label
           ><select v-model="filter">
             <option>All</option>
             <option>Online</option>
@@ -1256,10 +1266,10 @@ const confirmDeleteSensor = () => {
                 <th>Sensor ID</th>
                 <th>Device Name</th>
                 <th>Device Type</th>
-                <th>Serial Number</th>
+                <th>{{ t('adminModules.columns.serialNumber') }}</th>
                 <th>Location</th>
                 <th>Status</th>
-                <th>Installed At</th>
+                <th>{{ t('adminModules.columns.installedAt') }}</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -1268,14 +1278,14 @@ const confirmDeleteSensor = () => {
                 <td>
                   <strong>{{ s.id }}</strong>
                 </td>
-                <td>{{ s.deviceName }}</td>
-                <td>{{ s.deviceType }}</td>
+                <td>{{ dataLabel(s.deviceName) }}</td>
+                <td>{{ dataLabel(s.deviceType) }}</td>
                 <td>{{ s.serialNumber }}</td>
-                <td>{{ s.locationDescription || '—' }}</td>
+                <td>{{ s.locationDescription ? dataLabel(s.locationDescription) : '—' }}</td>
                 <td>
                   <em class="badge" :class="s.status.toLowerCase()">{{ s.status }}</em>
                 </td>
-                <td>{{ s.installedAt }}</td>
+                <td>{{ dataLabel(s.installedAt) }}</td>
                 <td>
                   <div class="sensor-actions">
                     <button class="table-action" type="button" @click="openSensorDetails(s)">
@@ -1305,25 +1315,25 @@ const confirmDeleteSensor = () => {
         <article class="danger">
           <span>!</span>
           <div>
-            <p>Active Alerts</p>
+            <p>{{ t('adminModules.alerts.activeAlerts') }}</p>
             <strong>{{ activeAlertCount }}</strong
-            ><small>Require review</small>
+            ><small>{{ t('adminModules.alerts.requireReview') }}</small>
           </div>
         </article>
         <article>
           <span>●</span>
           <div>
-            <p>High Severity</p>
+            <p>{{ t('adminModules.alerts.highSeverity') }}</p>
             <strong>{{ highSeverityAlertCount }}</strong
-            ><small>Immediate action</small>
+            ><small>{{ t('adminModules.alerts.immediateAction') }}</small>
           </div>
         </article>
         <article>
           <span>⌕</span>
           <div>
-            <p>Under Review</p>
+            <p>{{ t('adminModules.alerts.underReview') }}</p>
             <strong>{{ reviewingAlertCount }}</strong
-            ><small>Being investigated</small>
+            ><small>{{ t('adminModules.alerts.beingInvestigated') }}</small>
           </div>
         </article>
         <article>
@@ -1331,28 +1341,28 @@ const confirmDeleteSensor = () => {
           <div>
             <p>Resolved</p>
             <strong>{{ resolvedAlertCount }}</strong
-            ><small>Closed alerts</small>
+            ><small>{{ t('adminModules.alerts.closedAlerts') }}</small>
           </div>
         </article>
       </section>
       <section class="panel">
         <div class="panel-head">
           <div>
-            <p>THREAT REGISTER</p>
-            <h2>All Threat Alerts</h2>
+            <p>{{ t('adminModules.alerts.registerEyebrow') }}</p>
+            <h2>{{ t('adminModules.alerts.allAlerts') }}</h2>
           </div>
           <button class="secondary" type="button">Export Alerts</button>
         </div>
         <div class="filters alert-filters">
           <label
             ><span>⌕</span
-            ><input v-model="search" placeholder="Search alert, plant, sensor, reading or type..."
+            ><input v-model="search" :placeholder="t('adminModules.alerts.searchPlaceholder')"
           /></label>
-          <select v-model="alertStatusFilter" aria-label="Filter alerts by status">
-            <option>All Statuses</option>
-            <option>New</option>
-            <option>Reviewing</option>
-            <option>Resolved</option>
+          <select v-model="alertStatusFilter" :aria-label="t('adminModules.alerts.filterByStatus')">
+            <option value="All Statuses">{{ t('common.allStatuses') }}</option>
+            <option v-for="item in ['New', 'Reviewing', 'Resolved']" :key="item" :value="item">
+              {{ dataLabel(item) }}
+            </option>
           </select>
           <select v-model="alertSeverityFilter" aria-label="Filter alerts by severity">
             <option>All Severities</option>
@@ -1372,7 +1382,7 @@ const confirmDeleteSensor = () => {
                 <th>Severity</th>
                 <th>Confidence</th>
                 <th>Status</th>
-                <th>Created At</th>
+                <th>{{ t('adminModules.columns.createdAt') }}</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -1383,7 +1393,7 @@ const confirmDeleteSensor = () => {
                 </td>
                 <td>{{ alert.plant }}</td>
                 <td>{{ alert.sensorId }}</td>
-                <td>{{ alert.type }}</td>
+                <td>{{ dataLabel(alert.type) }}</td>
                 <td>
                   <em class="badge" :class="alert.severity.toLowerCase()">{{ alert.severity }}</em>
                 </td>
@@ -1391,7 +1401,7 @@ const confirmDeleteSensor = () => {
                 <td>
                   <em class="badge" :class="alert.status.toLowerCase()">{{ alert.status }}</em>
                 </td>
-                <td>{{ alert.createdAt }}</td>
+                <td>{{ dataLabel(alert.createdAt) }}</td>
                 <td>
                   <button class="table-action" type="button" @click="openAlertDetails(alert)">
                     View
@@ -1409,49 +1419,51 @@ const confirmDeleteSensor = () => {
         <article>
           <span>↻</span>
           <div>
-            <p>Events Today</p>
-            <strong>42</strong><small>All modules</small>
+            <p>{{ t('adminModules.activity.eventsToday') }}</p>
+            <strong>42</strong><small>{{ t('adminModules.activity.allModules') }}</small>
           </div>
         </article>
         <article>
           <span>♙</span>
           <div>
-            <p>User Actions</p>
-            <strong>18</strong><small>Administrative events</small>
+            <p>{{ t('adminModules.activity.userActions') }}</p>
+            <strong>18</strong><small>{{ t('adminModules.activity.administrativeEvents') }}</small>
           </div>
         </article>
         <article class="warning">
           <span>!</span>
           <div>
-            <p>Warnings</p>
-            <strong>3</strong><small>System-generated</small>
+            <p>{{ t('adminModules.activity.warnings') }}</p>
+            <strong>3</strong><small>{{ t('adminModules.activity.systemGenerated') }}</small>
           </div>
         </article>
         <article>
           <span>✓</span>
           <div>
-            <p>Security Events</p>
-            <strong>1</strong><small>No critical incidents</small>
+            <p>{{ t('adminModules.activity.securityEvents') }}</p>
+            <strong>1</strong><small>{{ t('adminModules.activity.noCriticalIncidents') }}</small>
           </div>
         </article>
       </section>
       <section class="panel">
         <div class="panel-head">
           <div>
-            <p>ADMINISTRATIVE AUDIT TRAIL</p>
-            <h2>Recent System Activity</h2>
+            <p>{{ t('adminModules.activity.auditEyebrow') }}</p>
+            <h2>{{ t('adminModules.activity.recentActivity') }}</h2>
           </div>
           <span>{{ filteredLogs.length }} events shown</span>
         </div>
         <div class="filters">
           <label
             ><span>⌕</span
-            ><input v-model="search" placeholder="Search actor, action, module or IP..." /></label
+            ><input
+              v-model="search"
+              :placeholder="t('adminModules.activity.searchPlaceholder')" /></label
           ><select v-model="filter">
-            <option>All</option>
-            <option>Info</option>
-            <option>Security</option>
-            <option>Warning</option>
+            <option value="All">{{ t('common.all') }}</option>
+            <option v-for="item in ['Info', 'Security', 'Warning']" :key="item" :value="item">
+              {{ dataLabel(item) }}
+            </option>
           </select>
         </div>
         <div class="activity-list">
@@ -1460,13 +1472,17 @@ const confirmDeleteSensor = () => {
               log.type === 'Warning' ? '!' : log.type === 'Security' ? '◇' : '↻'
             }}</span>
             <div class="event-main">
-              <strong>{{ log.action }}{{ log.target ? ` — ${log.target}` : '' }}</strong>
+              <strong
+                >{{ dataLabel(log.action)
+                }}{{ log.target ? ` — ${dataLabel(log.target)}` : '' }}</strong
+              >
               <p>
-                <b>{{ log.actor }}</b> · {{ log.module }} · {{ log.ipAddress }}
+                <b>{{ dataLabel(log.actor) }}</b> · {{ dataLabel(log.module) }} ·
+                {{ log.ipAddress }}
               </p>
             </div>
             <time :datetime="log.timestamp">{{ formatActivityTimestamp(log.timestamp) }}</time
-            ><em class="badge" :class="log.type.toLowerCase()">{{ log.type }}</em>
+            ><em class="badge" :class="log.type.toLowerCase()">{{ dataLabel(log.type) }}</em>
           </article>
         </div>
       </section>
@@ -1488,63 +1504,106 @@ const confirmDeleteSensor = () => {
       >
         <header class="sensor-modal-head">
           <div>
-            <p>ACTIVITY EXPORT</p>
-            <h2 id="export-activity-title">Export System Activity</h2>
+            <p>{{ t('adminModules.export.eyebrow') }}</p>
+            <h2 id="export-activity-title">{{ t('adminModules.export.title') }}</h2>
           </div>
-          <button type="button" aria-label="Close export dialog" @click="closeExportModal">×</button>
+          <button
+            type="button"
+            :aria-label="t('adminModules.export.closeDialog')"
+            @click="closeExportModal"
+          >
+            ×
+          </button>
         </header>
 
         <form class="export-form" @submit.prevent="exportActivity">
           <fieldset>
-            <legend>Date Range</legend>
+            <legend>{{ t('adminModules.export.dateRange') }}</legend>
             <div class="export-date-grid">
-              <label><span>From Date</span><input v-model="exportFromDate" type="date" /></label>
-              <label><span>To Date</span><input v-model="exportToDate" type="date" /></label>
+              <label
+                ><span>{{ t('adminModules.export.fromDate') }}</span
+                ><input v-model="exportFromDate" type="date"
+              /></label>
+              <label
+                ><span>{{ t('adminModules.export.toDate') }}</span
+                ><input v-model="exportToDate" type="date"
+              /></label>
             </div>
           </fieldset>
 
           <div class="export-select-grid">
             <label>
-              <span>Activity Type</span>
+              <span>{{ t('adminModules.export.activityType') }}</span>
               <select v-model="exportType">
-                <option>All</option><option>Info</option><option>Security</option><option>Warning</option><option>Error</option>
+                <option value="All">{{ t('common.all') }}</option>
+                <option
+                  v-for="item in ['Info', 'Security', 'Warning', 'Error']"
+                  :key="item"
+                  :value="item"
+                >
+                  {{ dataLabel(item) }}
+                </option>
               </select>
             </label>
             <label>
-              <span>Module</span>
+              <span>{{ t('adminModules.export.module') }}</span>
               <select v-model="exportModule">
-                <option>All Modules</option><option>User Management</option><option>Role &amp; Permission</option><option>IoT Monitoring</option><option>Sensor Management</option><option>Threat Alerts</option><option>System Activity</option>
+                <option value="All Modules">{{ t('adminModules.activity.allModules') }}</option>
+                <option
+                  v-for="item in [
+                    'User Management',
+                    'Role & Permission',
+                    'IoT Monitoring',
+                    'Sensor Management',
+                    'Threat Alerts',
+                    'System Activity',
+                  ]"
+                  :key="item"
+                  :value="item"
+                >
+                  {{ dataLabel(item) }}
+                </option>
               </select>
             </label>
           </div>
 
           <fieldset>
-            <legend>Export Scope</legend>
+            <legend>{{ t('adminModules.export.scope') }}</legend>
             <div class="export-options">
               <label>
                 <input v-model="exportScope" type="radio" value="filtered" />
-                <span><b>Current Filtered Results</b><small>Use the search and activity filter currently applied to this page.</small></span>
+                <span
+                  ><b>{{ t('adminModules.export.filteredResults') }}</b
+                  ><small>{{ t('adminModules.export.filteredDescription') }}</small></span
+                >
               </label>
               <label>
                 <input v-model="exportScope" type="radio" value="all" />
-                <span><b>All Activity Records</b><small>Ignore page filters and use only the export options above.</small></span>
+                <span
+                  ><b>{{ t('adminModules.export.allRecords') }}</b
+                  ><small>{{ t('adminModules.export.allDescription') }}</small></span
+                >
               </label>
             </div>
           </fieldset>
 
           <fieldset>
-            <legend>File Format</legend>
+            <legend>{{ t('adminModules.export.fileFormat') }}</legend>
             <div class="export-format-options">
               <label><input v-model="exportFormat" type="radio" value="csv" /> CSV</label>
               <label><input v-model="exportFormat" type="radio" value="pdf" /> PDF</label>
             </div>
           </fieldset>
 
-          <p v-if="exportValidationMessage" class="form-error" role="alert">{{ exportValidationMessage }}</p>
+          <p v-if="exportValidationMessage" class="form-error" role="alert">
+            {{ exportValidationMessage }}
+          </p>
 
           <div class="sensor-modal-actions modal-button-group">
-            <button class="secondary" type="button" @click="closeExportModal">Cancel</button>
-            <button class="primary" type="submit">Export</button>
+            <button class="secondary" type="button" @click="closeExportModal">
+              {{ t('common.cancel') }}
+            </button>
+            <button class="primary" type="submit">{{ t('adminModules.export.submit') }}</button>
           </div>
         </form>
       </section>

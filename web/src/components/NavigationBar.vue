@@ -9,12 +9,15 @@ import {
 } from 'vue'
 
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import LoginModal from './LoginModal.vue'
+import LanguageSwitcher from './LanguageSwitcher.vue'
 import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
 import { usePrototypeSession, type PrototypeSessionRole } from '../composables/usePrototypeSession'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const navSearch = ref('')
 
 // TEMPORARY FRONTEND ROLE STATE.
@@ -25,25 +28,25 @@ const { isLoggedIn, userRole, username } = usePrototypeSession()
 const navItems = computed(() => {
   const items = [
     {
-      label: 'Home',
+      label: t('nav.home'),
       to: '/',
     },
     {
-      label: 'Explore Species',
+      label: t('nav.species'),
       to: '/species',
     },
   ]
 
   if (isLoggedIn.value && userRole.value === 'admin') {
     items.push({
-      label: 'Admin',
+      label: t('nav.admin'),
       to: '/admin',
     })
   }
 
   if (isLoggedIn.value && userRole.value === 'conservation-officer') {
     items.push({
-      label: 'Conservation Officer',
+      label: t('nav.officer'),
       to: '/conservation-dashboard',
     })
   }
@@ -272,7 +275,7 @@ const logout = () => {
       </RouterLink>
 
       <!-- Desktop Navigation -->
-      <nav class="desktop-nav" aria-label="Main navigation">
+      <nav class="desktop-nav" :aria-label="t('nav.main')">
         <div
           ref="navTrack"
           class="nav-track"
@@ -295,16 +298,16 @@ const logout = () => {
 
           <form class="nav-search" role="search" @submit.prevent="submitNavSearch">
             <label>
-              <span class="sr-only">Search plants</span>
+              <span class="sr-only">{{ t('nav.searchPlants') }}</span>
               <input
                 v-model="navSearch"
                 autocomplete="off"
-                placeholder="Search here..."
+                :placeholder="t('nav.searchHere')"
                 type="search"
               />
             </label>
 
-            <button type="submit" aria-label="Search plants">
+            <button type="submit" :aria-label="t('nav.searchPlants')">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="10.8" cy="10.8" r="6.8" />
                 <path d="m16 16 4.5 4.5" />
@@ -320,14 +323,16 @@ const logout = () => {
 
       <div class="auth-area">
 
+        <LanguageSwitcher />
+
         <!-- Logged Out -->
 
         <button
           v-if="!isLoggedIn"
           class="login-button"
           type="button"
-          aria-label="Login"
-          title="Login"
+          :aria-label="t('nav.login')"
+          :title="t('nav.login')"
           @click="openLoginModal"
         >
 
@@ -346,7 +351,7 @@ const logout = () => {
 
           </svg>
 
-          <span class="login-button-text">Login</span>
+          <span class="login-button-text">{{ t('nav.login') }}</span>
 
         </button>
 
@@ -384,7 +389,7 @@ const logout = () => {
 
           </svg>
 
-          Logout
+          {{ t('nav.logout') }}
 
         </button>
 
@@ -393,7 +398,7 @@ const logout = () => {
       <button
         class="menu-button"
         type="button"
-        aria-label="Toggle navigation menu"
+        :aria-label="t('nav.toggle')"
         :aria-expanded="mobileMenuOpen"
         aria-controls="mobile-navigation"
         @click="toggleMobileMenu"
@@ -411,7 +416,7 @@ const logout = () => {
         v-if="mobileMenuOpen"
         class="mobile-nav-backdrop"
         type="button"
-        aria-label="Close navigation menu"
+        :aria-label="t('nav.close')"
         @click="closeMobileMenu"
       ></button>
 
@@ -419,7 +424,7 @@ const logout = () => {
         id="mobile-navigation"
         class="mobile-nav"
         :class="{ open: mobileMenuOpen }"
-        aria-label="Mobile navigation"
+        :aria-label="t('nav.mobile')"
       >
 
         <div class="mobile-drawer-header">
@@ -434,14 +439,14 @@ const logout = () => {
           <button
             class="mobile-drawer-close"
             type="button"
-            aria-label="Close navigation menu"
+            :aria-label="t('nav.close')"
             @click="closeMobileMenu"
           >
             ×
           </button>
         </div>
 
-        <p class="mobile-menu-label">MENU</p>
+        <p class="mobile-menu-label">{{ t('nav.menu') }}</p>
 
         <RouterLink
           v-for="item in navItems"
@@ -467,7 +472,7 @@ const logout = () => {
           <span class="mobile-link-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg>
           </span>
-          <span>Search</span>
+          <span>{{ t('nav.search') }}</span>
           <span class="mobile-search-chevron" aria-hidden="true">›</span>
         </button>
 
@@ -477,10 +482,10 @@ const logout = () => {
               v-model="navSearch"
               type="search"
               autocomplete="off"
-              placeholder="Search species..."
-              aria-label="Search species"
+              :placeholder="t('nav.searchSpecies')"
+              :aria-label="t('nav.searchSpecies')"
             />
-            <button type="submit" aria-label="Search species">
+            <button type="submit" :aria-label="t('nav.searchSpecies')">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="10.5" cy="10.5" r="6.5" />
                 <path d="m15.5 15.5 5 5" />
@@ -489,6 +494,10 @@ const logout = () => {
           </form>
         </div>
 
+
+        <div class="mobile-nav-divider" aria-hidden="true"></div>
+
+        <LanguageSwitcher />
 
         <div class="mobile-nav-divider" aria-hidden="true"></div>
 
@@ -514,7 +523,7 @@ const logout = () => {
 
           </svg>
 
-          Login
+          {{ t('nav.login') }}
 
         </button>
         <div v-else class="mobile-authenticated">
@@ -552,7 +561,7 @@ const logout = () => {
                 stroke-linejoin="round"
               />
             </svg>
-            Logout
+            {{ t('nav.logout') }}
           </button>
         </div>
 
@@ -604,11 +613,11 @@ const logout = () => {
       </div>
 
       <h2>
-        Log out?
+        {{ t('auth.logoutTitle') }}
       </h2>
 
       <p>
-        Are you sure you want to log out of your account?
+        {{ t('auth.logoutPrompt') }}
       </p>
 
       <div class="modal-actions">
@@ -618,7 +627,7 @@ const logout = () => {
           type="button"
           @click="closeLogoutModal"
         >
-          Cancel
+          {{ t('common.cancel') }}
         </button>
 
         <button
@@ -626,7 +635,7 @@ const logout = () => {
           type="button"
           @click="logout"
         >
-          Log Out
+          {{ t('auth.confirmLogout') }}
         </button>
 
       </div>

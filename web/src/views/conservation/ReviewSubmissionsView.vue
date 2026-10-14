@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useConservationText } from '../../composables/useConservationText'
+const { ct, sf, dt, speciesText, observationText, locale } = useConservationText()
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppModal from '../../components/conservation/AppModal.vue'
@@ -48,7 +50,7 @@ const filtered = computed(() =>
   conservationStore.observations.filter((observation) => {
     const officialSpecies = speciesForPlant(observation.plantId)
     const request = speciesRequestForPlant(observation.plantId)
-    const searchable = `${observation.id} ${observation.plantId} ${officialSpecies?.scientificName ?? ''} ${request?.proposedScientificName ?? ''} ${request?.proposedCommonName ?? ''} ${observation.recordedBy}`
+    const searchable = `${observation.id} ${observation.plantId} ${officialSpecies?.scientificName ?? ''} ${officialSpecies ? sf(officialSpecies) + ' ' + sf(officialSpecies, 'common') : ''} ${request?.proposedScientificName ?? ''} ${ct(request?.proposedScientificName)} ${request?.proposedCommonName ?? ''} ${observation.recordedBy}`
     const matchesDate =
       !date.value ||
       observation.submittedAt.includes(
@@ -79,12 +81,12 @@ const speciesResolved = computed(
 
 function open(observation: Observation) {
   selected.value = observation
-  comment.value = observation.reviewComment || ''
+  comment.value = observation.reviewComment ? observationText(observation, 'reviewComment') : ''
   error.value = ''
   reviewingSpecies.value = false
   speciesError.value = ''
   const request = speciesRequestForPlant(observation.plantId)
-  speciesComment.value = request?.reviewComment || ''
+  speciesComment.value = request?.reviewComment ? ct(request.reviewComment) : ''
 }
 
 function closeReview() {
@@ -170,27 +172,27 @@ onMounted(() => {
 <template>
   <section class="page-intro">
     <div>
-      <p class="page-kicker">VERIFICATION WORKFLOW</p>
-      <h2>Review Submissions</h2>
-      <p>Verify botanist observations and preserve a clear review decision.</p>
+      <p class="page-kicker">{{ ct('VERIFICATION WORKFLOW') }}</p>
+      <h2>{{ ct('Review Submissions') }}</h2>
+      <p>{{ ct('Verify botanist observations and preserve a clear review decision.') }}</p>
     </div>
   </section>
   <section class="summary-grid">
     <article v-for="count in counts" :key="String(count[0])" class="summary-card">
-      <p>{{ count[0] }}</p>
+      <p>{{ ct(count[0]) }}</p>
       <strong>{{ count[1] }}</strong
-      ><small>Observation submissions</small>
+      ><small>{{ ct('Observation submissions') }}</small>
     </article>
   </section>
   <div class="control-bar">
     <label class="field search-field"
-      ><span>Search</span
-      ><input v-model="search" placeholder="Observation ID, Plant ID, species or botanist"
+      ><span>{{ ct('Search') }}</span
+      ><input v-model="search" :placeholder="ct('Observation ID, Plant ID, species or botanist')"
     /></label>
     <label class="field"
-      ><span>Review status</span
+      ><span>{{ ct('Review status') }}</span
       ><select v-model="status">
-        <option value="">All statuses</option>
+        <option value="">{{ ct('All statuses') }}</option>
         <option
           v-for="reviewStatus in [
             'Pending Review',
@@ -200,35 +202,39 @@ onMounted(() => {
             'Flagged',
           ]"
           :key="reviewStatus"
+          :value="reviewStatus"
         >
-          {{ reviewStatus }}
+          {{ ct(reviewStatus) }}
         </option>
       </select></label
     >
     <label class="field"
-      ><span>Species</span
+      ><span>{{ ct('Species') }}</span
       ><select v-model="species">
-        <option value="">All species</option>
+        <option value="">{{ ct('All species') }}</option>
         <option v-for="item in conservationStore.species" :key="item.id" :value="item.id">
-          {{ item.commonName }}
+          {{ sf(item, 'common') }}
         </option>
       </select></label
     >
-    <label class="field"><span>Date</span><input v-model="date" type="date" /></label>
+    <label class="field"
+      ><span>{{ ct('Date') }}</span
+      ><input v-model="date" type="date"
+    /></label>
   </div>
   <section class="panel">
     <div class="table-scroll">
       <table>
         <thead>
           <tr>
-            <th>Observation ID</th>
-            <th>Plant ID</th>
-            <th>Species</th>
-            <th>Submitted By</th>
-            <th>Location</th>
-            <th>Submitted Date</th>
-            <th>Status</th>
-            <th>Actions</th>
+            <th>{{ ct('Observation ID') }}</th>
+            <th>{{ ct('Plant ID') }}</th>
+            <th>{{ ct('Species') }}</th>
+            <th>{{ ct('Submitted By') }}</th>
+            <th>{{ ct('Location') }}</th>
+            <th>{{ ct('Submitted Date') }}</th>
+            <th>{{ ct('Status') }}</th>
+            <th>{{ ct('Actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -239,11 +245,13 @@ onMounted(() => {
             <td>{{ observation.plantId }}</td>
             <td>
               <em v-if="speciesForPlant(observation.plantId)">{{
-                speciesForPlant(observation.plantId)?.scientificName
+                speciesText(observation.plantId)
               }}</em>
               <span v-else-if="speciesRequestForPlant(observation.plantId)" class="proposed-species"
-                ><small>Proposed New Species</small
-                ><em>{{ speciesRequestForPlant(observation.plantId)?.proposedScientificName }}</em
+                ><small>{{ ct('Proposed New Species') }}</small
+                ><em>{{
+                  ct(speciesRequestForPlant(observation.plantId)?.proposedScientificName)
+                }}</em
                 ><span
                   class="badge"
                   :class="
@@ -251,20 +259,22 @@ onMounted(() => {
                       ?.status.toLowerCase()
                       .replaceAll(' ', '-')
                   "
-                  >{{ speciesRequestForPlant(observation.plantId)?.status }}</span
+                  >{{ ct(speciesRequestForPlant(observation.plantId)?.status) }}</span
                 ></span
               >
-              <span v-else>Species unavailable</span>
+              <span v-else>{{ ct('Species unavailable') }}</span>
             </td>
             <td>{{ observation.recordedBy }}</td>
-            <td>{{ observation.location }}</td>
-            <td>{{ observation.submittedAt }}</td>
+            <td>{{ ct(observation.location) }}</td>
+            <td>{{ dt(observation.submittedAt) }}</td>
             <td>
               <span class="badge" :class="observation.status.toLowerCase().replaceAll(' ', '-')">{{
-                observation.status
+                ct(observation.status)
               }}</span>
             </td>
-            <td><button class="action-button" @click="open(observation)">Review</button></td>
+            <td>
+              <button class="action-button" @click="open(observation)">{{ ct('Review') }}</button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -273,61 +283,69 @@ onMounted(() => {
 
   <AppModal
     v-if="selected"
-    :title="`Review ${selected.id}`"
-    :subtitle="`${selected.plantId} · submitted by ${selected.recordedBy}`"
+    :title="ct('Review {id}', { id: selected.id })"
+    :subtitle="
+      ct('{id} · submitted by {name}', { id: selected.plantId, name: selected.recordedBy })
+    "
     wide
     @close="closeReview"
   >
     <section class="review-section">
-      <p class="section-kicker">PLANT / OBSERVATION INFORMATION</p>
+      <p class="section-kicker">{{ ct('PLANT / OBSERVATION INFORMATION') }}</p>
       <div class="two-column">
         <div>
           <dl class="detail-list">
             <div>
-              <dt>Species</dt>
-              <dd>{{ selectedSpecies?.scientificName || 'Proposed new species' }}</dd>
+              <dt>{{ ct('Species') }}</dt>
+              <dd>{{ selectedSpecies ? sf(selectedSpecies) : ct('Proposed New Species') }}</dd>
             </div>
             <div>
-              <dt>Taxonomy</dt>
-              <dd>{{ selectedSpecies?.family || selectedRequest?.family || 'Pending review' }}</dd>
+              <dt>{{ ct('Taxonomy') }}</dt>
+              <dd>
+                {{
+                  selectedSpecies
+                    ? sf(selectedSpecies, 'family')
+                    : ct(selectedRequest?.family || 'Pending Review')
+                }}
+              </dd>
             </div>
             <div>
-              <dt>Height</dt>
+              <dt>{{ ct('Height') }}</dt>
               <dd>{{ selected.height }}</dd>
             </div>
             <div>
-              <dt>Growth Stage</dt>
-              <dd>{{ selected.growthStage }}</dd>
+              <dt>{{ ct('Growth Stage') }}</dt>
+              <dd>{{ ct(selected.growthStage) }}</dd>
             </div>
             <div>
-              <dt>Health</dt>
-              <dd>{{ selected.health }}</dd>
+              <dt>{{ ct('Health') }}</dt>
+              <dd>{{ ct(selected.health) }}</dd>
             </div>
             <div>
-              <dt>Morphology</dt>
-              <dd>{{ selected.morphology }}</dd>
+              <dt>{{ ct('Morphology') }}</dt>
+              <dd>{{ observationText(selected, 'morphology') }}</dd>
             </div>
             <div>
-              <dt>Coordinates</dt>
+              <dt>{{ ct('Coordinates') }}</dt>
               <dd>
                 {{ plantFor(selected.plantId)?.latitude }},
                 {{ plantFor(selected.plantId)?.longitude }} ({{ selected.gpsAccuracy }})
               </dd>
             </div>
             <div>
-              <dt>Submission Date</dt>
-              <dd>{{ selected.submittedAt }}</dd>
+              <dt>{{ ct('Submission Date') }}</dt>
+              <dd>{{ dt(selected.submittedAt) }}</dd>
             </div>
           </dl>
-          <h3>Photographs</h3>
+          <h3>{{ ct('Photographs') }}</h3>
           <div class="media-grid">
             <div v-for="photo in selected.photos" :key="photo" class="media-placeholder">
-              {{ photo }}
+              {{ ct(photo) }}
             </div>
           </div>
         </div>
         <aside>
-          <h3>Observation History</h3>
+          <h3>{{ ct('Observation History') }}</h3>
           <div
             v-for="observation in conservationStore.observations.filter(
               (item) => item.plantId === selected?.plantId,
@@ -337,18 +355,18 @@ onMounted(() => {
           >
             <strong>{{ observation.id }}</strong
             ><span
-              >{{ observation.observedAt }} · {{ observation.height }} ·
-              {{ observation.health }}</span
+              >{{ dt(observation.observedAt) }} · {{ observation.height }} ·
+              {{ ct(observation.health) }}</span
             >
           </div>
           <label class="form-field officer-comment"
-            ><span>Observation Review Comment</span
+            ><span>{{ ct('Observation Review Comment') }}</span
             ><textarea
               v-model="comment"
-              placeholder="Record the observation decision or required action"
+              :placeholder="ct('Record the observation decision or required action')"
             ></textarea>
           </label>
-          <p v-if="error" class="form-error">{{ error }}</p>
+          <p v-if="error" class="form-error">{{ ct(error) }}</p>
         </aside>
       </div>
     </section>
@@ -356,109 +374,115 @@ onMounted(() => {
     <section v-if="selectedRequest" class="species-dependency">
       <div class="dependency-heading">
         <div>
-          <p class="section-kicker">SPECIES DEPENDENCY</p>
+          <p class="section-kicker">{{ ct('SPECIES DEPENDENCY') }}</p>
           <h3 v-if="selectedRequest.status === 'Approved'">
-            {{ selectedRequest.approvedSpeciesId }} — {{ selectedSpecies?.scientificName }}
+            {{ selectedRequest.approvedSpeciesId }} — {{ sf(selectedSpecies) }}
           </h3>
-          <h3 v-else>Proposed New Species · {{ selectedRequest.proposedScientificName }}</h3>
-          <span>Species Request: {{ selectedRequest.id }}</span>
+          <h3 v-else>
+            {{ ct('Proposed New Species') }} · {{ ct(selectedRequest.proposedScientificName) }}
+          </h3>
+          <span>{{ ct('Species Request: {id}', { id: selectedRequest.id }) }}</span>
         </div>
         <span class="badge" :class="selectedRequest.status.toLowerCase().replaceAll(' ', '-')">{{
-          selectedRequest.status
+          ct(selectedRequest.status)
         }}</span>
       </div>
       <button class="secondary-button" @click="reviewingSpecies = !reviewingSpecies">
-        {{ reviewingSpecies ? 'Hide Species Request' : 'Review Species Request' }}
+        {{ ct(reviewingSpecies ? 'Hide Species Request' : 'Review Species Request') }}
       </button>
       <div v-if="reviewingSpecies" class="species-review-panel">
         <dl class="detail-list">
           <div>
-            <dt>Request ID</dt>
+            <dt>{{ ct('Request ID') }}</dt>
             <dd>{{ selectedRequest.id }}</dd>
           </div>
           <div>
-            <dt>Request Status</dt>
-            <dd>{{ selectedRequest.status }}</dd>
+            <dt>{{ ct('Request Status') }}</dt>
+            <dd>{{ ct(selectedRequest.status) }}</dd>
           </div>
           <div>
-            <dt>Proposed Scientific Name</dt>
-            <dd>{{ selectedRequest.proposedScientificName }}</dd>
+            <dt>{{ ct('Proposed Scientific Name') }}</dt>
+            <dd>{{ ct(selectedRequest.proposedScientificName) }}</dd>
           </div>
           <div>
-            <dt>Proposed Common Name</dt>
-            <dd>{{ selectedRequest.proposedCommonName }}</dd>
+            <dt>{{ ct('Proposed Common Name') }}</dt>
+            <dd>{{ ct(selectedRequest.proposedCommonName) }}</dd>
           </div>
           <div>
-            <dt>Genus</dt>
-            <dd>{{ selectedRequest.genus }}</dd>
+            <dt>{{ ct('Genus') }}</dt>
+            <dd>{{ ct(selectedRequest.genus) }}</dd>
           </div>
           <div>
-            <dt>Family</dt>
-            <dd>{{ selectedRequest.family }}</dd>
+            <dt>{{ ct('Family') }}</dt>
+            <dd>{{ ct(selectedRequest.family) }}</dd>
           </div>
           <div>
-            <dt>Description</dt>
-            <dd>{{ selectedRequest.description }}</dd>
+            <dt>{{ ct('Description') }}</dt>
+            <dd>{{ ct(selectedRequest.description) }}</dd>
           </div>
           <div>
-            <dt>Habitat / Ecological Information</dt>
-            <dd>{{ selectedRequest.habitat }}</dd>
+            <dt>{{ ct('Habitat / Ecological Information') }}</dt>
+            <dd>{{ ct(selectedRequest.habitat) }}</dd>
           </div>
           <div>
-            <dt>Identification Notes</dt>
-            <dd>{{ selectedRequest.identificationNotes }}</dd>
+            <dt>{{ ct('Identification Notes') }}</dt>
+            <dd>{{ ct(selectedRequest.identificationNotes) }}</dd>
           </div>
           <div>
-            <dt>Submitted By</dt>
+            <dt>{{ ct('Submitted By') }}</dt>
             <dd>{{ selectedRequest.requestedBy }}</dd>
           </div>
           <div>
-            <dt>Submitted Date</dt>
-            <dd>{{ selectedRequest.submittedAt }}</dd>
+            <dt>{{ ct('Submitted Date') }}</dt>
+            <dd>{{ dt(selectedRequest.submittedAt) }}</dd>
           </div>
         </dl>
-        <h3>Submitted Photographs / Evidence</h3>
+        <h3>{{ ct('Submitted Photographs / Evidence') }}</h3>
         <div class="media-grid">
           <div v-for="photo in selectedRequest.photos" :key="photo" class="media-placeholder">
-            {{ photo }}
+            {{ ct(photo) }}
           </div>
         </div>
         <template v-if="selectedRequest.status !== 'Approved'"
           ><div class="species-review-fields">
             <label class="form-field full"
-              ><span>Species Request Comment</span
+              ><span>{{ ct('Species Request Comment') }}</span
               ><textarea
                 v-model="speciesComment"
-                placeholder="Record the species decision or required correction"
+                :placeholder="ct('Record the species decision or required correction')"
               ></textarea>
             </label>
           </div>
-          <p v-if="speciesError" class="form-error">{{ speciesError }}</p>
+          <p v-if="speciesError" class="form-error">{{ ct(speciesError) }}</p>
           <div class="species-actions">
             <button class="primary-button" @click="decideSpecies('Approved')">
-              Approve Species</button
-            ><button class="danger-button" @click="decideSpecies('Rejected')">Reject</button
+              {{ ct('Approve Species') }}</button
+            ><button class="danger-button" @click="decideSpecies('Rejected')">
+              {{ ct('Reject') }}</button
             ><button class="secondary-button" @click="decideSpecies('Correction Required')">
-              Request Correction
+              {{ ct('Request Correction') }}
             </button>
           </div></template
         >
         <p v-else class="resolved-message">
-          Species approved as {{ selectedRequest.approvedSpeciesId }}. The observation decision
-          remains separate.
+          {{
+            ct('Species approved as {id}. The observation decision remains separate.', {
+              id: selectedRequest.approvedSpeciesId || '—',
+            })
+          }}
         </p>
       </div>
     </section>
     <p v-if="!speciesResolved" class="approval-blocked">
-      Resolve the linked species request before approving this plant submission.
+      {{ ct('Resolve the linked species request before approving this plant submission.') }}
     </p>
     <div class="modal-actions">
       <button class="primary-button" :disabled="!speciesResolved" @click="decide('Approved')">
-        Approve</button
-      ><button class="danger-button" @click="decide('Rejected')">Reject</button
+        {{ ct('Approve') }}</button
+      ><button class="danger-button" @click="decide('Rejected')">{{ ct('Reject') }}</button
       ><button class="secondary-button" @click="decide('Correction Required')">
-        Request Correction</button
-      ><button class="secondary-button" @click="decide('Flagged')">Flag</button>
+        {{ ct('Request Correction') }}</button
+      ><button class="secondary-button" @click="decide('Flagged')">{{ ct('Flag') }}</button>
     </div>
   </AppModal>
 </template>

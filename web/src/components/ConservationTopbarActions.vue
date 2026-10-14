@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import {
   conservationNotifications,
   markAllConservationNotificationsRead,
@@ -8,11 +9,17 @@ import {
   type ConservationNotification,
 } from '../data/conservationNotifications'
 import { conservationProfile } from '../data/conservationProfile'
+import LanguageSwitcher from './LanguageSwitcher.vue'
 
 const router = useRouter()
+const { t } = useI18n()
 const actionsWrap = ref<HTMLElement | null>(null)
 const notificationsOpen = ref(false)
 const profileOpen = ref(false)
+const notificationText = (
+  notification: ConservationNotification,
+  field: 'title' | 'message' | 'time',
+) => t(`dashboardNotifications.conservation.${notification.id}.${field}`)
 
 const toggleNotifications = () => {
   notificationsOpen.value = !notificationsOpen.value
@@ -56,11 +63,12 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
 
 <template>
   <div ref="actionsWrap" class="conservation-topbar-actions">
+    <div class="dashboard-language"><LanguageSwitcher /></div>
     <div class="notification-wrap">
       <button
         class="notification-button"
         type="button"
-        aria-label="Notifications"
+        :aria-label="t('dashboardNav.notifications')"
         :aria-expanded="notificationsOpen"
         aria-controls="conservation-notifications"
         @click="toggleNotifications"
@@ -77,16 +85,16 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
         v-if="notificationsOpen"
         id="conservation-notifications"
         class="notification-menu"
-        aria-label="Conservation Officer notifications"
+        :aria-label="t('dashboardNav.conservationNotifications')"
       >
         <header>
-          <strong>Notifications</strong>
+          <strong>{{ t('dashboardNav.notifications') }}</strong>
           <button
             type="button"
             :disabled="unreadConservationNotificationCount === 0"
             @click="markAllConservationNotificationsRead"
           >
-            Mark all as read
+            {{ t('dashboardNav.markAllRead') }}
           </button>
         </header>
         <div v-if="conservationNotifications.length" class="notification-list">
@@ -112,15 +120,15 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
               }}
             </span>
             <span class="notification-copy">
-              <strong>{{ notification.title }}</strong>
-              <span>{{ notification.message }}</span>
-              <time>{{ notification.time }}</time>
+              <strong>{{ notificationText(notification, 'title') }}</strong>
+              <span>{{ notificationText(notification, 'message') }}</span>
+              <time>{{ notificationText(notification, 'time') }}</time>
             </span>
             <i v-if="!notification.read" aria-hidden="true"></i>
           </button>
         </div>
-        <p v-else class="notification-empty">No notifications.</p>
-        <footer>View relevant notifications by clicking an item.</footer>
+        <p v-else class="notification-empty">{{ t('dashboardNav.noNotifications') }}</p>
+        <footer>{{ t('dashboardNav.notificationHint') }}</footer>
       </section>
     </div>
 
@@ -135,13 +143,17 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
         <span class="avatar">O</span>
         <span class="profile-copy">
           <strong>{{ conservationProfile.fullName }}</strong>
-          <small>{{ conservationProfile.role }}</small>
+          <small>{{ t('dashboardNav.conservationOfficer') }}</small>
         </span>
         <span class="chevron" aria-hidden="true">⌄</span>
       </button>
       <div v-if="profileOpen" class="profile-menu" role="menu">
-        <button type="button" role="menuitem" @click="openProfileSettings">Profile settings</button>
-        <button type="button" role="menuitem" @click="signOut">Sign out</button>
+        <button type="button" role="menuitem" @click="openProfileSettings">
+          {{ t('dashboardNav.profileSettings') }}
+        </button>
+        <button type="button" role="menuitem" @click="signOut">
+          {{ t('dashboardNav.signOut') }}
+        </button>
       </div>
     </div>
   </div>
@@ -152,6 +164,11 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   display: flex;
   align-items: center;
   gap: 13px;
+}
+.dashboard-language :deep(.language-trigger) {
+  min-height: 39px;
+  border-radius: 11px;
+  background: #fff;
 }
 .notification-wrap,
 .profile-wrap {
@@ -437,6 +454,21 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   }
 }
 @media (max-width: 620px) {
+  .dashboard-language :deep(.language-switcher),
+  .dashboard-language :deep(.language-trigger) {
+    width: auto;
+  }
+  .dashboard-language :deep(.language-trigger) {
+    min-height: 35px;
+    padding-inline: 9px;
+    color: #3f7777;
+  }
+  .dashboard-language :deep(.language-full) {
+    display: none;
+  }
+  .dashboard-language :deep(.language-short) {
+    display: inline;
+  }
   .profile-copy,
   .chevron {
     display: none;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AdminPageShell from '../components/AdminPageShell.vue'
 import { isCurrentAdminAccount } from '../data/adminProfile'
 import { sendTemporaryPasswordEmail } from '../services/accountEmail'
@@ -27,6 +28,18 @@ interface UserRecord {
   status: UserStatus
   lastLogin: string
   initials: string
+}
+
+const { t } = useI18n()
+const roleOptions: UserRole[] = ['Administrator', 'Conservation Officer', 'Botanist', 'Visitor']
+const statusOptions: UserStatus[] = ['Active', 'Inactive', 'Suspended']
+const roleLabel = (role: UserRole) => t(`adminUsers.roles.${role.replaceAll(' ', '')}`)
+const statusLabel = (status: UserStatus) => t(`adminUsers.statuses.${status.toLowerCase()}`)
+const lastLoginLabel = (value: string) => {
+  if (value.startsWith('Today,')) return value.replace('Today,', `${t('adminUsers.today')},`)
+  if (value.startsWith('Yesterday,'))
+    return value.replace('Yesterday,', `${t('adminUsers.yesterday')},`)
+  return value
 }
 
 const addUserOpen = ref(false)
@@ -491,155 +504,156 @@ const clearFilters = () => {
 <template>
   <AdminPageShell title="User Management" eyebrow="ADMINISTRATION" active="User Management">
     <div class="content">
-        <section class="page-intro">
+      <section class="page-intro">
+        <div>
+          <h2>Manage system users</h2>
+          <p>View accounts, assign access roles, and manage user status.</p>
+        </div>
+        <button class="primary-button" type="button" @click="openAddUser">
+          <span>＋</span> Add New User
+        </button>
+      </section>
+
+      <section class="stats-grid" aria-label="User summary">
+        <article>
+          <span class="stat-icon">♙</span>
           <div>
-            <h2>Manage system users</h2>
-            <p>View accounts, assign access roles, and manage user status.</p>
+            <p>Total Users</p>
+            <strong>{{ totalUserCount }}</strong
+            ><small>{{ t('adminUsers.allRegisteredAccounts') }}</small>
           </div>
-          <button class="primary-button" type="button" @click="openAddUser">
-            <span>＋</span> Add New User
+        </article>
+        <article>
+          <span class="stat-icon active-icon">✓</span>
+          <div>
+            <p>Active Users</p>
+            <strong>{{ activeUserCount }}</strong
+            ><small>{{ t('adminUsers.currentlyActiveAccounts') }}</small>
+          </div>
+        </article>
+        <article>
+          <span class="stat-icon officer-icon">◇</span>
+          <div>
+            <p>Staff Accounts</p>
+            <strong>{{ staffCount }}</strong
+            ><small>{{ t('adminUsers.staffDescription') }}</small>
+          </div>
+        </article>
+        <article>
+          <span class="stat-icon botanist-icon">♧</span>
+          <div>
+            <p>{{ t('adminUsers.visitors') }}</p>
+            <strong>{{ visitorCount }}</strong
+            ><small>{{ t('adminUsers.selfRegisteredAccounts') }}</small>
+          </div>
+        </article>
+      </section>
+
+      <section class="users-panel">
+        <div class="panel-heading">
+          <div>
+            <p>{{ t('adminUsers.accountDirectory') }}</p>
+            <h2>All Users</h2>
+          </div>
+          <span>{{ filteredUsers.length }} records shown</span>
+        </div>
+
+        <div class="filters">
+          <label class="search-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="m15.5 15.5 5 5" />
+            </svg>
+            <span class="sr-only">{{ t('adminUsers.searchUsers') }}</span>
+            <input
+              v-model="search"
+              type="search"
+              :placeholder="t('adminUsers.searchPlaceholder')"
+            />
+          </label>
+          <select v-model="roleFilter" :aria-label="t('adminUsers.filterByRole')">
+            <option value="All roles">{{ t('adminUsers.allRoles') }}</option>
+            <option v-for="role in roleOptions" :key="role" :value="role">
+              {{ roleLabel(role) }}
+            </option>
+          </select>
+          <select v-model="statusFilter" :aria-label="t('adminUsers.filterByStatus')">
+            <option value="All statuses">{{ t('common.allStatuses') }}</option>
+            <option v-for="status in statusOptions" :key="status" :value="status">
+              {{ statusLabel(status) }}
+            </option>
+          </select>
+          <button class="clear-button" type="button" @click="clearFilters">
+            {{ t('adminUsers.clear') }}
           </button>
-        </section>
+        </div>
 
-        <section class="stats-grid" aria-label="User summary">
-          <article>
-            <span class="stat-icon">♙</span>
-            <div>
-              <p>Total Users</p>
-              <strong>{{ totalUserCount }}</strong
-              ><small>All registered accounts</small>
-            </div>
-          </article>
-          <article>
-            <span class="stat-icon active-icon">✓</span>
-            <div>
-              <p>Active Users</p>
-              <strong>{{ activeUserCount }}</strong
-              ><small>Currently active accounts</small>
-            </div>
-          </article>
-          <article>
-            <span class="stat-icon officer-icon">◇</span>
-            <div>
-              <p>Staff Accounts</p>
-              <strong>{{ staffCount }}</strong
-              ><small>Administrators, officers and botanists</small>
-            </div>
-          </article>
-          <article>
-            <span class="stat-icon botanist-icon">♧</span>
-            <div>
-              <p>Visitors</p>
-              <strong>{{ visitorCount }}</strong
-              ><small>Self-registered accounts</small>
-            </div>
-          </article>
-        </section>
-
-        <section class="users-panel">
-          <div class="panel-heading">
-            <div>
-              <p>ACCOUNT DIRECTORY</p>
-              <h2>All Users</h2>
-            </div>
-            <span>{{ filteredUsers.length }} records shown</span>
-          </div>
-
-          <div class="filters">
-            <label class="search-box">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="10.5" cy="10.5" r="6.5" />
-                <path d="m15.5 15.5 5 5" />
-              </svg>
-              <span class="sr-only">Search users</span>
-              <input
-                v-model="search"
-                type="search"
-                placeholder="Search name, email, ID or role..."
-              />
-            </label>
-            <select v-model="roleFilter" aria-label="Filter by role">
-              <option>All roles</option>
-              <option>Administrator</option>
-              <option>Conservation Officer</option>
-              <option>Botanist</option>
-              <option>Visitor</option>
-            </select>
-            <select v-model="statusFilter" aria-label="Filter by status">
-              <option>All statuses</option>
-              <option>Active</option>
-              <option>Inactive</option>
-              <option>Suspended</option>
-            </select>
-            <button class="clear-button" type="button" @click="clearFilters">Clear</button>
-          </div>
-
-          <div v-if="filteredUsers.length" class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>User ID</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Last Login</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="user in filteredUsers" :key="user.id">
-                  <td>
-                    <div class="user-cell">
-                      <span>{{ user.initials }}</span>
-                      <div>
-                        <strong>{{ user.name }}</strong>
-                        <small>{{ user.email }}</small>
-                      </div>
+        <div v-if="filteredUsers.length" class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>User ID</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>{{ t('adminUsers.lastLogin') }}</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="user in filteredUsers" :key="user.id">
+                <td>
+                  <div class="user-cell">
+                    <span>{{ user.initials }}</span>
+                    <div>
+                      <strong>{{ user.name }}</strong>
+                      <small>{{ user.email }}</small>
                     </div>
-                  </td>
-                  <td>
-                    <code>{{ user.id }}</code>
-                  </td>
-                  <td>
-                    <span class="role-badge" :class="user.role.toLowerCase().replace(' ', '-')">{{
-                      user.role
-                    }}</span>
-                  </td>
-                  <td>
-                    <span class="status-badge" :class="user.status.toLowerCase()"
-                      ><i></i>{{ user.status }}</span
+                  </div>
+                </td>
+                <td>
+                  <code>{{ user.id }}</code>
+                </td>
+                <td>
+                  <span class="role-badge" :class="user.role.toLowerCase().replace(' ', '-')">{{
+                    user.role
+                  }}</span>
+                </td>
+                <td>
+                  <span class="status-badge" :class="user.status.toLowerCase()"
+                    ><i></i>{{ user.status }}</span
+                  >
+                </td>
+                <td>{{ lastLoginLabel(user.lastLogin) }}</td>
+                <td>
+                  <div class="row-actions">
+                    <button type="button" title="View user" @click="openUserAction('view', user)">
+                      View
+                    </button>
+                    <button type="button" title="Edit user" @click="openUserAction('edit', user)">
+                      Edit
+                    </button>
+                    <button
+                      class="delete-action"
+                      type="button"
+                      title="Delete user"
+                      @click="openUserAction('delete', user)"
                     >
-                  </td>
-                  <td>{{ user.lastLogin }}</td>
-                  <td>
-                    <div class="row-actions">
-                      <button type="button" title="View user" @click="openUserAction('view', user)">
-                        View
-                      </button>
-                      <button type="button" title="Edit user" @click="openUserAction('edit', user)">
-                        Edit
-                      </button>
-                      <button
-                        class="delete-action"
-                        type="button"
-                        title="Delete user"
-                        @click="openUserAction('delete', user)"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="empty-state">
-            <span>♙</span>
-            <h3>No users found</h3>
-            <p>Try changing or clearing your filters.</p>
-            <button type="button" @click="clearFilters">Clear filters</button>
-          </div>
-        </section>
+                      Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="empty-state">
+          <span>♙</span>
+          <h3>No users found</h3>
+          <p>Try changing or clearing your filters.</p>
+          <button type="button" @click="clearFilters">Clear filters</button>
+        </div>
+      </section>
     </div>
 
     <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">
@@ -1602,5 +1616,4 @@ code {
     grid-template-columns: 1fr;
   }
 }
-
 </style>

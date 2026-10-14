@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useConservationText } from '../../composables/useConservationText'
+const { ct } = useConservationText()
 import { Chart, registerables } from 'chart.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
@@ -74,7 +76,7 @@ defineExpose({ toDataUrl })
         {{ description }}
       </canvas>
     </div>
-    <p v-else>No data available for this chart with the selected filters.</p>
+    <p v-else>{{ ct('No data available for this chart with the selected filters.') }}</p>
   </section>
 </template>
 
