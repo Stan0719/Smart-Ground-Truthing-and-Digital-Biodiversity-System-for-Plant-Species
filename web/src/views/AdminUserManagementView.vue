@@ -1,10 +1,6 @@
 <script setup lang="ts">
-<<<<<<< HEAD
-import { computed, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
-=======
 import { computed, ref, onMounted } from 'vue'
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
+import { useI18n } from 'vue-i18n'
 import AdminPageShell from '../components/AdminPageShell.vue'
 import { api, currentUser, type AuthUser } from '../services/auth'
 type PrototypeRole = 'Conservation Officer' | 'Botanist'
@@ -67,6 +63,7 @@ const setStatus = async (user: UserRecord, event: Event) => {
     target.disabled = false
   }
 }
+
 const createdUser = ref<PrototypeUser | null>(null)
 const actionMode = ref<'view' | 'edit' | 'delete' | null>(null)
 const selectedUser = ref<UserRecord | null>(null)
@@ -355,7 +352,6 @@ const clearFilters = () => {
           </button>
         </div>
 
-<<<<<<< HEAD
         <div v-if="filteredUsers.length" class="table-scroll">
           <table>
             <thead>
@@ -422,155 +418,6 @@ const clearFilters = () => {
           <button type="button" @click="clearFilters">Clear filters</button>
         </div>
       </section>
-=======
-        <section class="stats-grid" aria-label="User summary">
-          <article>
-            <span class="stat-icon">♙</span>
-            <div>
-              <p>Total Users</p>
-              <strong>{{ totalUserCount }}</strong
-              ><small>All registered accounts</small>
-            </div>
-          </article>
-          <article>
-            <span class="stat-icon active-icon">✓</span>
-            <div>
-              <p>Active Users</p>
-              <strong>{{ activeUserCount }}</strong
-              ><small>Currently active accounts</small>
-            </div>
-          </article>
-          <article>
-            <span class="stat-icon officer-icon">◇</span>
-            <div>
-              <p>Staff Accounts</p>
-              <strong>{{ staffCount }}</strong
-              ><small>Administrators, officers and botanists</small>
-            </div>
-          </article>
-          <article>
-            <span class="stat-icon botanist-icon">♧</span>
-            <div>
-              <p>Visitors</p>
-              <strong>{{ visitorCount }}</strong
-              ><small>Self-registered accounts</small>
-            </div>
-          </article>
-        </section>
-
-        <section class="users-panel">
-          <div class="panel-heading">
-            <div>
-              <p>ACCOUNT DIRECTORY</p>
-              <h2>All Users</h2>
-            </div>
-            <span>{{ filteredUsers.length }} records shown</span>
-          </div>
-
-          <div class="filters">
-            <label class="search-box">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="10.5" cy="10.5" r="6.5" />
-                <path d="m15.5 15.5 5 5" />
-              </svg>
-              <span class="sr-only">Search users</span>
-              <input
-                v-model="search"
-                type="search"
-                placeholder="Search name, email, ID or role..."
-              />
-            </label>
-            <select v-model="roleFilter" aria-label="Filter by role">
-              <option>All roles</option>
-              <option>Administrator</option>
-              <option>Conservation Officer</option>
-              <option>Botanist</option>
-              <option>Visitor</option>
-            </select>
-            <select v-model="statusFilter" aria-label="Filter by status">
-              <option>All statuses</option>
-              <option>Active</option>
-              <option>Inactive</option>
-              <option>Suspended</option>
-            </select>
-            <button class="clear-button" type="button" @click="clearFilters">Clear</button>
-          </div>
-
-          <div v-if="filteredUsers.length" class="table-scroll">
-            <p v-if="loadError" role="alert">{{ loadError }}</p>
-            <table>
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>User ID</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Last Login</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="user in filteredUsers" :key="user.id">
-                  <td>
-                    <div class="user-cell">
-                      <span>{{ user.initials }}</span>
-                      <div>
-                        <strong>{{ user.name }}</strong>
-                        <small>{{ user.email }}</small>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <code>{{ user.id }}</code>
-                  </td>
-                  <td>
-                    <span class="role-badge" :class="user.role.toLowerCase().replace(' ', '-')">{{
-                      user.role
-                    }}</span>
-                  </td>
-                  <td>
-                    <select
-                      :value="user.status"
-                      :aria-label="`Status for ${user.name}`"
-                      @change="setStatus(user, $event)"
-                    >
-                      <option>Active</option>
-                      <option>Inactive</option>
-                      <option>Suspended</option>
-                    </select>
-                  </td>
-                  <td>{{ user.lastLogin }}</td>
-                  <td>
-                    <div class="row-actions">
-                      <button type="button" title="View user" @click="openUserAction('view', user)">
-                        View
-                      </button>
-                      <button type="button" title="Edit user" @click="openUserAction('edit', user)">
-                        Edit
-                      </button>
-                      <button
-                        class="delete-action"
-                        type="button"
-                        title="Delete user"
-                        @click="openUserAction('delete', user)"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div v-else class="empty-state">
-            <p v-if="loadError" role="alert">{{ loadError }}</p>
-            <span>♙</span>
-            <h3>No users found</h3>
-            <p>Try changing or clearing your filters.</p>
-            <button type="button" @click="clearFilters">Clear filters</button>
-          </div>
-        </section>
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
     </div>
 
     <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">

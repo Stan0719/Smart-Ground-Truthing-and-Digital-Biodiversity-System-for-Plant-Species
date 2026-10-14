@@ -4,13 +4,8 @@ import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LoginModal from './LoginModal.vue'
-<<<<<<< HEAD
 import LanguageSwitcher from './LanguageSwitcher.vue'
-import { PENDING_PASSWORD_CHANGE_KEY } from '../data/prototypeAuth'
-import { usePrototypeSession, type PrototypeSessionRole } from '../composables/usePrototypeSession'
-=======
 import { currentUser, logout as serverLogout } from '../services/auth'
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
 
 const route = useRoute()
 const router = useRouter()
@@ -238,7 +233,6 @@ const logout = async () => {
       </RouterLink>
 
       <!-- Desktop Navigation -->
-<<<<<<< HEAD
       <nav class="desktop-nav" :aria-label="t('nav.main')">
         <div
           ref="navTrack"
@@ -249,11 +243,6 @@ const logout = async () => {
             :style="navThumbStyle"
             aria-hidden="true"
           ></div>
-=======
-      <nav class="desktop-nav" aria-label="Main navigation">
-        <div ref="navTrack" class="nav-track">
-          <div class="nav-thumb" :style="navThumbStyle" aria-hidden="true"></div>
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
 
           <RouterLink
             v-for="(item, index) in navItems"
@@ -291,12 +280,7 @@ const logout = async () => {
            ========================= -->
 
       <div class="auth-area">
-<<<<<<< HEAD
-
         <LanguageSwitcher />
-
-=======
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
         <!-- Logged Out -->
 
         <button
@@ -320,12 +304,7 @@ const logout = async () => {
             />
           </svg>
 
-<<<<<<< HEAD
           <span class="login-button-text">{{ t('nav.login') }}</span>
-
-=======
-          <span class="login-button-text">Login</span>
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
         </button>
 
         <!-- Logged In -->
@@ -353,12 +332,9 @@ const logout = async () => {
             />
           </svg>
 
-<<<<<<< HEAD
           {{ t('nav.logout') }}
-
-=======
           Logout
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
+
         </button>
       </div>
 
@@ -492,12 +468,7 @@ const logout = async () => {
             />
           </svg>
 
-<<<<<<< HEAD
           {{ t('nav.login') }}
-
-=======
-          Login
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
         </button>
         <div v-else class="mobile-authenticated">
           <div class="mobile-user">
@@ -560,7 +531,6 @@ const logout = async () => {
         </svg>
       </div>
 
-<<<<<<< HEAD
       <h2>
         {{ t('auth.logoutTitle') }}
       </h2>
@@ -568,16 +538,12 @@ const logout = async () => {
       <p>
         {{ t('auth.logoutPrompt') }}
       </p>
-=======
       <h2>Log out?</h2>
 
       <p>Are you sure you want to log out of your account?</p>
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
 
       <div class="modal-actions">
-        <button class="cancel-button" type="button" @click="closeLogoutModal">Cancel</button>
 
-<<<<<<< HEAD
         <button
           class="cancel-button"
           type="button"
@@ -594,9 +560,7 @@ const logout = async () => {
           {{ t('auth.confirmLogout') }}
         </button>
 
-=======
         <button class="confirm-logout-button" type="button" @click="logout">Log Out</button>
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
       </div>
     </div>
   </div>

@@ -1287,6 +1287,25 @@
       }
     }
   },
+  "loginModal": {
+    "title": "Welcome Back",
+    "intro": "Sign in to access the Niah Biodiversity System.",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot password?",
+    "signingIn": "Signing in…",
+    "submit": "Login",
+    "close": "Close login",
+    "mobileOnly": "This account is intended for the Niah mobile application.",
+    "errors": {
+      "credentials": "Unable to sign in. Check your email and password or contact the administrator.",
+      "network": "Unable to reach the server. Please try again.",
+      "unavailable": "Service unavailable. Please try again.",
+      "rejected": "Request rejected. Please refresh the page and try again.",
+      "invalid": "Invalid request. Please check your details and try again.",
+      "generic": "Unable to sign in. Please try again."
+    }
+  },
   "auth": {
     "logoutTitle": "Log out?",
     "logoutPrompt": "Are you sure you want to log out of your account?",

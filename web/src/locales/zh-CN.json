@@ -1373,6 +1373,25 @@
       }
     }
   },
+  "loginModal": {
+    "title": "欢迎回来",
+    "intro": "登录以访问尼亚生物多样性系统。",
+    "email": "电子邮箱",
+    "password": "密码",
+    "forgotPassword": "忘记密码？",
+    "signingIn": "正在登录…",
+    "submit": "登录",
+    "close": "关闭登录窗口",
+    "mobileOnly": "此账户用于尼亚移动应用。",
+    "errors": {
+      "credentials": "无法登录。请检查邮箱和密码，或联系管理员。",
+      "network": "无法连接服务器。请重试。",
+      "unavailable": "服务暂不可用。请重试。",
+      "rejected": "请求被拒绝。请刷新页面后重试。",
+      "invalid": "请求无效。请检查您的信息后重试。",
+      "generic": "无法登录。请重试。"
+    }
+  },
   "auth": {
     "logoutTitle": "退出登录？",
     "logoutPrompt": "您确定要退出当前账户吗？",

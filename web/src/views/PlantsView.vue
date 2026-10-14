@@ -4,10 +4,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
-import {
-plants as prototypePlants,
-  type Plant,
-} from '../data/plants'
+import { plants as prototypePlants, type Plant } from '../data/plants'
 
 const species = ref<Plant[]>([])
 const isLoading = ref(true)
@@ -22,7 +19,6 @@ const { t } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
 const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search : '')
 
-<<<<<<< HEAD
 const selectSort = (option: typeof sortOption.value) => {
   sortOption.value = option
   sortMenuOpen.value = false
@@ -31,7 +27,8 @@ const selectSort = (option: typeof sortOption.value) => {
 const clearFilters = () => {
   searchQuery.value = ''
   activeCategory.value = 'All'
-=======
+}
+
 interface ApiSpecies {
   species_id: string | number
   scientific_name: string
@@ -59,7 +56,6 @@ const loadSpecies = async () => {
 
     const result: SpeciesResponse = await response.json()
 
-    
     const apiPlants: Plant[] = result.species.map((item): Plant => {
       const name = item.common_name || item.scientific_name
       const scientificName = item.scientific_name || 'Unknown species'
@@ -93,18 +89,13 @@ const loadSpecies = async () => {
 
     species.value = [
       ...prototypePlants,
-      ...apiPlants.filter(
-        (plant) => !prototypeNames.has(plant.scientificName.toLowerCase()),
-      ),
+      ...apiPlants.filter((plant) => !prototypeNames.has(plant.scientificName.toLowerCase())),
     ]
-
   } catch (error) {
-    loadError.value =
-      error instanceof Error ? error.message : 'An unexpected error occurred.'
+    loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
   } finally {
     isLoading.value = false
   }
->>>>>>> 0d04ff741e9049fb4faa4248263f3129449a7df1
 }
 
 const canViewConservationStatus = computed(
@@ -285,9 +276,7 @@ const filteredSpecies = computed(() => {
           </div>
         </div>
 
-        <p v-if="isLoading" role="status">
-          Loading plant species...
-        </p>
+        <p v-if="isLoading" role="status">Loading plant species...</p>
 
         <p v-else-if="loadError" role="alert">
           {{ loadError }}

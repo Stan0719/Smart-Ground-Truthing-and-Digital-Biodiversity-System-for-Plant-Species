@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api, type AuthUser } from '../services/auth'
 import { useRouter } from 'vue-router' // Navigate to the forgot-password page
 const router = useRouter() //forgot password
+const { t } = useI18n({ useScope: 'global' })
+const loginErrorKeys: Record<string, string> = {
+  'Unable to sign in. Check your email and password or contact the administrator.': 'credentials',
+  'Unable to reach the server. Please try again.': 'network',
+  'Service unavailable. Please try again.': 'unavailable',
+  'Request rejected.': 'rejected',
+  'Invalid request.': 'invalid',
+}
 
 defineProps<{
   visible: boolean
@@ -54,7 +63,7 @@ const handleLogin = async () => {
       return
     }
     if (user.role === 'Botanist' || user.role === 'Visitor') {
-      platformMessage.value = 'This account is intended for the Niah mobile application.'
+      platformMessage.value = 'loginModal.mobileOnly'
       return
     }
     emit('login', {
@@ -65,8 +74,8 @@ const handleLogin = async () => {
     emit('close')
     email.value = ''
   } catch (error) {
-    loginError.value =
-      error instanceof Error ? error.message : 'Unable to sign in. Please try again.'
+    const message = error instanceof Error ? error.message : ''
+    loginError.value = `loginModal.errors.${loginErrorKeys[message] || 'generic'}`
   } finally {
     password.value = ''
     submitting.value = false
@@ -78,7 +87,12 @@ const handleLogin = async () => {
   <Transition name="modal-fade">
     <div v-if="visible" class="modal-backdrop" @click.self="closeModal">
       <div class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
-        <button type="button" class="close-button" aria-label="Close login" @click="closeModal">
+        <button
+          type="button"
+          class="close-button"
+          :aria-label="t('loginModal.close')"
+          @click="closeModal"
+        >
           &times;
         </button>
 
@@ -91,8 +105,8 @@ const handleLogin = async () => {
             </svg>
           </div>
 
-          <h2 id="login-title">Welcome Back</h2>
-          <p>Sign in to access the Niah Biodiversity System.</p>
+          <h2 id="login-title">{{ t('loginModal.title') }}</h2>
+          <p>{{ t('loginModal.intro') }}</p>
         </div>
 
         <form class="login-form" @submit.prevent="handleLogin">
@@ -107,7 +121,7 @@ const handleLogin = async () => {
               required
             />
             <div class="label-cut label-cut-email"></div>
-            <label class="floating-label" for="email">Email</label>
+            <label class="floating-label" for="email">{{ t('loginModal.email') }}</label>
           </div>
 
           <div class="input-container">
@@ -121,7 +135,7 @@ const handleLogin = async () => {
               required
             />
             <div class="label-cut label-cut-password"></div>
-            <label class="floating-label" for="password">Password</label>
+            <label class="floating-label" for="password">{{ t('loginModal.password') }}</label>
           </div>
 
           <!--
@@ -135,17 +149,17 @@ const handleLogin = async () => {
 
           <div class="forgot-password-row">
             <button type="button" class="forgot-password-button" @click="openForgotPassword">
-              Forgot password?
+              {{ t('loginModal.forgotPassword') }}
             </button>
           </div>
 
           <p v-if="loginError" class="login-error">
-            {{ loginError }}
+            {{ t(loginError) }}
           </p>
-          <p v-if="platformMessage" class="platform-message">{{ platformMessage }}</p>
+          <p v-if="platformMessage" class="platform-message">{{ t(platformMessage) }}</p>
 
           <button type="submit" class="login-submit" :disabled="submitting">
-            {{ submitting ? 'Signing in…' : 'Login' }}
+            {{ t(submitting ? 'loginModal.signingIn' : 'loginModal.submit') }}
           </button>
         </form>
       </div>

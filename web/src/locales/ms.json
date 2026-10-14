@@ -1413,6 +1413,25 @@
       }
     }
   },
+  "loginModal": {
+    "title": "Selamat Kembali",
+    "intro": "Log masuk untuk mengakses Sistem Biodiversiti Niah.",
+    "email": "E-mel",
+    "password": "Kata Laluan",
+    "forgotPassword": "Lupa kata laluan?",
+    "signingIn": "Sedang log masuk…",
+    "submit": "Log Masuk",
+    "close": "Tutup log masuk",
+    "mobileOnly": "Akaun ini digunakan untuk aplikasi mudah alih Niah.",
+    "errors": {
+      "credentials": "Tidak dapat log masuk. Semak e-mel dan kata laluan anda atau hubungi pentadbir.",
+      "network": "Tidak dapat menghubungi pelayan. Sila cuba lagi.",
+      "unavailable": "Perkhidmatan tidak tersedia. Sila cuba lagi.",
+      "rejected": "Permintaan ditolak. Sila muat semula halaman dan cuba lagi.",
+      "invalid": "Permintaan tidak sah. Sila semak maklumat anda dan cuba lagi.",
+      "generic": "Tidak dapat log masuk. Sila cuba lagi."
+    }
+  },
   "auth": {
     "logoutTitle": "Log keluar?",
     "logoutPrompt": "Adakah anda pasti mahu log keluar daripada akaun anda?",
