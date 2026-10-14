@@ -65,13 +65,6 @@ const summaryCards = [
   { title: 'activeSensors', value: '25', note: 'onlinePercent', icon: '✓', tone: 'success' },
   { title: 'offlineSensors', value: '2', note: 'requiresAttention', icon: '×', tone: 'neutral' },
   { title: 'threatAlerts', value: '3', note: 'needReview', icon: '!', tone: 'danger' },
-
-  { title: 'Total Users', value: '18', note: '3 active roles', icon: '♙', tone: 'green' },
-  { title: 'Plant Records', value: 'Loading...', note: 'Digital collection', icon: '♧', tone: 'green' },
-  { title: 'IoT Sensors', value: '27', note: 'Across 3 zones', icon: '⌁', tone: 'blue' },
-  { title: 'Active Sensors', value: '25', note: '92.6% online', icon: '✓', tone: 'success' },
-  { title: 'Offline Sensors', value: '2', note: 'Requires attention', icon: '×', tone: 'neutral' },
-  { title: 'Threat Alerts', value: '3', note: '2 need review', icon: '!', tone: 'danger' },
 ]
 
 const threatAlerts = [
