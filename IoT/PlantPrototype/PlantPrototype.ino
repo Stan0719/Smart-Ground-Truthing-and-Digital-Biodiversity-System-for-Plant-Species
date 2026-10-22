@@ -13,7 +13,6 @@
 
 #define SOIL_PIN 35
 #define RAIN_PIN 34
-#define SOUND_PIN 32
 
 // ==================== SENSOR OBJECTS ====================
 
@@ -24,28 +23,24 @@ bool mpuReady = false;
 
 // ==================== SAMPLING INTERVALS ====================
 
-const unsigned long SOIL_SAMPLE_INTERVAL = 30000;
-const unsigned long RAIN_SAMPLE_INTERVAL = 2000;
-const unsigned long DHT_SAMPLE_INTERVAL = 600000;
-const unsigned long SOUND_SAMPLE_INTERVAL = 2000;
+const unsigned long SOIL_SAMPLE_INTERVAL = 1000;
+const unsigned long RAIN_SAMPLE_INTERVAL = 1000;
+const unsigned long DHT_SAMPLE_INTERVAL = 1000;
 
 unsigned long lastSoilSample = 0;
 unsigned long lastRainSample = 0;
 unsigned long lastDHTSample = 0;
-unsigned long lastSoundSample = 0;
 
 // ==================== SENSOR READINGS ====================
 
 int soilValue = 0;
 int rainValue = 0;
-int soundValue = 0;
 
 float temperature = NAN;
 float humidity = NAN;
 
 bool soilHasReading = false;
 bool rainHasReading = false;
-bool soundHasReading = false;
 bool dhtHasReading = false;
 
 // ==================== SENSOR THRESHOLDS ====================
@@ -78,7 +73,7 @@ const unsigned long QUIET_TIME = 1500;
 // ==================== DASHBOARD ====================
 
 unsigned long lastDashboardRefresh = 0;
-const unsigned long DASHBOARD_INTERVAL = 500;
+const unsigned long DASHBOARD_INTERVAL = 1000;
 
 // ==================== SENSOR CLASSIFICATIONS ====================
 
@@ -168,22 +163,11 @@ void displayDashboard() {
 
     Serial.println();
 
-    // SOUND SENSOR
-    Serial.println("[ SOUND SENSOR ]");
-
-    if (soundHasReading) {
-        Serial.printf("Reading      : %d\n", soundValue);
-    } else {
-        Serial.println("Reading      : Waiting for first sample");
-    }
-
-    Serial.println();
-
     // SAMPLING INTERVALS
     Serial.println("----------------------------------------------");
     Serial.println("Sampling intervals:");
-    Serial.println("Soil: 30 seconds | Rain: 2 seconds");
-    Serial.println("DHT11: 10 minutes | Sound: 2 seconds");
+    Serial.println("Soil: 1 second | Rain: 1 second");
+    Serial.println("DHT11: 1 second | MPU6050: Continuous");
     Serial.println("----------------------------------------------");
 }
 
@@ -208,11 +192,6 @@ void sampleDHT11() {
         humidity = newHumidity;
         dhtHasReading = true;
     }
-}
-
-void sampleSoundSensor() {
-    soundValue = analogRead(SOUND_PIN);
-    soundHasReading = true;
 }
 
 // ==================== MOVEMENT DETECTION ====================
@@ -287,7 +266,6 @@ void setup() {
 
     pinMode(SOIL_PIN, INPUT);
     pinMode(RAIN_PIN, INPUT);
-    pinMode(SOUND_PIN, INPUT);
 
     dht.begin();
 
@@ -338,14 +316,12 @@ void setup() {
     sampleSoilMoisture();
     sampleRainSensor();
     sampleDHT11();
-    sampleSoundSensor();
 
     unsigned long now = millis();
 
     lastSoilSample = now;
     lastRainSample = now;
     lastDHTSample = now;
-    lastSoundSample = now;
 
     lastDashboardRefresh = now;
 }
@@ -358,31 +334,25 @@ void loop() {
     // Continuously monitor movement.
     monitorMovement();
 
-    // Soil moisture: every 30 seconds.
+    // Soil moisture: every 1 second.
     if (now - lastSoilSample >= SOIL_SAMPLE_INTERVAL) {
         lastSoilSample = now;
         sampleSoilMoisture();
     }
 
-    // Raindrop sensor: every 2 seconds.
+    // Raindrop sensor: every 1 second.
     if (now - lastRainSample >= RAIN_SAMPLE_INTERVAL) {
         lastRainSample = now;
         sampleRainSensor();
     }
 
-    // DHT11: every 10 minutes.
+    // DHT11: every 1 second.
     if (now - lastDHTSample >= DHT_SAMPLE_INTERVAL) {
         lastDHTSample = now;
         sampleDHT11();
     }
 
-    // Sound sensor: every 2 seconds.
-    if (now - lastSoundSample >= SOUND_SAMPLE_INTERVAL) {
-        lastSoundSample = now;
-        sampleSoundSensor();
-    }
-
-    // Refresh the dashboard twice per second.
+    // Refresh the dashboard every 1 second.
     if (now - lastDashboardRefresh >= DASHBOARD_INTERVAL) {
         lastDashboardRefresh = now;
         displayDashboard();
