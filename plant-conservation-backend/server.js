@@ -53,7 +53,7 @@ app.get('/api/db-test', async (req, res) => {
       database: result.rows[0],
     });
   } catch (error) {
-    console.error('Database connection error:', error.message);
+    console.error('Database connection error:', error);
 
     res.status(500).json({
       message: 'Database connection failed.',
@@ -119,6 +119,58 @@ app.get('/api/species', async (req, res) => {
 
     res.status(500).json({
       message: 'Unable to retrieve species.',
+    });
+  }
+});
+
+// Get one plant species by ID
+app.get('/api/species/:id', async (req, res) => {
+  const speciesId = Number(req.params.id);
+
+  if (!Number.isSafeInteger(speciesId) || speciesId <= 0) {
+    return res.status(400).json({
+      message: 'Invalid species ID.'
+    });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT
+        s.species_id,
+        s.scientific_name,
+        s.common_name,
+        g.genus_name,
+        f.family_name,
+        cs.status_name AS conservation_status,
+        s.description,
+        s.registered_at
+      FROM public.species AS s
+      LEFT JOIN public.genus AS g
+        ON s.genus_id = g.genus_id
+      LEFT JOIN public.family AS f
+        ON g.family_id = f.family_id
+      LEFT JOIN public.conservation_status AS cs
+        ON s.status_id = cs.status_id
+      WHERE s.species_id = $1
+      LIMIT 1;
+    `, [speciesId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: 'Species not found.'
+      });
+    }
+
+    return res.json({
+      message: 'Species retrieved successfully!',
+      species: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Species detail query error:', error.message);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve species.'
     });
   }
 });
