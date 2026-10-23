@@ -298,6 +298,273 @@ app.post('/api/plants', async (req, res) => {
   }
 });
 
+// Get all plant records
+app.get('/api/plants', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        pr.plant_id,
+        pr.species_id,
+        pr.registered_by,
+        pr.current_status,
+        pr.registered_at,
+
+        s.scientific_name,
+        s.common_name,
+
+        g.genus_name,
+        f.family_name,
+
+        pl.location_id,
+        pl.latitude,
+        pl.longitude,
+        pl.accuracy_m,
+        pl.recorded_at AS location_recorded_at
+
+      FROM public.plant_record AS pr
+
+      LEFT JOIN public.species AS s
+        ON pr.species_id = s.species_id
+
+      LEFT JOIN public.genus AS g
+        ON s.genus_id = g.genus_id
+
+      LEFT JOIN public.family AS f
+        ON g.family_id = f.family_id
+
+      LEFT JOIN public.plant_location AS pl
+        ON pr.plant_id = pl.plant_id
+
+      ORDER BY pr.registered_at DESC;
+    `);
+
+    return res.json({
+      message: 'Plants retrieved successfully!',
+      count: result.rows.length,
+      plants: result.rows
+    });
+
+  } catch (error) {
+    console.error('Plant list query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve plants.'
+    });
+  }
+});
+
+
+// Get one plant record by ID
+app.get('/api/plants/:id', async (req, res) => {
+  const plantId = Number(req.params.id);
+
+  if (!Number.isSafeInteger(plantId) || plantId <= 0) {
+    return res.status(400).json({
+      message: 'Invalid plant ID.'
+    });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT
+        pr.plant_id,
+        pr.species_id,
+        pr.registered_by,
+        pr.current_status,
+        pr.registered_at,
+
+        s.scientific_name,
+        s.common_name,
+
+        g.genus_name,
+        f.family_name,
+
+        cs.status_name AS conservation_status,
+
+        pl.location_id,
+        pl.latitude,
+        pl.longitude,
+        pl.accuracy_m,
+        pl.recorded_at AS location_recorded_at
+
+      FROM public.plant_record AS pr
+
+      LEFT JOIN public.species AS s
+        ON pr.species_id = s.species_id
+
+      LEFT JOIN public.genus AS g
+        ON s.genus_id = g.genus_id
+
+      LEFT JOIN public.family AS f
+        ON g.family_id = f.family_id
+
+      LEFT JOIN public.conservation_status AS cs
+        ON s.status_id = cs.status_id
+
+      LEFT JOIN public.plant_location AS pl
+        ON pr.plant_id = pl.plant_id
+
+      WHERE pr.plant_id = $1
+
+      LIMIT 1;
+    `, [plantId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: 'Plant not found.'
+      });
+    }
+
+    return res.json({
+      message: 'Plant retrieved successfully!',
+      plant: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Plant detail query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve plant.'
+    });
+  }
+});
+
+// Get all plant observations
+app.get('/api/observations', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        po.observation_id,
+        po.plant_id,
+        po.recorded_by,
+        po.height_cm,
+        po.morphology,
+        po.life_stage,
+        po.health_status,
+        po.notes,
+        po.observed_at,
+        po.status,
+
+        pr.species_id,
+        s.scientific_name,
+        s.common_name,
+
+        v.verification_id,
+        v.verified_by,
+        v.verification_status,
+        v.comments AS verification_comments,
+        v.verified_at
+
+      FROM public.plant_observation AS po
+
+      LEFT JOIN public.plant_record AS pr
+        ON po.plant_id = pr.plant_id
+
+      LEFT JOIN public.species AS s
+        ON pr.species_id = s.species_id
+
+      LEFT JOIN public.verification AS v
+        ON po.observation_id = v.observation_id
+
+      ORDER BY po.observed_at DESC;
+    `);
+
+    return res.json({
+      message: 'Observations retrieved successfully!',
+      count: result.rows.length,
+      observations: result.rows
+    });
+
+  } catch (error) {
+    console.error('Observation list query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve observations.'
+    });
+  }
+});
+
+// Get one observation by ID
+app.get('/api/observations/:id', async (req, res) => {
+  const observationId = Number(req.params.id);
+
+  if (!Number.isSafeInteger(observationId) || observationId <= 0) {
+    return res.status(400).json({
+      message: 'Invalid observation ID.'
+    });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT
+        po.observation_id,
+        po.plant_id,
+        po.recorded_by,
+        po.height_cm,
+        po.morphology,
+        po.life_stage,
+        po.health_status,
+        po.notes,
+        po.observed_at,
+        po.status,
+
+        pr.species_id,
+        pr.current_status AS plant_status,
+
+        s.scientific_name,
+        s.common_name,
+
+        g.genus_name,
+        f.family_name,
+
+        v.verification_id,
+        v.verified_by,
+        v.verification_status,
+        v.comments AS verification_comments,
+        v.verified_at
+
+      FROM public.plant_observation AS po
+
+      LEFT JOIN public.plant_record AS pr
+        ON po.plant_id = pr.plant_id
+
+      LEFT JOIN public.species AS s
+        ON pr.species_id = s.species_id
+
+      LEFT JOIN public.genus AS g
+        ON s.genus_id = g.genus_id
+
+      LEFT JOIN public.family AS f
+        ON g.family_id = f.family_id
+
+      LEFT JOIN public.verification AS v
+        ON po.observation_id = v.observation_id
+
+      WHERE po.observation_id = $1
+
+      LIMIT 1;
+    `, [observationId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: 'Observation not found.'
+      });
+    }
+
+    return res.json({
+      message: 'Observation retrieved successfully!',
+      observation: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Observation detail query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve observation.'
+    });
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
