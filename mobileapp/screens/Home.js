@@ -17,8 +17,8 @@ import {
   FlatList,
 } from 'react-native';
 
-import { plants } from '../data/mockData';
 import { getSpeciesImageSource } from '../data/speciesImages';
+import { fetchSpeciesCatalog } from '../utils/plantApi';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -302,8 +302,33 @@ export default function Home({ navigation }) {
   const carouselRef = useRef(null);
 
   const [carouselIndex, setCarouselIndex] = useState(0);
+  const [species, setSpecies] = useState([]);
+  const [speciesLoading, setSpeciesLoading] = useState(true);
+  const [speciesError, setSpeciesError] = useState('');
+  const carouselSpecies = [...species, ...species];
 
-  const carouselPlants = [...plants, ...plants];
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSpecies = async () => {
+      try {
+        setSpeciesLoading(true);
+        setSpeciesError('');
+        const result = await fetchSpeciesCatalog();
+        if (isMounted) setSpecies(result);
+      } catch (error) {
+        if (isMounted) {
+          setSpeciesError(error.message || 'Unable to load species.');
+          setSpecies([]);
+        }
+      } finally {
+        if (isMounted) setSpeciesLoading(false);
+      }
+    };
+
+    loadSpecies();
+    return () => { isMounted = false; };
+  }, []);
 
 
   // ==================================================
@@ -311,13 +336,13 @@ export default function Home({ navigation }) {
   // ==================================================
 
   useEffect(() => {
-    if (!plants.length) return;
+    if (!species.length) return;
 
     const interval = setInterval(() => {
       setCarouselIndex((current) => {
         const next = current + 1;
 
-        if (next >= plants.length) {
+        if (next >= species.length) {
           return 0;
         }
 
@@ -326,7 +351,7 @@ export default function Home({ navigation }) {
     }, 4000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [species.length]);
 
 
   useEffect(() => {
@@ -344,16 +369,16 @@ export default function Home({ navigation }) {
   // ==================================================
 
   const moveCarousel = (direction) => {
-    if (!plants.length) return;
+    if (!species.length) return;
 
     setCarouselIndex((current) => {
       let next = current + direction;
 
       if (next < 0) {
-        next = plants.length - 1;
+        next = species.length - 1;
       }
 
-      if (next >= plants.length) {
+      if (next >= species.length) {
         next = 0;
       }
 
@@ -387,6 +412,8 @@ const openPlant = (plant) => {
       screen: 'SpeciesDetail',
       params: {
         slug: plant.slug,
+        speciesId: plant.id,
+        species: plant,
       },
     });
 };
@@ -1132,7 +1159,7 @@ const renderPlant = ({ item }) => {
 
             <FlatList
               ref={carouselRef}
-              data={carouselPlants}
+              data={carouselSpecies}
               renderItem={renderPlant}
               keyExtractor={(item, index) =>
                 `${item.slug}-${index}`
@@ -1152,6 +1179,16 @@ const renderPlant = ({ item }) => {
                 index,
               })}
             />
+
+            {speciesLoading && (
+              <Text style={styles.exploreDescription}>Loading species from the database...</Text>
+            )}
+            {!speciesLoading && !!speciesError && (
+              <Text style={[styles.exploreDescription, { color: '#B42318' }]}>{speciesError}</Text>
+            )}
+            {!speciesLoading && !speciesError && species.length === 0 && (
+              <Text style={styles.exploreDescription}>No species are available yet.</Text>
+            )}
 
 
             {/* Carousel Controls */}

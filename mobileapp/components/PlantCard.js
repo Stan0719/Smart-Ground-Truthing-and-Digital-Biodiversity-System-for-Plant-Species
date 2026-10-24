@@ -17,9 +17,10 @@ export default function PlantCard({
   navigation,
   user,
 }) {
-  const species = getSpeciesBySlug(
-    plant.speciesSlug
-  );
+  const species = getSpeciesBySlug(plant.speciesSlug) || {
+    name: plant.commonName,
+    genus: plant.genus,
+  };
   const imageSource = getSpeciesImageSource(species);
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const lastVerified = formatDate(plant.latestApproved?.date);
@@ -67,29 +68,29 @@ export default function PlantCard({
         {isBotanist ? (
           <>
             <Text style={styles.plantZone}>
-              {plant.location.zone}
+              {plant.location?.zone || "Not recorded"}
             </Text>
 
             <Text style={styles.plantHealth}>
-              {plant.latestApproved.healthStatus}
+              {plant.latestApproved?.healthStatus || "Not recorded"}
             </Text>
           </>
         ) : (
           <View style={styles.infoGrid}>
             <PublicFact
               label="Height"
-              value={`${plant.latestApproved.heightCm} cm`}
+              value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : "Not recorded"}
             />
             <PublicFact
               label="Life stage"
-              value={plant.latestApproved.lifeStage}
+              value={plant.latestApproved?.lifeStage || "Not recorded"}
             />
             <PublicFact
               label="Genus"
               value={species?.genus}
             />
             <PublicFact
-              label="Last verified"
+              label="Registered"
               value={lastVerified}
             />
           </View>
@@ -118,17 +119,13 @@ function PublicFact({ label, value }) {
 
 function formatDate(dateString) {
   if (!dateString) return "-";
-
-  const [year, month, day] = dateString.split("-");
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
-  const monthName = months[Number(month) - 1];
-
-  if (!year || !monthName || !day) return dateString;
-
-  return `${Number(day)} ${monthName} ${year}`;
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 

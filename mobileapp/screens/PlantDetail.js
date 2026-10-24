@@ -10,13 +10,14 @@ import {
   TouchableOpacity,
   Image,
 } from "react-native";
-import { useFocusEffect } from "expo-router/react-navigation";
+import { useFocusEffect } from "@react-navigation/native";
 
 import {
   getPlantById,
   getSpeciesBySlug,
 } from "../data/mockData";
 import { getSpeciesImageSource } from "../data/speciesImages";
+import { fetchPlantDetail } from "../utils/plantApi";
 
 
 export default function PlantDetail({
@@ -25,20 +26,60 @@ export default function PlantDetail({
   user,
 }) {
   const { plantId } = route.params || {};
-  const [, setRefreshKey] = useState(0);
+  const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const [plant, setPlant] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useFocusEffect(
     useCallback(() => {
-      setRefreshKey((current) => current + 1);
-    }, [])
-  );
+      let isMounted = true;
 
-  const plant = getPlantById(plantId);
-  const isBotanist = user?.role?.toLowerCase() === "botanist";
+      const loadPlant = async () => {
+        setLoading(true);
+        setErrorMessage("");
+
+        if (!/^\d+$/.test(String(plantId ?? ""))) {
+          if (isMounted) {
+            setPlant(getPlantById(plantId) || null);
+            setLoading(false);
+          }
+          return;
+        }
+
+        try {
+          const backendPlant = await fetchPlantDetail(plantId, {
+            includeObservations: isBotanist,
+          });
+          if (isMounted) setPlant(backendPlant);
+        } catch (error) {
+          if (isMounted) {
+            setPlant(null);
+            setErrorMessage(error.message || "Unable to load this plant record.");
+          }
+        } finally {
+          if (isMounted) setLoading(false);
+        }
+      };
+
+      loadPlant();
+      return () => {
+        isMounted = false;
+      };
+    }, [plantId, isBotanist])
+  );
 
   // =====================================================
   // PLANT NOT FOUND
   // =====================================================
+
+  if (loading && !plant) {
+    return (
+      <View style={styles.notFoundContainer}>
+        <Text style={styles.notFoundTitle}>Loading plant record...</Text>
+      </View>
+    );
+  }
 
   if (!plant) {
     return (
@@ -53,8 +94,7 @@ export default function PlantDetail({
         </Text>
 
         <Text style={styles.notFoundText}>
-          The plant record you are looking for
-          does not exist.
+          {errorMessage || "The plant record you are looking for does not exist."}
         </Text>
 
         <TouchableOpacity
@@ -75,9 +115,11 @@ export default function PlantDetail({
   // FIND SPECIES
   // =====================================================
 
-  const selectedSpecies = getSpeciesBySlug(
-    plant.speciesSlug
-  );
+  const selectedSpecies = plant.species || getSpeciesBySlug(plant.speciesSlug) || {
+    name: plant.commonName,
+    scientificName: plant.scientificName,
+    genus: plant.genus,
+  };
   const speciesImageSource = getSpeciesImageSource(selectedSpecies);
 
 
@@ -121,6 +163,14 @@ export default function PlantDetail({
 ================================================= */}
 
 <View style={styles.header}>
+  <TouchableOpacity
+    style={styles.heroBackButton}
+    onPress={() => navigation.goBack()}
+    activeOpacity={0.8}
+  >
+    <Text style={styles.heroBackText}>← Back</Text>
+  </TouchableOpacity>
+
   <View style={styles.heroGrid}>
     {/* Plant image */}
     <View style={styles.imageFrame}>
@@ -143,7 +193,7 @@ export default function PlantDetail({
     {/* Plant information */}
     <View style={styles.heroCopy}>
       <Text style={styles.headerLabel}>
-        VERIFIED PLANT RECORD
+        PLANT RECORD
       </Text>
 
       <Text style={styles.plantId}>
@@ -161,17 +211,17 @@ export default function PlantDetail({
       <View style={styles.heroBadges}>
         {isBotanist && (
           <Text style={styles.heroBadge}>
-            {plant.latestApproved.healthStatus}
+            {plant.latestApproved?.healthStatus || "Not recorded"}
           </Text>
         )}
 
         <Text style={styles.heroBadge}>
-          {plant.latestApproved.lifeStage}
+          {plant.latestApproved?.lifeStage || "Not recorded"}
         </Text>
 
         {isBotanist && (
           <Text style={styles.heroBadge}>
-            {plant.location.zone}
+            {plant.location?.zone || "Not recorded"}
           </Text>
         )}
       </View>
@@ -181,7 +231,7 @@ export default function PlantDetail({
 
 
       {/* =================================================
-          CURRENT VERIFIED RECORD
+          CURRENT PLANT RECORD
       ================================================= */}
 
       <View style={styles.section}>
@@ -223,44 +273,44 @@ export default function PlantDetail({
 
           <InfoRow
             label="Height"
-            value={`${plant.latestApproved.heightCm} cm`}
+            value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : "Not recorded"}
           />
 
           {isBotanist && (
             <InfoRow
               label="Health status"
-              value={plant.latestApproved.healthStatus}
+              value={plant.latestApproved?.healthStatus || "Not recorded"}
             />
           )}
 
           <InfoRow
             label="Life stage"
             value={
-              plant.latestApproved.lifeStage
+              plant.latestApproved?.lifeStage || "Not recorded"
             }
           />
 
           <InfoRow
             label="Genus"
-            value={selectedSpecies?.genus}
+              value={selectedSpecies?.genus || "Not recorded"}
           />
 
           <InfoRow
             label="Last verified"
-            value={formatDate(plant.latestApproved.date)}
+            value={formatDate(plant.latestApproved?.date)}
           />
 
           {isBotanist && (
             <InfoRow
               label="Location zone"
-              value={plant.location.zone}
+              value={plant.location?.zone || "Not recorded"}
             />
           )}
 
           <InfoRow
             label="Morphology"
             value={
-              plant.latestApproved.morphology
+              plant.latestApproved?.morphology || "Not recorded"
             }
           />
 
@@ -310,22 +360,22 @@ export default function PlantDetail({
 
           <InfoRow
             label="Latitude"
-            value={plant.location.latitude.toFixed(6)}
+            value={formatCoordinate(plant.location?.latitude)}
           />
 
           <InfoRow
             label="Longitude"
-            value={plant.location.longitude.toFixed(6)}
+            value={formatCoordinate(plant.location?.longitude)}
           />
 
           <InfoRow
             label="Altitude"
-            value={`${plant.location.altitudeM} m`}
+            value={plant.location?.altitudeM != null ? `${plant.location.altitudeM} m` : "Not recorded"}
           />
 
           <InfoRow
             label="GPS accuracy"
-            value={`± ${plant.location.accuracyM} m`}
+            value={plant.location?.accuracyM != null ? `± ${plant.location.accuracyM} m` : "Not recorded"}
           />
 
         </View>
@@ -342,14 +392,14 @@ export default function PlantDetail({
 
           <InfoRow
             label="QR code"
-            value={plant.qr.code}
+            value={plant.qr?.code || "Not recorded"}
           />
 
 
           <View
             style={[
               styles.qrStatus,
-              plant.qr.status === "Active"
+              plant.qr?.status === "Active"
                 ? styles.qrActive
                 : styles.qrInactive,
             ]}
@@ -358,12 +408,12 @@ export default function PlantDetail({
             <Text
               style={[
                 styles.qrStatusText,
-                plant.qr.status === "Active"
+                plant.qr?.status === "Active"
                   ? styles.qrActiveText
                   : styles.qrInactiveText,
               ]}
             >
-              {plant.qr.status}
+              {plant.qr?.status || "Not recorded"}
             </Text>
 
           </View>
@@ -382,7 +432,7 @@ export default function PlantDetail({
 
           <InfoRow
             label="Registered by"
-            value={plant.registeredBy}
+            value={plant.registeredBy ?? "Not recorded"}
           />
 
           <InfoRow
@@ -439,7 +489,7 @@ export default function PlantDetail({
 
             <InfoRow
               label="Height"
-              value={`${latestApprovedObservation.heightCm} cm`}
+              value={latestApprovedObservation.heightCm != null ? `${latestApprovedObservation.heightCm} cm` : "Not recorded"}
             />
 
             <InfoRow
@@ -613,11 +663,11 @@ function ObservationCard({ observation }) {
           </Text>
 
           <Text style={styles.observationSummary}>
-            {observation.heightCm} cm
+            {observation.heightCm != null ? `${observation.heightCm} cm` : "Height not recorded"}
             {" • "}
-            {observation.healthStatus}
+            {observation.healthStatus || "Not recorded"}
             {" • "}
-            {observation.lifeStage}
+            {observation.lifeStage || "Not recorded"}
           </Text>
 
           <Text style={styles.historyLabel}>
@@ -625,7 +675,7 @@ function ObservationCard({ observation }) {
           </Text>
 
           <Text style={styles.historyValue}>
-            {observation.morphology}
+            {observation.morphology || "Not recorded"}
           </Text>
 
           {observation.notes && (
@@ -654,42 +704,19 @@ function formatDate(dateString) {
   if (!dateString) {
     return "-";
   }
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
-  const parts = dateString.split("-");
-
-  if (parts.length !== 3) {
-    return dateString;
-  }
-
-  const year = parts[0];
-  const month = parts[1];
-  const day = parts[2];
-
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-
-  const monthIndex = Number(month) - 1;
-
-  if (
-    monthIndex < 0 ||
-    monthIndex > 11
-  ) {
-    return dateString;
-  }
-
-  return `${day} ${months[monthIndex]} ${year}`;
+function formatCoordinate(value) {
+  return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))
+    ? Number(value).toFixed(6)
+    : "Not recorded";
 }
 
 
@@ -712,9 +739,24 @@ const styles = StyleSheet.create({
   
 header: {
   paddingHorizontal: 20,
-  paddingTop: 16,
+  paddingTop: 50,
   paddingBottom: 30,
   backgroundColor: "#E8EFE3",
+},
+
+heroBackButton: {
+  alignSelf: "flex-start",
+  marginBottom: 20,
+  paddingHorizontal: 14,
+  paddingVertical: 9,
+  borderRadius: 999,
+  backgroundColor: "#FFFFFFAA",
+},
+
+heroBackText: {
+  color: "#315B49",
+  fontSize: 12,
+  fontWeight: "700",
 },
 
 heroGrid: {

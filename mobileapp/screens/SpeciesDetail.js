@@ -1,6 +1,6 @@
 // screens/SpeciesDetail.js
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 import {
   View,
@@ -13,9 +13,9 @@ import {
 
 import {
   getSpeciesBySlug,
-  getPlantsBySpecies,
 } from "../data/mockData";
 import { getSpeciesImageSource } from "../data/speciesImages";
+import { fetchPlantRecords, fetchSpeciesDetail } from "../utils/plantApi";
 
 import PlantCard from "../components/PlantCard";
 
@@ -25,11 +25,53 @@ export default function SpeciesDetail({
   user,
 }) {
 
-  const { slug } = route.params || {};
+  const { slug, speciesId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
 
-  const selectedSpecies =
-    getSpeciesBySlug(slug);
+  const [selectedSpecies, setSelectedSpecies] = useState(
+    route.params?.species || getSpeciesBySlug(slug) || null
+  );
+  const [speciesPlants, setSpeciesPlants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadSpeciesDetails = async () => {
+      try {
+        setLoading(true);
+        setErrorMessage("");
+        const [backendSpecies, records] = await Promise.all([
+          fetchSpeciesDetail(speciesId, slug),
+          fetchPlantRecords(),
+        ]);
+        const resolvedSpecies = backendSpecies || route.params?.species || getSpeciesBySlug(slug) || null;
+        const resolvedId = resolvedSpecies?.id ?? speciesId;
+        const recordsForSpecies = resolvedId != null
+          ? records.filter((record) => String(record.speciesId) === String(resolvedId))
+          : records.filter((record) => record.speciesSlug === slug);
+
+        if (isMounted) {
+          setSelectedSpecies(resolvedSpecies);
+          setSpeciesPlants(recordsForSpecies);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(error.message || "Unable to load species details.");
+          setSpeciesPlants([]);
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    loadSpeciesDetails();
+    return () => {
+      isMounted = false;
+    };
+  }, [slug, speciesId, route.params?.species]);
+
   const primaryImageSource = getSpeciesImageSource(selectedSpecies);
 
   if (!selectedSpecies) {
@@ -41,12 +83,11 @@ export default function SpeciesDetail({
         </Text>
 
         <Text style={styles.notFoundTitle}>
-          Species not found
+          {loading ? "Loading species..." : "Species not found"}
         </Text>
 
         <Text style={styles.notFoundText}>
-          The species you are looking for is not
-          in the collection.
+          {errorMessage || "The species you are looking for is not in the collection."}
         </Text>
 
         <TouchableOpacity
@@ -63,12 +104,6 @@ export default function SpeciesDetail({
       </View>
     );
   }
-
-
-  const speciesPlants =
-    getPlantsBySpecies(
-      selectedSpecies.slug
-    );
 
 
   return (
@@ -88,7 +123,7 @@ export default function SpeciesDetail({
           }
         >
           <Text style={styles.backText}>
-            ← Back to Species
+            ← Back
           </Text>
         </TouchableOpacity>
 
@@ -141,7 +176,7 @@ export default function SpeciesDetail({
           </Text>
 
           <Text style={styles.summary}>
-            {selectedSpecies.description}
+          {selectedSpecies.description || "No description has been recorded."}
           </Text>
 
         </View>
@@ -162,7 +197,7 @@ export default function SpeciesDetail({
         </Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.overview}
+          {selectedSpecies.overview || selectedSpecies.description || "No overview has been recorded."}
         </Text>
 
 
@@ -171,7 +206,7 @@ export default function SpeciesDetail({
         </Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.habitat}
+          {selectedSpecies.habitat || "Habitat information has not been recorded."}
         </Text>
 
 
@@ -193,7 +228,7 @@ export default function SpeciesDetail({
         </Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.ecologicalRole}
+          {selectedSpecies.ecologicalRole || "Ecological information has not been recorded."}
         </Text>
 
 
@@ -230,7 +265,7 @@ export default function SpeciesDetail({
         </Text>
 
 
-        {selectedSpecies.characteristics.map(
+        {(selectedSpecies.characteristics || []).map(
           (characteristic) => (
             <View
               key={characteristic}
@@ -245,6 +280,10 @@ export default function SpeciesDetail({
               </Text>
             </View>
           )
+        )}
+
+        {(!selectedSpecies.characteristics || selectedSpecies.characteristics.length === 0) && (
+          <Text style={styles.characteristicText}>No characteristics have been recorded.</Text>
         )}
 
 
@@ -307,20 +346,22 @@ export default function SpeciesDetail({
         </Text>
 
         <Text style={styles.sectionTitle}>
-          Verified plants in Niah
+          Registered plants in Niah
         </Text>
 
         <Text style={styles.sectionDescription}>
-          {speciesPlants.length} tagged plant records
-          are linked to this species in the prototype.
+          {speciesPlants.length} registered plant {speciesPlants.length === 1 ? "record is" : "records are"}
+          {" "}linked to this species.
         </Text>
+
+        {loading && <Text style={styles.sectionDescription}>Loading species records...</Text>}
+        {!!errorMessage && <Text style={{ color: "#B42318", marginBottom: 12 }}>{errorMessage}</Text>}
 
 
         {speciesPlants.length === 0 ? (
           <View style={styles.noRecords}>
             <Text>
-              No verified individual plant records
-              are linked yet.
+              {loading ? "Loading plant records..." : "No plant records are linked to this species yet."}
             </Text>
           </View>
         ) : (
@@ -344,6 +385,8 @@ export default function SpeciesDetail({
                   "Species",
                   {
                     slug: selectedSpecies.slug,
+                    speciesId: selectedSpecies.id,
+                    species: selectedSpecies,
                   }
                 )
               }

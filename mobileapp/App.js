@@ -4,15 +4,15 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   NavigationContainer,
   useNavigationContainerRef,
-} from "expo-router/react-navigation";
+} from "@react-navigation/native";
 
 import {
   createBottomTabNavigator,
-} from "expo-router/js-tabs";
+} from "@react-navigation/bottom-tabs";
 
 import {
   createNativeStackNavigator,
-} from "expo-router/native-stack";
+} from "@react-navigation/native-stack";
 
 import { ActivityIndicator, AppState, View, Text } from "react-native";
 import { faceSession } from "./utils/faceSession";
@@ -89,7 +89,7 @@ function PlantsStack({ user }) {
         }}
       >
         {(props) => (
-          <PlantsScreen
+          <SpeciesScreen
             {...props}
             user={user}
           />
@@ -117,7 +117,7 @@ function PlantsStack({ user }) {
         }}
       >
         {(props) => (
-          <SpeciesScreen
+          <PlantsScreen
             {...props}
             user={user}
           />
@@ -127,6 +127,7 @@ function PlantsStack({ user }) {
       <Stack.Screen
         name="PlantDetails"
         options={{
+          headerShown: false,
           title: "Plant Details",
           headerTintColor: theme.dark,
           headerStyle: {
@@ -166,6 +167,7 @@ function ScanStack({ user }) {
       <Stack.Screen
         name="PlantDetails"
         options={{
+          headerShown: false,
           title: "Plant Details",
 
           headerTintColor: theme.dark,
@@ -207,6 +209,7 @@ function MapStack({ user }) {
       <Stack.Screen
         name="PlantDetails"
         options={{
+          headerShown: false,
           title: "Plant Details",
 
           headerTintColor: theme.dark,
@@ -266,6 +269,7 @@ function AccountStack({
       <Stack.Screen
         name="PlantDetails"
         options={{
+          headerShown: false,
           title: "Plant Details",
           headerTintColor: theme.dark,
           headerStyle: {
