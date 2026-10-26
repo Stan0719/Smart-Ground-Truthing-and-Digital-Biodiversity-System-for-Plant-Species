@@ -7,7 +7,7 @@ import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 const props = withDefaults(
   defineProps<{
-    plant: PlantRecord
+    plant: PlantRecord & { genus?: string; detailLinkEnabled?: boolean }
     compact?: boolean
   }>(),
   { compact: false },
@@ -25,6 +25,7 @@ const canViewStaffPlantData = computed(
 )
 
 const optionLabel = (value: string) => {
+  if (!value) return '—'
   const optionKey = value.toLowerCase().replace(/\s+/g, '')
   const key = `species.records.options.${optionKey}`
   return te(key) ? t(key) : value
@@ -32,17 +33,35 @@ const optionLabel = (value: string) => {
 
 const translatedGenus = computed(() => {
   const key = `speciesContent.${props.plant.speciesSlug}.genus`
-  return te(key) ? t(key) : selectedSpecies.value?.genus || '-'
+  return te(key) ? t(key) : props.plant.genus || selectedSpecies.value?.genus || '—'
 })
 
 const formatDate = (value: string) => {
+  if (!value) return '—'
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return '—'
   const dateLocale = locale.value === 'zh-CN' ? 'zh-CN' : locale.value === 'ms' ? 'ms-MY' : 'en-MY'
   return new Intl.DateTimeFormat(dateLocale, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
-  }).format(new Date(`${value}T00:00:00`))
+  }).format(date)
 }
+
+const displayHeight = computed(() =>
+  Number.isFinite(props.plant.latestApproved.heightCm)
+    ? `${props.plant.latestApproved.heightCm} cm`
+    : '—',
+)
+const displayName = computed(() => {
+  const key = `plantNames.${props.plant.speciesSlug}`
+  return te(key) ? t(key) : props.plant.commonName
+})
+const displayScientificName = computed(() => {
+  const key = `scientificNames.${props.plant.speciesSlug}`
+  return te(key) ? t(key) : props.plant.speciesName
+})
+const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
 </script>
 
 <template>
@@ -59,8 +78,8 @@ const formatDate = (value: string) => {
 
     <div class="record-copy">
       <h3>{{ plant.plantId }}</h3>
-      <p class="record-common-name">{{ t(`plantNames.${plant.speciesSlug}`) }}</p>
-      <p class="record-species">{{ t(`scientificNames.${plant.speciesSlug}`) }}</p>
+      <p class="record-common-name">{{ displayName }}</p>
+      <p class="record-species">{{ displayScientificName }}</p>
       <dl v-if="canViewStaffPlantData">
         <div>
           <dt>{{ t('common.location') }}</dt>
@@ -68,7 +87,7 @@ const formatDate = (value: string) => {
         </div>
         <div>
           <dt>{{ t('common.height') }}</dt>
-          <dd>{{ plant.latestApproved.heightCm }} cm</dd>
+          <dd>{{ displayHeight }}</dd>
         </div>
         <div>
           <dt>{{ t('common.lifeStage') }}</dt>
@@ -82,7 +101,7 @@ const formatDate = (value: string) => {
       <dl v-else>
         <div>
           <dt>{{ t('common.height') }}</dt>
-          <dd>{{ plant.latestApproved.heightCm }} cm</dd>
+          <dd>{{ displayHeight }}</dd>
         </div>
         <div>
           <dt>{{ t('common.lifeStage') }}</dt>
@@ -99,6 +118,7 @@ const formatDate = (value: string) => {
       </dl>
 
       <RouterLink
+        v-if="showDetailLink"
         :to="`/plant/${plant.plantId}`"
         class="learn-more"
         :aria-label="t('common.viewPlantAria', { id: plant.plantId })"

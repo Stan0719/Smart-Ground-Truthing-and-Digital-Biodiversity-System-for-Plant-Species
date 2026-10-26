@@ -1,13 +1,54 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppModal from '../../components/conservation/AppModal.vue'
-import {
-  conservationStore,
-  plantFor,
-  speciesForPlant,
-  type Observation,
-} from '../../data/conservation'
+import { formatObservationId } from '../../utils/observationId'
+import { formatPlantId } from '../../utils/plantId'
+
+interface ApiObservation {
+  observation_id: string | number
+  plant_id: string | number
+  recorded_by?: string | number | null
+  height_cm?: string | number | null
+  morphology?: string | null
+  life_stage?: string | null
+  health_status?: string | null
+  notes?: string | null
+  observed_at?: string | null
+  status?: string | null
+  species_id?: string | number | null
+  scientific_name?: string | null
+  common_name?: string | null
+  verified_by?: string | number | null
+  verification_status?: string | null
+  verification_comments?: string | null
+  verified_at?: string | null
+}
+
+interface ObservationView {
+  numericId: number
+  id: string
+  plantId: string
+  recordedBy: string
+  height: string
+  growthStage: string
+  health: string
+  location: string
+  observedAt: string
+  submittedAt: string
+  status: string
+  morphology: string
+  notes: string
+  gpsAccuracy: string
+  reviewedBy?: string
+  reviewedAt?: string
+  reviewComment?: string
+  photos: string[]
+  speciesId: string
+  scientificName: string
+  commonName: string
+}
+
 const { t, te, locale } = useI18n()
 const keyFor = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '')
 const label = (value: string | undefined) => {
@@ -16,107 +57,150 @@ const label = (value: string | undefined) => {
   const shared = `dashboardValues.${keyFor(value)}`
   return te(key) ? t(key) : te(shared) ? t(shared) : value
 }
-const speciesName = (plantId: string) => {
-  const sp = speciesForPlant(plantId)
-  if (!sp) return t('conservationPages.observations.unconfirmedSpecies')
-  const key = `conservationSpecies.scientific.${sp.id}`
-  return te(key) ? t(key) : sp.scientificName
-}
-const commonName = (id: string, fallback: string) => {
-  const key = `conservationSpecies.common.${id}`
-  return te(key) ? t(key) : fallback
-}
-const recordText = (record: Observation, field: 'morphology' | 'notes' | 'reviewComment') => {
-  const value = record[field]
-  const key = `conservationPages.observations.records.${record.id}.${field}`
-  return value && te(key) && value === t(`${key}Source`) ? t(key) : value || '—'
-}
-const parseDate = (value: string) => {
-  const match = /^(\d{1,2}) ([A-Za-z]{3}) (\d{4})(?:, (\d{2}):(\d{2}))?$/.exec(value)
-  if (!match) return null
-  const month = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ].indexOf(match[2]!)
-  return month < 0
-    ? null
-    : new Date(
-        Number(match[3]),
-        month,
-        Number(match[1]),
-        Number(match[4] || 0),
-        Number(match[5] || 0),
-      )
-}
+const speciesName = (record: ObservationView) =>
+  record.scientificName || t('conservationPages.observations.unconfirmedSpecies')
+const recordText = (record: ObservationView, field: 'morphology' | 'notes' | 'reviewComment') =>
+  record[field] || '—'
 const formatDate = (value: string | undefined) => {
   if (!value) return '—'
-  const parsed = parseDate(value)
-  if (!parsed) return value
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '—'
   return new Intl.DateTimeFormat(locale.value === 'ms' ? 'ms-MY' : locale.value, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
-    ...(value.includes(',')
-      ? ({ hour: '2-digit', minute: '2-digit', hour12: false } as const)
-      : {}),
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
   }).format(parsed)
 }
+const dateKey = (value: string) => {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+const canonicalStatus = (value: string | null | undefined) => {
+  const normalized = (value || '').trim().toLowerCase().replace(/[_-]+/g, ' ')
+  const statuses = [
+    'Draft',
+    'Pending Review',
+    'Approved',
+    'Rejected',
+    'Correction Required',
+    'Flagged',
+  ]
+  return statuses.find((item) => item.toLowerCase() === normalized) || value?.trim() || '—'
+}
+const stringValue = (value: string | number | null | undefined) =>
+  value === null || value === undefined ? '' : String(value)
+const observations = ref<ObservationView[]>([])
+const isLoading = ref(true)
+const loadError = ref('')
+
+const mapObservation = (item: ApiObservation): ObservationView | null => {
+  const numericId = Number(item.observation_id)
+  const id = formatObservationId(item.observation_id)
+  const plantId = formatPlantId(item.plant_id)
+  if (!id || !plantId || !Number.isSafeInteger(numericId)) return null
+
+  const height = Number(item.height_cm)
+  return {
+    numericId,
+    id,
+    plantId,
+    recordedBy: stringValue(item.recorded_by),
+    height:
+      item.height_cm !== null && item.height_cm !== undefined && Number.isFinite(height)
+        ? `${height} cm`
+        : '',
+    growthStage: item.life_stage || '',
+    health: item.health_status || '',
+    location: '',
+    observedAt: item.observed_at || '',
+    submittedAt: '',
+    status: canonicalStatus(item.verification_status || item.status),
+    morphology: item.morphology || '',
+    notes: item.notes || '',
+    gpsAccuracy: '',
+    reviewedBy: stringValue(item.verified_by) || undefined,
+    reviewedAt: item.verified_at || undefined,
+    reviewComment: item.verification_comments || undefined,
+    photos: [],
+    speciesId: stringValue(item.species_id),
+    scientificName: item.scientific_name || '',
+    commonName: item.common_name || '',
+  }
+}
+
+const loadObservations = async () => {
+  isLoading.value = true
+  loadError.value = ''
+  try {
+    const response = await fetch('/api/observations')
+    if (!response.ok) throw new Error('Unable to load observations.')
+    const result = (await response.json()) as { observations: ApiObservation[] }
+    observations.value = result.observations
+      .map(mapObservation)
+      .filter((item): item is ObservationView => item !== null)
+  } catch (error) {
+    observations.value = []
+    loadError.value = error instanceof Error ? error.message : 'Unable to load observations.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(loadObservations)
 const search = ref(''),
   status = ref(''),
   species = ref(''),
   location = ref(''),
   botanist = ref(''),
   date = ref(''),
-  selected = ref<Observation | null>(null),
+  selected = ref<ObservationView | null>(null),
   plantModal = ref(false),
   historyModal = ref(false)
 const filtered = computed(() =>
-  conservationStore.observations.filter((o) => {
-    const sp = speciesForPlant(o.plantId)
-    return (
-      `${o.id} ${o.plantId} ${sp?.scientificName} ${sp?.commonName} ${speciesName(o.plantId)} ${sp ? commonName(sp.id, sp.commonName) : ''} ${o.recordedBy}`
+  observations.value.filter(
+    (o) =>
+      `${o.id} ${o.plantId} ${o.scientificName} ${o.commonName} ${o.speciesId} ${o.recordedBy} ${o.observedAt} ${o.status}`
         .toLowerCase()
         .includes(search.value.toLowerCase()) &&
       (!status.value || o.status === status.value) &&
-      (!species.value || sp?.id === species.value) &&
+      (!species.value || o.speciesId === species.value) &&
       (!location.value || o.location === location.value) &&
       (!botanist.value || o.recordedBy === botanist.value) &&
-      (!date.value ||
-        o.observedAt.startsWith(
-          new Date(date.value + 'T00:00:00').toLocaleDateString('en-GB', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-          }),
-        ))
-    )
-  }),
+      (!date.value || dateKey(o.observedAt) === date.value),
+  ),
 )
 const history = computed(() =>
-  selected.value
-    ? conservationStore.observations.filter((o) => o.plantId === selected.value?.plantId)
-    : [],
+  selected.value ? observations.value.filter((o) => o.plantId === selected.value?.plantId) : [],
 )
-function open(o: Observation) {
+const speciesOptions = computed(() => {
+  const options = new Map<string, string>()
+  observations.value.forEach((observation) => {
+    if (observation.speciesId) {
+      options.set(
+        observation.speciesId,
+        observation.commonName || observation.scientificName || observation.speciesId,
+      )
+    }
+  })
+  return [...options].map(([id, name]) => ({ id, name }))
+})
+function open(o: ObservationView) {
   selected.value = o
   plantModal.value = false
   historyModal.value = false
 }
-function openPlant(o: Observation) {
+function openPlant(o: ObservationView) {
   open(o)
   plantModal.value = true
 }
-function openHistory(o: Observation) {
+function openHistory(o: ObservationView) {
   open(o)
   historyModal.value = true
 }
@@ -163,8 +247,8 @@ function closeModal() {
       ><span>{{ t('conservationPages.observations.species') }}</span
       ><select v-model="species">
         <option value="">{{ t('conservationPages.observations.allSpecies') }}</option>
-        <option v-for="s in conservationStore.species" :key="s.id" :value="s.id">
-          {{ commonName(s.id, s.commonName) }}
+        <option v-for="s in speciesOptions" :key="s.id" :value="s.id">
+          {{ s.name }}
         </option>
       </select></label
     ><label class="field"
@@ -172,7 +256,7 @@ function closeModal() {
       ><select v-model="location">
         <option value="">{{ t('conservationPages.observations.allLocations') }}</option>
         <option
-          v-for="l in [...new Set(conservationStore.observations.map((o) => o.location))]"
+          v-for="l in [...new Set(observations.map((o) => o.location).filter(Boolean))]"
           :key="l"
           :value="l"
         >
@@ -184,7 +268,7 @@ function closeModal() {
       ><select v-model="botanist">
         <option value="">{{ t('conservationPages.observations.allBotanists') }}</option>
         <option
-          v-for="b in [...new Set(conservationStore.observations.map((o) => o.recordedBy))]"
+          v-for="b in [...new Set(observations.map((o) => o.recordedBy).filter(Boolean))]"
           :key="b"
         >
           {{ b }}
@@ -214,16 +298,16 @@ function closeModal() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="o in filtered" :key="o.id">
+          <tr v-for="o in filtered" :key="o.numericId">
             <td>
               <strong>{{ o.id }}</strong>
             </td>
             <td>{{ o.plantId }}</td>
             <td>
-              <em>{{ speciesName(o.plantId) }}</em>
+              <em>{{ speciesName(o) }}</em>
             </td>
-            <td>{{ o.recordedBy }}</td>
-            <td>{{ o.height }}</td>
+            <td>{{ label(o.recordedBy) }}</td>
+            <td>{{ label(o.height) }}</td>
             <td>{{ label(o.growthStage) }}</td>
             <td>{{ label(o.health) }}</td>
             <td>{{ label(o.location) }}</td>
@@ -254,8 +338,14 @@ function closeModal() {
               </div>
             </td>
           </tr>
-          <tr v-if="!filtered.length">
-            <td colspan="11">{{ t('conservationPages.observations.empty') }}</td>
+          <tr v-if="isLoading || loadError || !filtered.length">
+            <td colspan="11">
+              {{
+                isLoading
+                  ? 'Loading observations...'
+                  : loadError || t('conservationPages.observations.empty')
+              }}
+            </td>
           </tr>
         </tbody>
       </table>
@@ -264,13 +354,13 @@ function closeModal() {
   <AppModal
     v-if="selected && !plantModal && !historyModal"
     :title="t('conservationPages.observations.observationTitle', { id: selected.id })"
-    :subtitle="`${selected.plantId} · ${speciesName(selected.plantId)}`"
+    :subtitle="`${selected.plantId} · ${speciesName(selected)}`"
     wide
     @close="selected = null"
     ><dl class="detail-list">
       <div>
         <dt>{{ t('conservationPages.observations.recordedBy') }}</dt>
-        <dd>{{ selected.recordedBy }}</dd>
+        <dd>{{ label(selected.recordedBy) }}</dd>
       </div>
       <div>
         <dt>{{ t('conservationPages.observations.dateTime') }}</dt>
@@ -278,7 +368,7 @@ function closeModal() {
       </div>
       <div>
         <dt>{{ t('conservationPages.observations.height') }}</dt>
-        <dd>{{ selected.height }}</dd>
+        <dd>{{ label(selected.height) }}</dd>
       </div>
       <div>
         <dt>{{ t('conservationPages.observations.growthStage') }}</dt>
@@ -296,15 +386,9 @@ function closeModal() {
         <dt>{{ t('conservationPages.observations.notes') }}</dt>
         <dd>{{ recordText(selected, 'notes') }}</dd>
       </div>
-      <div>
+      <div v-if="selected.gpsAccuracy">
         <dt>{{ t('conservationPages.observations.gpsAccuracy') }}</dt>
         <dd>{{ selected.gpsAccuracy }}</dd>
-      </div>
-      <div>
-        <dt>{{ t('conservationPages.observations.coordinates') }}</dt>
-        <dd>
-          {{ plantFor(selected.plantId)?.latitude }}, {{ plantFor(selected.plantId)?.longitude }}
-        </dd>
       </div>
       <div>
         <dt>{{ t('conservationPages.observations.review') }}</dt>
@@ -322,8 +406,8 @@ function closeModal() {
         <dd>{{ recordText(selected, 'reviewComment') }}</dd>
       </div>
     </dl>
-    <h3>{{ t('conservationPages.observations.media') }}</h3>
-    <div class="media-grid">
+    <h3 v-if="selected.photos.length">{{ t('conservationPages.observations.media') }}</h3>
+    <div v-if="selected.photos.length" class="media-grid">
       <div v-for="p in selected.photos" :key="p" class="media-placeholder">
         {{ t('conservationPages.observations.photo', { name: label(p) }) }}
       </div>
@@ -332,24 +416,24 @@ function closeModal() {
   <AppModal
     v-if="selected && plantModal"
     :title="t('conservationPages.observations.plantTitle', { id: selected.plantId })"
-    :subtitle="speciesName(selected.plantId)"
+    :subtitle="speciesName(selected)"
     @close="closeModal"
     ><dl class="detail-list">
       <div>
         <dt>{{ t('conservationPages.observations.registeredBy') }}</dt>
-        <dd>{{ plantFor(selected.plantId)?.registeredBy }}</dd>
+        <dd>—</dd>
       </div>
       <div>
         <dt>{{ t('conservationPages.observations.registeredAt') }}</dt>
-        <dd>{{ formatDate(plantFor(selected.plantId)?.registeredAt) }}</dd>
+        <dd>—</dd>
       </div>
       <div>
         <dt>{{ t('conservationPages.observations.zone') }}</dt>
-        <dd>{{ label(plantFor(selected.plantId)?.zone) }}</dd>
+        <dd>—</dd>
       </div>
       <div>
         <dt>{{ t('conservationPages.observations.health') }}</dt>
-        <dd>{{ label(plantFor(selected.plantId)?.health) }}</dd>
+        <dd>—</dd>
       </div>
     </dl></AppModal
   >
@@ -374,7 +458,7 @@ function closeModal() {
           <tr v-for="o in history" :key="o.id">
             <td>{{ o.id }}</td>
             <td>{{ formatDate(o.observedAt) }}</td>
-            <td>{{ o.height }}</td>
+            <td>{{ label(o.height) }}</td>
             <td>{{ label(o.health) }}</td>
             <td>
               <span class="badge" :class="o.status.toLowerCase().replaceAll(' ', '-')">{{

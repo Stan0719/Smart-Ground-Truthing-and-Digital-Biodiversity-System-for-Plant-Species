@@ -1,21 +1,113 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import PlantRecordCard from '../components/PlantRecordCard.vue'
-import { plants as species } from '../data/plants'
+import { plants as prototypeSpecies, type Plant } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 const route = useRoute()
 const { t, te } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
+const selectedSpecies = ref<Plant | null>(null)
+const isLoading = ref(true)
+const loadError = ref('')
+
+interface ApiSpecies {
+  species_id: string | number
+  scientific_name: string
+  common_name: string
+  genus_name?: string
+  family_name?: string
+  conservation_status?: string
+  description?: string
+}
+
+interface SpeciesListResponse {
+  species: ApiSpecies[]
+}
+
+interface SpeciesDetailResponse {
+  species: ApiSpecies
+}
+
+const generatedSlug = (item: ApiSpecies) => {
+  const name = item.common_name || item.scientific_name
+
+  return `${name}-${item.species_id}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+const loadSpecies = async () => {
+  isLoading.value = true
+  loadError.value = ''
+  selectedSpecies.value = null
+
+  try {
+    const slug = String(route.params.slug || '')
+    const prototypeForSlug = prototypeSpecies.find((item) => item.slug === slug)
+    const listResponse = await fetch('/api/species')
+
+    if (!listResponse.ok) throw new Error('Unable to load this species.')
+
+    const listResult: SpeciesListResponse = await listResponse.json()
+    const listSpecies = prototypeForSlug
+      ? listResult.species.find(
+          (item) =>
+            item.scientific_name.toLowerCase() === prototypeForSlug.scientificName.toLowerCase(),
+        )
+      : listResult.species.find((item) => generatedSlug(item) === slug)
+
+    if (!listSpecies) return
+
+    const detailResponse = await fetch(
+      `/api/species/${encodeURIComponent(String(listSpecies.species_id))}`,
+    )
+
+    if (!detailResponse.ok) {
+      if (detailResponse.status === 404) return
+      throw new Error('Unable to load this species.')
+    }
+
+    const detailResult: SpeciesDetailResponse = await detailResponse.json()
+    const item = detailResult.species
+    const prototype = prototypeSpecies.find(
+      (candidate) => candidate.scientificName.toLowerCase() === item.scientific_name.toLowerCase(),
+    )
+
+    selectedSpecies.value = {
+      ...(prototype || {}),
+      speciesId: String(item.species_id),
+      slug,
+      name: item.common_name || item.scientific_name,
+      scientificName: item.scientific_name || 'Unknown species',
+      genus: item.genus_name || '',
+      family: item.family_name || '',
+      conservationStatus: item.conservation_status || '',
+      description: item.description || 'No description available yet.',
+      category: prototype?.category || ('' as Plant['category']),
+      overview: prototype?.overview || '',
+      habitat: prototype?.habitat || '',
+      characteristics: prototype?.characteristics || [],
+      significance: prototype?.significance || '',
+    }
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+watch(() => route.params.slug, loadSpecies, { immediate: true })
+
 const canViewSensitiveFacts = computed(
   () =>
     isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
 )
-const selectedSpecies = computed(() => species.find((item) => item.slug === route.params.slug))
 const primaryImage = computed(
   () =>
     selectedSpecies.value?.image ||
@@ -35,12 +127,43 @@ const characteristicText = (index: number, fallback: string) =>
   speciesText(`characteristics.${index}`, fallback)
 
 const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${index}`, fallback)
+const translatedOr = (key: string, fallback: string) => (te(key) ? t(key) : fallback)
+const displayName = computed(() =>
+  selectedSpecies.value
+    ? translatedOr(`plantNames.${selectedSpecies.value.slug}`, selectedSpecies.value.name)
+    : '',
+)
+const displayScientificName = computed(() =>
+  selectedSpecies.value
+    ? translatedOr(
+        `scientificNames.${selectedSpecies.value.slug}`,
+        selectedSpecies.value.scientificName,
+      )
+    : '',
+)
+const displayFamily = computed(() =>
+  selectedSpecies.value
+    ? translatedOr(`familyNames.${selectedSpecies.value.slug}`, selectedSpecies.value.family || '')
+    : '',
+)
+const displayDescription = computed(() =>
+  selectedSpecies.value
+    ? translatedOr(
+        `plantDescriptions.${selectedSpecies.value.slug}`,
+        selectedSpecies.value.description,
+      )
+    : '',
+)
 </script>
 
 <template>
   <NavigationBar />
 
-  <main v-if="selectedSpecies" class="detail-page">
+  <main v-if="isLoading" class="not-found">
+    <p>Loading species...</p>
+  </main>
+
+  <main v-else-if="selectedSpecies" class="detail-page">
     <section class="detail-hero">
       <div class="detail-container">
         <RouterLink to="/species" class="back-link">
@@ -50,17 +173,13 @@ const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${
 
         <div class="hero-grid">
           <div v-if="primaryImage" class="species-image-card">
-            <img
-              class="plant-image"
-              :src="primaryImage"
-              :alt="t(`plantNames.${selectedSpecies.slug}`)"
-            />
+            <img class="plant-image" :src="primaryImage" :alt="displayName" />
           </div>
           <div
             v-else
             class="plant-placeholder"
             role="img"
-            :aria-label="t(`plantNames.${selectedSpecies.slug}`) + ' image placeholder'"
+            :aria-label="displayName + ' image placeholder'"
           >
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
@@ -71,7 +190,7 @@ const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${
 
           <div class="hero-copy">
             <div class="hero-badges">
-              <span class="category">{{
+              <span v-if="selectedSpecies.category" class="category">{{
                 t(`categories.${selectedSpecies.category.toLowerCase()}`)
               }}</span>
               <span
@@ -82,9 +201,9 @@ const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${
                 }}</span
               >
             </div>
-            <h1>{{ t(`plantNames.${selectedSpecies.slug}`) }}</h1>
-            <p class="scientific-name">{{ t(`scientificNames.${selectedSpecies.slug}`) }}</p>
-            <p class="summary">{{ t(`plantDescriptions.${selectedSpecies.slug}`) }}</p>
+            <h1>{{ displayName }}</h1>
+            <p class="scientific-name">{{ displayScientificName }}</p>
+            <p class="summary">{{ displayDescription }}</p>
           </div>
         </div>
       </div>
@@ -95,24 +214,33 @@ const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${
         <article class="main-description">
           <p class="section-label">{{ t('species.detail.aboutEyebrow') }}</p>
           <h2>
-            {{ t('species.detail.about', { name: t(`plantNames.${selectedSpecies.slug}`) }) }}
+            {{ t('species.detail.about', { name: displayName }) }}
           </h2>
-          <p>{{ speciesText('overview', selectedSpecies.overview) }}</p>
+          <p v-if="selectedSpecies.overview">
+            {{ speciesText('overview', selectedSpecies.overview) }}
+          </p>
 
-          <h3>{{ t('speciesLabels.habitat') }}</h3>
-          <p>{{ speciesText('habitat', selectedSpecies.habitat) }}</p>
+          <template v-if="selectedSpecies.habitat">
+            <h3>{{ t('speciesLabels.habitat') }}</h3>
+            <p>{{ speciesText('habitat', selectedSpecies.habitat) }}</p>
+          </template>
 
           <template v-if="selectedSpecies.distribution">
             <h3>{{ t('speciesLabels.distribution') }}</h3>
             <p>{{ speciesText('distribution', selectedSpecies.distribution || '') }}</p>
           </template>
 
-          <h3>{{ t('speciesLabels.ecology') }}</h3>
-          <p>
-            {{
-              speciesText('ecology', selectedSpecies.ecologicalRole || selectedSpecies.significance)
-            }}
-          </p>
+          <template v-if="selectedSpecies.ecologicalRole || selectedSpecies.significance">
+            <h3>{{ t('speciesLabels.ecology') }}</h3>
+            <p>
+              {{
+                speciesText(
+                  'ecology',
+                  selectedSpecies.ecologicalRole || selectedSpecies.significance,
+                )
+              }}
+            </p>
+          </template>
 
           <template v-if="selectedSpecies.culturalSignificance">
             <h3>{{ t('speciesLabels.culture') }}</h3>
@@ -123,8 +251,10 @@ const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${
         <aside class="quick-facts">
           <p class="section-label">{{ t('species.detail.referenceEyebrow') }}</p>
           <h2>{{ t('species.detail.referenceTitle') }}</h2>
-          <h3 class="characteristics-title">{{ t('speciesLabels.characteristics') }}</h3>
-          <ul>
+          <h3 v-if="selectedSpecies.characteristics.length" class="characteristics-title">
+            {{ t('speciesLabels.characteristics') }}
+          </h3>
+          <ul v-if="selectedSpecies.characteristics.length">
             <li
               v-for="(characteristic, index) in selectedSpecies.characteristics"
               :key="characteristic"
@@ -137,21 +267,21 @@ const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${
           <dl>
             <div>
               <dt>{{ t('speciesLabels.commonName') }}</dt>
-              <dd>{{ t(`plantNames.${selectedSpecies.slug}`) }}</dd>
+              <dd>{{ displayName }}</dd>
             </div>
             <div>
               <dt>{{ t('speciesLabels.scientificName') }}</dt>
-              <dd>{{ t(`scientificNames.${selectedSpecies.slug}`) }}</dd>
+              <dd>{{ displayScientificName }}</dd>
             </div>
             <div v-if="selectedSpecies.family">
               <dt>{{ t('speciesLabels.family') }}</dt>
-              <dd>{{ t(`familyNames.${selectedSpecies.slug}`) }}</dd>
+              <dd>{{ displayFamily }}</dd>
             </div>
             <div v-if="selectedSpecies.genus">
               <dt>{{ t('speciesLabels.genus') }}</dt>
               <dd>{{ speciesText('genus', selectedSpecies.genus || '') }}</dd>
             </div>
-            <div>
+            <div v-if="selectedSpecies.category">
               <dt>{{ t('speciesLabels.plantGroup') }}</dt>
               <dd>{{ t(`categories.${selectedSpecies.category.toLowerCase()}`) }}</dd>
             </div>
@@ -203,7 +333,7 @@ const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${
       </div>
     </section>
 
-    <section class="botanical-gallery">
+    <section v-if="selectedSpecies.images?.length" class="botanical-gallery">
       <div class="detail-container">
         <div class="section-heading">
           <p class="section-label">{{ t('species.detail.galleryEyebrow') }}</p>
@@ -255,7 +385,7 @@ const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${
   <main v-else class="not-found">
     <span aria-hidden="true">🌿</span>
     <h1>{{ t('species.notFound') }}</h1>
-    <p>{{ t('species.notFoundDescription') }}</p>
+    <p>{{ loadError || t('species.notFoundDescription') }}</p>
     <RouterLink to="/species">{{ t('common.returnToSpecies') }}</RouterLink>
   </main>
 </template>

@@ -4,9 +4,10 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import PlantRecordCard from '../components/PlantRecordCard.vue'
-import { plants as species } from '../data/plants'
-import { plantRecords } from '../data/plantRecords'
+import { plants as prototypeSpecies, type Plant } from '../data/plants'
+import type { PlantRecord } from '../data/plantRecords'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
+import { formatPlantId } from '../utils/plantId'
 
 type SortOption = 'default' | 'id-asc' | 'verified-newest' | 'verified-oldest'
 
@@ -24,11 +25,157 @@ const qrFilter = ref('All')
 const zoneFilter = ref('All')
 const sortOption = ref<SortOption>('default')
 const filtersOpen = ref(false)
+const selectedSpecies = ref<Plant | null>(null)
+const speciesPlants = ref<Array<PlantRecord & { genus?: string; detailLinkEnabled?: boolean }>>([])
+const isLoading = ref(true)
+const loadError = ref('')
 
-const selectedSpecies = computed(() => species.find((item) => item.slug === route.params.slug))
-const speciesPlants = computed(() =>
-  plantRecords.filter((plant) => plant.speciesSlug === selectedSpecies.value?.slug),
-)
+interface ApiSpecies {
+  species_id: string | number
+  scientific_name: string
+  common_name: string
+  genus_name?: string
+  family_name?: string
+  conservation_status?: string
+  description?: string
+}
+
+interface ApiPlant {
+  plant_id: string | number
+  species_id: string | number
+  registered_by: string | number
+  current_status?: string | null
+  registered_at?: string | null
+  scientific_name?: string | null
+  common_name?: string | null
+  genus_name?: string | null
+  latitude?: string | number | null
+  longitude?: string | number | null
+  accuracy_m?: string | number | null
+  latest_observation_id?: string | number | null
+  height_cm?: string | number | null
+  life_stage?: string | null
+  health_status?: string | null
+  morphology?: string | null
+  notes?: string | null
+  last_verified_at?: string | null
+}
+
+interface SpeciesResponse {
+  species: ApiSpecies[]
+}
+
+interface PlantsResponse {
+  plants: ApiPlant[]
+}
+
+const generatedSlug = (item: ApiSpecies) => {
+  const name = item.common_name || item.scientific_name
+
+  return `${name}-${item.species_id}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+const numericValue = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === '') return Number.NaN
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : Number.NaN
+}
+
+const loadPlants = async () => {
+  isLoading.value = true
+  loadError.value = ''
+  selectedSpecies.value = null
+  speciesPlants.value = []
+
+  try {
+    const slug = String(route.params.slug || '')
+    const prototypeForSlug = prototypeSpecies.find((item) => item.slug === slug)
+    const speciesResponse = await fetch('/api/species')
+
+    if (!speciesResponse.ok) throw new Error('Unable to load plant records.')
+
+    const speciesResult: SpeciesResponse = await speciesResponse.json()
+    const apiSpecies = prototypeForSlug
+      ? speciesResult.species.find(
+          (item) =>
+            item.scientific_name.toLowerCase() === prototypeForSlug.scientificName.toLowerCase(),
+        )
+      : speciesResult.species.find((item) => generatedSlug(item) === slug)
+
+    if (!apiSpecies) return
+
+    const prototype = prototypeSpecies.find(
+      (item) => item.scientificName.toLowerCase() === apiSpecies.scientific_name.toLowerCase(),
+    )
+
+    selectedSpecies.value = {
+      ...(prototype || {}),
+      speciesId: String(apiSpecies.species_id),
+      slug,
+      name: apiSpecies.common_name || apiSpecies.scientific_name,
+      scientificName: apiSpecies.scientific_name,
+      genus: apiSpecies.genus_name || '',
+      family: apiSpecies.family_name || '',
+      conservationStatus: apiSpecies.conservation_status || '',
+      description: apiSpecies.description || 'No description available yet.',
+      category: prototype?.category || ('' as Plant['category']),
+      overview: prototype?.overview || '',
+      habitat: prototype?.habitat || '',
+      characteristics: prototype?.characteristics || [],
+      significance: prototype?.significance || '',
+    }
+
+    const plantsResponse = await fetch('/api/plants')
+    if (!plantsResponse.ok) throw new Error('Unable to load plant records.')
+
+    const plantsResult: PlantsResponse = await plantsResponse.json()
+    const speciesId = String(apiSpecies.species_id)
+
+    speciesPlants.value = plantsResult.plants
+      .filter((item) => String(item.species_id) === speciesId)
+      .map((item) => ({ item, plantId: formatPlantId(item.plant_id) }))
+      .filter((entry): entry is { item: ApiPlant; plantId: string } => entry.plantId !== null)
+      .map(({ item, plantId }) => ({
+        plantId,
+        speciesSlug: slug,
+        speciesId: String(item.species_id),
+        speciesName: item.scientific_name || apiSpecies.scientific_name,
+        commonName: item.common_name || apiSpecies.common_name || apiSpecies.scientific_name,
+        genus: item.genus_name || apiSpecies.genus_name || '',
+        latestApproved: {
+          date: item.last_verified_at || '',
+          heightCm: numericValue(item.height_cm),
+          healthStatus: item.health_status || '',
+          lifeStage: item.life_stage || '',
+          morphology: item.morphology || '',
+          notes: item.notes || '',
+        },
+        location: {
+          zone: '',
+          latitude: numericValue(item.latitude),
+          longitude: numericValue(item.longitude),
+          altitudeM: Number.NaN,
+          accuracyM: numericValue(item.accuracy_m),
+        },
+        qr: { code: '', status: '' },
+        registeredBy: String(item.registered_by || ''),
+        registeredAt: item.registered_at || '',
+        images: [],
+        observations: [],
+        detailLinkEnabled: true,
+      }))
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+watch(() => route.params.slug, loadPlants, { immediate: true })
+
 const primaryImage = computed(
   () =>
     selectedSpecies.value?.image ||
@@ -37,14 +184,18 @@ const primaryImage = computed(
 
 const uniqueValues = (values: string[]) => ['All', ...new Set(values)]
 const healthOptions = computed(() =>
-  uniqueValues(speciesPlants.value.map((plant) => plant.latestApproved.healthStatus)),
+  uniqueValues(
+    speciesPlants.value.map((plant) => plant.latestApproved.healthStatus).filter(Boolean),
+  ),
 )
 const lifeStageOptions = computed(() =>
-  uniqueValues(speciesPlants.value.map((plant) => plant.latestApproved.lifeStage)),
+  uniqueValues(speciesPlants.value.map((plant) => plant.latestApproved.lifeStage).filter(Boolean)),
 )
-const qrOptions = computed(() => uniqueValues(speciesPlants.value.map((plant) => plant.qr.status)))
+const qrOptions = computed(() =>
+  uniqueValues(speciesPlants.value.map((plant) => plant.qr.status).filter(Boolean)),
+)
 const zoneOptions = computed(() =>
-  uniqueValues(speciesPlants.value.map((plant) => plant.location.zone)),
+  uniqueValues(speciesPlants.value.map((plant) => plant.location.zone).filter(Boolean)),
 )
 
 const filteredPlants = computed(() => {
@@ -119,10 +270,34 @@ const clearFilters = () => {
 }
 
 const optionLabel = (option: string) => {
+  if (!option) return '—'
   const optionKey = option.toLowerCase().replace(/\s+/g, '')
   const key = `species.records.options.${optionKey}`
   return te(key) ? t(key) : option
 }
+
+const translatedOr = (key: string, fallback: string) => (te(key) ? t(key) : fallback)
+const displayName = computed(() =>
+  selectedSpecies.value
+    ? translatedOr(`plantNames.${selectedSpecies.value.slug}`, selectedSpecies.value.name)
+    : '',
+)
+const displayScientificName = computed(() =>
+  selectedSpecies.value
+    ? translatedOr(
+        `scientificNames.${selectedSpecies.value.slug}`,
+        selectedSpecies.value.scientificName,
+      )
+    : '',
+)
+const displayDescription = computed(() =>
+  selectedSpecies.value
+    ? translatedOr(
+        `plantDescriptions.${selectedSpecies.value.slug}`,
+        selectedSpecies.value.description,
+      )
+    : '',
+)
 
 watch(
   canViewStaffPlantData,
@@ -140,26 +315,23 @@ watch(
 <template>
   <NavigationBar />
 
-  <main v-if="selectedSpecies" class="species-plants-page">
+  <main v-if="isLoading" class="not-found">
+    <p>Loading plant records...</p>
+  </main>
+
+  <main v-else-if="selectedSpecies" class="species-plants-page">
     <section class="page-hero">
       <div class="page-container">
         <RouterLink :to="`/species/${selectedSpecies.slug}`" class="back-link"
-          >←
-          {{
-            t('species.records.back', { name: t(`plantNames.${selectedSpecies.slug}`) })
-          }}</RouterLink
+          >← {{ t('species.records.back', { name: displayName }) }}</RouterLink
         >
         <div class="hero-grid">
-          <img
-            v-if="primaryImage"
-            :src="primaryImage"
-            :alt="t(`plantNames.${selectedSpecies.slug}`)"
-          />
+          <img v-if="primaryImage" :src="primaryImage" :alt="displayName" />
           <div class="hero-copy">
             <p class="section-label">{{ t('species.records.eyebrow') }}</p>
-            <h1>{{ t(`plantNames.${selectedSpecies.slug}`) }}</h1>
-            <p class="scientific-name">{{ t(`scientificNames.${selectedSpecies.slug}`) }}</p>
-            <p>{{ t(`plantDescriptions.${selectedSpecies.slug}`) }}</p>
+            <h1>{{ displayName }}</h1>
+            <p class="scientific-name">{{ displayScientificName }}</p>
+            <p>{{ displayDescription }}</p>
             <strong>{{
               t('species.records.count', { count: speciesPlants.length }, speciesPlants.length)
             }}</strong>
@@ -298,7 +470,7 @@ watch(
   <main v-else class="not-found">
     <span aria-hidden="true">🌿</span>
     <h1>{{ t('species.notFound') }}</h1>
-    <p>{{ t('species.notFoundDescription') }}</p>
+    <p>{{ loadError || t('species.notFoundDescription') }}</p>
     <RouterLink to="/species">{{ t('common.returnToSpecies') }}</RouterLink>
   </main>
 </template>

@@ -1,19 +1,94 @@
 <script setup lang="ts">
 import { useConservationText } from '../../composables/useConservationText'
-const { ct, sf, dt, speciesText, observationText, locale } = useConservationText()
+const { ct, dt, locale } = useConservationText()
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppModal from '../../components/conservation/AppModal.vue'
-import {
-  conservationStore,
-  plantFor,
-  speciesForPlant,
-  speciesRequestForPlant,
-  type Observation,
-  type ObservationStatus,
-  type SpeciesRecord,
-  type SpeciesRequestStatus,
-} from '../../data/conservation'
+import { formatObservationId } from '../../utils/observationId'
+import { formatPlantId } from '../../utils/plantId'
+import { formatSpeciesRequestId } from '../../utils/speciesRequestId'
+import type { ObservationStatus, SpeciesRequestStatus } from '../../data/conservation'
+
+interface ApiObservation {
+  observation_id: string | number
+  plant_id: string | number
+  recorded_by?: string | number | null
+  height_cm?: string | number | null
+  morphology?: string | null
+  life_stage?: string | null
+  health_status?: string | null
+  notes?: string | null
+  observed_at?: string | null
+  status?: string | null
+  species_id?: string | number | null
+  scientific_name?: string | null
+  common_name?: string | null
+  verified_by?: string | number | null
+  verification_status?: string | null
+  verification_comments?: string | null
+  verified_at?: string | null
+}
+
+interface ReviewObservation {
+  numericId: number
+  id: string
+  plantId: string
+  recordedBy: string
+  height: string
+  growthStage: string
+  health: string
+  location: string
+  observedAt: string
+  submittedAt: string
+  status: string
+  morphology: string
+  notes: string
+  gpsAccuracy: string
+  reviewedBy?: string
+  reviewedAt?: string
+  reviewComment?: string
+  photos: string[]
+  speciesId: string
+  scientificName: string
+  commonName: string
+}
+
+interface ApiSpeciesRequest {
+  request_id: string | number
+  requested_by?: string | number | null
+  reviewed_by?: string | number | null
+  suggested_common_name?: string | null
+  genus_id?: string | number | null
+  genus_name?: string | null
+  description?: string | null
+  habitat?: string | null
+  request_status?: string | null
+  review_comment?: string | null
+  submitted_at?: string | null
+  reviewed_at?: string | null
+  approved_species_id?: string | number | null
+}
+
+interface SpeciesRequestView {
+  numericId: number
+  id: string
+  requestedBy: string
+  reviewedBy: string
+  proposedScientificName: string
+  proposedCommonName: string
+  genusId: string
+  genus: string
+  family: string
+  description: string
+  habitat: string
+  identificationNotes: string
+  submittedAt: string
+  status: string
+  reviewComment: string
+  reviewedAt: string
+  approvedSpeciesId: string
+  photos: string[]
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -21,72 +96,170 @@ const search = ref('')
 const status = ref('')
 const species = ref('')
 const date = ref('')
-const selected = ref<Observation | null>(null)
+const selected = ref<ReviewObservation | null>(null)
 const comment = ref('')
 const error = ref('')
+const observations = ref<ReviewObservation[]>([])
+const speciesRequests = ref<SpeciesRequestView[]>([])
+const isLoading = ref(true)
+const loadError = ref('')
 const reviewingSpecies = ref(false)
 const speciesComment = ref('')
 const speciesError = ref('')
 
+const supportedStatuses: ObservationStatus[] = [
+  'Draft',
+  'Pending Review',
+  'Approved',
+  'Rejected',
+  'Correction Required',
+  'Flagged',
+]
+const canonicalStatus = (value: string | null | undefined) => {
+  const normalized = (value || '').trim().toLowerCase().replace(/[_-]+/g, ' ')
+  return supportedStatuses.find((item) => item.toLowerCase() === normalized) || ''
+}
+const stringValue = (value: string | number | null | undefined) =>
+  value === null || value === undefined ? '' : String(value)
+const dateKey = (value: string | undefined) => {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+const formatDate = (value: string | undefined) => {
+  if (!value) return '—'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '—'
+  return new Intl.DateTimeFormat(locale.value === 'ms' ? 'ms-MY' : locale.value, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed)
+}
+
+const mapObservation = (item: ApiObservation): ReviewObservation | null => {
+  const numericId = Number(item.observation_id)
+  const id = formatObservationId(item.observation_id)
+  const plantId = formatPlantId(item.plant_id)
+  if (!id || !plantId || !Number.isSafeInteger(numericId)) return null
+
+  const height = Number(item.height_cm)
+  return {
+    numericId,
+    id,
+    plantId,
+    recordedBy: stringValue(item.recorded_by),
+    height:
+      item.height_cm !== null && item.height_cm !== undefined && Number.isFinite(height)
+        ? `${height} cm`
+        : '',
+    growthStage: item.life_stage || '',
+    health: item.health_status || '',
+    location: '',
+    observedAt: item.observed_at || '',
+    submittedAt: '',
+    status: canonicalStatus(item.verification_status || item.status),
+    morphology: item.morphology || '',
+    notes: item.notes || '',
+    gpsAccuracy: '',
+    reviewedBy: stringValue(item.verified_by) || undefined,
+    reviewedAt: item.verified_at || undefined,
+    reviewComment: item.verification_comments || undefined,
+    photos: [],
+    speciesId: stringValue(item.species_id),
+    scientificName: item.scientific_name || '',
+    commonName: item.common_name || '',
+  }
+}
+
+const mapSpeciesRequest = (item: ApiSpeciesRequest): SpeciesRequestView | null => {
+  const numericId = Number(item.request_id)
+  const id = formatSpeciesRequestId(item.request_id)
+  if (!id || !Number.isSafeInteger(numericId)) return null
+
+  return {
+    numericId,
+    id,
+    requestedBy: stringValue(item.requested_by),
+    reviewedBy: stringValue(item.reviewed_by),
+    proposedScientificName: '',
+    proposedCommonName: item.suggested_common_name || '',
+    genusId: stringValue(item.genus_id),
+    genus: item.genus_name || '',
+    family: '',
+    description: item.description || '',
+    habitat: item.habitat || '',
+    identificationNotes: '',
+    submittedAt: item.submitted_at || '',
+    status: item.request_status || '',
+    reviewComment: item.review_comment || '',
+    reviewedAt: item.reviewed_at || '',
+    approvedSpeciesId: stringValue(item.approved_species_id),
+    photos: [],
+  }
+}
+
 const counts = computed(() => [
-  [
-    'Pending Review',
-    conservationStore.observations.filter((o) => o.status === 'Pending Review').length,
-  ],
+  ['Pending Review', observations.value.filter((o) => o.status === 'Pending Review').length],
   [
     'Correction Required',
-    conservationStore.observations.filter((o) => o.status === 'Correction Required').length,
+    observations.value.filter((o) => o.status === 'Correction Required').length,
   ],
-  ['Flagged', conservationStore.observations.filter((o) => o.status === 'Flagged').length],
+  ['Flagged', observations.value.filter((o) => o.status === 'Flagged').length],
   [
     'Approved Today',
-    conservationStore.observations.filter(
-      (o) => o.status === 'Approved' && o.reviewedAt?.startsWith('3 Oct'),
+    observations.value.filter(
+      (o) => o.status === 'Approved' && dateKey(o.reviewedAt) === dateKey(new Date().toISOString()),
     ).length,
   ],
 ])
 
 const filtered = computed(() =>
-  conservationStore.observations.filter((observation) => {
-    const officialSpecies = speciesForPlant(observation.plantId)
-    const request = speciesRequestForPlant(observation.plantId)
-    const searchable = `${observation.id} ${observation.plantId} ${officialSpecies?.scientificName ?? ''} ${officialSpecies ? sf(officialSpecies) + ' ' + sf(officialSpecies, 'common') : ''} ${request?.proposedScientificName ?? ''} ${ct(request?.proposedScientificName)} ${request?.proposedCommonName ?? ''} ${observation.recordedBy}`
-    const matchesDate =
-      !date.value ||
-      observation.submittedAt.includes(
-        new Date(`${date.value}T00:00:00`).toLocaleDateString('en-GB', {
-          day: 'numeric',
-          month: 'short',
-          year: 'numeric',
-        }),
-      )
+  observations.value.filter((observation) => {
+    const searchable = `${observation.id} ${observation.plantId} ${observation.speciesId} ${observation.scientificName} ${observation.commonName} ${observation.recordedBy} ${observation.status}`
+    const matchesDate = !date.value || dateKey(observation.observedAt) === date.value
     return (
       searchable.toLowerCase().includes(search.value.toLowerCase()) &&
       (!status.value || observation.status === status.value) &&
-      (!species.value || officialSpecies?.id === species.value) &&
+      (!species.value || observation.speciesId === species.value) &&
       matchesDate
     )
   }),
 )
 
-const selectedSpecies = computed(() =>
-  selected.value ? speciesForPlant(selected.value.plantId) : undefined,
-)
-const selectedRequest = computed(() =>
-  selected.value ? speciesRequestForPlant(selected.value.plantId) : undefined,
-)
+const selectedSpecies = computed(() => selected.value)
+const selectedRequest = computed<SpeciesRequestView | undefined>(() => undefined)
 const speciesResolved = computed(
   () => !selectedRequest.value || selectedRequest.value.status === 'Approved',
 )
 
-function open(observation: Observation) {
+const speciesOptions = computed(() => {
+  const options = new Map<string, string>()
+  observations.value.forEach((observation) => {
+    if (observation.speciesId) {
+      options.set(
+        observation.speciesId,
+        observation.commonName || observation.scientificName || observation.speciesId,
+      )
+    }
+  })
+  return [...options].map(([id, name]) => ({ id, name }))
+})
+
+function open(observation: ReviewObservation) {
   selected.value = observation
-  comment.value = observation.reviewComment ? observationText(observation, 'reviewComment') : ''
+  comment.value = observation.reviewComment || ''
   error.value = ''
   reviewingSpecies.value = false
   speciesError.value = ''
-  const request = speciesRequestForPlant(observation.plantId)
-  speciesComment.value = request?.reviewComment ? ct(request.reviewComment) : ''
+  speciesComment.value = ''
 }
 
 function closeReview() {
@@ -97,75 +270,49 @@ function closeReview() {
 
 function decide(next: ObservationStatus) {
   if (!selected.value) return
-  if (next === 'Approved' && !speciesResolved.value) {
-    error.value = 'Resolve the linked species request before approving this plant submission.'
-    return
-  }
-  if (next !== 'Approved' && !comment.value.trim()) {
-    error.value = 'An officer comment is required for this decision.'
-    return
-  }
-  selected.value.status = next
-  selected.value.reviewComment = comment.value || 'Submission verified.'
-  selected.value.reviewedBy = 'Officer01'
-  selected.value.reviewedAt = '3 Oct 2026'
-  closeReview()
-}
-
-function nextSpeciesId() {
-  const highestId = conservationStore.species.reduce((highest, item) => {
-    const numericId = Number.parseInt(item.id.match(/^SP(\d+)$/)?.[1] || '0', 10)
-    return Math.max(highest, numericId)
-  }, 0)
-  return `SP${String(highestId + 1).padStart(3, '0')}`
+  error.value = `${next} was not saved. Backend review persistence is not implemented yet.`
 }
 
 function decideSpecies(next: SpeciesRequestStatus) {
-  const request = selectedRequest.value
-  const plant = selected.value ? plantFor(selected.value.plantId) : undefined
-  if (!request || !plant) return
-  speciesError.value = ''
-  if (request.status === 'Approved' && request.approvedSpeciesId) {
-    reviewingSpecies.value = false
-    return
-  }
-  if (next !== 'Approved' && !speciesComment.value.trim()) {
-    speciesError.value = 'A Species Request Comment is required for this decision.'
-    return
-  }
-  if (next === 'Approved' && !request.proposedScientificName.trim()) {
-    speciesError.value = 'Scientific name is required for approval.'
-    return
-  }
-  if (next === 'Approved') {
-    const newSpecies: SpeciesRecord = {
-      id: nextSpeciesId(),
-      scientificName: request.proposedScientificName,
-      commonName: request.proposedCommonName,
-      genus: request.genus,
-      family: request.family,
-      status: 'Not Assessed',
-      plantCount: 1,
-      updated: '3 Oct 2026',
-      description: request.description,
-      habitat: request.habitat,
-      image: '/images/hero.jpg',
-    }
-    conservationStore.species.push(newSpecies)
-    request.approvedSpeciesId = newSpecies.id
-    plant.speciesId = newSpecies.id
-  }
-  request.status = next
-  request.reviewedBy = 'Officer01'
-  request.reviewedAt = '3 Oct 2026'
-  request.reviewComment = speciesComment.value
-  reviewingSpecies.value = false
+  speciesError.value = `${next} was not saved. Species Request persistence is not implemented yet.`
 }
 
-onMounted(() => {
-  const id = String(route.query.review || '')
-  const observation = conservationStore.observations.find((item) => item.id === id)
-  if (observation) open(observation)
+onMounted(async () => {
+  isLoading.value = true
+  loadError.value = ''
+  try {
+    const [observationsResponse, speciesRequestsResponse] = await Promise.all([
+      fetch('/api/observations'),
+      fetch('/api/species-requests'),
+    ])
+    if (!observationsResponse.ok || !speciesRequestsResponse.ok) {
+      throw new Error('Unable to load review submissions.')
+    }
+
+    const observationsResult = (await observationsResponse.json()) as {
+      observations: ApiObservation[]
+    }
+    const speciesRequestsResult = (await speciesRequestsResponse.json()) as {
+      species_requests: ApiSpeciesRequest[]
+    }
+    observations.value = observationsResult.observations
+      .map(mapObservation)
+      .filter((item): item is ReviewObservation => item !== null)
+    speciesRequests.value = speciesRequestsResult.species_requests
+      .map(mapSpeciesRequest)
+      .filter((item): item is SpeciesRequestView => item !== null)
+
+    const id = String(route.query.review || '')
+    const observation = observations.value.find((item) => item.id === id)
+    if (observation) open(observation)
+  } catch (loadFailure) {
+    observations.value = []
+    speciesRequests.value = []
+    loadError.value =
+      loadFailure instanceof Error ? loadFailure.message : 'Unable to load review submissions.'
+  } finally {
+    isLoading.value = false
+  }
 })
 </script>
 
@@ -212,8 +359,8 @@ onMounted(() => {
       ><span>{{ ct('Species') }}</span
       ><select v-model="species">
         <option value="">{{ ct('All species') }}</option>
-        <option v-for="item in conservationStore.species" :key="item.id" :value="item.id">
-          {{ sf(item, 'common') }}
+        <option v-for="item in speciesOptions" :key="item.id" :value="item.id">
+          {{ item.name }}
         </option>
       </select></label
     >
@@ -232,48 +379,40 @@ onMounted(() => {
             <th>{{ ct('Species') }}</th>
             <th>{{ ct('Submitted By') }}</th>
             <th>{{ ct('Location') }}</th>
-            <th>{{ ct('Submitted Date') }}</th>
+            <th>{{ ct('Observation Date') }}</th>
             <th>{{ ct('Status') }}</th>
             <th>{{ ct('Actions') }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="observation in filtered" :key="observation.id">
+          <tr v-for="observation in filtered" :key="observation.numericId">
             <td>
               <strong>{{ observation.id }}</strong>
             </td>
             <td>{{ observation.plantId }}</td>
             <td>
-              <em v-if="speciesForPlant(observation.plantId)">{{
-                speciesText(observation.plantId)
-              }}</em>
-              <span v-else-if="speciesRequestForPlant(observation.plantId)" class="proposed-species"
-                ><small>{{ ct('Proposed New Species') }}</small
-                ><em>{{
-                  ct(speciesRequestForPlant(observation.plantId)?.proposedScientificName)
-                }}</em
-                ><span
-                  class="badge"
-                  :class="
-                    speciesRequestForPlant(observation.plantId)
-                      ?.status.toLowerCase()
-                      .replaceAll(' ', '-')
-                  "
-                  >{{ ct(speciesRequestForPlant(observation.plantId)?.status) }}</span
-                ></span
-              >
+              <em v-if="observation.scientificName">{{ observation.scientificName }}</em>
               <span v-else>{{ ct('Species unavailable') }}</span>
             </td>
-            <td>{{ observation.recordedBy }}</td>
-            <td>{{ ct(observation.location) }}</td>
-            <td>{{ dt(observation.submittedAt) }}</td>
+            <td>{{ observation.recordedBy || '—' }}</td>
+            <td>—</td>
+            <td>{{ formatDate(observation.observedAt) }}</td>
             <td>
               <span class="badge" :class="observation.status.toLowerCase().replaceAll(' ', '-')">{{
-                ct(observation.status)
+                observation.status ? ct(observation.status) : '—'
               }}</span>
             </td>
             <td>
               <button class="action-button" @click="open(observation)">{{ ct('Review') }}</button>
+            </td>
+          </tr>
+          <tr v-if="isLoading || loadError || !filtered.length">
+            <td colspan="8">
+              {{
+                isLoading
+                  ? 'Loading review submissions...'
+                  : loadError || ct('No review submissions found.')
+              }}
             </td>
           </tr>
         </tbody>
@@ -297,48 +436,37 @@ onMounted(() => {
           <dl class="detail-list">
             <div>
               <dt>{{ ct('Species') }}</dt>
-              <dd>{{ selectedSpecies ? sf(selectedSpecies) : ct('Proposed New Species') }}</dd>
+              <dd>{{ selectedSpecies?.scientificName || ct('Species unavailable') }}</dd>
             </div>
             <div>
               <dt>{{ ct('Taxonomy') }}</dt>
               <dd>
-                {{
-                  selectedSpecies
-                    ? sf(selectedSpecies, 'family')
-                    : ct(selectedRequest?.family || 'Pending Review')
-                }}
+                {{ selectedSpecies?.commonName || '—' }}
               </dd>
             </div>
             <div>
               <dt>{{ ct('Height') }}</dt>
-              <dd>{{ selected.height }}</dd>
+              <dd>{{ selected.height || '—' }}</dd>
             </div>
             <div>
               <dt>{{ ct('Growth Stage') }}</dt>
-              <dd>{{ ct(selected.growthStage) }}</dd>
+              <dd>{{ selected.growthStage ? ct(selected.growthStage) : '—' }}</dd>
             </div>
             <div>
               <dt>{{ ct('Health') }}</dt>
-              <dd>{{ ct(selected.health) }}</dd>
+              <dd>{{ selected.health ? ct(selected.health) : '—' }}</dd>
             </div>
             <div>
               <dt>{{ ct('Morphology') }}</dt>
-              <dd>{{ observationText(selected, 'morphology') }}</dd>
+              <dd>{{ selected.morphology || '—' }}</dd>
             </div>
             <div>
-              <dt>{{ ct('Coordinates') }}</dt>
-              <dd>
-                {{ plantFor(selected.plantId)?.latitude }},
-                {{ plantFor(selected.plantId)?.longitude }} ({{ selected.gpsAccuracy }})
-              </dd>
-            </div>
-            <div>
-              <dt>{{ ct('Submission Date') }}</dt>
-              <dd>{{ dt(selected.submittedAt) }}</dd>
+              <dt>{{ ct('Observation Date') }}</dt>
+              <dd>{{ formatDate(selected.observedAt) }}</dd>
             </div>
           </dl>
-          <h3>{{ ct('Photographs') }}</h3>
-          <div class="media-grid">
+          <h3 v-if="selected.photos.length">{{ ct('Photographs') }}</h3>
+          <div v-if="selected.photos.length" class="media-grid">
             <div v-for="photo in selected.photos" :key="photo" class="media-placeholder">
               {{ ct(photo) }}
             </div>
@@ -347,16 +475,14 @@ onMounted(() => {
         <aside>
           <h3>{{ ct('Observation History') }}</h3>
           <div
-            v-for="observation in conservationStore.observations.filter(
-              (item) => item.plantId === selected?.plantId,
-            )"
+            v-for="observation in observations.filter((item) => item.plantId === selected?.plantId)"
             :key="observation.id"
             class="history-item"
           >
             <strong>{{ observation.id }}</strong
             ><span
-              >{{ dt(observation.observedAt) }} · {{ observation.height }} ·
-              {{ ct(observation.health) }}</span
+              >{{ formatDate(observation.observedAt) }} · {{ observation.height || '—' }} ·
+              {{ observation.health ? ct(observation.health) : '—' }}</span
             >
           </div>
           <label class="form-field officer-comment"
@@ -376,7 +502,7 @@ onMounted(() => {
         <div>
           <p class="section-kicker">{{ ct('SPECIES DEPENDENCY') }}</p>
           <h3 v-if="selectedRequest.status === 'Approved'">
-            {{ selectedRequest.approvedSpeciesId }} — {{ sf(selectedSpecies) }}
+            {{ selectedRequest.approvedSpeciesId }} — {{ selectedSpecies?.scientificName || '—' }}
           </h3>
           <h3 v-else>
             {{ ct('Proposed New Species') }} · {{ ct(selectedRequest.proposedScientificName) }}

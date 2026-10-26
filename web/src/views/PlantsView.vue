@@ -15,7 +15,7 @@ const sortOption = ref<'default' | 'name-asc' | 'name-desc' | 'scientific-asc'>(
 const sortMenuOpen = ref(false)
 const sortMenu = ref<HTMLElement | null>(null)
 const route = useRoute()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
 const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search : '')
 
@@ -60,11 +60,16 @@ const loadSpecies = async () => {
       const name = item.common_name || item.scientific_name
       const scientificName = item.scientific_name || 'Unknown species'
       const genus = item.genus_name || ''
+      const prototype = prototypePlants.find(
+        (plant) => plant.scientificName.toLowerCase() === scientificName.toLowerCase(),
+      )
 
-      const slug = `${name}-${item.species_id}`
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
+      const slug =
+        prototype?.slug ||
+        `${name}-${item.species_id}`
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')
 
       return {
         speciesId: String(item.species_id),
@@ -72,25 +77,20 @@ const loadSpecies = async () => {
         name,
         scientificName,
         genus,
-        category: genus === 'Nepenthes' ? 'Climbers' : 'Trees',
+        category: prototype?.category || ('' as Plant['category']),
         family: item.family_name || '',
         conservationStatus: item.conservation_status || '',
         description: item.description || 'No description available yet.',
-        overview: item.description || '',
-        habitat: 'Habitat information has not been added yet.',
+        overview: '',
+        habitat: '',
         characteristics: [],
-        significance: item.description || '',
+        significance: '',
+        image: prototype?.image,
+        images: prototype?.images,
       }
     })
 
-    const prototypeNames = new Set(
-      prototypePlants.map((plant) => plant.scientificName.toLowerCase()),
-    )
-
-    species.value = [
-      ...prototypePlants,
-      ...apiPlants.filter((plant) => !prototypeNames.has(plant.scientificName.toLowerCase())),
-    ]
+    species.value = apiPlants
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
   } finally {
@@ -102,6 +102,14 @@ const canViewConservationStatus = computed(
   () =>
     isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
 )
+
+const translatedOr = (key: string, fallback: string) => (te(key) ? t(key) : fallback)
+const displayName = (item: Plant) => translatedOr(`plantNames.${item.slug}`, item.name)
+const displayScientificName = (item: Plant) =>
+  translatedOr(`scientificNames.${item.slug}`, item.scientificName)
+const displayFamily = (item: Plant) => translatedOr(`familyNames.${item.slug}`, item.family || '')
+const displayDescription = (item: Plant) =>
+  translatedOr(`plantDescriptions.${item.slug}`, item.description)
 
 const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
   if (
@@ -139,7 +147,7 @@ const filteredSpecies = computed(() => {
     const matchesSearch =
       !query ||
       item.name.toLowerCase().includes(query) ||
-      t(`plantNames.${item.slug}`).toLowerCase().includes(query) ||
+      displayName(item).toLowerCase().includes(query) ||
       item.scientificName.toLowerCase().includes(query) ||
       item.genus?.toLowerCase().includes(query) ||
       item.category.toLowerCase().includes(query) ||
@@ -290,13 +298,13 @@ const filteredSpecies = computed(() => {
                 v-if="item.image || item.images?.find((image) => image.path)?.path"
                 class="plant-card-image"
                 :src="item.image || item.images?.find((image) => image.path)?.path"
-                :alt="t(`plantNames.${item.slug}`)"
+                :alt="displayName(item)"
               />
               <div
                 v-else
                 class="plant-image-placeholder"
                 role="img"
-                :aria-label="t(`plantNames.${item.slug}`) + ' image placeholder'"
+                :aria-label="displayName(item) + ' image placeholder'"
               >
                 <svg viewBox="0 0 64 64" aria-hidden="true">
                   <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
@@ -305,7 +313,7 @@ const filteredSpecies = computed(() => {
                 <span>{{ t('species.imageComingSoon') }}</span>
               </div>
               <div class="card-badges">
-                <span class="category-badge">{{
+                <span v-if="item.category" class="category-badge">{{
                   t(`categories.${item.category.toLowerCase()}`)
                 }}</span>
                 <span
@@ -317,12 +325,12 @@ const filteredSpecies = computed(() => {
             </div>
 
             <div class="plant-card-content">
-              <h3>{{ t(`plantNames.${item.slug}`) }}</h3>
-              <p class="scientific-name">{{ t(`scientificNames.${item.slug}`) }}</p>
+              <h3>{{ displayName(item) }}</h3>
+              <p class="scientific-name">{{ displayScientificName(item) }}</p>
               <p v-if="item.family" class="plant-family">
-                <span>{{ t('common.family') }}:</span> {{ t(`familyNames.${item.slug}`) }}
+                <span>{{ t('common.family') }}:</span> {{ displayFamily(item) }}
               </p>
-              <p class="plant-description">{{ t(`plantDescriptions.${item.slug}`) }}</p>
+              <p class="plant-description">{{ displayDescription(item) }}</p>
 
               <div class="card-actions">
                 <RouterLink

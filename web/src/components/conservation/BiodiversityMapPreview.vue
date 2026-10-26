@@ -1,9 +1,18 @@
 <script setup lang="ts">
 import 'leaflet/dist/leaflet.css'
 import * as L from 'leaflet'
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { conservationStore, speciesForPlant, speciesRequestForPlant } from '../../data/conservation'
+
+interface PreviewPlant {
+  id: string
+  latitude: number
+  longitude: number
+  scientificName: string
+  commonName: string
+}
+
+const props = defineProps<{ plants: PreviewPlant[] }>()
 
 const router = useRouter()
 const mapElement = ref<HTMLElement | null>(null)
@@ -13,21 +22,14 @@ let resizeObserver: ResizeObserver | null = null
 let resizeFrame: number | null = null
 let settleTimer: ReturnType<typeof setTimeout> | null = null
 
-const mappedPlants = conservationStore.plants.filter(
-  (plant) => Number.isFinite(plant.latitude) && Number.isFinite(plant.longitude),
+const mappedPlants = computed(() =>
+  props.plants.filter(
+    (plant) => Number.isFinite(plant.latitude) && Number.isFinite(plant.longitude),
+  ),
 )
 
 const scientificNameFor = (plantId: string) =>
-  speciesForPlant(plantId)?.scientificName ??
-  speciesRequestForPlant(plantId)?.proposedScientificName ??
-  'Identification pending'
-
-const openPlantOnFullMap = async (plantId: string) => {
-  await router.push({
-    name: 'conservation-map',
-    query: { plant: plantId },
-  })
-}
+  props.plants.find((plant) => plant.id === plantId)?.scientificName || 'Identification pending'
 
 const markerIcon = () =>
   L.divIcon({
@@ -48,7 +50,7 @@ const scheduleMapResize = () => {
 
 onMounted(async () => {
   await nextTick()
-  if (!mapElement.value || !mappedPlants.length || map) return
+  if (!mapElement.value || !mappedPlants.value.length || map) return
 
   map = L.map(mapElement.value, { zoomControl: true, minZoom: 3 })
   L.tileLayer(
@@ -63,7 +65,7 @@ onMounted(async () => {
   markerLayer = L.layerGroup().addTo(map)
 
   const bounds = L.latLngBounds([])
-  mappedPlants.forEach((plant) => {
+  mappedPlants.value.forEach((plant) => {
     const scientificName = scientificNameFor(plant.id)
     const marker = L.marker([plant.latitude, plant.longitude], {
       icon: markerIcon(),

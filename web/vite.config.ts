@@ -1,4 +1,3 @@
-
 import { fileURLToPath, URL } from 'node:url'
 
 import { defineConfig } from 'vite'
@@ -12,25 +11,33 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      '/api/species': {
-        target: 'https://smart-ground-truthing-and-digital.onrender.com',
+      '/api/iot': {
+        target: 'http://localhost:3000',
         changeOrigin: true,
-        secure: true,
+      },
+      '/api/species-requests': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+      '/api/species': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
       },
       '/api/tables': {
-        target: 'https://smart-ground-truthing-and-digital.onrender.com',
+        target: 'http://localhost:3000',
         changeOrigin: true,
-        secure: true,
       },
       '/api/plants': {
-        target: 'https://smart-ground-truthing-and-digital.onrender.com',
+        target: 'http://localhost:3000',
         changeOrigin: true,
-        secure: true,
       },
       '/api/db-test': {
-        target: 'https://smart-ground-truthing-and-digital.onrender.com',
+        target: 'http://localhost:3000',
         changeOrigin: true,
-        secure: true,
+      },
+      '/api/observations': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
       },
       '/api': 'http://127.0.0.1:3001',
     },

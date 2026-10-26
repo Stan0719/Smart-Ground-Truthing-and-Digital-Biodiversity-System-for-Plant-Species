@@ -101,7 +101,8 @@ textarea {
   gap: 4px;
 }
 .sidebar nav a,
-.sidebar-footer a {
+.sidebar-footer a,
+.sidebar-footer button {
   width: 100%;
   padding: 10px 13px;
   display: flex;
@@ -113,6 +114,11 @@ textarea {
   font-size: 12px;
   font-weight: 600;
   transition: 0.2s;
+}
+.sidebar-footer button {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
 }
 .sidebar nav a:hover,
 .sidebar nav a.router-link-active {
@@ -155,7 +161,8 @@ textarea {
   padding-top: 16px;
   border-top: 1px solid #ffffff1a;
 }
-.sidebar-footer a {
+.sidebar-footer a,
+.sidebar-footer button {
   justify-content: center;
   background: #fce8e6;
   color: #b84d42;
@@ -862,7 +869,9 @@ td em {
 }
 
 .sidebar-footer a:hover,
-.sidebar-footer a:focus-visible {
+.sidebar-footer a:focus-visible,
+.sidebar-footer button:hover,
+.sidebar-footer button:focus-visible {
   background: #b84d42;
   color: #fff;
 }

@@ -86,6 +86,197 @@ app.get('/api/tables', async (req, res) => {
   }
 });
 
+// Get all IoT devices with each device's latest reading (read-only)
+app.get('/api/iot/devices', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        sd.sensor_id,
+        sd.device_name,
+        sd.device_type,
+        sd.serial_number,
+        sd.location_description,
+        sd.status,
+        sd.installed_at,
+        latest_reading.reading_id,
+        latest_reading.plant_id,
+        latest_reading.temperature_c,
+        latest_reading.humidity,
+        latest_reading.soil_moisture,
+        latest_reading.rainfall_mm,
+        latest_reading.motion_detected,
+        latest_reading.gps_latitude,
+        latest_reading.gps_longitude,
+        latest_reading.recorded_at
+      FROM public.sensor_device AS sd
+      LEFT JOIN LATERAL (
+        SELECT
+          sr.reading_id,
+          sr.plant_id,
+          sr.temperature_c,
+          sr.humidity,
+          sr.soil_moisture,
+          sr.rainfall_mm,
+          sr.motion_detected,
+          sr.gps_latitude,
+          sr.gps_longitude,
+          sr.recorded_at
+        FROM public.sensor_reading AS sr
+        WHERE sr.sensor_id = sd.sensor_id
+        ORDER BY sr.recorded_at DESC
+        LIMIT 1
+      ) AS latest_reading ON true
+      ORDER BY sd.sensor_id ASC;
+    `);
+
+    const devices = result.rows.map(row => ({
+      sensor_id: row.sensor_id,
+      device_name: row.device_name,
+      device_type: row.device_type,
+      serial_number: row.serial_number,
+      location_description: row.location_description,
+      status: row.status,
+      installed_at: row.installed_at,
+      latest_reading: row.reading_id === null
+        ? null
+        : {
+            reading_id: row.reading_id,
+            plant_id: row.plant_id,
+            temperature_c: row.temperature_c,
+            humidity: row.humidity,
+            soil_moisture: row.soil_moisture,
+            rainfall_mm: row.rainfall_mm,
+            motion_detected: row.motion_detected,
+            gps_latitude: row.gps_latitude,
+            gps_longitude: row.gps_longitude,
+            recorded_at: row.recorded_at
+          }
+    }));
+
+    return res.json({
+      message: 'IoT devices retrieved successfully!',
+      count: devices.length,
+      devices
+    });
+  } catch (error) {
+    console.error('IoT device query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve IoT devices.'
+    });
+  }
+});
+
+// Get historical readings for one sensor device (read-only)
+app.get('/api/iot/sensors/:sensorId/readings', async (req, res) => {
+  const sensorId = Number(req.params.sensorId);
+
+  if (!Number.isSafeInteger(sensorId) || sensorId <= 0) {
+    return res.status(400).json({
+      message: 'Invalid sensor ID.'
+    });
+  }
+
+  try {
+    const sensorResult = await pool.query(`
+      SELECT
+        sensor_id,
+        device_name,
+        device_type,
+        serial_number,
+        location_description,
+        status
+      FROM public.sensor_device
+      WHERE sensor_id = $1
+      LIMIT 1;
+    `, [sensorId]);
+
+    if (sensorResult.rows.length === 0) {
+      return res.status(404).json({
+        message: 'Sensor not found.'
+      });
+    }
+
+    const readingsResult = await pool.query(`
+      SELECT
+        reading_id,
+        plant_id,
+        sensor_id,
+        temperature_c,
+        humidity,
+        soil_moisture,
+        rainfall_mm,
+        motion_detected,
+        gps_latitude,
+        gps_longitude,
+        recorded_at
+      FROM public.sensor_reading
+      WHERE sensor_id = $1
+      ORDER BY recorded_at DESC;
+    `, [sensorId]);
+
+    return res.json({
+      message: 'Sensor readings retrieved successfully!',
+      sensor: sensorResult.rows[0],
+      count: readingsResult.rows.length,
+      readings: readingsResult.rows
+    });
+  } catch (error) {
+    console.error('Sensor reading history query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve sensor readings.'
+    });
+  }
+});
+
+// Get all threat alerts with related sensor and plant details (read-only)
+app.get('/api/iot/alerts', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        ta.alert_id,
+        ta.plant_id,
+        ta.reading_id,
+        sr.sensor_id,
+        sd.device_name,
+        ta.alert_type,
+        ta.severity,
+        ta.confidence,
+        ta.description,
+        ta.image_path,
+        ta.status,
+        ta.created_at,
+        ta.resolved_by,
+        ta.resolved_at,
+        s.scientific_name,
+        s.common_name
+      FROM public.threat_alert AS ta
+      LEFT JOIN public.sensor_reading AS sr
+        ON ta.reading_id = sr.reading_id
+      LEFT JOIN public.sensor_device AS sd
+        ON sr.sensor_id = sd.sensor_id
+      LEFT JOIN public.plant_record AS pr
+        ON ta.plant_id = pr.plant_id
+      LEFT JOIN public.species AS s
+        ON pr.species_id = s.species_id
+      ORDER BY ta.created_at DESC;
+    `);
+
+    return res.json({
+      message: 'Threat alerts retrieved successfully!',
+      count: result.rows.length,
+      alerts: result.rows
+    });
+  } catch (error) {
+    console.error('Threat alert query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve threat alerts.'
+    });
+  }
+});
+
 // Get all plant species (read-only)
 app.get('/api/species', async (req, res) => {
   try {
@@ -171,6 +362,96 @@ app.get('/api/species/:id', async (req, res) => {
 
     return res.status(500).json({
       message: 'Unable to retrieve species.'
+    });
+  }
+});
+
+// Get all species requests (read-only)
+app.get('/api/species-requests', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        sr.request_id,
+        sr.requested_by,
+        sr.reviewed_by,
+        sr.suggested_common_name,
+        sr.genus_id,
+        g.genus_name,
+        sr.description,
+        sr.habitat,
+        sr.request_status,
+        sr.review_comment,
+        sr.submitted_at,
+        sr.reviewed_at,
+        sr.approved_species_id
+      FROM public.species_request AS sr
+      LEFT JOIN public.genus AS g
+        ON sr.genus_id = g.genus_id
+      ORDER BY sr.submitted_at DESC;
+    `);
+
+    return res.json({
+      message: 'Species requests retrieved successfully!',
+      count: result.rows.length,
+      species_requests: result.rows
+    });
+  } catch (error) {
+    console.error('Species request list query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve species requests.'
+    });
+  }
+});
+
+// Get one species request by ID (read-only)
+app.get('/api/species-requests/:id', async (req, res) => {
+  const requestId = Number(req.params.id);
+
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    return res.status(400).json({
+      message: 'Invalid species request ID.'
+    });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT
+        sr.request_id,
+        sr.requested_by,
+        sr.reviewed_by,
+        sr.suggested_common_name,
+        sr.genus_id,
+        g.genus_name,
+        sr.description,
+        sr.habitat,
+        sr.request_status,
+        sr.review_comment,
+        sr.submitted_at,
+        sr.reviewed_at,
+        sr.approved_species_id
+      FROM public.species_request AS sr
+      LEFT JOIN public.genus AS g
+        ON sr.genus_id = g.genus_id
+      WHERE sr.request_id = $1
+      LIMIT 1;
+    `, [requestId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: 'Species request not found.'
+      });
+    }
+
+    return res.json({
+      message: 'Species request retrieved successfully!',
+      species_request: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Species request detail query error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to retrieve species request.'
     });
   }
 });
@@ -298,7 +579,7 @@ app.post('/api/plants', async (req, res) => {
   }
 });
 
-// Get all plant records
+// Get all plant records with latest approved observation
 app.get('/api/plants', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -319,7 +600,15 @@ app.get('/api/plants', async (req, res) => {
         pl.latitude,
         pl.longitude,
         pl.accuracy_m,
-        pl.recorded_at AS location_recorded_at
+        pl.recorded_at AS location_recorded_at,
+
+        latest_obs.observation_id AS latest_observation_id,
+        latest_obs.height_cm,
+        latest_obs.life_stage,
+        latest_obs.health_status,
+        latest_obs.morphology,
+        latest_obs.notes,
+        latest_obs.observed_at AS last_verified_at
 
       FROM public.plant_record AS pr
 
@@ -334,6 +623,22 @@ app.get('/api/plants', async (req, res) => {
 
       LEFT JOIN public.plant_location AS pl
         ON pr.plant_id = pl.plant_id
+
+      LEFT JOIN LATERAL (
+        SELECT
+          po.observation_id,
+          po.height_cm,
+          po.life_stage,
+          po.health_status,
+          po.morphology,
+          po.notes,
+          po.observed_at
+        FROM public.plant_observation AS po
+        WHERE po.plant_id = pr.plant_id
+          AND LOWER(po.status) = 'approved'
+        ORDER BY po.observed_at DESC
+        LIMIT 1
+      ) AS latest_obs ON true
 
       ORDER BY pr.registered_at DESC;
     `);
@@ -562,6 +867,152 @@ app.get('/api/observations/:id', async (req, res) => {
     return res.status(500).json({
       message: 'Unable to retrieve observation.'
     });
+  }
+});
+
+// Review an observation
+app.patch('/api/observations/:id/review', async (req, res) => {
+  const observationId = Number(req.params.id);
+  const { decision, comment, verified_by: verifiedBy } = req.body || {};
+  const allowedDecisions = [
+    'Approved',
+    'Rejected',
+    'Correction Required',
+    'Flagged'
+  ];
+
+  if (!Number.isSafeInteger(observationId) || observationId <= 0) {
+    return res.status(400).json({
+      message: 'Invalid observation ID.'
+    });
+  }
+
+  if (typeof decision !== 'string' || !allowedDecisions.includes(decision)) {
+    return res.status(400).json({
+      message: 'Decision must be Approved, Rejected, Correction Required, or Flagged.'
+    });
+  }
+
+  if (!Number.isSafeInteger(verifiedBy) || verifiedBy <= 0) {
+    return res.status(400).json({
+      message: 'verified_by must be a positive integer.'
+    });
+  }
+
+  if (comment !== undefined && comment !== null && typeof comment !== 'string') {
+    return res.status(400).json({
+      message: 'Comment must be a string.'
+    });
+  }
+
+  const trimmedComment = typeof comment === 'string' ? comment.trim() : '';
+  if (decision !== 'Approved' && !trimmedComment) {
+    return res.status(400).json({
+      message: `Comment is required when the decision is ${decision}.`
+    });
+  }
+
+  const storedComment = trimmedComment || 'Submission verified.';
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  try {
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const observationExists = await client.query(`
+      SELECT observation_id
+      FROM public.plant_observation
+      WHERE observation_id = $1
+      FOR UPDATE;
+    `, [observationId]);
+
+    if (observationExists.rows.length === 0) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(404).json({
+        message: 'Observation not found.'
+      });
+    }
+
+    const verifierExists = await client.query(`
+      SELECT user_id
+      FROM public.users
+      WHERE user_id = $1
+      LIMIT 1;
+    `, [verifiedBy]);
+
+    if (verifierExists.rows.length === 0) {
+      await client.query('ROLLBACK');
+      transactionStarted = false;
+      return res.status(404).json({
+        message: 'Verifier not found.'
+      });
+    }
+
+    const observationResult = await client.query(`
+      UPDATE public.plant_observation
+      SET status = $1
+      WHERE observation_id = $2
+      RETURNING *;
+    `, [decision, observationId]);
+
+    const existingVerification = await client.query(`
+      SELECT verification_id
+      FROM public.verification
+      WHERE observation_id = $1
+      ORDER BY verified_at DESC, verification_id DESC
+      LIMIT 1
+      FOR UPDATE;
+    `, [observationId]);
+
+    const verificationResult = existingVerification.rows.length
+      ? await client.query(`
+          UPDATE public.verification
+          SET
+            verified_by = $1,
+            verification_status = $2,
+            comments = $3,
+            verified_at = NOW()
+          WHERE verification_id = $4
+          RETURNING *;
+        `, [verifiedBy, decision, storedComment, existingVerification.rows[0].verification_id])
+      : await client.query(`
+          INSERT INTO public.verification (
+            observation_id,
+            verified_by,
+            verification_status,
+            comments,
+            verified_at
+          )
+          VALUES ($1, $2, $3, $4, NOW())
+          RETURNING *;
+        `, [observationId, verifiedBy, decision, storedComment]);
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+
+    return res.json({
+      message: 'Observation review saved successfully!',
+      observation: observationResult.rows[0],
+      verification: verificationResult.rows[0]
+    });
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Observation review rollback failed:', rollbackError.message);
+      }
+    }
+
+    console.error('Observation review error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to save observation review.'
+    });
+  } finally {
+    client.release();
   }
 });
 

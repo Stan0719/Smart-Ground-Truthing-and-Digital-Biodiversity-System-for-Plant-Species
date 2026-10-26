@@ -1,11 +1,42 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
-import { plantRecords } from '../data/plantRecords'
+import { plantRecords, type PlantRecord } from '../data/plantRecords'
 import { plants as species } from '../data/plants'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
+import { formatPlantId, parsePlantId } from '../utils/plantId'
+
+interface ApiPlant {
+  plant_id: string | number
+  species_id: string | number
+  registered_by?: string | number | null
+  current_status?: string | null
+  registered_at?: string | null
+  scientific_name?: string | null
+  common_name?: string | null
+  genus_name?: string | null
+  family_name?: string | null
+  conservation_status?: string | null
+  location_id?: string | number | null
+  latitude?: string | number | null
+  longitude?: string | number | null
+  accuracy_m?: string | number | null
+  location_recorded_at?: string | null
+}
+
+interface PlantResponse {
+  plant: ApiPlant
+}
+
+type DetailPlant = PlantRecord & {
+  genus?: string
+  family?: string
+  conservationStatus?: string
+  currentStatus?: string
+  isBackendRecord?: boolean
+}
 
 const route = useRoute()
 const { t, te, locale } = useI18n()
@@ -14,7 +45,93 @@ const canViewStaffPlantData = computed(
   () =>
     isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
 )
-const plant = computed(() => plantRecords.find((item) => item.plantId === route.params.plantId))
+const plant = ref<DetailPlant | null>(null)
+const isLoading = ref(false)
+
+const numericValue = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === '') return Number.NaN
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : Number.NaN
+}
+
+const generatedSlug = (item: ApiPlant) => {
+  const name = item.common_name || item.scientific_name || 'species'
+  return `${name}-${item.species_id}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+const mapBackendPlant = (item: ApiPlant): DetailPlant | null => {
+  const plantId = formatPlantId(item.plant_id)
+  if (!plantId) return null
+
+  const prototypeSpecies = species.find(
+    (candidate) =>
+      candidate.scientificName.toLowerCase() === (item.scientific_name || '').toLowerCase(),
+  )
+
+  return {
+    plantId,
+    speciesSlug: prototypeSpecies?.slug || generatedSlug(item),
+    speciesId: String(item.species_id),
+    speciesName: item.scientific_name || '',
+    commonName: item.common_name || item.scientific_name || '',
+    genus: item.genus_name || '',
+    family: item.family_name || '',
+    conservationStatus: item.conservation_status || '',
+    currentStatus: item.current_status || '',
+    latestApproved: {
+      date: '',
+      heightCm: Number.NaN,
+      healthStatus: '',
+      lifeStage: '',
+      morphology: '',
+      notes: '',
+    },
+    location: {
+      zone: '',
+      latitude: numericValue(item.latitude),
+      longitude: numericValue(item.longitude),
+      altitudeM: Number.NaN,
+      accuracyM: numericValue(item.accuracy_m),
+    },
+    qr: { code: '', status: '' },
+    registeredBy: item.registered_by == null ? '' : String(item.registered_by),
+    registeredAt: item.registered_at || '',
+    images: [],
+    observations: [],
+    isBackendRecord: true,
+  }
+}
+
+const loadPlant = async () => {
+  plant.value = null
+  const displayId = typeof route.params.plantId === 'string' ? route.params.plantId : ''
+  const numericId = parsePlantId(displayId)
+  if (numericId === null) return
+
+  isLoading.value = true
+  try {
+    const response = await fetch(`/api/plants/${numericId}`)
+    if (response.ok) {
+      const result: PlantResponse = await response.json()
+      plant.value = mapBackendPlant(result.plant)
+      return
+    }
+
+    if (response.status === 404) {
+      plant.value = plantRecords.find((item) => item.plantId === displayId) || null
+    }
+  } catch {
+    plant.value = null
+  } finally {
+    isLoading.value = false
+  }
+}
+
+watch(() => route.params.plantId, loadPlant, { immediate: true })
+
 const selectedSpecies = computed(() =>
   species.find((item) => item.slug === plant.value?.speciesSlug),
 )
@@ -33,9 +150,38 @@ const optionLabel = (value: string) => {
 }
 
 const translatedGenus = computed(() => {
+  if (plant.value?.isBackendRecord) return plant.value.genus || '-'
   const key = `speciesContent.${selectedSpecies.value?.slug}.genus`
   return te(key) ? t(key) : selectedSpecies.value?.genus || '-'
 })
+
+const displayCommonName = computed(() => {
+  if (!plant.value) return ''
+  return plant.value.isBackendRecord
+    ? plant.value.commonName
+    : t(`plantNames.${plant.value.speciesSlug}`)
+})
+
+const displayScientificName = computed(() => {
+  if (!plant.value) return ''
+  return plant.value.isBackendRecord
+    ? plant.value.speciesName
+    : t(`scientificNames.${plant.value.speciesSlug}`)
+})
+
+const hasCoordinates = computed(
+  () =>
+    Number.isFinite(plant.value?.location.latitude) &&
+    Number.isFinite(plant.value?.location.longitude),
+)
+const hasRegistration = computed(() =>
+  Boolean(plant.value?.registeredBy || plant.value?.registeredAt),
+)
+const showStaffPanel = computed(
+  () =>
+    canViewStaffPlantData.value &&
+    (hasCoordinates.value || Boolean(plant.value?.qr.code) || hasRegistration.value),
+)
 
 const translatedMorphology = (lifeStage: string) =>
   t('species.plant.morphologyValue', {
@@ -44,26 +190,30 @@ const translatedMorphology = (lifeStage: string) =>
   })
 
 const formatDate = (value: string) => {
+  if (!value) return '-'
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return '-'
   const dateLocale = locale.value === 'zh-CN' ? 'zh-CN' : locale.value === 'ms' ? 'ms-MY' : 'en-MY'
   return new Intl.DateTimeFormat(dateLocale, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
-  }).format(new Date(`${value}T00:00:00`))
+  }).format(date)
 }
 </script>
 
 <template>
   <NavigationBar />
 
-  <main v-if="plant && selectedSpecies" class="plant-detail-page">
+  <main v-if="isLoading" class="not-found">
+    <p>Loading plant record...</p>
+  </main>
+
+  <main v-else-if="plant" class="plant-detail-page">
     <section class="plant-hero">
       <div class="container">
         <RouterLink :to="`/species/${plant.speciesSlug}`" class="back-link"
-          >←
-          {{
-            t('species.plant.back', { name: t(`plantNames.${selectedSpecies.slug}`) })
-          }}</RouterLink
+          >← {{ t('species.plant.back', { name: displayCommonName }) }}</RouterLink
         >
         <div class="hero-grid">
           <img
@@ -83,13 +233,26 @@ const formatDate = (value: string) => {
           <div class="hero-copy">
             <p class="eyebrow">{{ t('species.plant.verifiedRecord') }}</p>
             <h1>{{ t('speciesLabels.plantLabel') }} {{ plant.plantId }}</h1>
-            <h2>{{ t(`plantNames.${selectedSpecies.slug}`) }}</h2>
-            <p class="scientific-name">{{ t(`scientificNames.${selectedSpecies.slug}`) }}</p>
-            <p class="species-summary">{{ t(`plantDescriptions.${selectedSpecies.slug}`) }}</p>
+            <h2>{{ displayCommonName }}</h2>
+            <p class="scientific-name">{{ displayScientificName }}</p>
+            <p v-if="!plant.isBackendRecord" class="species-summary">
+              {{ t(`plantDescriptions.${plant.speciesSlug}`) }}
+            </p>
             <div class="hero-badges">
-              <span v-if="canViewStaffPlantData">{{ optionLabel(plant.latestApproved.healthStatus) }}</span
-              ><span>{{ optionLabel(plant.latestApproved.lifeStage) }}</span
-              ><span v-if="canViewStaffPlantData">{{ optionLabel(plant.location.zone) }}</span>
+              <span
+                v-if="
+                  canViewStaffPlantData &&
+                  (plant.latestApproved.healthStatus || plant.currentStatus)
+                "
+              >
+                {{ optionLabel(plant.latestApproved.healthStatus || plant.currentStatus || '') }}
+              </span>
+              <span v-if="plant.latestApproved.lifeStage">{{
+                optionLabel(plant.latestApproved.lifeStage)
+              }}</span>
+              <span v-if="canViewStaffPlantData && plant.location.zone">{{
+                optionLabel(plant.location.zone)
+              }}</span>
             </div>
           </div>
         </div>
@@ -111,48 +274,62 @@ const formatDate = (value: string) => {
             </div>
             <div>
               <span>{{ t('speciesLabels.species') }}</span
-              ><strong>{{ t(`plantNames.${selectedSpecies.slug}`) }}</strong>
+              ><strong>{{ displayCommonName }}</strong>
             </div>
             <div>
               <span>{{ t('speciesLabels.scientificName') }}</span
               ><strong
-                ><em>{{ t(`scientificNames.${selectedSpecies.slug}`) }}</em></strong
+                ><em>{{ displayScientificName }}</em></strong
               >
             </div>
-            <div>
+            <div v-if="Number.isFinite(plant.latestApproved.heightCm)">
               <span>{{ t('speciesLabels.height') }}</span
               ><strong>{{ plant.latestApproved.heightCm }} cm</strong>
             </div>
-            <div v-if="canViewStaffPlantData">
+            <div
+              v-if="
+                canViewStaffPlantData && (plant.latestApproved.healthStatus || plant.currentStatus)
+              "
+            >
               <span>{{ t('speciesLabels.health') }}</span
-              ><strong>{{ optionLabel(plant.latestApproved.healthStatus) }}</strong>
+              ><strong>{{
+                optionLabel(plant.latestApproved.healthStatus || plant.currentStatus || '')
+              }}</strong>
             </div>
-            <div>
+            <div v-if="plant.latestApproved.lifeStage">
               <span>{{ t('speciesLabels.growthStage') }}</span
               ><strong>{{ optionLabel(plant.latestApproved.lifeStage) }}</strong>
             </div>
-            <div>
+            <div v-if="plant.genus || selectedSpecies?.genus">
               <span>{{ t('speciesLabels.genus') }}</span
               ><strong>{{ translatedGenus }}</strong>
             </div>
-            <div>
+            <div v-if="plant.family">
+              <span>{{ t('speciesLabels.family') }}</span
+              ><strong>{{ plant.family }}</strong>
+            </div>
+            <div v-if="plant.conservationStatus">
+              <span>{{ t('speciesLabels.conservation') }}</span
+              ><strong>{{ plant.conservationStatus }}</strong>
+            </div>
+            <div v-if="plant.latestApproved.date">
               <span>{{ t('speciesLabels.lastVerified') }}</span
               ><strong>{{ formatDate(plant.latestApproved.date) }}</strong>
             </div>
-            <div class="wide">
+            <div v-if="plant.latestApproved.morphology" class="wide">
               <span>{{ t('speciesLabels.morphology') }}</span
               ><strong>{{ translatedMorphology(plant.latestApproved.lifeStage) }}</strong>
             </div>
-            <div v-if="canViewStaffPlantData">
+            <div v-if="canViewStaffPlantData && plant.location.zone">
               <span>{{ t('speciesLabels.location') }}</span
               ><strong>{{ optionLabel(plant.location.zone) }}</strong>
             </div>
           </div>
         </div>
 
-        <aside v-if="canViewStaffPlantData" class="staff-panel">
+        <aside v-if="showStaffPanel" class="staff-panel">
           <p class="eyebrow">{{ t('speciesLabels.staffRecord') }}</p>
-          <section>
+          <section v-if="hasCoordinates">
             <h3>{{ t('speciesLabels.gps') }}</h3>
             <dl>
               <div>
@@ -163,29 +340,29 @@ const formatDate = (value: string) => {
                 <dt>{{ t('speciesLabels.longitude') }}</dt>
                 <dd>{{ plant.location.longitude.toFixed(6) }}</dd>
               </div>
-              <div>
+              <div v-if="Number.isFinite(plant.location.altitudeM)">
                 <dt>{{ t('speciesLabels.altitude') }}</dt>
                 <dd>{{ plant.location.altitudeM }} m</dd>
               </div>
-              <div>
+              <div v-if="Number.isFinite(plant.location.accuracyM)">
                 <dt>{{ t('speciesLabels.gpsAccuracy') }}</dt>
                 <dd>± {{ plant.location.accuracyM }} m</dd>
               </div>
             </dl>
           </section>
-          <section>
+          <section v-if="plant.qr.code">
             <h3>{{ t('speciesLabels.qrTag') }}</h3>
             <p class="qr-code">{{ plant.qr.code }}</p>
             <span class="status">{{ plant.qr.status }}</span>
           </section>
-          <section>
+          <section v-if="hasRegistration">
             <h3>{{ t('speciesLabels.registration') }}</h3>
             <dl>
-              <div>
+              <div v-if="plant.registeredBy">
                 <dt>{{ t('speciesLabels.registeredBy') }}</dt>
                 <dd>{{ plant.registeredBy }}</dd>
               </div>
-              <div>
+              <div v-if="plant.registeredAt">
                 <dt>{{ t('speciesLabels.registeredAt') }}</dt>
                 <dd>{{ formatDate(plant.registeredAt) }}</dd>
               </div>

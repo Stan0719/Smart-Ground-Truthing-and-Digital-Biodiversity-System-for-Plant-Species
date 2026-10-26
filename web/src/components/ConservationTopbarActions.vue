@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { logout } from '../services/auth'
 import {
   conservationNotifications,
   markAllConservationNotificationsRead,
@@ -12,14 +13,17 @@ import { conservationProfile } from '../data/conservationProfile'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const actionsWrap = ref<HTMLElement | null>(null)
 const notificationsOpen = ref(false)
 const profileOpen = ref(false)
 const notificationText = (
   notification: ConservationNotification,
   field: 'title' | 'message' | 'time',
-) => t(`dashboardNotifications.conservation.${notification.id}.${field}`)
+) => {
+  const key = `dashboardNotifications.conservation.${notification.id}.${field}`
+  return te(key) ? t(key) : notification[field]
+}
 
 const toggleNotifications = () => {
   notificationsOpen.value = !notificationsOpen.value
@@ -50,7 +54,8 @@ const openProfileSettings = async () => {
 
 const signOut = async () => {
   closeMenus()
-  await router.push({ name: 'home' })
+  await logout()
+  await router.replace('/')
 }
 
 const handleOutsideClick = (event: MouseEvent) => {
@@ -112,7 +117,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
                   ? '✓'
                   : notification.type === 'species'
                     ? '♧'
-                    : notification.type === 'threat'
+                    : notification.type === 'threat' || notification.type === 'camera'
                       ? '!'
                       : notification.type === 'sensor'
                         ? '×'
@@ -312,6 +317,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   color: #287a53;
 }
 .notification-type.threat,
+.notification-type.camera,
 .notification-type.sensor {
   background: #f8e4e0;
   color: #b84b3a;

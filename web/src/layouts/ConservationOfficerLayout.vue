@@ -211,9 +211,8 @@ const closeControl = () =>
       </nav>
 
       <div class="sidebar-footer">
-        <RouterLink to="/">{{ t('nav.logout') }}</RouterLink>
+        <button type="button" @click="signOut">{{ t('nav.logout') }}</button>
       </div>
-      <div class="sidebar-footer"><button type="button" @click="signOut">Logout</button></div>
     </aside>
     <button
       v-if="sidebarOpen"

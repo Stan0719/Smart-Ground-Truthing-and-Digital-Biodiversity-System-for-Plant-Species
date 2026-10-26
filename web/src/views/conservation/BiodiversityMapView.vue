@@ -1,17 +1,46 @@
 <script setup lang="ts">
 import { useConservationText } from '../../composables/useConservationText'
-const { ct, sf, dt, speciesText, observationText, locale } = useConservationText()
+const { ct, dt, locale } = useConservationText()
 import 'leaflet/dist/leaflet.css'
 import * as L from 'leaflet'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppModal from '../../components/conservation/AppModal.vue'
-import {
-  conservationStore,
-  speciesForPlant,
-  speciesRequestForPlant,
-  type PlantRecord,
-} from '../../data/conservation'
+import { formatPlantId } from '../../utils/plantId'
+
+interface ApiPlant {
+  plant_id: string | number
+  species_id: string | number
+  scientific_name?: string | null
+  common_name?: string | null
+  genus_name?: string | null
+  family_name?: string | null
+  current_status?: string | null
+  latitude?: string | number | null
+  longitude?: string | number | null
+  accuracy_m?: string | number | null
+  location_recorded_at?: string | null
+}
+
+interface PlantsResponse {
+  plants?: ApiPlant[]
+  message?: string
+}
+
+interface MapPlant {
+  numericId: number
+  id: string
+  speciesId: string
+  scientificName: string
+  commonName: string
+  genus: string
+  family: string
+  status: string
+  latitude: number
+  longitude: number
+  accuracyM: number | null
+  locationRecordedAt: string
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -20,8 +49,11 @@ const species = ref('')
 const status = ref('')
 const zone = ref('')
 const plantStatus = ref('')
-const selected = ref<PlantRecord | null>(null)
+const plants = ref<MapPlant[]>([])
+const selected = ref<MapPlant | null>(null)
 const history = ref(false)
+const isLoading = ref(true)
+const loadError = ref('')
 const mapElement = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 let markerLayer: L.LayerGroup | null = null
@@ -31,46 +63,91 @@ let settleTimer: ReturnType<typeof setTimeout> | null = null
 const markers = new Map<string, L.Marker>()
 
 const filtered = computed(() =>
-  conservationStore.plants.filter(
-    (plant) =>
-      plant.id.toLowerCase().includes(search.value.trim().toLowerCase()) &&
+  plants.value.filter((plant) => {
+    const query = search.value.trim().toLowerCase()
+    return (
+      (!query ||
+        plant.id.toLowerCase().includes(query) ||
+        plant.scientificName.toLowerCase().includes(query) ||
+        plant.commonName.toLowerCase().includes(query)) &&
       (!species.value || plant.speciesId === species.value) &&
-      (!status.value || speciesForPlant(plant.id)?.status === status.value) &&
-      (!zone.value || plant.zone === zone.value) &&
-      (!plantStatus.value || plant.status === plantStatus.value),
-  ),
+      (!status.value || plant.status === status.value) &&
+      (!plantStatus.value || plant.status === plantStatus.value)
+    )
+  }),
 )
-const hasCoordinates = (plant: PlantRecord) =>
-  Number.isFinite(plant.latitude) && Number.isFinite(plant.longitude)
+const hasCoordinates = (plant: MapPlant) =>
+  Number.isFinite(plant.latitude) &&
+  plant.latitude >= -90 &&
+  plant.latitude <= 90 &&
+  Number.isFinite(plant.longitude) &&
+  plant.longitude >= -180 &&
+  plant.longitude <= 180
 const mappedPlants = computed(() => filtered.value.filter(hasCoordinates))
 const unmappedPlantCount = computed(() => filtered.value.length - mappedPlants.value.length)
 const speciesRecorded = computed(
-  () => new Set(conservationStore.plants.map((plant) => plant.speciesId).filter(Boolean)).size,
+  () => new Set(plants.value.map((plant) => plant.speciesId).filter(Boolean)).size,
 )
-const activeThreats = computed(
-  () => conservationStore.alerts.filter((alert) => alert.status !== 'Resolved').length,
-)
-const conservationStatuses = computed(() => [
-  ...new Set(conservationStore.species.map((item) => item.status)),
+const speciesOptions = computed(() => {
+  const options = new Map<string, string>()
+  plants.value.forEach((plant) =>
+    options.set(plant.speciesId, plant.commonName || plant.scientificName || plant.speciesId),
+  )
+  return [...options].map(([id, name]) => ({ id, name }))
+})
+const plantStatuses = computed(() => [
+  ...new Set(plants.value.map((plant) => plant.status).filter(Boolean)),
 ])
 
-const plantIdentity = (plant: PlantRecord) => {
-  const known = speciesForPlant(plant.id)
-  const request = speciesRequestForPlant(plant.id)
-  return {
-    scientificName: known
-      ? sf(known)
-      : ct(request?.proposedScientificName ?? 'Identification pending'),
-    commonName: known
-      ? sf(known, 'common')
-      : ct(request?.proposedCommonName ?? 'Common name unavailable'),
-    conservationStatus: known?.status ?? request?.status ?? 'Not assessed',
+const numericValue = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === '') return Number.NaN
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : Number.NaN
+}
+const displayValue = (value: string) => value || '—'
+const coordinateValue = (value: number) => (Number.isFinite(value) ? value : '—')
+const accuracyValue = (plant: MapPlant) =>
+  plant.accuracyM === null ? '—' : `${plant.accuracyM} m`
+const loadPlants = async () => {
+  isLoading.value = true
+  loadError.value = ''
+
+  try {
+    const response = await fetch('/api/plants')
+    const result: PlantsResponse = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(result.message || 'Unable to load plant locations.')
+
+    plants.value = (Array.isArray(result.plants) ? result.plants : [])
+      .map((item): MapPlant | null => {
+        const numericId = Number(item.plant_id)
+        const id = formatPlantId(item.plant_id)
+        if (!id || !Number.isSafeInteger(numericId) || numericId <= 0) return null
+
+        const accuracy = numericValue(item.accuracy_m)
+        return {
+          numericId,
+          id,
+          speciesId: String(item.species_id ?? ''),
+          scientificName: item.scientific_name || 'Identification pending',
+          commonName: item.common_name || 'Common name unavailable',
+          genus: item.genus_name || '',
+          family: item.family_name || '',
+          status: item.current_status || '',
+          latitude: numericValue(item.latitude),
+          longitude: numericValue(item.longitude),
+          accuracyM: Number.isFinite(accuracy) ? accuracy : null,
+          locationRecordedAt: item.location_recorded_at || '',
+        }
+      })
+      .filter((plant): plant is MapPlant => plant !== null)
+  } catch (error) {
+    plants.value = []
+    loadError.value =
+      error instanceof Error ? error.message : 'An unexpected error occurred while loading plants.'
+  } finally {
+    isLoading.value = false
   }
 }
-const activeThreatFor = (plant: PlantRecord) =>
-  conservationStore.alerts.find(
-    (alert) => alert.plantId === plant.id && alert.status !== 'Resolved',
-  )
 const markerIcon = () =>
   L.divIcon({
     className: 'plant-marker-host',
@@ -91,14 +168,12 @@ const appendText = <Tag extends keyof HTMLElementTagNameMap>(
   parent.appendChild(element)
   return element
 }
-const popupContent = (plant: PlantRecord) => {
-  const identity = plantIdentity(plant)
-  const threat = activeThreatFor(plant)
+const popupContent = (plant: MapPlant) => {
   const root = document.createElement('article')
   root.className = 'plant-popup-card'
   appendText(root, 'strong', plant.id, 'plant-popup-id')
-  appendText(root, 'em', identity.scientificName, 'plant-popup-scientific')
-  appendText(root, 'span', identity.commonName, 'plant-popup-common')
+  appendText(root, 'em', plant.scientificName, 'plant-popup-scientific')
+  appendText(root, 'span', plant.commonName, 'plant-popup-common')
   const details = document.createElement('dl')
   const addDetail = (label: string, value: string) => {
     const row = document.createElement('div')
@@ -106,25 +181,19 @@ const popupContent = (plant: PlantRecord) => {
     appendText(row, 'dd', value)
     details.appendChild(row)
   }
-  addDetail(ct('Status'), ct(identity.conservationStatus))
-  addDetail(ct('Health'), ct(plant.health))
-  addDetail(ct('Location'), `${ct(plant.location)} · ${ct(plant.zone)}`)
-  addDetail(ct('Last Observation'), dt(plant.lastObservation))
+  addDetail(ct('Genus'), displayValue(plant.genus))
+  addDetail(ct('Status'), displayValue(plant.status))
+  addDetail(ct('Family'), displayValue(plant.family))
+  addDetail(ct('GPS Accuracy'), accuracyValue(plant))
+  addDetail(ct('Recorded'), plant.locationRecordedAt ? dt(plant.locationRecordedAt) : '—')
   root.appendChild(details)
-  if (threat)
-    appendText(
-      root,
-      'p',
-      ct('{severity} threat: {type}', { severity: ct(threat.severity), type: ct(threat.type) }),
-      'plant-popup-threat',
-    )
   const actions = document.createElement('div')
   actions.className = 'plant-popup-actions'
   const detailsButton = appendText(actions, 'button', ct('View Plant Details'))
   detailsButton.type = 'button'
   detailsButton.addEventListener(
     'click',
-    () => void router.push({ name: 'conservation-observations', query: { plant: plant.id } }),
+    () => void router.push(`/plant/${plant.id}`),
   )
   const mapsLink = appendText(actions, 'a', ct('Open in Google Maps'))
   mapsLink.href = `https://www.google.com/maps/search/?api=1&query=${plant.latitude},${plant.longitude}`
@@ -137,7 +206,7 @@ const highlightSelectedMarker = () =>
   markers.forEach((marker, id) =>
     marker.getElement()?.classList.toggle('is-selected', selected.value?.id === id),
   )
-const selectPlant = (plant: PlantRecord, center = true) => {
+const selectPlant = (plant: MapPlant, center = true) => {
   if (!hasCoordinates(plant) || !map) return
 
   selected.value = plant
@@ -170,7 +239,7 @@ const renderMarkers = () => {
   mappedPlants.value.forEach((plant) => {
     const marker = L.marker([plant.latitude, plant.longitude], {
       icon: markerIcon(),
-      title: `${plant.id}: ${plantIdentity(plant).scientificName}`,
+      title: `${plant.id}: ${plant.scientificName}`,
       riseOnHover: true,
     })
       .bindPopup(popupContent(plant), { maxWidth: 320, minWidth: 250 })
@@ -190,12 +259,12 @@ const renderMarkers = () => {
   zoomOut?.setAttribute('title', ct('Zoom out'))
   zoomOut?.setAttribute('aria-label', ct('Zoom out'))
 }
-const focus = async (plant: PlantRecord) => {
+const focus = async (plant: MapPlant) => {
   await nextTick()
   mapElement.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   selectPlant(plant)
 }
-const openHistory = (plant: PlantRecord) => {
+const openHistory = (plant: MapPlant) => {
   selected.value = plant
   history.value = true
 }
@@ -238,6 +307,7 @@ onMounted(async () => {
   settleTimer = setTimeout(() => {
     map?.invalidateSize({ pan: false })
   }, 150)
+  await loadPlants()
 })
 watch([mappedPlants, locale], () => {
   renderMarkers()
@@ -291,36 +361,28 @@ onBeforeUnmount(() => {
       ><span>{{ ct('Species') }}</span
       ><select v-model="species">
         <option value="">{{ ct('All species') }}</option>
-        <option v-for="item in conservationStore.species" :key="item.id" :value="item.id">
-          {{ sf(item, 'common') }}
+        <option v-for="item in speciesOptions" :key="item.id" :value="item.id">
+          {{ item.name }}
         </option>
       </select></label
     >
     <label class="field"
       ><span>{{ ct('Conservation status') }}</span
-      ><select v-model="status">
+      ><select v-model="status" disabled>
         <option value="">{{ ct('All statuses') }}</option>
-        <option v-for="item in conservationStatuses" :key="item" :value="item">
-          {{ ct(item) }}
-        </option>
       </select></label
     >
     <label class="field"
       ><span>{{ ct('Zone') }}</span
-      ><select v-model="zone">
+      ><select v-model="zone" disabled>
         <option value="">{{ ct('All zones') }}</option>
-        <option value="Zone A">{{ ct('Zone A') }}</option>
-        <option value="Zone B">{{ ct('Zone B') }}</option>
-        <option value="Zone C">{{ ct('Zone C') }}</option>
       </select></label
     >
     <label class="field"
       ><span>{{ ct('Plant status') }}</span
       ><select v-model="plantStatus">
         <option value="">{{ ct('All statuses') }}</option>
-        <option value="Protected">{{ ct('Protected') }}</option>
-        <option value="Monitored">{{ ct('Monitored') }}</option>
-        <option value="Stable">{{ ct('Stable') }}</option>
+        <option v-for="item in plantStatuses" :key="item" :value="item">{{ ct(item) }}</option>
       </select></label
     >
   </div>
@@ -336,7 +398,7 @@ onBeforeUnmount(() => {
           <span aria-hidden="true">♣</span>
           <div>
             <small>{{ ct('Plant records') }}</small
-            ><strong>{{ conservationStore.plants.length }}</strong>
+            ><strong>{{ plants.length }}</strong>
           </div>
         </article>
         <article>
@@ -350,7 +412,7 @@ onBeforeUnmount(() => {
           <span aria-hidden="true">!</span>
           <div>
             <small>{{ ct('Active threats') }}</small
-            ><strong>{{ activeThreats }}</strong>
+            ><strong>—</strong>
           </div>
         </article>
       </div>
@@ -362,7 +424,13 @@ onBeforeUnmount(() => {
       >
         <span aria-hidden="true">⌖</span><span>{{ ct('Fit visible plants') }}</span>
       </button>
-      <div v-if="!mappedPlants.length" class="map-empty" role="status">
+      <div v-if="isLoading" class="map-empty" role="status">
+        {{ ct('Loading plant locations...') }}
+      </div>
+      <div v-else-if="loadError" class="map-empty" role="alert">
+        {{ loadError }}
+      </div>
+      <div v-else-if="!mappedPlants.length" class="map-empty" role="status">
         {{ ct('No plants with valid coordinates match the selected filters.') }}
       </div>
     </div>
@@ -376,9 +444,9 @@ onBeforeUnmount(() => {
     <div v-if="selected" class="selected-card">
       <div class="panel-header">
         <div>
-          <h3>{{ selected.id }} · {{ plantIdentity(selected).scientificName }}</h3>
+          <h3>{{ selected.id }} · {{ selected.scientificName }}</h3>
           <span class="panel-description"
-            >{{ plantIdentity(selected).commonName }} · {{ ct(selected.zone) }}</span
+            >{{ selected.commonName }} · {{ displayValue(selected.genus) }}</span
           >
         </div>
         <div class="selection-actions">
@@ -399,16 +467,16 @@ onBeforeUnmount(() => {
           <dd>{{ selected.latitude }}, {{ selected.longitude }}</dd>
         </div>
         <div>
-          <dt>{{ ct('Conservation Status') }}</dt>
-          <dd>{{ ct(plantIdentity(selected).conservationStatus) }}</dd>
+          <dt>{{ ct('Current Status') }}</dt>
+          <dd>{{ displayValue(selected.status) }}</dd>
         </div>
         <div>
-          <dt>{{ ct('Last Observation') }}</dt>
-          <dd>{{ dt(selected.lastObservation) }}</dd>
+          <dt>{{ ct('GPS Accuracy') }}</dt>
+          <dd>{{ accuracyValue(selected) }}</dd>
         </div>
         <div>
-          <dt>{{ ct('Health') }}</dt>
-          <dd>{{ ct(selected.health) }}</dd>
+          <dt>{{ ct('Location Recorded') }}</dt>
+          <dd>{{ selected.locationRecordedAt ? dt(selected.locationRecordedAt) : '—' }}</dd>
         </div>
       </dl>
     </div>
@@ -428,11 +496,11 @@ onBeforeUnmount(() => {
           <tr>
             <th>{{ ct('Plant ID') }}</th>
             <th>{{ ct('Species') }}</th>
-            <th>{{ ct('Location / Zone') }}</th>
+            <th>{{ ct('Genus / Family') }}</th>
             <th>{{ ct('Latitude') }}</th>
             <th>{{ ct('Longitude') }}</th>
-            <th>{{ ct('Conservation Status') }}</th>
-            <th>{{ ct('Last Observation') }}</th>
+            <th>{{ ct('Current Status') }}</th>
+            <th>{{ ct('GPS / Recorded') }}</th>
             <th>{{ ct('Actions') }}</th>
           </tr>
         </thead>
@@ -442,19 +510,22 @@ onBeforeUnmount(() => {
               <strong>{{ plant.id }}</strong>
             </td>
             <td>
-              <em>{{ plantIdentity(plant).scientificName }}</em>
+              <em>{{ plant.scientificName }}</em>
             </td>
-            <td>{{ ct(plant.location) }} / {{ ct(plant.zone) }}</td>
-            <td>{{ plant.latitude }}</td>
-            <td>{{ plant.longitude }}</td>
+            <td>{{ displayValue(plant.genus) }} / {{ displayValue(plant.family) }}</td>
+            <td>{{ coordinateValue(plant.latitude) }}</td>
+            <td>{{ coordinateValue(plant.longitude) }}</td>
             <td>
               <span
                 class="badge"
-                :class="plantIdentity(plant).conservationStatus.toLowerCase().replaceAll(' ', '-')"
-                >{{ ct(plantIdentity(plant).conservationStatus) }}</span
+                :class="plant.status.toLowerCase().replaceAll(' ', '-')"
+                >{{ displayValue(plant.status) }}</span
               >
             </td>
-            <td>{{ dt(plant.lastObservation) }}</td>
+            <td>
+              {{ accuracyValue(plant) }} /
+              {{ plant.locationRecordedAt ? dt(plant.locationRecordedAt) : '—' }}
+            </td>
             <td>
               <div class="action-group">
                 <button class="action-button" type="button" @click="selectPlant(plant, false)">
@@ -479,7 +550,7 @@ onBeforeUnmount(() => {
   <AppModal
     v-if="history && selected"
     :title="ct('{id} History', { id: selected.id })"
-    :subtitle="plantIdentity(selected).scientificName"
+    :subtitle="selected.scientificName"
     wide
     @close="history = false"
   >
@@ -495,17 +566,10 @@ onBeforeUnmount(() => {
           </tr>
         </thead>
         <tbody>
-          <tr
-            v-for="observation in conservationStore.observations.filter(
-              (item) => item.plantId === selected?.id,
-            )"
-            :key="observation.id"
-          >
-            <td>{{ observation.id }}</td>
-            <td>{{ dt(observation.observedAt) }}</td>
-            <td>{{ observation.height }}</td>
-            <td>{{ ct(observation.health) }}</td>
-            <td>{{ ct(observation.status) }}</td>
+          <tr>
+            <td class="empty-row" colspan="5">
+              {{ ct('Observation history is not included in the plant location response.') }}
+            </td>
           </tr>
         </tbody>
       </table>
