@@ -333,7 +333,6 @@ const logout = async () => {
           </svg>
 
           {{ t('nav.logout') }}
-          Logout
 
         </button>
       </div>
@@ -538,9 +537,6 @@ const logout = async () => {
       <p>
         {{ t('auth.logoutPrompt') }}
       </p>
-      <h2>Log out?</h2>
-
-      <p>Are you sure you want to log out of your account?</p>
 
       <div class="modal-actions">
 
@@ -559,8 +555,6 @@ const logout = async () => {
         >
           {{ t('auth.confirmLogout') }}
         </button>
-
-        <button class="confirm-logout-button" type="button" @click="logout">Log Out</button>
       </div>
     </div>
   </div>

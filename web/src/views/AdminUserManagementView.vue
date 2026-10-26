@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ActionFeedback from '../components/ActionFeedback.vue'
 import AdminPageShell from '../components/AdminPageShell.vue'
 import { api, currentUser, type AuthUser } from '../services/auth'
 type PrototypeRole = 'Conservation Officer' | 'Botanist'
@@ -68,10 +69,8 @@ const createdUser = ref<PrototypeUser | null>(null)
 const actionMode = ref<'view' | 'edit' | 'delete' | null>(null)
 const selectedUser = ref<UserRecord | null>(null)
 const actionError = ref('')
-const successMessage = ref('')
-const errorMessage = ref('')
-let successTimer: ReturnType<typeof setTimeout> | undefined
-let errorTimer: ReturnType<typeof setTimeout> | undefined
+const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
+let feedbackId = 0
 const editUser = ref<{ name: string; email: string; role: UserRole; status: UserStatus }>({
   name: '',
   email: '',
@@ -89,29 +88,15 @@ const newUser = ref<{ name: string; email: string; role: PrototypeRole | '' }>({
 })
 
 const showSuccessMessage = (message: string) => {
-  if (errorTimer) clearTimeout(errorTimer)
-  errorTimer = undefined
-  errorMessage.value = ''
-
-  if (successTimer) clearTimeout(successTimer)
-  successMessage.value = message
-  successTimer = setTimeout(() => {
-    successMessage.value = ''
-    successTimer = undefined
-  }, 3500)
+  feedback.value = { id: ++feedbackId, variant: 'success', message }
 }
 
 const showErrorMessage = (message: string) => {
-  if (successTimer) clearTimeout(successTimer)
-  successTimer = undefined
-  successMessage.value = ''
+  feedback.value = { id: ++feedbackId, variant: 'error', message }
+}
 
-  if (errorTimer) clearTimeout(errorTimer)
-  errorMessage.value = message
-  errorTimer = setTimeout(() => {
-    errorMessage.value = ''
-    errorTimer = undefined
-  }, 4000)
+const dismissFeedback = (id: number) => {
+  if (feedback.value?.id === id) feedback.value = null
 }
 
 const openAddUser = () => {
@@ -420,32 +405,14 @@ const clearFilters = () => {
       </section>
     </div>
 
-    <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">
-      <svg class="success-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M9 12l2 2 4-4"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-      </svg>
-      <p>
-        <strong>Success</strong><span>{{ successMessage }}</span>
-      </p>
-    </div>
-
-    <div v-if="errorMessage" class="error-alert" role="alert" aria-live="assertive">
-      <svg class="error-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-        <path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        <circle cx="12" cy="16.5" r="1" fill="currentColor" />
-      </svg>
-      <p>
-        <strong>Error</strong><span>{{ errorMessage }}</span>
-      </p>
-    </div>
+    <ActionFeedback
+      v-if="feedback"
+      :key="feedback.id"
+      :feedback-id="feedback.id"
+      :variant="feedback.variant"
+      :message="feedback.message"
+      @dismiss="dismissFeedback"
+    />
 
     <div v-if="addUserOpen" class="modal-backdrop" @click.self="finishCreatingUser">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
@@ -1016,98 +983,6 @@ code {
   font: inherit;
   font-size: 10px;
 }
-.success-alert {
-  position: fixed;
-  top: 96px;
-  left: 50%;
-  z-index: 1200;
-  width: min(380px, calc(100vw - 32px));
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-left: 4px solid #0c723a;
-  border-radius: 10px;
-  background: #abe7bf;
-  color: #245b3d;
-  box-shadow: 0 10px 28px rgba(36, 91, 61, 0.15);
-  transform: translateX(-50%);
-  animation: success-alert-in 180ms ease-out;
-}
-.success-alert-icon {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  color: #2f8a5a;
-}
-.success-alert p {
-  margin: 0;
-  display: grid;
-  gap: 2px;
-}
-.success-alert strong {
-  font-size: 11px;
-  font-weight: 800;
-}
-.success-alert span {
-  font-size: 10px;
-}
-.error-alert {
-  position: fixed;
-  top: 96px;
-  left: 50%;
-  z-index: 1201;
-  width: min(380px, calc(100vw - 32px));
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-left: 4px solid #b42318;
-  border-radius: 10px;
-  background: #fde8e7;
-  color: #7a271a;
-  box-shadow: 0 10px 28px rgba(122, 39, 26, 0.16);
-  transform: translateX(-50%);
-  animation: error-alert-in 180ms ease-out;
-}
-.error-alert-icon {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  color: #c43228;
-}
-.error-alert p {
-  margin: 0;
-  display: grid;
-  gap: 2px;
-}
-.error-alert strong {
-  font-size: 11px;
-  font-weight: 800;
-}
-.error-alert span {
-  font-size: 10px;
-}
-@keyframes success-alert-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-@keyframes error-alert-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
 .backdrop {
   display: none;
 }
@@ -1352,10 +1227,6 @@ code {
   }
 }
 @media (max-width: 560px) {
-  .success-alert,
-  .error-alert {
-    top: 82px;
-  }
   .page-intro {
     align-items: flex-start;
     flex-direction: column;

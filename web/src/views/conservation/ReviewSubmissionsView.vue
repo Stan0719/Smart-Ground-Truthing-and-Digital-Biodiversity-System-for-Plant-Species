@@ -2,7 +2,9 @@
 import { useConservationText } from '../../composables/useConservationText'
 const { ct, dt, locale } = useConservationText()
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
@@ -92,20 +94,29 @@ interface SpeciesRequestView {
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n({ useScope: 'global' })
 const search = ref('')
 const status = ref('')
 const species = ref('')
 const date = ref('')
 const selected = ref<ReviewObservation | null>(null)
 const comment = ref('')
-const error = ref('')
 const observations = ref<ReviewObservation[]>([])
 const speciesRequests = ref<SpeciesRequestView[]>([])
 const isLoading = ref(true)
 const loadError = ref('')
 const reviewingSpecies = ref(false)
 const speciesComment = ref('')
-const speciesError = ref('')
+const feedback = ref<{ id: number; variant: 'error'; message: string } | null>(null)
+let feedbackId = 0
+
+const showNotSavedFeedback = (message: string) => {
+  feedback.value = { id: ++feedbackId, variant: 'error', message }
+}
+
+const dismissFeedback = (id: number) => {
+  if (feedback.value?.id === id) feedback.value = null
+}
 
 const supportedStatuses: ObservationStatus[] = [
   'Draft',
@@ -256,9 +267,7 @@ const speciesOptions = computed(() => {
 function open(observation: ReviewObservation) {
   selected.value = observation
   comment.value = observation.reviewComment || ''
-  error.value = ''
   reviewingSpecies.value = false
-  speciesError.value = ''
   speciesComment.value = ''
 }
 
@@ -270,11 +279,15 @@ function closeReview() {
 
 function decide(next: ObservationStatus) {
   if (!selected.value) return
-  error.value = `${next} was not saved. Backend review persistence is not implemented yet.`
+  showNotSavedFeedback(
+    t('conservationPages.reviews.feedback.observationNotSaved', { decision: ct(next) }),
+  )
 }
 
 function decideSpecies(next: SpeciesRequestStatus) {
-  speciesError.value = `${next} was not saved. Species Request persistence is not implemented yet.`
+  showNotSavedFeedback(
+    t('conservationPages.reviews.feedback.speciesRequestNotSaved', { decision: ct(next) }),
+  )
 }
 
 onMounted(async () => {
@@ -317,6 +330,15 @@ onMounted(async () => {
 </script>
 
 <template>
+  <ActionFeedback
+    v-if="feedback"
+    :key="feedback.id"
+    :feedback-id="feedback.id"
+    :variant="feedback.variant"
+    :message="feedback.message"
+    @dismiss="dismissFeedback"
+  />
+
   <section class="page-intro">
     <div>
       <p class="page-kicker">{{ ct('VERIFICATION WORKFLOW') }}</p>
@@ -492,7 +514,6 @@ onMounted(async () => {
               :placeholder="ct('Record the observation decision or required action')"
             ></textarea>
           </label>
-          <p v-if="error" class="form-error">{{ ct(error) }}</p>
         </aside>
       </div>
     </section>
@@ -579,7 +600,6 @@ onMounted(async () => {
               ></textarea>
             </label>
           </div>
-          <p v-if="speciesError" class="form-error">{{ ct(speciesError) }}</p>
           <div class="species-actions">
             <button class="primary-button" @click="decideSpecies('Approved')">
               {{ ct('Approve Species') }}</button

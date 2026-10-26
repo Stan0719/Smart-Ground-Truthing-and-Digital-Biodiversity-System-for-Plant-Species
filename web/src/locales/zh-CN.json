@@ -1311,7 +1311,20 @@
       "searchSpecies": "搜索物种",
       "searchPlaceholder": "学名、常用名或科名",
       "plantRecords": "植物记录",
-      "lastUpdated": "最后更新"
+      "lastUpdated": "最后更新",
+      "feedback": {
+        "added": "已为本次会话添加物种。",
+        "edited": "已为本次会话保存物种更改。",
+        "deleted": "已从本次会话中移除物种。",
+        "editError": "无法为本次会话保存物种更改。请重试。",
+        "deleteError": "无法从本次会话中移除物种。请重试。"
+      }
+    },
+    "reviews": {
+      "feedback": {
+        "observationNotSaved": "未保存“{decision}”决定。后端审核持久化尚未实现。",
+        "speciesRequestNotSaved": "未保存“{decision}”决定。物种申请持久化尚未实现。"
+      }
     },
     "iot": {
       "eyebrow": "环境监测网络",

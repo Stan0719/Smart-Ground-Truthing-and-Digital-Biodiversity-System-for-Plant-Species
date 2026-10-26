@@ -1225,7 +1225,20 @@
       "searchSpecies": "Search species",
       "searchPlaceholder": "Scientific name, common name or family",
       "plantRecords": "Plant Records",
-      "lastUpdated": "Last Updated"
+      "lastUpdated": "Last Updated",
+      "feedback": {
+        "added": "Species added for this session.",
+        "edited": "Species changes saved for this session.",
+        "deleted": "Species removed from this session.",
+        "editError": "Unable to save the species changes for this session. Please try again.",
+        "deleteError": "Unable to remove the species from this session. Please try again."
+      }
+    },
+    "reviews": {
+      "feedback": {
+        "observationNotSaved": "{decision} was not saved. Backend review persistence is not implemented yet.",
+        "speciesRequestNotSaved": "{decision} was not saved. Species Request persistence is not implemented yet."
+      }
     },
     "iot": {
       "eyebrow": "Environmental Network",

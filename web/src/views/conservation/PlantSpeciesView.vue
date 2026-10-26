@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import {
   conservationStore,
@@ -44,6 +45,38 @@ const status = ref('')
 const modal = ref<'form' | 'view' | 'delete' | null>(null)
 const selected = ref<SpeciesRecord | null>(null)
 const editing = ref(false)
+const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
+let feedbackId = 0
+
+const showFeedback = (variant: 'success' | 'error', message: string) => {
+  feedback.value = { id: ++feedbackId, variant, message }
+}
+
+const dismissFeedback = (id: number) => {
+  if (feedback.value?.id === id) feedback.value = null
+}
+
+type RequiredSpeciesField = 'scientificName' | 'commonName' | 'genus' | 'family'
+type SpeciesFormErrors = Record<RequiredSpeciesField | 'image', string>
+
+const requiredFields: RequiredSpeciesField[] = ['scientificName', 'commonName', 'genus', 'family']
+const errors = reactive<SpeciesFormErrors>({
+  scientificName: '',
+  commonName: '',
+  genus: '',
+  family: '',
+  image: '',
+})
+const touched = reactive<Record<RequiredSpeciesField, boolean>>({
+  scientificName: false,
+  commonName: false,
+  genus: false,
+  family: false,
+})
+const fieldRefs: Partial<Record<RequiredSpeciesField, HTMLInputElement | null>> = {}
+const supportedImageTypes = ['image/jpeg', 'image/png', 'image/webp']
+const imageFileInput = ref<HTMLInputElement | null>(null)
+const hasUploadedDeviceImage = ref(false)
 
 const blank = () => ({
   id: `SP${String(conservationStore.species.length + 1).padStart(3, '0')}`,
@@ -61,6 +94,65 @@ const blank = () => ({
 
 const form = reactive<SpeciesRecord>(blank())
 
+const resetValidation = () => {
+  requiredFields.forEach((field) => {
+    errors[field] = ''
+    touched[field] = false
+  })
+  errors.image = ''
+}
+
+const setFieldRef = (field: RequiredSpeciesField, element: unknown) => {
+  fieldRefs[field] = element instanceof HTMLInputElement ? element : null
+}
+
+const validateField = (field: RequiredSpeciesField) => {
+  const value = form[field].trim()
+
+  if (!value) {
+    errors[field] =
+      field === 'scientificName'
+        ? 'Scientific name is required.'
+        : field === 'commonName'
+          ? 'Common name is required.'
+          : field === 'genus'
+            ? 'Genus is required.'
+            : 'Family is required.'
+    return false
+  }
+
+  if (field === 'scientificName') {
+    if (!/\p{L}/u.test(value)) {
+      errors.scientificName = 'Scientific name must include alphabetic text.'
+      return false
+    }
+
+    const normalizedName = value.toLocaleLowerCase()
+    const duplicate = conservationStore.species.some(
+      (species) =>
+        (!editing.value || species.id !== form.id) &&
+        species.scientificName.trim().toLocaleLowerCase() === normalizedName,
+    )
+
+    if (duplicate) {
+      errors.scientificName = 'A species with this scientific name already exists.'
+      return false
+    }
+  }
+
+  errors[field] = ''
+  return true
+}
+
+const touchAndValidate = (field: RequiredSpeciesField) => {
+  touched[field] = true
+  validateField(field)
+}
+
+const revalidateIfNeeded = (field: RequiredSpeciesField) => {
+  if (touched[field] || errors[field]) validateField(field)
+}
+
 const families = computed(() => [...new Set(conservationStore.species.map((s) => s.family))])
 
 const filtered = computed(() =>
@@ -77,26 +169,51 @@ const filtered = computed(() =>
 function openForm(item?: SpeciesRecord) {
   editing.value = !!item
   Object.assign(form, item ? { ...item } : blank())
+  hasUploadedDeviceImage.value = Boolean(item?.image.startsWith('data:image/'))
+  if (imageFileInput.value) imageFileInput.value.value = ''
+  resetValidation()
   modal.value = 'form'
 }
 
 function save() {
-  if (!form.scientificName || !form.commonName || !form.genus || !form.family) {
+  requiredFields.forEach((field) => {
+    touched[field] = true
+  })
+  const fieldsAreValid = requiredFields.map(validateField).every(Boolean)
+
+  if (!fieldsAreValid || errors.image) {
+    const firstInvalidField = requiredFields.find((field) => errors[field])
+    if (firstInvalidField) fieldRefs[firstInvalidField]?.focus()
     return
   }
+
+  form.scientificName = form.scientificName.trim()
+  form.commonName = form.commonName.trim()
+  form.genus = form.genus.trim()
+  form.family = form.family.trim()
+  form.description = form.description.trim()
+  form.habitat = form.habitat.trim()
+  form.image = form.image.trim()
 
   if (editing.value) {
     const index = conservationStore.species.findIndex((s) => s.id === form.id)
 
-    if (index !== -1) {
-      conservationStore.species[index] = { ...form }
+    if (index === -1) {
+      showFeedback('error', t('conservationPages.species.feedback.editError'))
+      return
     }
+    conservationStore.species[index] = { ...form }
+    modal.value = null
+    router.replace({ query: {} })
+    showFeedback('success', t('conservationPages.species.feedback.edited'))
+    return
   } else {
     conservationStore.species.push({ ...form })
   }
 
   modal.value = null
   router.replace({ query: {} })
+  showFeedback('success', t('conservationPages.species.feedback.added'))
 }
 
 function view(species: SpeciesRecord) {
@@ -114,11 +231,14 @@ function remove() {
 
   const index = conservationStore.species.findIndex((s) => s.id === selected.value?.id)
 
-  if (index !== -1) {
-    conservationStore.species.splice(index, 1)
+  if (index === -1) {
+    showFeedback('error', t('conservationPages.species.feedback.deleteError'))
+    return
   }
 
+  conservationStore.species.splice(index, 1)
   modal.value = null
+  showFeedback('success', t('conservationPages.species.feedback.deleted'))
 }
 
 function handleImageUpload(event: Event) {
@@ -127,20 +247,37 @@ function handleImageUpload(event: Event) {
 
   if (!file) return
 
-  if (!file.type.startsWith('image/')) {
+  if (!supportedImageTypes.includes(file.type)) {
+    errors.image = 'Please select an image file (JPG, PNG, or WEBP).'
     input.value = ''
     return
   }
+
+  errors.image = ''
 
   const reader = new FileReader()
 
   reader.onload = () => {
     if (typeof reader.result === 'string') {
       form.image = reader.result
+      hasUploadedDeviceImage.value = true
     }
   }
 
   reader.readAsDataURL(file)
+}
+
+function handleImageUrlInput() {
+  hasUploadedDeviceImage.value = false
+  if (imageFileInput.value) imageFileInput.value.value = ''
+}
+
+function removeUploadedImage() {
+  if (!hasUploadedDeviceImage.value) return
+  form.image = ''
+  hasUploadedDeviceImage.value = false
+  errors.image = ''
+  if (imageFileInput.value) imageFileInput.value.value = ''
 }
 
 onMounted(() => {
@@ -151,6 +288,15 @@ onMounted(() => {
 </script>
 
 <template>
+  <ActionFeedback
+    v-if="feedback"
+    :key="feedback.id"
+    :feedback-id="feedback.id"
+    :variant="feedback.variant"
+    :message="feedback.message"
+    @dismiss="dismissFeedback"
+  />
+
   <section class="page-intro">
     <div>
       <p class="page-kicker">{{ t('conservationPages.species.knowledgeBase') }}</p>
@@ -265,35 +411,93 @@ onMounted(() => {
     wide
     @close="modal = null"
   >
-    <form class="form-grid" @submit.prevent="save">
+    <p class="prototype-notice">
+      Prototype: changes made here are stored only for this session and are not saved to the
+      database.
+    </p>
+
+    <form class="form-grid" novalidate @submit.prevent="save">
       <label class="form-field">
         <span>Species ID</span>
         <input v-model="form.id" readonly class="readonly-field" />
       </label>
 
       <label class="form-field">
-        <span>Scientific Name</span>
-        <input v-model="form.scientificName" required />
+        <span>Scientific Name <b class="required-marker" aria-hidden="true">*</b></span>
+        <input
+          :ref="(element) => setFieldRef('scientificName', element)"
+          v-model="form.scientificName"
+          placeholder="e.g. Nepenthes ampullaria"
+          :aria-invalid="Boolean(errors.scientificName)"
+          :aria-describedby="
+            errors.scientificName
+              ? 'scientific-name-help scientific-name-error'
+              : 'scientific-name-help'
+          "
+          @blur="touchAndValidate('scientificName')"
+          @input="revalidateIfNeeded('scientificName')"
+        />
+        <small id="scientific-name-help" class="field-help">
+          Use the accepted botanical name, including genus and species.
+        </small>
+        <small v-if="errors.scientificName" id="scientific-name-error" class="field-error">
+          {{ errors.scientificName }}
+        </small>
       </label>
 
       <label class="form-field">
-        <span>Common Name</span>
-        <input v-model="form.commonName" required />
+        <span>Common Name <b class="required-marker" aria-hidden="true">*</b></span>
+        <input
+          :ref="(element) => setFieldRef('commonName', element)"
+          v-model="form.commonName"
+          placeholder="e.g. Flask-shaped Pitcher Plant"
+          :aria-invalid="Boolean(errors.commonName)"
+          :aria-describedby="errors.commonName ? 'common-name-error' : undefined"
+          @blur="touchAndValidate('commonName')"
+          @input="revalidateIfNeeded('commonName')"
+        />
+        <small v-if="errors.commonName" id="common-name-error" class="field-error">
+          {{ errors.commonName }}
+        </small>
       </label>
 
       <label class="form-field">
-        <span>Genus</span>
-        <input v-model="form.genus" required />
+        <span>Genus <b class="required-marker" aria-hidden="true">*</b></span>
+        <input
+          :ref="(element) => setFieldRef('genus', element)"
+          v-model="form.genus"
+          placeholder="e.g. Nepenthes"
+          :aria-invalid="Boolean(errors.genus)"
+          :aria-describedby="errors.genus ? 'genus-help genus-error' : 'genus-help'"
+          @blur="touchAndValidate('genus')"
+          @input="revalidateIfNeeded('genus')"
+        />
+        <small id="genus-help" class="field-help">Enter the plant genus only.</small>
+        <small v-if="errors.genus" id="genus-error" class="field-error">
+          {{ errors.genus }}
+        </small>
       </label>
 
       <label class="form-field">
-        <span>Family</span>
-        <input v-model="form.family" required />
+        <span>Family <b class="required-marker" aria-hidden="true">*</b></span>
+        <input
+          :ref="(element) => setFieldRef('family', element)"
+          v-model="form.family"
+          placeholder="e.g. Nepenthaceae"
+          :aria-invalid="Boolean(errors.family)"
+          :aria-describedby="errors.family ? 'family-help family-error' : 'family-help'"
+          @blur="touchAndValidate('family')"
+          @input="revalidateIfNeeded('family')"
+        />
+        <small id="family-help" class="field-help">Enter the botanical family.</small>
+        <small v-if="errors.family" id="family-error" class="field-error">
+          {{ errors.family }}
+        </small>
       </label>
 
       <label class="form-field">
         <span>Conservation Status</span>
-        <select v-model="form.status">
+        <select v-model="form.status" aria-describedby="conservation-status-help">
           <option
             v-for="s in [
               'Not Assessed',
@@ -308,21 +512,47 @@ onMounted(() => {
             {{ s }}
           </option>
         </select>
+        <small id="conservation-status-help" class="field-help">
+          Select the conservation category used for this species.
+        </small>
       </label>
 
       <label class="form-field full">
         <span>Description</span>
-        <textarea v-model="form.description"></textarea>
+        <textarea
+          v-model="form.description"
+          placeholder="e.g. Brief identifying features of the species"
+          aria-describedby="species-description-help"
+        ></textarea>
+        <small id="species-description-help" class="field-help">
+          Add brief identifying characteristics or notes.
+        </small>
       </label>
 
       <label class="form-field full">
         <span>Habitat / Ecological Information</span>
-        <textarea v-model="form.habitat"></textarea>
+        <textarea
+          v-model="form.habitat"
+          placeholder="e.g. Lowland rainforest, limestone forest"
+          aria-describedby="species-habitat-help"
+        ></textarea>
+        <small id="species-habitat-help" class="field-help">
+          Describe the typical habitat where the species is found.
+        </small>
       </label>
 
       <div class="form-field full">
         <span>Representative Photograph / Image URL</span>
-        <input v-model="form.image" type="text" placeholder="Enter image URL" />
+        <input
+          v-model="form.image"
+          type="text"
+          placeholder="e.g. https://example.com/plant.jpg"
+          aria-describedby="species-image-help"
+          @input="handleImageUrlInput"
+        />
+        <small id="species-image-help" class="field-help">
+          Optional. Enter a direct image URL or upload a supported image file.
+        </small>
         <span class="image-or">or upload from device</span>
         <label class="custom-file-upload">
           <div class="upload-icon" aria-hidden="true">
@@ -338,14 +568,37 @@ onMounted(() => {
             <span>Click to upload image</span>
             <small>PNG, JPG or WEBP</small>
           </div>
-          <input type="file" accept="image/*" @change="handleImageUpload" />
+          <input
+            ref="imageFileInput"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            :aria-invalid="Boolean(errors.image)"
+            :aria-describedby="
+              errors.image ? 'species-image-help species-image-error' : 'species-image-help'
+            "
+            @change="handleImageUpload"
+          />
         </label>
-        <img
-          v-if="form.image"
-          :src="form.image"
-          alt="Species representative preview"
-          class="image-preview"
-        />
+        <small v-if="errors.image" id="species-image-error" class="field-error">
+          {{ errors.image }}
+        </small>
+        <div v-if="form.image" class="image-preview-wrap">
+          <img
+            :src="form.image"
+            alt="Species representative preview"
+            class="image-preview"
+          />
+          <button
+            v-if="hasUploadedDeviceImage"
+            type="button"
+            class="remove-image-button"
+            aria-label="Remove uploaded image"
+            title="Remove uploaded image"
+            @click="removeUploadedImage"
+          >
+            ×
+          </button>
+        </div>
       </div>
 
       <div class="modal-actions form-field full">
@@ -428,6 +681,41 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.prototype-notice {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #d8e4dc;
+  border-radius: 8px;
+  background: #f7faf7;
+  color: #5f746a;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.required-marker {
+  color: #9f463b;
+}
+
+.form-field input[aria-invalid='true'],
+.form-field textarea[aria-invalid='true'],
+.form-field select[aria-invalid='true'],
+.custom-file-upload:has(input[aria-invalid='true']) {
+  border-color: #b84d42;
+}
+
+.field-error {
+  color: #a13f35;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.field-help {
+  color: #74857d;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .image-or {
   margin: 8px 0 4px;
   color: #829088;
@@ -498,14 +786,50 @@ onMounted(() => {
   display: none;
 }
 
-.image-preview {
+.image-preview-wrap {
+  position: relative;
   width: 180px;
   max-width: 100%;
   height: 130px;
   margin-top: 10px;
+}
+
+.image-preview {
+  width: 100%;
+  height: 100%;
   border: 1px solid #dce4dc;
   border-radius: 8px;
   object-fit: cover;
+}
+
+.remove-image-button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  background: rgba(28, 48, 40, 0.82);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(20, 42, 33, 0.24);
+}
+
+.remove-image-button:hover {
+  background: #8e3f36;
+}
+
+.remove-image-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px #3f7f66;
 }
 
 .species-view-image {

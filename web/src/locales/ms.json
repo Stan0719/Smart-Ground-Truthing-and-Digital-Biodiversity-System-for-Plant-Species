@@ -1351,7 +1351,20 @@
       "searchSpecies": "Cari spesies",
       "searchPlaceholder": "Nama saintifik, nama biasa atau famili",
       "plantRecords": "Rekod Tumbuhan",
-      "lastUpdated": "Kemas Kini Terakhir"
+      "lastUpdated": "Kemas Kini Terakhir",
+      "feedback": {
+        "added": "Spesies ditambah untuk sesi ini.",
+        "edited": "Perubahan spesies disimpan untuk sesi ini.",
+        "deleted": "Spesies dikeluarkan daripada sesi ini.",
+        "editError": "Tidak dapat menyimpan perubahan spesies untuk sesi ini. Sila cuba lagi.",
+        "deleteError": "Tidak dapat mengeluarkan spesies daripada sesi ini. Sila cuba lagi."
+      }
+    },
+    "reviews": {
+      "feedback": {
+        "observationNotSaved": "{decision} tidak disimpan. Penyimpanan semakan pada bahagian pelayan belum dilaksanakan.",
+        "speciesRequestNotSaved": "{decision} tidak disimpan. Penyimpanan Permohonan Spesies belum dilaksanakan."
+      }
     },
     "iot": {
       "eyebrow": "Rangkaian Alam Sekitar",
