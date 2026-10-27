@@ -6,6 +6,10 @@ import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
 
 interface ApiObservation {
+  id?:string
+  content?:{heightCm?:number;lifeStage?:string;healthStatus?:string;morphology?:string;notes?:string}
+  owner_subject?:string
+  created_at?:string
   observation_id: string | number
   plant_id: string | number
   recorded_by?: string | number | null
@@ -101,11 +105,12 @@ const isLoading = ref(true)
 const loadError = ref('')
 
 const mapObservation = (item: ApiObservation): ObservationView | null => {
-  const numericId = Number(item.observation_id)
-  const id = formatObservationId(item.observation_id)
+  const numericId = Number(item.observation_id||0)
+  const id = item.id||formatObservationId(item.observation_id)
   const plantId = formatPlantId(item.plant_id)
   if (!id || !plantId || !Number.isSafeInteger(numericId)) return null
 
+  item={...item,height_cm:item.content?.heightCm??item.height_cm,life_stage:item.content?.lifeStage??item.life_stage,health_status:item.content?.healthStatus??item.health_status,morphology:item.content?.morphology??item.morphology,notes:item.content?.notes??item.notes,recorded_by:item.owner_subject??item.recorded_by,observed_at:item.created_at??item.observed_at}
   const height = Number(item.height_cm)
   return {
     numericId,

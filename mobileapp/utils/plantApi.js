@@ -1,11 +1,23 @@
-import { plants as mockSpecies } from "../data/mockData";
+import {faceSession} from "./faceSession";
 
 const API_URL = (
   process.env.EXPO_PUBLIC_API_URL ||
-  "https://smart-ground-truthing-and-digital.onrender.com"
+  ""
 ).replace(/\/$/, "");
 
+export async function plantApi(path,{method='GET',body,expectedAccountId,accountId=expectedAccountId}={}){
+ if(!API_URL||new URL(API_URL).protocol!=='https:')throw Error('Configure an approved HTTPS plant API URL.');
+ if(!path.startsWith('/')||path.startsWith('//'))throw Error('Invalid plant API path.');
+ return faceSession.withToken(async(token,user)=>{
+ if(accountId&&user.id!==accountId)throw Error('Sign in with the correct account.');
+ if(path==='/species'&&['botanist','conservation-officer'].includes(user.role))path+='?scope=scientific';
+ const response=await fetch(API_URL+'/api'+path,{method,redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
+ const result=await response.json();if(!response.ok)throw Error(result.error||'Plant request failed.');return result;
+ });
+}
 async function getJson(path) {
+  if(!API_URL||new URL(API_URL).protocol!=="https:")throw Error("Configure an approved HTTPS plant API URL.");
+  if(faceSession.hasSession())return plantApi(path.replace(/^\/api/,''));
   let response;
   try {
     response = await fetch(`${API_URL}${path}`);
@@ -31,10 +43,7 @@ function unwrapList(payload, keys) {
 export function mapBackendSpecies(species) {
   const scientificName = species.scientific_name ?? species.scientificName ?? "";
   const commonName = species.common_name ?? species.name ?? "Unknown species";
-  const existingSpecies = mockSpecies.find((plant) =>
-    (plant.scientificName || "").toLowerCase() === scientificName.toLowerCase() ||
-    (plant.name || "").toLowerCase() === commonName.toLowerCase()
-  );
+  const existingSpecies = undefined;
   const id = String(species.species_id ?? species.id ?? scientificName ?? commonName);
 
   return {
@@ -74,6 +83,7 @@ export async function fetchSpeciesDetail(speciesId, slug) {
 }
 
 function mapBackendObservation(record) {
+  record={...record,...record.content,observation_id:record.id??record.observation_id,recorded_by:record.owner_subject??record.recorded_by,observed_at:record.created_at??record.observed_at};
   const verificationStatus = record.verification_status ?? record.verificationStatus;
   const status = record.status ?? (
     verificationStatus === "Verified" ? "Approved" :

@@ -1,3 +1,5 @@
+import { createTestAuth } from './test-postgres.mjs'
+import { createAuthServer } from './http.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
@@ -6,11 +8,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
 import { createAuth, LOGIN_ERROR } from './auth.mjs'
-
 test('HTTP API enforces status, role, cookies, origin and revocation', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'niah-auth-'))
   const filename = join(directory, 'test.sqlite')
-  const auth = await createAuth(filename)
+  const auth = await createTestAuth()
   await auth.createUser({
     name: 'Admin',
     email: 'admin@example.com',
@@ -31,37 +32,17 @@ test('HTTP API enforces status, role, cookies, origin and revocation', async () 
     role: 'Administrator',
     password: 'pending password value',
   })
-  const testEnv = {
-    ...process.env,
-    AUTH_DB: filename,
-    PORT: '0',
-    NODE_ENV: 'test',
-    CODESPACE_NAME: 'test-workspace',
-    GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: 'app.github.dev',
-  }
-  delete testEnv.APP_ORIGIN
-  const child = spawn(process.execPath, ['server/index.mjs'], {
-    env: testEnv,
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const server = createAuthServer({
+    auth,
+    env: {
+      NODE_ENV: 'test',
+      CODESPACE_NAME: 'test-workspace',
+      GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN: 'app.github.dev',
+    },
   })
-  let startupError = ''
-  child.stderr.on('data', (chunk) => {
-    startupError += chunk
-  })
-  const exited = once(child, 'exit')
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   try {
-    const started = await Promise.race([
-      once(child.stdout, 'data'),
-      exited.then(() => {
-        throw new Error('API exited early: ' + startupError)
-      }),
-      new Promise((_, reject) => {
-        const timer = setTimeout(() => reject(new Error('API startup timed out')), 10000)
-        timer.unref()
-      }),
-    ])
-    const port = /port (\d+)/.exec(String(started[0]))?.[1]
-    assert.ok(port && port !== '0')
+    const port = server.address().port
     const request = (path, method = 'GET', body, cookie = '', origin = 'http://localhost:5173') =>
       fetch(`http://127.0.0.1:${port}/api${path}`, {
         method,
@@ -230,9 +211,53 @@ test('HTTP API enforces status, role, cookies, origin and revocation', async () 
     assert.equal((await request('/auth/logout', 'POST', {}, adminCookie)).status, 200)
     assert.equal((await request('/admin/users', 'GET', undefined, adminCookie)).status, 401)
   } finally {
-    if (child.exitCode === null) child.kill()
-    await exited
-    auth.db.close()
+    await new Promise((resolve) => server.close(resolve))
+    await auth.db.close()
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+
+test('one-hour issued credentials expire; permanent Botanist shares independent web/mobile sessions',async()=>{
+ const {createStaffInvitations}=await import('./activation.mjs');const auth=await createTestAuth();let server,otherServer;const origin='http://localhost:5173';let delivered;
+ try{
+ const staff=createStaffInvitations({auth,origin,deliver:async value=>{delivered=value}});
+ const issued=await staff.invite({name:'Shared Botanist',username:'shared-botanist',email:'shared@example.invalid',role:'Botanist'},'fixture-admin','fixture');assert.equal(issued.delivery,'sent');
+ const expiry=await auth.db.prepare('SELECT expires_at FROM activation_tokens WHERE user_id=? AND used=0').get(issued.user.id);assert.ok(Number(expiry.expires_at)>Date.now()+3590000&&Number(expiry.expires_at)<=Date.now()+3600000);
+ server=createAuthServer({auth,env:{APP_ORIGIN:origin,NODE_ENV:'test'}}).listen(0,'127.0.0.1');await once(server,'listening');
+ const request=async(path,body,cookie='',bearer='',native=false,port=server.address().port)=>fetch('http://127.0.0.1:'+port+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(!native?{Origin:origin}:{}),...(cookie?{Cookie:cookie}:{}),...(bearer?{Authorization:'Bearer '+bearer}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+ const first=await request('/api/auth/login',{email:issued.user.email,password:delivered.temporaryPassword});assert.equal(first.status,200);const cookie=first.headers.get('set-cookie').split(';')[0];
+ assert.equal((await request('/api/mobile/password',{email:issued.user.email,password:delivered.temporaryPassword},'','',true)).status,401);
+ await auth.db.prepare('UPDATE activation_tokens SET expires_at=? WHERE user_id=?').run(Date.now()-1,issued.user.id);
+ assert.equal((await request('/api/auth/login',{email:issued.user.email,password:delivered.temporaryPassword})).status,401);
+ assert.equal((await request('/api/auth/me',undefined,cookie)).status,401);
+ await auth.db.prepare('UPDATE activation_tokens SET expires_at=? WHERE user_id=?').run(Date.now()+3600000,issued.user.id);
+ assert.equal((await request('/api/auth/password',{password:'Permanent shared account password!'},cookie)).status,200);
+ assert.equal((await request('/api/auth/login',{email:issued.user.email,password:delivered.temporaryPassword})).status,401);
+ const web=await request('/api/auth/login',{email:issued.user.email,password:'Permanent shared account password!'});const webCookie=web.headers.get('set-cookie').split(';')[0];
+ const mobile=await request('/api/mobile/password',{email:issued.user.email,password:'Permanent shared account password!'},'','',true);assert.equal(mobile.status,200);assert.equal(mobile.headers.get('set-cookie'),null);const session=await mobile.json();assert.equal(session.user.id,issued.user.id);assert.equal(session.user.role,'botanist');
+ assert.equal((await request('/api/auth/me',undefined,webCookie)).status,200);
+ assert.equal((await request('/api/mobile/me',{},'',session.token,true)).status,200);
+ assert.equal((await request('/api/mobile/me',{},webCookie,'',true)).status,403);
+ assert.equal((await request('/api/mobile/logout',{},'',session.token,true)).status,200);
+ assert.equal((await request('/api/auth/me',undefined,webCookie)).status,200);
+ const second=await(await request('/api/mobile/password',{email:issued.user.email,password:'Permanent shared account password!'},'','',true)).json();
+ await request('/api/auth/logout',{},webCookie);
+ assert.equal((await request('/api/mobile/me',{},'',second.token,true)).status,200);
+ otherServer=createAuthServer({auth:await createAuth(auth.db),env:{APP_ORIGIN:origin,NODE_ENV:'test'}}).listen(0,'127.0.0.1');await once(otherServer,'listening');
+ assert.equal((await request('/api/mobile/me',{},'',second.token,true,otherServer.address().port)).status,200);
+ }finally{for(const s of [server,otherServer])if(s){s.closeAllConnections();await new Promise(r=>s.close(r))}await auth.db.close()}
+});
+
+
+test('only Administrator can initiate another account recovery without changing its password',async()=>{
+ const auth=await createTestAuth();let server,calls=0;try{const accounts={};for(const [key,role]of[['admin','Administrator'],['officer','Conservation Officer'],['bot','Botanist']])accounts[key]=await auth.createUser({name:key,email:key+'@recovery.invalid',password:'Fixture original password!',role,mustChangePassword:false});
+ const before=(await auth.byId(accounts.bot.id)).password_hash;
+ server=createAuthServer({auth,recovery:{request:async email=>{calls++;assert.equal(email,accounts.bot.email);return {status:202,message:'Recovery requested.'}}},env:{NODE_ENV:'test',APP_ORIGIN:'http://localhost:5173'}}).listen(0,'127.0.0.1');await once(server,'listening');
+ for(const [key,status]of[['officer',403],['bot',403],['admin',202]]){const session=await auth.login(accounts[key].email,'Fixture original password!',key);const result=await fetch('http://127.0.0.1:'+server.address().port+'/api/admin/users/'+accounts.bot.id+'/reset',{method:'POST',headers:{Origin:'http://localhost:5173','Content-Type':'application/json',Cookie:'niah_session='+session.token},body:'{}'});assert.equal(result.status,status)}
+ assert.equal(calls,1);assert.equal((await auth.byId(accounts.bot.id)).password_hash,before);
+ const mobileOfficer=await fetch('http://127.0.0.1:'+server.address().port+'/api/mobile/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:accounts.officer.email,password:'Fixture original password!'})});assert.equal(mobileOfficer.status,200);assert.equal((await mobileOfficer.json()).user.role,'conservation-officer');
+ const mobileAdmin=await fetch('http://127.0.0.1:'+server.address().port+'/api/mobile/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:accounts.admin.email,password:'Fixture original password!'})});assert.equal(mobileAdmin.status,401);
+
+ }finally{if(server){server.closeAllConnections();await new Promise(r=>server.close(r))}await auth.db.close()}
+});

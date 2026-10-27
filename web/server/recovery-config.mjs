@@ -11,6 +11,10 @@ export function recoveryConfig(database,env=process.env){
    if(match&&!settings[match[1]])settings[match[1]]=match[2].trim().replace(/^['"]|['"]$/g,'')
   }
  }
+ if(settings.AUTH_RESET_KEY){
+  if(!/^[a-fA-F0-9]{64}$/.test(settings.AUTH_RESET_KEY))throw Error('AUTH_RESET_KEY must contain exactly 32 bytes encoded as hexadecimal.')
+  return {settings,key:Buffer.from(settings.AUTH_RESET_KEY,'hex')}
+ }
  const path=settings.AUTH_RESET_KEY_FILE??join(dirname(database),'recovery.key')
  mkdirSync(dirname(path),{recursive:true,mode:0o700})
  try{const fd=openSync(path,'wx',0o600);try{writeFileSync(fd,randomBytes(32))}finally{closeSync(fd)}}catch(error){if(error.code!=='EEXIST')throw error}

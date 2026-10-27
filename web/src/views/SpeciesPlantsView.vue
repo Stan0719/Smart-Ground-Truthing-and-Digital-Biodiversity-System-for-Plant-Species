@@ -16,7 +16,7 @@ const { t, te } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
 const canViewStaffPlantData = computed(
   () =>
-    isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer'),
 )
 const searchQuery = ref('')
 const healthFilter = ref('All')
@@ -103,7 +103,7 @@ const loadPlants = async () => {
           (item) =>
             item.scientific_name.toLowerCase() === prototypeForSlug.scientificName.toLowerCase(),
         )
-      : speciesResult.species.find((item) => generatedSlug(item) === slug)
+      : speciesResult.species.find((item) => String(item.species_id)===slug||generatedSlug(item) === slug)
 
     if (!apiSpecies) return
 

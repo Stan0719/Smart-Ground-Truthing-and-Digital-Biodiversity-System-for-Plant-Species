@@ -1,443 +1,108 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AdminPageShell from '../components/AdminPageShell.vue'
+import { api } from '../services/auth'
 
+type Device = { id: string; name: string; plant_id: string | null; status: string; last_seen: string | null }
+type Alert = { id: string; device_id: string; metric: string; status: string; created_at: string }
+type Reading = { id: string; device_id: string; values: Record<string, unknown>; created_at: string }
+type Account = { role: string }
+type Event = { id: number; reason: string; created_at: number }
 const router = useRouter()
-const { t, te } = useI18n()
-
-const speciesCount = ref<number | null>(null)
-const speciesLoading = ref(true)
-
-
-onMounted(async () => {
-  try {
-    const response = await fetch(
-      '/api/species'
-    )
-
-    if (!response.ok) {
-      throw new Error(`Failed to load species: ${response.status}`)
-    }
-
-    const data = await response.json()
-    console.log('Species API response:', data)
-
-    speciesCount.value = Number(data.count)
-  } catch (error) {
-    console.error('Could not load species count:', error)
-  } finally {
-    speciesLoading.value = false
-  }
-})
-
-const openUserManagement = async () => {
-  await router.push({ name: 'admin-users' })
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+const { t } = useI18n()
+const system = ref<{ accounts: number; database: string; uptimeSeconds: number } | null>(null)
+const devices = ref<Device[]>([])
+const alerts = ref<Alert[]>([])
+const readings = ref<Reading[]>([])
+const accounts = ref<Account[]>([])
+const events = ref<Event[]>([])
+const error = ref('')
+const sensorError = ref(false)
+const onlineCount = computed(() => devices.value.filter(device => device.status === 'Active').length)
+const offlineCount = computed(() => devices.value.length - onlineCount.value)
+const availability = computed(() => devices.value.length ? Math.round(onlineCount.value / devices.value.length * 100) : 0)
+const summaryCards = computed(() => [
+  { title: 'totalUsers', label: t('adminDashboard.summary.totalUsers'), value: system.value?.accounts ?? '—', note: 'Registered accounts', icon: 'U', tone: 'green' },
+  { title: 'database', label: 'Database', value: system.value?.database ?? '—', note: 'PostgreSQL storage', icon: 'DB', tone: 'green' },
+  { title: 'iotSensors', label: t('adminDashboard.summary.iotSensors'), value: sensorError.value ? '—' : devices.value.length, note: 'Registered devices', icon: 'S', tone: 'blue' },
+  { title: 'activeSensors', label: t('adminDashboard.summary.activeSensors'), value: sensorError.value ? '—' : onlineCount.value, note: 'Active devices', icon: '✓', tone: 'success' },
+  { title: 'offlineSensors', label: t('adminDashboard.summary.offlineSensors'), value: sensorError.value ? '—' : offlineCount.value, note: t('adminDashboard.summary.requiresAttention'), icon: '×', tone: 'neutral' },
+  { title: 'threatAlerts', label: t('adminDashboard.summary.threatAlerts'), value: alerts.value.length, note: 'Recorded alerts', icon: '!', tone: 'danger' },
+])
+const userRoles = computed(() => [
+  { label: 'administrators', role: 'Administrator', color: '#28745a' },
+  { label: 'conservationOfficers', role: 'Conservation Officer', color: '#55a781' },
+  { label: 'botanists', role: 'Botanist', color: '#91c7a8' },
+].map(item => ({ ...item, value: accounts.value.filter(account => account.role === item.role).length, percent: accounts.value.length ? accounts.value.filter(account => account.role === item.role).length / accounts.value.length * 100 : 0 })))
+const formatTime = (value: string | number) => value ? new Date(value).toLocaleString() : '—'
+const readingValue = (reading: Reading, key: string) => reading.values?.[key] == null ? '—' : String(reading.values[key])
+const refreshDashboard = async () => {
+  const [status, deviceResult, alertResult, readingResult, userResult, eventResult] = await Promise.allSettled([
+    api<{ system: NonNullable<typeof system.value> }>('/admin/system'),
+    api<{ devices: Device[] }>('/data/devices'),
+    api<{ alerts: Alert[] }>('/data/alerts'),
+    api<{ readings: Reading[] }>('/data/readings'),
+    api<{ users: Account[] }>('/admin/users'),
+    api<{ events: Event[] }>('/admin/audit'),
+  ])
+  if (status.status === 'fulfilled') { system.value = status.value.system; error.value = '' }
+  else error.value = status.reason instanceof Error ? status.reason.message : 'Unable to load system status.'
+  if (deviceResult.status === 'fulfilled') { devices.value = deviceResult.value.devices; sensorError.value = false }
+  else sensorError.value = true
+  if (alertResult.status === 'fulfilled') alerts.value = alertResult.value.alerts
+  if (readingResult.status === 'fulfilled') readings.value = readingResult.value.readings
+  if (userResult.status === 'fulfilled') accounts.value = userResult.value.users
+  if (eventResult.status === 'fulfilled') events.value = eventResult.value.events
 }
-
-const openIoTMonitoring = async () => {
-  await router.push({ name: 'admin-iot' })
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-}
-
-const openSensorManagement = async () => {
-  await router.push({ name: 'admin-sensors' })
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-}
-
-const openThreatAlerts = async () => {
-  await router.push({ name: 'admin-alerts' })
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-}
-
-const openSystemActivity = async () => {
-  await router.push({ name: 'admin-activity' })
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-}
-
-const summaryCards = [
-
-  { title: 'totalUsers', value: '18', note: 'activeRoles', icon: '♙', tone: 'green' },
-  { title: 'plantRecords', value: '350', note: 'digitalCollection', icon: '♧', tone: 'green' },
-  { title: 'iotSensors', value: '27', note: 'threeZones', icon: '⌁', tone: 'blue' },
-  { title: 'activeSensors', value: '25', note: 'onlinePercent', icon: '✓', tone: 'success' },
-  { title: 'offlineSensors', value: '2', note: 'requiresAttention', icon: '×', tone: 'neutral' },
-  { title: 'threatAlerts', value: '3', note: 'needReview', icon: '!', tone: 'danger' },
-]
-
-const threatAlerts = [
-  {
-    id: 'A001',
-    plant: 'PL002',
-    type: 'Movement Detected',
-    location: 'Zone A',
-    time: '29 Sep 2026, 10:35 AM',
-    severity: 'High',
-    status: 'New',
-  },
-  {
-    id: 'A002',
-    plant: 'PL010',
-    type: 'High Temperature',
-    location: 'Zone B',
-    time: '29 Sep 2026, 11:20 AM',
-    severity: 'Medium',
-    status: 'Reviewing',
-  },
-  {
-    id: 'A003',
-    plant: 'PL021',
-    type: 'Sensor Offline',
-    location: 'Zone C',
-    time: '29 Sep 2026, 12:05 PM',
-    severity: 'Low',
-    status: 'New',
-  },
-]
-
-const sensorActivity = [
-  {
-    sensor: 'S001',
-    plant: 'PL001',
-    temperature: '29°C',
-    humidity: '82%',
-    movement: 'No',
-    status: 'Online',
-    update: '2 mins ago',
-  },
-  {
-    sensor: 'S002',
-    plant: 'PL002',
-    temperature: '31°C',
-    humidity: '75%',
-    movement: 'Yes',
-    status: 'Alert',
-    update: '5 mins ago',
-  },
-  {
-    sensor: 'S003',
-    plant: 'PL003',
-    temperature: '28°C',
-    humidity: '85%',
-    movement: 'No',
-    status: 'Offline',
-    update: '20 mins ago',
-  },
-]
-
-const userRoles = [
-  { label: 'administrators', value: 3, percent: 17, color: '#28745a' },
-  { label: 'conservationOfficers', value: 5, percent: 28, color: '#55a781' },
-  { label: 'botanists', value: 10, percent: 55, color: '#91c7a8' },
-]
-
-const activities = [
-  { title: 'createdBotanist', time: '29 Sep 2026, 10:20 AM', type: 'user' },
-  { title: 'updatedSensor', time: '29 Sep 2026, 11:05 AM', type: 'sensor' },
-  { title: 'changedRole', time: '29 Sep 2026, 12:10 PM', type: 'role' },
-  { title: 'sensorOffline', time: '29 Sep 2026, 12:30 PM', type: 'warning' },
-]
-const dataLabel = (value: string) => {
-  const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
-  return te(key) ? t(key) : value
-}
+const go = async (name: string) => { await router.push({ name }); window.scrollTo(0, 0) }
+onMounted(refreshDashboard)
 </script>
 
 <template>
-  <AdminPageShell
-    :title="t('adminDashboard.title')"
-    :eyebrow="t('adminDashboard.overview')"
-    active="Dashboard"
-  >
+  <AdminPageShell :title="t('adminDashboard.title')" :eyebrow="t('adminDashboard.overview')" active="Dashboard">
     <div class="dashboard">
       <section class="welcome-row">
-        <div>
-          <h2>{{ t('adminDashboard.greeting') }}</h2>
-          <p>{{ t('adminDashboard.intro') }}</p>
-        </div>
-        <time datetime="2026-09-29">{{ t('adminDashboard.date') }}</time>
+        <div><h2>{{ t('adminDashboard.greeting') }}</h2><p>{{ t('adminDashboard.intro') }}</p></div>
+        <button class="secondary-button" type="button" @click="refreshDashboard">Refresh dashboard</button>
       </section>
-
+      <p v-if="error" role="alert">{{ error }}</p>
+      <p v-if="sensorError" role="alert">Sensor status could not be loaded.</p>
       <section class="summary-grid" :aria-label="t('adminDashboard.systemSummary')">
-        <article
-          v-for="card in summaryCards"
-          :key="card.title"
-          class="summary-card"
-          :class="`tone-${card.tone}`"
-        >
+        <article v-for="card in summaryCards" :key="card.title" class="summary-card" :class="`tone-${card.tone}`">
           <div class="summary-icon" aria-hidden="true">{{ card.icon }}</div>
-          <div>
-            <p>{{ t(`adminDashboard.summary.${card.title}`) }}</p>
-            <strong>
-              {{
-                card.title === 'plantRecords'
-                  ? speciesLoading
-                    ? '...'
-                    : speciesCount !== null
-                      ? speciesCount
-                      : 'Unavailable'
-                  : card.value
-              }}
-            </strong><small>{{ t(`adminDashboard.summary.${card.note}`) }}</small>
-          </div>
+          <div><p>{{ card.label }}</p><strong>{{ card.value }}</strong><small>{{ card.note }}</small></div>
         </article>
       </section>
-
       <div class="dashboard-grid primary-grid">
         <section class="panel sensor-overview">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">{{ t('adminDashboard.liveOverview') }}</p>
-              <h2>{{ t('adminDashboard.sensorStatusOverview') }}</h2>
-            </div>
-            <button class="secondary-button" type="button" @click="openIoTMonitoring">
-              {{ t('adminDashboard.viewIotMonitoring') }} →
-            </button>
-          </div>
+          <div class="panel-header"><div><p class="section-kicker">{{ t('adminDashboard.liveOverview') }}</p><h2>{{ t('adminDashboard.sensorStatusOverview') }}</h2></div><button class="secondary-button" type="button" @click="go('admin-iot')">{{ t('adminDashboard.viewIotMonitoring') }} &rarr;</button></div>
           <div class="sensor-content">
-            <div class="donut" role="img" :aria-label="t('adminDashboard.sensorChartLabel')">
-              <div>
-                <strong>27</strong><span>{{ t('adminDashboard.totalSensors') }}</span>
-              </div>
-            </div>
-            <div class="sensor-legend">
-              <div>
-                <span class="dot active-dot"></span>
-                <p>
-                  {{ t('adminDashboard.activeSensors')
-                  }}<small>{{ t('adminDashboard.operatingNormally') }}</small>
-                </p>
-                <strong>25</strong>
-              </div>
-              <div>
-                <span class="dot offline-dot"></span>
-                <p>
-                  {{ t('adminDashboard.offlineSensors')
-                  }}<small>{{ t('adminDashboard.requiresAttention') }}</small>
-                </p>
-                <strong>2</strong>
-              </div>
-              <div class="uptime">
-                <span>{{ t('adminDashboard.networkAvailability') }}</span
-                ><strong>92.6%</strong>
-              </div>
-            </div>
+            <div class="donut" role="img" :aria-label="t('adminDashboard.sensorChartLabel')" :style="{ background: `conic-gradient(#55a781 ${availability}%, #e4e9e5 0)` }"><div><strong>{{ sensorError ? '—' : devices.length }}</strong><span>{{ t('adminDashboard.totalSensors') }}</span></div></div>
+            <div class="sensor-legend"><div><span class="dot active-dot"></span><p>{{ t('adminDashboard.activeSensors') }}<small>{{ t('adminDashboard.operatingNormally') }}</small></p><strong>{{ sensorError ? '—' : onlineCount }}</strong></div><div><span class="dot offline-dot"></span><p>{{ t('adminDashboard.offlineSensors') }}<small>{{ t('adminDashboard.requiresAttention') }}</small></p><strong>{{ sensorError ? '—' : offlineCount }}</strong></div><div class="uptime"><span>{{ t('adminDashboard.networkAvailability') }}</span><strong>{{ sensorError ? '—' : availability + '%' }}</strong></div></div>
           </div>
         </section>
-
         <section class="panel system-status">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">{{ t('adminDashboard.services') }}</p>
-              <h2>{{ t('adminDashboard.systemStatus') }}</h2>
-            </div>
-            <span class="all-operational">{{ t('adminDashboard.allSystemsNormal') }}</span>
-          </div>
-          <div class="service-list">
-            <div>
-              <span><i></i>{{ t('adminDashboard.webSystem') }}</span
-              ><strong>{{ t('adminDashboard.operational') }}</strong>
-            </div>
-            <div>
-              <span><i></i>{{ t('adminDashboard.iotService') }}</span
-              ><strong>{{ t('adminDashboard.operational') }}</strong>
-            </div>
-            <div>
-              <span><i></i>{{ t('adminDashboard.sensorNetwork') }}</span
-              ><strong>{{ t('adminDashboard.onlineCount') }}</strong>
-            </div>
-            <div>
-              <span><i></i>{{ t('adminDashboard.lastSync') }}</span
-              ><strong>{{ t('adminDashboard.twoMinutesAgo') }}</strong>
-            </div>
-          </div>
+          <div class="panel-header"><div><p class="section-kicker">{{ t('adminDashboard.services') }}</p><h2>{{ t('adminDashboard.systemStatus') }}</h2></div><span class="all-operational">{{ system ? system.database : 'Unavailable' }}</span></div>
+          <div class="service-list"><div><span><i></i>{{ t('adminDashboard.webSystem') }}</span><strong>{{ system ? t('adminDashboard.operational') : 'Unavailable' }}</strong></div><div><span><i></i>{{ t('adminDashboard.sensorNetwork') }}</span><strong>{{ sensorError ? 'Unavailable' : `${onlineCount} / ${devices.length}` }}</strong></div><div><span><i></i>{{ t('adminDashboard.lastSync') }}</span><strong>{{ new Date().toLocaleTimeString() }}</strong></div></div>
         </section>
       </div>
-
       <section class="panel table-panel">
-        <div class="panel-header">
-          <div>
-            <p class="section-kicker danger-kicker">{{ t('adminDashboard.attentionRequired') }}</p>
-            <h2>{{ t('adminDashboard.recentThreatAlerts') }}</h2>
-          </div>
-          <button class="secondary-button" type="button" @click="openThreatAlerts">
-            {{ t('adminDashboard.viewAllAlerts') }} →
-          </button>
-        </div>
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>{{ t('adminDashboard.table.alertId') }}</th>
-                <th>{{ t('adminDashboard.table.plantId') }}</th>
-                <th>{{ t('adminDashboard.table.alertType') }}</th>
-                <th>{{ t('adminDashboard.table.location') }}</th>
-                <th>{{ t('adminDashboard.table.dateTime') }}</th>
-                <th>{{ t('adminDashboard.table.severity') }}</th>
-                <th>{{ t('adminDashboard.table.status') }}</th>
-                <th>{{ t('adminDashboard.table.action') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="alert in threatAlerts" :key="alert.id">
-                <td>
-                  <strong>{{ alert.id }}</strong>
-                </td>
-                <td>{{ alert.plant }}</td>
-                <td>{{ dataLabel(alert.type) }}</td>
-                <td>{{ dataLabel(alert.location) }}</td>
-                <td>{{ alert.time }}</td>
-                <td>
-                  <span class="badge" :class="alert.severity.toLowerCase()">{{
-                    dataLabel(alert.severity)
-                  }}</span>
-                </td>
-                <td>
-                  <span class="badge" :class="alert.status.toLowerCase()">{{
-                    dataLabel(alert.status)
-                  }}</span>
-                </td>
-                <td>
-                  <button class="view-button" type="button">{{ t('adminDashboard.view') }}</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <div class="panel-header"><div><p class="section-kicker danger-kicker">{{ t('adminDashboard.attentionRequired') }}</p><h2>{{ t('adminDashboard.recentThreatAlerts') }}</h2></div><button class="secondary-button" type="button" @click="go('admin-alerts')">{{ t('adminDashboard.viewAllAlerts') }} &rarr;</button></div>
+        <p v-if="!alerts.length">No threat alerts recorded.</p>
+        <div v-else class="table-scroll"><table><thead><tr><th>{{ t('adminDashboard.table.alertId') }}</th><th>{{ t('adminDashboard.table.sensorId') }}</th><th>{{ t('adminDashboard.table.alertType') }}</th><th>{{ t('adminDashboard.table.dateTime') }}</th><th>{{ t('adminDashboard.table.status') }}</th></tr></thead><tbody><tr v-for="alert in alerts.slice(0, 8)" :key="alert.id"><td><strong>{{ alert.id }}</strong></td><td>{{ alert.device_id }}</td><td>{{ alert.metric }}</td><td>{{ formatTime(alert.created_at) }}</td><td><span class="badge" :class="alert.status.toLowerCase()">{{ alert.status }}</span></td></tr></tbody></table></div>
       </section>
-
       <section class="panel table-panel">
-        <div class="panel-header">
-          <div>
-            <p class="section-kicker">{{ t('adminDashboard.latestReadings') }}</p>
-            <h2>{{ t('adminDashboard.recentSensorActivity') }}</h2>
-          </div>
-          <button class="secondary-button" type="button" @click="openSensorManagement">
-            {{ t('adminDashboard.viewAllSensors') }} →
-          </button>
-        </div>
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>{{ t('adminDashboard.table.sensorId') }}</th>
-                <th>{{ t('adminDashboard.table.plantId') }}</th>
-                <th>{{ t('adminDashboard.table.temperature') }}</th>
-                <th>{{ t('adminDashboard.table.humidity') }}</th>
-                <th>{{ t('adminDashboard.table.movement') }}</th>
-                <th>{{ t('adminDashboard.table.status') }}</th>
-                <th>{{ t('adminDashboard.table.lastUpdate') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="sensor in sensorActivity" :key="sensor.sensor">
-                <td>
-                  <strong>{{ sensor.sensor }}</strong>
-                </td>
-                <td>{{ sensor.plant }}</td>
-                <td>{{ sensor.temperature }}</td>
-                <td>{{ sensor.humidity }}</td>
-                <td>{{ dataLabel(sensor.movement) }}</td>
-                <td>
-                  <span class="badge" :class="sensor.status.toLowerCase()">{{
-                    dataLabel(sensor.status)
-                  }}</span>
-                </td>
-                <td>{{ dataLabel(sensor.update) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <div class="panel-header"><div><p class="section-kicker">{{ t('adminDashboard.latestReadings') }}</p><h2>{{ t('adminDashboard.recentSensorActivity') }}</h2></div><button class="secondary-button" type="button" @click="go('admin-sensors')">{{ t('adminDashboard.viewAllSensors') }} &rarr;</button></div>
+        <p v-if="!readings.length">No sensor readings received yet.</p>
+        <div v-else class="table-scroll"><table><thead><tr><th>{{ t('adminDashboard.table.sensorId') }}</th><th>{{ t('adminDashboard.table.temperature') }}</th><th>{{ t('adminDashboard.table.humidity') }}</th><th>{{ t('adminDashboard.table.lastUpdate') }}</th></tr></thead><tbody><tr v-for="reading in readings.slice(0, 8)" :key="reading.id"><td><strong>{{ devices.find(device => device.id === reading.device_id)?.name ?? reading.device_id }}</strong></td><td>{{ readingValue(reading, 'temperature') }}</td><td>{{ readingValue(reading, 'humidity') }}</td><td>{{ formatTime(reading.created_at) }}</td></tr></tbody></table></div>
       </section>
-
       <div class="dashboard-grid lower-grid">
-        <section class="panel user-summary">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">{{ t('adminDashboard.accessOverview') }}</p>
-              <h2>{{ t('adminDashboard.userSummary') }}</h2>
-            </div>
-            <button class="secondary-button" type="button" @click="openUserManagement">
-              {{ t('adminDashboard.manageUsers') }} →
-            </button>
-          </div>
-          <div class="role-list">
-            <div v-for="role in userRoles" :key="role.label" class="role-row">
-              <div class="role-copy">
-                <span>{{ t(`adminDashboard.roles.${role.label}`) }}</span
-                ><strong>{{ role.value }}</strong>
-              </div>
-              <div class="role-track">
-                <span :style="{ width: `${role.percent}%`, background: role.color }"></span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel activity-panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">{{ t('adminDashboard.auditTrail') }}</p>
-              <h2>{{ t('adminDashboard.recentSystemActivity') }}</h2>
-            </div>
-          </div>
-          <div class="timeline">
-            <div
-              v-for="activity in activities"
-              :key="activity.title"
-              class="timeline-item"
-              :class="activity.type"
-            >
-              <span class="timeline-dot"></span>
-              <div>
-                <strong>{{ t(`adminDashboard.activities.${activity.title}`) }}</strong
-                ><time>{{ activity.time }}</time>
-              </div>
-            </div>
-          </div>
-        </section>
+        <section class="panel user-summary"><div class="panel-header"><div><p class="section-kicker">{{ t('adminDashboard.accessOverview') }}</p><h2>{{ t('adminDashboard.userSummary') }}</h2></div><button class="secondary-button" type="button" @click="go('admin-users')">{{ t('adminDashboard.manageUsers') }} &rarr;</button></div><div class="role-list"><div v-for="role in userRoles" :key="role.role" class="role-row"><div class="role-copy"><span>{{ t(`adminDashboard.roles.${role.label}`) }}</span><strong>{{ role.value }}</strong></div><div class="role-track"><span :style="{ width: `${role.percent}%`, background: role.color }"></span></div></div></div></section>
+        <section class="panel activity-panel"><div class="panel-header"><div><p class="section-kicker">{{ t('adminDashboard.auditTrail') }}</p><h2>{{ t('adminDashboard.recentSystemActivity') }}</h2></div></div><p v-if="!events.length">No account activity recorded.</p><div v-else class="timeline"><div v-for="event in events.slice(0, 5)" :key="event.id" class="timeline-item"><span class="timeline-dot"></span><div><strong>{{ event.reason }}</strong><time>{{ formatTime(event.created_at) }}</time></div></div></div></section>
       </div>
-
-      <section class="panel quick-actions">
-        <div class="panel-header">
-          <div>
-            <p class="section-kicker">{{ t('adminDashboard.shortcuts') }}</p>
-            <h2>{{ t('adminDashboard.quickActions') }}</h2>
-          </div>
-        </div>
-        <div class="action-grid">
-          <button type="button" @click="openUserManagement">
-            <span>＋</span>
-            <div>
-              <strong>{{ t('adminDashboard.actions.addUser') }}</strong
-              ><small>{{ t('adminDashboard.actions.createAccount') }}</small>
-            </div>
-          </button>
-          <button type="button" @click="openIoTMonitoring">
-            <span>⌁</span>
-            <div>
-              <strong>{{ t('adminDashboard.actions.viewSensors') }}</strong
-              ><small>{{ t('adminDashboard.actions.openIot') }}</small>
-            </div>
-          </button>
-          <button type="button" @click="openThreatAlerts">
-            <span>!</span>
-            <div>
-              <strong>{{ t('adminDashboard.actions.viewAlerts') }}</strong
-              ><small>{{ t('adminDashboard.actions.reviewThreats') }}</small>
-            </div>
-          </button>
-          <button type="button" @click="openSystemActivity">
-            <span>↻</span>
-            <div>
-              <strong>{{ t('adminDashboard.actions.systemActivity') }}</strong
-              ><small>{{ t('adminDashboard.actions.viewAuditTrail') }}</small>
-            </div>
-          </button>
-        </div>
-      </section>
+      <section class="panel quick-actions"><div class="panel-header"><div><p class="section-kicker">{{ t('adminDashboard.shortcuts') }}</p><h2>{{ t('adminDashboard.quickActions') }}</h2></div></div><div class="action-grid"><button type="button" @click="go('admin-users')"><span>+</span><div><strong>{{ t('adminDashboard.actions.addUser') }}</strong><small>{{ t('adminDashboard.actions.createAccount') }}</small></div></button><button type="button" @click="go('admin-iot')"><span>&rarr;</span><div><strong>{{ t('adminDashboard.actions.viewSensors') }}</strong><small>{{ t('adminDashboard.actions.openIot') }}</small></div></button><button type="button" @click="go('admin-alerts')"><span>!</span><div><strong>{{ t('adminDashboard.actions.viewAlerts') }}</strong><small>{{ t('adminDashboard.actions.reviewThreats') }}</small></div></button><button type="button" @click="go('admin-activity')"><span>&rarr;</span><div><strong>{{ t('adminDashboard.actions.systemActivity') }}</strong><small>{{ t('adminDashboard.actions.viewAuditTrail') }}</small></div></button></div></section>
     </div>
   </AdminPageShell>
 </template>
@@ -487,6 +152,9 @@ const dataLabel = (value: string) => {
   background: #fff;
   box-shadow: 0 6px 18px rgba(35, 70, 53, 0.045);
 }
+.summary-card > div:last-child {
+  min-width: 0;
+}
 .summary-icon {
   width: 37px;
   height: 37px;
@@ -511,6 +179,7 @@ const dataLabel = (value: string) => {
   color: #274e40;
   font-size: 25px;
   line-height: 1;
+  overflow-wrap: anywhere;
 }
 .summary-card small {
   display: block;

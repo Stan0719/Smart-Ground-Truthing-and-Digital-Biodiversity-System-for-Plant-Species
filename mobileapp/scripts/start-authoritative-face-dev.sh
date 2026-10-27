@@ -3,7 +3,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 FACE_WORKSPACE="$PWD"
-FACE_SERVICE_PORT="${FACE_SERVICE_PORT:-3002}"
+export FACE_SERVICE_PORT="${FACE_SERVICE_PORT:-3002}"
 export FACE_ACCOUNT_SERVICE_URL="http://127.0.0.1:$FACE_SERVICE_PORT"
 export FACE_ACCOUNT_SERVICE_KEY_FILE="$FACE_WORKSPACE/face_backend/data/account-service.key"
 FACE_RUNTIME="$FACE_WORKSPACE/face_backend/.venv/bin/python"
@@ -22,16 +22,17 @@ else:
 PY
 # Refuse to replace or silently reuse an existing face service/prototype.
 "$FACE_RUNTIME" - <<'PY'
-import socket
-s=socket.socket();busy=s.connect_ex(('127.0.0.1',8000))==0;s.close()
-if busy: raise SystemExit('Port 8000 is in use. Stop the current face backend before changing account mode.')
+import socket,os
+for port in (8000,int(os.environ.get('FACE_SERVICE_PORT','3002'))):
+    s=socket.socket();busy=s.connect_ex(('127.0.0.1',port))==0;s.close()
+    if busy: raise SystemExit(f'Port {port} is in use. Stop the previous face/account service before starting another instance.')
 PY
 FACE_REAL_PID=''
 cleanup() { if [ -n "$FACE_REAL_PID" ]; then kill "$FACE_REAL_PID" 2>/dev/null || true; wait "$FACE_REAL_PID" 2>/dev/null || true; fi; }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-AUTH_DEBUG=1 HOST=127.0.0.1 PORT="$FACE_SERVICE_PORT" AUTH_DB="$FACE_WORKSPACE/../web/server/data/auth.sqlite" node "$FACE_WORKSPACE/../web/server/index.mjs" &
+HOST=127.0.0.1 PORT="$FACE_SERVICE_PORT" AUTH_DB="$FACE_WORKSPACE/../web/server/data/auth.sqlite" node "$FACE_WORKSPACE/../web/server/index.mjs" &
 FACE_REAL_PID=$!
 "$FACE_RUNTIME" - <<'PY'
 import os,sys,time
@@ -46,7 +47,7 @@ else: raise SystemExit('The real account service did not start. Inspect its term
 print('Real account service verified; existing account restrictions remain enforced.',flush=True)
 PY
 if [ "${1:-}" = "--backend-only" ]; then
-  FACE_IMAGE_DEBUG=1 FACE_BIND_HOST=0.0.0.0 bash face_backend/start.sh
+  FACE_IMAGE_DEBUG="${FACE_IMAGE_DEBUG:-0}" FACE_BIND_HOST="${FACE_BIND_HOST:-127.0.0.1}" bash face_backend/start.sh
 else
   npm run start:face "$@"
 fi

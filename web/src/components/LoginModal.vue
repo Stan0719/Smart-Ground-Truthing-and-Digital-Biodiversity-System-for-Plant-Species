@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { api, type AuthUser } from '../services/auth'
+import { api, logout, type AuthUser } from '../services/auth'
 import { useRouter } from 'vue-router' // Navigate to the forgot-password page
 const router = useRouter() //forgot password
 const { t } = useI18n({ useScope: 'global' })
@@ -62,8 +62,14 @@ const handleLogin = async () => {
       await router.push({ name: 'change-password' })
       return
     }
-    if (user.role === 'Botanist' || user.role === 'Visitor') {
+    if (user.role === 'Botanist') {
+      await logout()
       platformMessage.value = 'loginModal.mobileOnly'
+      return
+    }
+    if (user.role === 'Visitor') {
+      closeModal()
+      await router.push({name:'account'})
       return
     }
     emit('login', {

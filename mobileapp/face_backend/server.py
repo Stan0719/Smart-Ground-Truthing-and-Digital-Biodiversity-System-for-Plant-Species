@@ -234,6 +234,8 @@ if __name__ == '__main__':
         auth = AuthoritativeFaceAuth(auth, AccountService(service_url, key_file))
         readiness['accountService'] = 'authoritative'
     else:
+        if os.environ.get('ALLOW_PROTOTYPE_AUTH') != '1':
+            raise SystemExit('Configure authoritative account service. Local prototype mode requires explicit ALLOW_PROTOTYPE_AUTH=1.')
         readiness['accountService'] = 'prototype'
     print('Account service mode: '+readiness['accountService'], flush=True)
     server = create_server(auth, args.host, args.port, readiness)

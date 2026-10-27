@@ -17,8 +17,8 @@ export async function parseFaceResponse(response) {
   const status = response.status;
   if (!raw.trim()) {
     if (status === 401 || status === 403) throw new Error(`Backend access denied (HTTP ${status}). The tunnel may require sign-in. Check its access configuration.`);
-    if ([502, 503, 504].includes(status)) throw new Error(`Backend is unreachable through the tunnel (HTTP ${status}). Keep the Python server terminal running and check /health.`);
-    throw new Error(`Backend returned an empty response (HTTP ${status}). Check /health and the Python terminal.`);
+    if ([502, 503, 504].includes(status)) throw new Error(`Backend is unreachable through the tunnel (HTTP ${status}). Keep the authentication service running and check /health.`);
+    throw new Error(`Backend returned an empty response (HTTP ${status}). Check /health and the authentication service.`);
   }
   let result;
   try { result = JSON.parse(raw); }
@@ -44,10 +44,11 @@ export function faceReference() {
   return Array.from({ length: 12 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
 }
 
-export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000 }) {
+export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000, beforeRequest }) {
   return async function request(path, body = {}, token, method = "POST", reference = faceReference()) {
     const base = normalizeFaceUrl(url);
     if (!base) throw new Error("Set EXPO_PUBLIC_FACE_API_URL to the HTTPS backend address, without query parameters.");
+    if(beforeRequest)await beforeRequest(path);
     const log = (phase, details = {}) => {
       if (diagnostics) console.info("[face-api]", { phase, reference, endpoint: path, backend: new URL(base).origin, ...details });
     };
@@ -58,19 +59,19 @@ export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000 })
       timer = setTimeout(() => {
         log("timeout");
         controller.abort();
-        reject(new Error("Face backend timed out. Check the Python terminal; the request may already have completed. Sign in again before retrying enrollment."));
+        reject(new Error("Face backend timed out. Check the backend service; the request may already have completed. Sign in again before retrying enrollment."));
       }, ["/me", "/health", "/logout"].includes(path) ? Math.min(timeoutMs, 15000) : timeoutMs);
     });
     const operation = async () => {
       let response;
       try {
         response = await fetchImpl(`${base}${path}`, {
-          method, headers: { "Content-Type": "application/json", "X-Face-Request-ID": reference, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          method, redirect:"error", headers: { "Content-Type": "application/json", "X-Face-Request-ID": reference, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           body: method === "GET" ? undefined : JSON.stringify(body), signal: controller.signal,
         });
       } catch {
         log("failed_before_response");
-        throw new Error("Cannot connect to the face backend. Check your internet connection, backend URL and running Python terminal.");
+        throw new Error("Cannot connect to the face backend. Check your internet connection, backend URL and running authentication service.");
       }
       // Clone for metadata only; never log response content or request values.
       log("response_received", { status: response.status, contentType: response.headers?.get?.("content-type") || "unknown" });
@@ -81,13 +82,17 @@ export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000 })
     try { return await Promise.race([operation(), timeout]); }
     catch (error) {
       log("request_rejected", { code: error.code || "transport_failure", requestId: error.requestId || reference });
+      if(!error.status)error.transient=true;
       error.message = `${path}: ${error.message}`;
       throw error;
     }
     finally { clearTimeout(timer); }
   };
 }
-export const faceApi = createFaceClient({ url: configuredUrl });
+const faceClient=createFaceClient({url:configuredUrl});
+const accountUrl=process.env.EXPO_PUBLIC_AUTH_API_URL?.trim();
+const accountClient=createFaceClient({url:accountUrl});
+export const faceApi=(path,...args)=>accountUrl&&['/password','/me','/logout','/recovery/request','/recovery/confirm'].includes(path)?accountClient(path,...args):faceClient(path,...args);
 
 export function validateFaceSession(result) {
   if (!result || typeof result.token !== "string" || !/^[a-f0-9]{64}$/.test(result.token) || !validFaceUser(result.user)) {
@@ -96,5 +101,5 @@ export function validateFaceSession(result) {
   return result;
 }
 export function validFaceUser(user) {
-  return user && typeof user.email === "string" && typeof user.id === "string" && typeof user.name === "string" && ["botanist", "visitor"].includes(user.role);
+  return user && typeof user.email === "string" && typeof user.id === "string" && typeof user.name === "string" && ["botanist", "visitor", "conservation-officer"].includes(user.role);
 }

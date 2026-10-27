@@ -56,8 +56,11 @@ the send button for that account confirmation.
    Temporary password: {{temporary_password}}
    Website: {{login_url}}
 
-   Conservation Officers: sign in on the website and change your password on first login.
-   Botanists: use the Niah mobile application.
+   Sign in on the website with your email and temporary password within one hour.
+   You will be taken to Set New Password. Choose a new password with 15 to 128 characters.
+   Then sign in again with your new password.
+   Botanists: complete this website setup before signing in to the mobile application.
+   If the password has expired, ask your administrator to resend it and use the newest email.
    ```
 
 3. Copy `.env.example` to `.env.local`. Fill in the service ID, template ID, and

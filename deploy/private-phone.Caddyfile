@@ -1,0 +1,59 @@
+# PRIVATE PHONE VERIFICATION ONLY. No public listener, file server, or access logs.
+# TLS is supplied by an approved Tailscale Serve session; never use Funnel.
+{
+	admin off
+	auto_https off
+}
+http://127.0.0.1:8080, http://codespaces-83ea7d.tailb9ff43.ts.net:8080 {
+	bind 127.0.0.1
+	request_body {
+		max_size 6MB
+	}
+	@blocked path /internal /internal/* /face/internal /face/internal/* /data /data/* /.env /auth.sqlite
+	handle @blocked {
+		respond "Not found" 404
+	}
+	handle_path /face/* {
+		reverse_proxy 127.0.0.1:8000 {
+			@redirect status 3xx
+			handle_response @redirect {
+				respond "Upstream redirect rejected" 502
+			}
+		}
+	}
+	handle /health {
+		reverse_proxy 127.0.0.1:3000 {
+			@redirect status 3xx
+			handle_response @redirect {
+				respond "Upstream redirect rejected" 502
+			}
+		}
+	}
+	handle /auth-health {
+		rewrite * /health
+		reverse_proxy 127.0.0.1:3001 {
+			@redirect status 3xx
+			handle_response @redirect {
+				respond "Upstream redirect rejected" 502
+			}
+		}
+	}
+	@auth path /api/auth/* /api/admin/* /api/mobile/*
+	handle @auth {
+		reverse_proxy 127.0.0.1:3001 {
+			@redirect status 3xx
+			handle_response @redirect {
+				respond "Upstream redirect rejected" 502
+			}
+		}
+	}
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3000 {
+			@redirect status 3xx
+			handle_response @redirect {
+				respond "Upstream redirect rejected" 502
+			}
+		}
+	}
+	respond "Not found" 404
+}

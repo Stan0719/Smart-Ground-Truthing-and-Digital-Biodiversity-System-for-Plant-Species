@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 import { plants as prototypePlants, type Plant } from '../data/plants'
+import {refreshKnowledge,knowledgeError} from '../services/knowledge'
 
 const species = ref<Plant[]>([])
 const isLoading = ref(true)
@@ -48,49 +49,10 @@ const loadSpecies = async () => {
   loadError.value = ''
 
   try {
-    const response = await fetch('/api/species')
+    await refreshKnowledge()
+    if(knowledgeError.value)throw Error(knowledgeError.value)
+    species.value=[...prototypePlants]
 
-    if (!response.ok) {
-      throw new Error('Unable to load plant species.')
-    }
-
-    const result: SpeciesResponse = await response.json()
-
-    const apiPlants: Plant[] = result.species.map((item): Plant => {
-      const name = item.common_name || item.scientific_name
-      const scientificName = item.scientific_name || 'Unknown species'
-      const genus = item.genus_name || ''
-      const prototype = prototypePlants.find(
-        (plant) => plant.scientificName.toLowerCase() === scientificName.toLowerCase(),
-      )
-
-      const slug =
-        prototype?.slug ||
-        `${name}-${item.species_id}`
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-|-$/g, '')
-
-      return {
-        speciesId: String(item.species_id),
-        slug,
-        name,
-        scientificName,
-        genus,
-        category: prototype?.category || ('' as Plant['category']),
-        family: item.family_name || '',
-        conservationStatus: item.conservation_status || '',
-        description: item.description || 'No description available yet.',
-        overview: '',
-        habitat: '',
-        characteristics: [],
-        significance: '',
-        image: prototype?.image,
-        images: prototype?.images,
-      }
-    })
-
-    species.value = apiPlants
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
   } finally {
@@ -100,7 +62,7 @@ const loadSpecies = async () => {
 
 const canViewConservationStatus = computed(
   () =>
-    isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer'),
 )
 
 const translatedOr = (key: string, fallback: string) => (te(key) ? t(key) : fallback)

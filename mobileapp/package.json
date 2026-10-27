@@ -46,8 +46,7 @@
     "lint": "expo lint",
     "type-check": "tsc --noEmit",
     "test:otp": "node scripts/recovery-flow.test.mjs",
-    "test:face-api": "node scripts/face-api.test.mjs",
-    "start:face": "bash scripts/start-face-dev.sh"
+    "test:face-api": "node scripts/face-api.test.mjs"
   },
   "private": true,
   "devDependencies": {

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { currentUser } from './services/auth'
+import {refreshKnowledge} from './services/knowledge'
 import SiteFooter from './components/SiteFooter.vue'
 
 const route = useRoute()
@@ -20,7 +21,10 @@ const checkSession = async () => {
     if (!(await currentUser())) await router.replace('/')
   }
 }
+const loadPublic=(path:string)=>{if(!path.startsWith('/admin')&&!path.startsWith('/conservation')&&path!=='/account'&&path!=='/change-password')void refreshKnowledge()}
+router.afterEach(to=>loadPublic(to.path))
 onMounted(() => {
+  loadPublic(route.path)
   timer = setInterval(checkSession, 15000)
   window.addEventListener('focus', checkSession)
 })

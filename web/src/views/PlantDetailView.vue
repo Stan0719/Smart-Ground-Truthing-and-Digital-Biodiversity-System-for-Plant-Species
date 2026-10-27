@@ -43,7 +43,7 @@ const { t, te, locale } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
 const canViewStaffPlantData = computed(
   () =>
-    isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer'),
 )
 const plant = ref<DetailPlant | null>(null)
 const isLoading = ref(false)
@@ -121,7 +121,7 @@ const loadPlant = async () => {
     }
 
     if (response.status === 404) {
-      plant.value = plantRecords.find((item) => item.plantId === displayId) || null
+      plant.value = null
     }
   } catch {
     plant.value = null

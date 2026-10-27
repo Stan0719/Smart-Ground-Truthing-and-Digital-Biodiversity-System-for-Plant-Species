@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import sqlite3
 import time
@@ -21,6 +22,8 @@ class AuthError(Exception):
 class Auth:
     def __init__(self, filename, embed):
         self.db = sqlite3.connect(filename)
+        if str(filename) != ":memory:":
+            os.chmod(filename, 0o600)
         self.embed = embed
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS accounts(email TEXT PRIMARY KEY,name TEXT,role TEXT,salt TEXT,password TEXT,template TEXT);

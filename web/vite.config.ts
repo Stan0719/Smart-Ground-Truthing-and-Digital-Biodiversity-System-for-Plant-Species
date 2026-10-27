@@ -11,6 +11,11 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/api/data': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: false,
+        rewrite: (path) => path.replace(/^\/api\/data/, '/api'),
+      },
       '/api/iot': {
         target: 'http://localhost:3000',
         changeOrigin: true,

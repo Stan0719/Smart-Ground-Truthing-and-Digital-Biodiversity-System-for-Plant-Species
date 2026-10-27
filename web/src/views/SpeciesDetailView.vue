@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import PlantRecordCard from '../components/PlantRecordCard.vue'
+import {refreshKnowledge} from '../services/knowledge'
 import { plants as prototypeSpecies, type Plant } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
@@ -48,6 +49,7 @@ const loadSpecies = async () => {
   selectedSpecies.value = null
 
   try {
+    await refreshKnowledge()
     const slug = String(route.params.slug || '')
     const prototypeForSlug = prototypeSpecies.find((item) => item.slug === slug)
     const listResponse = await fetch('/api/species')
@@ -60,7 +62,7 @@ const loadSpecies = async () => {
           (item) =>
             item.scientific_name.toLowerCase() === prototypeForSlug.scientificName.toLowerCase(),
         )
-      : listResult.species.find((item) => generatedSlug(item) === slug)
+      : listResult.species.find((item) => String(item.species_id)===slug || generatedSlug(item) === slug)
 
     if (!listSpecies) return
 
@@ -106,7 +108,7 @@ watch(() => route.params.slug, loadSpecies, { immediate: true })
 
 const canViewSensitiveFacts = computed(
   () =>
-    isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer'),
 )
 const primaryImage = computed(
   () =>

@@ -235,7 +235,7 @@ auth.db.close();await import('./server/index.mjs');
         self.auth.logout(session['token'])
         self.assertEqual(self.prototype.db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0],0)
 
-    @unittest.skipUnless(os.environ.get('FACE_TEST_SECOND_PORTRAIT'),'Set second distinct public genuine fixture.')
+    @unittest.skipUnless(os.environ.get('FACE_TEST_PORTRAIT') and os.environ.get('FACE_TEST_SECOND_PORTRAIT'),'Set both consented portrait fixtures for genuine-pair tests.')
     def test_actual_distinct_genuine_capture_obeys_threshold(self):
         from server import embed, initialize_models
         from core import distance, MATCH_THRESHOLD

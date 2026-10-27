@@ -9,7 +9,7 @@ import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
 import ReviewSubmissionsView from '../views/conservation/ReviewSubmissionsView.vue'
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
 import AdminModuleView from '../views/AdminModuleView.vue'
-import { currentUser } from '../services/auth'
+import { currentUser, logout } from '../services/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -54,6 +54,8 @@ const router = createRouter({
       path: '/plants',
       redirect: '/species',
     },
+    {path:'/admin/settings',name:'admin-settings',component:AdminModuleView,props:{section:'settings'},meta:{requiresAdmin:true}},
+    {path:'/account',name:'account',component:()=>import('../components/AccountProfile.vue'),props:{standalone:true}},
     {
       path: '/change-password',
       name: 'change-password',
@@ -212,12 +214,17 @@ router.beforeEach(async (to) => {
   if (
     !to.path.startsWith('/admin') &&
     !to.path.startsWith('/conservation') &&
+    to.name !== 'account' &&
     to.name !== 'change-password'
   )
     return
   const user = await currentUser()
   if (!user) return { name: 'home' }
   if (user.mustChangePassword && to.name !== 'change-password') return { name: 'change-password' }
+  if (user.role === 'Botanist' && !user.mustChangePassword) {
+    await logout()
+    return { name: 'home' }
+  }
   if (to.path.startsWith('/admin') && user.role !== 'Administrator') return { name: 'home' }
   if (to.path.startsWith('/conservation') && user.role !== 'Conservation Officer')
     return { name: 'home' }
