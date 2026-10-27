@@ -6,11 +6,11 @@ import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
 
 interface ApiObservation {
-  id?:string
+  id?: string | number | null
   content?:{heightCm?:number;lifeStage?:string;healthStatus?:string;morphology?:string;notes?:string}
   owner_subject?:string
   created_at?:string
-  observation_id: string | number
+  observation_id?: string | number | null
   plant_id: string | number
   recorded_by?: string | number | null
   height_cm?: string | number | null
@@ -27,10 +27,14 @@ interface ApiObservation {
   verification_status?: string | null
   verification_comments?: string | null
   verified_at?: string | null
+  review_decision?: string | null
+  reviewed_at?: string | null
+  review_comment?: string | null
+  assets?: { id: string | number; content_type?: string | null; approved?: boolean | null }[] | null
 }
 
 interface ObservationView {
-  numericId: number
+  numericId: string
   id: string
   plantId: string
   recordedBy: string
@@ -105,15 +109,16 @@ const isLoading = ref(true)
 const loadError = ref('')
 
 const mapObservation = (item: ApiObservation): ObservationView | null => {
-  const numericId = Number(item.observation_id||0)
-  const id = item.id||formatObservationId(item.observation_id)
+  const rawId = item.id ?? item.observation_id
+  const formattedId = rawId === null || rawId === undefined ? null : formatObservationId(rawId)
+  const id = stringValue(rawId) || formattedId || ''
   const plantId = formatPlantId(item.plant_id)
-  if (!id || !plantId || !Number.isSafeInteger(numericId)) return null
+  if (!id || !plantId) return null
 
   item={...item,height_cm:item.content?.heightCm??item.height_cm,life_stage:item.content?.lifeStage??item.life_stage,health_status:item.content?.healthStatus??item.health_status,morphology:item.content?.morphology??item.morphology,notes:item.content?.notes??item.notes,recorded_by:item.owner_subject??item.recorded_by,observed_at:item.created_at??item.observed_at}
   const height = Number(item.height_cm)
   return {
-    numericId,
+    numericId: id,
     id,
     plantId,
     recordedBy: stringValue(item.recorded_by),
@@ -126,14 +131,16 @@ const mapObservation = (item: ApiObservation): ObservationView | null => {
     location: '',
     observedAt: item.observed_at || '',
     submittedAt: '',
-    status: canonicalStatus(item.verification_status || item.status),
+    status: canonicalStatus(item.status || item.review_decision || item.verification_status),
     morphology: item.morphology || '',
     notes: item.notes || '',
     gpsAccuracy: '',
     reviewedBy: stringValue(item.verified_by) || undefined,
-    reviewedAt: item.verified_at || undefined,
-    reviewComment: item.verification_comments || undefined,
-    photos: [],
+    reviewedAt: item.reviewed_at ?? item.verified_at ?? undefined,
+    reviewComment: item.review_comment ?? item.verification_comments ?? undefined,
+    photos: (item.assets || [])
+      .filter((asset) => asset.approved !== false && (!asset.content_type || asset.content_type.startsWith('image/')))
+      .map((asset) => String(asset.id)),
     speciesId: stringValue(item.species_id),
     scientificName: item.scientific_name || '',
     commonName: item.common_name || '',
