@@ -1,17 +1,28 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import AdminPageShell from '../components/AdminPageShell.vue'
+import {api} from '../services/auth'
 
-type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity'
+type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity' | 'settings'
 const props = defineProps<{ section: Section }>()
 const { t, te, locale } = useI18n()
 const dataLabel = (value: string) => {
   const key = `adminModules.values.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
   return te(key) ? t(key) : value
 }
+const security=ref({session_hours:8,login_limit:30}), securitySaving=ref(false),securityMessage=ref('')
+async function saveSecurity(){securitySaving.value=true;serverError.value='';try{await api('/admin/settings','PATCH',security.value);securityMessage.value='Security settings saved. All sessions were revoked; sign in again.'}catch(e){serverError.value=e instanceof Error?e.message:'Settings were not saved.'}finally{securitySaving.value=false}}
+const enforced=ref<Record<string,string[]>>({}), assignedUsers=ref<{role:string}[]>([]), persistedEvents=ref<{id:number;user_id:string;actor_id:string;reason:string;created_at:number}[]>([]), serverError=ref(''), serverLoading=ref(true)
+const roleSummaries = computed(() => [
+  { role: 'Administrator', initial: 'A', key: 'administrator' },
+  { role: 'Conservation Officer', initial: 'C', key: 'officer' },
+  { role: 'Botanist', initial: 'B', key: 'botanist' },
+  { role: 'Visitor', initial: 'V', key: 'visitor' },
+].map(item => ({ ...item, count: assignedUsers.value.filter(user => user.role === item.role).length })))
+onMounted(async()=>{try{if(props.section==='settings')security.value=(await api<{settings:typeof security.value}>('/admin/settings')).settings; if(props.section==='roles'){const [permissions,users]=await Promise.all([api<{permissions:Record<string,string[]>}>('/admin/permissions'),api<{users:{role:string}[]}>('/admin/users')]);enforced.value=permissions.permissions;assignedUsers.value=users.users} if(props.section==='activity')persistedEvents.value=(await api<{events:typeof persistedEvents.value}>('/admin/audit')).events}catch(e){serverError.value=e instanceof Error?e.message:'Unable to load authorized data.'}finally{serverLoading.value=false}})
 const search = ref('')
 const filter = ref('All')
 
@@ -123,6 +134,7 @@ const sensorForm = ref<SensorForm>({
 const page = computed(
   () =>
     ({
+      settings:{title:'Security Settings',eyebrow:'SECURITY',active:'Security Settings',intro:'Account session and login limits.'},
       roles: {
         title: t('adminRoles.title'),
         eyebrow: t('adminRoles.eyebrow'),
@@ -885,6 +897,30 @@ const confirmDeleteSensor = () => {
 
 <template>
   <AdminPageShell :title="page.title" :eyebrow="page.eyebrow" :active="page.active">
+<template v-if="['roles','activity','settings'].includes(section)">
+<h2>{{page.title}}</h2><form v-if="section==='settings'&&!serverLoading" @submit.prevent="saveSecurity"><label>Session hours<input v-model.number="security.session_hours" type="number" min="1" max="24" required></label><label>Login attempts per 15 minutes<input v-model.number="security.login_limit" type="number" min="5" max="100" required></label><p>Saving revokes all existing sessions.</p><button :disabled="securitySaving">Save security settings</button><p role="status">{{securityMessage}}</p></form><p v-if="serverError" role="alert">{{serverError}}</p><p v-if="serverLoading">Loading?</p>
+<template v-if="section==='roles'&&!serverLoading&&!serverError">
+  <section class="stat-grid three" aria-label="Role summary">
+    <article><span>R</span><div><p>{{ t('adminRoles.systemRoles') }}</p><strong>4</strong><small>{{ t('adminRoles.predefinedGroups') }}</small></div></article>
+    <article><span>U</span><div><p>{{ t('adminRoles.assignedUsers') }}</p><strong>{{ assignedUsers.length }}</strong><small>{{ t('adminRoles.acrossAllRoles') }}</small></div></article>
+    <article><span>P</span><div><p>{{ t('adminRoles.permissions') }}</p><strong>{{ Object.keys(enforced).length }}</strong><small>{{ t('adminRoles.configuredRules') }}</small></div></article>
+  </section>
+  <section class="role-cards" aria-label="System roles">
+    <article v-for="item in roleSummaries" :key="item.role">
+      <div class="role-head"><span>{{ item.initial }}</span><div><h3>{{ t(`adminRoles.roles.${item.key}.name`) }}</h3><p>{{ t(`adminRoles.roles.${item.key}.access`) }}</p></div><b>{{ t('adminRoles.userCount', { count: item.count }) }}</b></div>
+      <p>{{ t(`adminRoles.roles.${item.key}.description`) }}</p>
+      <span class="system-role-label">{{ t('adminRoles.systemDefined') }}</span>
+    </article>
+  </section>
+  <p class="read-only-note">{{ t('adminRoles.readOnlyNotice') }}</p>
+  <section class="panel permission-panel">
+    <div class="panel-head"><div><p>{{ t('adminRoles.matrixEyebrow') }}</p><h2>{{ t('adminRoles.modulePermissions') }}</h2></div><span>{{ t('adminRoles.allowedRestricted') }}</span></div>
+    <div class="table-scroll"><table><thead><tr><th>{{ t('adminRoles.systemModule') }}</th><th v-for="item in roleSummaries" :key="item.role">{{ t(`adminRoles.roles.${item.key}.name`) }}</th></tr></thead><tbody><tr v-for="(roles,permission) in enforced" :key="permission"><th>{{ permission }}</th><td v-for="item in roleSummaries" :key="item.role"><span :class="roles.includes(item.role)?'allowed':'restricted'">{{ roles.includes(item.role)?'✓':'—' }}</span></td></tr></tbody></table></div>
+  </section>
+</template>
+<template v-if="section==='activity'&&!serverLoading&&!serverError"><p v-if="!persistedEvents.length">No account activity recorded.</p><table v-else><thead><tr><th>Time</th><th>Account</th><th>Actor</th><th>Action</th></tr></thead><tbody><tr v-for="event in persistedEvents" :key="event.id"><td>{{new Date(Number(event.created_at)).toLocaleString()}}</td><td>{{event.user_id||'Anonymous'}}</td><td>{{event.actor_id||'Self'}}</td><td>{{event.reason}}</td></tr></tbody></table></template>
+</template><template v-else>
+
     <section class="page-intro">
       <div>
         <h2>{{ page.title }}</h2>
@@ -2091,7 +2127,7 @@ const confirmDeleteSensor = () => {
         </div>
       </section>
     </div>
-  </AdminPageShell>
+</template>  </AdminPageShell>
 </template>
 
 <style scoped>
