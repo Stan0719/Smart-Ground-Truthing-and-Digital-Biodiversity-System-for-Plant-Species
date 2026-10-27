@@ -1,4 +1,5 @@
 import unittest
+import os
 from serial_bridge import frames
 
 class UsbSerialTests(unittest.TestCase):
@@ -56,6 +57,42 @@ class SerialBridgeTests(unittest.TestCase):
         self.assertEqual(list(frames(['Temperature: 30 C', '====================================',
             'Humidity: 50 %', '===================================='])), [{'temperature': 30}, {'humidity': 50}])
 
+    def test_current_firmware_dashboard_format(self):
+        dashboard = [
+            '==============================================',
+            '       BIODIVERSITY SENSOR MONITOR',
+            '==============================================',
+            '[ SOIL MOISTURE ]', 'Reading      : 2150',
+            '[ RAINDROP SENSOR ]', 'Reading      : 812',
+            '[ DHT11 ]', 'Temperature  : 29.5 C', 'Humidity     : 82.0 %',
+            '[ MPU6050 ]', 'Movement     : DETECTED',
+        ]
+        self.assertEqual(list(frames(dashboard)), [])
+
+        next_refresh = dashboard + dashboard
+        self.assertEqual(list(frames(next_refresh)), [{
+            'soilMoisture': 2150.0, 'rainfall': 812.0,
+            'temperature': 29.5, 'humidity': 82.0, 'movement': 1,
+        }])
+
+    def test_current_firmware_waiting_values_are_ignored(self):
+        lines = [
+            'BIODIVERSITY SENSOR MONITOR', '[ SOIL MOISTURE ]',
+            'Reading      : Waiting for first sample',
+            '[ RAINDROP SENSOR ]', 'Reading      : 400',
+            '[ DHT11 ]', 'Temperature  : Waiting for first sample',
+            'Humidity     : Waiting for first sample',
+            '[ MPU6050 ]', 'Movement     : No movement',
+            'BIODIVERSITY SENSOR MONITOR',
+        ]
+        self.assertEqual(list(frames(lines)), [{'rainfall': 400.0}])
+
+    def test_current_firmware_malformed_values_do_not_crash(self):
+        lines = ['BIODIVERSITY SENSOR MONITOR', '[ SOIL MOISTURE ]',
+                 'Reading      : ..', '[ DHT11 ]', 'Temperature  : nan C',
+                 'Humidity     : 50 %', 'BIODIVERSITY SENSOR MONITOR']
+        self.assertEqual(list(frames(lines)), [{'humidity': 50.0}])
+
 class MalformedFrameTests(__import__('unittest').TestCase):
     def test_malformed_numeric_value_does_not_crash_reader(self):
         from serial_bridge import frames
@@ -76,7 +113,8 @@ class OutboxTests(unittest.TestCase):
             self.assertEqual(box.flush(lambda body: sent.append(body) or 201, 'isolated-device'),1)
             self.assertEqual(sent[0].decode(),before)
             self.assertEqual(len(json.loads(before)['client_key']),32)
-            self.assertEqual(os.stat(path).st_mode&0o777,0o600)
+            if os.name == 'posix':
+                self.assertEqual(os.stat(path).st_mode&0o777,0o600)
             self.assertEqual(box.db.execute('SELECT COUNT(*) FROM queue').fetchone()[0],0);box.close()
 
     def test_rejection_and_device_change_preserve_outbox(self):

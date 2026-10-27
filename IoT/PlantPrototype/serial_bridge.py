@@ -53,16 +53,30 @@ def list_serial_ports():
 
 def frames(lines):
     values = {}
+    dashboard = False
+    section = None
     for line in lines:
         line = line.strip()
         if line == '========== SENSOR READINGS ==========':
             values = {}
+            dashboard = False
+            section = None
         elif line == '====================================':
             if values:
                 yield values
             values = {}
+            dashboard = False
+            section = None
+        elif line == 'BIODIVERSITY SENSOR MONITOR':
+            if values:
+                yield values
+            values = {}
+            dashboard = True
+            section = None
+        elif dashboard and line.startswith('[') and line.endswith(']'):
+            section = line[1:-1].strip()
         else:
-            match = re.match(r'^(Soil Moisture|Rain Sensor|Sound Sensor|Temperature|Humidity):\s*(-?[\d.]+)', line)
+            match = re.match(r'^(Soil Moisture|Rain Sensor|Sound Sensor|Temperature|Humidity)\s*:\s*(-?[\d.]+)', line)
             if match:
                 try:
                     value = float(match[2])
@@ -70,7 +84,27 @@ def frames(lines):
                     continue
                 if math.isfinite(value):
                     values[LABELS[match[1]]] = value
+            elif dashboard and section in ('SOIL MOISTURE', 'RAINDROP SENSOR'):
+                match = re.match(r'^Reading\s*:\s*(-?[\d.]+)', line)
+                if match:
+                    try:
+                        value = float(match[1])
+                    except ValueError:
+                        continue
+                    if math.isfinite(value):
+                        values['soilMoisture' if section == 'SOIL MOISTURE' else 'rainfall'] = value
+            elif dashboard:
+                match = re.match(r'^(Temperature|Humidity)\s*:\s*(-?[\d.]+)', line)
+                if match:
+                    try:
+                        value = float(match[2])
+                    except ValueError:
+                        continue
+                    if math.isfinite(value):
+                        values[LABELS[match[1]]] = value
             if line.startswith('IMU:') and 'change detected' in line:
+                values['movement'] = 1
+            if dashboard and line.startswith('Movement') and 'DETECTED' in line.upper():
                 values['movement'] = 1
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
