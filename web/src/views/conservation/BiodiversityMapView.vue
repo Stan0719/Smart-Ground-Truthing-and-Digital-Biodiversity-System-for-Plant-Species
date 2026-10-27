@@ -593,6 +593,7 @@ onBeforeUnmount(() => {
 }
 .map-shell {
   position: relative;
+  isolation: isolate;
   min-height: 620px;
   background: #dce8dc;
 }

@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import ActionFeedback from '../../components/ActionFeedback.vue'
 import { plantApi, type Observation } from '../../services/plantApi'
 import AppModal from '../../components/conservation/AppModal.vue'
 
-const observations = ref<Observation[]>([]), selected = ref<Observation | null>(null), comment = ref(''), error = ref(''), message = ref(''), busy = ref(false)
+const observations = ref<Observation[]>([]), selected = ref<Observation | null>(null), comment = ref(''), error = ref(''), busy = ref(false)
+const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
+let feedbackId = 0
+const showFeedback = (variant: 'success' | 'error', message: string) => { feedback.value = { id: ++feedbackId, variant, message } }
+const dismissFeedback = (id: number) => { if (feedback.value?.id === id) feedback.value = null }
 const search = ref(''), status = ref(''), species = ref('')
 const speciesOptions = computed(() => [...new Set(observations.value.map(row => row.plant_id))].sort())
 const counts = computed(() => ['Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged'].map(name => [name, observations.value.filter(row => row.status === name).length] as const))
@@ -14,12 +19,13 @@ const filtered = computed(() => observations.value.filter(row => {
 async function load() { observations.value = (await plantApi<{ observations: Observation[] }>('/observations')).observations }
 onMounted(async () => { try { await load() } catch (e) { error.value = e instanceof Error ? e.message : 'Unable to load review submissions.' } })
 function open(row: Observation) { selected.value = row; comment.value = ''; error.value = '' }
-async function review(decision: string) { if (!selected.value || busy.value) return; busy.value = true; error.value = ''; try { await plantApi('/observations/' + selected.value.id + '/review', 'POST', { decision, comment: comment.value, revision: selected.value.revision }); await load(); selected.value = null; message.value = 'Decision saved.' } catch (e) { error.value = e instanceof Error ? e.message : 'Review failed.' } finally { busy.value = false } }
+async function review(decision: string) { if (!selected.value || busy.value) return; busy.value = true; error.value = ''; try { await plantApi('/observations/' + selected.value.id + '/review', 'POST', { decision, comment: comment.value, revision: selected.value.revision }); await load(); selected.value = null; showFeedback('success', 'Decision saved.') } catch (e) { error.value = e instanceof Error ? e.message : 'Review failed.'; showFeedback('error', error.value) } finally { busy.value = false } }
 </script>
 
 <template>
+  <ActionFeedback v-if="feedback" :key="feedback.id" :feedback-id="feedback.id" :variant="feedback.variant" :message="feedback.message" @dismiss="dismissFeedback" />
   <section class="page-intro"><div><p class="page-kicker">VERIFICATION WORKFLOW</p><h2>Review Submissions</h2><p>Verify botanist observations and preserve a clear review decision.</p></div></section>
-  <p v-if="error" class="page-alert" role="alert">{{ error }}</p><p v-if="message" class="page-success" role="status">{{ message }}</p>
+  <p v-if="error" class="page-alert" role="alert">{{ error }}</p>
   <section class="summary-grid"><article v-for="count in counts" :key="count[0]" class="summary-card"><p>{{ count[0] }}</p><strong>{{ count[1] }}</strong><small>Observation submissions</small></article></section>
   <div class="control-bar"><label class="field search-field"><span>Search</span><input v-model="search" placeholder="Observation ID, Plant ID or botanist" /></label><label class="field"><span>Review status</span><select v-model="status"><option value="">All statuses</option><option v-for="count in counts" :key="count[0]" :value="count[0]">{{ count[0] }}</option></select></label><label class="field"><span>Plant ID</span><select v-model="species"><option value="">All plants</option><option v-for="id in speciesOptions" :key="id" :value="id">{{ id }}</option></select></label></div>
   <section class="panel"><div class="table-scroll"><table><thead><tr><th>Observation ID</th><th>Plant ID</th><th>Submitted By</th><th>Status</th><th>Actions</th></tr></thead><tbody><tr v-for="row in filtered" :key="row.id"><td><strong>{{ row.id }}</strong></td><td>{{ row.plant_id }}</td><td>{{ row.owner_subject }}</td><td><span class="badge" :class="row.status.toLowerCase().replaceAll(' ', '-')">{{ row.status }}</span></td><td><button class="action-button" @click="open(row)">Review</button></td></tr><tr v-if="!filtered.length"><td colspan="5" class="empty-row">{{ observations.length ? 'No submissions match the selected filters.' : 'No observation submissions recorded.' }}</td></tr></tbody></table></div></section>
@@ -27,5 +33,5 @@ async function review(decision: string) { if (!selected.value || busy.value) ret
 </template>
 
 <style scoped>
-.page-alert,.page-success{padding:11px 14px;border-radius:9px;margin:0 0 16px;font-size:12px}.page-alert{background:#fff0ec;color:#a02020}.page-success{background:#e7f4eb;color:#28745a}.review-meta,.review-actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px}.review-meta{margin-bottom:12px}.review-details{display:grid;grid-template-columns:minmax(110px,1fr) 3fr;gap:8px 12px;font-size:11px}.review-details dt{font-weight:700;color:#587267}.review-details dd{margin:0;overflow-wrap:anywhere}.review-photos{display:flex;gap:10px;flex-wrap:wrap}.review-photos img{max-width:100%;max-height:240px;border-radius:8px}.review-actions{margin-top:18px}.form-field textarea{min-height:90px}
+.page-alert{padding:11px 14px;border-radius:9px;margin:0 0 16px;font-size:12px;background:#fff0ec;color:#a02020}.review-meta,.review-actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px}.review-meta{margin-bottom:12px}.review-details{display:grid;grid-template-columns:minmax(110px,1fr) 3fr;gap:8px 12px;font-size:11px}.review-details dt{font-weight:700;color:#587267}.review-details dd{margin:0;overflow-wrap:anywhere}.review-photos{display:flex;gap:10px;flex-wrap:wrap}.review-photos img{max-width:100%;max-height:240px;border-radius:8px}.review-actions{margin-top:18px}.form-field textarea{min-height:90px}
 </style>

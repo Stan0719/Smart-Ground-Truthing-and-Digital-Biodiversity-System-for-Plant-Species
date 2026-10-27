@@ -3,6 +3,7 @@ import { computed, nextTick, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import ActionFeedback from '../components/ActionFeedback.vue'
 import AdminPageShell from '../components/AdminPageShell.vue'
 import {api} from '../services/auth'
 
@@ -107,8 +108,8 @@ type SensorForm = Pick<
 
 const sensorModal = ref<'register' | 'view' | 'edit' | 'delete' | null>(null)
 const sensorFormError = ref('')
-const successMessage = ref('')
-const errorMessage = ref('')
+const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
+let feedbackId = 0
 const exportButton = ref<HTMLButtonElement | null>(null)
 const exportDialog = ref<HTMLElement | null>(null)
 const exportModalOpen = ref(false)
@@ -119,8 +120,6 @@ const exportModule = ref('All Modules')
 const exportScope = ref<'filtered' | 'all'>('filtered')
 const exportFormat = ref<'csv' | 'pdf'>('csv')
 const exportValidationMessage = ref('')
-let successTimer: ReturnType<typeof setTimeout> | undefined
-let errorTimer: ReturnType<typeof setTimeout> | undefined
 const sensorForm = ref<SensorForm>({
   id: '',
   deviceName: '',
@@ -555,27 +554,15 @@ const selectedAlertSensor = computed(() =>
 )
 
 const showSuccessMessage = (message: string) => {
-  if (errorTimer) clearTimeout(errorTimer)
-  errorTimer = undefined
-  errorMessage.value = ''
-  if (successTimer) clearTimeout(successTimer)
-  successMessage.value = message
-  successTimer = setTimeout(() => {
-    successMessage.value = ''
-    successTimer = undefined
-  }, 3500)
+  feedback.value = { id: ++feedbackId, variant: 'success', message }
 }
 
 const showErrorMessage = (message: string) => {
-  if (successTimer) clearTimeout(successTimer)
-  successTimer = undefined
-  successMessage.value = ''
-  if (errorTimer) clearTimeout(errorTimer)
-  errorMessage.value = message
-  errorTimer = setTimeout(() => {
-    errorMessage.value = ''
-    errorTimer = undefined
-  }, 4000)
+  feedback.value = { id: ++feedbackId, variant: 'error', message }
+}
+
+const dismissFeedback = (id: number) => {
+  if (feedback.value?.id === id) feedback.value = null
 }
 
 const openExportModal = async () => {
@@ -1881,32 +1868,14 @@ const confirmDeleteSensor = () => {
       </section>
     </div>
 
-    <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">
-      <svg class="success-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M9 12l2 2 4-4"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-      </svg>
-      <p>
-        <strong>Success</strong><span>{{ successMessage }}</span>
-      </p>
-    </div>
-
-    <div v-if="errorMessage" class="error-alert" role="alert" aria-live="assertive">
-      <svg class="error-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-        <path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        <circle cx="12" cy="16.5" r="1" fill="currentColor" />
-      </svg>
-      <p>
-        <strong>Error</strong><span>{{ errorMessage }}</span>
-      </p>
-    </div>
+    <ActionFeedback
+      v-if="feedback"
+      :key="feedback.id"
+      :feedback-id="feedback.id"
+      :variant="feedback.variant"
+      :message="feedback.message"
+      @dismiss="dismissFeedback"
+    />
 
     <div
       v-if="sensorModal === 'view' && selectedSensor"
@@ -2698,82 +2667,6 @@ td i {
 .sensor-actions .delete-action {
   color: #a64b40;
 }
-.success-alert,
-.error-alert {
-  position: fixed;
-  top: 96px;
-  left: 50%;
-  z-index: 1200;
-  width: min(380px, calc(100vw - 32px));
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-radius: 10px;
-  transform: translateX(-50%);
-}
-.success-alert {
-  border-left: 4px solid #0c723a;
-  background: #abe7bf;
-  color: #245b3d;
-  box-shadow: 0 10px 28px rgba(36, 91, 61, 0.15);
-  animation: success-alert-in 180ms ease-out;
-}
-.error-alert {
-  z-index: 1201;
-  border-left: 4px solid #b42318;
-  background: #fde8e7;
-  color: #7a271a;
-  box-shadow: 0 10px 28px rgba(122, 39, 26, 0.16);
-  animation: error-alert-in 180ms ease-out;
-}
-.success-alert-icon,
-.error-alert-icon {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-}
-.success-alert-icon {
-  color: #2f8a5a;
-}
-.error-alert-icon {
-  color: #c43228;
-}
-.success-alert p,
-.error-alert p {
-  margin: 0;
-  display: grid;
-  gap: 2px;
-}
-.success-alert strong,
-.error-alert strong {
-  font-size: 11px;
-  font-weight: 800;
-}
-.success-alert span,
-.error-alert span {
-  font-size: 10px;
-}
-@keyframes success-alert-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-@keyframes error-alert-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
 .sensor-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -3089,10 +2982,6 @@ td i {
   }
 }
 @media (max-width: 620px) {
-  .success-alert,
-  .error-alert {
-    top: 82px;
-  }
   .network-overview,
   .sensor-modal {
     padding: 17px;
