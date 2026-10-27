@@ -63,7 +63,8 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       `field-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
   const mode = route.name,
-    edit = mode === "EditPlant",
+    edit = mode === "EditPlant" || mode === "FieldCollectionEdit",
+    newPlant = mode === "AddPlant" || mode === "FieldCollectionPlant",
     dashboard = mode === "BotanistDashboard" || mode === "AccountTab";
   const change = (key, value) => setForm((old) => ({ ...old, [key]: value }));
   async function load() {
@@ -257,7 +258,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
         return;
       }
       const key = draftKey.current;
-      const isNew = mode === "AddPlant";
+      const isNew = newPlant;
       if (isNew && (!form.species_id || data.latitude === undefined))
         throw Error("Select a species and record GPS.");
       if (!isNew && !form.plant_id) throw Error("Enter an approved plant ID.");
@@ -334,7 +335,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             ? "Plant QR codes"
             : edit
               ? "Correct observation"
-              : mode === "AddPlant"
+              : newPlant
                 ? "Register plant"
                 : "Add observation"}
       </Text>
@@ -378,10 +379,10 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             onPress={() =>
               navigation.navigate(
                 draft.method === "PATCH"
-                  ? "EditPlant"
+                  ? "FieldCollectionEdit"
                   : draft.path === "/plants"
-                    ? "AddPlant"
-                    : "AddObservation",
+                    ? "FieldCollectionPlant"
+                    : "FieldCollection",
                 { draft },
               )
             }
@@ -395,7 +396,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       {user && !dashboard && mode !== "PlantQRCode" && (
         <>
           <Text>Species reference</Text>
-          {user.offline && mode === "AddPlant" && (
+          {user.offline && newPlant && (
             <TextInput
               style={input}
               accessibilityLabel="Species ID from your field reference"

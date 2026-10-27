@@ -38,6 +38,8 @@ import SpeciesScreen from "./screens/Species";
 import SpeciesDetailScreen from "./screens/SpeciesDetail";
 import BotanistPlantDetailScreen from "./screens/BotanistPlantDetail";
 import AddObservationScreen from "./screens/AddObservation";
+import FieldCollectionScreen from "./screens/FieldCollection";
+import PersistentKnowledgeScreen from "./screens/PersistentKnowledge";
 
 
 const Tab = createBottomTabNavigator();
@@ -770,6 +772,53 @@ export default function App({ homeRequest }) {
             },
           }}
         />
+
+        <RootStack.Screen
+          name="FieldCollection"
+          component={FieldCollectionScreen}
+          options={{
+            headerShown: true,
+            title: "Field Collection",
+            headerTintColor: theme.dark,
+            headerStyle: { backgroundColor: theme.light },
+          }}
+        />
+
+        <RootStack.Screen
+          name="FieldCollectionPlant"
+          component={FieldCollectionScreen}
+          options={{
+            headerShown: true,
+            title: "Register Plant",
+            headerTintColor: theme.dark,
+            headerStyle: { backgroundColor: theme.light },
+          }}
+        />
+
+        <RootStack.Screen
+          name="FieldCollectionEdit"
+          component={FieldCollectionScreen}
+          options={{
+            headerShown: true,
+            title: "Correct Observation",
+            headerTintColor: theme.dark,
+            headerStyle: { backgroundColor: theme.light },
+          }}
+        />
+
+        <RootStack.Screen
+          name="PersistentKnowledge"
+          options={{ headerShown: true, title: "Plant Knowledge" }}
+        >
+          {(props) => <PersistentKnowledgeScreen {...props} user={user} />}
+        </RootStack.Screen>
+
+        <RootStack.Screen
+          name="KnowledgeMap"
+          options={{ headerShown: true, title: "Knowledge Map" }}
+        >
+          {(props) => <PersistentKnowledgeScreen {...props} user={user} />}
+        </RootStack.Screen>
 
         <RootStack.Screen
           name="PlantQRCode"

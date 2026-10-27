@@ -25,7 +25,7 @@ export default function PersistentKnowledge({ route, navigation, user }) {
     [search, setSearch] = useState(""),
     [selected, setSelected] = useState(null),
     [images, setImages] = useState([]);
-  const map = route.name === "Map";
+  const map = route.name === "KnowledgeMap";
   async function load() {
     setError("");
     setSpecies([]);

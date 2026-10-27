@@ -146,6 +146,14 @@ export default function BotanistDashboardScreen({
     );
   }
 
+  function handleFieldCollection() {
+    navigation.navigate("FieldCollection");
+  }
+
+  function handlePersistentKnowledge() {
+    navigation.navigate("PersistentKnowledge");
+  }
+
 
   // =====================================================
   // RENDER PLANT
@@ -631,6 +639,22 @@ export default function BotanistDashboardScreen({
           + Add New Plant Record
         </Text>
 
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.addButton}
+        activeOpacity={0.8}
+        onPress={handleFieldCollection}
+      >
+        <Text style={styles.addButtonText}>Open Field Collection</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.addButton}
+        activeOpacity={0.8}
+        onPress={handlePersistentKnowledge}
+      >
+        <Text style={styles.addButtonText}>Plant Knowledge &amp; Map</Text>
       </TouchableOpacity>
 
 
