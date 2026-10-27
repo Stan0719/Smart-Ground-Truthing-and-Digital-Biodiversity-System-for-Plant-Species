@@ -9,6 +9,7 @@ import ConservationOfficerLayout from '../layouts/ConservationOfficerLayout.vue'
 import ReviewSubmissionsView from '../views/conservation/ReviewSubmissionsView.vue'
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
 import AdminModuleView from '../views/AdminModuleView.vue'
+import AdminOperationsView from '../views/AdminOperationsView.vue'
 import { currentUser, logout } from '../services/auth'
 
 const router = createRouter({
@@ -96,15 +97,13 @@ const router = createRouter({
     {
       path: '/admin/sensors',
       name: 'admin-sensors',
-      component: AdminModuleView,
-      props: { section: 'sensors' },
+      component: AdminOperationsView,
       meta: { requiresAdmin: true },
     },
     {
       path: '/admin/alerts',
       name: 'admin-alerts',
-      component: AdminModuleView,
-      props: { section: 'alerts' },
+      component: AdminOperationsView,
       meta: { requiresAdmin: true },
     },
     {

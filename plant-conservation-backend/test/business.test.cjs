@@ -279,7 +279,13 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   const device = await call("/devices", "admin", "POST", {
     name: "Simulated sensor",
   });
-  assert.equal(device.status, 201, JSON.stringify(device.data));
+  assert.equal(device.status, 201, "Device registration should return HTTP 201.");
+  assert.deepEqual(Object.keys(device.data).sort(), [
+    "id",
+    "message",
+    "provisioningKey",
+  ]);
+  assert.match(device.data.provisioningKey, /^[a-f0-9]{64}$/);
   assert.equal(
     (
       await call(`/devices/${device.data.id}/thresholds`, "admin", "PATCH", {
@@ -411,11 +417,48 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   assert.equal((await call(`/assets/${pdf.data.id}`)).status, 403);
   assert.equal((await call(`/assets/${pdf.data.id}`, "officer")).status, 200);
   assert.equal((await call("/species/1", "officer", "DELETE", {})).status, 409);
-  assert.equal((await call("/devices", "admin")).data.devices.length, 1);
-  assert.equal(
-    (await call("/readings", "officer")).data.readings[0].values.temperature,
-    35,
-  );
+  const registeredDevices = (await call("/devices", "admin")).data;
+  assert.deepEqual(Object.keys(registeredDevices), ["devices"]);
+  assert.equal(registeredDevices.devices.length, 1);
+  assert.deepEqual(Object.keys(registeredDevices.devices[0]).sort(), [
+    "id",
+    "last_seen",
+    "name",
+    "plant_id",
+    "status",
+    "thresholds",
+  ]);
+  assert.equal(registeredDevices.devices[0].id, device.data.id);
+  assert.equal(registeredDevices.devices[0].name, "Simulated sensor");
+
+  const readingResponse = (await call("/readings", "officer")).data;
+  assert.deepEqual(Object.keys(readingResponse), ["readings"]);
+  assert.equal(readingResponse.readings.length, 1);
+  assert.deepEqual(Object.keys(readingResponse.readings[0]).sort(), [
+    "created_at",
+    "device_id",
+    "id",
+    "values",
+  ]);
+  assert.equal(readingResponse.readings[0].device_id, device.data.id);
+  assert.equal(readingResponse.readings[0].values.temperature, 35);
+
+  const alertResponse = (await call("/alerts", "officer")).data;
+  assert.deepEqual(Object.keys(alertResponse).sort(), ["alerts", "responses"]);
+  assert.equal(alertResponse.alerts.length, 1);
+  assert.deepEqual(Object.keys(alertResponse.alerts[0]).sort(), [
+    "created_at",
+    "device_id",
+    "id",
+    "metric",
+    "reading_id",
+    "status",
+    "value",
+  ]);
+  assert.equal(alertResponse.alerts[0].device_id, device.data.id);
+  assert.equal(alertResponse.alerts[0].metric, "temperature");
+  assert.equal(alertResponse.alerts[0].value, 35);
+  assert.equal(alertResponse.responses.length, 1);
   assert.equal(
     (
       await call(`/devices/${device.data.id}`, "admin", "PATCH", {

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, onMounted } from 'vue'
+import { computed, nextTick, ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import ActionFeedback from '../components/ActionFeedback.vue'
 import AdminPageShell from '../components/AdminPageShell.vue'
 import {api} from '../services/auth'
+import { plantApi } from '../services/plantApi'
 
 type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity' | 'settings'
 const props = defineProps<{ section: Section }>()
@@ -39,7 +40,7 @@ interface IoTSensor {
   soilMoisture: string
   rainfall: string
   movement: string
-  status: 'Online' | 'Offline' | 'Maintenance' | 'Inactive'
+  status: string
   lastReading: string
   recordedAt: string
   gpsLatitude: string
@@ -54,11 +55,11 @@ interface ThreatAlert {
   readingId: string
   sensorId: string
   type: string
-  severity: 'High' | 'Medium' | 'Low'
+  severity: string
   confidence: string
   description: string
   imagePath: string
-  status: 'New' | 'Reviewing' | 'Resolved'
+  status: string
   createdAt: string
   resolvedBy: string
   resolvedAt: string
@@ -281,6 +282,132 @@ const sensors = ref<IoTSensor[]>([
   },
 ])
 
+interface PlantDevice {
+  id: string
+  name: string
+  plant_id: string | number | null
+  status: string
+  thresholds: Record<string, number>
+  last_seen: string | null
+}
+interface PlantReading {
+  id: string
+  device_id: string
+  values: Record<string, number>
+  created_at: string
+}
+interface PlantAlert {
+  id: string
+  device_id: string
+  reading_id: string
+  metric: string
+  value: number
+  status: string
+  created_at: string
+}
+interface DevicesResponse { devices: PlantDevice[] }
+interface ReadingsResponse { readings: PlantReading[] }
+interface AlertsResponse { alerts: PlantAlert[]; responses: unknown[] }
+
+const liveDevices = ref<PlantDevice[]>([])
+const liveReadings = ref<PlantReading[]>([])
+const liveAlerts = ref<PlantAlert[]>([])
+const iotLoading = ref(false)
+const devicesLoaded = ref(false)
+const readingsLoaded = ref(false)
+const alertsLoaded = ref(false)
+const devicesError = ref('')
+const readingsError = ref('')
+const alertsError = ref('')
+let iotRequestVersion = 0
+
+const scalarText = (value: string | number | null | undefined, fallback = '—') =>
+  value === null || value === undefined || value === '' ? fallback : String(value)
+const formattedTimestamp = (value: string | null | undefined) => {
+  if (value === null || value === undefined || value === '') return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : formatActivityTimestamp(date.toISOString())
+}
+const latestReadingByDevice = computed(() => {
+  const latest = new Map<string, PlantReading>()
+  for (const reading of liveReadings.value) {
+    if (!latest.has(reading.device_id)) latest.set(reading.device_id, reading)
+  }
+  return latest
+})
+const sensorRows = computed<IoTSensor[]>(() => liveDevices.value.map((device) => {
+  const reading = latestReadingByDevice.value.get(device.id)
+  const values = reading?.values || {}
+  const measurement = (name: string, suffix = '') => {
+    const value = values[name]
+    return typeof value === 'number' && Number.isFinite(value) ? `${value}${suffix}` : '—'
+  }
+  return {
+    id: device.id,
+    deviceName: device.name,
+    deviceType: '—',
+    serialNumber: '—',
+    locationDescription: '—',
+    plant: scalarText(device.plant_id),
+    temperature: measurement('temperature', '°C'),
+    humidity: measurement('humidity', '%'),
+    soilMoisture: measurement('soilMoisture'),
+    rainfall: measurement('rainfall'),
+    movement: measurement('movement'),
+    status: device.status,
+    lastReading: formattedTimestamp(reading?.created_at),
+    recordedAt: formattedTimestamp(reading?.created_at),
+    gpsLatitude: '—',
+    gpsLongitude: '—',
+    installedAt: '—',
+    readingId: reading?.id || '—',
+  }
+}))
+
+async function loadAdminIoTData() {
+  const version = ++iotRequestVersion
+  iotLoading.value = true
+  devicesError.value = ''
+  readingsError.value = ''
+  alertsError.value = ''
+  const [devicesResult, readingsResult, alertsResult] = await Promise.allSettled([
+    plantApi<DevicesResponse>('/devices'),
+    plantApi<ReadingsResponse>('/readings'),
+    plantApi<AlertsResponse>('/alerts'),
+  ])
+  if (version !== iotRequestVersion) return
+  if (devicesResult.status === 'fulfilled' && Array.isArray(devicesResult.value.devices)) {
+    liveDevices.value = devicesResult.value.devices
+    devicesLoaded.value = true
+  } else {
+    devicesError.value = devicesResult.status === 'rejected'
+      ? (devicesResult.reason instanceof Error ? devicesResult.reason.message : 'Unable to load devices.')
+      : 'The devices API returned an invalid response.'
+  }
+  if (readingsResult.status === 'fulfilled' && Array.isArray(readingsResult.value.readings)) {
+    liveReadings.value = readingsResult.value.readings
+    readingsLoaded.value = true
+  } else {
+    readingsError.value = readingsResult.status === 'rejected'
+      ? (readingsResult.reason instanceof Error ? readingsResult.reason.message : 'Unable to load readings.')
+      : 'The readings API returned an invalid response.'
+  }
+  if (alertsResult.status === 'fulfilled' && Array.isArray(alertsResult.value.alerts)) {
+    liveAlerts.value = alertsResult.value.alerts
+    alertsLoaded.value = true
+  } else {
+    alertsError.value = alertsResult.status === 'rejected'
+      ? (alertsResult.reason instanceof Error ? alertsResult.reason.message : 'Unable to load alerts.')
+      : 'The alerts API returned an invalid response.'
+  }
+  iotLoading.value = false
+}
+
+watch(() => props.section, (section) => {
+  if (section === 'iot') void loadAdminIoTData()
+  else iotRequestVersion += 1
+}, { immediate: true })
+
 const alerts = ref<ThreatAlert[]>([
   {
     id: 'A001',
@@ -392,8 +519,6 @@ const alerts = ref<ThreatAlert[]>([
   },
 ])
 
-const recentAlerts = computed(() => alerts.value.slice(0, 3))
-
 const logs: ActivityLog[] = [
   {
     id: 'ACT001',
@@ -482,7 +607,7 @@ const filteredSensors = computed(() => {
 })
 const filteredIoTSensors = computed(() => {
   const query = search.value.trim().toLowerCase()
-  return sensors.value.filter((sensor) => {
+  return sensorRows.value.filter((sensor) => {
     const matchesSearch =
       !query ||
       [
@@ -496,6 +621,8 @@ const filteredIoTSensors = computed(() => {
     return matchesSearch && (filter.value === 'All' || sensor.status === filter.value)
   })
 })
+const iotStatusOptions = computed(() => [...new Set(sensorRows.value.map((sensor) => sensor.status))])
+const recentAlerts = computed(() => liveAlerts.value.slice(0, 3))
 const filteredAlerts = computed(() => {
   const query = search.value.trim().toLowerCase()
   return alerts.value.filter((alert) => {
@@ -527,15 +654,24 @@ const filteredLogs = computed(() =>
   ),
 )
 
-const onlineSensorCount = computed(() => sensors.value.filter((s) => s.status === 'Online').length)
-const offlineSensorCount = computed(
-  () => sensors.value.filter((s) => s.status === 'Offline').length,
-)
+const activeDeviceCount = computed(() => liveDevices.value.filter((device) => device.status === 'Active').length)
+const inactiveDeviceCount = computed(() => liveDevices.value.filter((device) => device.status === 'Inactive').length)
+const onlineSensorCount = computed(() => sensors.value.filter((sensor) => sensor.status === 'Online').length)
+const offlineSensorCount = computed(() => sensors.value.filter((sensor) => sensor.status === 'Offline').length)
+const latestReadingAge = computed(() => {
+  const timestamps = liveReadings.value
+    .map((reading) => new Date(reading.created_at).getTime())
+    .filter((timestamp) => Number.isFinite(timestamp))
+  if (!timestamps.length) return '—'
+  const minutes = Math.max(0, Math.floor((Date.now() - Math.max(...timestamps)) / 60000))
+  return minutes < 1 ? 'Just now' : `${minutes} min${minutes === 1 ? '' : 's'} ago`
+})
+const devicesWithReadingsCount = computed(() => liveDevices.value.filter((device) => device.last_seen !== null).length)
 const maintenanceSensorCount = computed(
   () => sensors.value.filter((s) => s.status === 'Maintenance').length,
 )
 const activeAlertCount = computed(
-  () => alerts.value.filter((alert) => alert.status !== 'Resolved').length,
+  () => liveAlerts.value.filter((alert) => alert.status.toLowerCase() !== 'resolved').length,
 )
 const highSeverityAlertCount = computed(
   () =>
@@ -1057,32 +1193,32 @@ const confirmDeleteSensor = () => {
           <span>⌁</span>
           <div>
             <p>{{ t('adminModules.iot.totalSensors') }}</p>
-            <strong>{{ sensors.length }}</strong
+            <strong>{{ devicesLoaded ? liveDevices.length : '—' }}</strong
             ><small>{{ t('adminModules.iot.registeredDevices') }}</small>
           </div>
         </article>
         <article>
           <span>✓</span>
           <div>
-            <p>{{ t('adminModules.iot.onlineSensors') }}</p>
-            <strong>{{ onlineSensorCount }}</strong
-            ><small>{{ t('adminModules.iot.currentlyAvailable') }}</small>
+            <p>Active devices</p>
+            <strong>{{ devicesLoaded ? activeDeviceCount : '—' }}</strong
+            ><small>Stored device status</small>
           </div>
         </article>
         <article class="warning">
           <span>×</span>
           <div>
-            <p>{{ t('adminModules.iot.offlineSensors') }}</p>
-            <strong>{{ offlineSensorCount }}</strong
-            ><small>{{ t('adminModules.common.needsAttention') }}</small>
+            <p>Inactive devices</p>
+            <strong>{{ devicesLoaded ? inactiveDeviceCount : '—' }}</strong
+            ><small>Stored device status</small>
           </div>
         </article>
         <article class="danger">
           <span>!</span>
           <div>
             <p>{{ t('adminModules.iot.activeThreatAlerts') }}</p>
-            <strong>{{ activeAlertCount }}</strong
-            ><small>{{ t('adminModules.iot.unreviewed', { count: 2 }) }}</small>
+            <strong>{{ alertsLoaded ? activeAlertCount : '—' }}</strong
+            ><small>{{ alertsLoaded ? 'Not resolved' : 'Waiting for alert data' }}</small>
           </div>
         </article>
       </section>
@@ -1090,26 +1226,26 @@ const confirmDeleteSensor = () => {
         <div class="panel-head">
           <div>
             <p>{{ t('adminModules.iot.networkEyebrow') }}</p>
-            <h2>{{ t('adminModules.iot.connectivitySummary') }}</h2>
+            <h2>Device status and reporting</h2>
           </div>
-          <span class="live"><i></i> Updating</span>
+          <span class="live"><i></i>{{ iotLoading ? 'Loading API data' : devicesError || readingsError || alertsError ? 'API unavailable' : 'PostgreSQL API data' }}</span>
         </div>
         <div class="network-metrics">
           <article>
-            <small>{{ t('adminModules.iot.onlineSensors') }}</small
-            ><strong>{{ onlineSensorCount }}</strong>
+            <small>Active devices</small
+            ><strong>{{ devicesLoaded ? activeDeviceCount : '—' }}</strong>
           </article>
           <article>
-            <small>{{ t('adminModules.iot.offlineSensors') }}</small
-            ><strong>{{ offlineSensorCount }}</strong>
+            <small>Inactive devices</small
+            ><strong>{{ devicesLoaded ? inactiveDeviceCount : '—' }}</strong>
           </article>
           <article>
             <small>{{ t('adminModules.iot.latestReading') }}</small
-            ><strong>{{ t('adminModules.iot.minutesAgo', { count: 2 }) }}</strong>
+            ><strong>{{ devicesLoaded ? latestReadingAge : '—' }}</strong>
           </article>
           <article>
-            <small>{{ t('adminModules.iot.reportingToday') }}</small
-            ><strong>{{ onlineSensorCount }} / {{ sensors.length }}</strong>
+            <small>Devices reporting</small
+            ><strong>{{ devicesLoaded ? `${devicesWithReadingsCount} / ${liveDevices.length}` : '—' }}</strong>
           </article>
         </div>
       </section>
@@ -1117,9 +1253,9 @@ const confirmDeleteSensor = () => {
         <div class="panel-head">
           <div>
             <p>{{ t('adminModules.iot.liveFeed') }}</p>
-            <h2>{{ t('adminModules.iot.currentReadings') }}</h2>
+            <h2>Latest Available Readings</h2>
           </div>
-          <span class="live"><i></i> Updating</span>
+          <span class="live"><i></i>{{ iotLoading ? 'Loading API data' : devicesError || readingsError ? 'Device or reading API unavailable' : 'PostgreSQL API data' }}</span>
         </div>
         <div class="filters">
           <label
@@ -1129,13 +1265,13 @@ const confirmDeleteSensor = () => {
               :placeholder="t('adminModules.iot.searchPlaceholder')" /></label
           ><select v-model="filter">
             <option>All</option>
-            <option>Online</option>
-            <option>Offline</option>
-            <option>Maintenance</option>
-            <option>Inactive</option>
+            <option v-for="status in iotStatusOptions" :key="status" :value="status">{{ status }}</option>
           </select>
         </div>
         <div class="table-scroll">
+          <p v-if="readingsError" role="alert">Reading data unavailable: {{ readingsError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></p>
+          <p v-else-if="iotLoading && !readingsLoaded">Loading readings…</p>
+          <p v-else-if="readingsLoaded && !liveReadings.length">No readings received yet.</p>
           <table>
             <thead>
               <tr>
@@ -1153,6 +1289,10 @@ const confirmDeleteSensor = () => {
               </tr>
             </thead>
             <tbody>
+              <tr v-if="iotLoading && !devicesLoaded"><td colspan="11">Loading sensors…</td></tr>
+              <tr v-else-if="devicesError"><td colspan="11">{{ devicesError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></td></tr>
+              <tr v-else-if="!liveDevices.length"><td colspan="11">No devices registered yet.</td></tr>
+              <tr v-else-if="!filteredIoTSensors.length"><td colspan="11">No sensors match these filters.</td></tr>
               <tr v-for="s in filteredIoTSensors" :key="s.id">
                 <td>
                   <strong>{{ s.id }}</strong>
@@ -1191,30 +1331,29 @@ const confirmDeleteSensor = () => {
             <thead>
               <tr>
                 <th>Alert ID</th>
-                <th>Plant ID</th>
-                <th>Alert Type</th>
-                <th>Severity</th>
-                <th>Confidence</th>
+                <th>Device ID</th>
+                <th>Metric</th>
+                <th>Value</th>
                 <th>Status</th>
                 <th>{{ t('adminModules.columns.createdAt') }}</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
+              <tr v-if="iotLoading && !alertsLoaded"><td colspan="7">Loading alerts…</td></tr>
+              <tr v-else-if="alertsError"><td colspan="7">{{ alertsError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></td></tr>
+              <tr v-else-if="!liveAlerts.length"><td colspan="7">No threat alerts recorded.</td></tr>
               <tr v-for="alert in recentAlerts" :key="alert.id">
                 <td>
                   <strong>{{ alert.id }}</strong>
                 </td>
-                <td>{{ alert.plant }}</td>
-                <td>{{ dataLabel(alert.type) }}</td>
-                <td>
-                  <em class="badge" :class="alert.severity.toLowerCase()">{{ alert.severity }}</em>
-                </td>
-                <td>{{ alert.confidence }}</td>
+                <td>{{ alert.device_id }}</td>
+                <td>{{ dataLabel(alert.metric) }}</td>
+                <td>{{ alert.value }}</td>
                 <td>
                   <em class="badge" :class="alert.status.toLowerCase()">{{ alert.status }}</em>
                 </td>
-                <td>{{ dataLabel(alert.createdAt) }}</td>
+                <td>{{ formattedTimestamp(alert.created_at) }}</td>
                 <td>
                   <RouterLink class="table-action action-link" to="/admin/alerts">View</RouterLink>
                 </td>

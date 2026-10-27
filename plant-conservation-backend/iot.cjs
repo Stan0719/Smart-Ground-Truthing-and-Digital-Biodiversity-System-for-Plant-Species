@@ -29,6 +29,16 @@ function thresholds(value) {
       fail(400, "Thresholds must be finite numbers.");
   return value;
 }
+const MAX_BIGINT = 9223372036854775807n;
+function positiveBigint(value) {
+  if (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value))
+    return false;
+  try {
+    return BigInt(value) <= MAX_BIGINT;
+  } catch {
+    return false;
+  }
+}
 function mountDeviceIngestion(app, { pool }) {
   app.post("/api/device/readings", async (req, res) => {
     const match = /^Device ([a-f0-9]{64})$/.exec(
@@ -109,6 +119,91 @@ function mountDeviceIngestion(app, { pool }) {
   });
 }
 function mountIoT(app, { pool, allow }) {
+  app.get("/api/iot/devices", allow("devices.read"), async (_req, res) => {
+    const rows = (
+      await pool.query(
+        `SELECT d.sensor_id,d.device_name,d.device_type,d.serial_number,
+          d.location_description,d.status,d.installed_at,
+          CASE WHEN latest.reading_id IS NULL THEN NULL
+            ELSE row_to_json(latest) END AS latest_reading
+        FROM public.sensor_device AS d
+        LEFT JOIN LATERAL (
+          SELECT r.reading_id,r.plant_id,r.temperature_c,r.humidity,
+            r.soil_moisture,r.rainfall_mm,r.motion_detected,
+            r.gps_latitude,r.gps_longitude,r.recorded_at
+          FROM public.sensor_reading AS r
+          WHERE r.sensor_id=d.sensor_id
+          ORDER BY r.recorded_at DESC,r.reading_id DESC
+          LIMIT 1
+        ) AS latest ON TRUE
+        ORDER BY d.sensor_id`,
+      )
+    ).rows;
+    res.json({
+      message: "IoT devices retrieved.",
+      count: rows.length,
+      devices: rows,
+    });
+  });
+  app.get(
+    "/api/iot/sensors/:sensorId/readings",
+    allow("readings.read"),
+    async (req, res) => {
+      const { sensorId } = req.params;
+      if (!positiveBigint(sensorId))
+        return res.status(400).json({ message: "Invalid sensor ID." });
+
+      const sensor = (
+        await pool.query(
+          `SELECT sensor_id,device_name,device_type,serial_number,
+            location_description,status
+          FROM public.sensor_device
+          WHERE sensor_id=$1`,
+          [sensorId],
+        )
+      ).rows[0];
+      if (!sensor)
+        return res.status(404).json({ message: "Sensor not found." });
+
+      const readings = (
+        await pool.query(
+          `SELECT reading_id,plant_id,temperature_c,humidity,soil_moisture,
+            rainfall_mm,motion_detected,gps_latitude,gps_longitude,recorded_at
+          FROM public.sensor_reading
+          WHERE sensor_id=$1
+          ORDER BY recorded_at DESC,reading_id DESC`,
+          [sensorId],
+        )
+      ).rows;
+      return res.json({
+        message: "Sensor readings retrieved.",
+        sensor,
+        count: readings.length,
+        readings,
+      });
+    },
+  );
+  app.get("/api/iot/alerts", allow("alerts.read"), async (_req, res) => {
+    const rows = (
+      await pool.query(
+        `SELECT a.alert_id,a.plant_id,a.reading_id,r.sensor_id,
+          d.device_name,a.alert_type,a.severity,a.confidence,a.description,
+          a.image_path,a.status,a.created_at,a.resolved_by,a.resolved_at,
+          s.scientific_name,s.common_name
+        FROM public.threat_alert AS a
+        JOIN public.plant_record AS p ON p.plant_id=a.plant_id
+        JOIN public.species AS s ON s.species_id=p.species_id
+        LEFT JOIN public.sensor_reading AS r ON r.reading_id=a.reading_id
+        LEFT JOIN public.sensor_device AS d ON d.sensor_id=r.sensor_id
+        ORDER BY a.created_at DESC,a.alert_id DESC`,
+      )
+    ).rows;
+    res.json({
+      message: "Threat alerts retrieved.",
+      count: rows.length,
+      alerts: rows,
+    });
+  });
   app.get("/api/devices", allow("devices.read"), async (req, res) =>
     res.json({
       devices: (
