@@ -1,12 +1,8 @@
 import {faceSession} from "./faceSession";
-
-const API_URL = (
-  process.env.EXPO_PUBLIC_API_URL ||
-  ""
-).replace(/\/$/, "");
+import { mobileApiUrl } from "./apiConfiguration.js";
 
 export async function plantApi(path,{method='GET',body,expectedAccountId,accountId=expectedAccountId}={}){
- if(!API_URL||new URL(API_URL).protocol!=='https:')throw Error('Configure an approved HTTPS plant API URL.');
+ const API_URL = mobileApiUrl("plant");
  if(!path.startsWith('/')||path.startsWith('//'))throw Error('Invalid plant API path.');
  return faceSession.withToken(async(token,user)=>{
  if(accountId&&user.id!==accountId)throw Error('Sign in with the correct account.');
@@ -16,7 +12,7 @@ export async function plantApi(path,{method='GET',body,expectedAccountId,account
  });
 }
 async function getJson(path) {
-  if(!API_URL||new URL(API_URL).protocol!=="https:")throw Error("Configure an approved HTTPS plant API URL.");
+  const API_URL = mobileApiUrl("plant");
   if(faceSession.hasSession())return plantApi(path.replace(/^\/api/,''));
   let response;
   try {

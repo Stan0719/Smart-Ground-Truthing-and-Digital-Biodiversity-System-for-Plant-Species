@@ -30,7 +30,7 @@ export function selectApiConfiguration(settings, release = false) {
     plant:
       environment === "production"
         ? settings.plantProduction
-        : settings.plantDevelopment || settings.plant,
+        : settings.plantDevelopment || settings.plant || settings.legacyPlant,
     face:
       environment === "production"
         ? settings.faceProduction
@@ -73,6 +73,7 @@ export const mobileApiConfiguration = selectApiConfiguration(
     backendDevelopment: process.env.EXPO_PUBLIC_BACKEND_URL_DEVELOPMENT,
     backendProduction: process.env.EXPO_PUBLIC_BACKEND_URL_PRODUCTION,
     plant: process.env.EXPO_PUBLIC_PLANT_API_URL,
+    legacyPlant: process.env.EXPO_PUBLIC_API_URL,
     face: process.env.EXPO_PUBLIC_FACE_API_URL,
     plantDevelopment: process.env.EXPO_PUBLIC_PLANT_API_URL_DEVELOPMENT,
     faceDevelopment: process.env.EXPO_PUBLIC_FACE_API_URL_DEVELOPMENT,
