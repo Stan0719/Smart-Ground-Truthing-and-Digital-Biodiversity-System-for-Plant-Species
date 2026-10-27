@@ -32,7 +32,7 @@ cleanup() { if [ -n "$FACE_REAL_PID" ]; then kill "$FACE_REAL_PID" 2>/dev/null |
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-HOST=127.0.0.1 PORT="$FACE_SERVICE_PORT" AUTH_DB="$FACE_WORKSPACE/../web/server/data/auth.sqlite" node "$FACE_WORKSPACE/../web/server/index.mjs" &
+HOST=127.0.0.1 PORT="$FACE_SERVICE_PORT" node "$FACE_WORKSPACE/../web/server/index.mjs" &
 FACE_REAL_PID=$!
 "$FACE_RUNTIME" - <<'PY'
 import os,sys,time
