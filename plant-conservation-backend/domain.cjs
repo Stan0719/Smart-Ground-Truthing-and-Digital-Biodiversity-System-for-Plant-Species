@@ -148,31 +148,43 @@ function mountDomain(app, { pool, auth, allow }) {
       row = await speciesRow(pool, id(req.params.id), req.user);
     res.json({ species: projectSpecies(row, scientific) });
   });
-  app.get("/api/plants", allow("plants.public.read"), async (req, res) => {
+  const readPlants = async (req, res) => {
+    const plantId = req.params.id === undefined ? null : req.params.id;
+    if (
+      plantId !== null &&
+      (!/^[1-9][0-9]{0,9}$/.test(plantId) || Number(plantId) > 2147483647)
+    )
+      fail(400, "Invalid plant identifier.");
     const staff = permitted(req.user, "plants.scientific.read");
     const rows = (
       await pool.query(
-        `SELECT p.plant_id,p.species_id,p.rbac_status,p.registered_subject,p.registered_at,l.latitude,l.longitude,l.accuracy_m,o.content AS latest_approved,o.updated_at AS observed_at FROM plant_record p LEFT JOIN plant_location l ON l.location_id=(SELECT location_id FROM plant_location WHERE plant_id=p.plant_id ORDER BY recorded_at DESC,location_id DESC LIMIT 1) LEFT JOIN plant_observation o ON o.id=(SELECT id FROM plant_observation WHERE plant_id=p.plant_id AND status='Approved' ORDER BY updated_at DESC,id DESC LIMIT 1) LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id WHERE COALESCE(v.visibility,'protected') = ANY($1::text[]) AND (p.rbac_status='Approved' OR p.registered_subject=$2 OR $3) ORDER BY p.plant_id DESC LIMIT 500`,
+        `SELECT p.plant_id,p.species_id,p.rbac_status,p.registered_subject,p.registered_at,l.latitude,l.longitude,l.accuracy_m,o.content AS latest_approved,o.updated_at AS observed_at FROM plant_record p LEFT JOIN plant_location l ON l.location_id=(SELECT location_id FROM plant_location WHERE plant_id=p.plant_id ORDER BY recorded_at DESC,location_id DESC LIMIT 1) LEFT JOIN plant_observation o ON o.id=(SELECT id FROM plant_observation WHERE plant_id=p.plant_id AND status='Approved' ORDER BY updated_at DESC,id DESC LIMIT 1) LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id WHERE COALESCE(v.visibility,'protected') = ANY($1::text[]) AND (p.rbac_status='Approved' OR p.registered_subject=$2 OR $3) AND ($4::integer IS NULL OR p.plant_id=$4) ORDER BY p.plant_id DESC LIMIT 500`,
         [
           visibilityFor(req.user),
           req.user ? subject(req.user) : "",
           req.user?.role === "Conservation Officer",
+          plantId,
         ],
       )
     ).rows;
-    res.json({
-      plants: rows.map((r) =>
-        staff
-          ? r
-          : {
-              plant_id: r.plant_id,
-              species_id: r.species_id,
-              status: r.rbac_status,
-              registered_at: r.registered_at,
-            },
-      ),
-    });
-  });
+    const plants = rows.map((r) =>
+      staff
+        ? r
+        : {
+            plant_id: r.plant_id,
+            species_id: r.species_id,
+            status: r.rbac_status,
+            registered_at: r.registered_at,
+          },
+    );
+    if (plantId !== null) {
+      if (!plants.length) fail(404, "Plant unavailable.");
+      return res.json({ plant: plants[0] });
+    }
+    res.json({ plants });
+  };
+  app.get("/api/plants", allow("plants.public.read"), readPlants);
+  app.get("/api/plants/:id", allow("plants.public.read"), readPlants);
   app.post("/api/plants", allow("plants.create"), async (req, res) => {
     const b = req.body;
     if (
@@ -238,19 +250,38 @@ function mountDomain(app, { pool, auth, allow }) {
     });
     res.status(201).json(result);
   });
+  const readObservations = async (req, res) => {
+    const observationId = req.params.id ?? null;
+    // Imported IDs may be numeric; new records use UUIDs.
+    if (
+      observationId !== null &&
+      !/^(?:[1-9][0-9]{0,18}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(
+        observationId,
+      )
+    )
+      fail(400, "Invalid observation identifier.");
+    const officer = req.user.role === "Conservation Officer";
+    const rows = (
+      await pool.query(
+        "SELECT o.*,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'content_type',a.content_type)) FROM plant_asset a WHERE a.observation_id=o.id),'[]') AS assets,p.species_id,s.scientific_name,s.common_name,r.comment AS review_comment,r.decision AS review_decision,r.created_at AS reviewed_at FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id JOIN species s ON s.species_id=p.species_id LEFT JOIN LATERAL (SELECT comment,decision,created_at FROM observation_review WHERE observation_id=o.id ORDER BY created_at DESC LIMIT 1) r ON true LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id WHERE ($1 OR o.owner_subject=$2) AND COALESCE(v.visibility,'protected') = ANY($3::text[]) AND ($4::text IS NULL OR o.id=$4) ORDER BY o.created_at DESC LIMIT 500",
+        [officer, subject(req.user), visibilityFor(req.user), observationId],
+      )
+    ).rows;
+    if (observationId !== null) {
+      if (!rows.length) fail(404, "Observation unavailable.");
+      return res.json({ observation: rows[0] });
+    }
+    res.json({ observations: rows });
+  };
   app.get(
     "/api/observations",
     allow("plants.scientific.read"),
-    async (req, res) => {
-      const officer = req.user.role === "Conservation Officer";
-      const rows = (
-        await pool.query(
-          "SELECT o.*,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'content_type',a.content_type)) FROM plant_asset a WHERE a.observation_id=o.id),'[]') AS assets,p.species_id,s.scientific_name,s.common_name,r.comment AS review_comment,r.decision AS review_decision,r.created_at AS reviewed_at FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id JOIN species s ON s.species_id=p.species_id LEFT JOIN LATERAL (SELECT comment,decision,created_at FROM observation_review WHERE observation_id=o.id ORDER BY created_at DESC LIMIT 1) r ON true LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id WHERE ($1 OR o.owner_subject=$2) AND COALESCE(v.visibility,'protected') = ANY($3::text[]) ORDER BY o.created_at DESC LIMIT 500",
-          [officer, subject(req.user), visibilityFor(req.user)],
-        )
-      ).rows;
-      res.json({ observations: rows });
-    },
+    readObservations,
+  );
+  app.get(
+    "/api/observations/:id",
+    allow("plants.scientific.read"),
+    readObservations,
   );
   app.post(
     "/api/plants/:id/observations",

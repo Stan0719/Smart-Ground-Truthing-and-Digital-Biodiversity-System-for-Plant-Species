@@ -208,10 +208,52 @@ function mountIoT(app, { pool, allow }) {
     res.json({
       devices: (
         await pool.query(
-          "SELECT id,name,plant_id,status,thresholds,last_seen FROM iot_device ORDER BY name",
+          `SELECT d.id,d.name,d.plant_id,d.status,d.thresholds,d.last_seen,CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object('id',r.id,'device_id',r.device_id,'values',r."values",'created_at',r.created_at) END AS latest_reading FROM iot_device d LEFT JOIN LATERAL (SELECT id,device_id,"values",created_at FROM sensor_reading WHERE device_id=d.id ORDER BY created_at DESC,id DESC LIMIT 1) r ON true ORDER BY d.name,d.id`,
         )
       ).rows,
     }),
+  );
+  app.get(
+    "/api/devices/:id/readings",
+    allow("readings.read"),
+    async (req, res) => {
+      if (
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+          req.params.id,
+        )
+      )
+        fail(400, "Invalid device identifier.");
+      const pageNumber = (value, fallback, max) => {
+        if (value === undefined) return fallback;
+        if (
+          typeof value !== "string" ||
+          !/^[1-9][0-9]{0,5}$/.test(value) ||
+          Number(value) > max
+        )
+          fail(400, "Invalid pagination.");
+        return Number(value);
+      };
+      const limit = pageNumber(req.query.limit, 50, 100);
+      const page = pageNumber(req.query.page, 1, 10000);
+      const device = (
+        await pool.query("SELECT id FROM iot_device WHERE id=$1", [
+          req.params.id,
+        ])
+      ).rows[0];
+      if (!device) fail(404, "Device not found.");
+      const rows = (
+        await pool.query(
+          'SELECT id,device_id,"values",created_at FROM sensor_reading WHERE device_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3',
+          [req.params.id, limit + 1, (page - 1) * limit],
+        )
+      ).rows;
+      res.json({
+        readings: rows.slice(0, limit),
+        page,
+        limit,
+        hasMore: rows.length > limit,
+      });
+    },
   );
   app.post("/api/devices", allow("devices.manage"), async (req, res) => {
     const key = randomBytes(32).toString("hex"),

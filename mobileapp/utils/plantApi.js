@@ -105,6 +105,7 @@ function mapBackendObservation(record) {
 }
 
 function mapBackendPlant(record, speciesById) {
+  record = { ...record, ...record.latest_approved };
   const speciesId = String(record.species_id ?? record.speciesId ?? "");
   const species = speciesById.get(speciesId);
   const registeredAt = record.registered_at ?? record.registeredAt ?? null;
@@ -120,12 +121,12 @@ function mapBackendPlant(record, speciesById) {
     scientificName: record.scientific_name ?? record.scientificName ?? species?.scientificName ?? "",
     genus: record.genus_name ?? record.genus ?? species?.genus ?? "",
     family: record.family_name ?? record.family ?? species?.family ?? "",
-    currentStatus: record.current_status ?? record.currentStatus ?? "Not recorded",
+    currentStatus: record.rbac_status ?? record.status ?? record.current_status ?? record.currentStatus ?? "Not recorded",
     latestApproved: {
       heightCm: record.height_cm ?? record.heightCm ?? null,
       healthStatus: record.health_status ?? record.healthStatus ?? "Not recorded",
       lifeStage: record.life_stage ?? record.lifeStage ?? "Not recorded",
-      date: record.observation_date ?? record.verified_at ?? null,
+      date: record.observed_at ?? record.observation_date ?? record.verified_at ?? null,
       morphology: record.morphology ?? "",
       notes: record.notes ?? "",
     },
@@ -140,7 +141,7 @@ function mapBackendPlant(record, speciesById) {
       code: record.qr_code ?? record.qr?.code ?? "Not recorded",
       status: record.qr_status ?? record.qr?.status ?? "Not recorded",
     },
-    registeredBy: record.registered_by ?? record.registeredBy ?? "Not recorded",
+    registeredBy: record.registered_subject ?? record.registered_by ?? record.registeredBy ?? "Not recorded",
     registeredAt,
     observations: [],
   };
