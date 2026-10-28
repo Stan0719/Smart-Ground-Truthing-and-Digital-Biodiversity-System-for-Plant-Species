@@ -1,11 +1,13 @@
 # Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species
 
+The active website uses Vue components, a Node.js backend and PostgreSQL. Project Python source files and their launchers have been removed. Historical Python-based face, AI and serial tools are not available; no replacement recognition or hardware implementation is implied.
+
 # For web:
 cd web
 npm install
 npm run dev
 
-# Harcoded account for testing:
+# Historical prototype-only test accounts (not PostgreSQL backend credentials):
 account: admin@niah.com
 password: admin123
 
@@ -62,4 +64,4 @@ https://smart-ground-truthing-and-digital.onrender.com/api/species
 
 The API currently returns two sample species: Mango and Pitcher plant.
 
-**Note:** The Vite proxy in `web/vite.config.ts` forwards `/api/species` requests to the deployed backend during local development. Local authentication uses a separate SQLite database and may require additional setup.
+**Note:** The Vite proxy in `web/vite.config.ts` routes local plant API requests to the local Node.js backend. Local authentication and plant data now use private PostgreSQL schemas. Follow [the PostgreSQL migration guide](docs/postgresql-migration.md) for completed cutover checks and the remaining administrator-login and deployment work.

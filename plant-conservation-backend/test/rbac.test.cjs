@@ -182,6 +182,9 @@ test("HTTP access matrix rejects unauthorized roles before database calls", asyn
   });
   const routes = [
     ["POST", "/api/plants", ["Botanist"]],
+    ["GET", "/api/plants/1", ["Guest", "Visitor", "Botanist", "Conservation Officer"]],
+    ["GET", "/api/observations/1", ["Botanist", "Conservation Officer"]],
+    ["GET", "/api/devices/11111111-1111-4111-8111-111111111111/readings", ["Administrator", "Conservation Officer"]],
     [
       "GET",
       "/api/species/1",

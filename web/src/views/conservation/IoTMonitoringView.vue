@@ -7,6 +7,7 @@ import SensorHistoryChart, {
   type SensorChartPoint,
 } from '../../components/conservation/SensorHistoryChart.vue'
 import { useConservationText } from '../../composables/useConservationText'
+import { plantApi } from '../../services/plantApi'
 import { formatPlantId } from '../../utils/plantId'
 
 interface ApiSensorReading {
@@ -33,18 +34,30 @@ interface ApiSensorDevice {
   latest_reading: ApiSensorReading | null
 }
 
-interface IoTDevicesResponse {
-  message: string
-  count: number
-  devices: ApiSensorDevice[]
+interface CurrentReading {
+  id: string
+  created_at: string
+  values: Record<string, number>
 }
-
-interface SensorReadingsResponse {
-  message: string
-  sensor: Omit<ApiSensorDevice, 'installed_at' | 'latest_reading'>
-  count: number
-  readings: ApiSensorReading[]
+interface CurrentDevice {
+  id: string
+  name: string
+  plant_id: number | null
+  status: string
+  latest_reading: CurrentReading | null
 }
+const mapReading = (reading: CurrentReading, plantId: string | number): ApiSensorReading => ({
+  reading_id: reading.id,
+  plant_id: plantId,
+  temperature_c: reading.values.temperature ?? null,
+  humidity: reading.values.humidity ?? null,
+  soil_moisture: reading.values.soilMoisture ?? null,
+  rainfall_mm: reading.values.rainfall ?? null,
+  motion_detected: reading.values.movement === undefined ? null : reading.values.movement === 1,
+  gps_latitude: null,
+  gps_longitude: null,
+  recorded_at: reading.created_at,
+})
 
 const { t } = useI18n()
 const { ct, dt } = useConservationText()
@@ -65,10 +78,19 @@ const loadDevices = async () => {
   isLoading.value = true
   errorMessage.value = ''
   try {
-    const response = await fetch('/api/iot/devices')
-    const result = (await response.json()) as Partial<IoTDevicesResponse>
-    if (!response.ok) throw new Error(result.message || 'Unable to retrieve IoT devices.')
-    devices.value = Array.isArray(result.devices) ? result.devices : []
+    const result = await plantApi<{ devices: CurrentDevice[] }>('/devices')
+    devices.value = result.devices.map((device) => ({
+      sensor_id: device.id,
+      device_name: device.name,
+      device_type: 'Sensor',
+      serial_number: null,
+      location_description: null,
+      status: device.status,
+      installed_at: null,
+      latest_reading: device.latest_reading
+        ? mapReading(device.latest_reading, device.plant_id ?? '')
+        : null,
+    }))
   } catch (error) {
     devices.value = []
     errorMessage.value = error instanceof Error ? error.message : 'Unable to retrieve IoT devices.'
@@ -138,10 +160,12 @@ const loadReadingHistory = async (device: ApiSensorDevice) => {
   historyErrorMessage.value = ''
   isHistoryLoading.value = true
   try {
-    const response = await fetch(`/api/iot/sensors/${device.sensor_id}/readings`)
-    const result = (await response.json()) as Partial<SensorReadingsResponse>
-    if (!response.ok) throw new Error(result.message || 'Unable to retrieve sensor readings.')
-    historyReadings.value = Array.isArray(result.readings) ? result.readings : []
+    const result = await plantApi<{ readings: CurrentReading[] }>(
+      `/devices/${encodeURIComponent(String(device.sensor_id))}/readings?limit=100&page=1`,
+    )
+    historyReadings.value = result.readings.map((reading) =>
+      mapReading(reading, device.latest_reading?.plant_id ?? ''),
+    )
   } catch (error) {
     historyErrorMessage.value =
       error instanceof Error ? error.message : 'Unable to retrieve sensor readings.'
