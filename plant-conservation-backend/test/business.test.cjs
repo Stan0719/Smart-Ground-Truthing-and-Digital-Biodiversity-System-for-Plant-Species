@@ -423,6 +423,7 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   assert.deepEqual(Object.keys(registeredDevices.devices[0]).sort(), [
     "id",
     "last_seen",
+    "latest_reading",
     "name",
     "plant_id",
     "status",

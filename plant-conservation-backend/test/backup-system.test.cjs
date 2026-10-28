@@ -21,6 +21,12 @@ test("PostgreSQL backup passes passwords through child environment, validates ar
     schemas: ["plant_auth"],
     run: (...args) => {
       calls.push(args);
+
+      // Simulate pg_dump creating the backup archive.
+      if (args[0] === "pg_dump") {
+        require("node:fs").writeFileSync(args[1][3], "mock archive");
+      }
+
       return { status: 0 };
     },
   });
