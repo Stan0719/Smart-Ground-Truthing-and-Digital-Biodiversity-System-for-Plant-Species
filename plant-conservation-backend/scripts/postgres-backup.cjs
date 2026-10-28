@@ -1,6 +1,6 @@
 "use strict";
 const { spawnSync } = require("node:child_process");
-const { mkdirSync, chmodSync, existsSync } = require("node:fs");
+const defaultFileSystem = require("node:fs");
 const { dirname, resolve } = require("node:path");
 function dumpEnvironment(
   settings = process.env,
@@ -42,14 +42,15 @@ function backupPostgres(
     connection = settings.DATABASE_URL,
     schemas = [settings.PLANT_PG_SCHEMA || "public"],
     run = spawnSync,
+    fileSystem = defaultFileSystem,
   } = {},
 ) {
   if (!schemas.every((s) => /^[a-z][a-z0-9_]{0,62}$/.test(s)))
     throw Error("Invalid backup schema.");
   const destination = resolve(file);
-  if (existsSync(destination))
+  if (fileSystem.existsSync(destination))
     throw Error("Refusing to overwrite an existing backup.");
-  mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+  fileSystem.mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
   const args = [
     "--format=custom",
     "--no-password",
@@ -66,7 +67,9 @@ function backupPostgres(
     throw Error(
       "PostgreSQL backup failed. Install matching pg_dump and verify private connection settings.",
     );
-  if (existsSync(destination)) chmodSync(destination, 0o600);
+  if (!fileSystem.existsSync(destination))
+    throw Error("PostgreSQL backup failed; the archive file was not created.");
+  fileSystem.chmodSync(destination, 0o600);
   const verified = run(
     settings.PG_RESTORE_BINARY || "pg_restore",
     ["--list", destination],
