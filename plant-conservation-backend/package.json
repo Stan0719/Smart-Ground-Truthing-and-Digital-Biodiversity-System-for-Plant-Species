@@ -8,6 +8,7 @@
     "test": "node --test --test-isolation=none test/*.test.cjs",
     "check-db": "node scripts/check-db.cjs",
     "migrate": "node scripts/migrate.cjs",
+    "migrate:rbac": "node scripts/migrate-rbac.cjs",
     "backup": "node scripts/backup-db.cjs",
     "backup:system": "node scripts/backup-system.cjs"
   },
