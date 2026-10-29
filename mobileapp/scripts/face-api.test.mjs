@@ -1,8 +1,6 @@
-import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-const source = readFileSync(new URL('../utils/faceApi.js', import.meta.url), 'utf8');
-const { createFaceClient, normalizeFaceUrl, validateFaceSession } = await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+import { createFaceClient, normalizeFaceUrl, validateFaceSession } from '../utils/faceApi.js';
 const url = 'https://backend.example';
 const response = (status, text) => ({ status, ok: status >= 200 && status < 300, text: async () => text });
 

@@ -97,7 +97,7 @@ export function createFaceServiceHandler({ auth, recovery, key, now = () => Date
         return send(401, { error: LOGIN_ERROR })
       const result = await auth.login(body.email, body.password, ip, {
         roles: ['Botanist', 'Visitor'],
-        requirePermanent: true,
+
         reference: /^[a-f0-9]{12}$/.test(req.headers['x-face-request-id'] ?? '')
           ? req.headers['x-face-request-id']
           : undefined,
@@ -106,6 +106,14 @@ export function createFaceServiceHandler({ auth, recovery, key, now = () => Date
         result.error ? result.status : 200,
         result.error ? { error: result.error } : result,
       )
+    }
+    if (req.url === '/internal/face/change-password') {
+      const user = typeof body.token === 'string' && /^[a-f0-9]{64}$/.test(body.token) && await auth.session(body.token)
+      if (!user || !['Botanist', 'Visitor'].includes(user.role)) return send(401, {error: LOGIN_ERROR})
+      if (typeof body.password !== 'string' || body.password.length < 15 || body.password.length > 128)
+        return send(400, {error: 'Use a password with 15 to 128 characters.'})
+      const changed = await auth.changePassword(user.id, body.password)
+      return send(changed ? 200 : 401, changed ? {changed: true} : {error: LOGIN_ERROR})
     }
     if (req.url === '/internal/face/issue') {
       if (typeof body.userId !== 'string' || body.userId.length > 100)

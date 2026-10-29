@@ -3,7 +3,7 @@ export function createRecovery({ auth, deliver, key, now = () => Date.now() }) {
   const hash = (id, code) =>
     createHmac('sha256', key).update(`niah-password-reset\n${id}\n${code}`).digest('hex')
   return {
-    async request(email, ip) {
+    async request(email, ip, requirements = {}) {
       if (!deliver || !key || key.length < 32)
         return {
           status: 503,
@@ -30,7 +30,7 @@ export function createRecovery({ auth, deliver, key, now = () => Date.now() }) {
         const user = await auth.db
           .prepare(`SELECT * FROM ${table} WHERE id=? FOR UPDATE`)
           .get(existing.id)
-        if (!user || user.status !== 'Active' || user.must_change_password) return {}
+        if (!user || user.status !== 'Active' || user.must_change_password || (requirements.roles && !requirements.roles.includes(user.role))) return {}
         await auth.db.prepare('UPDATE password_resets SET used=1 WHERE user_id=?').run(user.id)
         await auth.db
           .prepare(
@@ -65,7 +65,7 @@ export function createRecovery({ auth, deliver, key, now = () => Date.now() }) {
           'If an eligible account exists, a recovery code will be sent. Delivery is not confirmed here.',
       }
     },
-    async confirm({ recoveryId: requestId, code, password }, ip) {
+    async confirm({ recoveryId: requestId, code, password }, ip, requirements = {}) {
       if (!key) return { status: 503, error: 'Password recovery is not configured.' }
       if (
         typeof requestId !== 'string' ||
@@ -96,6 +96,9 @@ export function createRecovery({ auth, deliver, key, now = () => Date.now() }) {
           )
         )
           return { status: 401, error: 'Recovery code is invalid or expired.' }
+        const user = await auth.byId(row.user_id)
+        if (!user || (requirements.roles && !requirements.roles.includes(user.role)))
+          return {status:401, error:'Recovery code is invalid or expired.'}
         const consumed = await auth.db
           .prepare(
             'UPDATE password_resets SET used=1 WHERE id=? AND used=0 AND attempts<=5 AND expires_at>?',

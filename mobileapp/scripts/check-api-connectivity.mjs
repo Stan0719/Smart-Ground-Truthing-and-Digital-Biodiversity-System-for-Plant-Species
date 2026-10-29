@@ -7,7 +7,10 @@ for (const name of [".env.local", ".env"]) {
 const { mobileApiConfiguration, mobileApiUrl, checkApiConnectivity } =
   await import("../utils/apiConfiguration.js");
 console.log("API environment:", mobileApiConfiguration.environment);
-for (const service of ["plant", "face"]) {
+const requested = process.argv.slice(2);
+if (requested.some(service => !["auth", "plant", "face"].includes(service)))
+  throw Error("Use service arguments: auth, plant, face (or omit for all).");
+for (const service of requested.length ? requested : ["auth", "plant", "face"]) {
   try {
     await checkApiConnectivity(service, mobileApiUrl(service));
     console.log(service + ": ready (unauthenticated JSON health check)");

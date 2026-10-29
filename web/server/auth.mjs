@@ -5,6 +5,7 @@ import { connectAuth } from './postgres.mjs'
 const derive = promisify(scrypt)
 const derivePbkdf2 = promisify(pbkdf2)
 const options = { N: 32768, r: 8, p: 3, maxmem: 64 * 1024 * 1024 }
+export const WEBSITE_ROLES = Object.freeze(['Administrator', 'Conservation Officer'])
 export const LOGIN_ERROR =
   'Unable to sign in. Check your email and password or contact the administrator.'
 export const digest = (value) => createHash('sha256').update(value).digest('hex')
@@ -54,7 +55,11 @@ export function publicUser(user) {
       .toUpperCase(),
   }
 }
-export async function createAuth(database = connectAuth()) {
+export async function createAuth(database = connectAuth(), {
+  diagnostic = (entry) => {
+    if (process.env.AUTH_DEBUG === '1') console.info(JSON.stringify(entry))
+  },
+} = {}) {
   if (!database || typeof database !== 'object' || !database.prepare)
     throw new Error('SQLite paths are no longer supported. Supply a PostgreSQL database adapter.')
   const db = database
@@ -81,6 +86,18 @@ export async function createAuth(database = connectAuth()) {
     (await db.prepare('SELECT * FROM users WHERE id=?').get(id)) ??
     (await db.prepare('SELECT * FROM visitors WHERE id=?').get(id))
   const sessionTable = (user) => (user.role === 'Visitor' ? 'visitor_sessions' : 'sessions')
+  // These reasons stay in opt-in server logs; clients receive the same generic error.
+  const accountDenial = async (current, expectedHash, requirements) => {
+    if (!current) return 'account_missing'
+    if (current.status !== 'Active') return 'account_inactive'
+    if (await temporaryExpired(current)) return 'temporary_password_expired'
+    if (current.password_hash !== expectedHash) return 'credentials_changed'
+    if ((requirements.role && current.role !== requirements.role) ||
+        (requirements.roles && !requirements.roles.includes(current.role))) return 'role_denied'
+    if (requirements.requirePermanent && current.must_change_password) return 'permanent_password_required'
+    return null
+  }
+
   return {
     db,
     byEmail,
@@ -125,6 +142,12 @@ export async function createAuth(database = connectAuth()) {
       return publicUser(await db.prepare('SELECT * FROM users WHERE id=?').get(id))
     },
     async login(email, password, ip, requirements = {}) {
+      const report = (reason, stage) => {
+        if (!/^[a-f0-9]{12}$/.test(requirements.reference ?? '')) return
+        diagnostic({event:'password_verification', reference:requirements.reference,
+          processId:process.pid, stage, reason})
+      }
+
       const limited = await db.transaction(async () => {
         await db.prepare('SELECT pg_advisory_xact_lock(hashtext(?))').get('login:' + ip)
         const settings = await db
@@ -144,33 +167,18 @@ export async function createAuth(database = connectAuth()) {
         await event(null, ip, 'login_attempt')
         return false
       })
-      if (limited) return { error: LOGIN_ERROR, status: 429 }
+      if (limited) {
+        report('rate_limited', 'verification')
+        return { error: LOGIN_ERROR, status: 429 }
+      }
       const user = await byEmail(email.trim().toLowerCase())
       const valid = await verify(password, user?.password_hash ?? dummy)
       // Reload after async verification: an admin may have disabled this account meanwhile.
       const current = user && (await byId(user.id))
-      if (process.env.AUTH_DEBUG === '1' && requirements.reference)
-        console.info(
-          JSON.stringify({
-            event: 'password_verification',
-            reference: requirements.reference,
-            accountFound: Boolean(current),
-            role: current?.role,
-            status: current?.status,
-            mustChangePassword: Boolean(current?.must_change_password),
-            passwordVerified: valid,
-          }),
-        )
-      if (
-        !valid ||
-        !current ||
-        current.status !== 'Active' ||
-        (await temporaryExpired(current)) ||
-        current.password_hash !== user.password_hash ||
-        (requirements.role && current.role !== requirements.role) ||
-        (requirements.roles && !requirements.roles.includes(current.role)) ||
-        (requirements.requirePermanent && current.must_change_password)
-      ) {
+      const denial = !current ? 'account_missing' : !valid ? 'password_mismatch'
+        : await accountDenial(current, user.password_hash, requirements)
+      report(denial ?? 'eligible', 'verification')
+      if (denial) {
         await event(user?.id ?? null, ip, !valid ? 'invalid_credentials' : 'account_blocked')
         return { error: LOGIN_ERROR, status: 401 }
       }
@@ -179,16 +187,11 @@ export async function createAuth(database = connectAuth()) {
         const locked = await db
           .prepare(`SELECT * FROM ${table} WHERE id=? FOR UPDATE`)
           .get(current.id)
-        if (
-          !locked ||
-          locked.status !== 'Active' ||
-          (await temporaryExpired(locked)) ||
-          locked.password_hash !== user.password_hash ||
-          (requirements.role && locked.role !== requirements.role) ||
-          (requirements.roles && !requirements.roles.includes(locked.role)) ||
-          (requirements.requirePermanent && locked.must_change_password)
-        )
+        const lockedDenial = await accountDenial(locked, user.password_hash, requirements)
+        if (lockedDenial) {
+          report(lockedDenial, 'locked_recheck')
           return { error: LOGIN_ERROR, status: 401 }
+        }
         const token = randomBytes(32).toString('hex')
         await db
           .prepare(`INSERT INTO ${sessionTable(locked)} VALUES(?,?,?)`)
@@ -206,6 +209,7 @@ export async function createAuth(database = connectAuth()) {
           .prepare(`UPDATE ${table} SET last_login=? WHERE id=?`)
           .run(new Date().toISOString(), locked.id)
         await event(locked.id, ip, 'authenticated')
+        report('authenticated', 'session_created')
         return { token, user: publicUser(locked) }
       })
     },

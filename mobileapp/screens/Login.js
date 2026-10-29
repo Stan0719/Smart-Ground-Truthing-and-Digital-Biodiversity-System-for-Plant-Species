@@ -25,6 +25,8 @@ import { createFaceCameraController, FACE_CAPTURE_VERSION } from "../utils/faceC
 import { completeFaceLogin } from "../utils/completeFaceLogin";
 import { faceSession } from "../utils/faceSession";
 import { faceApi, validateFaceSession, faceDiagnostic, faceReference } from "../utils/faceApi";
+import MandatoryPasswordChangeScreen from "./MandatoryPasswordChange";
+import { changeFirstLoginPassword } from "../utils/firstLoginPassword";
 import FaceCameraModal, { faceCameraConfigured } from "../components/FaceCameraModal";
 
 
@@ -151,7 +153,9 @@ export default function LoginScreen({
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [pendingPasswordSession, setPendingPasswordSession] = useState(null);
   const [loginError, setLoginError] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
   const [faceRequest, setFaceRequest] = useState(null);
   const [registerCameraFace, setRegisterCameraFace] = useState(false);
   const [cameraMessage, setCameraMessage] = useState("");
@@ -383,6 +387,8 @@ export default function LoginScreen({
   async function handleLogin() {
   if (loginLock.current || biometricLock.current || faceRequest) return;
   loginLock.current = true;
+  setPasswordBusy(true);
+  setLoginError("");
   try {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail || !password) {
@@ -401,6 +407,9 @@ export default function LoginScreen({
   try {
     const result = await faceApi("/password", { email: normalizedEmail, password });
     validateFaceSession(result);
+    if (result.user.mustChangePassword) {
+      setPendingPasswordSession(result); setPassword(""); setLoginError(""); return;
+    }
     user = result.user;
     serverToken = result.token;
   } catch (error) {
@@ -472,6 +481,7 @@ export default function LoginScreen({
   }
   } finally {
     loginLock.current = false;
+    setPasswordBusy(false);
   }
   }
 
@@ -484,6 +494,20 @@ export default function LoginScreen({
     navigation.replace("MainTabs");
   }
 
+
+  if (pendingPasswordSession) {
+    return <MandatoryPasswordChangeScreen
+      onSubmit={async (replacement, confirmation) => {
+        await changeFirstLoginPassword({ api: faceApi, session: pendingPasswordSession, password: replacement, confirmation });
+        setPendingPasswordSession(null); setPassword("");
+        setLoginError("Password changed. Sign in with your new password.");
+      }}
+      onCancel={async () => {
+        try { await faceApi("/logout", {}, pendingPasswordSession.token); }
+        finally { setPendingPasswordSession(null); setPassword(""); setLoginError(""); }
+      }}
+    />;
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -569,7 +593,7 @@ export default function LoginScreen({
               {/* Email */}
               <FloatingInput
                 onFocus={() => fillFromBiometrics(true)}
-                editable={!biometricBusy}
+                editable={!biometricBusy && !passwordBusy}
                 label="Email"
                 value={email}
                 onChangeText={updateEmail}
@@ -581,7 +605,7 @@ export default function LoginScreen({
 
               {/* Password */}
               <FloatingInput
-                editable={!biometricBusy}
+                editable={!biometricBusy && !passwordBusy}
                 label="Password"
                 value={password}
                 onChangeText={updatePassword}
@@ -674,19 +698,22 @@ export default function LoginScreen({
 
               {/* Login */}
               <TouchableOpacity
-                disabled={biometricBusy}
+                disabled={biometricBusy || passwordBusy}
                 style={styles.loginButton}
                 onPress={handleLogin}
                 activeOpacity={0.75}
                 accessibilityRole="button"
               >
                 <Text style={styles.loginButtonText}>
-                  Login with Email and Password
+                  {passwordBusy ? "Signing in…" : "Login with Email and Password"}
                 </Text>
               </TouchableOpacity>
 
 
               {/* Visitor registration */}
+              {typeof __DEV__ === "boolean" && __DEV__ ? (
+                <Text style={styles.biometricHelp}>Development build: 20261029.1</Text>
+              ) : null}
               <TouchableOpacity
                 style={styles.registerPrompt}
                 onPress={() => navigation.navigate("VisitorRegister")}

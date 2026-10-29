@@ -20,13 +20,17 @@ export function selectApiConfiguration(settings, release = false) {
         environment,
         "plant",
       );
-      return { environment, plant: gateway, face: gateway + "/face" };
+      return { environment, plant: gateway, face: gateway + "/face", auth: gateway + "/api/mobile" };
     } catch (error) {
       return { environment, error: error.message };
     }
   }
   return {
     environment,
+    auth:
+      environment === "production"
+        ? settings.authProduction
+        : settings.authDevelopment || settings.auth,
     plant:
       environment === "production"
         ? settings.plantProduction
@@ -50,7 +54,8 @@ export function validatedApiUrl(value, environment, service) {
     url.password ||
     url.search ||
     url.hash ||
-    (service === "plant" && url.pathname !== "/")
+    (service === "plant" && url.pathname !== "/") ||
+    (service === "auth" && url.pathname.replace(/\/$/, "") !== "/api/mobile")
   )
     throw Error(
       `Invalid ${service} API URL. Use HTTPS without credentials, query parameters or fragments.`,
@@ -75,6 +80,9 @@ export const mobileApiConfiguration = selectApiConfiguration(
     plant: process.env.EXPO_PUBLIC_PLANT_API_URL,
     legacyPlant: process.env.EXPO_PUBLIC_API_URL,
     face: process.env.EXPO_PUBLIC_FACE_API_URL,
+    auth: process.env.EXPO_PUBLIC_AUTH_API_URL,
+    authDevelopment: process.env.EXPO_PUBLIC_AUTH_API_URL_DEVELOPMENT,
+    authProduction: process.env.EXPO_PUBLIC_AUTH_API_URL_PRODUCTION,
     plantDevelopment: process.env.EXPO_PUBLIC_PLANT_API_URL_DEVELOPMENT,
     faceDevelopment: process.env.EXPO_PUBLIC_FACE_API_URL_DEVELOPMENT,
     plantProduction: process.env.EXPO_PUBLIC_PLANT_API_URL_PRODUCTION,
@@ -164,7 +172,9 @@ export async function checkApiConnectivity(
         const correct =
           service === "plant"
             ? body?.service === "Plant Conservation API" && body.ready === true
-            : body?.ready === true && body.accountService === "authoritative";
+            : service === "auth"
+              ? body?.service === "Niah Authentication API" && body.ready === true
+              : body?.ready === true && body.accountService === "authoritative";
         if (!correct)
           throw connectivityError(
             "API_WRONG_SERVICE",

@@ -1,5 +1,5 @@
 const diagnostics = process.env.EXPO_PUBLIC_FACE_DEBUG === "1";
-const configuredUrl = process.env.EXPO_PUBLIC_FACE_API_URL?.trim();
+import { mobileApiUrl } from "./apiConfiguration.js";
 
 export function normalizeFaceUrl(value) {
   try {
@@ -9,7 +9,7 @@ export function normalizeFaceUrl(value) {
   } catch { return null; }
 }
 export function faceCameraConfigured() {
-  return Boolean(normalizeFaceUrl(configuredUrl));
+  try { return Boolean(mobileApiUrl("face")); } catch { return false; }
 }
 
 export async function parseFaceResponse(response) {
@@ -44,10 +44,13 @@ export function faceReference() {
   return Array.from({ length: 12 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
 }
 
-export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000, beforeRequest }) {
+export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000, beforeRequest, service = "face" }) {
   return async function request(path, body = {}, token, method = "POST", reference = faceReference()) {
-    const base = normalizeFaceUrl(url);
-    if (!base) throw new Error("Set EXPO_PUBLIC_FACE_API_URL to the HTTPS backend address, without query parameters.");
+    const label = service === "auth" ? "authentication service" : "face backend";
+    let base;
+    try { base = normalizeFaceUrl(typeof url === "function" ? url() : url); }
+    catch (error) { error.code = "API_CONFIGURATION"; throw error; }
+    if (!base) throw Object.assign(new Error(`Configure the ${service} API HTTPS URL without credentials, query parameters or fragments.`), {code:"API_CONFIGURATION"});
     if(beforeRequest)await beforeRequest(path);
     const log = (phase, details = {}) => {
       if (diagnostics) console.info("[face-api]", { phase, reference, endpoint: path, backend: new URL(base).origin, ...details });
@@ -59,24 +62,26 @@ export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000, b
       timer = setTimeout(() => {
         log("timeout");
         controller.abort();
-        reject(new Error("Face backend timed out. Check the backend service; the request may already have completed. Sign in again before retrying enrollment."));
+        reject(Object.assign(new Error(`The ${label} timed out. Check the running service and connection. The request may have completed; sign in again before retrying.`), {code:"API_TIMEOUT"}));
       }, ["/me", "/health", "/logout"].includes(path) ? Math.min(timeoutMs, 15000) : timeoutMs);
     });
     const operation = async () => {
       let response;
       try {
         response = await fetchImpl(`${base}${path}`, {
-          method, redirect:"error", headers: { "Content-Type": "application/json", "X-Face-Request-ID": reference, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          method, credentials:"omit", redirect:"error", headers: { "Content-Type": "application/json", "X-Face-Request-ID": reference, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           body: method === "GET" ? undefined : JSON.stringify(body), signal: controller.signal,
         });
       } catch {
         log("failed_before_response");
-        throw new Error("Cannot connect to the face backend. Check your internet connection, backend URL and running authentication service.");
+        throw Object.assign(new Error(`Cannot connect to the ${label}. Check the configured ${service} API URL, hostname, internet connection and running service.`), {code:"API_UNREACHABLE"});
       }
       // Clone for metadata only; never log response content or request values.
       log("response_received", { status: response.status, contentType: response.headers?.get?.("content-type") || "unknown" });
       const raw = await response.text();
       log("response_completed", { status: response.status, bodyLength: raw.length });
+      if (service === "auth" && response.status === 404)
+        throw Object.assign(new Error("Authentication endpoint not found. Set the auth API base to the Node authentication service /api/mobile path."), {status:404, code:"API_WRONG_SERVICE"});
       return parseFaceResponse({ status: response.status, ok: response.ok, text: async () => raw });
     };
     try { return await Promise.race([operation(), timeout]); }
@@ -89,10 +94,14 @@ export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000, b
     finally { clearTimeout(timer); }
   };
 }
-const faceClient=createFaceClient({url:configuredUrl});
-const accountUrl=process.env.EXPO_PUBLIC_AUTH_API_URL?.trim();
-const accountClient=createFaceClient({url:accountUrl});
-export const faceApi=(path,...args)=>accountUrl&&['/password','/me','/logout','/recovery/request','/recovery/confirm'].includes(path)?accountClient(path,...args):faceClient(path,...args);
+// Password/session traffic must never silently fall back to the biometric service.
+const accountPaths = new Set(['/password','/change-password','/register','/me','/logout','/recovery/request','/recovery/confirm']);
+export function createMobileApi({ resolveUrl = mobileApiUrl, fetchImpl = fetch, timeoutMs } = {}) {
+  const accountClient = createFaceClient({url:()=>resolveUrl('auth'), fetchImpl, timeoutMs:timeoutMs ?? 15000, service:'auth'});
+  const faceClient = createFaceClient({url:()=>resolveUrl('face'), fetchImpl, timeoutMs});
+  return (path,...args)=>accountPaths.has(path)?accountClient(path,...args):faceClient(path,...args);
+}
+export const faceApi = createMobileApi();
 
 export function validateFaceSession(result) {
   if (!result || typeof result.token !== "string" || !/^[a-f0-9]{64}$/.test(result.token) || !validFaceUser(result.user)) {

@@ -219,11 +219,11 @@ router.beforeEach(async (to) => {
     return
   const user = await currentUser()
   if (!user) return { name: 'home' }
-  if (user.mustChangePassword && to.name !== 'change-password') return { name: 'change-password' }
-  if (user.role === 'Botanist' && !user.mustChangePassword) {
+  if (!['Administrator', 'Conservation Officer'].includes(user.role)) {
     await logout()
     return { name: 'home' }
   }
+  if (user.mustChangePassword && to.name !== 'change-password') return { name: 'change-password' }
   if (to.path.startsWith('/admin') && user.role !== 'Administrator') return { name: 'home' }
   if (to.path.startsWith('/conservation') && user.role !== 'Conservation Officer')
     return { name: 'home' }

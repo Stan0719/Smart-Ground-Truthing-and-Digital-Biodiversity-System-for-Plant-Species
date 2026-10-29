@@ -13,8 +13,8 @@ import urllib.request
 from core import AuthError
 
 
-def mobile_user(user):
-    if not isinstance(user, dict) or user.get('role') not in ('Botanist','Visitor') or user.get('status') != 'Active' or user.get('mustChangePassword') is not False:
+def mobile_user(user, allow_temporary=False):
+    if not isinstance(user, dict) or user.get('role') not in ('Botanist','Visitor') or user.get('status') != 'Active' or (user.get('mustChangePassword') is not False and not (allow_temporary and user.get('mustChangePassword') is True)):
         raise AuthError('An active Botanist or Visitor account with its permanent password is required.', 401, 'account_restricted')
     if not all(isinstance(user.get(field), str) and user[field] for field in ('id','email','name')):
         raise AuthError('Invalid authoritative account.', 503, 'account_service_invalid')
@@ -46,7 +46,7 @@ class AccountService:
                 result = json.load(response)
         except urllib.error.HTTPError as error:
             status=error.code if error.code in (400,401,403,409,429,503) else 503
-            message='Authoritative account service rejected this authentication. Check credentials, account eligibility and permanent-password requirements.'
+            message='Authoritative account service rejected this authentication. Check credentials and account eligibility.'
             if status in (400,409,429,503):
                 try: message=json.load(error).get('error',message)
                 except (ValueError,OSError): pass
@@ -67,13 +67,13 @@ class AccountService:
         return self._session_result(self.request('issue', {'userId':user_id}))
 
     def password_login(self, email, password):
-        return self._session_result(self.request('password', {'email':email, 'password':password}))
+        return self._session_result(self.request('password', {'email':email, 'password':password}), allow_temporary=True)
 
-    def _session_result(self, result):
+    def _session_result(self, result, allow_temporary=False):
         token = result.get('token')
         if not isinstance(token, str) or len(token) != 64 or any(c not in '0123456789abcdef' for c in token):
             raise AuthError('Invalid authoritative session.', 503, 'account_service_invalid')
-        return {'token':token, 'user':mobile_user(result.get('user'))}
+        return {'token':token, 'user':mobile_user(result.get('user'), allow_temporary=allow_temporary)}
 
     def logout(self, token):
         return self.request('logout', {'token':token})

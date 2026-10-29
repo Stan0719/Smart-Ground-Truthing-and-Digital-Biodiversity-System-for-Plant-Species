@@ -1,9 +1,12 @@
 import * as LocalAuthentication from "expo-local-authentication";
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
-import { faceApi, normalizeFaceUrl, validFaceUser } from "./faceApi";
+import { faceApi, validFaceUser } from "./faceApi";
 import { createFaceSessionManager } from "./faceSessionLifecycle";
-const backend = normalizeFaceUrl((process.env.EXPO_PUBLIC_AUTH_API_URL||process.env.EXPO_PUBLIC_FACE_API_URL)?.trim());
+import { mobileApiUrl } from "./apiConfiguration.js";
+// Bind persisted sessions to the same selected account API used by /me.
+let backend = null;
+try { backend = mobileApiUrl("auth"); } catch { /* Login reports configuration errors. */ }
 let memoryOnly = null;
 const supported = async () => Platform.OS !== "web" && await SecureStore.isAvailableAsync();
 const options = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };

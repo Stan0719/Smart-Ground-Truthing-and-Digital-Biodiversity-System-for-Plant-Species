@@ -86,6 +86,11 @@ function identity(auth) {
       return res.status(401).json({ error: "Invalid session." });
     }
     req.user = token ? await auth.session(token) : null;
+    // Browser/cookie authentication is restricted before any domain permission check.
+    // Native bearer clients retain the existing mobile permissions.
+    if (req.user && (req.headers.origin || req.headers.cookie) &&
+        !['Administrator', 'Conservation Officer'].includes(req.user.role))
+      return res.status(403).json({ error: 'Access denied.' });
     if (token && !req.user)
       return res.status(401).json({ error: "Please sign in again." });
     next();

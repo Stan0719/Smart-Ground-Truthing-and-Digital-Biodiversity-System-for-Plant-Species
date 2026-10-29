@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 const importSource = async path => import('data:text/javascript;base64,'+Buffer.from(readFileSync(new URL(path,import.meta.url),'utf8')).toString('base64'));
 const {createFaceCameraController,runFaceCapture,FACE_CAPTURE_VERSION}=await importSource('../utils/faceCaptureFlow.js');
-const {validateFaceSession}=await importSource('../utils/faceApi.js');
+import {validateFaceSession} from '../utils/faceApi.js';
 const {completeFaceLogin}=await importSource('../utils/completeFaceLogin.js');
 const {createFaceSessionManager}=await importSource('../utils/faceSessionLifecycle.js');
 const token='a'.repeat(64),challenge='b'.repeat(64),user={id:'real-account-id',email:'fixture@example.invalid',name:'Fixture',role:'botanist'};

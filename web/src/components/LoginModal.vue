@@ -57,19 +57,14 @@ const handleLogin = async () => {
       email: email.value,
       password: password.value,
     })
-    if (user.mustChangePassword) {
-      closeModal()
-      await router.push({ name: 'change-password' })
-      return
-    }
-    if (user.role === 'Botanist') {
+    if (!['Administrator', 'Conservation Officer'].includes(user.role)) {
       await logout()
       platformMessage.value = 'loginModal.mobileOnly'
       return
     }
-    if (user.role === 'Visitor') {
+    if (user.mustChangePassword) {
       closeModal()
-      await router.push({name:'account'})
+      await router.push({ name: 'change-password' })
       return
     }
     emit('login', {

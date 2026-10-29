@@ -70,7 +70,14 @@ function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
           ? "Service unavailable. Please try again."
           : status === 413
             ? "Request too large."
-            : error.message || "Invalid request.",
+            : ({
+                "23505": "Record already exists.",
+                "23503": "Related record is unavailable.",
+                "23514": "Invalid record values.",
+                "22P02": "Invalid record values.",
+              })[error.code] || (error instanceof SyntaxError
+                ? "Invalid request."
+                : error.message || "Invalid request."),
     });
   });
   return app;

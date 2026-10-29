@@ -28,6 +28,9 @@ export function createDraftStore({
         : JSON.parse(await decrypt(accountId, saved));
       if (!Array.isArray(rows)) throw Error("Invalid drafts");
       await authorize(accountId);
+      // Upgrade only after encryption and round-trip verification succeed.
+      // A failed conversion leaves the original storage value untouched.
+      if (Array.isArray(saved)) await write(accountId, rows, true);
       return rows;
     } catch {
       throw Error(
@@ -35,7 +38,7 @@ export function createDraftStore({
       );
     }
   }
-  async function write(accountId, rows) {
+  async function write(accountId, rows, verifyConversion = false) {
     const plain = JSON.stringify(rows);
     const bytes = new TextEncoder().encode(plain).byteLength;
     if (bytes > maxBytes || (await availableBytes()) < bytes * 4 + 1048576)
@@ -43,6 +46,9 @@ export function createDraftStore({
         "Not enough draft storage. Previous drafts are safe. Keep this form open, use fewer/smaller photos or synchronize saved drafts first.",
       );
     const payload = JSON.stringify(await encrypt(accountId, plain));
+    if (verifyConversion &&
+        await decrypt(accountId, JSON.parse(payload)) !== plain)
+      throw Error("Draft encryption verification failed. Original drafts are safe.");
     await authorize(accountId);
     // One atomic replacement: never remove the previous value before a successful write.
     try {

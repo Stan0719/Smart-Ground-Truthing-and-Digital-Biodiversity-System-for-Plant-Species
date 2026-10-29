@@ -84,7 +84,7 @@ def create_server(auth, host="127.0.0.1", port=8000, readiness=None):
             request_id = supplied_reference if re.fullmatch(r'[a-f0-9]{12}', supplied_reference) else secrets.token_hex(6)
             request_reference.set(request_id)
             started = time.monotonic()
-            known = {'/health', '/register', '/recovery/request', '/recovery/confirm', '/password', '/enrollment-status', '/enroll', '/legacy-link', '/legacy-reenroll', '/challenge', '/face-login', '/me', '/delete-face', '/logout'}
+            known = {'/health', '/register', '/recovery/request', '/recovery/confirm', '/password', '/change-password', '/enrollment-status', '/enroll', '/legacy-link', '/legacy-reenroll', '/challenge', '/face-login', '/me', '/delete-face', '/logout'}
             endpoint = self.path if self.path in known else 'unknown'
             print(f'Face API {request_id}: incoming POST endpoint={endpoint}', flush=True)
             try:
@@ -124,6 +124,9 @@ def create_server(auth, host="127.0.0.1", port=8000, readiness=None):
                     if not isinstance(body.get('email'), str) or not isinstance(body.get('password'), str) or len(body['password']) > 1024 or len(body['email']) > 254:
                         raise AuthError('Invalid credentials.')
                     result = auth.password_login(body['email'], body['password'])
+                elif self.path == '/change-password':
+                    if not hasattr(auth, 'authority'): raise AuthError('Authoritative account service is required.',503,'account_service_unavailable')
+                    result = auth.authority.request('change-password', {'token':token, 'password':body.get('password')})
                 elif self.path == '/enrollment-status':
                     result = auth.enrollment_status(token)
                 elif self.path == '/enroll':

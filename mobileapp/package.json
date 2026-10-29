@@ -48,7 +48,9 @@
     "lint": "expo lint",
     "type-check": "tsc --noEmit",
     "test:otp": "node scripts/recovery-flow.test.mjs",
-    "test:face-api": "node scripts/face-api.test.mjs"
+    "test:face-api": "node scripts/face-api.test.mjs",
+    "test:mobile-auth": "node --test ../deploy/mobile-login-gateway.test.mjs scripts/mobile-auth-routing.test.mjs scripts/first-login-screen.test.mjs ../web/server/client-boundary.test.mjs ../web/server/website-origin.test.mjs",
+    "check:connectivity": "node scripts/check-api-connectivity.mjs"
   },
   "private": true,
   "devDependencies": {

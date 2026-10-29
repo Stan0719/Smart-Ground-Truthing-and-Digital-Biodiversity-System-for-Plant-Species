@@ -1,8 +1,9 @@
 import { createServer } from 'node:http'
+import { randomBytes } from 'node:crypto'
 import { createFaceServiceHandler } from './face-service.mjs'
-import { digest, LOGIN_ERROR } from './auth.mjs'
+import { digest, LOGIN_ERROR, WEBSITE_ROLES } from './auth.mjs'
 import { adminRequest } from './operations.mjs'
-export function createAuthServer({ auth, recovery, staff, key = null, env = process.env }) {
+export function createAuthServer({ auth, recovery, staff, diagnostics = null, key = null, env = process.env }) {
   const faceHandler = createFaceServiceHandler({ auth, recovery, key })
   const origin = env.APP_ORIGIN ?? 'http://localhost:5173'
   const secure = env.NODE_ENV === 'production'
@@ -32,7 +33,14 @@ export function createAuthServer({ auth, recovery, staff, key = null, env = proc
     const token =
       /(?:^|;\s*)niah_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie ?? '')?.[1] ?? ''
     try {
-      if(path==='/health'&&req.method==='GET')return send(200,{service:'Niah Authentication API',ready:true,accountAdapter:Boolean(key)})
+      if(['/health','/auth-health','/api/mobile/health'].includes(path)&&req.method==='GET')return send(200,{service:'Niah Authentication API',ready:true,accountAdapter:Boolean(key)})
+      if (path === '/internal/auth/diagnostics') {
+        if (!diagnostics?.enabled) return send(404, {error:'Not found.'})
+        if (req.method !== 'GET' || req.headers.origin ||
+            !['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))
+          return send(403, {error:'Request rejected.'})
+        return send(200, diagnostics.identity)
+      }
       if (path.startsWith('/internal/face/')) return await faceHandler(req, res)
       if (req.method !== 'GET' && !(path.startsWith('/api/mobile/')&&!req.headers.origin&&!req.headers.cookie) && !allowedOrigins.has(req.headers.origin)) {
         if (!secure) {
@@ -63,25 +71,41 @@ export function createAuthServer({ auth, recovery, staff, key = null, env = proc
       if(path.startsWith('/api/mobile/')){
         const mobileUser=user=>({...user,role:user.role==='Botanist'?'botanist':user.role==='Visitor'?'visitor':user.role==='Conservation Officer'?'conservation-officer':user.role})
         const mobileToken=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1]
+        if(path==='/api/mobile/register'&&req.method==='POST'){
+          if(typeof body.name!=='string'||!body.name.trim()||body.name.length>100||typeof body.email!=='string'||body.email.length>254||!/^\S+@\S+\.\S+$/.test(body.email)||typeof body.password!=='string'||body.password.length<15||body.password.length>128)
+            return send(400,{error:'Use a valid name/email and a password with 15 to 128 characters.'})
+          const result=await auth.createVisitor(body)
+          return result.error?send(result.status,{error:result.error}):send(201,{user:mobileUser(result.user)})
+        }
         if(path==='/api/mobile/password'&&req.method==='POST'){
+          const suppliedReference=req.headers['x-face-request-id']
+          const requestId=typeof suppliedReference==='string'&&/^[a-f0-9]{12}$/.test(suppliedReference)
+            ?suppliedReference:randomBytes(6).toString('hex')
+
           if(typeof body.email!=='string'||body.email.length>254||typeof body.password!=='string'||body.password.length>1024)return send(401,{error:LOGIN_ERROR})
-          const result=await auth.login(body.email,body.password,ip,{roles:['Botanist','Visitor','Conservation Officer'],requirePermanent:true})
-          return result.error?send(result.status,{error:result.error}):send(200,{token:result.token,user:mobileUser(result.user)})
+          const result=await auth.login(body.email,body.password,ip,{roles:['Botanist','Visitor','Conservation Officer'],reference:requestId})
+          return result.error?send(result.status,{error:result.error,requestId}):send(200,{token:result.token,user:mobileUser(result.user),requestId})
         }
         if(path==='/api/mobile/recovery/request'&&req.method==='POST'&&recovery){const {status,...result}=await recovery.request(body.email,ip);return send(status,result)}
         if(path==='/api/mobile/recovery/confirm'&&req.method==='POST'&&recovery){const {status,...result}=await recovery.confirm(body,ip);return send(status,result)}
         const mobile=mobileToken&&await auth.session(mobileToken)
-        if(!mobile||mobile.mustChangePassword||!['Botanist','Visitor','Conservation Officer'].includes(mobile.role))return send(401,{error:LOGIN_ERROR})
+        if(!mobile||!['Botanist','Visitor','Conservation Officer'].includes(mobile.role))return send(401,{error:LOGIN_ERROR})
+        if(path==='/api/mobile/change-password'&&req.method==='POST'){
+          if(typeof body.password!=='string'||body.password.length<15||body.password.length>128)return send(400,{error:'Use a password with 15 to 128 characters.'})
+          const updated=await auth.changePassword(mobile.id,body.password)
+          return send(updated?200:401,updated?{changed:true}:{error:LOGIN_ERROR})
+        }
+        if(mobile.mustChangePassword && path!=='/api/mobile/logout')return send(403,{error:'Change your temporary password first.'})
         if(path==='/api/mobile/me'&&['GET','POST'].includes(req.method))return send(200,{user:mobileUser(mobile)})
         if(path==='/api/mobile/logout'&&req.method==='POST'){await auth.db.prepare('DELETE FROM sessions WHERE token_hash=?').run(digest(mobileToken));await auth.db.prepare('DELETE FROM visitor_sessions WHERE token_hash=?').run(digest(mobileToken));return send(200,{})}
         return send(404,{error:'Not found.'})
       }
       if (path === '/api/auth/recovery/request' && req.method === 'POST') {
-        const { status, ...result } = await recovery.request(body.email, ip)
+        const { status, ...result } = await recovery.request(body.email, ip, {roles:WEBSITE_ROLES})
         return send(status, result)
       }
       if (path === '/api/auth/recovery/confirm' && req.method === 'POST') {
-        const { status, ...result } = await recovery.confirm(body, ip)
+        const { status, ...result } = await recovery.confirm(body, ip, {roles:WEBSITE_ROLES})
         return send(status, result)
       }
       if (path === '/api/auth/login' && req.method === 'POST') {
@@ -92,7 +116,7 @@ export function createAuthServer({ auth, recovery, staff, key = null, env = proc
           body.password.length > 1024
         )
           return send(401, { error: LOGIN_ERROR })
-        const result = await auth.login(body.email, body.password, ip)
+        const result = await auth.login(body.email, body.password, ip, {roles:WEBSITE_ROLES})
         if (result.error) return send(result.status, { error: result.error })
         // Rotate an existing browser session on login.
         await auth.db.prepare('DELETE FROM sessions WHERE token_hash=?').run(digest(token))
@@ -107,7 +131,7 @@ export function createAuthServer({ auth, recovery, staff, key = null, env = proc
         return send(200, {})
       }
       const user = await auth.session(token)
-      if (!user) {
+      if (!user || !WEBSITE_ROLES.includes(user.role)) {
         res.setHeader('Set-Cookie', cookie())
         return send(401, { error: 'Please sign in again.' })
       }

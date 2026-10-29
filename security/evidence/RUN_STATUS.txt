@@ -1,0 +1,25 @@
+Baseline revision: 7241fb7
+Assessment date: 2026-10-28 Asia/Kuala_Lumpur
+Node: v24.20.0
+npm: 11.19.0 (npm.cmd; PowerShell npm.ps1 execution is disabled)
+Baseline: exit 0, 7 assertions passed (expected old vulnerabilities reproduced)
+Reassessment: exit 0, 22 tests passed, 0 failed
+Mobile lint: exit 0
+Mobile type-check: exit 0
+Web npm audit: exit 1, registry request failed, no advisory conclusion
+Plant npm audit: exit 1, registry request failed, no advisory conclusion
+Mobile npm audit: exit 1, registry request failed, no advisory conclusion
+Semgrep: unavailable on PATH, not run
+No SQL/IoT/network service started by security tests. Audit attempted npm registry only.
+Scope correction reassessment: exit 0, 39 Node tests passed, 0 failed
+Face diagnostic metadata tests: exit 0, 2 Python tests passed
+No GPS, protected-location, restricted-note access-policy or IoT tests run.
+SQL/IoT/live deployment verification: POSTPONED.
+Latest pull review HEAD: 4c1bdd1
+Pre-change rerun: 39 Node tests passed, exit 0
+Prototype finding F03: shortened GCM tag accepted; reproduced before fix
+Post-fix reassessment: 45 Node tests passed, exit 0
+Repeated Python diagnostics: 2 tests passed, exit 0
+Repeated mobile lint: exit 0
+Repeated mobile type-check: exit 0
+No regression found in inspected pulled security paths; teammates' admin/router changes preserved
