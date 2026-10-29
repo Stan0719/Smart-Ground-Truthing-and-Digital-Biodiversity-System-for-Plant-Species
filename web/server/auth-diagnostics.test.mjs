@@ -17,6 +17,17 @@ test('retained diagnostics correlate references and discard all non-allowlisted 
   diagnostics.record({event:'password_verification',reference:'bad\ninjection',stage:'verification',reason:'account_missing'});assert.equal(seen.length,2)
  }finally{rmSync(directory,{recursive:true,force:true})}
 })
+
+test('transport retention excludes bodies, query values and arbitrary metadata',()=>{
+ const directory=mkdtempSync(join(tmpdir(),'auth-transport-'))
+ try{
+  const diagnostics=createAuthDiagnostics({env:{NODE_ENV:'development'},directory,storeFingerprint:'synthetic',consoleSink:()=>{}})
+  diagnostics.transport({event:'mobile_transport',component:'auth',reference:'abcdef123456',path:'/api/mobile/password',method:'POST',phase:'completed',status:401,durationMs:10,password:'private-password',body:'private-personal-data'})
+  diagnostics.transport({event:'mobile_transport',component:'auth',reference:'abcdef123456',path:'/api/mobile/password?secret=private-query',method:'POST',phase:'received'})
+  const retained=readFileSync(join(directory,'auth-diagnostics.ndjson'),'utf8')
+  assert.equal(retained.trim().split('\n').length,1);assert.match(retained,/"status":401/);assert.doesNotMatch(retained,/private-|password":|body":/)
+ }finally{rmSync(directory,{recursive:true,force:true})}
+})
 test('production diagnostics stay off unless explicitly enabled; retention is bounded',()=>{
  const directory=mkdtempSync(join(tmpdir(),'auth-diagnostics-'))
  try{

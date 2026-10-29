@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { createFaceServiceHandler } from './face-service.mjs'
 import { digest, LOGIN_ERROR, WEBSITE_ROLES } from './auth.mjs'
 import { adminRequest } from './operations.mjs'
+import { traceMobileRequest } from '../../shared/mobile-request-trace.mjs'
 export function createAuthServer({ auth, recovery, staff, diagnostics = null, key = null, env = process.env }) {
   const faceHandler = createFaceServiceHandler({ auth, recovery, key })
   const origin = env.APP_ORIGIN ?? 'http://localhost:5173'
@@ -21,6 +22,8 @@ export function createAuthServer({ auth, recovery, staff, diagnostics = null, ke
   const cookie = (token = '') =>
     `niah_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 28800 : 0}${secure ? '; Secure' : ''}`
   const server = createServer(async (req, res) => {
+    traceMobileRequest(req, res, { component: 'auth', enabled: !secure,
+      emit: entry => diagnostics?.transport?.(entry) })
     res.setHeader('Content-Type', 'application/json')
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('X-Content-Type-Options', 'nosniff')

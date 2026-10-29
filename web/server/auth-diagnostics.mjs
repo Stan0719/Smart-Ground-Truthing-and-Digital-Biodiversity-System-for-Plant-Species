@@ -24,6 +24,13 @@ export function createAuthDiagnostics({env=process.env,directory,storeFingerprin
   try{consoleSink(entry)}catch{ /* Diagnostic output must not change authentication outcomes. */ }
  }
  return {enabled,identity,
+  transport(entry){
+   if(entry?.event!=='mobile_transport'||entry.component!=='auth'||!/^[a-f0-9]{12}$/.test(entry.reference||''))return
+   if(!['/api/mobile/password','/api/mobile/change-password','/api/mobile/health'].includes(entry.path)||!['GET','POST','OPTIONS','OTHER'].includes(entry.method)||!['received','completed','disconnected'].includes(entry.phase))return
+   emit({event:'mobile_transport',component:'auth',reference:entry.reference,path:entry.path,method:entry.method,phase:entry.phase,
+    ...(Number.isSafeInteger(entry.durationMs)&&entry.durationMs>=0?{durationMs:entry.durationMs}:{}),
+    ...(Number.isInteger(entry.status)&&entry.status>=100&&entry.status<=599?{status:entry.status}:{})})
+  },
   runtime(){emit({event:'auth_runtime'})},
   lifecycle(event,fields={}){
    if(!new Set(['process_started','server_listening','shutdown_requested','server_closed','database_closed','shutdown_complete','shutdown_failed','uncaught_exception','before_exit','process_exit','server_error']).has(event))return

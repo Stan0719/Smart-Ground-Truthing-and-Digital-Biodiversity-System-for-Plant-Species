@@ -2,6 +2,7 @@
 // Start: node deploy/mobile-login-gateway.mjs
 import {createServer, request} from 'node:http'
 import {pathToFileURL} from 'node:url'
+import {traceMobileRequest} from '../shared/mobile-request-trace.mjs'
 const hopHeaders = new Set(['connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade'])
 function headersWithoutHop(headers) {
  const blocked=new Set([...hopHeaders,...String(headers.connection||'').toLowerCase().split(',').map(v=>v.trim())])
@@ -19,8 +20,9 @@ export function gatewayRoute(raw, {authPort=3001,plantPort=3000,facePort=8000}={
  if(path.startsWith('/api/'))return {port:plantPort,path:url.pathname+url.search}
  return null
 }
-export function createMobileLoginGateway(ports={}) {
+export function createMobileLoginGateway(ports={}, { trace = process.env.NODE_ENV !== 'production', emit = entry => console.info(JSON.stringify(entry)) } = {}) {
  return createServer((req,res)=>{
+  traceMobileRequest(req,res,{component:'gateway',enabled:trace,emit})
   const send=(status,error)=>{if(res.headersSent){res.destroy();return}res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({error}))}
   const route=gatewayRoute(req.url,ports)
   if(!route)return send(404,'Not found.')

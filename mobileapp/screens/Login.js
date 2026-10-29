@@ -24,7 +24,7 @@ import Constants from "expo-constants";
 import { createFaceCameraController, FACE_CAPTURE_VERSION } from "../utils/faceCaptureFlow";
 import { completeFaceLogin } from "../utils/completeFaceLogin";
 import { faceSession } from "../utils/faceSession";
-import { faceApi, validateFaceSession, faceDiagnostic, faceReference } from "../utils/faceApi";
+import { faceApi, validateFaceSession, faceDiagnostic, faceReference, probeAuthConnection } from "../utils/faceApi";
 import MandatoryPasswordChangeScreen from "./MandatoryPasswordChange";
 import { changeFirstLoginPassword } from "../utils/firstLoginPassword";
 import FaceCameraModal, { faceCameraConfigured } from "../components/FaceCameraModal";
@@ -156,6 +156,8 @@ export default function LoginScreen({
   const [pendingPasswordSession, setPendingPasswordSession] = useState(null);
   const [loginError, setLoginError] = useState("");
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [connectionCheck, setConnectionCheck] = useState("");
+  const [checkingConnection, setCheckingConnection] = useState(false);
   const [faceRequest, setFaceRequest] = useState(null);
   const [registerCameraFace, setRegisterCameraFace] = useState(false);
   const [cameraMessage, setCameraMessage] = useState("");
@@ -513,6 +515,22 @@ export default function LoginScreen({
     <SafeAreaView style={styles.safeArea}>
       <FaceCameraModal request={faceRequest} onClose={(requestId) => finishFaceCamera(null, requestId)} onResult={finishFaceCamera} isCurrent={(id) => faceCameraController.current.isCurrent(id)} />
 
+            {typeof __DEV__ === "boolean" && __DEV__ ? (
+              <View style={{ backgroundColor: "#E8F3ED", borderColor: "#397558", borderWidth: 1, borderRadius: 12, padding: 14, margin: 10, flexShrink: 0, gap: 8 }}>
+                <Text style={{ color: "#174B35", fontWeight: "700" }}>Development build: 20261029.4</Text>
+                <Text style={{ color: "#174B35", fontSize: 12 }}>Metro: {Constants.expoConfig?.hostUri || "Not supplied by runtime"}</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check authentication connection (no credentials)" disabled={checkingConnection || passwordBusy} onPress={async () => {
+                  setCheckingConnection(true); setConnectionCheck("Checking authentication connection…");
+                  try { const result = await probeAuthConnection(); setConnectionCheck(`HTTP ${result.status}: Connected\n${result.base}\nReference: ${result.reference}`); }
+                  catch (error) { setConnectionCheck(`${error.status ? `HTTP ${error.status} received` : "No HTTP response received"}\n${error.code || "API_CLIENT_ERROR"}: ${error.message}\nReference: ${error.requestId || "Not available"}`); }
+                  finally { setCheckingConnection(false); }
+                }} style={{ backgroundColor: "#175E3E", borderRadius: 8, padding: 12 }}>
+                  <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>{checkingConnection ? "Checking connection…" : "Check authentication connection (no credentials)"}</Text>
+                </TouchableOpacity>
+                {!!connectionCheck && <ScrollView style={{ maxHeight: 120 }} keyboardShouldPersistTaps="handled"><Text selectable accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: "#174B35", fontSize: 12 }}>{connectionCheck}</Text></ScrollView>}
+              </View>
+            ) : null}
+
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={
@@ -585,6 +603,8 @@ export default function LoginScreen({
             <Text style={styles.subtitle}>
               Sign in to access the Niah Biodiversity System.
             </Text>
+
+
 
 
             {/* Form */}
@@ -711,9 +731,6 @@ export default function LoginScreen({
 
 
               {/* Visitor registration */}
-              {typeof __DEV__ === "boolean" && __DEV__ ? (
-                <Text style={styles.biometricHelp}>Development build: 20261029.1</Text>
-              ) : null}
               <TouchableOpacity
                 style={styles.registerPrompt}
                 onPress={() => navigation.navigate("VisitorRegister")}
