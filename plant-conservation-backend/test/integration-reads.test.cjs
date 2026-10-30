@@ -45,7 +45,10 @@ test("detail visibility, observation ownership, latest readings and bounded devi
     "INSERT INTO plant_location(plant_id,latitude,longitude) VALUES(1,1,2)",
   );
   await pool.query(
-    "INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES('1',1,'staff:bot','Draft','{}','a'),('2',3,'staff:bot','Draft','{}','b')",
+    `INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key)
+     VALUES('1',1,'staff:bot','Draft','{"latitude":1,"longitude":2,"accuracy_m":4}','a'),
+           ('2',3,'staff:bot','Draft','{}','b'),
+           ('3',1,'staff:bot','Approved','{"latitude":11,"longitude":22,"accuracy_m":3}','approved')`,
   );
   const device = "11111111-1111-4111-8111-111111111111";
   const empty = "22222222-2222-4222-8222-222222222222";
@@ -70,16 +73,42 @@ test("detail visibility, observation ownership, latest readings and bounded devi
         server.close(resolve);
       }),
   );
-  const call = async (path, role) => {
+  const call = async (path, role, init = {}) => {
     const response = await fetch(
       `http://127.0.0.1:${server.address().port}/api${path}`,
-      { headers: role ? { Authorization: `Bearer ${tokens[role]}` } : {} },
+      {
+        ...init,
+        headers: {
+          ...(role ? { Authorization: `Bearer ${tokens[role]}` } : {}),
+          ...(init.body ? { "Content-Type": "application/json" } : {}),
+          ...init.headers,
+        },
+      },
     );
     return { status: response.status, data: await response.json() };
   };
   assert.equal((await call("/plants/1")).status, 200);
   assert.equal((await call("/plants/1")).data.plant.latitude, undefined);
-  assert.equal((await call("/plants/1", "bot")).data.plant.latitude, 1);
+  const adminPlant = await call("/plants/1", "admin");
+  const botanistPlant = await call("/plants/1", "bot");
+  const visitorPlant = await call("/plants/1", "visitor");
+  const officerPlant = await call("/plants/1", "officer");
+  for (const plant of [
+    adminPlant.data.plant,
+    botanistPlant.data.plant,
+    visitorPlant.data.plant,
+  ]) {
+    assert.equal(plant.latitude, undefined);
+    assert.equal(plant.longitude, undefined);
+    assert.equal(plant.accuracy_m, undefined);
+    assert.equal(plant.latest_approved?.latitude, undefined);
+    assert.equal(plant.latest_approved?.longitude, undefined);
+    assert.equal(plant.latest_approved?.accuracy_m, undefined);
+  }
+  assert.equal(officerPlant.data.plant.latitude, 1);
+  assert.equal(officerPlant.data.plant.longitude, 2);
+  assert.equal(officerPlant.data.plant.latest_approved.latitude, 11);
+  assert.equal(officerPlant.data.plant.latest_approved.longitude, 22);
   assert.equal((await call("/plants/2")).status, 404);
   assert.equal((await call("/plants/2", "other")).status, 404);
   assert.equal((await call("/plants/2", "bot")).status, 200);
@@ -90,7 +119,39 @@ test("detail visibility, observation ownership, latest readings and bounded devi
   assert.equal((await call("/observations/1")).status, 401);
   assert.equal((await call("/observations/1", "visitor")).status, 403);
   assert.equal((await call("/observations/1", "other")).status, 404);
-  assert.equal((await call("/observations/1", "bot")).data.observation.id, "1");
+  const botanistObservation = await call("/observations/1", "bot");
+  assert.equal(botanistObservation.data.observation.id, "1");
+  assert.equal(botanistObservation.data.observation.content.latitude, undefined);
+  assert.equal(botanistObservation.data.observation.content.longitude, undefined);
+  const officerObservation = await call("/observations/1", "officer");
+  assert.equal(officerObservation.data.observation.content.latitude, 1);
+  assert.equal(officerObservation.data.observation.content.longitude, 2);
+  assert.equal((await call("/observations/3", "bot")).data.observation.content.latitude, undefined);
+  assert.equal((await call("/observations/3", "officer")).data.observation.content.latitude, 11);
+
+  const draftContent = {
+    heightCm: 123,
+    healthStatus: "healthy",
+    lifeStage: "mature",
+    morphology: "test morphology",
+    latitude: 12.5,
+    longitude: 34.5,
+    accuracy_m: 2,
+  };
+  const createdObservation = await call("/plants/1/observations", "bot", {
+    method: "POST",
+    body: JSON.stringify({ content: draftContent, client_key: "gps-create-test" }),
+  });
+  assert.equal(createdObservation.status, 201);
+  assert.equal(createdObservation.data.content.latitude, undefined);
+  assert.equal(createdObservation.data.content.longitude, undefined);
+  const updatedObservation = await call("/observations/1", "bot", {
+    method: "PATCH",
+    body: JSON.stringify({ content: draftContent, revision: 1 }),
+  });
+  assert.equal(updatedObservation.status, 200);
+  assert.equal(updatedObservation.data.content.latitude, undefined);
+  assert.equal(updatedObservation.data.content.longitude, undefined);
   for (const path of [
     "/plants/0",
     "/plants/2147483648",

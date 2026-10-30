@@ -8,6 +8,7 @@ const {
   text,
   hash,
 } = require("./domain.cjs");
+const { projectGps } = require("../shared/rbac.cjs");
 const metrics = [
   "temperature",
   "humidity",
@@ -119,7 +120,7 @@ function mountDeviceIngestion(app, { pool }) {
   });
 }
 function mountIoT(app, { pool, allow }) {
-  app.get("/api/iot/devices", allow("devices.read"), async (_req, res) => {
+  app.get("/api/iot/devices", allow("devices.read"), async (req, res) => {
     const rows = (
       await pool.query(
         `SELECT d.sensor_id,d.device_name,d.device_type,d.serial_number,
@@ -142,7 +143,7 @@ function mountIoT(app, { pool, allow }) {
     res.json({
       message: "IoT devices retrieved.",
       count: rows.length,
-      devices: rows,
+      devices: projectGps(rows, req.user),
     });
   });
   app.get(
@@ -179,7 +180,7 @@ function mountIoT(app, { pool, allow }) {
         message: "Sensor readings retrieved.",
         sensor,
         count: readings.length,
-        readings,
+        readings: projectGps(readings, req.user),
       });
     },
   );

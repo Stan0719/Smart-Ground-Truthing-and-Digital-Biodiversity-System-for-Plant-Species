@@ -14,6 +14,7 @@ const grants = Object.freeze({
   ],
   "plants.scientific.read": ["Botanist", "Conservation Officer"],
   "plants.protected.read": ["Conservation Officer"],
+  "plants.gps.exact.read": ["Conservation Officer"],
   "plants.create": ["Botanist"],
   "observations.create": ["Botanist"],
   "observations.edit.own": ["Botanist"],
@@ -35,6 +36,27 @@ function permitted(user, permission) {
     user.mustChangePassword === false &&
     grants[permission].includes(user.role)
   );
+}
+const exactGpsFields = new Set([
+  "latitude",
+  "longitude",
+  "gps_latitude",
+  "gps_longitude",
+  "accuracy_m",
+  "gpsLatitude",
+  "gpsLongitude",
+  "accuracyM",
+]);
+function projectGps(value, user) {
+  if (permitted(user, "plants.gps.exact.read")) return value;
+  if (Array.isArray(value)) return value.map((item) => projectGps(item, user));
+  if (!value || typeof value !== "object") return value;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const projected = {};
+  for (const [key, item] of Object.entries(value))
+    if (!exactGpsFields.has(key)) projected[key] = projectGps(item, user);
+  return projected;
 }
 function visibilityFor(user) {
   if (permitted(user, "plants.protected.read"))
@@ -99,6 +121,7 @@ module.exports = {
   roles,
   grants,
   permitted,
+  projectGps,
   visibilityFor,
   projectSpecies,
   assertEdit,

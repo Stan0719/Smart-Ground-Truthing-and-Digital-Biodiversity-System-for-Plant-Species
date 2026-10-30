@@ -47,8 +47,8 @@ test("legacy IoT routes preserve response contracts and enforce permissions", as
       soil_moisture: null,
       rainfall_mm: null,
       motion_detected: false,
-      gps_latitude: null,
-      gps_longitude: null,
+      gps_latitude: "3.812345",
+      gps_longitude: "113.789012",
       recorded_at: "2026-10-27T00:00:00.000Z",
     },
     alert = {
@@ -78,7 +78,7 @@ test("legacy IoT routes preserve response contracts and enforce permissions", as
         return {
           rows: emptyLists
             ? []
-            : [{ ...sensor, installed_at: null, latest_reading: null }],
+            : [{ ...sensor, installed_at: null, latest_reading: reading }],
         };
       if (sql.includes("FROM public.sensor_device"))
         return {
@@ -147,7 +147,14 @@ test("legacy IoT routes preserve response contracts and enforce permissions", as
       "status",
     ]);
     assert.equal(devices.devices[0].status, "active");
-    assert.equal(devices.devices[0].latest_reading, null);
+    assert.equal(devices.devices[0].latest_reading.reading_id, "21");
+    const exactGpsAllowed = role === "Conservation Officer";
+    for (const coordinate of ["gps_latitude", "gps_longitude"]) {
+      assert.equal(
+        Object.hasOwn(devices.devices[0].latest_reading, coordinate),
+        exactGpsAllowed,
+      );
+    }
 
     const historyResponse = await call(
         "/api/iot/sensors/9223372036854775807/readings",
@@ -172,9 +179,10 @@ test("legacy IoT routes preserve response contracts and enforce permissions", as
     ]);
     assert.equal(history.count, 1);
     assert.equal(history.readings[0].reading_id, "21");
+    for (const coordinate of ["gps_latitude", "gps_longitude"])
+      assert.equal(Object.hasOwn(history.readings[0], coordinate), exactGpsAllowed);
     assert.deepEqual(Object.keys(history.readings[0]).sort(), [
-      "gps_latitude",
-      "gps_longitude",
+      ...(exactGpsAllowed ? ["gps_latitude", "gps_longitude"] : []),
       "humidity",
       "motion_detected",
       "plant_id",

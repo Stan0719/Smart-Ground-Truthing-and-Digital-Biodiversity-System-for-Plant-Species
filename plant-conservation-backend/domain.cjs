@@ -2,6 +2,7 @@
 const { randomUUID, randomBytes, createHash } = require("node:crypto");
 const {
   permitted,
+  projectGps,
   visibilityFor,
   projectSpecies,
   assertEdit,
@@ -179,9 +180,9 @@ function mountDomain(app, { pool, auth, allow }) {
     );
     if (plantId !== null) {
       if (!plants.length) fail(404, "Plant unavailable.");
-      return res.json({ plant: plants[0] });
+      return res.json({ plant: projectGps(plants[0], req.user) });
     }
-    res.json({ plants });
+    res.json({ plants: projectGps(plants, req.user) });
   };
   app.get("/api/plants", allow("plants.public.read"), readPlants);
   app.get("/api/plants/:id", allow("plants.public.read"), readPlants);
@@ -269,9 +270,9 @@ function mountDomain(app, { pool, auth, allow }) {
     ).rows;
     if (observationId !== null) {
       if (!rows.length) fail(404, "Observation unavailable.");
-      return res.json({ observation: rows[0] });
+      return res.json({ observation: projectGps(rows[0], req.user) });
     }
-    res.json({ observations: rows });
+    res.json({ observations: projectGps(rows, req.user) });
   };
   app.get(
     "/api/observations",
@@ -325,7 +326,7 @@ function mountDomain(app, { pool, auth, allow }) {
           fail(409, "Client key already belongs to another plant.");
         return old;
       });
-      res.status(201).json(result);
+      res.status(201).json(projectGps(result, req.user));
     },
   );
   app.post(
@@ -395,7 +396,7 @@ function mountDomain(app, { pool, auth, allow }) {
         await audit(c, req.user, "observation_resubmitted", row.id);
         return updated;
       });
-      res.json(result);
+      res.json(projectGps(result, req.user));
     },
   );
   app.post(

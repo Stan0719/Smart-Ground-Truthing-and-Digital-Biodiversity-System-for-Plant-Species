@@ -7,6 +7,7 @@ const { resolve } = require("node:path");
 const { createPlantApp } = require("../server.js");
 const {
   permitted,
+  projectGps,
   assertEdit,
   assertReview,
   projectSpecies,
@@ -123,6 +124,26 @@ test("conflicting and malformed credentials are rejected", () => {
           "niah_session=" + "a".repeat(64) + "; niah_session=" + "a".repeat(64),
       },
     }),
+  );
+});
+test("exact GPS permission and nested field projection are Officer-only", () => {
+  for (const role of ["Administrator", "Botanist", "Visitor"])
+    assert.equal(permitted(user(role), "plants.gps.exact.read"), false, role);
+  assert.equal(
+    permitted(user("Conservation Officer"), "plants.gps.exact.read"),
+    true,
+  );
+  assert.deepEqual(
+    projectGps({
+      latitude: 1,
+      nested: [{ gps_latitude: 2, longitude: 3, value: "retained" }],
+      value: "retained",
+    }, user("Botanist")),
+    { nested: [{ value: "retained" }], value: "retained" },
+  );
+  assert.deepEqual(
+    projectGps({ latitude: 1, nested: { gps_longitude: 2 } }, user("Conservation Officer")),
+    { latitude: 1, nested: { gps_longitude: 2 } },
   );
 });
 test("HTTP access matrix rejects unauthorized roles before database calls", async (t) => {
