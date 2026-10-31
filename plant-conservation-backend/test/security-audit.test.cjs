@@ -70,7 +70,9 @@ async function fixture(t) {
     const response = await fetch(base + path, {
       method,
       headers: {
-        Origin: "http://localhost:5173",
+        ...(role !== "owner" && role !== "other"
+          ? { Origin: "http://localhost:5173" }
+          : {}),
         "Content-Type": "application/json",
         ...(role ? { Authorization: `Bearer ${tokens[role]}` } : {}),
       },

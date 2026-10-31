@@ -68,7 +68,13 @@ function mountDeviceIngestion(app, { pool }) {
           [b.device_id, hash(match[1])],
         )
       ).rows[0];
+
       if (!device) fail(401, "Device authentication failed.");
+
+      if (device.device_type !== "Sensor") {
+        fail(403, "Camera devices cannot submit sensor readings.");
+      }
+      
       if (b.client_key) {
         const previous = (
           await c.query(
@@ -209,7 +215,7 @@ function mountIoT(app, { pool, allow }) {
     res.json({
       devices: (
         await pool.query(
-          `SELECT d.id,d.name,d.plant_id,d.status,d.thresholds,d.last_seen,CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object('id',r.id,'device_id',r.device_id,'values',r."values",'created_at',r.created_at) END AS latest_reading FROM iot_device d LEFT JOIN LATERAL (SELECT id,device_id,"values",created_at FROM sensor_reading WHERE device_id=d.id ORDER BY created_at DESC,id DESC LIMIT 1) r ON true ORDER BY d.name,d.id`,
+          `SELECT d.id,d.name,d.device_type,d.plant_id,d.status,d.thresholds,d.last_seen,CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object('id',r.id,'device_id',r.device_id,'values',r."values",'created_at',r.created_at)END AS latest_reading FROM iot_device d LEFT JOIN LATERAL (SELECT id,device_id,"values",created_at FROM sensor_reading WHERE device_id=d.id ORDER BY created_at DESC,id DESC LIMIT 1) r ON true ORDER BY d.name,d.id`,
         )
       ).rows,
     }),
@@ -259,14 +265,30 @@ function mountIoT(app, { pool, allow }) {
   app.post("/api/devices", allow("devices.manage"), async (req, res) => {
     const key = randomBytes(32).toString("hex"),
       deviceId = randomUUID();
+
     text(req.body.name, 100);
+
+    const deviceType = req.body.device_type ?? "Sensor";
+
+    if (!["Sensor", "Camera"].includes(deviceType)) {
+      fail(400, "Invalid device type. Use Sensor or Camera.");
+    }
+
     await transaction(pool, async (c) => {
       await c.query(
-        "INSERT INTO iot_device(id,name,plant_id,key_hash) VALUES($1,$2,$3,$4)",
-        [deviceId, req.body.name, req.body.plant_id || null, hash(key)],
+        "INSERT INTO iot_device(id,name,plant_id,key_hash,device_type) VALUES($1,$2,$3,$4,$5)",
+        [
+          deviceId,
+          req.body.name,
+          req.body.plant_id || null,
+          hash(key),
+          deviceType,
+        ],
       );
+
       await audit(c, req.user, "device_registered", deviceId);
     });
+
     res.status(201).json({
       id: deviceId,
       provisioningKey: key,

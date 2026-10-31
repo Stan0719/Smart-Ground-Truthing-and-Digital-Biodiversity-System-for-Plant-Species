@@ -93,8 +93,8 @@ test("detail visibility, observation ownership, latest readings and bounded devi
   const botanistPlant = await call("/plants/1", "bot");
   const visitorPlant = await call("/plants/1", "visitor");
   const officerPlant = await call("/plants/1", "officer");
+  assert.equal(adminPlant.status, 403);
   for (const plant of [
-    adminPlant.data.plant,
     botanistPlant.data.plant,
     visitorPlant.data.plant,
   ]) {

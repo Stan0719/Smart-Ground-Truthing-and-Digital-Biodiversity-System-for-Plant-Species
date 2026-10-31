@@ -71,7 +71,9 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
     const response = await fetch(base + path, {
       method,
       headers: {
-        Origin: "http://localhost:5173",
+        ...(!["bot", "other", "visitor"].includes(role)
+          ? { Origin: "http://localhost:5173" }
+          : {}),
         "Content-Type": "application/json",
         ...(tokens[role] ? { Authorization: `Bearer ${tokens[role]}` } : {}),
       },
@@ -421,6 +423,7 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   assert.deepEqual(Object.keys(registeredDevices), ["devices"]);
   assert.equal(registeredDevices.devices.length, 1);
   assert.deepEqual(Object.keys(registeredDevices.devices[0]).sort(), [
+    "device_type",
     "id",
     "last_seen",
     "latest_reading",
@@ -448,13 +451,16 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   assert.deepEqual(Object.keys(alertResponse).sort(), ["alerts", "responses"]);
   assert.equal(alertResponse.alerts.length, 1);
   assert.deepEqual(Object.keys(alertResponse.alerts[0]).sort(), [
+    "camera_id",
     "created_at",
+    "detected_at",
     "device_id",
     "id",
     "metric",
     "reading_id",
     "status",
     "value",
+    "video_path",
   ]);
   assert.equal(alertResponse.alerts[0].device_id, device.data.id);
   assert.equal(alertResponse.alerts[0].metric, "temperature");
