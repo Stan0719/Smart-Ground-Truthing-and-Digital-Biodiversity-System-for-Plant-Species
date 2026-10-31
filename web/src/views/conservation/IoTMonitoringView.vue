@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import AppModal from '../../components/conservation/AppModal.vue'
 import CameraMonitoringSection from '../../components/CameraMonitoringSection.vue'
 import SensorHistoryChart, {
   type SensorChartPoint,
 } from '../../components/conservation/SensorHistoryChart.vue'
 import { useConservationText } from '../../composables/useConservationText'
-import { plantApi } from '../../services/plantApi'
 import { formatPlantId } from '../../utils/plantId'
 
 interface ApiSensorReading {
@@ -34,33 +34,22 @@ interface ApiSensorDevice {
   latest_reading: ApiSensorReading | null
 }
 
-interface CurrentReading {
-  id: string
-  created_at: string
-  values: Record<string, number>
+interface IoTDevicesResponse {
+  message: string
+  count: number
+  devices: ApiSensorDevice[]
 }
-interface CurrentDevice {
-  id: string
-  name: string
-  plant_id: number | null
-  status: string
-  latest_reading: CurrentReading | null
+
+interface SensorReadingsResponse {
+  message: string
+  sensor: Omit<ApiSensorDevice, 'installed_at' | 'latest_reading'>
+  count: number
+  readings: ApiSensorReading[]
 }
-const mapReading = (reading: CurrentReading, plantId: string | number): ApiSensorReading => ({
-  reading_id: reading.id,
-  plant_id: plantId,
-  temperature_c: reading.values.temperature ?? null,
-  humidity: reading.values.humidity ?? null,
-  soil_moisture: reading.values.soilMoisture ?? null,
-  rainfall_mm: reading.values.rainfall ?? null,
-  motion_detected: reading.values.movement === undefined ? null : reading.values.movement === 1,
-  gps_latitude: null,
-  gps_longitude: null,
-  recorded_at: reading.created_at,
-})
 
 const { t } = useI18n()
 const { ct, dt } = useConservationText()
+const router = useRouter()
 const devices = ref<ApiSensorDevice[]>([])
 const selectedDevice = ref<ApiSensorDevice | null>(null)
 const selectedReading = ref<ApiSensorReading | null>(null)
@@ -78,19 +67,10 @@ const loadDevices = async () => {
   isLoading.value = true
   errorMessage.value = ''
   try {
-    const result = await plantApi<{ devices: CurrentDevice[] }>('/devices')
-    devices.value = result.devices.map((device) => ({
-      sensor_id: device.id,
-      device_name: device.name,
-      device_type: 'Sensor',
-      serial_number: null,
-      location_description: null,
-      status: device.status,
-      installed_at: null,
-      latest_reading: device.latest_reading
-        ? mapReading(device.latest_reading, device.plant_id ?? '')
-        : null,
-    }))
+    const response = await fetch('/api/iot/devices')
+    const result = (await response.json()) as Partial<IoTDevicesResponse>
+    if (!response.ok) throw new Error(result.message || 'Unable to retrieve IoT devices.')
+    devices.value = Array.isArray(result.devices) ? result.devices : []
   } catch (error) {
     devices.value = []
     errorMessage.value = error instanceof Error ? error.message : 'Unable to retrieve IoT devices.'
@@ -153,6 +133,32 @@ const motionValue = (reading: ApiSensorReading) => {
   return reading.motion_detected ? 'Detected' : 'No motion'
 }
 
+const viewDeviceAlerts = (device: ApiSensorDevice) => {
+  selectedDevice.value = null
+  void router.push({
+    name: 'conservation-alerts',
+    query: { sensor: String(device.sensor_id) },
+  })
+}
+
+const viewReadingAlerts = (reading: ApiSensorReading) => {
+  selectedReading.value = null
+  void router.push({
+    name: 'conservation-alerts',
+    query: { reading: String(reading.reading_id) },
+  })
+}
+
+const viewReadingOnMap = (reading: ApiSensorReading, source: 'device' | 'reading') => {
+  const plantId = formatPlantId(reading.plant_id)
+  if (!plantId) return
+
+  if (source === 'device') selectedDevice.value = null
+  else selectedReading.value = null
+
+  void router.push({ name: 'conservation-map', query: { plant: plantId } })
+}
+
 const loadReadingHistory = async (device: ApiSensorDevice) => {
   historyDevice.value = device
   selectedDevice.value = null
@@ -160,12 +166,10 @@ const loadReadingHistory = async (device: ApiSensorDevice) => {
   historyErrorMessage.value = ''
   isHistoryLoading.value = true
   try {
-    const result = await plantApi<{ readings: CurrentReading[] }>(
-      `/devices/${encodeURIComponent(String(device.sensor_id))}/readings?limit=100&page=1`,
-    )
-    historyReadings.value = result.readings.map((reading) =>
-      mapReading(reading, device.latest_reading?.plant_id ?? ''),
-    )
+    const response = await fetch(`/api/iot/sensors/${device.sensor_id}/readings`)
+    const result = (await response.json()) as Partial<SensorReadingsResponse>
+    if (!response.ok) throw new Error(result.message || 'Unable to retrieve sensor readings.')
+    historyReadings.value = Array.isArray(result.readings) ? result.readings : []
   } catch (error) {
     historyErrorMessage.value =
       error instanceof Error ? error.message : 'Unable to retrieve sensor readings.'
@@ -404,6 +408,19 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       <button class="primary-button" type="button" @click="loadReadingHistory(selectedDevice)">
         View Reading History
       </button>
+      <button class="action-button" type="button" @click="viewDeviceAlerts(selectedDevice)">
+        View Alerts
+      </button>
+      <button
+        v-if="
+          selectedDevice.latest_reading && formatPlantId(selectedDevice.latest_reading.plant_id)
+        "
+        class="action-button"
+        type="button"
+        @click="viewReadingOnMap(selectedDevice.latest_reading, 'device')"
+      >
+        View on Map
+      </button>
     </div>
   </AppModal>
 
@@ -523,6 +540,19 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         <dd>{{ dt(selectedReading.recorded_at) }}</dd>
       </div>
     </dl>
+    <div class="modal-actions">
+      <button class="action-button" type="button" @click="viewReadingAlerts(selectedReading)">
+        View Alerts
+      </button>
+      <button
+        v-if="formatPlantId(selectedReading.plant_id)"
+        class="action-button"
+        type="button"
+        @click="viewReadingOnMap(selectedReading, 'reading')"
+      >
+        View on Map
+      </button>
+    </div>
   </AppModal>
 </template>
 

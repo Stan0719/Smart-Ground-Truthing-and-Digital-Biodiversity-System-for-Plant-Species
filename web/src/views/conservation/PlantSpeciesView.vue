@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ActionFeedback from '../../components/ActionFeedback.vue'
@@ -77,6 +77,9 @@ const fieldRefs: Partial<Record<RequiredSpeciesField, HTMLInputElement | null>> 
 const supportedImageTypes = ['image/jpeg', 'image/png', 'image/webp']
 const imageFileInput = ref<HTMLInputElement | null>(null)
 const hasUploadedDeviceImage = ref(false)
+const deleteCancelButton = ref<HTMLButtonElement | null>(null)
+const deleteModalShake = ref(false)
+let deleteShakeTimer: ReturnType<typeof setTimeout> | null = null
 
 const blank = () => ({
   id: `SP${String(conservationStore.species.length + 1).padStart(3, '0')}`,
@@ -224,6 +227,18 @@ function view(species: SpeciesRecord) {
 function confirmDelete(species: SpeciesRecord) {
   selected.value = species
   modal.value = 'delete'
+  void nextTick(() => deleteCancelButton.value?.focus())
+}
+
+const handleDeleteBackdropAttempt = async () => {
+  if (deleteShakeTimer !== null) clearTimeout(deleteShakeTimer)
+  deleteModalShake.value = false
+  await nextTick()
+  deleteModalShake.value = true
+  deleteShakeTimer = setTimeout(() => {
+    deleteModalShake.value = false
+    deleteShakeTimer = null
+  }, 340)
 }
 
 function remove() {
@@ -273,7 +288,6 @@ function handleImageUrlInput() {
 }
 
 function removeUploadedImage() {
-  if (!hasUploadedDeviceImage.value) return
   form.image = ''
   hasUploadedDeviceImage.value = false
   errors.image = ''
@@ -284,6 +298,10 @@ onMounted(() => {
   if (route.query.action === 'add') {
     openForm()
   }
+})
+
+onBeforeUnmount(() => {
+  if (deleteShakeTimer !== null) clearTimeout(deleteShakeTimer)
 })
 </script>
 
@@ -583,17 +601,12 @@ onMounted(() => {
           {{ errors.image }}
         </small>
         <div v-if="form.image" class="image-preview-wrap">
-          <img
-            :src="form.image"
-            alt="Species representative preview"
-            class="image-preview"
-          />
+          <img :src="form.image" alt="Species representative preview" class="image-preview" />
           <button
-            v-if="hasUploadedDeviceImage"
             type="button"
             class="remove-image-button"
-            aria-label="Remove uploaded image"
-            title="Remove uploaded image"
+            aria-label="Remove image"
+            title="Remove image"
             @click="removeUploadedImage"
           >
             ×
@@ -663,24 +676,64 @@ onMounted(() => {
   <!-- Delete Species -->
   <AppModal
     v-if="modal === 'delete' && selected"
-    title="Delete species record?"
+    title="Delete species?"
     :subtitle="`${selected.id} — ${selected.scientificName}`"
+    :close-on-backdrop="false"
+    danger-backdrop
+    :shake="deleteModalShake"
+    hide-close
+    compact
     @close="modal = null"
+    @backdrop-attempt="handleDeleteBackdropAttempt"
   >
-    <p>
-      This removes the species from this frontend mock state. This action cannot be undone during
-      the current session.
-    </p>
+    <div class="delete-confirmation-content">
+      <div class="delete-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24">
+          <path d="M4 7h16" />
+          <path d="M9 7V4h6v3" />
+          <path d="M6.5 7l.8 13h9.4l.8-13" />
+          <path d="M10 11v5M14 11v5" />
+        </svg>
+      </div>
+      <p>Are you sure you want to delete this species?</p>
+      <p class="delete-warning">
+        This will remove the species from the current session. This action cannot be undone.
+      </p>
 
-    <div class="modal-actions">
-      <button class="secondary-button" @click="modal = null">Cancel</button>
+      <div class="modal-actions">
+        <button ref="deleteCancelButton" class="secondary-button" @click="modal = null">
+          Cancel
+        </button>
 
-      <button class="danger-button" @click="remove">Delete Species</button>
+        <button class="danger-button" @click="remove">Delete Species</button>
+      </div>
     </div>
   </AppModal>
 </template>
 
 <style scoped>
+.form-grid {
+  align-items: start;
+}
+
+.form-field {
+  align-content: start;
+}
+
+.form-field > input:not([type='file']),
+.form-field > select {
+  box-sizing: border-box;
+  height: 38px;
+  min-height: 38px;
+  padding-block: 0;
+}
+
+.form-field > textarea {
+  box-sizing: border-box;
+  height: 96px;
+  min-height: 96px;
+}
+
 .prototype-notice {
   margin: 0 0 16px;
   padding: 10px 12px;
@@ -690,6 +743,54 @@ onMounted(() => {
   color: #5f746a;
   font-size: 10px;
   line-height: 1.5;
+}
+
+.delete-warning {
+  margin: 8px 0 0;
+  color: #7b665f;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.delete-confirmation-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.delete-icon {
+  width: 54px;
+  height: 54px;
+  margin: 2px auto 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #f8e9e7;
+  color: #a7463c;
+}
+
+.delete-icon svg {
+  width: 30px;
+  height: 30px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.delete-confirmation-content > p:first-child {
+  margin: 0;
+  color: #38594c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.delete-confirmation-content .modal-actions {
+  width: 100%;
+  margin-top: 22px;
+  justify-content: center;
 }
 
 .required-marker {
