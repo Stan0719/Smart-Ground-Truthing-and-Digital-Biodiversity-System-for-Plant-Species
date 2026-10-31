@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { useConservationText } from '../../composables/useConservationText'
 const { ct, dt, locale } = useConservationText()
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
+import PlantSimilarityDrawer from '../../components/conservation/PlantSimilarityDrawer.vue'
 import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
 import { formatSpeciesRequestId } from '../../utils/speciesRequestId'
 import type { ObservationStatus, SpeciesRequestStatus } from '../../data/conservation'
+import {
+  plantSimilarityByObservation,
+  type PlantSimilarityAnalysis,
+} from '../../data/plantSimilarityPrototype'
 
 interface ApiObservation {
   observation_id: string | number
@@ -53,6 +58,14 @@ interface ReviewObservation {
   speciesId: string
   scientificName: string
   commonName: string
+  speciesCategory: string
+  speciesRequestId: string
+  locationZone: string
+  latitude: string
+  longitude: string
+  altitude: string
+  qrCode: string
+  qrStatus: string
 }
 
 interface ApiSpeciesRequest {
@@ -108,6 +121,8 @@ const loadError = ref('')
 const reviewingSpecies = ref(false)
 const speciesComment = ref('')
 const feedback = ref<{ id: number; variant: 'error'; message: string } | null>(null)
+const similarityAnalysis = ref<PlantSimilarityAnalysis | null>(null)
+const similarityTrigger = ref<HTMLElement | null>(null)
 let feedbackId = 0
 
 const showNotSavedFeedback = (message: string) => {
@@ -187,8 +202,23 @@ const mapObservation = (item: ApiObservation): ReviewObservation | null => {
     speciesId: stringValue(item.species_id),
     scientificName: item.scientific_name || '',
     commonName: item.common_name || '',
+    speciesCategory: '',
+    speciesRequestId: '',
+    locationZone: '',
+    latitude: '',
+    longitude: '',
+    altitude: '',
+    qrCode: '',
+    qrStatus: '',
   }
 }
+
+const submissionImageCategories = [
+  { label: 'Whole Plant', requirement: 'Required submission image' },
+  { label: 'Leaf Close-up', requirement: 'Required submission image' },
+  { label: 'Stem / Bark', requirement: 'Required submission image' },
+  { label: 'Flower / Fruit', requirement: 'Optional submission image' },
+] as const
 
 const mapSpeciesRequest = (item: ApiSpeciesRequest): SpeciesRequestView | null => {
   const numericId = Number(item.request_id)
@@ -275,6 +305,21 @@ function closeReview() {
   selected.value = null
   reviewingSpecies.value = false
   router.replace({ query: {} })
+}
+
+const similarityFor = (observationId: string) =>
+  plantSimilarityByObservation.get(observationId)
+
+const formatSimilarity = (value: number) => `${Math.round(value * 100)}%`
+
+function openSimilarity(analysis: PlantSimilarityAnalysis, event: Event) {
+  similarityTrigger.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  similarityAnalysis.value = analysis
+}
+
+function closeSimilarity() {
+  similarityAnalysis.value = null
+  void nextTick(() => similarityTrigger.value?.focus())
 }
 
 function decide(next: ObservationStatus) {
@@ -400,9 +445,10 @@ onMounted(async () => {
             <th>{{ ct('Plant ID') }}</th>
             <th>{{ ct('Species') }}</th>
             <th>{{ ct('Submitted By') }}</th>
-            <th>{{ ct('Location') }}</th>
+            <th>{{ ct('Location Zone') }}</th>
             <th>{{ ct('Observation Date') }}</th>
             <th>{{ ct('Status') }}</th>
+            <th>{{ ct('Similarity') }}</th>
             <th>{{ ct('Actions') }}</th>
           </tr>
         </thead>
@@ -417,7 +463,7 @@ onMounted(async () => {
               <span v-else>{{ ct('Species unavailable') }}</span>
             </td>
             <td>{{ observation.recordedBy || '—' }}</td>
-            <td>—</td>
+            <td>{{ observation.locationZone || '—' }}</td>
             <td>{{ formatDate(observation.observedAt) }}</td>
             <td>
               <span class="badge" :class="observation.status.toLowerCase().replaceAll(' ', '-')">{{
@@ -425,11 +471,24 @@ onMounted(async () => {
               }}</span>
             </td>
             <td>
+              <button
+                v-if="similarityFor(observation.id)?.status === 'available'"
+                class="similarity-badge-button"
+                type="button"
+                :aria-label="`View prototype visual similarity results for ${observation.id}: ${formatSimilarity(similarityFor(observation.id)!.highestSimilarity)}`"
+                @click="openSimilarity(similarityFor(observation.id)!, $event)"
+              >
+                <strong>{{ formatSimilarity(similarityFor(observation.id)!.highestSimilarity) }}</strong>
+                <span>Prototype</span>
+              </button>
+              <span v-else class="similarity-unavailable">Not analyzed</span>
+            </td>
+            <td>
               <button class="action-button" @click="open(observation)">{{ ct('Review') }}</button>
             </td>
           </tr>
           <tr v-if="isLoading || loadError || !filtered.length">
-            <td colspan="8">
+            <td colspan="9">
               {{
                 isLoading
                   ? 'Loading review submissions...'
@@ -452,20 +511,40 @@ onMounted(async () => {
     @close="closeReview"
   >
     <section class="review-section">
-      <p class="section-kicker">{{ ct('PLANT / OBSERVATION INFORMATION') }}</p>
+      <p class="section-kicker">{{ ct('PLANT & SPECIES INFORMATION') }}</p>
       <div class="two-column">
         <div>
           <dl class="detail-list">
             <div>
-              <dt>{{ ct('Species') }}</dt>
-              <dd>{{ selectedSpecies?.scientificName || ct('Species unavailable') }}</dd>
+              <dt>{{ ct('Plant ID') }}</dt>
+              <dd>{{ selected.plantId || '—' }}</dd>
             </div>
             <div>
-              <dt>{{ ct('Taxonomy') }}</dt>
-              <dd>
-                {{ selectedSpecies?.commonName || '—' }}
-              </dd>
+              <dt>{{ ct('Species ID') }}</dt>
+              <dd>{{ selected.speciesId || '—' }}</dd>
             </div>
+            <div>
+              <dt>{{ ct('Scientific Name') }}</dt>
+              <dd>{{ selectedSpecies?.scientificName || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('Common Name') }}</dt>
+              <dd>{{ selectedSpecies?.commonName || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('Species Category') }}</dt>
+              <dd>{{ selected.speciesCategory || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('Species Request ID') }}</dt>
+              <dd>{{ selected.speciesRequestId || '—' }}</dd>
+            </div>
+          </dl>
+
+          <p class="section-kicker review-subsection-heading">
+            {{ ct('OBSERVATION INFORMATION') }}
+          </p>
+          <dl class="detail-list">
             <div>
               <dt>{{ ct('Height') }}</dt>
               <dd>{{ selected.height || '—' }}</dd>
@@ -475,7 +554,7 @@ onMounted(async () => {
               <dd>{{ selected.growthStage ? ct(selected.growthStage) : '—' }}</dd>
             </div>
             <div>
-              <dt>{{ ct('Health') }}</dt>
+              <dt>{{ ct('Health Status') }}</dt>
               <dd>{{ selected.health ? ct(selected.health) : '—' }}</dd>
             </div>
             <div>
@@ -483,18 +562,118 @@ onMounted(async () => {
               <dd>{{ selected.morphology || '—' }}</dd>
             </div>
             <div>
+              <dt>{{ ct('Description / Notes') }}</dt>
+              <dd>{{ selected.notes || '—' }}</dd>
+            </div>
+          </dl>
+
+          <p class="section-kicker review-subsection-heading">
+            {{ ct('LOCATION INFORMATION') }}
+          </p>
+          <dl class="detail-list">
+            <div>
+              <dt>{{ ct('Location Zone') }}</dt>
+              <dd>{{ selected.locationZone || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('Latitude') }}</dt>
+              <dd>{{ selected.latitude || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('Longitude') }}</dt>
+              <dd>{{ selected.longitude || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('Altitude') }}</dt>
+              <dd>{{ selected.altitude || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('GPS Accuracy') }}</dt>
+              <dd>{{ selected.gpsAccuracy || '—' }}</dd>
+            </div>
+          </dl>
+
+          <p class="section-kicker review-subsection-heading">{{ ct('QR INFORMATION') }}</p>
+          <dl class="detail-list">
+            <div>
+              <dt>{{ ct('QR Code') }}</dt>
+              <dd>{{ selected.qrCode || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('QR Status') }}</dt>
+              <dd>{{ selected.qrStatus || '—' }}</dd>
+            </div>
+          </dl>
+
+          <p class="section-kicker review-subsection-heading">{{ ct('SUBMITTED IMAGES') }}</p>
+          <div class="submission-image-grid">
+            <article
+              v-for="imageCategory in submissionImageCategories"
+              :key="imageCategory.label"
+              class="submitted-image-item"
+            >
+              <div class="submitted-image-preview">
+                <span>{{ ct('No image submitted') }}</span>
+              </div>
+              <div class="submitted-image-caption">
+                <strong>{{ ct(imageCategory.label) }}</strong>
+                <small>{{ ct(imageCategory.requirement) }}</small>
+              </div>
+            </article>
+            <article class="submitted-image-item">
+              <div class="submitted-image-preview">
+                <span>{{ ct('No additional photos') }}</span>
+              </div>
+              <div class="submitted-image-caption">
+                <strong>{{ ct('Additional Photos') }}</strong>
+                <small>{{ ct('Optional submission images') }}</small>
+              </div>
+            </article>
+          </div>
+
+          <p class="section-kicker review-subsection-heading">
+            {{ ct('SUBMISSION INFORMATION') }}
+          </p>
+          <dl class="detail-list">
+            <div>
+              <dt>{{ ct('Submitted By') }}</dt>
+              <dd>{{ selected.recordedBy || '—' }}</dd>
+            </div>
+            <div>
+              <dt>{{ ct('Submitted At') }}</dt>
+              <dd>{{ formatDate(selected.submittedAt) }}</dd>
+            </div>
+            <div>
               <dt>{{ ct('Observation Date') }}</dt>
               <dd>{{ formatDate(selected.observedAt) }}</dd>
             </div>
-          </dl>
-          <h3 v-if="selected.photos.length">{{ ct('Photographs') }}</h3>
-          <div v-if="selected.photos.length" class="media-grid">
-            <div v-for="photo in selected.photos" :key="photo" class="media-placeholder">
-              {{ ct(photo) }}
+            <div>
+              <dt>{{ ct('Status') }}</dt>
+              <dd>{{ selected.status ? ct(selected.status) : '—' }}</dd>
             </div>
-          </div>
+          </dl>
         </div>
         <aside>
+          <p class="section-kicker">{{ ct('REVIEW DECISION') }}</p>
+          <section class="review-similarity-summary" aria-labelledby="review-similarity-heading">
+            <div>
+              <span>Frontend prototype</span>
+              <h3 id="review-similarity-heading">AI Plant Similarity</h3>
+              <p v-if="similarityFor(selected.id)?.status === 'available'">
+                Highest mock visual match:
+                <strong>{{ formatSimilarity(similarityFor(selected.id)!.highestSimilarity) }}</strong>
+              </p>
+              <p v-else>No prototype analysis is available for this submission.</p>
+            </div>
+            <button
+              v-if="similarityFor(selected.id)?.status === 'available'"
+              class="secondary-button"
+              type="button"
+              @click="openSimilarity(similarityFor(selected.id)!, $event)"
+            >
+              View matches
+            </button>
+          </section>
           <h3>{{ ct('Observation History') }}</h3>
           <div
             v-for="observation in observations.filter((item) => item.plantId === selected?.plantId)"
@@ -548,11 +727,11 @@ onMounted(async () => {
             <dd>{{ ct(selectedRequest.status) }}</dd>
           </div>
           <div>
-            <dt>{{ ct('Proposed Scientific Name') }}</dt>
+            <dt>{{ ct('Scientific Name') }}</dt>
             <dd>{{ ct(selectedRequest.proposedScientificName) }}</dd>
           </div>
           <div>
-            <dt>{{ ct('Proposed Common Name') }}</dt>
+            <dt>{{ ct('Common Name') }}</dt>
             <dd>{{ ct(selectedRequest.proposedCommonName) }}</dd>
           </div>
           <div>
@@ -562,6 +741,10 @@ onMounted(async () => {
           <div>
             <dt>{{ ct('Family') }}</dt>
             <dd>{{ ct(selectedRequest.family) }}</dd>
+          </div>
+          <div>
+            <dt>{{ ct('Conservation Status') }}</dt>
+            <dd>—</dd>
           </div>
           <div>
             <dt>{{ ct('Description') }}</dt>
@@ -584,11 +767,13 @@ onMounted(async () => {
             <dd>{{ dt(selectedRequest.submittedAt) }}</dd>
           </div>
         </dl>
-        <h3>{{ ct('Submitted Photographs / Evidence') }}</h3>
-        <div class="media-grid">
-          <div v-for="photo in selectedRequest.photos" :key="photo" class="media-placeholder">
-            {{ ct(photo) }}
-          </div>
+        <h3>{{ ct('Species Photos') }}</h3>
+        <div class="submission-image-grid">
+          <article class="submission-image-card">
+            <strong>{{ ct('Species Photos') }}</strong>
+            <small>{{ ct('Optional submission image') }}</small>
+            <span>{{ ct('No image submitted') }}</span>
+          </article>
         </div>
         <template v-if="selectedRequest.status !== 'Approved'"
           ><div class="species-review-fields">
@@ -631,9 +816,158 @@ onMounted(async () => {
       ><button class="secondary-button" @click="decide('Flagged')">{{ ct('Flag') }}</button>
     </div>
   </AppModal>
+
+  <PlantSimilarityDrawer
+    v-if="similarityAnalysis"
+    :analysis="similarityAnalysis"
+    @close="closeSimilarity"
+  />
 </template>
 
 <style scoped>
+.similarity-badge-button {
+  min-width: 58px;
+  padding: 5px 8px;
+  display: inline-grid;
+  justify-items: center;
+  gap: 1px;
+  border: 1px solid #bcd7c8;
+  border-radius: 9px;
+  background: #e8f3ec;
+  color: #287a53;
+  cursor: pointer;
+}
+.similarity-badge-button strong {
+  color: inherit;
+  font-size: 10px;
+  line-height: 1.1;
+}
+.similarity-badge-button span {
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.similarity-badge-button:hover {
+  border-color: #73a68e;
+  background: #dceee3;
+}
+.similarity-badge-button:focus-visible {
+  outline: 3px solid rgba(65, 132, 104, 0.22);
+  outline-offset: 2px;
+}
+.similarity-unavailable {
+  color: #89968f;
+  font-size: 9px;
+}
+.review-similarity-summary {
+  margin: 10px 0 20px;
+  padding: 14px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #d6e5dc;
+  border-radius: 10px;
+  background: #f6faf7;
+}
+.review-similarity-summary span {
+  color: #698075;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.review-similarity-summary h3 {
+  margin: 4px 0;
+  color: #315749;
+  font-size: 12px;
+}
+.review-similarity-summary p {
+  margin: 0;
+  color: #71817a;
+  font-size: 9px;
+  line-height: 1.45;
+}
+.review-similarity-summary p strong {
+  color: #287a53;
+}
+.review-similarity-summary .secondary-button {
+  flex: 0 0 auto;
+}
+.review-subsection-heading {
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+.submission-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 10px;
+}
+.submitted-image-item {
+  min-width: 0;
+}
+.submitted-image-preview {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px dashed #a9c1b4;
+  border-radius: 10px;
+  background: #edf4ee;
+  color: #587568;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.submitted-image-preview img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+.submitted-image-caption {
+  padding: 8px 2px 0;
+  display: grid;
+  gap: 3px;
+}
+.submitted-image-caption strong {
+  color: #38594c;
+  font-size: 11px;
+}
+.submitted-image-caption small {
+  color: #71857b;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.submission-image-card {
+  min-width: 0;
+  min-height: 112px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 5px;
+  border: 1px dashed #a9c1b4;
+  border-radius: 10px;
+  background: #edf4ee;
+  color: #38594c;
+}
+.submission-image-card strong {
+  font-size: 11px;
+}
+.submission-image-card small,
+.submission-image-card span {
+  color: #71857b;
+  font-size: 9px;
+  line-height: 1.4;
+}
+.submission-image-card span {
+  margin-top: 4px;
+  color: #587568;
+}
 .history-item {
   padding: 10px 0;
   display: grid;
@@ -728,6 +1062,13 @@ onMounted(async () => {
   opacity: 0.5;
 }
 @media (max-width: 620px) {
+  .review-similarity-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .submission-image-grid {
+    grid-template-columns: 1fr;
+  }
   .dependency-heading {
     flex-direction: column;
   }
