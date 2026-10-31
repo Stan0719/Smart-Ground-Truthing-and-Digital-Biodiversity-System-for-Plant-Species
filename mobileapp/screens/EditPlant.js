@@ -29,11 +29,16 @@ export default function EditPlantScreen({
     useState(plant.description);
 
   function handleUpdate() {
-    if (!scientificName || !commonName) {
+    if (!scientificName.trim() || !commonName.trim()) {
       Alert.alert(
         "Missing Information",
         "Scientific name and common name are required."
       );
+      return;
+    }
+
+    if (scientificName.trim().length > 200 || commonName.trim().length > 200 || description.trim().length > 4000) {
+      Alert.alert("Text too long", "Names must be 200 characters or fewer; descriptions 4,000 or fewer.");
       return;
     }
 

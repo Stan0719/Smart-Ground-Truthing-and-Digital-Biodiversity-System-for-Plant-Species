@@ -18,7 +18,7 @@ const sortMenu = ref<HTMLElement | null>(null)
 const route = useRoute()
 const { t, te } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
-const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search : '')
+const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search.slice(0, 100) : '')
 
 const selectSort = (option: typeof sortOption.value) => {
   sortOption.value = option
@@ -97,7 +97,7 @@ onBeforeUnmount(() => {
 watch(
   () => route.query.search,
   (search) => {
-    searchQuery.value = typeof search === 'string' ? search : ''
+    searchQuery.value = typeof search === 'string' ? search.slice(0, 100) : ''
   },
 )
 
@@ -172,6 +172,7 @@ const filteredSpecies = computed(() => {
               <input
                 v-model="searchQuery"
                 type="search"
+                maxlength="100"
                 :placeholder="t('species.searchPlaceholder')"
               />
             </label>

@@ -1,0 +1,6 @@
+{
+  "protectedFilesHashChecked": 283,
+  "protectedFilesChanged": [],
+  "recognitionSessionFunctionBodyUnchangedFromHead": true,
+  "baselineNote": "Protected-file hashes compared with the saved snapshot preceding the earlier account-name integration; protected files have remained unchanged across both tasks. This is not a full current-task baseline for account/UI files."
+}

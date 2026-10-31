@@ -213,20 +213,30 @@ if __name__ == '__main__':
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8000)
     parser.add_argument('--check-models', action='store_true')
+    parser.add_argument('--check-storage', action='store_true')
     args = parser.parse_args()
     if args.check_models:
         print(json.dumps(initialize_models()))
         raise SystemExit(0)
-    directory = Path(__file__).parent / 'data'
-    directory.mkdir(mode=0o700, exist_ok=True)
-    auth = Auth(str(directory / 'auth.sqlite'), embed)
+    from postgres_store import load_face_environment, connect_face_store
+    load_face_environment()
+    try:
+        store = connect_face_store()
+    except (RuntimeError, ValueError) as error:
+        raise SystemExit(str(error)) from None
+    if args.check_storage:
+        print(json.dumps({'ready': True, 'storage': 'postgresql', 'schema': store.schema}))
+        store.close()
+        raise SystemExit(0)
+    auth = Auth(None, embed, database=store)
     if args.create_user:
         auth.provision(input('Email: '), getpass.getpass('Password (12+ characters): '), input('Name: '), input('Role (botanist/visitor): '))
         print('Local server account created. Use these credentials in the app.')
         raise SystemExit
-    print(f'Database path: {directory / "auth.sqlite"}', flush=True)
+    print(f'Face storage: PostgreSQL private schema {store.schema}', flush=True)
     print('Initializing face models; HTTP service will listen only after readiness succeeds.', flush=True)
     readiness = initialize_models()
+    readiness['storage'] = 'postgresql'
     service_url = os.environ.get('FACE_ACCOUNT_SERVICE_URL')
     key_file = os.environ.get('FACE_ACCOUNT_SERVICE_KEY_FILE')
     if bool(service_url) != bool(key_file):

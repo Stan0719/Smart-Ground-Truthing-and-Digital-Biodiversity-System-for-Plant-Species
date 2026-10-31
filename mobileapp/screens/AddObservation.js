@@ -56,6 +56,11 @@ export default function AddObservation({ route, navigation, user }) {
       return;
     }
 
+    if (morphology.trim().length > 4000 || notes.trim().length > 4000) {
+      Alert.alert("Text too long", "Morphology and field notes must be 4,000 characters or fewer.");
+      return;
+    }
+
     const heightCm = Number(height);
 
     if (!Number.isFinite(heightCm) || heightCm <= 0) {

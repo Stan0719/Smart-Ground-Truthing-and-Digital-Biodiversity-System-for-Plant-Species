@@ -364,6 +364,7 @@ watch(
               <input
                 v-model="searchQuery"
                 type="search"
+                maxlength="100"
                 :placeholder="t('species.records.search')"
               />
             </label>

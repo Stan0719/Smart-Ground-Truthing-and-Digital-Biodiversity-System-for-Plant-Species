@@ -1,0 +1,18 @@
+{
+  "previouslyExistingFilesChangedThisTask": [
+    "web/server/api.test.mjs"
+  ],
+  "newFilesThisTask": [
+    "security/APPROVED_REMAINING_SECURITY_REPORT.md",
+    "security/account-security-readonly.sql",
+    "security/account-security.test.mjs",
+    "security/encryption-utility.test.mjs",
+    "security/evidence/approved-remaining-client-scan.txt",
+    "security/evidence/approved-remaining-live.txt",
+    "security/evidence/approved-remaining-scope.txt",
+    "security/evidence/approved-remaining-tests.txt",
+    "security/evidence/approved-remaining-web-build.txt"
+  ],
+  "protectedExistingSourceUnchanged": true,
+  "note": "Compared file bytes with the snapshot taken at the start of this approved task. Ignored build artifacts are excluded."
+}

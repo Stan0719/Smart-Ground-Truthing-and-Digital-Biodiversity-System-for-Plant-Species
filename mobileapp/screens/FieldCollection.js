@@ -185,13 +185,19 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     const height = Number(form.heightCm);
     if (!Number.isFinite(height) || height <= 0 || !form.morphology.trim())
       throw Error("Enter a positive height and morphology.");
+    for (const [field, max] of Object.entries({ healthStatus: 100, lifeStage: 100, morphology: 4000, notes: 4000, taxonomy: 1000 })) {
+      if (typeof form[field] !== "string" || form[field].length > max)
+        throw Error(`${field} must be text with ${max} characters or fewer.`);
+    }
+    if (!form.healthStatus.trim() || !form.lifeStage.trim())
+      throw Error("Enter health status and life stage.");
     const result = {
       heightCm: height,
-      healthStatus: form.healthStatus,
-      lifeStage: form.lifeStage,
-      morphology: form.morphology,
-      notes: form.notes,
-      ...(form.taxonomy ? { taxonomy: form.taxonomy } : {}),
+      healthStatus: form.healthStatus.trim(),
+      lifeStage: form.lifeStage.trim(),
+      morphology: form.morphology.trim(),
+      notes: form.notes.trim(),
+      ...(form.taxonomy ? { taxonomy: form.taxonomy.trim() } : {}),
     };
     if (form.latitude || form.longitude) {
       if (!form.latitude || !form.longitude)

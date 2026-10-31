@@ -4,10 +4,22 @@ import json
 import os
 import unittest
 from unittest.mock import patch
-from matching_diagnostics import matching_diagnostic
+from matching_diagnostics import matching_diagnostic, matching_outcome
+from image_pipeline import request_reference
 
 
 class MatchingDiagnosticsTests(unittest.TestCase):
+    def test_outcome_is_reference_only_metadata_without_scores_or_identity(self):
+        token=request_reference.set('c54e8dd4d053')
+        try:
+            with patch.dict(os.environ,{'FACE_IMAGE_DEBUG':'0'}),contextlib.redirect_stdout(io.StringIO()) as output:
+                matching_outcome(0,0)
+            self.assertEqual(json.loads(output.getvalue()),{
+                'event':'face_matching_outcome','reference':'c54e8dd4d053',
+                'comparedTemplates':0,'matchedAccounts':0})
+        finally:
+            request_reference.reset(token)
+
     def test_closest_distance_is_rounded_opt_in_server_metadata(self):
         output=io.StringIO()
         with patch.dict(os.environ,{'FACE_IMAGE_DEBUG':'1'}),contextlib.redirect_stdout(output):

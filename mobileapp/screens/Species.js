@@ -300,6 +300,7 @@ export default function Plant({ navigation, user }) {
               <TextInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
+                maxLength={100}
                 placeholder="Search by name..."
                 placeholderTextColor="#8A968F"
                 style={styles.searchInput}

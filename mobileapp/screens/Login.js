@@ -160,6 +160,11 @@ export default function LoginScreen({
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [faceRequest, setFaceRequest] = useState(null);
   const [registerCameraFace, setRegisterCameraFace] = useState(false);
+  const registrationIntent = useRef(false);
+  function selectFaceRegistration(selected) {
+    registrationIntent.current = selected;
+    setRegisterCameraFace(selected);
+  }
   const [cameraMessage, setCameraMessage] = useState("");
   const [manageLegacy, setManageLegacy] = useState(false);
   const [legacyEmail, setLegacyEmail] = useState("");
@@ -196,6 +201,9 @@ export default function LoginScreen({
         faceDiagnostic("session_or_navigation_failed", result.requestId, { code: error.code || "session_or_navigation_error" });
         setCameraMessage(error.message || "Session verification failed. Use email/password or retry face login.");
       }).finally(() => { loginLock.current = false; });
+    } else if (completed.mode === "recognize" && result?.enrollmentRequired) {
+      selectFaceRegistration(true);
+      setCameraMessage("Sign in with your password to register your face. Complete any required password change, then sign in with your permanent password. Registration requires your consent.");
     } else if (result?.error) setCameraMessage(result.error);
     if (completed.mode === "enroll") {
       faceCompletion.current?.(result);
@@ -386,8 +394,9 @@ export default function LoginScreen({
   }
 
 
-  async function handleLogin() {
+  async function handleLogin(forceRegistration = false) {
   if (loginLock.current || biometricLock.current || faceRequest) return;
+  const wantsRegistration = forceRegistration === true || registrationIntent.current || registerCameraFace;
   loginLock.current = true;
   setPasswordBusy(true);
   setLoginError("");
@@ -446,7 +455,7 @@ export default function LoginScreen({
     }
   }
 
-  if (registerCameraFace && cameraEnabled) {
+  if (wantsRegistration && cameraEnabled) {
     try {
       const status = await faceApi("/enrollment-status", {}, serverToken);
       if (status.user?.id !== user.id || typeof status.enrolled !== "boolean") throw new Error("Unable to confirm enrollment for this account.");
@@ -455,10 +464,13 @@ export default function LoginScreen({
         faceCameraController.current.openEnrollment({ token: serverToken, user });
       });
       if (result?.alreadyEnrolled) {
-        setRegisterCameraFace(false);
+        selectFaceRegistration(false);
         setCameraMessage("Your face is already registered. You can now use Face Login.");
         Alert.alert("Face Login ready", "Your face is already registered. You can now use Face Login.");
-      } else if (result?.enrolled === true) Alert.alert("Face registered", "You can use Login with Face ID next time.");
+      } else if (result?.enrolled === true && result.user?.id === user.id && result.user?.email === user.email) {
+        selectFaceRegistration(false);
+        Alert.alert("Face registered", "You can use Login with Face ID next time.");
+      }
       else Alert.alert("Face registration not completed", "Your password login will continue. You can register your face next time.");
     } catch (error) {
       Alert.alert("Unable to check face registration", error.message || "Your password login will continue. Try again later.");
@@ -661,16 +673,24 @@ export default function LoginScreen({
                 <Text style={styles.biometricHelp}>Register once for your eligible account, then use Login with Face ID without typing your email or password.</Text>
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <Text style={[styles.biometricHelp, { flex: 1 }]}>Register my face after password login</Text>
-                  <Switch value={registerCameraFace} onValueChange={setRegisterCameraFace} accessibilityLabel="Register face after login" />
+                  <Switch value={registerCameraFace} onValueChange={selectFaceRegistration} accessibilityLabel="Register face after login" />
                 </View>
+                {typeof __DEV__ === "boolean" && __DEV__ && <Text style={styles.biometricHelp}>Face flow: {FACE_CAPTURE_VERSION}</Text>}
+                <TouchableOpacity accessibilityRole="button" disabled={passwordBusy} onPress={() => {
+                  selectFaceRegistration(true);
+                  return handleLogin(true);
+                }}>
+                  <Text style={styles.guestButtonText}>Register Face with password</Text>
+                </TouchableOpacity>
                 <TouchableOpacity accessibilityRole="button" onPress={() => {
                   if (!loginLock.current && !biometricLock.current && !faceRequest) {
-                    setRegisterCameraFace(false);
+                    if (registrationIntent.current || registerCameraFace) return handleLogin(true);
                     faceCameraController.current.openLogin();
                   }
                 }}>
-                  <Text style={styles.guestButtonText}>Login with Face ID</Text>
+                  <Text style={styles.guestButtonText}>{registerCameraFace ? "Sign in and register my face" : "Login with Face ID"}</Text>
                 </TouchableOpacity>
+                {registerCameraFace && <Text style={styles.biometricHelp}>Enter your email and permanent password, then sign in to open Face Registration. No face is saved until you agree in the camera.</Text>}
                 <TouchableOpacity accessibilityRole="button" onPress={() => {
                   if (!loginLock.current && !faceRequest) { setManageLegacy(!manageLegacy); setLegacyPassword(""); }
                 }}><Text style={styles.biometricHelp}>Manage my existing facial enrollment</Text></TouchableOpacity>

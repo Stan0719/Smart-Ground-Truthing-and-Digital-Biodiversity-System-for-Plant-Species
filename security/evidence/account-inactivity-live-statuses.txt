@@ -1,0 +1,9 @@
+31 October 2026, Asia/Kuala_Lumpur.
+Read-only aggregate inspection of plant_auth.users and plant_auth.visitors.
+Transaction: BEGIN READ ONLY; SELECT aggregate counts only; ROLLBACK.
+Staff Active: 5.
+Staff Inactive: 22.
+No Visitor status groups returned.
+No names, emails, passwords, encrypted values or session tokens were retrieved.
+No live records, schema, RLS, grants or policies were changed.
+The existing live account backend was not restarted with the new policy.

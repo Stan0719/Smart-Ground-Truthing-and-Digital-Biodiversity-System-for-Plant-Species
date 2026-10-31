@@ -1,0 +1,11 @@
+31 October 2026, Asia/Kuala_Lumpur.
+Configured account schema: plant_auth.
+DATA_ENCRYPTION_KEYS present: false.
+DATA_ENCRYPTION_ACTIVE_KEY_ID present: false.
+No secret values displayed, generated or changed.
+Read-only live check requested information_schema.columns metadata only for users,
+visitors and account_emails (name, email and phone/telephone-like column names).
+Result: NOT VERIFIED, connection error EACCES. No account values were retrieved.
+No live INSERT/UPDATE/DELETE, schema changes, policies, grants or migrations ran.
+Field existence and storage claims in the report are based on repository schema,
+production write/read source, and isolated PostgreSQL integration tests.

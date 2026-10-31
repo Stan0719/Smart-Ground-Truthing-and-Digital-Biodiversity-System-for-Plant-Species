@@ -1,0 +1,2 @@
+# Additional storage driver only; does not reinstall face models or ML packages.
+psycopg[binary]>=3.2,<4

@@ -124,6 +124,11 @@ const validateField = (field: RequiredSpeciesField) => {
     return false
   }
 
+  if (value.length > 200) {
+    errors[field] = 'Use 200 characters or fewer.'
+    return false
+  }
+
   if (field === 'scientificName') {
     if (!/\p{L}/u.test(value)) {
       errors.scientificName = 'Scientific name must include alphabetic text.'
@@ -179,6 +184,10 @@ function openForm(item?: SpeciesRecord) {
 }
 
 function save() {
+  if (form.description.trim().length > 4000 || form.habitat.trim().length > 4000) {
+    showFeedback('error', 'Description and habitat must be 4,000 characters or fewer.')
+    return
+  }
   requiredFields.forEach((field) => {
     touched[field] = true
   })
@@ -326,7 +335,7 @@ onBeforeUnmount(() => {
   <div class="control-bar">
     <label class="field search-field">
       <span>{{ t('conservationPages.species.searchSpecies') }}</span>
-      <input v-model="search" :placeholder="t('conservationPages.species.searchPlaceholder')" />
+      <input v-model.trim="search" maxlength="100" :placeholder="t('conservationPages.species.searchPlaceholder')" />
     </label>
 
     <label class="field">

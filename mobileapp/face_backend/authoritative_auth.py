@@ -7,14 +7,15 @@ from core import AuthError, distance, MATCH_THRESHOLD
 from image_pipeline import diagnostic
 
 from pipeline_identity import pipeline_identity
-from matching_diagnostics import matching_diagnostic
+from matching_diagnostics import matching_diagnostic, matching_outcome
 
 
 class AuthoritativeFaceAuth:
     def __init__(self, prototype, authority):
         self.prototype, self.authority, self.db = prototype, authority, prototype.db
         self.pipeline = pipeline_identity()
-        self.db.executescript('''
+        if getattr(self.db, 'dialect', None) != 'postgresql':
+            self.db.executescript('''
         CREATE TABLE IF NOT EXISTS real_face_templates(user_id TEXT PRIMARY KEY,template TEXT NOT NULL,pipeline TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS face_account_links(prototype_email TEXT PRIMARY KEY,real_user_id TEXT UNIQUE NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS legacy_face_replacements(prototype_email TEXT PRIMARY KEY,real_user_id TEXT NOT NULL,created REAL NOT NULL);
@@ -130,8 +131,8 @@ class AuthoritativeFaceAuth:
         # Reuse single-use challenge validation but never issue a prototype session.
         import hashlib
         key=hashlib.sha256(challenge.encode()).hexdigest()
-        row=self.db.execute('SELECT expires FROM challenges WHERE token=?',(key,)).fetchone()
-        self.db.execute('DELETE FROM challenges WHERE token=?',(key,));self.db.commit()
+        row=self.db.execute('DELETE FROM challenges WHERE token=? RETURNING expires',(key,)).fetchone()
+        self.db.commit()
         if not row or row[0] < time.time():
             raise AuthError('Face attempt expired. Please try again.',401,'challenge_expired')
         diagnostic('challenge_validated', accountService='authoritative')
@@ -148,6 +149,9 @@ class AuthoritativeFaceAuth:
                 link=self.db.execute('SELECT real_user_id FROM face_account_links WHERE prototype_email=?',(email,)).fetchone()
                 matches.add(('real',link[0]) if link else ('unlinked',email))
         matching_diagnostic(distances, matchedAccounts=len(matches), result='accepted' if len(matches)==1 else 'rejected', threshold=MATCH_THRESHOLD, accountService='authoritative', legacyProvenance='unknown')
+        matching_outcome(len(distances), len(matches))
+        if not distances:
+            raise AuthError('No face enrollment is available on this server. Sign in with your password, complete any required password change, then register your face.',409,'not_enrolled')
         if not matches: raise AuthError('Your capture did not match a registered face.',401,'face_not_matched')
         if len(matches)!=1: raise AuthError('Face matched multiple accounts. Use your password.',401,'ambiguous_face')
         kind,subject=next(iter(matches))

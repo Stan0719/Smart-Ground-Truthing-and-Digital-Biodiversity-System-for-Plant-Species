@@ -341,6 +341,7 @@ export default function Species({
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
+                maxLength={100}
           placeholder="Search by Plant ID..."
           placeholderTextColor="#8A968F"
           style={styles.search}

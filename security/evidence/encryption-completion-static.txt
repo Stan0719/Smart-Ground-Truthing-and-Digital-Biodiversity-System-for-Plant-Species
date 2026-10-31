@@ -1,0 +1,30 @@
+[
+  {
+    "command": [
+      "node",
+      "--check",
+      "web/server/data-encryption.mjs"
+    ],
+    "workingDirectory": "repository root",
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "node",
+      "--check",
+      "security/backend-data-encryption.test.mjs"
+    ],
+    "workingDirectory": "repository root",
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "eslint server/data-encryption.mjs --no-cache"
+    ],
+    "workingDirectory": "web",
+    "exitCode": 0,
+    "output": ""
+  }
+]

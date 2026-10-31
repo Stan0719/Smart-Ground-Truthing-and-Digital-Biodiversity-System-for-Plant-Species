@@ -54,6 +54,12 @@ export async function importSqlite(source, db, tables = accountTables) {
             `INSERT INTO "${table}"(${fields.map((c) => '"' + c + '"').join(',')}) VALUES(${fields.map(() => '?').join(',')})`,
           )
           .run(...fields.map((c) => row[c]))
+        if (tables === faceTables) {
+          const key = columns[0]
+          const saved = await db.prepare(`SELECT * FROM "${table}" WHERE "${key}"=?`).get(row[key])
+          if (!saved || fields.some(field => saved[field] !== row[field]))
+            throw Error('Face import content verification failed; transaction rolled back.')
+        }
       }
       const after = (await db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get()).n
       if (after !== rows.length) throw Error('Migration record count verification failed.')
@@ -84,6 +90,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let source
   try {
     source = new DatabaseSync(path, { readOnly: true })
+    if (face) source.exec('BEGIN') // Consistent read-only snapshot across all face tables.
     const result = await importSqlite(source, db, face ? faceTables : accountTables)
     console.log(JSON.stringify({ imported: true, counts: result, sourcePreserved: true }, null, 2))
   } catch (error) {

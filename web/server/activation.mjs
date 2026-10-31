@@ -90,6 +90,13 @@ export function createStaffInvitations({ auth, deliver, origin, now = () => Date
         await auth.db.prepare('UPDATE activation_tokens SET used=1 WHERE user_id=?').run(id)
         await auth.db.prepare('INSERT INTO activation_tokens(token_hash,user_id,expires_at,used) VALUES(?,?,?,0)').run(digest(randomBytes(32).toString('hex')),id,now()+60*60*1000)
         await auth.event(id, ip, 'invitation_created', actor)
+      }).catch(error => {
+        if (error?.code === 'DATA_ENCRYPTION_CONFIGURATION') return {
+          status: 503,
+          code: 'account_encryption_unavailable',
+          error: 'Account creation could not proceed because backend personal-data encryption is not configured correctly. No account was created or changed, and no email was sent. Contact the system administrator.',
+        }
+        throw error
       })
       if (blocked) return blocked
       try {
@@ -118,7 +125,7 @@ export function createStaffInvitations({ auth, deliver, origin, now = () => Date
           user: publicUser(await auth.byId(id)),
           delivery: 'failed',
           message:
-            'The account requires its temporary password. ' +
+            'The account was saved, but temporary-password email delivery failed. Do not create it again; use Resend temporary password for the existing account. ' +
             deliveryErrors[diagnostic] +
             ' Delivery was not confirmed.',
         }
@@ -151,7 +158,7 @@ const deliveryErrors = {
   unknown:
     'The email provider could not confirm delivery. Check EmailJS Email History and the backend connection.',
 }
-export function temporaryPasswordDelivery(env, fetchImpl = fetch) {
+export function temporaryPasswordDelivery(env, fetchImpl = fetch, diagnostic = entry => console.warn(JSON.stringify(entry))) {
   if (!activationConfiguration(env).ready) return null
   return async ({ email, name, role, temporaryPassword, loginUrl }) => {
     const response = await fetchImpl('https://api.emailjs.com/api/v1.0/email/send', {
@@ -191,6 +198,13 @@ export function temporaryPasswordDelivery(env, fetchImpl = fetch) {
       const failure = new Error('Staff account email delivery failed.')
       failure.deliveryCode = code
       failure.providerStatus = response.status
+      // Only an allowlisted summary can leave the adapter; never the raw body.
+      const { sanitizedEmailResponse } = await import('./email-diagnostics.mjs')
+      failure.providerResponse = sanitizedEmailResponse(text)
+      try {
+        diagnostic({ event: 'staff_email_provider_failure', status: response.status,
+          code, response: failure.providerResponse })
+      } catch { /* Diagnostics must not change the delivery outcome. */ }
       throw failure
     }
   }

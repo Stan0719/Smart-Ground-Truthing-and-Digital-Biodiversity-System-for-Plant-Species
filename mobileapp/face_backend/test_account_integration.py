@@ -20,35 +20,67 @@ class AccountIntegrationTests(unittest.TestCase):
         cls.directory = tempfile.TemporaryDirectory()
         directory = Path(cls.directory.name)
         key = directory/'service.key';key.write_bytes(os.urandom(32));key.chmod(0o600)
+        if os.name == 'nt':
+            # Apply the production key-permission requirements to this temporary key.
+            subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', r'''
+$ErrorActionPreference='Stop'
+$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl=New-Object System.Security.AccessControl.FileSecurity
+$acl.SetAccessRuleProtection($true,$false)
+$acl.SetOwner($sid)
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'FullControl','Allow')))
+Set-Acl -LiteralPath $env:FACE_TEST_KEY_FILE -AclObject $acl
+'''], env={**os.environ, 'FACE_TEST_KEY_FILE': str(key)}, check=True,
+                capture_output=True, timeout=15)
         cls.key_file=str(key)
         code = '''
-import { createAuth } from './server/auth.mjs';
-const auth=await createAuth(process.env.AUTH_DB);
+import { createTestAuth } from './server/test-postgres.mjs';
+import { createAuthServer } from './server/http.mjs';
+import { readFileSync } from 'node:fs';
+// In-memory PGlite fixture only. Never import index.mjs or load project .env files.
+const auth=await createTestAuth();
 for(const [email,role,status,temporary] of [
  ['botanist@example.invalid','Botanist','Active',false],
  ['officer@example.invalid','Conservation Officer','Suspended',false],
  ['temporary@example.invalid','Botanist','Active',true],
+ ['first-login@example.invalid','Botanist','Active',true],
  ['other@example.invalid','Botanist','Active',false]]) {
  const user=await auth.createUser({name:'Fixture',email,role,password:'isolated-account-password',mustChangePassword:temporary});
- if(status!=='Active')auth.setStatus(user.id,status,'fixture','fixture');
+ if(status!=='Active')await auth.setStatus(user.id,status,'fixture','fixture');
 }
-auth.db.close();await import('./server/index.mjs');
+const server=createAuthServer({auth,key:readFileSync(process.env.FACE_TEST_KEY_FILE),env:{}});
+server.listen(0,'127.0.0.1',()=>console.log('Authentication API running on port '+server.address().port));
+// Reset only this in-memory fixture's request history between independent tests.
+process.stdin.on('data',async()=>{
+ await auth.db.prepare('DELETE FROM auth_events').run();
+ console.log('Fixture request history reset');
+});
 '''
         cls.child=subprocess.Popen(['node','--input-type=module','-e',code],cwd=WEB,
-            env={**os.environ,'AUTH_DB':str(directory/'real.sqlite'),'FACE_ACCOUNT_SERVICE_KEY_FILE':str(key),'PORT':'0','AUTH_RECOVERY_DELIVERY_DISABLED':'1'},
-            stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-        for _ in range(10):
-            line=cls.child.stdout.readline()
-            if 'Authentication API running on port' in line:
-                cls.url='http://127.0.0.1:'+line.strip().split()[-1];break
-        else: raise RuntimeError('Isolated account service did not start')
+            env={**os.environ,'FACE_TEST_KEY_FILE':str(key)},
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        import queue, threading
+        output=queue.Queue();cls.output=output
+        threading.Thread(target=lambda: [output.put(line) for line in cls.child.stdout], daemon=True).start()
+        try:
+            line=output.get(timeout=30)
+            if 'Authentication API running on port' not in line:
+                raise RuntimeError('Isolated account service did not report readiness')
+            cls.url='http://127.0.0.1:'+line.strip().split()[-1]
+        except Exception:
+            cls.child.terminate();cls.child.wait(timeout=10)
+            cls.child.stdin.close();cls.child.stdout.close();cls.child.stderr.close();cls.directory.cleanup()
+            raise
 
     @classmethod
     def tearDownClass(cls):
         cls.child.terminate();cls.child.wait(timeout=10)
+        cls.child.stdin.close()
         cls.child.stdout.close();cls.child.stderr.close();cls.directory.cleanup()
 
     def setUp(self):
+        self.child.stdin.write('reset\n');self.child.stdin.flush()
+        self.assertEqual(self.output.get(timeout=10).strip(),'Fixture request history reset')
         self.authority=AccountService(self.url,self.key_file)
         self.prototype=Auth(':memory:',lambda _: [1.,0.])
         self.auth=AuthoritativeFaceAuth(self.prototype,self.authority)
@@ -144,9 +176,49 @@ auth.db.close();await import('./server/index.mjs');
         with self.assertRaises(AuthError): self.auth.session(result['token'])
 
     def test_officer_and_temporary_accounts_never_grant_botanist_access(self):
-        for email in ('officer@example.invalid','temporary@example.invalid'):
-            with self.assertRaises(AuthError): self.authority.password_login(email,'isolated-account-password')
+        with self.assertRaises(AuthError):
+            self.authority.password_login('officer@example.invalid','isolated-account-password')
+        pending=self.authority.password_login('temporary@example.invalid','isolated-account-password')
+        self.assertTrue(pending['user']['mustChangePassword'])
+        with self.assertRaises(AuthError): self.authority.session(pending['token'])
+        with self.assertRaises(AuthError): self.authority.issue(pending['user']['id'])
+        with self.assertRaises(AuthError): self.auth.enroll(pending['token'],self.image)
+        self.authority.logout(pending['token'])
         with self.assertRaises(AuthError): self.authority.issue('nonexistent-subject')
+
+    def test_mobile_temporary_password_change_then_face_login_same_identity(self):
+        import urllib.request, urllib.error
+        def mobile(path, body, token=None):
+            headers={'Content-Type':'application/json'}
+            if token: headers['Authorization']='Bearer '+token
+            request=urllib.request.Request(self.url+'/api/mobile'+path,
+                data=json.dumps(body).encode(),headers=headers,method='POST')
+            try:
+                response=urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request,timeout=10)
+            except urllib.error.HTTPError as error:
+                response=error
+            with response:
+                return response.status,json.load(response)
+        email='first-login@example.invalid'
+        status,pending=mobile('/password',{'email':email,'password':'isolated-account-password'})
+        self.assertEqual(status,200)
+        self.assertTrue(pending['user']['mustChangePassword'])
+        self.assertEqual(mobile('/me',{},pending['token'])[0],403)
+        with self.assertRaises(AuthError): self.auth.enroll(pending['token'],self.image)
+        replacement='isolated-replacement-password'
+        status,changed=mobile('/change-password',{'password':replacement},pending['token'])
+        self.assertEqual(status,200)
+        self.assertTrue(changed['changed'])
+        self.assertEqual(mobile('/password',{'email':email,'password':'isolated-account-password'})[0],401)
+        status,session=mobile('/password',{'email':email,'password':replacement})
+        self.assertEqual(status,200)
+        self.assertFalse(session['user']['mustChangePassword'])
+        self.assertEqual(session['user']['id'],pending['user']['id'])
+        self.auth.enroll(session['token'],self.image)
+        recognized=self.auth.face_login(self.auth.challenge()['challenge'],self.image)
+        self.assertEqual(recognized['user']['id'],pending['user']['id'])
+        self.auth.logout(recognized['token'])
+        self.authority.logout(session['token'])
 
     def test_unlinked_legacy_cannot_authenticate_real_account(self):
         self.prototype.embed=lambda _: [1.,0.]+[0.]*126
@@ -271,6 +343,106 @@ auth.db.close();await import('./server/index.mjs');
         self.prototype.db.execute('UPDATE accounts SET template=?',(json.dumps([1.,0.]),));self.prototype.db.commit()
         with self.assertRaises(AuthError) as caught: self.auth.face_login(self.auth.challenge()['challenge'],self.image)
         self.assertEqual(caught.exception.code,'ambiguous_face')
+
+    def test_empty_gallery_directs_to_password_and_enrollment(self):
+        with self.assertRaises(AuthError) as caught:
+            self.auth.face_login(self.auth.challenge()['challenge'],self.image)
+        self.assertEqual(caught.exception.code,'not_enrolled')
+        self.assertEqual(caught.exception.status,409)
+        self.assertIn('Sign in with your password',str(caught.exception))
+        self.assertFalse(self.auth.enrollment_status(self.session['token'])['enrolled'])
+        self.assertEqual(self.prototype.db.execute('SELECT COUNT(*) FROM real_face_templates').fetchone()[0],0)
+
+    def test_other_new_account_is_not_enrolled_just_because_gallery_contains_a_template(self):
+        saved=self.auth.enroll(self.session['token'],self.image)
+        other=self.authority.password_login('other@example.invalid','isolated-account-password')
+        try:
+            self.assertTrue(self.auth.enrollment_status(self.session['token'])['enrolled'])
+            self.assertFalse(self.auth.enrollment_status(other['token'])['enrolled'])
+            self.assertEqual(saved['user']['id'],self.session['user']['id'])
+            self.assertNotEqual(saved['user']['id'],other['user']['id'])
+            recognized=self.auth.face_login(self.auth.challenge()['challenge'],self.image)
+            self.assertEqual(recognized['user']['id'],self.session['user']['id'])
+            self.assertNotEqual(recognized['user']['id'],other['user']['id'])
+            self.auth.logout(recognized['token'])
+        finally:
+            self.authority.logout(other['token'])
+
+    def test_two_botanists_persist_independent_faces_and_login_from_the_entire_gallery(self):
+        second=self.authority.password_login('other@example.invalid','isolated-account-password')
+        first_image=base64.b64encode(b'first-user-face').decode()
+        second_image=base64.b64encode(b'second-user-face').decode()
+        unknown_image=base64.b64encode(b'unknown-face').decode()
+        def matcher(data):
+            if data==b'first-user-face': return [1.,0.,0.]+[0.]*125
+            if data==b'second-user-face': return [0.,1.,0.]+[0.]*125
+            return [0.,0.,1.]+[0.]*125
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                path=str(Path(directory)/'multi-user-fixture.sqlite')
+                store=Auth(path,matcher)
+                try:
+                    face=AuthoritativeFaceAuth(store,self.authority)
+                    first=face.enroll(self.session['token'],first_image)
+                    original=store.db.execute('SELECT template FROM real_face_templates WHERE user_id=?',(self.session['user']['id'],)).fetchone()[0]
+                    added=face.enroll(second['token'],second_image)
+                    self.assertEqual(first['user']['id'],self.session['user']['id'])
+                    self.assertEqual(added['user']['id'],second['user']['id'])
+                    self.assertEqual(store.db.execute('SELECT COUNT(*) FROM real_face_templates').fetchone()[0],2)
+                    self.assertEqual(store.db.execute('SELECT template FROM real_face_templates WHERE user_id=?',(self.session['user']['id'],)).fetchone()[0],original)
+                finally:
+                    store.db.close()
+                restored=Auth(path,matcher)
+                try:
+                    face=AuthoritativeFaceAuth(restored,self.authority)
+                    self.assertTrue(face.enrollment_status(self.session['token'])['enrolled'])
+                    self.assertTrue(face.enrollment_status(second['token'])['enrolled'])
+                    # Match the second row first: recognition must not stop at the first enrollment.
+                    for image,expected in [(second_image,second),(first_image,self.session),(second_image,second)]:
+                        result=face.face_login(face.challenge()['challenge'],image)
+                        self.assertEqual(result['user']['id'],expected['user']['id'])
+                        face.logout(result['token'])
+                    with self.assertRaises(AuthError) as caught:
+                        face.face_login(face.challenge()['challenge'],unknown_image)
+                    self.assertEqual(caught.exception.code,'face_not_matched')
+                finally:
+                    restored.db.close()
+        finally:
+            self.authority.logout(second['token'])
+
+    def test_same_face_cannot_be_copied_to_another_botanist_account(self):
+        self.auth.enroll(self.session['token'],self.image)
+        before=self.prototype.db.execute('SELECT user_id,template FROM real_face_templates').fetchall()
+        second=self.authority.password_login('other@example.invalid','isolated-account-password')
+        try:
+            with self.assertRaises(AuthError) as caught:
+                self.auth.enroll(second['token'],self.image)
+            self.assertEqual(caught.exception.code,'existing_face_requires_link')
+            self.assertEqual(self.prototype.db.execute('SELECT user_id,template FROM real_face_templates').fetchall(),before)
+            self.assertFalse(self.auth.enrollment_status(second['token'])['enrolled'])
+        finally:
+            self.authority.logout(second['token'])
+
+    def test_enrollment_survives_face_store_reopen_and_issues_same_account(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=str(Path(directory)/'isolated-face.sqlite')
+            store=Auth(path,lambda _: [1.,0.])
+            try:
+                face=AuthoritativeFaceAuth(store,self.authority)
+                result=face.enroll(self.session['token'],self.image)
+                self.assertTrue(result['enrolled'])
+                self.assertEqual(result['user']['id'],self.session['user']['id'])
+            finally:
+                store.db.close()
+            restored=Auth(path,lambda _: [1.,0.])
+            try:
+                face=AuthoritativeFaceAuth(restored,self.authority)
+                self.assertTrue(face.enrollment_status(self.session['token'])['enrolled'])
+                recognized=face.face_login(face.challenge()['challenge'],self.image)
+                self.assertEqual(recognized['user']['id'],self.session['user']['id'])
+                face.logout(recognized['token'])
+            finally:
+                restored.db.close()
 
     @unittest.skipUnless(os.environ.get('FACE_TEST_PORTRAIT'),'Set public portrait fixture for actual models.')
     def test_actual_models_issue_and_validate_real_service_session(self):

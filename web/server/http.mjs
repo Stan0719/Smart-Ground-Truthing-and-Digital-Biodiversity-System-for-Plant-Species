@@ -75,7 +75,7 @@ export function createAuthServer({ auth, recovery, staff, diagnostics = null, ke
         const mobileUser=user=>({...user,role:user.role==='Botanist'?'botanist':user.role==='Visitor'?'visitor':user.role==='Conservation Officer'?'conservation-officer':user.role})
         const mobileToken=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1]
         if(path==='/api/mobile/register'&&req.method==='POST'){
-          if(typeof body.name!=='string'||!body.name.trim()||body.name.length>100||typeof body.email!=='string'||body.email.length>254||!/^\S+@\S+\.\S+$/.test(body.email)||typeof body.password!=='string'||body.password.length<15||body.password.length>128)
+          if(typeof body.name!=='string'||!body.name.trim()||body.name.length>100||typeof body.email!=='string'||body.email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())||typeof body.password!=='string'||body.password.length<15||body.password.length>128)
             return send(400,{error:'Use a valid name/email and a password with 15 to 128 characters.'})
           const result=await auth.createVisitor(body)
           return result.error?send(result.status,{error:result.error}):send(201,{user:mobileUser(result.user)})
@@ -85,7 +85,7 @@ export function createAuthServer({ auth, recovery, staff, diagnostics = null, ke
           const requestId=typeof suppliedReference==='string'&&/^[a-f0-9]{12}$/.test(suppliedReference)
             ?suppliedReference:randomBytes(6).toString('hex')
 
-          if(typeof body.email!=='string'||body.email.length>254||typeof body.password!=='string'||body.password.length>1024)return send(401,{error:LOGIN_ERROR})
+          if(typeof body.email!=='string'||body.email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())||typeof body.password!=='string'||body.password.length>1024)return send(401,{error:LOGIN_ERROR})
           const result=await auth.login(body.email,body.password,ip,{roles:['Botanist','Visitor','Conservation Officer'],reference:requestId})
           return result.error?send(result.status,{error:result.error,requestId}):send(200,{token:result.token,user:mobileUser(result.user),requestId})
         }
@@ -115,6 +115,7 @@ export function createAuthServer({ auth, recovery, staff, diagnostics = null, ke
         if (
           typeof body.email !== 'string' ||
           body.email.length > 254 ||
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim()) ||
           typeof body.password !== 'string' ||
           body.password.length > 1024
         )

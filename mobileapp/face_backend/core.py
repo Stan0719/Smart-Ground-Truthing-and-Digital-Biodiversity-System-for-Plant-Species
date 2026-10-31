@@ -1,4 +1,4 @@
-"""Local prototype authentication. Facial templates remain on this computer."""
+"""Shared face primitives. Runtime storage is injected; SQLite supports isolated fixtures."""
 import base64
 import hashlib
 import hmac
@@ -20,11 +20,14 @@ class AuthError(Exception):
 
 
 class Auth:
-    def __init__(self, filename, embed):
+    def __init__(self, filename, embed, *, database=None):
+        self.embed = embed
+        if database is not None:
+            self.db = database
+            return
         self.db = sqlite3.connect(filename)
         if str(filename) != ":memory:":
             os.chmod(filename, 0o600)
-        self.embed = embed
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS accounts(email TEXT PRIMARY KEY,name TEXT,role TEXT,salt TEXT,password TEXT,template TEXT);
         CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,email TEXT,expires REAL);
@@ -109,8 +112,7 @@ class Auth:
         from image_pipeline import diagnostic
         diagnostic("face_login_received")
         key = hashlib.sha256(challenge.encode()).hexdigest()
-        row = self.db.execute('SELECT expires FROM challenges WHERE token=?', (key,)).fetchone()
-        self.db.execute('DELETE FROM challenges WHERE token=?', (key,))
+        row = self.db.execute('DELETE FROM challenges WHERE token=? RETURNING expires', (key,)).fetchone()
         self.db.commit()
         if not row or row[0] < time.time():
             diagnostic('challenge_rejected')

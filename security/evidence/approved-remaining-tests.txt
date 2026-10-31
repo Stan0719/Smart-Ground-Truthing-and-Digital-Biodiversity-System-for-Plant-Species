@@ -1,0 +1,64 @@
+✔ offline restart restores only a bounded owner draft lease, not API authority (2.5683ms)
+✔ revocation and clock rollback cannot restore offline access; logout clears the lease (0.4246ms)
+✔ draft recovery after restart and failed writes preserve earlier observations (2.495ms)
+✔ storage budget and low disk refuse new writes without deleting drafts (0.5699ms)
+✔ sync removal cannot delete a newer edit of the same draft (0.6176ms)
+✔ corrupt encrypted data fails closed without deleting stored observations (0.3521ms)
+✔ device unlock cannot extend an expired offline lease or restore a logged-out session (0.4503ms)
+✔ draft read rechecks account authorization after asynchronous decryption (0.26ms)
+(node:36764) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/innovation%20project/Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species/mobileapp/utils/faceApi.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\C:\innovation project\Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species\mobileapp\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ isolated account migration revokes API-role schema access and PUBLIC table access (1541.5774ms)
+✔ existing remote account connections override disabled TLS with certificate verification (1.2293ms)
+✔ AES-256-GCM round trip survives envelope JSON serialization (0.7488ms)
+✔ repeated encryption uses fresh nonces and ciphertext (2.9229ms)
+✔ missing, wrong-type and non-256-bit keys fail closed (0.7912ms)
+✔ record context is required and authenticated (0.3972ms)
+✔ tampering with nonce, tag or ciphertext is rejected (0.4752ms)
+✔ malformed envelopes, truncated tags and noncanonical base64 are rejected (0.7928ms)
+✔ unsupported serialization fails without returning a partial envelope (0.6678ms)
+Rejected website origin: "https://other-workspace-5173.app.github.dev"
+Rejected website origin: "(missing)"
+Rejected website origin: "https://evil.example"
+✔ HTTP API enforces status, role, cookies, origin and revocation (5047.9096ms)
+✔ one-hour Botanist credentials expire; mobile-only first login and independent native sessions (4096.2671ms)
+✔ only Administrator can initiate another account recovery without changing its password (2922.1458ms)
+✔ all roles enforce status, log denials and permanently revoke old sessions (5715.9743ms)
+✔ password change, expiry, direct database disable and throttling (2905.7298ms)
+✔ explicit email administrator bootstrap preserves existing users and never returns credentials (2231.5352ms)
+✔ website role boundary and complete Botanist mobile first-login lifecycle without a database (3593.1598ms)
+✔ plant identity rejects Botanist browser credentials and preserves native bearer identity (0.4493ms)
+✔ direct mobile health and Visitor registration need no Face ID service (7.0598ms)
+✔ Administrator-issued temporary password reaches mobile through the same auth instance; separate store cannot authenticate it (3742.8453ms)
+✔ private login diagnostics distinguish policy failures without exposing reasons to the caller (1396.6904ms)
+✔ expired Administrator-issued temporary password requires resend; resend revokes sessions and the old credential (1266.3739ms)
+✔ mock email delivery targets the stored recipient; failures are reported and resend ignores a replacement recipient (1019.8375ms)
+{"event":"mobile_transport","component":"gateway","reference":"4bb100a41394","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"4bb100a41394","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":234,"status":200}
+{"event":"mobile_transport","component":"gateway","reference":"555555555555","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"555555555555","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":214,"status":401}
+{"event":"mobile_transport","component":"gateway","reference":"e24cc104805f","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"e24cc104805f","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":201,"status":401}
+{"event":"mobile_transport","component":"gateway","reference":"8421a9034706","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"8421a9034706","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":197,"status":200}
+{"event":"mobile_transport","component":"gateway","reference":"220904f3732f","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"220904f3732f","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":214,"status":200}
+{"event":"mobile_transport","component":"gateway","reference":"10d2dac20d2a","path":"/api/mobile/change-password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"10d2dac20d2a","path":"/api/mobile/change-password","method":"POST","phase":"completed","durationMs":497,"status":200}
+{"event":"mobile_transport","component":"gateway","reference":"f08920c2614e","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"f08920c2614e","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":214,"status":401}
+{"event":"mobile_transport","component":"gateway","reference":"3db0db97f1da","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"3db0db97f1da","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":220,"status":200}
+✔ isolated Administrator issuance -> real gateway -> mobile client -> mandatory-change helper -> permanent login (3881.2467ms)
+ℹ tests 31
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 42031.6949
+
+Process exit code: 0

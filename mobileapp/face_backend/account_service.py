@@ -10,7 +10,40 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import os
+import subprocess
 from core import AuthError
+
+
+def require_private_key(path):
+    if os.name != 'nt':
+        if path.stat().st_mode & 0o077:
+            raise ValueError('Service key file permissions must be 600.')
+        return
+    # Windows chmod does not enforce POSIX 0600. Validate a protected DACL instead.
+    script = r'''
+$ErrorActionPreference='Stop'
+$acl=Get-Acl -LiteralPath $env:NIAH_FACE_KEY_PATH
+$user=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$trusted=@($user,'S-1-5-18','S-1-5-32-544')
+if (-not $acl.AreAccessRulesProtected) { exit 1 }
+if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $user) { exit 1 }
+$readable=$false
+foreach ($rule in $acl.Access) {
+ if ($rule.AccessControlType -eq 'Allow') {
+  $sid=$rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+  if ($trusted -notcontains $sid) { exit 1 }
+  if ($sid -eq $user -and ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData)) { $readable=$true }
+ }
+}
+if (-not $readable) { exit 1 }
+'''
+    try:
+        subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script],
+                       env={**os.environ, 'NIAH_FACE_KEY_PATH': str(path.resolve())},
+                       capture_output=True, check=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        raise ValueError('Service key requires a private Windows ACL owned by the current user.') from None
 
 
 def mobile_user(user, allow_temporary=False):
@@ -27,8 +60,7 @@ class AccountService:
         if parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or parsed.path not in ('','/') or parsed.query or parsed.fragment or parsed.username:
             raise ValueError('Account service must use an explicit http://127.0.0.1 loopback URL.')
         self.url = url.rstrip('/')
-        if Path(key_file).stat().st_mode & 0o077:
-            raise ValueError('Service key file permissions must be 600.')
+        require_private_key(Path(key_file))
         self.key = Path(key_file).read_bytes()
         if len(self.key) < 32:
             raise ValueError('Face account service key must contain at least 32 bytes.')

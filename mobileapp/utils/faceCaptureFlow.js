@@ -1,5 +1,5 @@
 // These operations never fall back to one another. Request state is memory-only.
-export const FACE_CAPTURE_VERSION = 'face-routing-v2';
+export const FACE_CAPTURE_VERSION = 'face-registration-v4';
 export function createFaceCameraController({ reference, onChange, clearMessages, diagnostic }) {
   let current = null;
   const open = (mode, fields = {}) => {

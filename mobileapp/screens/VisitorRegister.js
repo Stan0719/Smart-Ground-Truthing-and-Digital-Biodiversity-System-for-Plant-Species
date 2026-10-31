@@ -113,8 +113,9 @@ export default function VisitorRegisterScreen({ navigation }) {
     const nextErrors = {};
 
     if (!trimmedName) nextErrors.name = "Full Name is required.";
+    if (trimmedName.length > 100) nextErrors.name = "Use 100 characters or fewer.";
     if (!normalizedEmail) nextErrors.email = "Email is required.";
-    else if (!EMAIL_PATTERN.test(normalizedEmail)) nextErrors.email = "Enter a valid email address.";
+    else if (email.length > 254 || !EMAIL_PATTERN.test(normalizedEmail)) nextErrors.email = "Enter a valid email address.";
     if (!password) nextErrors.password = "Password is required.";
     else if (password.length < 15 || password.length > 128) nextErrors.password = "Password must have 15 to 128 characters.";
     if (!confirmPassword) nextErrors.confirmPassword = "Confirm Password is required.";

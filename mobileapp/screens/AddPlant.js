@@ -561,6 +561,10 @@ function handleRemoveSpeciesPhoto(index) {
 
 
   function handleAddSpeciesRequest() {
+    if ([speciesScientificName, speciesCommonName, speciesGenus, speciesFamily].some(value => value.trim().length > 200) || [speciesDescription, speciesHabitat].some(value => value.trim().length > 4000)) {
+      Alert.alert("Text too long", "Names must be 200 characters or fewer; descriptions and habitat 4,000 or fewer.");
+      return;
+    }
 
     // -------------------------------------------------
     // VALIDATE SPECIES INFORMATION
@@ -733,6 +737,10 @@ function handleRemoveSpeciesPhoto(index) {
   // ===================================================
 
   function handleSubmitPlant() {
+    if (scientificName.trim().length > 200 || description.trim().length > 4000 || morphology.trim().length > 4000) {
+      Alert.alert("Text too long", "Names must be 200 characters or fewer; descriptions and notes 4,000 or fewer.");
+      return;
+    }
 
     // =================================================
     // VALIDATE PLANT INFORMATION

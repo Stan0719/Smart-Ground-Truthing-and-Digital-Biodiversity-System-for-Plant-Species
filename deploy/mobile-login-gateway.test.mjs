@@ -7,7 +7,22 @@ test('gateway routes match existing upstreams and reject internal/private paths'
  assert.deepEqual(gatewayRoute('/api/mobile/password'),{port:3001,path:'/api/mobile/password'})
  assert.deepEqual(gatewayRoute('/auth-health'),{port:3001,path:'/health'})
  assert.deepEqual(gatewayRoute('/face/face-login'),{port:8000,path:'/face-login'})
+ assert.deepEqual(gatewayRoute('/face/health'),{port:8000,path:'/health'})
  assert.deepEqual(gatewayRoute('/api/species?x=1'),{port:3000,path:'/api/species?x=1'})
+})
+
+test('Face health strips the prefix, forwards real responses and returns 503 when upstream is missing',async()=>{
+ const face=createServer((req,res)=>{assert.equal(req.url,'/health');res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ready:true,accountService:'authoritative'}))})
+ await new Promise(r=>face.listen(0,'127.0.0.1',r))
+ const port=face.address().port
+ const gateway=createMobileLoginGateway({facePort:port},{trace:false})
+ await new Promise(r=>gateway.listen(0,'127.0.0.1',r))
+ try{
+  const url=`http://127.0.0.1:${gateway.address().port}/face/health`
+  const healthy=await fetch(url);assert.equal(healthy.status,200);assert.equal((await healthy.json()).ready,true)
+  await new Promise(r=>face.close(r))
+  const missing=await fetch(url);assert.equal(missing.status,503);assert.deepEqual(await missing.json(),{error:'Service unavailable. Please try again.'})
+ }finally{await new Promise(r=>gateway.close(r));if(face.listening)await new Promise(r=>face.close(r))}
 })
 test('real HTTP gateway forwards auth bodies/bearer/origin, blocks redirects and hides upstream failures',async()=>{
  const received=[]

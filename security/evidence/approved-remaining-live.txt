@@ -1,0 +1,9 @@
+31 October 2026, Asia/Kuala_Lumpur
+Inspection: account/account-audit metadata only.
+Configured destination identified as Supabase without displaying the hostname or credentials.
+Retried through the existing pg dependency from web/, using existing server configuration
+and existing certificate-verifying connectionOptions. No security weakening or credential edits.
+Result: NOT VERIFIED. Connection returned EACCES before SQL metadata could be inspected.
+No live SQL, policies, grants, records, migrations or project settings were changed.
+Manual fallback: security/account-security-readonly.sql.
+The SQL was syntax/execution tested only against an isolated in-memory PostgreSQL engine.

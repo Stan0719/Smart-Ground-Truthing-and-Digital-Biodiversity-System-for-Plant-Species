@@ -50,15 +50,16 @@ function fieldContent(body) {
     body.heightCm > 100000
   )
     fail(400, "Invalid height.");
-  text(body.healthStatus, 100);
-  text(body.lifeStage, 100);
-  text(body.morphology);
+  body.healthStatus = text(body.healthStatus, 100);
+  body.lifeStage = text(body.lifeStage, 100);
+  body.morphology = text(body.morphology);
   if (
     body.notes !== undefined &&
     (typeof body.notes !== "string" || body.notes.length > 4000)
   )
     fail(400, "Invalid notes.");
-  if (body.taxonomy !== undefined) text(body.taxonomy, 1000);
+  if (body.notes !== undefined) body.notes = body.notes.trim();
+  if (body.taxonomy !== undefined) body.taxonomy = text(body.taxonomy, 1000);
   if (body.latitude !== undefined || body.longitude !== undefined) {
     if (
       typeof body.latitude !== "number" ||
@@ -134,7 +135,9 @@ function mountDomain(app, { pool, auth, allow }) {
     const scientific = req.query.scope === "scientific";
     if (scientific && !permitted(req.user, "plants.scientific.read"))
       fail(req.user ? 403 : 401, "Scientific access required.");
-    const q = typeof req.query.q === "string" ? req.query.q : "";
+    if (req.query.q !== undefined && typeof req.query.q !== "string")
+      fail(400, "Search must be text.");
+    const q = (req.query.q ?? "").trim();
     if (q.length > 200) fail(400, "Search is too long.");
     const rows = (
       await pool.query(
@@ -493,15 +496,19 @@ function mountDomain(app, { pool, auth, allow }) {
   app.get('/api/taxonomy',allow('species.manage'),async(_req,res)=>res.json({genera:(await pool.query('SELECT g.genus_id,g.genus_name,f.family_name FROM genus g LEFT JOIN family f ON f.family_id=g.family_id ORDER BY g.genus_name')).rows}));
   app.post("/api/species", allow("species.manage"), async (req, res) => {
     const b = req.body;
-    text(b.scientific_name, 200);
-    text(b.common_name, 200);
-    text(b.description);
+    if (!b || typeof b !== "object" || Array.isArray(b))
+      fail(400, "Species details must be an object.");
+    b.scientific_name = text(b.scientific_name, 200);
+    b.common_name = text(b.common_name, 200);
+    b.description = text(b.description);
     for (const key of ["habitat", "culturalSignificance"])
       if (
         b[key] !== undefined &&
         (typeof b[key] !== "string" || b[key].length > 4000)
       )
         fail(400, "Invalid species text.");
+    for (const key of ["habitat", "culturalSignificance"])
+      if (b[key] !== undefined) b[key] = b[key].trim();
     if (!["public", "internal", "protected"].includes(b.visibility))
       fail(400, "Select visibility.");
     const result = await transaction(pool, async (c) => {
@@ -532,15 +539,19 @@ function mountDomain(app, { pool, auth, allow }) {
   });
   app.patch("/api/species/:id", allow("species.manage"), async (req, res) => {
     const b = req.body;
-    text(b.scientific_name, 200);
-    text(b.common_name, 200);
-    text(b.description);
+    if (!b || typeof b !== "object" || Array.isArray(b))
+      fail(400, "Species details must be an object.");
+    b.scientific_name = text(b.scientific_name, 200);
+    b.common_name = text(b.common_name, 200);
+    b.description = text(b.description);
     for (const key of ["habitat", "culturalSignificance"])
       if (
         b[key] !== undefined &&
         (typeof b[key] !== "string" || b[key].length > 4000)
       )
         fail(400, "Invalid species text.");
+    for (const key of ["habitat", "culturalSignificance"])
+      if (b[key] !== undefined) b[key] = b[key].trim();
     if (!["public", "internal", "protected"].includes(b.visibility))
       fail(400, "Select visibility.");
     await transaction(pool, async (c) => {

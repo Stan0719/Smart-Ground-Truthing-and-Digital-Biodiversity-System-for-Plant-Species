@@ -2,7 +2,7 @@ import React, { useRef, useState } from "react";
 import { Modal, SafeAreaView, Text, TouchableOpacity, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { faceApi, validateFaceSession, faceReference, faceDiagnostic } from "../utils/faceApi";
-import { runFaceCapture } from "../utils/faceCaptureFlow";
+import { runFaceCapture, FACE_CAPTURE_VERSION } from "../utils/faceCaptureFlow";
 export { faceCameraConfigured } from "../utils/faceApi";
 
 function Capture({ request, onClose, onResult, isCurrent }) {
@@ -53,6 +53,10 @@ function Capture({ request, onClose, onResult, isCurrent }) {
       if (result && active.current && isCurrent(request.id)) onResult(result, request.id);
     } catch (failure) {
       faceDiagnostic("capture_failed", reference, { code: failure.code || "capture_or_response_error" });
+      if (request.mode === "recognize" && failure.code === "not_enrolled") {
+        if (active.current && isCurrent(request.id)) onResult({ enrollmentRequired: true }, request.id);
+        return;
+      }
       if (request.mode === "enroll" && failure.status === 409 && failure.code === "already_enrolled") {
         if (active.current && isCurrent(request.id)) onResult({ alreadyEnrolled: true }, request.id);
         return;
@@ -69,6 +73,8 @@ function Capture({ request, onClose, onResult, isCurrent }) {
   }, [request.mode, permission?.granted, ready]);
   return <SafeAreaView style={{ flex: 1, backgroundColor: "#244B47", padding: 20 }}>
     <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={onClose}><Text style={{ color: "white", fontSize: 20, padding: 16 }}>Close — use password</Text></TouchableOpacity>
+    <Text accessibilityRole="header" style={{ color: "white", fontSize: 22, padding: 16 }}>{request.mode === "enroll" ? "Face Registration" : "Face Login"}</Text>
+    {typeof __DEV__ === "boolean" && __DEV__ && <Text style={{ color: "white", padding: 8 }}>Face flow: {FACE_CAPTURE_VERSION} · {request.mode}</Text>}
     <Text style={{ color: "white", fontSize: 18, padding: 16 }}>{request.mode === "enroll"
       ? request.legacyProof
         ? "Agree to save a new live facial template for your authenticated account. Your old template will be preserved for reference and removed from active matching. Both account passwords will be verified."
