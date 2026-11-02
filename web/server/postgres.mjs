@@ -52,11 +52,11 @@ export function connectionOptions(env = process.env) {
     if (env.PGSSLROOTCERT) url.searchParams.set('sslrootcert', env.PGSSLROOTCERT)
     connectionString = url.toString()
   }
-  const ssl = env.PGSSLROOTCERT
-    ? { rejectUnauthorized: true, ca: readFileSync(env.PGSSLROOTCERT, 'utf8') }
-    : remote
-      ? { rejectUnauthorized: true }
-      : undefined
+  const ssl = remote
+    ? env.PGSSLROOTCERT
+      ? { rejectUnauthorized: true, ca: readFileSync(env.PGSSLROOTCERT, 'utf8') }
+      : { rejectUnauthorized: true }
+    : undefined
   return {
     ...(connectionString
       ? { connectionString }

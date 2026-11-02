@@ -37,14 +37,16 @@ function poolFromEnvironment(env = process.env) {
       url.searchParams.set("sslrootcert", env.PGSSLROOTCERT);
     config.connectionString = url.toString();
   }
-  const ssl = env.PGSSLROOTCERT
-    ? {
-        rejectUnauthorized: true,
-        ca: require("node:fs").readFileSync(env.PGSSLROOTCERT, "utf8"),
-      }
-    : !["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)
-      ? { rejectUnauthorized: true }
-      : undefined;
+  const isLocal = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(host);
+
+  const ssl = isLocal
+    ? undefined
+    : env.PGSSLROOTCERT
+      ? {
+          rejectUnauthorized: true,
+          ca: require("node:fs").readFileSync(env.PGSSLROOTCERT, "utf8"),
+        }
+      : { rejectUnauthorized: true };
   const schema = env.PLANT_PG_SCHEMA || "public";
   if (
     !/^[a-z][a-z0-9_]{0,62}$/.test(schema) ||

@@ -61,7 +61,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         ' schema ready. Existing accounts were not reset.',
     )
   } catch (error) {
-    console.error('Authentication migration failed:', error.code ?? error.name)
+    console.error('Authentication migration failed:', error.message)
+    console.error('PostgreSQL error code:', error.code ?? 'N/A')
+    console.error('Error detail:', error.detail ?? 'N/A')
     process.exitCode = 1
   } finally {
     await db.close()

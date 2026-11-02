@@ -2,8 +2,8 @@ param([ValidateSet('Check','Account','Face')][string]$Mode='Check')
 $ErrorActionPreference='Stop'
 $faceRoot=Join-Path $PSScriptRoot '..\face_backend'
 $faceRoot=[System.IO.Path]::GetFullPath($faceRoot)
-$pythonRuntime=Join-Path $faceRoot '.runtime\python311\python.exe'
-if (-not (Test-Path -LiteralPath $pythonRuntime)) { throw 'Restore the workspace Python 3.11 runtime first. See docs/face-service-windows.md.' }
+$pythonRuntime=Join-Path $faceRoot '.venv311\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $pythonRuntime)) { throw 'The Face API Python environment is missing. Restore mobileapp\face_backend\.venv311 first.' }
 $keyPath=Join-Path $faceRoot 'data\account-service.key'
 if ($Mode -eq 'Check') {
  & $pythonRuntime -B (Join-Path $faceRoot 'server.py') --check-models

@@ -12,7 +12,7 @@ def pipeline_identity():
               'inputColorOrder':'BGR','inputDtype':'uint8','exifTranspose':True,
               'resizeMaxEdge':1600,'resizePreservesAspect':True,
               'orientationRetry':'detection_failure_only'}
-    for package in ('deepface','opencv-contrib-python-headless','Pillow','numpy'):
+    for package in ('deepface','opencv-python','Pillow','numpy'):
         try: identity[package]=version(package)
         except PackageNotFoundError: identity[package]='unavailable'
     weights=Path(os.environ.get('DEEPFACE_HOME',str(Path.home())))/'.deepface'/'weights'
