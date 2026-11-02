@@ -528,7 +528,7 @@ export default function LoginScreen({
       <FaceCameraModal request={faceRequest} onClose={(requestId) => finishFaceCamera(null, requestId)} onResult={finishFaceCamera} isCurrent={(id) => faceCameraController.current.isCurrent(id)} />
 
             {typeof __DEV__ === "boolean" && __DEV__ ? (
-              <View style={{ backgroundColor: "#E8F3ED", borderColor: "#397558", borderWidth: 1, borderRadius: 12, padding: 14, margin: 10, flexShrink: 0, gap: 8 }}>
+              <View style={{ display: "none", backgroundColor: "#E8F3ED", borderColor: "#397558", borderWidth: 1, borderRadius: 12, padding: 14, margin: 10, flexShrink: 0, gap: 8 }}>
                 <Text style={{ color: "#174B35", fontWeight: "700" }}>Development build: 20261029.4</Text>
                 <Text style={{ color: "#174B35", fontSize: 12 }}>Metro: {Constants.expoConfig?.hostUri || "Not supplied by runtime"}</Text>
                 <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check authentication connection (no credentials)" disabled={checkingConnection || passwordBusy} onPress={async () => {
