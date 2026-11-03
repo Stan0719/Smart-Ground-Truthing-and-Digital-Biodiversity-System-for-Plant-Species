@@ -40,13 +40,16 @@ class AuthoritativeFaceAuth:
     def challenge(self):
         return self.prototype.challenge()
 
-    def _templates(self):
+    def _templates(self, subject_id=None):
         for user_id, template, pipeline in self.db.execute('SELECT user_id,template,pipeline FROM real_face_templates'):
+            if subject_id is not None and user_id != subject_id:
+                continue
             if json.loads(pipeline) != self.pipeline:
                 raise AuthError('Face template pipeline differs from the current model. Authorized re-enrollment is required.', 409, 'template_incompatible')
             yield user_id, json.loads(template)
         for user_id, template in self.db.execute('SELECT l.real_user_id,a.template FROM face_account_links l JOIN accounts a ON a.email=l.prototype_email WHERE a.template IS NOT NULL AND NOT EXISTS (SELECT 1 FROM legacy_face_replacements r WHERE r.prototype_email=a.email)'):
-            yield user_id, json.loads(template)
+            if subject_id is None or user_id == subject_id:
+                yield user_id, json.loads(template)
 
     def recover_legacy(self, real_token, real_password, legacy_email, legacy_password, consent, image=None):
         """Fresh proof of both accounts. Preserve old bytes; never transfer an existing link."""
@@ -105,7 +108,7 @@ class AuthoritativeFaceAuth:
 
     def enrollment_status(self, token):
         user = self.session(token)
-        enrolled = any(subject == user['id'] for subject, _ in self._templates())
+        enrolled = any(subject == user['id'] for subject, _ in self._templates(subject_id=user['id']))
         return {'user':user, 'enrolled':enrolled}
 
     def enroll(self, token, image):
