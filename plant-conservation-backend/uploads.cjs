@@ -115,6 +115,20 @@ function mountUploads(app, { pool, allow }) {
     },
   );
   app.get("/api/assets", allow("plants.public.read"), async (req, res) => {
+    if (req.query.plant_id !== undefined) {
+      const plantId = id(String(req.query.plant_id));
+      const rows = (await pool.query(
+        `SELECT a.id,a.content_type FROM plant_asset a
+         JOIN plant_record p ON p.plant_id=a.plant_id
+         LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
+         WHERE a.plant_id=$1 AND a.approved=true AND p.rbac_status='Approved'
+           AND a.content_type IN ('image/jpeg','image/png')
+           AND COALESCE(v.visibility,'protected') = ANY($2::text[])
+         ORDER BY a.created_at,a.id`,
+        [plantId, visibilityFor(req.user)],
+      )).rows;
+      return res.json({ assets: rows });
+    }
     const speciesId = id(String(req.query.species_id || ""));
     const rows = (
       await pool.query(

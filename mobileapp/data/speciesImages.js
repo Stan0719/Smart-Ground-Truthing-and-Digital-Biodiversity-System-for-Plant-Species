@@ -13,10 +13,21 @@ const localSpeciesImagePaths = {
   },
 };
 
-export const getSpeciesImageSource = (species, imagePath) => {
+export const getSpeciesImageSource = (species, imagePath, {
+  allowUnmappedRemote = true,
+  preferVerifiedBackend = true,
+} = {}) => {
+  if (!imagePath && preferVerifiedBackend && species?.speciesImageVerified && species.image) {
+    return species.image;
+  }
+
   if (!imagePath && speciesImages[species?.slug]) {
     return speciesImages[species.slug];
   }
+
+  // Callers can require a verified backend image or explicit local mapping;
+  // arbitrary remote paths are not accepted in that mode.
+  if (allowUnmappedRemote === false) return null;
 
   const resolvedImage =
     imagePath ||

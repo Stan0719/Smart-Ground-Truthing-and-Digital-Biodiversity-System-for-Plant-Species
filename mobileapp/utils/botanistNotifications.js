@@ -9,6 +9,9 @@ export const botanistNotifications = createBotanistNotificationStore({
   backend: mobileApiConfiguration.plant || "unconfigured",
   authorize: () => faceSession.restore({ allowOffline: true }),
   fetchObservations: (accountId) => plantApi("/observations", { expectedAccountId: accountId }),
+  fetchNotifications: (accountId) => plantApi("/notifications", { expectedAccountId: accountId }),
+  markNotificationsRead: (accountId, body) => plantApi("/notifications/read", { method: "POST", body, expectedAccountId: accountId }),
+  recordSyncRemote: (accountId, body) => plantApi("/notifications/sync", { method: "POST", body, expectedAccountId: accountId }),
 });
 
 export async function ownedNotificationObservation(accountId, observationId) {

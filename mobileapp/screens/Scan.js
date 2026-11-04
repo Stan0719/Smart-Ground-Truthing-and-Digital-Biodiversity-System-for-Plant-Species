@@ -1,5 +1,5 @@
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import {
   View,
@@ -14,10 +14,11 @@ import {
   useCameraPermissions,
 } from "expo-camera";
 
-import { fetchPlantByQRCode, fetchPlantDetail } from "../utils/plantApi";
+import { fetchPlantByQRCode } from "../utils/plantApi";
+import { recordVisitorScan } from "../utils/visitorFeatures";
 
 
-export default function ScanScreen({ navigation }) {
+export default function ScanScreen({ navigation, user }) {
   useAppTranslation();
 
   const [permission, requestPermission] =
@@ -25,6 +26,7 @@ export default function ScanScreen({ navigation }) {
 
   const [cameraKey, setCameraKey] = useState(0);
   const scanInProgress = useRef(false);
+  useEffect(() => navigation.addListener("focus", () => { scanInProgress.current = false; }), [navigation]);
 
 
   // ==========================================
@@ -88,22 +90,44 @@ export default function ScanScreen({ navigation }) {
   async function handleBarcodeScanned({ data }) {
     if (scanInProgress.current) return;
     scanInProgress.current = true;
+    let navigated = false;
     try {
       let token = String(data || "").trim();
       if (/^https?:\/\//i.test(token)) {
         const scannedUrl = new URL(token);
-        const qrRoute = scannedUrl.pathname.match(/\/api\/qr\/([^/]+)\/?$/);
+        const qrRoute = scannedUrl.pathname.match(/\/(?:api\/)?qr\/([^/]+)\/?$/);
         if (!qrRoute) {
           throw new Error("This QR code is not a plant record code.");
         }
         token = decodeURIComponent(qrRoute[1]);
       }
 
-      const result = await fetchPlantByQRCode(token);
+      let result;
+      let historyError = null;
+      if (user?.role?.toLowerCase() === "visitor") {
+        try {
+          result = await recordVisitorScan(user.id, token);
+        } catch (error) {
+          historyError = error;
+          // Preserve QR navigation if history storage is temporarily unavailable.
+          // This fallback never writes a scan event.
+          result = await fetchPlantByQRCode(token);
+        }
+      } else {
+        result = await fetchPlantByQRCode(token);
+      }
+      if (result?.assigned === false) {
+        Alert.alert(t("scan.plantQrUnavailable"), t("scan.qrCodeNotAssigned"));
+        setCameraKey((current) => current + 1);
+        return;
+      }
       const plantId = result?.plant?.plant_id;
       if (!plantId) throw new Error("The QR code did not resolve to a plant record.");
-      const plant = await fetchPlantDetail(plantId);
-      navigation.navigate("PlantDetails", { plant });
+      if (historyError) Alert.alert(t("scanHistory.historySaveFailedTitle"), translateUIMessage(historyError.message || "Unable to save this scan."));
+      // PlantDetail loads by the plantId route parameter. Passing a plant object
+      // here left its required ID undefined and rendered the not-found screen.
+      navigation.navigate("PlantDetails", { plantId: String(plantId) });
+      navigated = true;
     } catch (error) {
       Alert.alert(
         t("scan.plantQrUnavailable"),
@@ -113,7 +137,7 @@ export default function ScanScreen({ navigation }) {
       );
       setCameraKey((current) => current + 1);
     } finally {
-      scanInProgress.current = false;
+      if (!navigated) scanInProgress.current = false;
     }
   }
 
@@ -217,7 +241,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
 
-    backgroundColor: "#DEF9C4",
+    backgroundColor: "#E7F2E2",
   },
 
 
@@ -239,7 +263,7 @@ const styles = StyleSheet.create({
 
     padding: 30,
 
-    backgroundColor: "#DEF9C4",
+    backgroundColor: "#E7F2E2",
   },
 
 
@@ -249,7 +273,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 50,
 
-    backgroundColor: "#9CDBA6",
+    backgroundColor: "#E9F7E4",
 
     justifyContent: "center",
     alignItems: "center",
@@ -359,7 +383,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 4,
     borderLeftWidth: 4,
 
-    borderColor: "#DEF9C4",
+    borderColor: "#E7F2E2",
 
     borderTopLeftRadius: 12,
   },
@@ -381,7 +405,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 4,
     borderRightWidth: 4,
 
-    borderColor: "#DEF9C4",
+    borderColor: "#E7F2E2",
 
     borderTopRightRadius: 12,
   },
@@ -403,7 +427,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 4,
     borderLeftWidth: 4,
 
-    borderColor: "#DEF9C4",
+    borderColor: "#E7F2E2",
 
     borderBottomLeftRadius: 12,
   },
@@ -425,7 +449,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 4,
     borderRightWidth: 4,
 
-    borderColor: "#DEF9C4",
+    borderColor: "#E7F2E2",
 
     borderBottomRightRadius: 12,
   },
@@ -458,13 +482,16 @@ const styles = StyleSheet.create({
   // ==========================================
 
   button: {
-    backgroundColor: "#50B498",
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#468585",
 
     paddingHorizontal: 28,
 
     paddingVertical: 14,
 
-    borderRadius: 12,
+    borderRadius: 14,
 
     marginTop: 20,
   },

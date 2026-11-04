@@ -3,5 +3,6 @@
   "python-envs.defaultEnvManager": "ms-python.python:system",
   "python.analysis.extraPaths": [
     "./Ai/Ai_duplication_Prevention/src"
-  ]
+  ],
+  "python.terminal.useEnvFile": true
 }
