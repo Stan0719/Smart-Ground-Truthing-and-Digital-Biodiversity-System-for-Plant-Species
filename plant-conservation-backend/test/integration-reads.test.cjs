@@ -59,7 +59,17 @@ test("detail visibility, observation ownership, latest readings and bounded devi
            ('3',1,'staff:bot','Approved','{"latitude":11,"longitude":22,"accuracy_m":3,"altitudeM":28.5,"zone":"Zone A"}','approved'),
            ('4',1,'staff:bot','Pending Review','{"latitude":33,"longitude":44,"accuracy_m":1,"altitudeM":99,"zone":"Pending Zone"}','pending-gps'),
            ('5',4,'staff:bot','Approved','{}','approved-no-gps'),
-           ('6',5,'staff:bot','Approved','{"latitude":5,"longitude":6,"accuracy_m":10,"altitudeM":12,"zone":"Fallback zone"}','approved-location-no-row')`,
+           ('6',5,'staff:bot','Approved','{"latitude":5,"longitude":6,"accuracy_m":10,"altitudeM":12,"zone":"Fallback zone"}','approved-location-no-row'),
+           ('7',1,'staff:bot','Rejected','{}','rejected-photo')`,
+  );
+  const imageBytes = Buffer.from("fixture image bytes");
+  await pool.query(
+    `INSERT INTO plant_asset(id,plant_id,observation_id,owner_subject,client_key,approved,content_type,content)
+     VALUES('approved-plant-photo',1,'3','staff:bot','approved-photo',FALSE,'image/jpeg',$1),
+           ('pending-plant-photo',1,'4','staff:bot','pending-photo',TRUE,'image/jpeg',$1),
+           ('rejected-plant-photo',1,'7','staff:bot','rejected-photo',TRUE,'image/jpeg',$1),
+           ('plant-photo-pdf',1,'3','staff:bot','pdf-photo',TRUE,'application/pdf',$1)`,
+    [imageBytes],
   );
   const device = "11111111-1111-4111-8111-111111111111";
   const empty = "22222222-2222-4222-8222-222222222222";
@@ -96,7 +106,11 @@ test("detail visibility, observation ownership, latest readings and bounded devi
         },
       },
     );
-    return { status: response.status, data: await response.json() };
+    const contentType = response.headers.get("content-type") || "";
+    const data = contentType.includes("application/json")
+      ? await response.json()
+      : Buffer.from(await response.arrayBuffer());
+    return { status: response.status, contentType, data };
   };
   assert.equal((await call("/plants/1")).status, 200);
   assert.equal((await call("/plants/1")).data.plant.latitude, undefined);
@@ -111,6 +125,18 @@ test("detail visibility, observation ownership, latest readings and bounded devi
   assert.equal(botanistPlant.data.plant.accuracy_m, 8);
   assert.equal(botanistPlant.data.plant.altitude_m, 28.5);
   assert.equal(botanistPlant.data.plant.zone, "Zone A");
+  assert.equal(botanistPlant.data.plant.plant_image_asset_id, "approved-plant-photo");
+  assert.equal(visitorPlant.data.plant.plant_image_asset_id, "approved-plant-photo");
+  assert.equal((await call("/assets?plant_id=1", "bot")).data.assets.map((asset) => asset.id).join(","), "approved-plant-photo");
+  const plantPhoto = await call("/assets/approved-plant-photo", "bot");
+  assert.equal(plantPhoto.status, 200);
+  assert.match(plantPhoto.contentType, /image\/jpeg/);
+  assert.deepEqual(plantPhoto.data, imageBytes);
+  assert.equal((await call("/assets/pending-plant-photo", "other")).status, 404);
+  assert.equal((await call("/assets/rejected-plant-photo", "other")).status, 404);
+  assert.equal((await call("/assets?plant_id=1", "other")).data.assets.some((asset) => asset.id === "pending-plant-photo" || asset.id === "rejected-plant-photo"), false);
+  // The submitting Botanist retains the existing private dashboard preview path.
+  assert.equal((await call("/assets/pending-plant-photo?scope=mine", "bot")).status, 200);
   for (const field of ["latitude", "longitude", "accuracy_m", "altitude_m", "zone"])
     assert.equal(botanistMinePlant.data.plant[field], botanistPlant.data.plant[field]);
   for (const nested of [botanistPlant.data.plant.latest_approved, botanistPlant.data.plant.latest_submission]) {
@@ -134,6 +160,7 @@ test("detail visibility, observation ownership, latest readings and bounded devi
   assert.equal(noApprovedGps.data.plant.accuracy_m, null);
   assert.equal(noApprovedGps.data.plant.altitude_m, null);
   assert.equal(noApprovedGps.data.plant.zone, null);
+  assert.equal(noApprovedGps.data.plant.plant_image_asset_id, null);
   const botanistNoApprovedGps = await call("/plants/4", "bot");
   assert.equal(botanistNoApprovedGps.status, 200);
   for (const field of ["latitude", "longitude", "accuracy_m", "altitude_m", "zone"])

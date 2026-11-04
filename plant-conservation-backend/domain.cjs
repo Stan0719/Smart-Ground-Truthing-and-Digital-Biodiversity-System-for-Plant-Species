@@ -26,12 +26,32 @@ const text = (value, max = 4000) => {
     fail(400, "Invalid text.");
   return value.trim();
 };
-// Species catalogue images must be explicitly attached to the species itself.
-// Plant observation photos can depict other subjects and are not species portraits.
+// Prefer an explicitly approved species portrait. If absent, use a photograph
+// from the latest approved observation of an approved plant linked by species_id.
+// This avoids treating unrelated species assets or old observation revisions as portraits.
 const speciesImageJoin = `LEFT JOIN LATERAL (
-  SELECT a.id FROM plant_asset a
-  WHERE a.species_id=s.species_id AND a.approved=TRUE AND a.content_type='image/jpeg'
-  ORDER BY a.created_at ASC,a.id ASC LIMIT 1
+  SELECT image.id
+  FROM (
+    SELECT a.id,0 AS source_priority,a.created_at AS selected_at,a.created_at AS asset_created_at
+    FROM plant_asset a
+    WHERE a.species_id=s.species_id AND a.approved=TRUE
+      AND a.content_type IN ('image/jpeg','image/png')
+    UNION ALL
+    SELECT a.id,1 AS source_priority,latest_observation.updated_at AS selected_at,a.created_at AS asset_created_at
+    FROM plant_record p
+    JOIN LATERAL (
+      SELECT o.id,o.updated_at
+      FROM plant_observation o
+      WHERE o.plant_id=p.plant_id AND o.status='Approved'
+      ORDER BY o.updated_at DESC,o.id DESC
+      LIMIT 1
+    ) latest_observation ON true
+    JOIN plant_asset a ON a.plant_id=p.plant_id AND a.observation_id=latest_observation.id
+    WHERE p.species_id=s.species_id AND p.rbac_status='Approved'
+      AND a.content_type IN ('image/jpeg','image/png')
+  ) image
+  ORDER BY image.source_priority,image.selected_at DESC,image.asset_created_at,image.id
+  LIMIT 1
 ) preview ON true`;
 function fieldContent(body) {
   const allowed = [
@@ -229,6 +249,7 @@ function mountDomain(app, { pool, auth, allow }) {
       await pool.query(
         `SELECT p.plant_id,p.species_id,p.scientific_name,p.rbac_status,p.registered_subject,p.registered_at,
           p.qr_token,qr.qr_id,qr.status AS qr_status,
+          plant_preview.id AS plant_image_asset_id,
           COALESCE(approved_location_row.latitude,approved_location.latitude) AS latitude,
           COALESCE(approved_location_row.longitude,approved_location.longitude) AS longitude,
           COALESCE(approved_location_row.accuracy_m,approved_location.accuracy_m) AS accuracy_m,
@@ -241,6 +262,20 @@ function mountDomain(app, { pool, auth, allow }) {
             'family_name',f.family_name,'conservation_status',cs.status_name) END AS species_details
           FROM plant_record p JOIN species s ON s.species_id=p.species_id
           LEFT JOIN public.qr_code qr ON qr.plant_id=p.plant_id AND qr.qr_code=p.qr_token
+          LEFT JOIN LATERAL (
+            SELECT a.id
+            FROM plant_asset a
+            LEFT JOIN plant_observation image_observation
+              ON image_observation.id=a.observation_id
+              AND image_observation.plant_id=p.plant_id
+            WHERE a.plant_id=p.plant_id
+              AND a.content_type IN ('image/jpeg','image/png')
+              AND p.rbac_status='Approved'
+              AND ((a.observation_id IS NULL AND a.approved=TRUE)
+                OR (image_observation.id IS NOT NULL AND image_observation.status='Approved'))
+            ORDER BY a.created_at,a.id
+            LIMIT 1
+          ) plant_preview ON true
           LEFT JOIN genus g ON g.genus_id=s.genus_id LEFT JOIN family f ON f.family_id=g.family_id
           LEFT JOIN conservation_status cs ON cs.status_id=s.status_id
           LEFT JOIN LATERAL (
@@ -303,6 +338,7 @@ function mountDomain(app, { pool, auth, allow }) {
             species_id: r.species_id,
             status: r.rbac_status,
             registered_at: r.registered_at,
+            plant_image_asset_id: r.plant_image_asset_id == null ? null : String(r.plant_image_asset_id),
           },
     );
     const projectedPlants = req.user?.role === "Botanist"

@@ -37,6 +37,8 @@ export default function PlantDetail({
   const isVisitor = user?.role?.toLowerCase() === "visitor";
   const favourites = useVisitorFavourites(user);
   const [plant, setPlant] = useState(null);
+  const [failedHeroImageKey, setFailedHeroImageKey] = useState(null);
+  const [failedPhotoIds, setFailedPhotoIds] = useState([]);
   const locationDisplay = getPlantLocationDisplay(plant?.location, user?.role);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -135,6 +137,15 @@ export default function PlantDetail({
     genus: plant.genus,
   };
   const speciesImageSource = getSpeciesImageSource(selectedSpecies);
+  const plantPhotoSource = plant.photos?.[0] || null;
+  const imageSourceKey = (source) => typeof source === "number" ? `local:${source}` : source?.uri || null;
+  const heroImageSource = plantPhotoSource && imageSourceKey(plantPhotoSource) !== failedHeroImageKey
+    ? plantPhotoSource
+    : speciesImageSource && imageSourceKey(speciesImageSource) !== failedHeroImageKey
+      ? speciesImageSource
+      : null;
+  const plantPhotos = plant.photos || [];
+  const galleryPhotos = heroImageSource === plantPhotoSource ? plantPhotos.slice(1) : plantPhotos;
 
 
   // =====================================================
@@ -214,11 +225,12 @@ export default function PlantDetail({
   <View style={styles.heroGrid}>
     {/* Plant image */}
     <View style={styles.imageFrame}>
-      {speciesImageSource ? (
+      {heroImageSource ? (
         <Image
-          source={speciesImageSource}
+          source={heroImageSource}
           style={styles.plantImage}
           resizeMode="cover"
+          onError={() => setFailedHeroImageKey(imageSourceKey(heroImageSource))}
         />
       ) : (
         <View style={styles.imagePlaceholder}>
@@ -264,10 +276,12 @@ export default function PlantDetail({
   </View>
 </View>
 
-{plant.photos?.length > 0 && (
+{plant.photos?.length > 0 && galleryPhotos.length > 0 && (
   <View style={styles.plantPhotoGallery}>
-    {plant.photos.map((photo) => (
-      <Image key={photo.id} source={{ uri: photo.uri }} style={styles.plantPhoto} resizeMode="cover" />
+    {galleryPhotos.map((photo) => (
+      failedPhotoIds.includes(photo.id)
+        ? <View key={photo.id} style={[styles.plantPhoto, styles.plantPhotoPlaceholder]}><Text style={styles.photoPlaceholderText}>{t("plantDetail.fieldPhotographComingSoon")}</Text></View>
+        : <Image key={photo.id} source={{ uri: photo.uri, ...(photo.headers ? { headers: photo.headers } : {}) }} style={styles.plantPhoto} resizeMode="cover" onError={() => setFailedPhotoIds((ids) => ids.includes(photo.id) ? ids : [...ids, photo.id])} />
     ))}
   </View>
 )}
@@ -751,6 +765,8 @@ const styles = StyleSheet.create({
 
   plantPhotoGallery: { flexDirection: "row", flexWrap: "wrap", gap: 10, paddingHorizontal: 18, paddingVertical: 14, backgroundColor: "#FFFFFF" },
   plantPhoto: { width: 112, height: 112, borderRadius: 12, backgroundColor: "#E7EFE8" },
+  plantPhotoPlaceholder: { alignItems: "center", justifyContent: "center", padding: 8 },
+  photoPlaceholderText: { color: "#64756B", fontSize: 11, textAlign: "center" },
 
 
   // ===================================================

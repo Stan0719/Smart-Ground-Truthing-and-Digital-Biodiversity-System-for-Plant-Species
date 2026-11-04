@@ -135,6 +135,8 @@ test("Home image selection accepts explicitly mapped species images and rejects 
   const getSource = module.exports.getSpeciesImageSource;
   assert.deepEqual(getSource({ slug: "tropical-pitcher-plant", image: { uri: "https://example.invalid/verified.jpg" }, speciesImageVerified: true }, undefined, { preferVerifiedBackend: true, allowUnmappedRemote: false }), { uri: "https://example.invalid/verified.jpg" });
   assert.equal(getSource({ slug: "tropical-pitcher-plant", image: { uri: "https://example.invalid/unverified.jpg" } }, undefined, { preferVerifiedBackend: true, allowUnmappedRemote: false }), 73);
+  assert.equal(getSource({ slug: "api-species-26", scientificName: "Etlingera elatior" }, undefined, { allowUnmappedRemote: false }), 73);
+  assert.equal(getSource({ slug: "api-species-27", commonName: "Unmapped species", image: { uri: "https://example.invalid/unverified.jpg" } }, undefined, { allowUnmappedRemote: false }), null);
   assert.equal(getSource({ slug: "api-species-42", image: { uri: "https://example.invalid/unverified.jpg" } }, undefined, { preferVerifiedBackend: true, allowUnmappedRemote: false }), null);
 });
 

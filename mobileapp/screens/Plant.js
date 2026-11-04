@@ -636,12 +636,19 @@ function PlantCard({
   favourites,
 }) {
   useAppTranslation();
+  const [failedImageKey, setFailedImageKey] = useState(null);
 
   const species = plant.species || getSpeciesBySlug(plant.speciesSlug) || {
     name: plant.commonName,
     genus: plant.genus,
   };
-  const imageSource = getSpeciesImageSource(species);
+  const speciesImageSource = getSpeciesImageSource(species);
+  const sourceKey = (source) => typeof source === "number" ? `local:${source}` : source?.uri || null;
+  const imageSource = plant.plantImage && sourceKey(plant.plantImage) !== failedImageKey
+    ? plant.plantImage
+    : speciesImageSource && sourceKey(speciesImageSource) !== failedImageKey
+      ? speciesImageSource
+      : null;
   const isBotanist = user?.role?.toLowerCase() === "botanist";
 
   return (
@@ -659,12 +666,7 @@ function PlantCard({
             source={imageSource}
             style={styles.plantImage}
             resizeMode="cover"
-            onError={(error) => {
-              console.log(
-                "Plant image error:",
-                error.nativeEvent
-              );
-            }}
+            onError={() => setFailedImageKey(sourceKey(imageSource))}
           />
         ) : (
           <Text style={styles.plantIcon}>

@@ -30,6 +30,21 @@ const GRID_GAP = SCREEN_WIDTH < 500 ? 8 : 10;
 const SPECIES_CARD_WIDTH =
   (SCREEN_WIDTH - GRID_HORIZONTAL_PADDING * 2 - GRID_GAP) / 2;
 
+function SpeciesCardImage({ species }) {
+  const [failedImageKey, setFailedImageKey] = useState(null);
+  const source = getSpeciesImageSource(species);
+  const key = typeof source === "number" ? `local:${source}` : source?.uri || null;
+  if (!source || key === failedImageKey) {
+    return (
+      <View style={styles.imagePlaceholder}>
+        <Text style={styles.placeholderIcon}>🌿</Text>
+        <Text style={styles.placeholderText}>{t("species.imageComingSoon")}</Text>
+      </View>
+    );
+  }
+  return <Image source={source} style={styles.cardImage} resizeMode="cover" onError={() => setFailedImageKey(key)} />;
+}
+
 export default function Species({ navigation, user }) {
   useAppTranslation();
   const isBotanist = user?.role?.toLowerCase() === "botanist";
@@ -71,24 +86,12 @@ export default function Species({ navigation, user }) {
 
   const renderSpeciesCard = ({ item }) => {
     const plantCount = plantCounts?.[item.id] || 0;
-    const imageSource = getSpeciesImageSource(item);
 
 
     return (
       <View style={styles.card}>
         <View style={styles.imageWrapper}>
-          {imageSource ? (
-            <Image
-              source={imageSource}
-              style={styles.cardImage}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.imagePlaceholder}>
-              <Text style={styles.placeholderIcon}>🌿</Text>
-              <Text style={styles.placeholderText}>{t("species.imageComingSoon")}</Text>
-            </View>
-          )}
+          <SpeciesCardImage species={item} />
 
           <View style={styles.badgeContainer}>
             {!!item.family?.trim() && <Text style={styles.categoryBadge}>

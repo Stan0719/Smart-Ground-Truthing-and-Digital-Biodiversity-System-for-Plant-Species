@@ -40,6 +40,7 @@ export default function SpeciesDetail({
   const [selectedSpecies, setSelectedSpecies] = useState(
     route.params?.species || getSpeciesBySlug(slug) || null
   );
+  const [failedPrimaryImageKey, setFailedPrimaryImageKey] = useState(null);
   const [speciesPlants, setSpeciesPlants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -82,6 +83,7 @@ export default function SpeciesDetail({
   }, [loadSpeciesDetails]));
 
   const primaryImageSource = getSpeciesImageSource(selectedSpecies);
+  const primaryImageKey = typeof primaryImageSource === "number" ? `local:${primaryImageSource}` : primaryImageSource?.uri || null;
 
   if (!selectedSpecies) {
     return (
@@ -158,10 +160,11 @@ export default function SpeciesDetail({
 
         <View style={styles.heroImage}>
 
-          {primaryImageSource ? (
+          {primaryImageSource && primaryImageKey !== failedPrimaryImageKey ? (
             <Image
               source={primaryImageSource}
               style={styles.image}
+              onError={() => setFailedPrimaryImageKey(primaryImageKey)}
             />
           ) : (
             <View style={styles.placeholder}>

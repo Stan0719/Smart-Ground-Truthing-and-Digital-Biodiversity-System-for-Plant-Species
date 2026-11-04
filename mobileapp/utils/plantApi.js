@@ -164,6 +164,7 @@ export function mapBackendPlant(record, speciesById = new Map()) {
     genus: record.genus_name ?? record.genus ?? species?.genus ?? "",
     family: record.family_name ?? record.family ?? species?.family ?? "",
     currentStatus: record.rbac_status ?? record.status ?? record.current_status ?? record.currentStatus ?? "Not recorded",
+    plantImageAssetId: record.plant_image_asset_id == null ? null : String(record.plant_image_asset_id),
     latestApproved: {
       heightCm: record.height_cm ?? record.heightCm ?? null,
       healthStatus: record.health_status ?? record.healthStatus ?? "Not recorded",
@@ -193,7 +194,7 @@ export function mapBackendPlant(record, speciesById = new Map()) {
 
 export async function plantAssetSources(assets, accountId, { ownSubmission = false } = {}) {
   return faceSession.withToken(async (token, user) => {
-    if (String(user.id) !== String(accountId)) throw Error("Sign in with the correct account.");
+    if (accountId != null && String(user.id) !== String(accountId)) throw Error("Sign in with the correct account.");
     return assets.map((asset) => ({ uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(asset.id) + (ownSubmission ? "?scope=mine" : ""),
       headers: { Authorization: "Bearer " + token } }));
   });
@@ -210,9 +211,19 @@ export async function speciesRequestPhotoSources(requests, accountId) {
 export async function fetchPlantRecords(speciesCatalog = [], { scopeMine = false, ...options } = {}) {
   const payload = await getJson(`/api/plants${scopeMine ? "?scope=mine" : ""}`, options);
   const speciesById = new Map(speciesCatalog.map((species) => [String(species.id), species]));
-  return unwrapList(payload, ["plants", "data", "results"]).map((record) =>
+  const plants = unwrapList(payload, ["plants", "data", "results"]).map((record) =>
     mapBackendPlant(record, speciesById)
   );
+  const withPhotos = plants.filter((plant) => plant.plantImageAssetId);
+  if (!withPhotos.length) return plants;
+  const assets = withPhotos.map((plant) => ({ id: plant.plantImageAssetId }));
+  const sources = faceSession.hasSession()
+    ? await plantAssetSources(assets, options.accountId)
+    : assets.map((asset) => ({ uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(asset.id) }));
+  const sourceByPlantId = new Map(withPhotos.map((plant, index) => [plant.id, sources[index]]));
+  return plants.map((plant) => sourceByPlantId.has(plant.id)
+    ? { ...plant, plantImage: sourceByPlantId.get(plant.id) }
+    : plant);
 }
 
 export async function fetchPlantDetail(plantId, { includeObservations = false, scopeMine = false, accountId } = {}) {
