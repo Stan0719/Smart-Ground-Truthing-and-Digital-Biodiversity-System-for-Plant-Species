@@ -20,6 +20,7 @@ import QRCode from "react-native-qrcode-svg";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import QRRefreshButton from "../components/QRRefreshButton";
 import RefreshButton from "../components/RefreshButton";
+import { fieldFormStyles } from "../components/fieldFormStyles";
 import { plantApi, fetchSpeciesCatalog } from "../utils/plantApi";
 import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation";
 import { useFocusEffect } from "@react-navigation/native";
@@ -1753,47 +1754,23 @@ const styles = StyleSheet.create({
   // MAIN
   // ===================================================
 
-  container: {
-    flex: 1,
-    backgroundColor: "#F5F9F3",
-  },
+  container: fieldFormStyles.container,
 
 
-  scrollView: {
-    flex: 1,
-  },
+  scrollView: fieldFormStyles.scrollView,
 
 
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 50,
-  },
+  scrollContent: fieldFormStyles.scrollContent,
 
 
   // ===================================================
   // CARD
   // ===================================================
 
-  card: {
-    marginBottom: 18,
-    padding: 18,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#E0EADF",
-    elevation: 2,
-    shadowColor: "#234B3A",
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-  },
+  card: fieldFormStyles.card,
 
 
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#234B3A",
-    marginBottom: 6,
-  },
+  sectionTitle: fieldFormStyles.sectionTitle,
 
 
   sectionDescription: {
@@ -1808,38 +1785,13 @@ const styles = StyleSheet.create({
   // FORM
   // ===================================================
 
-  label: {
-    marginTop: 15,
-    marginBottom: 7,
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#234B3A",
-  },
+  label: fieldFormStyles.label,
 
 
-  input: {
-    minHeight: 48,
-    paddingHorizontal: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#DCE8D6",
-    backgroundColor: "#FAFCF9",
-    color: "#234B3A",
-    fontSize: 14,
-  },
+  input: fieldFormStyles.input,
 
 
-  textArea: {
-    minHeight: 110,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#DCE8D6",
-    backgroundColor: "#FAFCF9",
-    color: "#234B3A",
-    fontSize: 14,
-  },
+  textArea: fieldFormStyles.textArea,
 
   // ===================================================
   // CATEGORY
@@ -2244,21 +2196,10 @@ const styles = StyleSheet.create({
   // LOCATION
   // ===================================================
 
-  locationButton: {
-    marginTop: 12,
-    minHeight: 48,
-    borderRadius: 12,
-    backgroundColor: "#50B498",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  locationButton: fieldFormStyles.locationButton,
 
 
-  locationButtonText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "700",
-  },
+  locationButtonText: fieldFormStyles.locationButtonText,
 
 
   // ===================================================
@@ -2385,30 +2326,13 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  photoButtonRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 5,
-  },
+  photoButtonRow: fieldFormStyles.photoButtonRow,
 
 
-  photoButton: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 12,
-    backgroundColor: "#EAF6E7",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#D5E8D1",
-  },
+  photoButton: fieldFormStyles.photoButton,
 
 
-  photoButtonText: {
-    color: "#468585",
-    fontSize: 13,
-    fontWeight: "700",
-  },
+  photoButtonText: fieldFormStyles.photoButtonText,
 
 
   photoList: {
@@ -2590,20 +2514,10 @@ const styles = StyleSheet.create({
   // SUBMIT
   // ===================================================
 
-  submitButton: {
-    minHeight: 52,
-    borderRadius: 14,
-    backgroundColor: "#468585",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  submitButton: fieldFormStyles.submitButton,
 
 
-  submitButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "700",
-  },
+  submitButtonText: fieldFormStyles.submitButtonText,
 
 
   // ===================================================

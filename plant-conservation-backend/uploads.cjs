@@ -115,6 +115,24 @@ function mountUploads(app, { pool, allow }) {
     },
   );
   app.get("/api/assets", allow("plants.public.read"), async (req, res) => {
+    if (req.query.plant_id !== undefined) {
+      const plantId = id(String(req.query.plant_id));
+      const rows = (await pool.query(
+        `SELECT a.id,a.content_type FROM plant_asset a
+         JOIN plant_record p ON p.plant_id=a.plant_id
+         LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
+         WHERE a.plant_id=$1 AND p.rbac_status='Approved'
+           AND a.content_type IN ('image/jpeg','image/png')
+           AND ((a.observation_id IS NULL AND a.approved=TRUE) OR EXISTS (
+             SELECT 1 FROM plant_observation o
+             WHERE o.id=a.observation_id AND o.plant_id=a.plant_id AND o.status='Approved'
+           ))
+           AND COALESCE(v.visibility,'protected') = ANY($2::text[])
+         ORDER BY a.created_at,a.id`,
+        [plantId, visibilityFor(req.user)],
+      )).rows;
+      return res.json({ assets: rows });
+    }
     const speciesId = id(String(req.query.species_id || ""));
     const rows = (
       await pool.query(
@@ -131,7 +149,12 @@ function mountUploads(app, { pool, allow }) {
   app.get("/api/assets/:id", allow("plants.public.read"), async (req, res) => {
     const row = (
       await pool.query(
-        "SELECT a.*,p.species_id AS plant_species,p.registered_subject,p.rbac_status FROM plant_asset a LEFT JOIN plant_record p ON p.plant_id=a.plant_id WHERE a.id=$1",
+        `SELECT a.*,p.species_id AS plant_species,p.registered_subject,p.rbac_status,
+          o.status AS observation_status,o.plant_id AS observation_plant_id
+         FROM plant_asset a
+         LEFT JOIN plant_record p ON p.plant_id=a.plant_id
+         LEFT JOIN plant_observation o ON o.id=a.observation_id AND o.plant_id=a.plant_id
+         WHERE a.id=$1`,
         [req.params.id],
       )
     ).rows[0];
@@ -146,12 +169,18 @@ function mountUploads(app, { pool, allow }) {
       row.rbac_status !== "Approved" && classification?.rbac_data?.submittedBy === owner &&
       ["Pending Review", "Rejected", "Correction Required"].includes(classification?.rbac_data?.approvalStatus));
     const ownSubmissionPhoto = req.query.scope === "mine" && permitted(req.user, "plants.create") &&
-      row.plant_id && row.owner_subject === owner && row.registered_subject === owner;
+      row.plant_id && row.observation_id && row.observation_plant_id != null &&
+      row.owner_subject === owner && row.registered_subject === owner;
+    const approvedPlantPhoto = row.plant_id
+      ? row.rbac_status === "Approved" && (row.observation_id
+        ? row.observation_plant_id != null && row.observation_status === "Approved"
+        : row.approved)
+      : row.approved;
     if (!visibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto)
       fail(404, "Asset unavailable.");
     if (
       row.plant_id &&
-      (!row.approved || row.rbac_status !== "Approved") &&
+      !approvedPlantPhoto &&
       row.owner_subject !== (req.user ? subject(req.user) : "") &&
       req.user?.role !== "Conservation Officer"
     )

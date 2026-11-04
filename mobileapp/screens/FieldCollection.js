@@ -1,13 +1,16 @@
 import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldLabel } from "../translations/i18n";
 import { canCollectDrafts } from "../utils/rbac";
 import React, { useEffect, useState, useRef } from "react";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import {
+  StyleSheet,
   ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
   View,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
@@ -16,24 +19,11 @@ import { faceSession } from "../utils/faceSession";
 import { saveDraft, readDrafts } from "../utils/fieldStorage";
 import { syncDrafts } from "../utils/fieldSync";
 import { createFieldCapture } from "../utils/fieldCapture";
+import { fieldFormStyles } from "../components/fieldFormStyles";
 const fieldCapture = createFieldCapture({
   imagePicker: ImagePicker,
   location: Location,
 });
-const input = {
-  borderWidth: 1,
-  borderColor: "#b5cbbd",
-  padding: 12,
-  marginVertical: 6,
-  borderRadius: 8,
-  backgroundColor: "white",
-};
-const button = {
-  padding: 14,
-  marginVertical: 6,
-  backgroundColor: "#d8eddf",
-  borderRadius: 8,
-};
 export default function FieldCollection({ route, navigation, onLogout }) {
   useAppTranslation();
   const [user, setUser] = useState(null),
@@ -45,7 +35,9 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false),
     [photos, setPhotos] = useState([]),
-    [qr, setQr] = useState("");
+    [qr, setQr] = useState(""),
+    [plantRecord, setPlantRecord] = useState(null),
+    [locating, setLocating] = useState(false);
   const [form, setForm] = useState({
     species_id: "",
     plant_id: String(route.params?.plantId || ""),
@@ -93,6 +85,15 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       ]);
       setSpecies(catalog.species);
       setRows(observations.observations);
+      if (mode === "AddObservation" && form.plant_id) {
+        setPlantRecord(null);
+        try {
+          const result = await plantApi(`/plants/${encodeURIComponent(form.plant_id)}`);
+          setPlantRecord(result.plant || null);
+        } catch {
+          // Keep the assigned plant ID visible when the details endpoint is unavailable.
+        }
+      }
     } catch (e) {
       setUser(null);
       setDrafts([]);
@@ -156,11 +157,14 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     };
   }, [user?.id]);
   async function locate() {
+    setLocating(true);
     try {
       const coordinates = await fieldCapture.coordinates();
       setForm((old) => ({ ...old, ...coordinates }));
     } catch (e) {
       setError(e.message);
+    } finally {
+      setLocating(false);
     }
   }
   async function capture(camera) {
@@ -328,15 +332,10 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     }
   }
   return (
-    <ScrollView
-      contentContainerStyle={{
-        padding: 20,
-        backgroundColor: "#f2f8ef",
-        flexGrow: 1,
-      }}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Text style={{ fontSize: 25, color: "#234b3a" }}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}
+      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+      <View style={styles.page}>
+      <Text style={styles.pageTitle}>
         {dashboard
           ? t("fieldCollection.botanistDashboard")
           : mode === "PlantQRCode"
@@ -347,7 +346,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
                 ? t("fieldCollection.registerPlant")
                 : t("fieldCollection.addObservation")}
       </Text>
-      <TouchableOpacity style={button} onPress={load}>
+      <TouchableOpacity style={styles.secondaryButton} onPress={load} accessibilityRole="button">
         <Text>{t("common.refresh")}</Text>
       </TouchableOpacity>
       {!!error && (
@@ -359,18 +358,18 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       {user && dashboard && (
         <>
           {onLogout && (
-            <TouchableOpacity style={button} onPress={onLogout}>
+            <TouchableOpacity style={styles.secondaryButton} onPress={onLogout}>
               <Text>{t("fieldCollection.signOut")}</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={button}
+            style={styles.secondaryButton}
             onPress={() => navigation.navigate("AddPlant", { botanist: user })}
           >
             <Text>{t("fieldCollection.registerNewPlant")}</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={button}
+            style={styles.secondaryButton}
             disabled={busy}
             onPress={synchronize}
           >
@@ -383,7 +382,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
         drafts.map((draft) => (
           <TouchableOpacity
             key={draft.client_key}
-            style={button}
+            style={styles.secondaryButton}
             onPress={() =>
               navigation.navigate(
                 draft.method === "PATCH"
@@ -402,101 +401,110 @@ export default function FieldCollection({ route, navigation, onLogout }) {
         ))}
       {user && !dashboard && mode !== "PlantQRCode" && (
         <>
-          <Text>{t("fieldCollection.speciesReference")}</Text>
-          {user.offline && newPlant && (
-            <TextInput
-              style={input}
-              accessibilityLabel={t("fieldCollection.speciesIdFromYourFieldReference")}
-              placeholder={t("fieldCollection.knownSpeciesId")}
-              value={form.species_id}
-              onChangeText={(value) => change("species_id", value)}
-            />
+          <View style={styles.card}>
+          {mode === "AddObservation" ? (
+            <>
+              <Text style={styles.sectionTitle}>{t("fieldCollection.plantSpeciesSection")}</Text>
+              <View style={styles.plantSummary}>
+                <Text style={styles.summaryLabel}>{t("fieldCollection.plant")}{form.plant_id || "—"}</Text>
+                {!!(plantRecord?.scientific_name || plantRecord?.species_details?.scientific_name) && (
+                  <Text style={styles.summaryName}>{plantRecord.scientific_name || plantRecord.species_details.scientific_name}</Text>
+                )}
+                {!!(plantRecord?.common_name || plantRecord?.species_details?.common_name) && (
+                  <Text style={styles.summaryCommon}>{plantRecord.common_name || plantRecord.species_details.common_name}</Text>
+                )}
+                {!!(plantRecord?.status || plantRecord?.rbac_status) && (
+                  <Text style={styles.summaryStatus}>{translateLabel(plantRecord.status || plantRecord.rbac_status)}</Text>
+                )}
+              </View>
+              <Text style={styles.label}>{t("fieldCollection.approvedPlantId")}</Text>
+              <TextInput style={styles.input} accessibilityLabel={t("fieldCollection.approvedPlantId")}
+                placeholder={t("fieldCollection.approvedPlantId")} value={form.plant_id}
+                placeholderTextColor="#9AA7A0" onChangeText={(v) => { change("plant_id", v); setPlantRecord(null); }}
+                onEndEditing={async () => {
+                  if (!/^\d+$/.test(form.plant_id)) return;
+                  try {
+                    const result = await plantApi(`/plants/${encodeURIComponent(form.plant_id)}`);
+                    setPlantRecord(result.plant || null);
+                  } catch {
+                    setPlantRecord(null);
+                  }
+                }} keyboardType="number-pad" />
+            </>
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>{t("fieldCollection.plantSpeciesSection")}</Text>
+              <Text style={styles.label}>{t("fieldCollection.speciesReference")}</Text>
+              {user.offline && newPlant && (
+                <TextInput style={styles.input}
+                  accessibilityLabel={t("fieldCollection.speciesIdFromYourFieldReference")}
+                  placeholder={t("fieldCollection.knownSpeciesId")} value={form.species_id}
+                  onChangeText={(value) => change("species_id", value)} />
+              )}
+              {species.map((s) => (
+                <TouchableOpacity key={s.species_id} onPress={() => change("species_id", s.species_id)}
+                  style={[styles.choiceButton, String(form.species_id) === s.species_id && styles.selectedChoice]}
+                  accessibilityRole="button" accessibilityState={{ selected: String(form.species_id) === s.species_id }}>
+                  <Text>{String(form.species_id) === s.species_id ? "✓ " : ""}{s.scientific_name} · {s.common_name}</Text>
+                </TouchableOpacity>
+              ))}
+            </>
           )}
-          {species.map((s) => (
-            <TouchableOpacity
-              key={s.species_id}
-              onPress={() => change("species_id", s.species_id)}
-              style={button}
-            >
-              <Text>
-                {String(form.species_id) === s.species_id ? "✓ " : ""}
-                {s.scientific_name} — {s.common_name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-          {mode === "AddObservation" && (
-            <TextInput
-              style={input}
-              accessibilityLabel={t("fieldCollection.approvedPlantId")}
-              placeholder={t("fieldCollection.approvedPlantId")}
-              value={form.plant_id}
-              onChangeText={(v) => change("plant_id", v)}
-            />
-          )}
-          {[
-            "heightCm",
-            "healthStatus",
-            "lifeStage",
-            "morphology",
-            "taxonomy",
-            "notes",
-            "latitude",
-            "longitude",
-            "accuracy_m",
-          ].map((field) => (
-            <View key={field}>
-              <Text>{translateFieldLabel(field)}</Text>
-              <TextInput
-                accessibilityLabel={translateFieldLabel(field)}
-                style={input}
-                multiline={["notes", "morphology"].includes(field)}
-                value={form[field]}
-                onChangeText={(v) => change(field, v)}
-              />
+          </View>
+          <View style={styles.card}>
+          <Text style={styles.sectionTitle}>{t("fieldCollection.observationSection")}</Text>
+          {["heightCm", "healthStatus", "lifeStage", "morphology", "taxonomy", "notes"].map((field) => (
+            <View key={field} style={styles.fieldGroup}>
+              <Text style={styles.label}>{translateFieldLabel(field)}</Text>
+              <TextInput accessibilityLabel={translateFieldLabel(field)} style={[styles.input, ["notes", "morphology"].includes(field) && styles.multiline]}
+                multiline={["notes", "morphology"].includes(field)} value={form[field]} onChangeText={(v) => change(field, v)} />
             </View>
           ))}
-          <TouchableOpacity style={button} onPress={locate}>
-            <Text>{t("fieldCollection.recordCurrentGps")}</Text>
+          </View>
+          <View style={styles.card}>
+          <Text style={styles.sectionTitle}>{t("fieldCollection.locationSection")}</Text>
+          {["latitude", "longitude", "accuracy_m"].map((field) => (
+            <View key={field} style={styles.fieldGroup}>
+              <Text style={styles.label}>{translateFieldLabel(field)}</Text>
+              <TextInput accessibilityLabel={translateFieldLabel(field)} style={styles.input} value={form[field]} onChangeText={(v) => change(field, v)} keyboardType="decimal-pad" />
+            </View>
+          ))}
+          <TouchableOpacity style={styles.locationButton} onPress={locate} disabled={locating} accessibilityRole="button" accessibilityState={{ disabled: locating }}>
+            {locating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.locationButtonText}>{t("addPlant.getCurrentLocation")}</Text>}
           </TouchableOpacity>
-          <TouchableOpacity style={button} onPress={() => capture(true)}>
-            <Text>{t("fieldCollection.capturePhoto")}</Text>
+          </View>
+          <View style={styles.card}>
+          <Text style={styles.sectionTitle}>{t("fieldCollection.photosSection")}</Text>
+          <View style={styles.actionRow}>
+          <TouchableOpacity style={[styles.photoButton, styles.actionFlex]} onPress={() => capture(true)} accessibilityRole="button">
+            <Text style={styles.photoButtonText}>{t("addPlant.camera")}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={button} onPress={() => capture(false)}>
-            <Text>{t("fieldCollection.attachPhoto")}</Text>
+          <TouchableOpacity style={[styles.photoButton, styles.actionFlex]} onPress={() => capture(false)} accessibilityRole="button">
+            <Text style={styles.photoButtonText}>{t("addPlant.gallery")}</Text>
           </TouchableOpacity>
+          </View>
+          <View style={styles.photoList}>
           {photos.map((p) => (
-            <View key={p.client_key}>
-              <Image
-                source={{ uri: p.uri }}
-                style={{ width: 120, height: 100 }}
-              />
-              <TouchableOpacity
-                style={button}
-                accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
-                onPress={() =>
-                  setPhotos((old) =>
-                    old.filter((photo) => photo.client_key !== p.client_key),
-                  )
-                }
-              >
-                <Text>{t("fieldCollection.removePhoto")}</Text>
+            <View key={p.client_key} style={styles.photoItem}>
+              <Image source={{ uri: p.uri }} style={styles.photoPreview} resizeMode="cover" />
+              <TouchableOpacity style={styles.removePhotoButton}
+                accessibilityRole="button" accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
+                onPress={() => setPhotos((old) => old.filter((photo) => photo.client_key !== p.client_key))}>
+                <Ionicons name="close" size={18} color="#C85C5C" />
               </TouchableOpacity>
             </View>
           ))}
-          <TouchableOpacity
-            style={button}
-            disabled={busy}
-            onPress={() => save(false)}
-          >
-            <Text>{t("fieldCollection.saveOfflineDraft")}</Text>
+          </View>
+          </View>
+          <View style={styles.card}>
+          <Text style={styles.sectionTitle}>{t("fieldCollection.submissionSection")}</Text>
+          <TouchableOpacity style={[styles.primaryButton, busy && styles.disabledButton]} disabled={busy} onPress={() => save(false)} accessibilityRole="button" accessibilityState={{ disabled: busy }}>
+            <Text style={styles.primaryButtonText}>{t("fieldCollection.saveOfflineDraft")}</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={button}
-            disabled={busy}
-            onPress={() => save(true)}
-          >
-            <Text>{t("fieldCollection.submitAndSynchronize")}</Text>
+          <TouchableOpacity style={[styles.primaryButton, styles.submitButton, busy && styles.disabledButton]} disabled={busy} onPress={() => save(true)} accessibilityRole="button" accessibilityState={{ disabled: busy }}>
+            <Text style={styles.primaryButtonText}>{t("fieldCollection.submitAndSynchronize")}</Text>
           </TouchableOpacity>
+          </View>
         </>
       )}
       {user &&
@@ -504,19 +512,19 @@ export default function FieldCollection({ route, navigation, onLogout }) {
         rows.map((row) => (
           <View
             key={row.id}
-            style={{ padding: 14, marginVertical: 8, backgroundColor: "white" }}
+            style={styles.card}
           >
             <Text>{t("fieldCollection.plant")}{row.plant_id} · {translateLabel(row.status)}
             </Text>
             <Text>{row.content.morphology}</Text>
-            <TouchableOpacity style={button} onPress={() => showQr(row)}>
+            <TouchableOpacity style={styles.secondaryButton} onPress={() => showQr(row)}>
               <Text>{t("fieldCollection.viewPersistentQrCode")}</Text>
             </TouchableOpacity>
             {["Draft", "Correction Required", "Rejected"].includes(
               row.status,
             ) && (
               <TouchableOpacity
-                style={button}
+                style={styles.secondaryButton}
                 onPress={() => {
                   setForm((old) => ({
                     ...old,
@@ -534,7 +542,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
               </TouchableOpacity>
             )}
             <TouchableOpacity
-              style={button}
+              style={styles.secondaryButton}
               onPress={() =>
                 navigation.navigate("AddObservation", { plantId: row.plant_id })
               }
@@ -544,6 +552,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           </View>
         ))}
       {!!qr && <QrDisplay value={qr} />}
+      </View>
     </ScrollView>
   );
 }
@@ -557,3 +566,39 @@ function QrDisplay({ value }) {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: fieldFormStyles.container,
+  scrollContent: { flexGrow: 1, alignItems: "center", paddingHorizontal: 16, paddingTop: 18, paddingBottom: 36 },
+  page: { width: "100%", maxWidth: 900, gap: 12 },
+  pageTitle: { fontSize: 27, fontWeight: "700", color: "#234B3A", marginBottom: 2 },
+  card: fieldFormStyles.card,
+  sectionTitle: fieldFormStyles.sectionTitle,
+  label: fieldFormStyles.label,
+  fieldGroup: { marginBottom: 7 },
+  input: [fieldFormStyles.input, { width: "100%", marginTop: 6 }],
+  multiline: fieldFormStyles.textArea,
+  choiceButton: { minHeight: 48, justifyContent: "center", paddingHorizontal: 14, paddingVertical: 11, marginTop: 7, borderRadius: 11, backgroundColor: "#f3f8f4", borderWidth: 1, borderColor: "#e0ebe3" },
+  selectedChoice: { backgroundColor: "#e4f2e9", borderColor: "#468585" },
+  secondaryButton: { minHeight: 48, justifyContent: "center", alignItems: "center", paddingHorizontal: 16, paddingVertical: 11, marginVertical: 4, borderRadius: 12, backgroundColor: "#e8f2eb", borderWidth: 1, borderColor: "#d4e5d9" },
+  secondaryButtonText: { color: "#2b5948", fontWeight: "600", fontSize: 15, textAlign: "center" },
+  primaryButton: [fieldFormStyles.submitButton, { marginTop: 8, paddingHorizontal: 18, paddingVertical: 13 }],
+  submitButton: { backgroundColor: "#234B3A" },
+  disabledButton: { opacity: 0.55 },
+  primaryButtonText: [fieldFormStyles.submitButtonText, { fontSize: 16, textAlign: "center" }],
+  locationButton: fieldFormStyles.locationButton,
+  locationButtonText: fieldFormStyles.locationButtonText,
+  photoButton: [fieldFormStyles.photoButton, { flexDirection: "row", gap: 7 }],
+  photoButtonText: fieldFormStyles.photoButtonText,
+  actionRow: fieldFormStyles.photoButtonRow,
+  actionFlex: { flex: 1 },
+  photoList: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 14 },
+  photoItem: { width: 112, position: "relative" },
+  photoPreview: fieldFormStyles.photoPreview,
+  removePhotoButton: fieldFormStyles.removePhotoButton,
+  plantSummary: { padding: 14, borderRadius: 12, backgroundColor: "#F5F9F3", borderWidth: 1, borderColor: "#E0EADF", marginVertical: 6 },
+  summaryLabel: { color: "#234B3A", fontSize: 15, fontWeight: "700" },
+  summaryName: { color: "#234B3A", fontSize: 17, fontWeight: "700", marginTop: 5 },
+  summaryCommon: { color: "#6D7F75", fontSize: 14, marginTop: 2 },
+  summaryStatus: { alignSelf: "flex-start", marginTop: 8, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, overflow: "hidden", color: "#2C6956", backgroundColor: "#EAF6E7", fontSize: 12, fontWeight: "700" },
+});

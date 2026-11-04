@@ -20,7 +20,7 @@ export default function BotanistNotifications({ navigation, user }) {
     actionRunning.current = true;
     setBusy("all");
     try {
-      await botanistNotifications.markRead(accountId, items.filter((item) => !item.read).map((item) => item.id));
+      await botanistNotifications.markRead(accountId, [], { all: true });
       await refresh(false);
     } catch (cause) {
       Alert.alert(t("botanistNotifications.couldNotMarkNotificationsRead"), translateUIMessage(cause.message));
