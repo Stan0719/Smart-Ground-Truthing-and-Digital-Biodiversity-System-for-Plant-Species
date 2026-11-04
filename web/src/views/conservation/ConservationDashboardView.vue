@@ -1,55 +1,319 @@
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import BiodiversityMapPreview from '../../components/conservation/BiodiversityMapPreview.vue'
-import { conservationStore, speciesForPlant, speciesRequestForPlant } from '../../data/conservation'
+import { formatObservationId } from '../../utils/observationId'
+import { formatPlantId } from '../../utils/plantId'
+
+interface ApiObservation {
+  id: string | number
+  plant_id: string | number
+  owner_subject?: string | null
+  status?: string | null
+  scientific_name?: string | null
+  common_name?: string | null
+}
+
+interface ApiPlant {
+  plant_id: string | number
+  species_id: string | number
+  registered_subject?: string | null
+  rbac_status?: string | null
+  registered_at?: string | null
+  latitude?: string | number | null
+  longitude?: string | number | null
+  observed_at?: string | null
+}
+
+interface ApiSpecies {
+  species_id: string | number
+  scientific_name?: string | null
+  common_name?: string | null
+  conservation_status?: string | null
+}
+
+interface ApiAlert {
+  alert_id: string | number
+  plant_id: string | number
+  alert_type: string
+  severity: string
+  status: string
+  created_at: string
+}
+
 const router = useRouter()
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
+const today = new Date()
+const dateLocale = computed(() => (locale.value === 'ms' ? 'ms-MY' : locale.value))
+const currentDate = computed(() =>
+  new Intl.DateTimeFormat(dateLocale.value, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(today),
+)
+const currentDateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+const dt = (value?: string | null) => {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isFinite(date.getTime())
+    ? new Intl.DateTimeFormat(dateLocale.value, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(date)
+    : '—'
+}
 const go = (name: string, query?: Record<string, string>) => router.push({ name, query })
-const summaries = [
-  ['plantSpecies', conservationStore.species.length, 'digitalKnowledgeBase'],
-  ['plantRecords', conservationStore.plants.length, 'registeredPlants'],
+
+const observations = ref<ApiObservation[]>([])
+const plants = ref<ApiPlant[]>([])
+const species = ref<ApiSpecies[]>([])
+const alerts = ref<ApiAlert[]>([])
+const observationsLoading = ref(true)
+const plantsLoading = ref(true)
+const speciesLoading = ref(true)
+const alertsLoading = ref(true)
+const observationsError = ref('')
+const plantsError = ref('')
+const speciesError = ref('')
+const alertsError = ref('')
+
+const loadJson = async <T,>(url: string, collection: string): Promise<T[]> => {
+  let response: Response
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(15000) })
+  } catch {
+    throw new Error('Dashboard data unavailable. Please try again later.')
+  }
+  let result: Record<string, unknown>
+  try {
+    const body: unknown = await response.json()
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error()
+    result = body as Record<string, unknown>
+  } catch {
+    throw new Error('Dashboard data unavailable: invalid server response.')
+  }
+  if (!response.ok) {
+    const message = [result.message, result.error].find(
+      (value): value is string => typeof value === 'string' && Boolean(value.trim()),
+    )
+    throw new Error(message || 'Dashboard data unavailable. Please try again later.')
+  }
+  if (
+    !Array.isArray(result[collection]) ||
+    result[collection].some((item) => !item || typeof item !== 'object' || Array.isArray(item))
+  )
+    throw new Error('Dashboard data unavailable: invalid server response.')
+  return result[collection] as T[]
+}
+
+const loadObservations = async () => {
+  observationsLoading.value = true
+  observationsError.value = ''
+  try {
+    observations.value = await loadJson<ApiObservation>('/api/observations', 'observations')
+  } catch (error) {
+    observations.value = []
+    observationsError.value = error instanceof Error ? error.message : 'Observations unavailable.'
+  } finally {
+    observationsLoading.value = false
+  }
+}
+const loadPlants = async () => {
+  plantsLoading.value = true
+  plantsError.value = ''
+  try {
+    plants.value = await loadJson<ApiPlant>('/api/plants', 'plants')
+  } catch (error) {
+    plants.value = []
+    plantsError.value = error instanceof Error ? error.message : 'Plant records unavailable.'
+  } finally {
+    plantsLoading.value = false
+  }
+}
+const loadSpecies = async () => {
+  speciesLoading.value = true
+  speciesError.value = ''
+  try {
+    species.value = await loadJson<ApiSpecies>('/api/species?scope=scientific', 'species')
+  } catch (error) {
+    species.value = []
+    speciesError.value = error instanceof Error ? error.message : 'Species data unavailable.'
+  } finally {
+    speciesLoading.value = false
+  }
+}
+const loadAlerts = async () => {
+  alertsLoading.value = true
+  alertsError.value = ''
+  try {
+    alerts.value = await loadJson<ApiAlert>('/api/iot/alerts', 'alerts')
+  } catch (error) {
+    alerts.value = []
+    alertsError.value = error instanceof Error ? error.message : 'Threat alerts unavailable.'
+  } finally {
+    alertsLoading.value = false
+  }
+}
+
+onMounted(() => {
+  void Promise.allSettled([loadObservations(), loadPlants(), loadSpecies(), loadAlerts()])
+})
+
+const effectiveObservationStatus = (observation: ApiObservation) =>
+  typeof observation.status === 'string' ? observation.status.trim() : ''
+// Preserve the existing review-required grouping, including correction/flagged records.
+const requiresReview = (observation: ApiObservation) => {
+  const status = effectiveObservationStatus(observation).toLowerCase().replace(/[_-]+/g, ' ')
+  return ['pending', 'pending review', 'correction required', 'flagged'].includes(status)
+}
+const pending = computed(() => observations.value.filter(requiresReview).slice(0, 4))
+const timestamp = (value?: string | null) => {
+  const parsed = value ? Date.parse(value) : NaN
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
+}
+// Most recently registered among the loaded records; missing dates sort last.
+const recentPlants = computed(() =>
+  [...plants.value]
+    .sort((a, b) => timestamp(b.registered_at) - timestamp(a.registered_at))
+    .slice(0, 4),
+)
+const speciesById = computed(
+  () => new Map(species.value.map((item) => [String(item.species_id), item])),
+)
+const speciesForPlant = (plant: ApiPlant) => speciesById.value.get(String(plant.species_id))
+const recentAlerts = computed(() =>
+  [...alerts.value]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 3),
+)
+const mapPlants = computed(() =>
+  plants.value.flatMap((plant) => {
+    // This overview represents approved biodiversity records, not the review queue.
+    if (normalizeStatus(plant.rbac_status) !== 'approved') return []
+    const id = formatPlantId(plant.plant_id)
+    if (
+      plant.latitude === null ||
+      plant.latitude === undefined ||
+      plant.longitude === null ||
+      plant.longitude === undefined ||
+      String(plant.latitude).trim() === '' ||
+      String(plant.longitude).trim() === ''
+    )
+      return []
+    const latitude = Number(plant.latitude)
+    const longitude = Number(plant.longitude)
+    if (
+      !id ||
+      !Number.isFinite(latitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      !Number.isFinite(longitude) ||
+      longitude < -180 ||
+      longitude > 180
+    )
+      return []
+    return [
+      {
+        id,
+        latitude,
+        longitude,
+        scientificName: speciesForPlant(plant)?.scientific_name || '',
+        commonName: speciesForPlant(plant)?.common_name || '',
+      },
+    ]
+  }),
+)
+
+const normalizeStatus = (value?: string | null) =>
+  (typeof value === 'string' ? value : '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+const endangeredSpeciesCount = computed(
+  () =>
+    species.value.filter((item) => normalizeStatus(item.conservation_status).includes('endangered'))
+      .length,
+)
+const activeAlertCount = computed(
+  () => alerts.value.filter((alert) => normalizeStatus(alert.status) !== 'resolved').length,
+)
+const summaries = computed(() => [
+  [
+    'plantSpecies',
+    speciesLoading.value ? '—' : speciesError.value ? '—' : species.value.length,
+    'digitalKnowledgeBase',
+  ],
+  [
+    'plantRecords',
+    plantsLoading.value ? '—' : plantsError.value ? '—' : plants.value.length,
+    'registeredPlants',
+  ],
   [
     'pendingReviews',
-    conservationStore.observations.filter((o) => o.status === 'Pending Review').length,
+    observationsLoading.value
+      ? '—'
+      : observationsError.value
+        ? '—'
+        : observations.value.filter(requiresReview).length,
     'requiresVerification',
   ],
   [
     'endangeredSpecies',
-    conservationStore.species.filter((s) => s.status.includes('Endangered')).length,
+    speciesLoading.value ? '—' : speciesError.value ? '—' : endangeredSpeciesCount.value,
     'underMonitoring',
   ],
   [
     'activeThreats',
-    conservationStore.alerts.filter((a) => a.status !== 'Resolved').length,
+    alertsLoading.value ? '—' : alertsError.value ? '—' : activeAlertCount.value,
     'needsAttention',
   ],
-  ['recentObservations', conservationStore.observations.length, 'currentDataset'],
+  [
+    'recentObservations',
+    observationsLoading.value ? '—' : observationsError.value ? '—' : observations.value.length,
+    'currentDataset',
+  ],
+])
+
+const biodiversityStatuses = [
+  'Not Assessed',
+  'Least Concern',
+  'Near Threatened',
+  'Vulnerable',
+  'Endangered',
+  'Critically Endangered',
 ]
-const pending = conservationStore.observations
-  .filter((o) => o.status === 'Pending Review')
-  .slice(0, 4)
-const translatedScientificName = (id: string, fallback: string) => {
-  const key = `conservationSpecies.scientific.${id}`
-  return te(key) ? t(key) : fallback
-}
-const speciesLabel = (plantId: string) => {
-  const officialSpecies = speciesForPlant(plantId)
-  if (officialSpecies)
-    return translatedScientificName(officialSpecies.id, officialSpecies.scientificName)
-  const request = speciesRequestForPlant(plantId)
-  const proposedName = request
-    ? translatedScientificName('proposedShoreaNiahensis', request.proposedScientificName)
-    : ''
-  return request
-    ? t('conservationDashboard.proposedSpecies', { name: proposedName })
-    : t('conservationDashboard.speciesUnavailable')
-}
+const statusCount = (status: string) =>
+  species.value.filter(
+    (item) => normalizeStatus(item.conservation_status) === normalizeStatus(status),
+  ).length
 const dataLabel = (value: string) => {
   const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
   return te(key) ? t(key) : value
 }
+const valueOrDash = (value: string | number | null | undefined) =>
+  value === null || value === undefined || value === '' ? '—' : String(value)
+// Numeric legacy IDs retain their presentation; current UUIDs stay intact, including in links.
+const observationId = (item: ApiObservation) => formatObservationId(item.id) || String(item.id)
+const statusClass = (status?: string | null) => normalizeStatus(status).replaceAll(' ', '-')
+const plantId = (value: string | number) => formatPlantId(value) || '—'
+const alertId = (value: string | number) => {
+  const numeric = Number(value)
+  return Number.isSafeInteger(numeric) && numeric > 0
+    ? `ALT${String(numeric).padStart(3, '0')}`
+    : String(value)
+}
+const speciesName = (item?: { scientific_name?: string | null; common_name?: string | null }) =>
+  item?.scientific_name || item?.common_name || t('conservationDashboard.speciesUnavailable')
 </script>
+
 <template>
   <section class="page-intro">
     <div>
@@ -57,8 +321,9 @@ const dataLabel = (value: string) => {
       <h2>{{ t('conservationDashboard.greeting') }}</h2>
       <p>{{ t('conservationDashboard.intro') }}</p>
     </div>
-    <time datetime="2026-10-03">{{ t('conservationDashboard.date') }}</time>
+    <time :datetime="currentDateKey">{{ currentDate }}</time>
   </section>
+
   <section class="summary-grid">
     <article v-for="card in summaries" :key="String(card[0])" class="summary-card">
       <p>{{ t(`conservationDashboard.summary.${card[0]}`) }}</p>
@@ -66,6 +331,7 @@ const dataLabel = (value: string) => {
       ><small>{{ t(`conservationDashboard.summary.${card[2]}`) }}</small>
     </article>
   </section>
+
   <div class="two-column">
     <section class="panel">
       <header class="panel-header">
@@ -78,7 +344,14 @@ const dataLabel = (value: string) => {
           {{ t('conservationDashboard.viewAllSubmissions') }} →
         </button>
       </header>
-      <div class="table-scroll">
+      <p v-if="observationsLoading" class="dashboard-state">Loading observations...</p>
+      <p v-else-if="observationsError" class="dashboard-state error-state">
+        {{ observationsError }}
+      </p>
+      <p v-else-if="!pending.length" class="dashboard-state">
+        No observations currently require review.
+      </p>
+      <div v-else class="table-scroll">
         <table>
           <thead>
             <tr>
@@ -91,20 +364,27 @@ const dataLabel = (value: string) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="o in pending" :key="o.id">
+            <tr v-for="item in pending" :key="String(item.id)">
               <td>
-                <strong>{{ o.id }}</strong>
+                <strong class="observation-id" :title="String(item.id)">{{
+                  observationId(item)
+                }}</strong>
               </td>
-              <td>{{ o.plantId }}</td>
+              <td>{{ plantId(item.plant_id) }}</td>
               <td>
-                <em>{{ speciesLabel(o.plantId) }}</em>
+                <em>{{ speciesName(item) }}</em>
               </td>
-              <td>{{ o.recordedBy }}</td>
+              <td>{{ valueOrDash(item.owner_subject) }}</td>
               <td>
-                <span class="badge pending-review">{{ dataLabel(o.status) }}</span>
+                <span class="badge pending-review">{{
+                  dataLabel(effectiveObservationStatus(item))
+                }}</span>
               </td>
               <td>
-                <button class="action-button" @click="go('conservation-reviews', { review: o.id })">
+                <button
+                  class="action-button"
+                  @click="go('conservation-reviews', { review: observationId(item) })"
+                >
                   {{ t('conservationDashboard.review') }}
                 </button>
               </td>
@@ -113,6 +393,7 @@ const dataLabel = (value: string) => {
         </table>
       </div>
     </section>
+
     <section class="panel">
       <header class="panel-header">
         <div>
@@ -120,23 +401,17 @@ const dataLabel = (value: string) => {
           <h2>{{ t('conservationDashboard.biodiversityOverview') }}</h2>
         </div>
       </header>
-      <div
-        v-for="status in [
-          'Not Assessed',
-          'Least Concern',
-          'Near Threatened',
-          'Vulnerable',
-          'Endangered',
-          'Critically Endangered',
-        ]"
-        :key="status"
-        class="overview-row"
+      <p v-if="speciesLoading" class="dashboard-state">Loading species...</p>
+      <p v-else-if="speciesError" class="dashboard-state error-state">{{ speciesError }}</p>
+      <template v-else
+        ><div v-for="itemStatus in biodiversityStatuses" :key="itemStatus" class="overview-row">
+          <span>{{ dataLabel(itemStatus) }}</span
+          ><strong>{{ statusCount(itemStatus) }}</strong>
+        </div></template
       >
-        <span>{{ dataLabel(status) }}</span
-        ><strong>{{ conservationStore.species.filter((s) => s.status === status).length }}</strong>
-      </div>
     </section>
   </div>
+
   <section class="panel">
     <header class="panel-header">
       <div>
@@ -144,53 +419,65 @@ const dataLabel = (value: string) => {
         <h2>{{ t('conservationDashboard.recentPlantRecords') }}</h2>
       </div>
       <button class="secondary-button" @click="go('conservation-observations')">
-        {{ t('conservationDashboard.viewAllPlants') }} →
+        View All Observations →
       </button>
     </header>
-    <div class="table-scroll">
+    <p v-if="plantsLoading" class="dashboard-state">Loading plant records...</p>
+    <p v-else-if="plantsError" class="dashboard-state error-state">{{ plantsError }}</p>
+    <p v-else-if="!recentPlants.length" class="dashboard-state">No plant records available.</p>
+    <div v-else class="table-scroll">
       <table>
         <thead>
           <tr>
             <th>{{ t('conservationDashboard.table.plantId') }}</th>
             <th>{{ t('conservationDashboard.table.species') }}</th>
-            <th>{{ t('conservationDashboard.table.location') }}</th>
-            <th>{{ t('conservationDashboard.table.recordedBy') }}</th>
+            <th>Registered By</th>
+            <th>Registered At</th>
             <th>{{ t('conservationDashboard.table.lastObservation') }}</th>
             <th>{{ t('conservationDashboard.table.status') }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="p in conservationStore.plants.slice(0, 4)" :key="p.id">
+          <tr v-for="plant in recentPlants" :key="String(plant.plant_id)">
             <td>
-              <strong>{{ p.id }}</strong>
+              <RouterLink class="record-link" :to="`/plant/${plantId(plant.plant_id)}`"
+                ><strong>{{ plantId(plant.plant_id) }}</strong></RouterLink
+              >
             </td>
             <td>
-              <em>{{ speciesLabel(p.id) }}</em>
+              <em>{{ speciesName(speciesForPlant(plant)) }}</em>
             </td>
-            <td>{{ dataLabel(p.location) }}</td>
-            <td>{{ p.registeredBy }}</td>
-            <td>{{ p.lastObservation }}</td>
+            <td>{{ valueOrDash(plant.registered_subject) }}</td>
+            <td>{{ dt(plant.registered_at) }}</td>
+            <td>{{ dt(plant.observed_at) }}</td>
             <td>
-              <span class="badge approved">{{ dataLabel(p.status) }}</span>
+              <span class="badge" :class="statusClass(plant.rbac_status)">{{
+                valueOrDash(plant.rbac_status)
+              }}</span>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
   </section>
+
   <div class="two-column dashboard-lower">
     <section class="panel">
       <header class="panel-header">
         <div>
           <p class="section-kicker">{{ t('conservationDashboard.parkCoverage') }}</p>
           <h2>{{ t('conservationDashboard.speciesDistribution') }}</h2>
+          <span class="panel-description">{{ t('conservationDashboard.approvedMapRecords') }}</span>
         </div>
         <button class="secondary-button" @click="go('conservation-map')">
           {{ t('conservationDashboard.openFullMap') }} →
         </button>
       </header>
-      <BiodiversityMapPreview />
+      <p v-if="plantsLoading" class="dashboard-state">Loading map records...</p>
+      <p v-else-if="plantsError" class="dashboard-state error-state">{{ plantsError }}</p>
+      <BiodiversityMapPreview v-else :plants="mapPlants" />
     </section>
+
     <section class="panel">
       <header class="panel-header">
         <div>
@@ -201,17 +488,30 @@ const dataLabel = (value: string) => {
           {{ t('conservationDashboard.viewAllAlerts') }} →
         </button>
       </header>
-      <article v-for="a in conservationStore.alerts.slice(0, 3)" :key="a.id" class="alert-preview">
+      <p v-if="alertsLoading" class="dashboard-state">Loading threat alerts...</p>
+      <p v-else-if="alertsError" class="dashboard-state error-state">{{ alertsError }}</p>
+      <p v-else-if="!recentAlerts.length" class="dashboard-state">No threat alerts available.</p>
+      <button
+        v-for="alert in recentAlerts"
+        v-else
+        :key="String(alert.alert_id)"
+        class="alert-preview"
+        @click="go('conservation-alerts', { alert: alertId(alert.alert_id) })"
+      >
         <div>
-          <strong>{{ dataLabel(a.type) }}</strong
-          ><small>{{ a.id }} · {{ a.plantId }} · {{ dataLabel(a.zone) }}</small>
+          <strong>{{ alert.alert_type }}</strong
+          ><small
+            >{{ alertId(alert.alert_id) }} · {{ plantId(alert.plant_id) }} ·
+            {{ dt(alert.created_at) }} · {{ alert.status }}</small
+          >
         </div>
-        <span class="badge alert-severity-badge" :class="a.severity.toLowerCase()">
-          {{ dataLabel(a.severity) }}
-        </span>
-      </article>
+        <span class="badge alert-severity-badge" :class="statusClass(alert.severity)">{{
+          valueOrDash(alert.severity)
+        }}</span>
+      </button>
     </section>
   </div>
+
   <section class="panel">
     <header class="panel-header">
       <div>
@@ -221,24 +521,24 @@ const dataLabel = (value: string) => {
     </header>
     <div class="quick-grid">
       <button @click="go('conservation-species', { action: 'add' })">
-        ＋
-        <span
+        ＋<span
           ><strong>{{ t('conservationDashboard.actions.addSpecies') }}</strong
           ><small>{{ t('conservationDashboard.actions.createSpecies') }}</small></span
-        ></button
-      ><button @click="go('conservation-reviews')">
-        ✓
-        <span
+        >
+      </button>
+      <button @click="go('conservation-reviews')">
+        ✓<span
           ><strong>{{ t('conservationDashboard.actions.reviewObservations') }}</strong
           ><small>{{ t('conservationDashboard.actions.verifySubmissions') }}</small></span
-        ></button
-      ><button @click="go('conservation-observations')">
-        ⌕
-        <span
-          ><strong>{{ t('conservationDashboard.actions.searchPlants') }}</strong
+        >
+      </button>
+      <button @click="go('conservation-observations')">
+        ⌕<span
+          ><strong>Search Observations</strong
           ><small>{{ t('conservationDashboard.actions.findRecords') }}</small></span
-        ></button
-      ><button @click="go('conservation-reports')">
+        >
+      </button>
+      <button @click="go('conservation-reports')">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="24"
@@ -258,9 +558,8 @@ const dataLabel = (value: string) => {
           <path d="M14 2v5a1 1 0 0 0 1 1h5" />
           <path d="M10 9H8" />
           <path d="M16 13H8" />
-          <path d="M16 17H8" />
-        </svg>
-        <span
+          <path d="M16 17H8" /></svg
+        ><span
           ><strong>{{ t('conservationDashboard.actions.generateReport') }}</strong
           ><small>{{ t('conservationDashboard.actions.createSummary') }}</small></span
         >
@@ -268,7 +567,15 @@ const dataLabel = (value: string) => {
     </div>
   </section>
 </template>
+
 <style scoped>
+.observation-id {
+  display: block;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .overview-row {
   padding: 12px 0;
   display: flex;
@@ -283,12 +590,39 @@ const dataLabel = (value: string) => {
 .two-column + .panel {
   margin-top: 18px;
 }
+.dashboard-state {
+  margin: 0;
+  padding: 28px 18px;
+  color: #7b8a83;
+  font-size: 11px;
+  text-align: center;
+}
+.error-state {
+  color: #a04d3f;
+}
+.record-link {
+  color: #2f7459;
+  text-decoration: none;
+}
+.record-link:hover {
+  text-decoration: underline;
+}
 .alert-preview {
+  width: 100%;
   padding: 13px 0;
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  border: 0;
   border-bottom: 1px solid #edf0ed;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.alert-preview:hover {
+  background: #f6f9f6;
 }
 .alert-preview div {
   display: grid;
@@ -378,7 +712,8 @@ const dataLabel = (value: string) => {
 }
 .secondary-button:focus-visible,
 .action-button:focus-visible,
-.quick-grid button:focus-visible {
+.quick-grid button:focus-visible,
+.alert-preview:focus-visible {
   outline: 3px solid rgba(74, 145, 113, 0.3);
   outline-offset: 2px;
 }

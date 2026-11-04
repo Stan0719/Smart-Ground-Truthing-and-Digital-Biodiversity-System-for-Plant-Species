@@ -1,3 +1,4 @@
+import { t, translateLabel, dateLocale, useAppTranslation, translateFieldValue } from "../translations/i18n";
 import React from "react";
 
 import {
@@ -17,9 +18,11 @@ export default function PlantCard({
   navigation,
   user,
 }) {
-  const species = getSpeciesBySlug(
-    plant.speciesSlug
-  );
+  useAppTranslation();
+  const species = getSpeciesBySlug(plant.speciesSlug) || {
+    name: plant.commonName,
+    genus: plant.genus,
+  };
   const imageSource = getSpeciesImageSource(species);
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const lastVerified = formatDate(plant.latestApproved?.date);
@@ -67,37 +70,35 @@ export default function PlantCard({
         {isBotanist ? (
           <>
             <Text style={styles.plantZone}>
-              {plant.location.zone}
+              {plant.location?.zone || t("plant.notRecorded")}
             </Text>
 
             <Text style={styles.plantHealth}>
-              {plant.latestApproved.healthStatus}
+              {translateLabel(plant.latestApproved?.healthStatus || t("plant.notRecorded"))}
             </Text>
           </>
         ) : (
           <View style={styles.infoGrid}>
             <PublicFact
-              label="Height"
-              value={`${plant.latestApproved.heightCm} cm`}
+              label={t("plant.height")}
+              value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
             />
             <PublicFact
-              label="Life stage"
-              value={plant.latestApproved.lifeStage}
+              label={t("plant.lifeStage")}
+              value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
             />
             <PublicFact
-              label="Genus"
+              label={t("plant.genus")}
               value={species?.genus}
             />
             <PublicFact
-              label="Last verified"
+              label={t("plantCard.registered")}
               value={lastVerified}
             />
           </View>
         )}
 
-        <Text style={styles.plantView}>
-          View Record →
-        </Text>
+        <Text style={styles.plantView}>{t("plantCard.viewRecord")}</Text>
 
       </View>
 
@@ -106,11 +107,12 @@ export default function PlantCard({
 }
 
 function PublicFact({ label, value }) {
+  useAppTranslation();
   return (
     <View style={styles.infoItem}>
-      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoLabel}>{translateLabel(label)}</Text>
       <Text style={styles.infoValue} numberOfLines={1}>
-        {value || "-"}
+        {translateFieldValue(label, value || "-")}
       </Text>
     </View>
   );
@@ -118,17 +120,13 @@ function PublicFact({ label, value }) {
 
 function formatDate(dateString) {
   if (!dateString) return "-";
-
-  const [year, month, day] = dateString.split("-");
-  const months = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
-  const monthName = months[Number(month) - 1];
-
-  if (!year || !monthName || !day) return dateString;
-
-  return `${Number(day)} ${monthName} ${year}`;
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return date.toLocaleDateString(dateLocale(), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 

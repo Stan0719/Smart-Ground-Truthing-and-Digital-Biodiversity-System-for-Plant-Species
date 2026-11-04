@@ -1,6 +1,7 @@
+import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/SpeciesDetail.js
 
-import React from "react";
+import React, { useCallback, useRef, useState } from "react";
 
 import {
   View,
@@ -9,27 +10,73 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  RefreshControl,
 } from "react-native";
 
 import {
   getSpeciesBySlug,
-  getPlantsBySpecies,
 } from "../data/mockData";
+import { useFocusEffect } from "@react-navigation/native";
 import { getSpeciesImageSource } from "../data/speciesImages";
+import { fetchPlantRecords, fetchSpeciesDetail } from "../utils/plantApi";
 
 import PlantCard from "../components/PlantCard";
+import RefreshButton from "../components/RefreshButton";
 
 export default function SpeciesDetail({
   route,
   navigation,
   user,
 }) {
+  useAppTranslation();
 
-  const { slug } = route.params || {};
+  const { slug, speciesId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
 
-  const selectedSpecies =
-    getSpeciesBySlug(slug);
+  const [selectedSpecies, setSelectedSpecies] = useState(
+    route.params?.species || getSpeciesBySlug(slug) || null
+  );
+  const [speciesPlants, setSpeciesPlants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const requestRef = useRef(null);
+
+  const loadSpeciesDetails = useCallback((isRefresh = false) => {
+    if (requestRef.current) return requestRef.current;
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setErrorMessage("");
+    const request = (async () => {
+      try {
+        const [backendSpecies, records] = await Promise.all([
+          fetchSpeciesDetail(speciesId, slug, { accountId: user?.id }),
+          fetchPlantRecords([], { accountId: user?.id }),
+        ]);
+        const resolvedSpecies = backendSpecies || route.params?.species || getSpeciesBySlug(slug) || null;
+        const resolvedId = resolvedSpecies?.id ?? speciesId;
+        const recordsForSpecies = resolvedId != null
+          ? records.filter((record) => String(record.speciesId) === String(resolvedId))
+          : records.filter((record) => record.speciesSlug === slug);
+
+        setSelectedSpecies(resolvedSpecies);
+        setSpeciesPlants(recordsForSpecies);
+      } catch (error) {
+        setErrorMessage(error.message || "Unable to load species details.");
+      } finally {
+        if (requestRef.current === request) requestRef.current = null;
+        setLoading(false);
+        setRefreshing(false);
+      }
+    })();
+    requestRef.current = request;
+    return request;
+  }, [slug, speciesId, route.params?.species, user?.id]);
+
+  useFocusEffect(useCallback(() => {
+    void loadSpeciesDetails(false);
+  }, [loadSpeciesDetails]));
+
   const primaryImageSource = getSpeciesImageSource(selectedSpecies);
 
   if (!selectedSpecies) {
@@ -41,12 +88,11 @@ export default function SpeciesDetail({
         </Text>
 
         <Text style={styles.notFoundTitle}>
-          Species not found
+          {loading ? t("plant.loadingSpecies") : t("plant.speciesNotFound")}
         </Text>
 
         <Text style={styles.notFoundText}>
-          The species you are looking for is not
-          in the collection.
+          {errorMessage || t("speciesDetail.theSpeciesYouAreLookingForIsNotInThe")}
         </Text>
 
         <TouchableOpacity
@@ -55,9 +101,7 @@ export default function SpeciesDetail({
             navigation.navigate("Plants")
           }
         >
-          <Text style={styles.notFoundButtonText}>
-            Return to Species
-          </Text>
+          <Text style={styles.notFoundButtonText}>{t("plant.returnToSpecies")}</Text>
         </TouchableOpacity>
 
       </View>
@@ -65,32 +109,40 @@ export default function SpeciesDetail({
   }
 
 
-  const speciesPlants =
-    getPlantsBySpecies(
-      selectedSpecies.slug
-    );
-
-
   return (
     <ScrollView
       style={styles.page}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => void loadSpeciesDetails(true)}
+          tintColor="#315B49"
+          colors={["#315B49"]}
+        />
+      }
     >
 
       {/* HERO */}
 
       <View style={styles.hero}>
 
+        <View style={styles.heroToolbar}>
         <TouchableOpacity
           style={styles.backButton}
           onPress={() =>
             navigation.goBack()
           }
         >
-          <Text style={styles.backText}>
-            ← Back to Species
-          </Text>
+          <Text style={styles.backText}>{t("plant.back")}</Text>
         </TouchableOpacity>
+        <RefreshButton
+          onPress={() => void loadSpeciesDetails(true)}
+          loading={loading || refreshing}
+          label={t("common.refresh")}
+          testID="species-detail-refresh"
+        />
+        </View>
 
 
         <View style={styles.heroImage}>
@@ -106,9 +158,7 @@ export default function SpeciesDetail({
                 🌿
               </Text>
 
-              <Text style={styles.placeholderText}>
-                Plant image coming soon
-              </Text>
+              <Text style={styles.placeholderText}>{t("speciesDetail.plantImageComingSoon")}</Text>
             </View>
           )}
 
@@ -120,12 +170,12 @@ export default function SpeciesDetail({
           <View style={styles.badges}>
 
             <Text style={styles.category}>
-              {selectedSpecies.category}
+              {translateLabel(selectedSpecies.category)}
             </Text>
 
             {isBotanist && selectedSpecies.conservationStatus && (
               <Text style={styles.conservation}>
-                {selectedSpecies.conservationStatus}
+                {translateLabel(selectedSpecies.conservationStatus)}
               </Text>
             )}
 
@@ -141,7 +191,7 @@ export default function SpeciesDetail({
           </Text>
 
           <Text style={styles.summary}>
-            {selectedSpecies.description}
+          {selectedSpecies.description || t("speciesDetail.noDescriptionHasBeenRecorded")}
           </Text>
 
         </View>
@@ -153,33 +203,26 @@ export default function SpeciesDetail({
 
       <View style={styles.section}>
 
-        <Text style={styles.sectionLabel}>
-          ABOUT THIS SPECIES
-        </Text>
+        <Text style={styles.sectionLabel}>{t("speciesDetail.aboutThisSpecies")}</Text>
 
-        <Text style={styles.sectionTitle}>
-          About {selectedSpecies.name}
+        <Text style={styles.sectionTitle}>{t("speciesDetail.about")}{selectedSpecies.name}
         </Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.overview}
+          {selectedSpecies.overview || selectedSpecies.description || t("speciesDetail.noOverviewHasBeenRecorded")}
         </Text>
 
 
-        <Text style={styles.subTitle}>
-          Natural habitat
-        </Text>
+        <Text style={styles.subTitle}>{t("speciesDetail.naturalHabitat")}</Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.habitat}
+          {selectedSpecies.habitat || t("speciesDetail.habitatInformationHasNotBeenRecorded")}
         </Text>
 
 
         {selectedSpecies.distribution && (
           <>
-            <Text style={styles.subTitle}>
-              Distribution
-            </Text>
+            <Text style={styles.subTitle}>{t("speciesDetail.distribution")}</Text>
 
             <Text style={styles.paragraph}>
               {selectedSpecies.distribution}
@@ -188,20 +231,16 @@ export default function SpeciesDetail({
         )}
 
 
-        <Text style={styles.subTitle}>
-          Ecological importance
-        </Text>
+        <Text style={styles.subTitle}>{t("speciesDetail.ecologicalImportance")}</Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.ecologicalRole}
+          {selectedSpecies.ecologicalRole || t("speciesDetail.ecologicalInformationHasNotBeenRecorded")}
         </Text>
 
 
         {selectedSpecies.culturalSignificance && (
           <>
-            <Text style={styles.subTitle}>
-              Traditional and cultural importance
-            </Text>
+            <Text style={styles.subTitle}>{t("speciesDetail.traditionalAndCulturalImportance")}</Text>
 
             <Text style={styles.paragraph}>
               {selectedSpecies.culturalSignificance}
@@ -216,21 +255,15 @@ export default function SpeciesDetail({
 
       <View style={styles.quickFacts}>
 
-        <Text style={styles.sectionLabel}>
-          TAXONOMY & QUICK FACTS
-        </Text>
+        <Text style={styles.sectionLabel}>{t("speciesDetail.taxonomyQuickFacts")}</Text>
 
-        <Text style={styles.quickTitle}>
-          Species reference
-        </Text>
+        <Text style={styles.quickTitle}>{t("fieldCollection.speciesReference")}</Text>
 
 
-        <Text style={styles.characteristicTitle}>
-          Key characteristics
-        </Text>
+        <Text style={styles.characteristicTitle}>{t("speciesDetail.keyCharacteristics")}</Text>
 
 
-        {selectedSpecies.characteristics.map(
+        {(selectedSpecies.characteristics || []).map(
           (characteristic) => (
             <View
               key={characteristic}
@@ -247,49 +280,53 @@ export default function SpeciesDetail({
           )
         )}
 
+        {(!selectedSpecies.characteristics || selectedSpecies.characteristics.length === 0) && (
+          <Text style={styles.characteristicText}>{t("speciesDetail.noCharacteristicsHaveBeenRecorded")}</Text>
+        )}
+
 
         <View style={styles.factDivider} />
 
 
         <Fact
-          label="Common name"
+          label={t("speciesDetail.commonName")}
           value={selectedSpecies.name}
         />
 
         <Fact
-          label="Scientific name"
+          label={t("plantDetail.scientificName")}
           value={selectedSpecies.scientificName}
         />
 
         <Fact
-          label="Family"
+          label={t("speciesDetail.family")}
           value={selectedSpecies.family}
         />
 
         <Fact
-          label="Genus"
+          label={t("plant.genus")}
           value={selectedSpecies.genus}
         />
 
         <Fact
-          label="Plant group"
+          label={t("speciesDetail.plantGroup")}
           value={selectedSpecies.category}
         />
 
         <Fact
-          label="Local name"
+          label={t("speciesDetail.localName")}
           value={selectedSpecies.localName}
         />
 
         {isBotanist && (
           <>
             <Fact
-              label="Conservation status"
+              label={t("speciesDetail.conservationStatus")}
               value={selectedSpecies.conservationStatus}
             />
 
             <Fact
-              label="Sensitivity level"
+              label={t("speciesDetail.sensitivityLevel")}
               value={selectedSpecies.sensitivityLevel}
             />
           </>
@@ -302,25 +339,22 @@ export default function SpeciesDetail({
 
       <View style={styles.individualSection}>
 
-        <Text style={styles.sectionLabel}>
-          INDIVIDUAL PLANTS OF THIS SPECIES
-        </Text>
+        <Text style={styles.sectionLabel}>{t("speciesDetail.individualPlantsOfThisSpecies")}</Text>
 
-        <Text style={styles.sectionTitle}>
-          Verified plants in Niah
-        </Text>
+        <Text style={styles.sectionTitle}>{t("speciesDetail.registeredPlantsInNiah")}</Text>
 
         <Text style={styles.sectionDescription}>
-          {speciesPlants.length} tagged plant records
-          are linked to this species in the prototype.
-        </Text>
+          {speciesPlants.length}{t("speciesDetail.registeredPlant")}{speciesPlants.length === 1 ? t("speciesDetail.recordIs") : t("speciesDetail.recordsAre")}
+          {" "}{t("speciesDetail.linkedToThisSpecies")}</Text>
+
+        {loading && <Text style={styles.sectionDescription}>{t("speciesDetail.loadingSpeciesRecords")}</Text>}
+        {!!errorMessage && <Text style={{ color: "#B42318", marginBottom: 12 }}>{translateUIMessage(errorMessage)}</Text>}
 
 
         {speciesPlants.length === 0 ? (
           <View style={styles.noRecords}>
             <Text>
-              No verified individual plant records
-              are linked yet.
+              {loading ? t("plant.loadingPlantRecords") : t("speciesDetail.noPlantRecordsAreLinkedToThisSpeciesYet")}
             </Text>
           </View>
         ) : (
@@ -344,13 +378,13 @@ export default function SpeciesDetail({
                   "Species",
                   {
                     slug: selectedSpecies.slug,
+                    speciesId: selectedSpecies.id,
+                    species: selectedSpecies,
                   }
                 )
               }
             >
-              <Text style={styles.viewAllText}>
-                View All Plants →
-              </Text>
+              <Text style={styles.viewAllText}>{t("speciesDetail.viewAllPlants")}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -362,19 +396,11 @@ export default function SpeciesDetail({
 
       <View style={styles.gallerySection}>
 
-        <Text style={styles.sectionLabel}>
-          BOTANICAL PHOTOGRAPHS
-        </Text>
+        <Text style={styles.sectionLabel}>{t("speciesDetail.botanicalPhotographs")}</Text>
 
-        <Text style={styles.sectionTitle}>
-          Identification from different views
-        </Text>
+        <Text style={styles.sectionTitle}>{t("speciesDetail.identificationFromDifferentViews")}</Text>
 
-        <Text style={styles.sectionDescription}>
-          Photographs support species identification
-          by showing important botanical features
-          and growth form.
-        </Text>
+        <Text style={styles.sectionDescription}>{t("speciesDetail.photographsSupportSpeciesIdentificationByShowingImportantBotanicalFeaturesAnd")}</Text>
 
 
         <View style={styles.galleryGrid}>
@@ -399,9 +425,7 @@ export default function SpeciesDetail({
                       🌿
                     </Text>
 
-                    <Text style={styles.placeholderText}>
-                      Photograph coming soon
-                    </Text>
+                    <Text style={styles.placeholderText}>{t("speciesDetail.photographComingSoon")}</Text>
                   </View>
                 )}
 
@@ -430,17 +454,18 @@ export default function SpeciesDetail({
 // =====================================================
 
 function Fact({ label, value }) {
+  useAppTranslation();
   if (!value) return null;
 
   return (
     <View style={styles.fact}>
 
       <Text style={styles.factLabel}>
-        {label}
+        {translateLabel(label)}
       </Text>
 
       <Text style={styles.factValue}>
-        {value}
+        {translateFieldValue(label, value)}
       </Text>
 
     </View>
@@ -464,9 +489,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#E1EADB",
   },
 
+  heroToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+
   backButton: {
     alignSelf: "flex-start",
-    marginBottom: 20,
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 999,

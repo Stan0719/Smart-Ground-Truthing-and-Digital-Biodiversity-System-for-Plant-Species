@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocalSearchParams } from 'expo-router';
-import { NavigationIndependentTree } from 'expo-router/react-navigation';
+import { NavigationIndependentTree } from '@react-navigation/native';
 import App from '../../App';
 
 // Preserve the existing screens inside an independent navigation tree.

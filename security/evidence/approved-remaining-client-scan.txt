@@ -1,0 +1,8 @@
+{
+  "scannedClientFiles": 146,
+  "webBuildPresent": true,
+  "mobileBuildPresent": false,
+  "findingsWithoutSecretValues": [],
+  "trackedPrivateConfigPaths": [],
+  "limitations": "Current source and available artifacts only; no historical repository/deployed hosting/native binary scan."
+}

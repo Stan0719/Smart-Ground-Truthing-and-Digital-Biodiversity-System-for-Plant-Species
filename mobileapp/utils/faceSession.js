@@ -1,8 +1,12 @@
+import * as LocalAuthentication from "expo-local-authentication";
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
-import { faceApi, normalizeFaceUrl, validFaceUser } from "./faceApi";
+import { faceApi, validFaceUser } from "./faceApi";
 import { createFaceSessionManager } from "./faceSessionLifecycle";
-const backend = normalizeFaceUrl(process.env.EXPO_PUBLIC_FACE_API_URL?.trim());
+import { mobileApiUrl } from "./apiConfiguration.js";
+// Bind persisted sessions to the same selected account API used by /me.
+let backend = null;
+try { backend = mobileApiUrl("auth"); } catch { /* Login reports configuration errors. */ }
 let memoryOnly = null;
 const supported = async () => Platform.OS !== "web" && await SecureStore.isAvailableAsync();
 const options = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
@@ -10,6 +14,8 @@ export const faceSession = createFaceSessionManager({
   backend,
   api: faceApi,
   validUser: validFaceUser,
+  diagnostic: typeof __DEV__ === "boolean" && __DEV__ ? (entry) => console.info("[mobile-session]", entry) : undefined,
+  authorizeOffline:async()=>Platform.OS!=="web"&&(await LocalAuthentication.authenticateAsync({promptMessage:"Unlock private offline drafts",disableDeviceFallback:false})).success,
   storage: {
     async get(key) { return await supported() ? SecureStore.getItemAsync(key, options) : memoryOnly; },
     async set(key, value) {

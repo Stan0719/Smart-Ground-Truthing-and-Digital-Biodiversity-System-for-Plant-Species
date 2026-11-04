@@ -1,17 +1,30 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import ActionFeedback from '../components/ActionFeedback.vue'
 import AdminPageShell from '../components/AdminPageShell.vue'
+import {api} from '../services/auth'
+import { plantApi } from '../services/plantApi'
 
-type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity'
+type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity' | 'settings'
 const props = defineProps<{ section: Section }>()
 const { t, te, locale } = useI18n()
 const dataLabel = (value: string) => {
   const key = `adminModules.values.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
   return te(key) ? t(key) : value
 }
+const security=ref({session_hours:8,login_limit:30}), securitySaving=ref(false),securityMessage=ref('')
+async function saveSecurity(){securitySaving.value=true;serverError.value='';try{await api('/admin/settings','PATCH',security.value);securityMessage.value='Security settings saved. All sessions were revoked; sign in again.'}catch(e){serverError.value=e instanceof Error?e.message:'Settings were not saved.'}finally{securitySaving.value=false}}
+const enforced=ref<Record<string,string[]>>({}), assignedUsers=ref<{role:string}[]>([]), persistedEvents=ref<{id:number;user_id:string;actor_id:string;reason:string;created_at:number}[]>([]), serverError=ref(''), serverLoading=ref(true)
+const roleSummaries = computed(() => [
+  { role: 'Administrator', initial: 'A', key: 'administrator' },
+  { role: 'Conservation Officer', initial: 'C', key: 'officer' },
+  { role: 'Botanist', initial: 'B', key: 'botanist' },
+  { role: 'Visitor', initial: 'V', key: 'visitor' },
+].map(item => ({ ...item, count: assignedUsers.value.filter(user => user.role === item.role).length })))
+onMounted(async()=>{try{if(props.section==='settings')security.value=(await api<{settings:typeof security.value}>('/admin/settings')).settings; if(props.section==='roles'){const [permissions,users]=await Promise.all([api<{permissions:Record<string,string[]>}>('/admin/permissions'),api<{users:{role:string}[]}>('/admin/users')]);enforced.value=permissions.permissions;assignedUsers.value=users.users} if(props.section==='activity')persistedEvents.value=(await api<{events:typeof persistedEvents.value}>('/admin/audit')).events}catch(e){serverError.value=e instanceof Error?e.message:'Unable to load authorized data.'}finally{serverLoading.value=false}})
 const search = ref('')
 const filter = ref('All')
 
@@ -27,7 +40,7 @@ interface IoTSensor {
   soilMoisture: string
   rainfall: string
   movement: string
-  status: 'Online' | 'Offline' | 'Maintenance' | 'Inactive'
+  status: string
   lastReading: string
   recordedAt: string
   gpsLatitude: string
@@ -42,11 +55,11 @@ interface ThreatAlert {
   readingId: string
   sensorId: string
   type: string
-  severity: 'High' | 'Medium' | 'Low'
+  severity: string
   confidence: string
   description: string
   imagePath: string
-  status: 'New' | 'Reviewing' | 'Resolved'
+  status: string
   createdAt: string
   resolvedBy: string
   resolvedAt: string
@@ -96,8 +109,8 @@ type SensorForm = Pick<
 
 const sensorModal = ref<'register' | 'view' | 'edit' | 'delete' | null>(null)
 const sensorFormError = ref('')
-const successMessage = ref('')
-const errorMessage = ref('')
+const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
+let feedbackId = 0
 const exportButton = ref<HTMLButtonElement | null>(null)
 const exportDialog = ref<HTMLElement | null>(null)
 const exportModalOpen = ref(false)
@@ -108,8 +121,6 @@ const exportModule = ref('All Modules')
 const exportScope = ref<'filtered' | 'all'>('filtered')
 const exportFormat = ref<'csv' | 'pdf'>('csv')
 const exportValidationMessage = ref('')
-let successTimer: ReturnType<typeof setTimeout> | undefined
-let errorTimer: ReturnType<typeof setTimeout> | undefined
 const sensorForm = ref<SensorForm>({
   id: '',
   deviceName: '',
@@ -123,6 +134,7 @@ const sensorForm = ref<SensorForm>({
 const page = computed(
   () =>
     ({
+      settings:{title:'Security Settings',eyebrow:'SECURITY',active:'Security Settings',intro:'Account session and login limits.'},
       roles: {
         title: t('adminRoles.title'),
         eyebrow: t('adminRoles.eyebrow'),
@@ -270,6 +282,132 @@ const sensors = ref<IoTSensor[]>([
   },
 ])
 
+interface PlantDevice {
+  id: string
+  name: string
+  plant_id: string | number | null
+  status: string
+  thresholds: Record<string, number>
+  last_seen: string | null
+}
+interface PlantReading {
+  id: string
+  device_id: string
+  values: Record<string, number>
+  created_at: string
+}
+interface PlantAlert {
+  id: string
+  device_id: string
+  reading_id: string
+  metric: string
+  value: number
+  status: string
+  created_at: string
+}
+interface DevicesResponse { devices: PlantDevice[] }
+interface ReadingsResponse { readings: PlantReading[] }
+interface AlertsResponse { alerts: PlantAlert[]; responses: unknown[] }
+
+const liveDevices = ref<PlantDevice[]>([])
+const liveReadings = ref<PlantReading[]>([])
+const liveAlerts = ref<PlantAlert[]>([])
+const iotLoading = ref(false)
+const devicesLoaded = ref(false)
+const readingsLoaded = ref(false)
+const alertsLoaded = ref(false)
+const devicesError = ref('')
+const readingsError = ref('')
+const alertsError = ref('')
+let iotRequestVersion = 0
+
+const scalarText = (value: string | number | null | undefined, fallback = '—') =>
+  value === null || value === undefined || value === '' ? fallback : String(value)
+const formattedTimestamp = (value: string | null | undefined) => {
+  if (value === null || value === undefined || value === '') return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : formatActivityTimestamp(date.toISOString())
+}
+const latestReadingByDevice = computed(() => {
+  const latest = new Map<string, PlantReading>()
+  for (const reading of liveReadings.value) {
+    if (!latest.has(reading.device_id)) latest.set(reading.device_id, reading)
+  }
+  return latest
+})
+const sensorRows = computed<IoTSensor[]>(() => liveDevices.value.map((device) => {
+  const reading = latestReadingByDevice.value.get(device.id)
+  const values = reading?.values || {}
+  const measurement = (name: string, suffix = '') => {
+    const value = values[name]
+    return typeof value === 'number' && Number.isFinite(value) ? `${value}${suffix}` : '—'
+  }
+  return {
+    id: device.id,
+    deviceName: device.name,
+    deviceType: '—',
+    serialNumber: '—',
+    locationDescription: '—',
+    plant: scalarText(device.plant_id),
+    temperature: measurement('temperature', '°C'),
+    humidity: measurement('humidity', '%'),
+    soilMoisture: measurement('soilMoisture'),
+    rainfall: measurement('rainfall'),
+    movement: measurement('movement'),
+    status: device.status,
+    lastReading: formattedTimestamp(reading?.created_at),
+    recordedAt: formattedTimestamp(reading?.created_at),
+    gpsLatitude: '—',
+    gpsLongitude: '—',
+    installedAt: '—',
+    readingId: reading?.id || '—',
+  }
+}))
+
+async function loadAdminIoTData() {
+  const version = ++iotRequestVersion
+  iotLoading.value = true
+  devicesError.value = ''
+  readingsError.value = ''
+  alertsError.value = ''
+  const [devicesResult, readingsResult, alertsResult] = await Promise.allSettled([
+    plantApi<DevicesResponse>('/devices'),
+    plantApi<ReadingsResponse>('/readings'),
+    plantApi<AlertsResponse>('/alerts'),
+  ])
+  if (version !== iotRequestVersion) return
+  if (devicesResult.status === 'fulfilled' && Array.isArray(devicesResult.value.devices)) {
+    liveDevices.value = devicesResult.value.devices
+    devicesLoaded.value = true
+  } else {
+    devicesError.value = devicesResult.status === 'rejected'
+      ? (devicesResult.reason instanceof Error ? devicesResult.reason.message : 'Unable to load devices.')
+      : 'The devices API returned an invalid response.'
+  }
+  if (readingsResult.status === 'fulfilled' && Array.isArray(readingsResult.value.readings)) {
+    liveReadings.value = readingsResult.value.readings
+    readingsLoaded.value = true
+  } else {
+    readingsError.value = readingsResult.status === 'rejected'
+      ? (readingsResult.reason instanceof Error ? readingsResult.reason.message : 'Unable to load readings.')
+      : 'The readings API returned an invalid response.'
+  }
+  if (alertsResult.status === 'fulfilled' && Array.isArray(alertsResult.value.alerts)) {
+    liveAlerts.value = alertsResult.value.alerts
+    alertsLoaded.value = true
+  } else {
+    alertsError.value = alertsResult.status === 'rejected'
+      ? (alertsResult.reason instanceof Error ? alertsResult.reason.message : 'Unable to load alerts.')
+      : 'The alerts API returned an invalid response.'
+  }
+  iotLoading.value = false
+}
+
+watch(() => props.section, (section) => {
+  if (section === 'iot') void loadAdminIoTData()
+  else iotRequestVersion += 1
+}, { immediate: true })
+
 const alerts = ref<ThreatAlert[]>([
   {
     id: 'A001',
@@ -381,8 +519,6 @@ const alerts = ref<ThreatAlert[]>([
   },
 ])
 
-const recentAlerts = computed(() => alerts.value.slice(0, 3))
-
 const logs: ActivityLog[] = [
   {
     id: 'ACT001',
@@ -471,7 +607,7 @@ const filteredSensors = computed(() => {
 })
 const filteredIoTSensors = computed(() => {
   const query = search.value.trim().toLowerCase()
-  return sensors.value.filter((sensor) => {
+  return sensorRows.value.filter((sensor) => {
     const matchesSearch =
       !query ||
       [
@@ -485,6 +621,8 @@ const filteredIoTSensors = computed(() => {
     return matchesSearch && (filter.value === 'All' || sensor.status === filter.value)
   })
 })
+const iotStatusOptions = computed(() => [...new Set(sensorRows.value.map((sensor) => sensor.status))])
+const recentAlerts = computed(() => liveAlerts.value.slice(0, 3))
 const filteredAlerts = computed(() => {
   const query = search.value.trim().toLowerCase()
   return alerts.value.filter((alert) => {
@@ -516,15 +654,24 @@ const filteredLogs = computed(() =>
   ),
 )
 
-const onlineSensorCount = computed(() => sensors.value.filter((s) => s.status === 'Online').length)
-const offlineSensorCount = computed(
-  () => sensors.value.filter((s) => s.status === 'Offline').length,
-)
+const activeDeviceCount = computed(() => liveDevices.value.filter((device) => device.status === 'Active').length)
+const inactiveDeviceCount = computed(() => liveDevices.value.filter((device) => device.status === 'Inactive').length)
+const onlineSensorCount = computed(() => sensors.value.filter((sensor) => sensor.status === 'Online').length)
+const offlineSensorCount = computed(() => sensors.value.filter((sensor) => sensor.status === 'Offline').length)
+const latestReadingAge = computed(() => {
+  const timestamps = liveReadings.value
+    .map((reading) => new Date(reading.created_at).getTime())
+    .filter((timestamp) => Number.isFinite(timestamp))
+  if (!timestamps.length) return '—'
+  const minutes = Math.max(0, Math.floor((Date.now() - Math.max(...timestamps)) / 60000))
+  return minutes < 1 ? 'Just now' : `${minutes} min${minutes === 1 ? '' : 's'} ago`
+})
+const devicesWithReadingsCount = computed(() => liveDevices.value.filter((device) => device.last_seen !== null).length)
 const maintenanceSensorCount = computed(
   () => sensors.value.filter((s) => s.status === 'Maintenance').length,
 )
 const activeAlertCount = computed(
-  () => alerts.value.filter((alert) => alert.status !== 'Resolved').length,
+  () => liveAlerts.value.filter((alert) => alert.status.toLowerCase() !== 'resolved').length,
 )
 const highSeverityAlertCount = computed(
   () =>
@@ -543,27 +690,15 @@ const selectedAlertSensor = computed(() =>
 )
 
 const showSuccessMessage = (message: string) => {
-  if (errorTimer) clearTimeout(errorTimer)
-  errorTimer = undefined
-  errorMessage.value = ''
-  if (successTimer) clearTimeout(successTimer)
-  successMessage.value = message
-  successTimer = setTimeout(() => {
-    successMessage.value = ''
-    successTimer = undefined
-  }, 3500)
+  feedback.value = { id: ++feedbackId, variant: 'success', message }
 }
 
 const showErrorMessage = (message: string) => {
-  if (successTimer) clearTimeout(successTimer)
-  successTimer = undefined
-  successMessage.value = ''
-  if (errorTimer) clearTimeout(errorTimer)
-  errorMessage.value = message
-  errorTimer = setTimeout(() => {
-    errorMessage.value = ''
-    errorTimer = undefined
-  }, 4000)
+  feedback.value = { id: ++feedbackId, variant: 'error', message }
+}
+
+const dismissFeedback = (id: number) => {
+  if (feedback.value?.id === id) feedback.value = null
 }
 
 const openExportModal = async () => {
@@ -885,6 +1020,30 @@ const confirmDeleteSensor = () => {
 
 <template>
   <AdminPageShell :title="page.title" :eyebrow="page.eyebrow" :active="page.active">
+<template v-if="['roles','activity','settings'].includes(section)">
+<h2>{{page.title}}</h2><form v-if="section==='settings'&&!serverLoading" @submit.prevent="saveSecurity"><label>Session hours<input v-model.number="security.session_hours" type="number" min="1" max="24" required></label><label>Login attempts per 15 minutes<input v-model.number="security.login_limit" type="number" min="5" max="100" required></label><p>Saving revokes all existing sessions.</p><button :disabled="securitySaving">Save security settings</button><p role="status">{{securityMessage}}</p></form><p v-if="serverError" role="alert">{{serverError}}</p><p v-if="serverLoading">Loading?</p>
+<template v-if="section==='roles'&&!serverLoading&&!serverError">
+  <section class="stat-grid three" aria-label="Role summary">
+    <article><span>R</span><div><p>{{ t('adminRoles.systemRoles') }}</p><strong>4</strong><small>{{ t('adminRoles.predefinedGroups') }}</small></div></article>
+    <article><span>U</span><div><p>{{ t('adminRoles.assignedUsers') }}</p><strong>{{ assignedUsers.length }}</strong><small>{{ t('adminRoles.acrossAllRoles') }}</small></div></article>
+    <article><span>P</span><div><p>{{ t('adminRoles.permissions') }}</p><strong>{{ Object.keys(enforced).length }}</strong><small>{{ t('adminRoles.configuredRules') }}</small></div></article>
+  </section>
+  <section class="role-cards" aria-label="System roles">
+    <article v-for="item in roleSummaries" :key="item.role">
+      <div class="role-head"><span>{{ item.initial }}</span><div><h3>{{ t(`adminRoles.roles.${item.key}.name`) }}</h3><p>{{ t(`adminRoles.roles.${item.key}.access`) }}</p></div><b>{{ t('adminRoles.userCount', { count: item.count }) }}</b></div>
+      <p>{{ t(`adminRoles.roles.${item.key}.description`) }}</p>
+      <span class="system-role-label">{{ t('adminRoles.systemDefined') }}</span>
+    </article>
+  </section>
+  <p class="read-only-note">{{ t('adminRoles.readOnlyNotice') }}</p>
+  <section class="panel permission-panel">
+    <div class="panel-head"><div><p>{{ t('adminRoles.matrixEyebrow') }}</p><h2>{{ t('adminRoles.modulePermissions') }}</h2></div><span>{{ t('adminRoles.allowedRestricted') }}</span></div>
+    <div class="table-scroll"><table><thead><tr><th>{{ t('adminRoles.systemModule') }}</th><th v-for="item in roleSummaries" :key="item.role">{{ t(`adminRoles.roles.${item.key}.name`) }}</th></tr></thead><tbody><tr v-for="(roles,permission) in enforced" :key="permission"><th>{{ permission }}</th><td v-for="item in roleSummaries" :key="item.role"><span :class="roles.includes(item.role)?'allowed':'restricted'">{{ roles.includes(item.role)?'✓':'—' }}</span></td></tr></tbody></table></div>
+  </section>
+</template>
+<template v-if="section==='activity'&&!serverLoading&&!serverError"><p v-if="!persistedEvents.length">No account activity recorded.</p><table v-else><thead><tr><th>Time</th><th>Account</th><th>Actor</th><th>Action</th></tr></thead><tbody><tr v-for="event in persistedEvents" :key="event.id"><td>{{new Date(Number(event.created_at)).toLocaleString()}}</td><td>{{event.user_id||'Anonymous'}}</td><td>{{event.actor_id||'Self'}}</td><td>{{event.reason}}</td></tr></tbody></table></template>
+</template><template v-else>
+
     <section class="page-intro">
       <div>
         <h2>{{ page.title }}</h2>
@@ -1034,32 +1193,32 @@ const confirmDeleteSensor = () => {
           <span>⌁</span>
           <div>
             <p>{{ t('adminModules.iot.totalSensors') }}</p>
-            <strong>{{ sensors.length }}</strong
+            <strong>{{ devicesLoaded ? liveDevices.length : '—' }}</strong
             ><small>{{ t('adminModules.iot.registeredDevices') }}</small>
           </div>
         </article>
         <article>
           <span>✓</span>
           <div>
-            <p>{{ t('adminModules.iot.onlineSensors') }}</p>
-            <strong>{{ onlineSensorCount }}</strong
-            ><small>{{ t('adminModules.iot.currentlyAvailable') }}</small>
+            <p>Active devices</p>
+            <strong>{{ devicesLoaded ? activeDeviceCount : '—' }}</strong
+            ><small>Stored device status</small>
           </div>
         </article>
         <article class="warning">
           <span>×</span>
           <div>
-            <p>{{ t('adminModules.iot.offlineSensors') }}</p>
-            <strong>{{ offlineSensorCount }}</strong
-            ><small>{{ t('adminModules.common.needsAttention') }}</small>
+            <p>Inactive devices</p>
+            <strong>{{ devicesLoaded ? inactiveDeviceCount : '—' }}</strong
+            ><small>Stored device status</small>
           </div>
         </article>
         <article class="danger">
           <span>!</span>
           <div>
             <p>{{ t('adminModules.iot.activeThreatAlerts') }}</p>
-            <strong>{{ activeAlertCount }}</strong
-            ><small>{{ t('adminModules.iot.unreviewed', { count: 2 }) }}</small>
+            <strong>{{ alertsLoaded ? activeAlertCount : '—' }}</strong
+            ><small>{{ alertsLoaded ? 'Not resolved' : 'Waiting for alert data' }}</small>
           </div>
         </article>
       </section>
@@ -1067,26 +1226,26 @@ const confirmDeleteSensor = () => {
         <div class="panel-head">
           <div>
             <p>{{ t('adminModules.iot.networkEyebrow') }}</p>
-            <h2>{{ t('adminModules.iot.connectivitySummary') }}</h2>
+            <h2>Device status and reporting</h2>
           </div>
-          <span class="live"><i></i> Updating</span>
+          <span class="live"><i></i>{{ iotLoading ? 'Loading API data' : devicesError || readingsError || alertsError ? 'API unavailable' : 'PostgreSQL API data' }}</span>
         </div>
         <div class="network-metrics">
           <article>
-            <small>{{ t('adminModules.iot.onlineSensors') }}</small
-            ><strong>{{ onlineSensorCount }}</strong>
+            <small>Active devices</small
+            ><strong>{{ devicesLoaded ? activeDeviceCount : '—' }}</strong>
           </article>
           <article>
-            <small>{{ t('adminModules.iot.offlineSensors') }}</small
-            ><strong>{{ offlineSensorCount }}</strong>
+            <small>Inactive devices</small
+            ><strong>{{ devicesLoaded ? inactiveDeviceCount : '—' }}</strong>
           </article>
           <article>
             <small>{{ t('adminModules.iot.latestReading') }}</small
-            ><strong>{{ t('adminModules.iot.minutesAgo', { count: 2 }) }}</strong>
+            ><strong>{{ devicesLoaded ? latestReadingAge : '—' }}</strong>
           </article>
           <article>
-            <small>{{ t('adminModules.iot.reportingToday') }}</small
-            ><strong>{{ onlineSensorCount }} / {{ sensors.length }}</strong>
+            <small>Devices reporting</small
+            ><strong>{{ devicesLoaded ? `${devicesWithReadingsCount} / ${liveDevices.length}` : '—' }}</strong>
           </article>
         </div>
       </section>
@@ -1094,9 +1253,9 @@ const confirmDeleteSensor = () => {
         <div class="panel-head">
           <div>
             <p>{{ t('adminModules.iot.liveFeed') }}</p>
-            <h2>{{ t('adminModules.iot.currentReadings') }}</h2>
+            <h2>Latest Available Readings</h2>
           </div>
-          <span class="live"><i></i> Updating</span>
+          <span class="live"><i></i>{{ iotLoading ? 'Loading API data' : devicesError || readingsError ? 'Device or reading API unavailable' : 'PostgreSQL API data' }}</span>
         </div>
         <div class="filters">
           <label
@@ -1106,13 +1265,13 @@ const confirmDeleteSensor = () => {
               :placeholder="t('adminModules.iot.searchPlaceholder')" /></label
           ><select v-model="filter">
             <option>All</option>
-            <option>Online</option>
-            <option>Offline</option>
-            <option>Maintenance</option>
-            <option>Inactive</option>
+            <option v-for="status in iotStatusOptions" :key="status" :value="status">{{ status }}</option>
           </select>
         </div>
         <div class="table-scroll">
+          <p v-if="readingsError" role="alert">Reading data unavailable: {{ readingsError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></p>
+          <p v-else-if="iotLoading && !readingsLoaded">Loading readings…</p>
+          <p v-else-if="readingsLoaded && !liveReadings.length">No readings received yet.</p>
           <table>
             <thead>
               <tr>
@@ -1130,6 +1289,10 @@ const confirmDeleteSensor = () => {
               </tr>
             </thead>
             <tbody>
+              <tr v-if="iotLoading && !devicesLoaded"><td colspan="11">Loading sensors…</td></tr>
+              <tr v-else-if="devicesError"><td colspan="11">{{ devicesError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></td></tr>
+              <tr v-else-if="!liveDevices.length"><td colspan="11">No devices registered yet.</td></tr>
+              <tr v-else-if="!filteredIoTSensors.length"><td colspan="11">No sensors match these filters.</td></tr>
               <tr v-for="s in filteredIoTSensors" :key="s.id">
                 <td>
                   <strong>{{ s.id }}</strong>
@@ -1168,30 +1331,29 @@ const confirmDeleteSensor = () => {
             <thead>
               <tr>
                 <th>Alert ID</th>
-                <th>Plant ID</th>
-                <th>Alert Type</th>
-                <th>Severity</th>
-                <th>Confidence</th>
+                <th>Device ID</th>
+                <th>Metric</th>
+                <th>Value</th>
                 <th>Status</th>
                 <th>{{ t('adminModules.columns.createdAt') }}</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
+              <tr v-if="iotLoading && !alertsLoaded"><td colspan="7">Loading alerts…</td></tr>
+              <tr v-else-if="alertsError"><td colspan="7">{{ alertsError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></td></tr>
+              <tr v-else-if="!liveAlerts.length"><td colspan="7">No threat alerts recorded.</td></tr>
               <tr v-for="alert in recentAlerts" :key="alert.id">
                 <td>
                   <strong>{{ alert.id }}</strong>
                 </td>
-                <td>{{ alert.plant }}</td>
-                <td>{{ dataLabel(alert.type) }}</td>
-                <td>
-                  <em class="badge" :class="alert.severity.toLowerCase()">{{ alert.severity }}</em>
-                </td>
-                <td>{{ alert.confidence }}</td>
+                <td>{{ alert.device_id }}</td>
+                <td>{{ dataLabel(alert.metric) }}</td>
+                <td>{{ alert.value }}</td>
                 <td>
                   <em class="badge" :class="alert.status.toLowerCase()">{{ alert.status }}</em>
                 </td>
-                <td>{{ dataLabel(alert.createdAt) }}</td>
+                <td>{{ formattedTimestamp(alert.created_at) }}</td>
                 <td>
                   <RouterLink class="table-action action-link" to="/admin/alerts">View</RouterLink>
                 </td>
@@ -1845,32 +2007,14 @@ const confirmDeleteSensor = () => {
       </section>
     </div>
 
-    <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">
-      <svg class="success-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M9 12l2 2 4-4"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-      </svg>
-      <p>
-        <strong>Success</strong><span>{{ successMessage }}</span>
-      </p>
-    </div>
-
-    <div v-if="errorMessage" class="error-alert" role="alert" aria-live="assertive">
-      <svg class="error-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-        <path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        <circle cx="12" cy="16.5" r="1" fill="currentColor" />
-      </svg>
-      <p>
-        <strong>Error</strong><span>{{ errorMessage }}</span>
-      </p>
-    </div>
+    <ActionFeedback
+      v-if="feedback"
+      :key="feedback.id"
+      :feedback-id="feedback.id"
+      :variant="feedback.variant"
+      :message="feedback.message"
+      @dismiss="dismissFeedback"
+    />
 
     <div
       v-if="sensorModal === 'view' && selectedSensor"
@@ -2091,7 +2235,7 @@ const confirmDeleteSensor = () => {
         </div>
       </section>
     </div>
-  </AdminPageShell>
+</template>  </AdminPageShell>
 </template>
 
 <style scoped>
@@ -2662,82 +2806,6 @@ td i {
 .sensor-actions .delete-action {
   color: #a64b40;
 }
-.success-alert,
-.error-alert {
-  position: fixed;
-  top: 96px;
-  left: 50%;
-  z-index: 1200;
-  width: min(380px, calc(100vw - 32px));
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-radius: 10px;
-  transform: translateX(-50%);
-}
-.success-alert {
-  border-left: 4px solid #0c723a;
-  background: #abe7bf;
-  color: #245b3d;
-  box-shadow: 0 10px 28px rgba(36, 91, 61, 0.15);
-  animation: success-alert-in 180ms ease-out;
-}
-.error-alert {
-  z-index: 1201;
-  border-left: 4px solid #b42318;
-  background: #fde8e7;
-  color: #7a271a;
-  box-shadow: 0 10px 28px rgba(122, 39, 26, 0.16);
-  animation: error-alert-in 180ms ease-out;
-}
-.success-alert-icon,
-.error-alert-icon {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-}
-.success-alert-icon {
-  color: #2f8a5a;
-}
-.error-alert-icon {
-  color: #c43228;
-}
-.success-alert p,
-.error-alert p {
-  margin: 0;
-  display: grid;
-  gap: 2px;
-}
-.success-alert strong,
-.error-alert strong {
-  font-size: 11px;
-  font-weight: 800;
-}
-.success-alert span,
-.error-alert span {
-  font-size: 10px;
-}
-@keyframes success-alert-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-@keyframes error-alert-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
 .sensor-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -3053,10 +3121,6 @@ td i {
   }
 }
 @media (max-width: 620px) {
-  .success-alert,
-  .error-alert {
-    top: 82px;
-  }
   .network-overview,
   .sensor-modal {
     padding: 17px;

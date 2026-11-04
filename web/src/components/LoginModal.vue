@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { api, type AuthUser } from '../services/auth'
+import { api, logout, type AuthUser } from '../services/auth'
 import { useRouter } from 'vue-router' // Navigate to the forgot-password page
 const router = useRouter() //forgot password
 const { t } = useI18n({ useScope: 'global' })
@@ -49,6 +49,11 @@ const openForgotPassword = () => {
 const submitting = ref(false)
 const handleLogin = async () => {
   if (submitting.value) return
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim()) || email.value.length > 254 || !password.value) {
+    loginError.value = 'loginModal.errors.invalid'
+    return
+  }
+  email.value = email.value.trim()
   submitting.value = true
   loginError.value = ''
   platformMessage.value = ''
@@ -57,13 +62,14 @@ const handleLogin = async () => {
       email: email.value,
       password: password.value,
     })
+    if (!['Administrator', 'Conservation Officer'].includes(user.role)) {
+      await logout()
+      platformMessage.value = 'loginModal.mobileOnly'
+      return
+    }
     if (user.mustChangePassword) {
       closeModal()
       await router.push({ name: 'change-password' })
-      return
-    }
-    if (user.role === 'Botanist' || user.role === 'Visitor') {
-      platformMessage.value = 'loginModal.mobileOnly'
       return
     }
     emit('login', {
@@ -116,6 +122,7 @@ const handleLogin = async () => {
               v-model="email"
               class="form-input"
               type="email"
+              maxlength="254"
               placeholder=" "
               autocomplete="email"
               required

@@ -1,3 +1,4 @@
+import {reactive} from 'vue'
 export type ObservationStatus = 'Approved' | 'Pending' | 'Rejected'
 
 export interface PlantObservation {
@@ -120,18 +121,4 @@ const record = (
   }
 }
 
-export const plantRecords: PlantRecord[] = [
-  record('PL001', 'tropical-pitcher-plant', 'SP001', 'Tropical Pitcher Plant', 'Nepenthes rafflesiana', 'A', 80, 'Healthy', 'Mature', 1),
-  record('PL014', 'tropical-pitcher-plant', 'SP001', 'Tropical Pitcher Plant', 'Nepenthes rafflesiana', 'B', 64, 'Healthy', 'Juvenile', 2),
-  record('PL026', 'tropical-pitcher-plant', 'SP001', 'Tropical Pitcher Plant', 'Nepenthes rafflesiana', 'C', 91, 'Monitoring', 'Mature', 3),
-  record('PL032', 'wild-ginger', 'SP002', 'Wild Ginger', 'Etlingera elatior', 'A', 178, 'Healthy', 'Flowering', 4),
-  record('PL041', 'wild-ginger', 'SP002', 'Wild Ginger', 'Etlingera elatior', 'B', 152, 'Healthy', 'Mature', 5),
-  record('PL053', 'tree-fern', 'SP003', 'Tree Fern', 'Cyathea contaminans', 'B', 320, 'Healthy', 'Mature', 6),
-  record('PL061', 'tree-fern', 'SP003', 'Tree Fern', 'Cyathea contaminans', 'C', 245, 'Healthy', 'Juvenile', 7),
-  record('PL074', 'borneo-orchid', 'SP004', 'Borneo Orchid', 'Phalaenopsis bellina', 'A', 34, 'Healthy', 'Flowering', 8),
-  record('PL082', 'borneo-orchid', 'SP004', 'Borneo Orchid', 'Phalaenopsis bellina', 'C', 29, 'Monitoring', 'Mature', 9),
-  record('PL093', 'rattan-palm', 'SP005', 'Rattan Palm', 'Calamus manan', 'A', 410, 'Healthy', 'Mature', 10),
-  record('PL107', 'rattan-palm', 'SP005', 'Rattan Palm', 'Calamus manan', 'B', 285, 'Healthy', 'Juvenile', 11),
-  record('PL118', 'forest-shrub', 'SP006', 'Forest Shrub', 'Syzygium grande', 'B', 196, 'Healthy', 'Mature', 12),
-  record('PL126', 'forest-shrub', 'SP006', 'Forest Shrub', 'Syzygium grande', 'C', 143, 'Healthy', 'Juvenile', 13),
-]
+export const plantRecords: PlantRecord[] = reactive([])

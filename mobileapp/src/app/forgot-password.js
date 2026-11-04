@@ -1,9 +1,11 @@
+import { useAppTranslation, t, translateUIMessage } from "../../translations/i18n";
 import React, { useState } from 'react';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScrollView, Text, TextInput, TouchableOpacity } from 'react-native';
 import { faceApi } from '../../utils/faceApi';
 export default function ForgotPassword() {
+  useAppTranslation();
   const [email,setEmail]=useState(''),[requestId,setRequestId]=useState('');
   const [code,setCode]=useState(''),[password,setPassword]=useState(''),[confirm,setConfirm]=useState('');
   const [message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[done,setDone]=useState(false);
@@ -24,17 +26,17 @@ export default function ForgotPassword() {
   }
   const inputStyle={borderWidth:1,borderColor:'#aaa',borderRadius:8,padding:14,marginVertical:8};
   return <SafeAreaView style={{flex:1,backgroundColor:'#f3f6f2'}}><ScrollView contentContainerStyle={{padding:24,gap:12}} keyboardShouldPersistTaps="handled">
-    <Text style={{fontSize:26,color:'#244b47'}}>Forgot Password</Text>
-    {!done&&(!requestId?<TextInput style={inputStyle} accessibilityLabel="Account email" placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address"/>:<>
-      <Text>Enter the six-digit email code within five minutes. Use a new password with 15 to 128 characters.</Text>
-      <TextInput style={inputStyle} accessibilityLabel="Recovery code" placeholder="Recovery code" value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6}/>
-      <TextInput style={inputStyle} accessibilityLabel="New password" placeholder="New password" secureTextEntry value={password} onChangeText={setPassword}/>
-      <TextInput style={inputStyle} accessibilityLabel="Confirm new password" placeholder="Confirm password" secureTextEntry value={confirm} onChangeText={setConfirm}/>
+    <Text style={{fontSize:26,color:'#244b47'}}>{t("forgot-password.forgotPassword")}</Text>
+    {!done&&(!requestId?<TextInput style={inputStyle} accessibilityLabel={t("forgot-password.accountEmail")} placeholder={t("login.email")} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address"/>:<>
+      <Text>{t("forgot-password.enterTheSixDigitEmailCodeWithinFiveMinutesUse")}</Text>
+      <TextInput style={inputStyle} accessibilityLabel={t("forgot-password.recoveryCode")} placeholder={t("forgot-password.recoveryCode")} value={code} onChangeText={setCode} keyboardType="number-pad" maxLength={6}/>
+      <TextInput style={inputStyle} accessibilityLabel={t("mandatoryPasswordChange.newPassword")} placeholder={t("mandatoryPasswordChange.newPassword")} secureTextEntry value={password} onChangeText={setPassword}/>
+      <TextInput style={inputStyle} accessibilityLabel={t("mandatoryPasswordChange.confirmNewPassword")} placeholder={t("forgot-password.confirmPassword")} secureTextEntry value={confirm} onChangeText={setConfirm}/>
     </>)}
-    {!!message&&<Text accessibilityLiveRegion="polite">{message}</Text>}
-    {!!error&&<Text accessibilityRole="alert" style={{color:'#b42318'}}>{error}</Text>}
-    {!done&&<TouchableOpacity disabled={busy} onPress={submit}><Text style={{padding:16,backgroundColor:'#28745a',color:'white'}}>{busy?'Please wait…':requestId?'Reset password':'Request recovery code'}</Text></TouchableOpacity>}
-    {!!requestId&&<TouchableOpacity disabled={busy} onPress={()=>{setRequestId('');setCode('');setPassword('');setConfirm('');setMessage('');setError('');}}><Text>Request a new code</Text></TouchableOpacity>}
-    <TouchableOpacity onPress={()=>router.back()}><Text>Return to Login</Text></TouchableOpacity>
+    {!!message&&<Text accessibilityLiveRegion="polite">{translateUIMessage(message)}</Text>}
+    {!!error&&<Text accessibilityRole="alert" style={{color:'#b42318'}}>{translateUIMessage(error)}</Text>}
+    {!done&&<TouchableOpacity disabled={busy} onPress={submit}><Text style={{padding:16,backgroundColor:'#28745a',color:'white'}}>{busy?t("common.pleaseWait"):requestId?t("forgot-password.resetPassword"):t("forgot-password.requestRecoveryCode")}</Text></TouchableOpacity>}
+    {!!requestId&&<TouchableOpacity disabled={busy} onPress={()=>{setRequestId('');setCode('');setPassword('');setConfirm('');setMessage('');setError('');}}><Text>{t("forgot-password.requestANewCode")}</Text></TouchableOpacity>}
+    <TouchableOpacity onPress={()=>router.back()}><Text>{t("forgot-password.returnToLogin")}</Text></TouchableOpacity>
   </ScrollView></SafeAreaView>;
 }

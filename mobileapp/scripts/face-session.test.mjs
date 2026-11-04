@@ -11,9 +11,9 @@ function fixture() {
  const make = () => createFaceSessionManager({storage, api, backend:'https://backend.example', validUser: v => v?.id === user.id});
  return {make, calls, stored:()=>saved, fail:()=>{fail=true;}, seed:v=>{saved=JSON.stringify(v);}};
 }
-test('persist token only; restore profile from backend', async()=>{
+test('persist secure token and bounded draft lease; restore online authority from backend', async()=>{
  const f=fixture(), m=f.make(); assert.deepEqual(await m.establish({token,user}),user);
- assert.deepEqual(JSON.parse(f.stored()),{backend:'https://backend.example',token});
+ const saved=JSON.parse(f.stored());assert.equal(saved.backend,'https://backend.example');assert.equal(saved.token,token);assert.deepEqual(saved.lease.user,user);assert.ok(Number.isFinite(saved.lease.verifiedAt));f.seed({...saved,lease:{...saved.lease,user:{...user,role:'Administrator'}}});
  assert.deepEqual(await f.make().restore(),user); assert.equal(f.calls.every(c=>c.path==='/me'&&c.bearer===token),true);
 });
 test('reject identity mismatch',async()=>{const f=fixture();await assert.rejects(f.make().establish({token,user:{id:'other'}}),/does not match/);assert.equal(f.stored(),null);});

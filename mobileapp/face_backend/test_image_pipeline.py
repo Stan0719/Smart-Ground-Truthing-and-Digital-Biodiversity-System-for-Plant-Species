@@ -119,6 +119,8 @@ class RealPortraitTests(unittest.TestCase):
         with self.assertRaises(AuthError) as caught: embed(buffer.getvalue())
         self.assertEqual(caught.exception.code,'liveness_rejected')
 
+@unittest.skipUnless(os.environ.get('FACE_TEST_REAL_MODELS') == '1', 'Enable non-biometric model inference explicitly.')
+class RealNoFaceTests(unittest.TestCase):
     def test_real_no_face_photo(self):
         from server import embed
         buffer=io.BytesIO();Image.new('RGB',(512,512),(120,120,120)).save(buffer,format='JPEG')

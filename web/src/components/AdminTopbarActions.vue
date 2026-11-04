@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { adminProfile } from '../data/adminProfile'
 import AdminNotificationBell from './AdminNotificationBell.vue'
 import LanguageSwitcher from './LanguageSwitcher.vue'
+import { logout } from '../services/auth'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -28,6 +29,7 @@ const openProfileSettings = async () => {
 }
 
 const signOut = async () => {
+  await logout()
   closeProfile()
   await router.push({ name: 'home' })
 }

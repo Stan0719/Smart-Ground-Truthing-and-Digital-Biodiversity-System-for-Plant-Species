@@ -1,0 +1,71 @@
+✔ version 2 JSON round trip includes a key ID and hides account plaintext (3.1239ms)
+✔ rotation encrypts with the active ID and reads old envelopes using retained keys (0.5622ms)
+✔ v1 compatibility is explicit; versions and plaintext never silently fall back (0.52ms)
+✔ wrong keys and altered key IDs, versions, algorithms and contexts fail closed (0.7312ms)
+✔ tampering and malformed nonce/tag/ciphertext are rejected (0.9354ms)
+✔ fresh encryptions use unique nonces and do not mutate input records (2.2113ms)
+✔ keyring validation rejects missing keys, wrong lengths/types and invalid IDs (0.7821ms)
+✔ backend environment configuration fails without keys and rejects public variable prefixes (0.5182ms)
+✔ encryption/decryption errors do not echo plaintext, keys or underlying exceptions (0.3624ms)
+✔ AES-256-GCM round trip survives envelope JSON serialization (0.3552ms)
+✔ repeated encryption uses fresh nonces and ciphertext (2.6165ms)
+✔ missing, wrong-type and non-256-bit keys fail closed (0.5199ms)
+✔ record context is required and authenticated (0.3209ms)
+✔ tampering with nonce, tag or ciphertext is rejected (0.3129ms)
+✔ malformed envelopes, truncated tags and noncanonical base64 are rejected (0.747ms)
+✔ unsupported serialization fails without returning a partial envelope (0.3418ms)
+✔ UTC inactivity: one millisecond below 30 days stays Active; exact boundary suspends once (2425.7932ms)
+✔ protected session validation suspends inactivity and permanently revokes existing sessions (2070.631ms)
+✔ never-logged-in staff and Visitors use server-side creation audit timestamps (2040.1144ms)
+✔ legacy unknown creation/login starts one durable grace window; failed login does not refresh it (2330.4436ms)
+✔ reactivation grants 30 fresh days without changing last login, role, password or reviving sessions (1904.1707ms)
+✔ only Administrator can reactivate through HTTP or the account service; self-suspension and Inactive selection are rejected (3267.9857ms)
+✔ full account edit reactivation records its operator and starts a fresh window (1971.2261ms)
+✔ temporary-password expiry, resend, forced change and subsequent inactivity remain compatible (2707.2094ms)
+✔ concurrent checks protect the final fully activated Administrator from lockout (1833.1527ms)
+✔ legacy Inactive records remain unchanged until an Administrator explicitly reactivates (1586.6014ms)
+✔ dashboard status filter and edit options omit Inactive while retaining legacy display compatibility (0.7018ms)
+✔ actual staff/Visitor inserts encrypt names in bound parameters and PostgreSQL; reads preserve responses (2080.4587ms)
+✔ real HTTP account creation/edit/list/login/recovery decrypt names and keep authorization/contracts (3078.0833ms)
+✔ legacy plaintext records remain readable, and editing one encrypts only its name (1737.4986ms)
+✔ wrong keys, corrupted ciphertext, record substitution and missing keys fail without data loss (1657.4254ms)
+✔ missing configured key prevents real backend writes before INSERT, without plaintext fallback (1999.9467ms)
+✔ administrator provisions temporary password; first change is mandatory before RBAC access (3261.2133ms)
+✔ missing delivery creates nothing; failed delivery keeps first-change restrictions and permits retry (1860.9974ms)
+✔ resend rotates temporary password and sessions but cannot reset completed or blocked staff (3277.0071ms)
+✔ legacy pending account is preserved until administrator issues its temporary password (1916.9583ms)
+✔ Visitor administration uses Visitor table without permitting staff promotion (2009.3842ms)
+✔ activation diagnostic rejects missing/placeholders and never reveals configured values (1.2243ms)
+✔ invitation abuse limit rejects delivery before rotating tokens or creating accounts (1545.5793ms)
+✔ startup and diagnostics share public fallback without reusing OTP or overriding server settings (3.9221ms)
+✔ EmailJS errors expose only safe actionable categories, never provider text or secrets (1667.1246ms)
+Rejected website origin: "https://other-workspace-5173.app.github.dev"
+Rejected website origin: "(missing)"
+Rejected website origin: "https://evil.example"
+✔ HTTP API enforces status, role, cookies, origin and revocation (4864.9677ms)
+✔ one-hour Botanist credentials expire; mobile-only first login and independent native sessions (3918.5903ms)
+✔ only Administrator can initiate another account recovery without changing its password (3169.4441ms)
+✔ listener remains healthy; overlapping shutdown requests close the listener and database only once (7.0125ms)
+✔ unexpected server closure and event-loop drain are distinguishable from requested shutdown (1.226ms)
+✔ database shutdown failure is recorded safely and produces a nonzero exit (1.1748ms)
+✔ fatal observers retain safe metadata without swallowing exceptions or unhandled rejections (0.2608ms)
+✔ all roles enforce status, log denials and permanently revoke old sessions (6342.4177ms)
+✔ password change, expiry, direct database disable and throttling (2746.8507ms)
+✔ explicit email administrator bootstrap preserves existing users and never returns credentials (2018.0363ms)
+✔ security settings are constrained, persisted, audited and revoke sessions (1771.4499ms)
+✔ delete archives staff and visitors, hides them after reload and blocks reactivation (2631.3627ms)
+✔ Visitor registration persists hashed credentials, authenticates and revokes correctly (2153.7197ms)
+✔ server recovery expiry, attempts, single use, password update and session revocation (2655.1697ms)
+✔ delivery failures do not claim delivery and blocked accounts cannot reset (1579.3922ms)
+✔ signed recovery HTTP returns a distinct recovery identifier and validates real session after reset (2235.1487ms)
+✔ private environment recovery key requires no file and rejects malformed key material (2.5704ms)
+ℹ tests 58
+ℹ suites 0
+ℹ pass 58
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 84511.24
+
+Process exit code: 0

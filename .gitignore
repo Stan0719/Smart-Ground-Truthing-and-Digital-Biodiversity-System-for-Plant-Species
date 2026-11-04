@@ -9,6 +9,18 @@ node_modules/
 
 # Python virtual environment
 .venv/
+.venv-win/
 
 # Build output
 dist/
+
+# Local recovery metadata exports
+docs/recovery/*.local.json
+
+# Private runtime data, migration tooling and test environments
+.local-tools/
+__pycache__/
+*.pyc
+plant-conservation-backend/backups/
+web/server/data/
+mobileapp/face_backend/data/

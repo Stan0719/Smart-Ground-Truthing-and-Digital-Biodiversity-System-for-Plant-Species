@@ -1,252 +1,161 @@
-require('dotenv').config();
-
-const express = require('express');
-const { Pool } = require('pg');
-const cors = require('cors');
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Allow the local Expo web app to access the API
-app.use(cors({
-  origin: [
-    'http://localhost:8081',
-    'http://127.0.0.1:8081'
-  ]
-}));
-
-// Parse incoming JSON requests
-app.use(express.json());
-
-// Connect to Supabase when DATABASE_URL is configured.
-// Otherwise, continue using existing local PostgreSQL settings.
-const pool = process.env.DATABASE_URL
-  ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-    })
-  : new Pool({
-      host: process.env.DB_HOST,
-      port: Number(process.env.DB_PORT),
-      database: process.env.DB_NAME,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-    });
-
-// Basic test route
-app.get('/', (req, res) => {
-  res.send('Plant Conservation API is running!');
-});
-
-// Test PostgreSQL and PostGIS connection
-app.get('/api/db-test', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        current_database() AS database_name,
-        current_user AS connected_user,
-        PostGIS_Full_Version() AS postgis_version;
-    `);
-
-    res.json({
-      message: 'Database connection successful!',
-      database: result.rows[0],
-    });
-  } catch (error) {
-    console.error('Database connection error:', error.message);
-
-    res.status(500).json({
-      message: 'Database connection failed.',
-    });
-  }
-});
-
-// List existing database tables (read-only)
-app.get('/api/tables', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT table_name
-      FROM information_schema.tables
-      WHERE table_schema = 'public'
-        AND table_type = 'BASE TABLE'
-      ORDER BY table_name;
-    `);
-
-    res.json({
-      message: 'Tables retrieved successfully!',
-      count: result.rows.length,
-      tables: result.rows.map(row => row.table_name),
-    });
-  } catch (error) {
-    console.error('Table query error:', error.message);
-
-    res.status(500).json({
-      message: 'Unable to retrieve tables.',
-    });
-  }
-});
-
-// Get all plant species (read-only)
-app.get('/api/species', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT
-        s.species_id,
-        s.scientific_name,
-        s.common_name,
-        g.genus_name,
-        f.family_name,
-        cs.status_name AS conservation_status,
-        s.description,
-        s.registered_at
-      FROM public.species AS s
-      LEFT JOIN public.genus AS g
-        ON s.genus_id = g.genus_id
-      LEFT JOIN public.family AS f
-        ON g.family_id = f.family_id
-      LEFT JOIN public.conservation_status AS cs
-        ON s.status_id = cs.status_id
-      ORDER BY s.scientific_name ASC;
-    `);
-
-    res.json({
-      message: 'Species retrieved successfully!',
-      count: result.rows.length,
-      species: result.rows,
-    });
-  } catch (error) {
-    console.error('Species query error:', error.message);
-
-    res.status(500).json({
-      message: 'Unable to retrieve species.',
-    });
-  }
-});
-
-// Register a plant and its GPS location
-app.post('/api/plants', async (req, res) => {
-  const {
-    species_id,
-    registered_by,
-    latitude,
-    longitude,
-    accuracy_m
-  } = req.body;
-
-  // Validate required values
-  if (
-    !Number.isSafeInteger(species_id) ||
-    species_id <= 0 ||
-    !Number.isSafeInteger(registered_by) ||
-    registered_by <= 0 ||
-    typeof latitude !== 'number' ||
-    typeof longitude !== 'number' ||
-    !Number.isFinite(latitude) ||
-    !Number.isFinite(longitude) ||
-    latitude < -90 ||
-    latitude > 90 ||
-    longitude < -180 ||
-    longitude > 180
-  ) {
-    return res.status(400).json({
-      message: 'Please provide valid species_id, registered_by, latitude and longitude.'
-    });
-  }
-
-  if (
-    accuracy_m !== undefined &&
-    accuracy_m !== null &&
-    (
-      typeof accuracy_m !== 'number' ||
-      !Number.isFinite(accuracy_m) ||
-      accuracy_m < 0
+"use strict";
+const express = require("express");
+const { createServer } = require("node:http");
+const {
+  configuredOrigins,
+  browserBoundary,
+  identity,
+  requirePermission,
+} = require("./authorization.cjs");
+const { mountDomain } = require("./domain.cjs");
+const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
+const { mountUploads } = require("./uploads.cjs");
+const { mountPlantSubmissions } = require("./plant-submissions.cjs");
+const { mountRecordChanges } = require("./record-changes.cjs");
+const { mountRecordVersionHistory } = require("./record-version-history.cjs");
+function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
+  const app = express();
+  app.disable("x-powered-by");
+  // Do not generate ETags for uncached, authenticated JSON reads.
+  app.disable("etag");
+  app.use((req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    next();
+  });
+  app.get("/health", (_req, res) =>
+    res.json({ service: "Plant Conservation API", ready: true }),
+  );
+  app.use(browserBoundary(origins));
+  app.use((req, res, next) => {
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
+      !req.is("application/json")
     )
-  ) {
-    return res.status(400).json({
-      message: 'accuracy_m must be a non-negative number.'
+      return res.status(415).json({ error: "JSON required." });
+    next();
+  });
+  app.use("/api/plant-submissions", express.json({ limit: "64mb" }));
+  app.use("/api/my-plants", express.json({ limit: "64mb" }));
+  app.use("/api/my-species-requests", express.json({ limit: "8mb" }));
+  app.use("/api/record-changes", express.json({ limit: "64mb" }));
+  app.use(express.json({ limit: "6mb" }));
+  mountDeviceIngestion(app, { pool });
+  app.use(identity(auth));
+  const allow = (permission) => requirePermission(auth, permission);
+  mountDomain(app, { auth, pool, allow });
+  mountPlantSubmissions(app, { pool, allow });
+  mountRecordChanges(app, { pool, allow });
+  mountRecordVersionHistory(app, { pool, allow });
+  mountUploads(app, { pool, allow });
+  mountIoT(app, { pool, allow });
+  app.get("/api/db-test", allow("system.read"), async (_req, res) => {
+    await pool.query("SELECT 1");
+    res.json({ connected: true, database: "postgresql" });
+  });
+  app.get("/api/tables", allow("system.read"), async (_req, res) =>
+    res.json({
+      tables: (
+        await pool.query(
+          "SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() ORDER BY table_name",
+        )
+      ).rows.map((row) => row.table_name),
+    }),
+  );
+  app.use((_req, res) => res.status(404).json({ error: "Not found." }));
+  app.use((error, _req, res, _next) => {
+    if (["42P01", "42703"].includes(error.code))
+      return res.status(503).json({ error: "Plant database setup is incomplete. Apply the supplied Add Plant migrations and restart the plant API." });
+    const status =
+      error.type === "entity.too.large"
+        ? 413
+        : error instanceof SyntaxError
+          ? 400
+          : error.status ||
+            (["23505", "23503"].includes(error.code)
+              ? 409
+              : ["23514", "22P02"].includes(error.code)
+                ? 400
+                : 503);
+    if (error.code === "23503")
+      console.error("Plant API foreign key violation:", JSON.stringify({
+        code: error.code,
+        schema: error.schema,
+        table: error.table,
+        constraint: error.constraint,
+      }));
+    if (status >= 500)
+      console.error("Plant API request failed:", error.code ?? error.name);
+    res.status(status).json({
+      error:
+        status >= 500
+          ? "Service unavailable. Please try again."
+          : status === 413
+            ? "Request too large."
+            : ({
+                "23505": "Record already exists.",
+                "23503": "Related record is unavailable.",
+                "23514": "Invalid record values.",
+                "22P02": "Invalid record values.",
+              })[error.code] || (error instanceof SyntaxError
+                ? "Invalid request."
+                : error.message || "Invalid request."),
     });
-  }
-
-  const client = await pool.connect();
-  let transactionStarted = false;
-
+  });
+  return app;
+}
+async function start() {
+  require("./environment.cjs");
+  const { loadServerEnvironment } = await import("../web/server/postgres.mjs");
+  loadServerEnvironment();
+  const { createAuth } = await import("../web/server/auth.mjs");
+  const { poolFromEnvironment } = require("./database.cjs");
+  const auth = await createAuth(),
+    pool = poolFromEnvironment();
   try {
-    await client.query('BEGIN');
-    transactionStarted = true;
-
-    // Create the plant record
-    const plantResult = await client.query(
-      `INSERT INTO public.plant_record
-        (species_id, registered_by)
-       VALUES ($1::bigint, $2::bigint)
-       RETURNING plant_id, species_id, registered_by,
-                 current_status, registered_at`,
-      [species_id, registered_by]
+    await pool.query(
+      "SELECT plant_id,registered_subject,rbac_status,qr_token FROM plant_record LIMIT 0",
     );
-
-    const plant = plantResult.rows[0];
-
-    // Create its GPS location and PostGIS point
-    const locationResult = await client.query(
-      `INSERT INTO public.plant_location
-         (plant_id, latitude, longitude, accuracy_m, geometry)
-       VALUES (
-         $1, $2, $3, $4,
-         ST_SetSRID(
-           ST_MakePoint(
-             ($3::numeric)::double precision,
-             ($2::numeric)::double precision
-           ),
-           4326
-         )
-       )
-       RETURNING location_id, plant_id, latitude, longitude,
-                 accuracy_m, recorded_at`,
-      [
-        plant.plant_id,
-        latitude,
-        longitude,
-        accuracy_m ?? null
-      ]
+    await pool.query("SELECT species_id,rbac_data FROM species LIMIT 0");
+    await pool.query("SELECT qr_id,qr_code,plant_id,status FROM public.qr_code LIMIT 0");
+    await pool.query(
+      "SELECT id,owner_subject,revision FROM plant_observation LIMIT 0",
     );
-
-    await client.query('COMMIT');
-    transactionStarted = false;
-
-    return res.status(201).json({
-      message: 'Plant registered successfully!',
-      plant,
-      location: locationResult.rows[0]
-    });
   } catch (error) {
-    if (transactionStarted) {
-      try {
-        await client.query('ROLLBACK');
-      } catch (rollbackError) {
-        console.error(
-          'Transaction rollback failed:',
-          rollbackError.message
-        );
-      }
-    }
-
-    console.error('Plant registration error:', error.message);
-
-    if (error.code === '23503') {
-      return res.status(400).json({
-        message: 'The supplied species_id or registered_by does not exist.'
-      });
-    }
-
-    return res.status(500).json({
-      message: 'Unable to register the plant.'
-    });
-  } finally {
-    client.release();
+    await Promise.allSettled([auth.db.close(), pool.end()]);
+    throw error;
   }
-});
-
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-});
+  const app = createPlantApp({ auth, pool });
+  const server = createServer(app);
+  const port = Number(process.env.PORT || 3000);
+  server.once("listening", () => console.log("Plant API listening on port " + server.address().port));
+  server.on("error", async (error) => {
+    console.error(
+      "Plant API startup failed:",
+      error.code ?? error.name,
+      ...(error.code === "EADDRINUSE" ? [`Port ${port} is already in use. Stop the existing plant API before starting another instance.`] : []),
+    );
+    await Promise.allSettled([auth.db.close(), pool.end()]);
+    process.exitCode = 1;
+  });
+  server.listen(port, process.env.HOST || "127.0.0.1");
+  for (const signal of ["SIGINT", "SIGTERM"])
+    process.once(signal, () =>
+      server.close(async () => {
+        await Promise.allSettled([auth.db.close(), pool.end()]);
+        process.exit(0);
+      }),
+    );
+}
+if (require.main === module)
+  start().catch((error) => {
+    console.error(
+      "Plant API startup failed; verify configuration:"
+    );
+    // Driver messages/stacks may contain connection strings or credentials.
+    const code = typeof error?.code === "string" && /^[A-Z0-9_]{1,40}$/.test(error.code)
+      ? error.code : "STARTUP_FAILURE";
+    console.error("Startup error code:", code);
+    process.exitCode = 1;
+  });
+module.exports = { createPlantApp };

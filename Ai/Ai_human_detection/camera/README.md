@@ -1,3 +1,5 @@
+> Historical instructions: project Python files and launchers were removed at the user's request. Python commands below are no longer runnable. The active website uses Vue, Node.js and PostgreSQL.
+
 # AI-Powered Human and Animal Detection & Tracking Using YOLOv8
 
 ## Overview

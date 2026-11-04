@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ActionFeedback from '../components/ActionFeedback.vue'
 import AdminPageShell from '../components/AdminPageShell.vue'
 import { api, currentUser, type AuthUser } from '../services/auth'
-type PrototypeRole = 'Conservation Officer' | 'Botanist'
-type PrototypeUser = AuthUser & { password: string }
-import { sendTemporaryPasswordEmail } from '../services/accountEmail'
-type UserStatus = 'Active' | 'Inactive' | 'Suspended'
+import StaffDialog from '../components/StaffDialog.vue'
+import StaffInvitations from '../components/StaffInvitations.vue'
+type UserStatus = 'Active' | 'Inactive' | 'Suspended' | 'Pending Activation'
 type UserRole = 'Administrator' | 'Conservation Officer' | 'Botanist' | 'Visitor'
 
 interface UserRecord {
@@ -17,11 +17,12 @@ interface UserRecord {
   status: UserStatus
   lastLogin: string
   initials: string
+  mustChangePassword?: boolean
 }
 
 const { t } = useI18n()
 const roleOptions: UserRole[] = ['Administrator', 'Conservation Officer', 'Botanist', 'Visitor']
-const statusOptions: UserStatus[] = ['Active', 'Inactive', 'Suspended']
+const statusOptions: UserStatus[] = ['Active', 'Suspended']
 const roleLabel = (role: UserRole) => t(`adminUsers.roles.${role.replaceAll(' ', '')}`)
 const statusLabel = (status: UserStatus) => t(`adminUsers.statuses.${status.toLowerCase()}`)
 const lastLoginLabel = (value: string) => {
@@ -50,115 +51,57 @@ onMounted(async () => {
   currentAdminId.value = (await currentUser())?.id ?? ''
   await loadUsers()
 })
-const setStatus = async (user: UserRecord, event: Event) => {
-  const target = event.target as HTMLSelectElement
-  target.disabled = true
-  try {
-    await api(`/admin/users/${user.id}/status`, 'PATCH', { status: target.value })
-    await loadUsers()
-  } catch (error) {
-    target.value = user.status
-    loadError.value = error instanceof Error ? error.message : 'Unable to change status.'
-  } finally {
-    target.disabled = false
-  }
-}
-
-const createdUser = ref<PrototypeUser | null>(null)
 const actionMode = ref<'view' | 'edit' | 'delete' | null>(null)
 const selectedUser = ref<UserRecord | null>(null)
 const actionError = ref('')
-const successMessage = ref('')
-const errorMessage = ref('')
-let successTimer: ReturnType<typeof setTimeout> | undefined
-let errorTimer: ReturnType<typeof setTimeout> | undefined
-const editUser = ref<{ name: string; email: string; role: UserRole; status: UserStatus }>({
+const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
+let feedbackId = 0
+const editUser = ref<{ name: string; email: string; role: UserRole; status: UserStatus | '' }>({
   name: '',
   email: '',
   role: 'Botanist',
   status: 'Active',
 })
-const copyLabel = ref('Copy Password')
-const emailState = ref<'idle' | 'sending' | 'sent' | 'error'>('idle')
-const emailError = ref('')
-const formError = ref('')
-const newUser = ref<{ name: string; email: string; role: PrototypeRole | '' }>({
-  name: '',
-  email: '',
-  role: '',
-})
+const creatingStaff = ref(false)
 
 const showSuccessMessage = (message: string) => {
-  if (errorTimer) clearTimeout(errorTimer)
-  errorTimer = undefined
-  errorMessage.value = ''
-
-  if (successTimer) clearTimeout(successTimer)
-  successMessage.value = message
-  successTimer = setTimeout(() => {
-    successMessage.value = ''
-    successTimer = undefined
-  }, 3500)
+  feedback.value = { id: ++feedbackId, variant: 'success', message }
 }
 
 const showErrorMessage = (message: string) => {
-  if (successTimer) clearTimeout(successTimer)
-  successTimer = undefined
-  successMessage.value = ''
-
-  if (errorTimer) clearTimeout(errorTimer)
-  errorMessage.value = message
-  errorTimer = setTimeout(() => {
-    errorMessage.value = ''
-    errorTimer = undefined
-  }, 4000)
+  feedback.value = { id: ++feedbackId, variant: 'error', message }
 }
 
-const openAddUser = () => {
-  newUser.value = { name: '', email: '', role: '' }
-  formError.value = ''
-  createdUser.value = null
-  copyLabel.value = 'Copy Password'
-  emailState.value = 'idle'
-  emailError.value = ''
-  addUserOpen.value = true
+const dismissFeedback = (id: number) => {
+  if (feedback.value?.id === id) feedback.value = null
 }
 
-const submitNewUser = async () => {
-  const name = newUser.value.name.trim()
-  const email = newUser.value.email.trim().toLowerCase()
-  formError.value = ''
-
-  if (!name || !email || !newUser.value.role) {
-    formError.value = 'Full name, email and role are required.'
-    showErrorMessage(formError.value)
-    return
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    formError.value = 'Enter a valid email address.'
-    showErrorMessage(formError.value)
-    return
-  }
+const openAddUser = () => { addUserOpen.value = true }
+const staffCreated = async (result: { delivery: string; message?: string }) => {
+  addUserOpen.value = false
+  await loadUsers()
+  if (result.delivery === 'sent') showSuccessMessage('Staff account created. Temporary-password email accepted for delivery.')
+  else showErrorMessage(result.message || 'Account created, but email delivery was not confirmed. Use Resend temporary password to retry.')
+}
+async function requestRecovery(user:UserRecord){if(!confirm('Send a password recovery code to '+user.email+'?'))return;try{await api('/admin/users/'+user.id+'/reset','POST',{});showSuccessMessage('Recovery requested. The account owner must complete the recovery flow.')}catch(e){showErrorMessage(e instanceof Error?e.message:'Recovery unavailable.')}}
+const resendBusy = ref<string | null>(null)
+const resendTemporaryPassword = async (user: UserRecord) => {
+  if (resendBusy.value) return
+  resendBusy.value = user.id
   try {
-    createdUser.value = (
-      await api<{ user: PrototypeUser }>('/admin/users', 'POST', {
-        name,
-        email,
-        role: newUser.value.role,
-      })
-    ).user
-    users.value.push(createdUser.value)
-  } catch (error) {
-    formError.value = error instanceof Error ? error.message : 'Unable to create user.'
-    showErrorMessage(formError.value)
-  }
+    const result = await api<{ delivery: string; message?: string }>(`/admin/users/${user.id}/resend`, 'POST', {})
+    await loadUsers()
+    if (result.delivery === 'sent') showSuccessMessage('Temporary-password email accepted for delivery.')
+    else showErrorMessage(result.message || 'Email delivery was not confirmed.')
+  } catch (error) { showErrorMessage(error instanceof Error ? error.message : 'Unable to resend temporary password.') }
+  finally { resendBusy.value = null }
 }
 
 const openUserAction = (mode: 'view' | 'edit' | 'delete', user: UserRecord) => {
   selectedUser.value = user
   actionMode.value = mode
   actionError.value = ''
-  editUser.value = { name: user.name, email: user.email, role: user.role, status: user.status }
+  editUser.value = { name: user.name, email: user.email, role: user.role, status: statusOptions.includes(user.status) ? user.status : '' }
 }
 
 const closeUserAction = () => {
@@ -170,8 +113,24 @@ const closeUserAction = () => {
 const saveEditedUser = async () => {
   if (!selectedUser.value) return
   actionError.value = ''
+  const status = selectedUser.value.status === 'Pending Activation' ? 'Pending Activation' : editUser.value.status
+  if (!status) {
+    actionError.value = 'Choose Active or Suspended. The existing account status has not been changed.'
+    return
+  }
   try {
-    await api(`/admin/users/${selectedUser.value.id}`, 'PATCH', { ...editUser.value })
+    const detailsChanged = editUser.value.name !== selectedUser.value.name ||
+      editUser.value.email !== selectedUser.value.email || editUser.value.role !== selectedUser.value.role
+    if (!detailsChanged && status === selectedUser.value.status) {
+      closeUserAction()
+      return
+    }
+    if (!detailsChanged && statusOptions.includes(status)) {
+      // Status-only actions must not rewrite personal fields or require name keys.
+      await api(`/admin/users/${selectedUser.value.id}/status`, 'PATCH', { status })
+    } else {
+      await api(`/admin/users/${selectedUser.value.id}`, 'PATCH', { ...editUser.value, status })
+    }
     await loadUsers()
     closeUserAction()
     showSuccessMessage('Account updated successfully.')
@@ -192,44 +151,6 @@ const confirmDeleteUser = async () => {
     actionError.value = error instanceof Error ? error.message : 'Unable to delete account.'
     showErrorMessage(actionError.value)
   }
-}
-
-const copyPassword = async () => {
-  if (!createdUser.value) return
-  try {
-    await navigator.clipboard.writeText(createdUser.value.password)
-    copyLabel.value = 'Copied'
-  } catch {
-    copyLabel.value = 'Copy unavailable'
-  }
-}
-
-const sendAccountEmail = async () => {
-  if (!createdUser.value || emailState.value === 'sending' || emailState.value === 'sent') return
-  emailState.value = 'sending'
-  emailError.value = ''
-  try {
-    await sendTemporaryPasswordEmail(createdUser.value, {
-      serviceId: import.meta.env.VITE_EMAILJS_SERVICE_ID,
-      templateId: import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
-      publicKey: import.meta.env.VITE_EMAILJS_PUBLIC_KEY,
-      loginUrl:
-        import.meta.env.VITE_ACCOUNT_LOGIN_URL ||
-        new URL(import.meta.env.BASE_URL, window.location.origin).href,
-    })
-    emailState.value = 'sent'
-  } catch (error) {
-    emailState.value = 'error'
-    emailError.value =
-      error instanceof Error ? error.message : 'Email could not be sent. Please try again.'
-    showErrorMessage(emailError.value || 'Account email could not be sent. Please try again.')
-  }
-}
-
-const finishCreatingUser = () => {
-  if (emailState.value === 'sending') return
-  addUserOpen.value = false
-  createdUser.value = null
 }
 
 const filteredUsers = computed(() => {
@@ -272,6 +193,7 @@ const clearFilters = () => {
         <div>
           <h2>Manage system users</h2>
           <p>View accounts, assign access roles, and manage user status.</p>
+          <p>Accounts are suspended after 30 days without a successful login. Only an Administrator can reactivate them. The last active Administrator is protected from automatic suspension.</p>
         </div>
         <button class="primary-button" type="button" @click="openAddUser">
           <span>＋</span> Add New User
@@ -420,121 +342,18 @@ const clearFilters = () => {
       </section>
     </div>
 
-    <div v-if="successMessage" class="success-alert" role="status" aria-live="polite">
-      <svg class="success-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M9 12l2 2 4-4"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-      </svg>
-      <p>
-        <strong>Success</strong><span>{{ successMessage }}</span>
-      </p>
-    </div>
+    <ActionFeedback
+      v-if="feedback"
+      :key="feedback.id"
+      :feedback-id="feedback.id"
+      :variant="feedback.variant"
+      :message="feedback.message"
+      @dismiss="dismissFeedback"
+    />
 
-    <div v-if="errorMessage" class="error-alert" role="alert" aria-live="assertive">
-      <svg class="error-alert-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-        <path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        <circle cx="12" cy="16.5" r="1" fill="currentColor" />
-      </svg>
-      <p>
-        <strong>Error</strong><span>{{ errorMessage }}</span>
-      </p>
-    </div>
-
-    <div v-if="addUserOpen" class="modal-backdrop" @click.self="finishCreatingUser">
-      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
-        <div class="modal-heading">
-          <div>
-            <p>NEW ACCOUNT</p>
-            <h2 id="add-user-title">Add New User</h2>
-          </div>
-          <button
-            type="button"
-            aria-label="Close"
-            :disabled="emailState === 'sending'"
-            @click="finishCreatingUser"
-          >
-            ×
-          </button>
-        </div>
-        <div v-if="createdUser" class="creation-result">
-          <strong>{{ createdUser.name }}</strong>
-          <span>{{ createdUser.role }}</span>
-          <span>{{ createdUser.email }}</span>
-          <div class="temporary-password">
-            <small>Temporary password</small><code>{{ createdUser.password }}</code>
-          </div>
-          <p class="form-note">
-            The user must change this password when signing in for the first time.
-          </p>
-          <p v-if="emailState === 'sent'" class="form-note" role="status">
-            Account email sent to {{ createdUser.email }}.
-          </p>
-          <p v-else-if="emailState === 'error'" class="form-error" role="alert">
-            {{ emailError }} The account is still created; you can retry sending.
-          </p>
-          <button
-            class="primary-button"
-            type="button"
-            :disabled="emailState === 'sending' || emailState === 'sent'"
-            @click="sendAccountEmail"
-          >
-            {{
-              emailState === 'sending'
-                ? 'Sending email…'
-                : emailState === 'sent'
-                  ? 'Email Sent'
-                  : emailState === 'error'
-                    ? 'Retry Email'
-                    : 'Send Account Email'
-            }}
-          </button>
-          <div class="modal-actions">
-            <button type="button" @click="copyPassword">{{ copyLabel }}</button>
-            <button
-              class="primary-button"
-              type="button"
-              :disabled="emailState === 'sending'"
-              @click="finishCreatingUser"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-        <form v-else @submit.prevent="submitNewUser">
-          <label
-            >Full name<input v-model="newUser.name" type="text" placeholder="Enter full name"
-          /></label>
-          <label
-            >Email address<input
-              v-model="newUser.email"
-              type="email"
-              placeholder="name@example.com"
-          /></label>
-          <label
-            >Role<select v-model="newUser.role">
-              <option value="" disabled>Select role</option>
-              <option>Conservation Officer</option>
-              <option>Botanist</option>
-            </select></label
-          >
-          <p v-if="formError" class="form-error">{{ formError }}</p>
-          <p class="form-note">
-            A temporary password will be generated for this frontend-only prototype.
-          </p>
-          <div class="modal-actions">
-            <button type="button" @click="addUserOpen = false">Cancel</button
-            ><button class="primary-button" type="submit">Create User</button>
-          </div>
-        </form>
-      </section>
-    </div>
+    <StaffDialog v-if="addUserOpen" title="Add New User" :busy="creatingStaff" @close="addUserOpen = false">
+      <StaffInvitations @created="staffCreated" @busy="creatingStaff = $event" @cancel="addUserOpen = false" />
+    </StaffDialog>
 
     <div v-if="actionMode && selectedUser" class="modal-backdrop" @click.self="closeUserAction">
       <section
@@ -594,6 +413,8 @@ const clearFilters = () => {
             </div>
           </dl>
           <div class="modal-actions">
+            <button v-if="!selectedUser.mustChangePassword&&selectedUser.status==='Active'" type="button" @click="requestRecovery(selectedUser)">Request password recovery</button>
+            <button v-if="selectedUser.mustChangePassword && selectedUser.status === 'Active' && ['Botanist','Conservation Officer'].includes(selectedUser.role)" type="button" :disabled="Boolean(resendBusy)" @click="resendTemporaryPassword(selectedUser)">{{ resendBusy === selectedUser.id ? 'Sending?' : 'Resend temporary password' }}</button>
             <button type="button" @click="closeUserAction">Close</button
             ><button
               class="primary-button"
@@ -623,19 +444,25 @@ const clearFilters = () => {
               </select></label
             >
             <label
-              >Status<select v-model="editUser.status" :disabled="selectedIsCurrentAdmin">
+              >Status<select v-model="editUser.status" required :disabled="selectedIsCurrentAdmin || selectedUser.status === 'Pending Activation'">
+                <option disabled value="">Choose Active or Suspended</option>
                 <option>Active</option>
-                <option>Inactive</option>
                 <option>Suspended</option>
               </select></label
             >
           </div>
           <p v-if="actionError" class="form-error" role="alert">{{ actionError }}</p>
           <p v-if="selectedIsPrototype" class="form-note">
-            Prototype accounts can be assigned to Conservation Officer or Botanist roles.
+            Staff role changes are enforced by the server and require a new sign-in.
           </p>
           <p v-if="selectedIsVisitor" class="form-note">
             Visitor accounts are self-registered. Their role cannot be changed from User Management.
+          </p>
+          <p v-if="selectedUser.status === 'Inactive'" class="form-note">
+            This is a legacy disabled account. Its status stays unchanged until you explicitly choose Active or Suspended.
+          </p>
+          <p v-if="selectedUser.status === 'Pending Activation'" class="form-note">
+            This account's status is controlled by its existing activation workflow.
           </p>
           <p v-if="selectedIsCurrentAdmin" class="form-note">
             Your own Administrator role and account status cannot be changed from User Management.
@@ -1016,98 +843,6 @@ code {
   font: inherit;
   font-size: 10px;
 }
-.success-alert {
-  position: fixed;
-  top: 96px;
-  left: 50%;
-  z-index: 1200;
-  width: min(380px, calc(100vw - 32px));
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-left: 4px solid #0c723a;
-  border-radius: 10px;
-  background: #abe7bf;
-  color: #245b3d;
-  box-shadow: 0 10px 28px rgba(36, 91, 61, 0.15);
-  transform: translateX(-50%);
-  animation: success-alert-in 180ms ease-out;
-}
-.success-alert-icon {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  color: #2f8a5a;
-}
-.success-alert p {
-  margin: 0;
-  display: grid;
-  gap: 2px;
-}
-.success-alert strong {
-  font-size: 11px;
-  font-weight: 800;
-}
-.success-alert span {
-  font-size: 10px;
-}
-.error-alert {
-  position: fixed;
-  top: 96px;
-  left: 50%;
-  z-index: 1201;
-  width: min(380px, calc(100vw - 32px));
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-left: 4px solid #b42318;
-  border-radius: 10px;
-  background: #fde8e7;
-  color: #7a271a;
-  box-shadow: 0 10px 28px rgba(122, 39, 26, 0.16);
-  transform: translateX(-50%);
-  animation: error-alert-in 180ms ease-out;
-}
-.error-alert-icon {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  color: #c43228;
-}
-.error-alert p {
-  margin: 0;
-  display: grid;
-  gap: 2px;
-}
-.error-alert strong {
-  font-size: 11px;
-  font-weight: 800;
-}
-.error-alert span {
-  font-size: 10px;
-}
-@keyframes success-alert-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
-@keyframes error-alert-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -6px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-}
 .backdrop {
   display: none;
 }
@@ -1352,10 +1087,6 @@ code {
   }
 }
 @media (max-width: 560px) {
-  .success-alert,
-  .error-alert {
-    top: 82px;
-  }
   .page-intro {
     align-items: flex-start;
     flex-direction: column;

@@ -1,3 +1,4 @@
+import { useAppTranslation, t, translateLabel } from "../translations/i18n";
 import React, { useMemo, useState } from "react";
 
 import {
@@ -16,6 +17,7 @@ import {
 } from "../data/mockData";
 
 export default function MapScreen({ navigation }) {
+  useAppTranslation();
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] =
     useState("All");
@@ -263,7 +265,7 @@ export default function MapScreen({ navigation }) {
                 styles.categoryText
               }
             >
-              {item.category}
+              {translateLabel(item.category)}
             </Text>
           </View>
         )}
@@ -305,7 +307,7 @@ export default function MapScreen({ navigation }) {
                     .charAt(0)
                     .toUpperCase() +
                   item.status.slice(1)
-                : "Unknown"}
+                : t("map.unknown")}
             </Text>
           </View>
 
@@ -340,15 +342,9 @@ export default function MapScreen({ navigation }) {
         ===================================================== */}
 
         <View style={styles.header}>
-          <Text style={styles.title}>
-            Plant Map
-          </Text>
+          <Text style={styles.title}>{t("map.plantMap")}</Text>
 
-          <Text style={styles.subtitle}>
-            Explore documented plant
-            locations in Niah National
-            Park
-          </Text>
+          <Text style={styles.subtitle}>{t("map.exploreDocumentedPlantLocationsInNiahNationalPark")}</Text>
         </View>
 
         {/* =====================================================
@@ -366,7 +362,7 @@ export default function MapScreen({ navigation }) {
 
           <TextInput
             style={styles.searchInput}
-            placeholder="Search plants..."
+            placeholder={t("map.searchPlants")}
             placeholderTextColor="#999"
             value={search}
             onChangeText={setSearch}
@@ -431,7 +427,7 @@ export default function MapScreen({ navigation }) {
                         styles.filterTextSelected,
                     ]}
                   >
-                    {category}
+                    {translateLabel(category)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -460,9 +456,7 @@ export default function MapScreen({ navigation }) {
 
             <Text
               style={styles.summaryLabel}
-            >
-              Total Records
-            </Text>
+            >{t("map.totalRecords")}</Text>
           </View>
 
           <View
@@ -491,9 +485,7 @@ export default function MapScreen({ navigation }) {
 
             <Text
               style={styles.summaryLabel}
-            >
-              Categories
-            </Text>
+            >{t("map.categories")}</Text>
           </View>
         </View>
 
@@ -513,18 +505,13 @@ export default function MapScreen({ navigation }) {
               style={
                 styles.sectionTitle
               }
-            >
-              Documented Plants
-            </Text>
+            >{t("map.documentedPlants")}</Text>
 
             <Text
               style={
                 styles.sectionSubtitle
               }
-            >
-              Tap a record to view its
-              details
-            </Text>
+            >{t("map.tapARecordToViewItsDetails")}</Text>
           </View>
 
           <View
@@ -560,17 +547,11 @@ export default function MapScreen({ navigation }) {
 
             <Text
               style={styles.emptyTitle}
-            >
-              No records found
-            </Text>
+            >{t("map.noRecordsFound")}</Text>
 
             <Text
               style={styles.emptyText}
-            >
-              Try searching for another
-              plant or selecting a
-              different category.
-            </Text>
+            >{t("map.trySearchingForAnotherPlantOrSelectingADifferentCategory")}</Text>
 
             <TouchableOpacity
               style={
@@ -583,9 +564,7 @@ export default function MapScreen({ navigation }) {
                 style={
                   styles.clearFiltersText
                 }
-              >
-                Clear Filters
-              </Text>
+              >{t("map.clearFilters")}</Text>
             </TouchableOpacity>
           </View>
         ) : (

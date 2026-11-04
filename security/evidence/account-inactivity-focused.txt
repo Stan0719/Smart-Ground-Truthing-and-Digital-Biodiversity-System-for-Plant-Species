@@ -1,0 +1,21 @@
+✔ UTC inactivity: one millisecond below 30 days stays Active; exact boundary suspends once (2362.7698ms)
+✔ protected session validation suspends inactivity and permanently revokes existing sessions (1966.58ms)
+✔ never-logged-in staff and Visitors use server-side creation audit timestamps (1916.2155ms)
+✔ legacy unknown creation/login starts one durable grace window; failed login does not refresh it (1845.1839ms)
+✔ reactivation grants 30 fresh days without changing last login, role, password or reviving sessions (1733.6789ms)
+✔ only Administrator can reactivate through HTTP or the account service; self-suspension and Inactive selection are rejected (3464.9328ms)
+✔ full account edit reactivation records its operator and starts a fresh window (1997.5595ms)
+✔ temporary-password expiry, resend, forced change and subsequent inactivity remain compatible (2770.1999ms)
+✔ concurrent checks protect the final fully activated Administrator from lockout (1909.323ms)
+✔ legacy Inactive records remain unchanged until an Administrator explicitly reactivates (1631.5861ms)
+✔ dashboard status filter and edit options omit Inactive while retaining legacy display compatibility (1.8959ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22469.3204
+
+Process exit code: 0

@@ -1,0 +1,50 @@
+✔ least privilege, protected species, projections and unknown permissions (1.6357ms)
+✔ ownership, workflow, feedback, and self-approval restrictions (0.1917ms)
+✔ conflicting and malformed credentials are rejected (0.4192ms)
+(node:36620) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/innovation%20project/Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species/mobileapp/utils/faceApi.js is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\C:\innovation project\Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species\mobileapp\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ HTTP access matrix rejects unauthorized roles before database calls (3665.2297ms)
+✔ all roles enforce status, log denials and permanently revoke old sessions (7115.9753ms)
+✔ password change, expiry, direct database disable and throttling (3394.725ms)
+✔ explicit email administrator bootstrap preserves existing users and never returns credentials (2334.6334ms)
+✔ website role boundary and complete Botanist mobile first-login lifecycle without a database (4025.5738ms)
+✔ plant identity rejects Botanist browser credentials and preserves native bearer identity (0.5148ms)
+✔ direct mobile health and Visitor registration need no Face ID service (6.2948ms)
+✔ Administrator-issued temporary password reaches mobile through the same auth instance; separate store cannot authenticate it (4317.3115ms)
+✔ private login diagnostics distinguish policy failures without exposing reasons to the caller (1634.9337ms)
+✔ expired Administrator-issued temporary password requires resend; resend revokes sessions and the old credential (1379.9004ms)
+✔ mock email delivery targets the stored recipient; failures are reported and resend ignores a replacement recipient (1167.8688ms)
+{"event":"mobile_transport","component":"gateway","reference":"c8612a45f955","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"c8612a45f955","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":230,"status":200}
+{"event":"mobile_transport","component":"gateway","reference":"555555555555","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"555555555555","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":250,"status":401}
+{"event":"mobile_transport","component":"gateway","reference":"4b2165484525","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"4b2165484525","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":229,"status":401}
+{"event":"mobile_transport","component":"gateway","reference":"ce178c04ba56","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"ce178c04ba56","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":229,"status":200}
+{"event":"mobile_transport","component":"gateway","reference":"b012d8f4c22a","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"b012d8f4c22a","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":246,"status":200}
+{"event":"mobile_transport","component":"gateway","reference":"a1c330ac1f13","path":"/api/mobile/change-password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"a1c330ac1f13","path":"/api/mobile/change-password","method":"POST","phase":"completed","durationMs":459,"status":200}
+{"event":"mobile_transport","component":"gateway","reference":"9d3d9c229a67","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"9d3d9c229a67","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":234,"status":401}
+{"event":"mobile_transport","component":"gateway","reference":"4786612f7ef9","path":"/api/mobile/password","method":"POST","phase":"received","durationMs":0}
+{"event":"mobile_transport","component":"gateway","reference":"4786612f7ef9","path":"/api/mobile/password","method":"POST","phase":"completed","durationMs":231,"status":200}
+✔ isolated Administrator issuance -> real gateway -> mobile client -> mandatory-change helper -> permanent login (4036.6563ms)
+✔ isolated database: normal login, species and plant registration preserve text as data (3994.9859ms)
+✔ ordinary text rejects empty, wrong types and excessive names; preserves Unicode and punctuation (0.7735ms)
+✔ species create/update normalize text and bind SQL-looking names as parameters (0.8763ms)
+✔ HTTP rejects invalid emails/types before calling login or registration (165.1885ms)
+✔ Vue interpolation escapes HTML-like text; reviewed species template uses interpolation (10.9281ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 37577.3067
+
+Process exit code: 0

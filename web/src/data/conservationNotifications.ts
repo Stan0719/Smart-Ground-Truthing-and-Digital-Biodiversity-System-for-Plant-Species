@@ -1,6 +1,7 @@
 import { computed, reactive } from 'vue'
 
-export type ConservationNotificationType = 'review' | 'species' | 'threat' | 'sensor' | 'system'
+export type ConservationNotificationType =
+  'review' | 'species' | 'threat' | 'sensor' | 'camera' | 'system'
 
 export interface ConservationNotification {
   id: string
@@ -8,11 +9,26 @@ export interface ConservationNotification {
   title: string
   message: string
   time: string
+  eventId?: string
+  plantId?: string
+  confidence?: number
   read: boolean
   route?: string
 }
 
 export const conservationNotifications = reactive<ConservationNotification[]>([
+  {
+    id: 'CAM-NOTICE-001',
+    type: 'camera',
+    eventId: 'CAM-EVT-001',
+    plantId: 'PL001',
+    title: 'Possible suspicious activity detected',
+    message: 'PL001 · Possible plant contact detected · Detection confidence: 87%',
+    confidence: 0.87,
+    time: 'Prototype event',
+    read: false,
+    route: '/conservation/alerts?alert=CAM-EVT-001',
+  },
   {
     id: 'CN-001',
     type: 'review',

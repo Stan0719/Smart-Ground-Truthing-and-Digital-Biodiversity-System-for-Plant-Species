@@ -1,10 +1,10 @@
+import { t, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import React, { useEffect, useRef, useState } from "react";
 
 import {
   Animated,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 import { faceApi } from "../utils/faceApi";
@@ -29,6 +30,7 @@ function FloatingInput({
   returnKeyType,
   onSubmitEditing,
 }) {
+  useAppTranslation();
   const [isFocused, setIsFocused] = useState(false);
   const animation = useRef(new Animated.Value(value.length > 0 ? 1 : 0)).current;
   const isFloating = isFocused || value.length > 0;
@@ -81,6 +83,7 @@ function FloatingInput({
 }
 
 export default function VisitorRegisterScreen({ navigation }) {
+  useAppTranslation();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -113,8 +116,9 @@ export default function VisitorRegisterScreen({ navigation }) {
     const nextErrors = {};
 
     if (!trimmedName) nextErrors.name = "Full Name is required.";
+    if (trimmedName.length > 100) nextErrors.name = "Use 100 characters or fewer.";
     if (!normalizedEmail) nextErrors.email = "Email is required.";
-    else if (!EMAIL_PATTERN.test(normalizedEmail)) nextErrors.email = "Enter a valid email address.";
+    else if (email.length > 254 || !EMAIL_PATTERN.test(normalizedEmail)) nextErrors.email = "Enter a valid email address.";
     if (!password) nextErrors.password = "Password is required.";
     else if (password.length < 15 || password.length > 128) nextErrors.password = "Password must have 15 to 128 characters.";
     if (!confirmPassword) nextErrors.confirmPassword = "Confirm Password is required.";
@@ -157,39 +161,39 @@ export default function VisitorRegisterScreen({ navigation }) {
 
             {registeredEmail ? (
               <>
-                <Text style={styles.title}>Account Created</Text>
-                <Text style={styles.subtitle}>Your Visitor account has been created successfully.</Text>
+                <Text style={styles.title}>{t("visitorRegister.accountCreated")}</Text>
+                <Text style={styles.subtitle}>{t("visitorRegister.yourVisitorAccountHasBeenCreatedSuccessfully")}</Text>
                 <TouchableOpacity style={styles.primaryButton} onPress={continueToLogin} activeOpacity={0.75} accessibilityRole="button">
-                  <Text style={styles.primaryButtonText}>Continue to Login</Text>
+                  <Text style={styles.primaryButtonText}>{t("visitorRegister.continueToLogin")}</Text>
                 </TouchableOpacity>
               </>
             ) : (
               <>
-                <Text style={styles.title}>Create Account</Text>
-                <Text style={styles.subtitle}>Register as a Visitor to explore the Niah Biodiversity System.</Text>
+                <Text style={styles.title}>{t("visitorRegister.createAccount")}</Text>
+                <Text style={styles.subtitle}>{t("visitorRegister.registerAsAVisitorToExploreTheNiahBiodiversitySystem")}</Text>
                 <View style={styles.form}>
                   <View>
-                    <FloatingInput label="Full Name" value={name} onChangeText={updateField("name", setName)} autoComplete="name" autoCapitalize="words" returnKeyType="next" />
-                    {errors.name ? <Text style={styles.fieldError}>{errors.name}</Text> : null}
+                    <FloatingInput label={t("visitorRegister.fullName")} value={name} onChangeText={updateField("name", setName)} autoComplete="name" autoCapitalize="words" returnKeyType="next" />
+                    {errors.name ? <Text style={styles.fieldError}>{translateUIMessage(errors.name)}</Text> : null}
                   </View>
                   <View>
-                    <FloatingInput label="Email" value={email} onChangeText={updateField("email", setEmail)} keyboardType="email-address" autoComplete="email" returnKeyType="next" />
-                    {errors.email ? <Text style={styles.fieldError}>{errors.email}</Text> : null}
+                    <FloatingInput label={t("login.email")} value={email} onChangeText={updateField("email", setEmail)} keyboardType="email-address" autoComplete="email" returnKeyType="next" />
+                    {errors.email ? <Text style={styles.fieldError}>{translateUIMessage(errors.email)}</Text> : null}
                   </View>
                   <View>
-                    <FloatingInput label="Password" value={password} onChangeText={updateField("password", setPassword)} secureTextEntry autoComplete="new-password" returnKeyType="next" />
-                    {errors.password ? <Text style={styles.fieldError}>{errors.password}</Text> : null}
+                    <FloatingInput label={t("login.password")} value={password} onChangeText={updateField("password", setPassword)} secureTextEntry autoComplete="new-password" returnKeyType="next" />
+                    {errors.password ? <Text style={styles.fieldError}>{translateUIMessage(errors.password)}</Text> : null}
                   </View>
                   <View>
-                    <FloatingInput label="Confirm Password" value={confirmPassword} onChangeText={updateField("confirmPassword", setConfirmPassword)} secureTextEntry autoComplete="new-password" returnKeyType="done" onSubmitEditing={handleRegister} />
-                    {errors.confirmPassword ? <Text style={styles.fieldError}>{errors.confirmPassword}</Text> : null}
+                    <FloatingInput label={t("visitorRegister.confirmPassword")} value={confirmPassword} onChangeText={updateField("confirmPassword", setConfirmPassword)} secureTextEntry autoComplete="new-password" returnKeyType="done" onSubmitEditing={handleRegister} />
+                    {errors.confirmPassword ? <Text style={styles.fieldError}>{translateUIMessage(errors.confirmPassword)}</Text> : null}
                   </View>
-                  {errors.form ? <Text style={styles.formError} accessibilityRole="alert">{errors.form}</Text> : null}
+                  {errors.form ? <Text style={styles.formError} accessibilityRole="alert">{translateUIMessage(errors.form)}</Text> : null}
                   <TouchableOpacity style={[styles.primaryButton, isSubmitting && styles.disabledButton]} onPress={handleRegister} disabled={isSubmitting} activeOpacity={0.75} accessibilityRole="button">
-                    <Text style={styles.primaryButtonText}>{isSubmitting ? "Creating Account..." : "Create Account"}</Text>
+                    <Text style={styles.primaryButtonText}>{isSubmitting ? t("visitorRegister.creatingAccount") : t("visitorRegister.createAccount")}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.loginPrompt} onPress={() => navigation.goBack()} activeOpacity={0.65} accessibilityRole="button">
-                    <Text style={styles.promptText}>Already have an account? <Text style={styles.promptLink}>Login</Text></Text>
+                    <Text style={styles.promptText}>{t("visitorRegister.alreadyHaveAnAccount")}<Text style={styles.promptLink}>{t("visitorRegister.login")}</Text></Text>
                   </TouchableOpacity>
                 </View>
               </>

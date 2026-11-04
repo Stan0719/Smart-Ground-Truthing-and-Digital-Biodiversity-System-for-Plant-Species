@@ -1,0 +1,21 @@
+{
+  "existingFilesChanged": [
+    "web/server/activation.test.mjs",
+    "web/server/postgres.mjs",
+    "web/server/test-postgres.mjs"
+  ],
+  "newFiles": [
+    "security/ACCOUNT_PERSONAL_DATA_INTEGRATION.md",
+    "security/evidence/account-name-integration-live.txt",
+    "security/evidence/account-name-integration-mobile-lint.txt",
+    "security/evidence/account-name-integration-mobile-types.txt",
+    "security/evidence/account-name-integration-scope.txt",
+    "security/evidence/account-name-integration-static.txt",
+    "security/evidence/account-name-integration-tests.txt",
+    "security/evidence/account-name-integration-web-build.txt",
+    "web/server/account-name-storage.mjs",
+    "web/server/account-name-storage.test.mjs"
+  ],
+  "allOtherPreviouslyExistingFileHashesUnchanged": true,
+  "ignoredBuildOutputExcluded": true
+}

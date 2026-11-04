@@ -84,7 +84,7 @@ def create_server(auth, host="127.0.0.1", port=8000, readiness=None):
             request_id = supplied_reference if re.fullmatch(r'[a-f0-9]{12}', supplied_reference) else secrets.token_hex(6)
             request_reference.set(request_id)
             started = time.monotonic()
-            known = {'/health', '/register', '/recovery/request', '/recovery/confirm', '/password', '/enrollment-status', '/enroll', '/legacy-link', '/legacy-reenroll', '/challenge', '/face-login', '/me', '/delete-face', '/logout'}
+            known = {'/health', '/register', '/recovery/request', '/recovery/confirm', '/password', '/change-password', '/enrollment-status', '/enroll', '/legacy-link', '/legacy-reenroll', '/challenge', '/face-login', '/me', '/delete-face', '/logout'}
             endpoint = self.path if self.path in known else 'unknown'
             print(f'Face API {request_id}: incoming POST endpoint={endpoint}', flush=True)
             try:
@@ -124,6 +124,9 @@ def create_server(auth, host="127.0.0.1", port=8000, readiness=None):
                     if not isinstance(body.get('email'), str) or not isinstance(body.get('password'), str) or len(body['password']) > 1024 or len(body['email']) > 254:
                         raise AuthError('Invalid credentials.')
                     result = auth.password_login(body['email'], body['password'])
+                elif self.path == '/change-password':
+                    if not hasattr(auth, 'authority'): raise AuthError('Authoritative account service is required.',503,'account_service_unavailable')
+                    result = auth.authority.request('change-password', {'token':token, 'password':body.get('password')})
                 elif self.path == '/enrollment-status':
                     result = auth.enrollment_status(token)
                 elif self.path == '/enroll':
@@ -210,20 +213,30 @@ if __name__ == '__main__':
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8000)
     parser.add_argument('--check-models', action='store_true')
+    parser.add_argument('--check-storage', action='store_true')
     args = parser.parse_args()
     if args.check_models:
         print(json.dumps(initialize_models()))
         raise SystemExit(0)
-    directory = Path(__file__).parent / 'data'
-    directory.mkdir(mode=0o700, exist_ok=True)
-    auth = Auth(str(directory / 'auth.sqlite'), embed)
+    from postgres_store import load_face_environment, connect_face_store
+    load_face_environment()
+    try:
+        store = connect_face_store()
+    except (RuntimeError, ValueError) as error:
+        raise SystemExit(str(error)) from None
+    if args.check_storage:
+        print(json.dumps({'ready': True, 'storage': 'postgresql', 'schema': store.schema}))
+        store.close()
+        raise SystemExit(0)
+    auth = Auth(None, embed, database=store)
     if args.create_user:
         auth.provision(input('Email: '), getpass.getpass('Password (12+ characters): '), input('Name: '), input('Role (botanist/visitor): '))
         print('Local server account created. Use these credentials in the app.')
         raise SystemExit
-    print(f'Database path: {directory / "auth.sqlite"}', flush=True)
+    print(f'Face storage: PostgreSQL private schema {store.schema}', flush=True)
     print('Initializing face models; HTTP service will listen only after readiness succeeds.', flush=True)
     readiness = initialize_models()
+    readiness['storage'] = 'postgresql'
     service_url = os.environ.get('FACE_ACCOUNT_SERVICE_URL')
     key_file = os.environ.get('FACE_ACCOUNT_SERVICE_KEY_FILE')
     if bool(service_url) != bool(key_file):
@@ -234,6 +247,8 @@ if __name__ == '__main__':
         auth = AuthoritativeFaceAuth(auth, AccountService(service_url, key_file))
         readiness['accountService'] = 'authoritative'
     else:
+        if os.environ.get('ALLOW_PROTOTYPE_AUTH') != '1':
+            raise SystemExit('Configure authoritative account service. Local prototype mode requires explicit ALLOW_PROTOTYPE_AUTH=1.')
         readiness['accountService'] = 'prototype'
     print('Account service mode: '+readiness['accountService'], flush=True)
     server = create_server(auth, args.host, args.port, readiness)

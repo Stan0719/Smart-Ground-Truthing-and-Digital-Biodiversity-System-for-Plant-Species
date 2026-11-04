@@ -37,7 +37,8 @@
           "cameraPermission": "Allow Niah Biodiversity to capture a photo for optional face login.",
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "expo-font"
     ],
     "scheme": "niahbiodiversity"
   }

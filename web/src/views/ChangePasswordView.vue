@@ -7,20 +7,25 @@ const router = useRouter()
 const newPassword = ref('')
 const confirmPassword = ref('')
 const error = ref('')
+const submitting=ref(false)
 
 const changePassword = async () => {
+  if(submitting.value)return
   error.value = ''
+  if(newPassword.value.length<15||newPassword.value.length>128){error.value='Use a password with 15 to 128 characters.';return}
   if (newPassword.value !== confirmPassword.value) {
     error.value = 'Passwords do not match.'
     return
   }
+  submitting.value=true
   try {
     await api('/auth/password', 'POST', { password: newPassword.value })
+    newPassword.value='';confirmPassword.value=''
     await router.replace({ path: '/', query: { passwordChanged: '1' } })
     window.alert('Password changed. Please sign in with your new password.')
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to change password.'
-  }
+  } finally {submitting.value=false}
 }
 </script>
 
@@ -38,6 +43,8 @@ const changePassword = async () => {
             v-model="newPassword"
             type="password"
             autocomplete="new-password"
+            minlength="15"
+            maxlength="128"
             required
         /></label>
         <label
@@ -48,7 +55,7 @@ const changePassword = async () => {
             required
         /></label>
         <p v-if="error" class="error-message">{{ error }}</p>
-        <button type="submit">Change Password</button>
+        <button type="submit" :disabled="submitting">{{ submitting ? 'Changing password?' : 'Change Password' }}</button>
       </form>
     </section>
   </main>
