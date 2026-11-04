@@ -32,7 +32,10 @@ creates a species. Duplicate scientific-name checks are preserved.
 The teammate authenticated /api/species-requests/:id/photo remains supported.
 The Officer gallery uses the protected compatibility alias
 /api/assets/species-request-:id through /api/data/assets/.... Stored photos have
-already been normalized during submission. No synthetic asset row is created for
+normalized during submission and are also validated and re-encoded on read.
+Both photo routes reject stored bytes over 4 MB, images over 24 million pixels,
+and formats other than JPEG/PNG; successful responses include sandbox CSP,
+nosniff and an inline filename. No synthetic asset row is created for
 the gallery alias. Observation embeddings retain the Officer metadata contract;
 list/detail responses retain the teammate contract. Review additionally returns
 reviewed:true for the Officer form, which refetches the observation before unlock.
@@ -40,3 +43,11 @@ reviewed:true for the Officer form, which refetches the observation before unloc
 Tests use isolated PGlite with no environment loading or external database.
 These do not prove multi-connection PostgreSQL concurrency behavior. An existing
 deployment requires the columns from 004 and 006; this task applies no migrations.
+
+Request route IDs must be positive 32-bit integers. Approval rechecks required
+request fields and proposed-species scientific names for legacy/imported data.
+Approval feedback is optional and trimmed, including whitespace-only feedback;
+the 4000-character limit and rejection/correction feedback rules still apply.
+Competing HTTP decisions are tested with the serialized PGlite pool, including
+FOR UPDATE use and immutable winner metadata. This does not test concurrent
+PostgreSQL connections or lock scheduling.

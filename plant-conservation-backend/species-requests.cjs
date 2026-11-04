@@ -76,14 +76,37 @@ async function assertSpeciesResolved(c, plantId, fail) {
     fail(409, "Resolve the linked species request before reviewing this plant submission.");
 }
 
-function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, id, assertNewSpecies }) {
+function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, assertNewSpecies }) {
+  const requestId = (value) => {
+    if (typeof value !== "string" || !/^[1-9][0-9]{0,9}$/.test(value) || BigInt(value) > 2147483647n)
+      fail(400, "Invalid species request identifier.");
+    return value;
+  };
+  const servePhoto = async (res, photo) => {
+    let bytes;
+    try {
+      if (!(Buffer.isBuffer(photo) || photo instanceof Uint8Array) || !photo.length || photo.length > 4194304)
+        throw Error("Invalid photo size");
+      const input = sharp(photo, { limitInputPixels: 24000000, failOn: "warning" });
+      const metadata = await input.metadata();
+      if (!["jpeg", "png"].includes(metadata.format) || (metadata.pages || 1) > 1)
+        throw Error("Unsupported photo format");
+      bytes = await input.rotate()
+        .resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 85 }).toBuffer();
+    } catch { fail(415, "Request photo is unavailable or unsupported."); }
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", 'inline; filename="species-request.jpg"');
+    res.type("image/jpeg").send(bytes);
+  };
   // Reuse current role grants: botanists submit, conservation officers review.
   const read = (req, res, next) => allow(permitted(req.user, "species.manage")
     ? "species.manage" : "plants.create")(req, res, next);
   app.get("/api/assets/species-request-:id", allow("species.manage"), async (req, res) => {
-    const row = (await pool.query("SELECT photo FROM species_request_submission WHERE request_id=$1", [id(req.params.id)])).rows[0];
+    const row = (await pool.query("SELECT photo FROM species_request_submission WHERE request_id=$1", [requestId(req.params.id)])).rows[0];
     if (!row) fail(404, "Species request unavailable.");
-    res.type("image/jpeg").send(Buffer.from(row.photo));
+    await servePhoto(res, row.photo);
   });
   app.post("/api/species-requests", allow("plants.create"), async (req, res) => {
     const b = req.body;
@@ -136,33 +159,40 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
   app.get("/api/species-requests/:id", read, async (req, res) => {
     const row = (await pool.query(`SELECT ${columns} FROM species_request_submission
       WHERE request_id=$1 AND ($2 OR owner_subject=$3)`,
-      [id(req.params.id), permitted(req.user, "species.manage"), subject(req.user)])).rows[0];
+      [requestId(req.params.id), permitted(req.user, "species.manage"), subject(req.user)])).rows[0];
     if (!row) fail(404, "Species request unavailable.");
     res.json({ species_request: project(row) });
   });
   app.get("/api/species-requests/:id/photo", read, async (req, res) => {
     const row = (await pool.query("SELECT photo FROM species_request_submission WHERE request_id=$1 AND ($2 OR owner_subject=$3)",
-      [id(req.params.id), permitted(req.user, "species.manage"), subject(req.user)])).rows[0];
+      [requestId(req.params.id), permitted(req.user, "species.manage"), subject(req.user)])).rows[0];
     if (!row) fail(404, "Species request unavailable.");
-    res.type("image/jpeg").send(Buffer.from(row.photo));
+    await servePhoto(res, row.photo);
   });
   app.post("/api/species-requests/:id/review", allow("species.manage"), async (req, res) => {
+    const requestKey = requestId(req.params.id);
     const b = req.body;
     if (!b || Array.isArray(b) || Object.keys(b).some(key => !["decision", "comment", "visibility"].includes(key)) || !["Approved", "Rejected", "Correction Required"].includes(b.decision)) fail(400, "Invalid review decision.");
-    const comment = b.decision === "Approved" && (b.comment === undefined || b.comment === "") ? "" : text(b.comment);
+    if (b.comment !== undefined && (typeof b.comment !== "string" || b.comment.length > 4000))
+      fail(400, "Invalid review comment.");
+    const comment = b.decision === "Approved" ? (b.comment || "").trim() : text(b.comment);
     if (b.decision === "Approved" && !["public", "internal", "protected"].includes(b.visibility)) fail(400, "Select visibility.");
     const result = await transaction(pool, async (c) => {
-      const row = (await c.query("SELECT * FROM species_request_submission WHERE request_id=$1 FOR UPDATE", [id(req.params.id)])).rows[0];
+      const row = (await c.query("SELECT * FROM species_request_submission WHERE request_id=$1 FOR UPDATE", [requestKey])).rows[0];
       if (!row) fail(404, "Species request unavailable.");
       if (row.owner_subject === subject(req.user)) fail(403, "You cannot review your own species request.");
       if (row.request_status !== "Pending Review") fail(409, "Species request has already been reviewed.");
+      if (b.decision === "Approved" && fields.some(key => typeof row[key] !== "string" || !row[key].trim()))
+        fail(409, "Species request is incomplete.");
       let speciesId = null;
       if (row.proposed_species_id) {
         const linked = (await c.query("SELECT request_id FROM species_request_submission WHERE proposed_species_id=$1 OR approved_species_id=$1 ORDER BY request_id", [row.proposed_species_id])).rows;
         if (linked.length !== 1) fail(409, "Species request association is ambiguous.");
-        const proposed = (await c.query("SELECT species_id,rbac_data FROM species WHERE species_id=$1 FOR UPDATE", [row.proposed_species_id])).rows[0];
+        const proposed = (await c.query("SELECT species_id,scientific_name,rbac_data FROM species WHERE species_id=$1 FOR UPDATE", [row.proposed_species_id])).rows[0];
         if (!proposed || proposed.rbac_data?.approvalStatus !== "Pending Review") fail(409, "Proposed species is no longer awaiting review.");
         if (b.decision === "Approved") {
+          if (typeof proposed.scientific_name !== "string" || !proposed.scientific_name.trim())
+            fail(409, "Proposed species is incomplete.");
           await c.query("SELECT pg_advisory_xact_lock(hashtext(lower(btrim($1))))", [row.scientific_name]);
           if ((await c.query("SELECT species_id FROM species WHERE lower(btrim(scientific_name))=lower(btrim($1)) AND species_id<>$2", [row.scientific_name, row.proposed_species_id])).rows.length)
             fail(409, "This scientific name already exists. Resolve the duplicate before approval.");

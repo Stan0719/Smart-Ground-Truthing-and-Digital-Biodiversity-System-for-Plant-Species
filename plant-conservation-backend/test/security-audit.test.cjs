@@ -211,3 +211,30 @@ test("unavailable PostgreSQL fails cleanly without exposing credentials or a sta
   assert.match(output, /Plant API startup failed; verify configuration/);
   assert.doesNotMatch(output, /TypeError|server\.address|listening on port/);
 });
+
+
+test("startup rejection diagnostics retain safe codes without raw messages, stacks or credentials", () => {
+  const { readFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const vm = require("node:vm");
+  const source = readFileSync(join(__dirname, "../server.js"), "utf8");
+  // Execute the actual startup rejection callback without starting services or
+  // loading environment variables; subprocess behavior is tested separately.
+  const marker = "start().catch(";
+  const callback = source.slice(source.lastIndexOf(marker) + marker.length, source.lastIndexOf("module.exports"))
+    .replace(/\);\s*$/, "");
+  for (const code of ["ECONNREFUSED", "28P01", "postgresql://secret:password@host/db", undefined]) {
+    const logs = [], state = {};
+    const reject = vm.runInNewContext(`(${callback})`, {
+      console: { error: (...args) => logs.push(args.join(" ")) }, process: state,
+    });
+    const error = Object.assign(Error("postgresql://secret:password@host/db driver details"), {code});
+    error.stack = "sensitive startup stack";
+    reject(error);
+    assert.equal(state.exitCode, 1);
+    const output = logs.join("\n");
+    assert.match(output, /Plant API startup failed; verify configuration/);
+    assert.match(output, new RegExp(`Startup error code: ${["ECONNREFUSED", "28P01"].includes(code) ? code : "STARTUP_FAILURE"}`));
+    assert.doesNotMatch(output, /secret|password|postgresql|driver details|sensitive startup stack/);
+  }
+});

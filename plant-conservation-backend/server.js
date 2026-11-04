@@ -152,7 +152,10 @@ if (require.main === module)
     console.error(
       "Plant API startup failed; verify configuration:"
     );
-    console.error(error);
+    // Driver messages/stacks may contain connection strings or credentials.
+    const code = typeof error?.code === "string" && /^[A-Z0-9_]{1,40}$/.test(error.code)
+      ? error.code : "STARTUP_FAILURE";
+    console.error("Startup error code:", code);
     process.exitCode = 1;
   });
 module.exports = { createPlantApp };

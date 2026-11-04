@@ -9,6 +9,17 @@ const { createPlantApp } = require("../server.js");
 
 test("reconciled species requests: authoritative linkage and dependency guards", async t => {
   const pool = await createPlantDatabase();
+  let requestLocks = 0;
+  const connect = pool.connect.bind(pool);
+  pool.connect = async () => {
+    const client = await connect();
+    const query = client.query.bind(client);
+    client.query = (sql, params) => {
+      if (/SELECT \* FROM species_request_submission.*FOR UPDATE/.test(sql)) requestLocks++;
+      return query(sql, params);
+    };
+    return client;
+  };
   t.after(() => pool.end());
   // Snapshot of the existing deployed table, in isolated PGlite only. No
   // application migration, production DDL, or production fixture is involved.
@@ -41,7 +52,7 @@ test("reconciled species requests: authoritative linkage and dependency guards",
       headers: { ...(tokens[role] ? { Authorization: `Bearer ${tokens[role]}` } : {}), "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    return { status: response.status, data: response.headers.get("Content-Type")?.includes("json") ? await response.json() : Buffer.from(await response.arrayBuffer()) };
+    return { status: response.status, headers: response.headers, data: response.headers.get("Content-Type")?.includes("json") ? await response.json() : Buffer.from(await response.arrayBuffer()) };
   };
   const photo = await sharp({ create: { width: 2, height: 2, channels: 3, background: "green" } }).jpeg().toBuffer();
   let serial = 0;
@@ -147,5 +158,136 @@ test("reconciled species requests: authoritative linkage and dependency guards",
     assert.equal(history[1].review_comment, "Verified taxonomy");
     assert.ok(history[1].reviewed_at);
     assert.equal(Number((await pool.query("SELECT count(*) FROM business_audit WHERE action='species_request_reviewed' AND target=$1", [String(f.request)])).rows[0].count), 1);
+  });
+  await t.test("request IDs are positive int32 on detail, photo, alias and review", async () => {
+    for (const id of ["0", "-1", "bad", "1.5", "2147483648", "9".repeat(100)]) {
+      for (const path of [`/species-requests/${id}`, `/species-requests/${id}/photo`, `/assets/species-request-${id}`])
+        assert.equal((await call(path)).status, 400, path);
+      assert.equal((await call(`/species-requests/${id}/review`, "officer", {decision: "Approved", visibility: "internal"})).status, 400);
+    }
+    for (const path of ["/species-requests/2147483647", "/species-requests/2147483647/photo", "/assets/species-request-2147483647"])
+      assert.equal((await call(path)).status, 404);
+    assert.equal((await call("/species-requests/2147483647/review", "officer", {decision: "Approved", visibility: "internal"})).status, 404);
+  });
+  await t.test("legacy incomplete requests and proposed names cannot be approved", async () => {
+    for (const field of ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"]) {
+      const f = await fixture();
+      await pool.query(`UPDATE species_request_submission SET ${field}=' ' WHERE request_id=$1`, [f.request]);
+      assert.equal((await decision(f, "Approved")).status, 409, field);
+      assert.equal((await observation(f)).status, "Pending Review");
+      assert.equal((await observation(f)).species_request.request_status, "Pending Review");
+    }
+    const f = await fixture();
+    await pool.query("UPDATE species SET scientific_name=' ' WHERE species_id=$1", [f.species]);
+    assert.equal((await decision(f, "Approved")).status, 409);
+    // No proposed ID is required by the standalone creation workflow.
+    const standalone = await fixture();
+    await pool.query("UPDATE species_request_submission SET proposed_species_id=NULL,scientific_name='Standalone hardened' WHERE request_id=$1", [standalone.request]);
+    const result = await decision(standalone, "Approved");
+    assert.equal(result.status, 200);
+    assert.ok(result.data.species_request.approved_species_id);
+    assert.notEqual(String(result.data.species_request.approved_species_id), standalone.species);
+  });
+  await t.test("photo routes validate stored bytes, bound decoding, set headers and retain authorization", async () => {
+    const f = await fixture();
+    const paths = [`/species-requests/${f.request}/photo`, `/assets/species-request-${f.request}`];
+    const png = await sharp({create: {width: 2, height: 2, channels: 4, background: 'green'}}).png().toBuffer();
+    for (const bytes of [photo, png]) {
+      await pool.query("UPDATE species_request_submission SET photo=$1 WHERE request_id=$2", [bytes, f.request]);
+      for (const path of paths) {
+        const result = await call(path);
+        assert.equal(result.status, 200);
+        assert.equal(result.headers.get('content-type'), 'image/jpeg');
+        assert.equal(result.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+        assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
+        assert.equal(result.headers.get('content-disposition'), 'inline; filename="species-request.jpg"');
+        assert.equal((await sharp(result.data).metadata()).format, 'jpeg');
+      }
+    }
+    assert.equal((await call(paths[0], 'bot')).status, 200);
+    assert.equal((await call(paths[1], 'bot')).status, 403);
+    for (const path of paths) assert.equal((await call(path, 'second')).status, 200);
+    const unsupported = await sharp(photo).webp().toBuffer();
+    const excessivePixels = await sharp({create: {width: 5000, height: 5000, channels: 3, background: 'green'}}).png().toBuffer();
+    for (const bytes of [Buffer.from('not an image'), unsupported, excessivePixels]) {
+      await pool.query("UPDATE species_request_submission SET photo=$1 WHERE request_id=$2", [bytes, f.request]);
+      for (const path of paths) {
+        const result = await call(path);
+        assert.equal(result.status, 415);
+        assert.deepEqual(result.data, {error: 'Request photo is unavailable or unsupported.'});
+      }
+    }
+    // The real CHECK prevents >4 MB storage. Simulate an invalid legacy adapter
+    // result without weakening that CHECK or changing any schema.
+    const query = pool.query;
+    pool.query = async (sql, params) => sql.startsWith('SELECT photo FROM species_request_submission')
+      ? {rows: [{photo: Buffer.alloc(4194305)}]} : query(sql, params);
+    try { for (const path of paths) assert.equal((await call(path)).status, 415); }
+    finally { pool.query = query; }
+  });
+  await t.test("optional approval comments normalize without relaxing limits or rejection feedback", async () => {
+    for (const [input, stored] of [[undefined, ''], ['', ''], ['   ', ''], ['  Verified  ', 'Verified']]) {
+      const f = await fixture();
+      const result = await call(`/species-requests/${f.request}/review`, 'officer', {decision: 'Approved', visibility: 'internal', ...(input === undefined ? {} : {comment: input})});
+      assert.equal(result.status, 200);
+      assert.equal((await observation(f)).species_request.review_comment, stored);
+    }
+    const f = await fixture();
+    for (const decision of ['Approved', 'Rejected', 'Correction Required'])
+      assert.equal((await call(`/species-requests/${f.request}/review`, 'officer', {decision, visibility: 'internal', comment: ' '.repeat(4001)})).status, 400);
+    for (const decision of ['Rejected', 'Correction Required'])
+      for (const comment of ['', '   ']) assert.equal((await decisionCall(f, decision, comment)).status, 400);
+    function decisionCall(f, decision, comment) { return call(`/species-requests/${f.request}/review`, 'officer', {decision, comment}); }
+  });
+  await t.test("malformed review payloads fail without changing request state", async () => {
+    const f = await fixture();
+    for (const body of [null, [], {}, {decision: 'Flagged'}, {decision: 'Approved', visibility: 'invalid'},
+      {decision: 'Approved', visibility: 'internal', reviewer_id: 'other'},
+      {decision: 'Approved', visibility: 'internal', revision: 1},
+      {decision: 'Approved', visibility: 'internal', comment: 12},
+      {decision: 'Approved', visibility: 'internal', comment: 'x'.repeat(4001)}])
+      assert.equal((await call(`/species-requests/${f.request}/review`, 'officer', body)).status, 400);
+    assert.equal((await observation(f)).species_request.request_status, 'Pending Review');
+  });
+  await t.test("projection exposes review evidence but omits stored secrets and bytes", async () => {
+    const f = await fixture();
+    const before = (await observation(f)).species_request;
+    assert.equal(before.request_id, String(f.request));
+    assert.equal(before.proposed_scientific_name, 'Proposed');
+    assert.equal(before.suggested_common_name, 'Common');
+    assert.equal(before.genus_name, 'Genus');
+    assert.equal(before.family_name, 'Family');
+    assert.equal(before.conservation_status, 'Least Concern');
+    assert.equal(before.description, 'Description');
+    assert.equal(before.habitat, 'Habitat');
+    assert.equal(before.requested_by, 'staff:bot');
+    assert.ok(before.submitted_at);
+    assert.equal(before.approved_species_id, null);
+    assert.equal(before.review_decision, null);
+    assert.deepEqual(before.assets, [{id: `species-request-${f.request}`, content_type: 'image/jpeg'}]);
+    for (const key of ['photo', 'payload_hash', 'client_key', 'reviewed_by']) assert.equal(key in before, false);
+    assert.equal((await decision(f, 'Correction Required', 'More evidence')).status, 200);
+    const after = (await observation(f)).species_request;
+    assert.equal(after.review_decision, 'Correction Required');
+    assert.equal(after.review_comment, 'More evidence');
+    assert.ok(after.reviewed_at);
+    assert.equal((await observation(f)).revision, 1);
+    assert.equal((await plantDecision(f)).status, 409);
+  });
+  await t.test("competing and repeated reviews keep exactly one decision and its metadata", async () => {
+    const f = await fixture();
+    const beforeLocks = requestLocks;
+    // PGlite's pool serializes transactions: this proves HTTP competing/retry
+    // behavior and FOR UPDATE use, not multi-connection PostgreSQL lock timing.
+    const results = await Promise.all([decision(f, 'Approved', 'First'), decision(f, 'Rejected', 'Second', 'second')]);
+    assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+    assert.equal(requestLocks - beforeLocks, 2);
+    const saved = (await pool.query('SELECT * FROM species_request_submission WHERE request_id=$1', [f.request])).rows[0];
+    assert.equal(saved.review_comment, results[0].status === 200 ? 'First' : 'Second');
+    assert.equal(saved.reviewed_by, results[0].status === 200 ? 'staff:officer' : 'staff:second');
+    assert.equal((await decision(f, 'Rejected', 'Overwrite')).status, 409);
+    assert.deepEqual((await pool.query('SELECT * FROM species_request_submission WHERE request_id=$1', [f.request])).rows[0], saved);
+    assert.equal(Number((await pool.query("SELECT count(*) FROM business_audit WHERE action='species_request_reviewed' AND target=$1", [String(f.request)])).rows[0].count), 1);
+    assert.equal((await observation(f)).status, 'Pending Review');
   });
 });
