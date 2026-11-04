@@ -18,10 +18,7 @@ import {
   type LinkedSpeciesRequest,
 } from '../../services/reviewSpeciesRequest'
 import type { ObservationStatus } from '../../data/conservation'
-import {
-  plantSimilarityByObservation,
-  type PlantSimilarityAnalysis,
-} from '../../data/plantSimilarityPrototype'
+import type { PlantSimilarityAnalysis } from '../../data/plantSimilarityPrototype'
 
 interface ReviewObservation {
   // Raw backend ID is authoritative; displayId preserves numeric legacy presentation only.
@@ -81,6 +78,11 @@ const reviewMessage = ref<{ variant: 'success' | 'error'; message: string } | nu
 const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
 const similarityAnalysis = ref<PlantSimilarityAnalysis | null>(null)
 const similarityTrigger = ref<HTMLElement | null>(null)
+const similarityResults = ref<Record<string, PlantSimilarityAnalysis>>({})
+const similarityErrors = ref<Record<string, string>>({})
+const similarityLoading = ref('')
+let similarityAbort: AbortController | null = null
+let similarityRequest = 0
 let feedbackId = 0
 let selectionRequest = 0
 let disposed = false
@@ -293,6 +295,9 @@ const speciesOptions = computed(() => {
 
 function open(observation: ReviewObservation) {
   if (reviewBusy.value) return
+  similarityRequest++
+  similarityAbort?.abort()
+  similarityLoading.value = ''
   selectionRequest++
   selectionLoading.value = false
   selected.value = observation
@@ -307,6 +312,9 @@ function open(observation: ReviewObservation) {
 
 function closeReview() {
   if (reviewBusy.value) return
+  similarityRequest++
+  similarityAbort?.abort()
+  similarityLoading.value = ''
   selectionRequest++
   selectionLoading.value = false
   selected.value = null
@@ -316,13 +324,84 @@ function closeReview() {
   void router.replace({ query })
 }
 
-const similarityFor = (observationId: string) => plantSimilarityByObservation.get(observationId)
+const similarityFor = (observationId: string) => similarityResults.value[observationId]
 
 const formatSimilarity = (value: number) => `${Math.round(value * 100)}%`
 
 function openSimilarity(analysis: PlantSimilarityAnalysis, event: Event) {
   similarityTrigger.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   similarityAnalysis.value = analysis
+}
+
+function parseSimilarity(value: unknown, observation: ReviewObservation): PlantSimilarityAnalysis {
+  const data = record(value)
+  if (!data || data.observationId !== observation.id || data.plantId !== observation.plantId ||
+      data.status !== 'available' || !Array.isArray(data.candidates) ||
+      data.candidates.length < 1 || data.candidates.length > 5)
+    throw new Error('The similarity service returned an invalid result.')
+  const candidates: PlantSimilarityAnalysis['candidates'] = []
+  const seen = new Set<string>()
+  for (const [index, value] of data.candidates.entries()) {
+    const candidate = record(value)
+    if (!candidate || typeof candidate.plantId !== 'string' || !/^PL[0-9]+$/.test(candidate.plantId) ||
+        candidate.plantId === observation.plantId || seen.has(candidate.plantId) ||
+        candidate.rank !== index + 1 || typeof candidate.similarity !== 'number' ||
+        !Number.isFinite(candidate.similarity) || Math.abs(candidate.similarity) > 1 ||
+        (candidate.distanceMeters !== undefined &&
+          (typeof candidate.distanceMeters !== 'number' || !Number.isFinite(candidate.distanceMeters) || candidate.distanceMeters < 0)))
+      throw new Error('The similarity service returned an invalid candidate.')
+    seen.add(candidate.plantId)
+    const rawObservationId = stringValue(candidate.observationId)
+    candidates.push({ rank: index + 1, plantId: candidate.plantId,
+      observationId: formatObservationId(rawObservationId) || rawObservationId || undefined,
+      scientificName: stringValue(candidate.scientificName) || undefined,
+      commonName: stringValue(candidate.commonName) || undefined,
+      similarity: candidate.similarity,
+      distanceMeters: candidate.distanceMeters as number | undefined })
+  }
+  if (data.highestSimilarity !== candidates[0]?.similarity)
+    throw new Error('The similarity service returned inconsistent scores.')
+  return { observationId: observation.displayId, plantId: observation.plantId,
+    status: 'available', highestSimilarity: data.highestSimilarity as number, candidates }
+}
+
+async function checkSimilarity(observation: ReviewObservation, event: Event) {
+  const cached = similarityFor(observation.id)
+  if (cached) {
+    openSimilarity(cached, event)
+    return
+  }
+  const trigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  similarityAbort?.abort()
+  const controller = new AbortController()
+  similarityAbort = controller
+  const token = ++similarityRequest
+  similarityLoading.value = observation.id
+  delete similarityErrors.value[observation.id]
+  const timeout = window.setTimeout(() => controller.abort(), 180000)
+  try {
+    const response = await fetch(`/api/data/observations/${encodeURIComponent(observation.id)}/similarity`, {
+      credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+    })
+    const result: unknown = await response.json()
+    if (!response.ok) {
+      const error = record(result)
+      throw new Error(typeof error?.error === 'string' ? error.error : 'Unable to compare this observation.')
+    }
+    const analysis = parseSimilarity(result, observation)
+    if (disposed || token !== similarityRequest) return
+    similarityResults.value[observation.id] = analysis
+    similarityTrigger.value = trigger
+    similarityAnalysis.value = analysis
+  } catch (error) {
+    if (!disposed && token === similarityRequest)
+      similarityErrors.value[observation.id] = controller.signal.aborted
+        ? 'Comparison timed out. Check the BioCLIP terminal and retry.'
+        : error instanceof Error ? error.message : 'Unable to compare this observation.'
+  } finally {
+    window.clearTimeout(timeout)
+    if (token === similarityRequest) similarityLoading.value = ''
+  }
 }
 
 function closeSimilarity() {
@@ -399,6 +478,13 @@ async function fetchObservation(id: string) {
   return observation
 }
 function updateObservation(observation: ReviewObservation) {
+  if (similarityLoading.value === observation.id) {
+    similarityRequest++
+    similarityAbort?.abort()
+    similarityLoading.value = ''
+  }
+  delete similarityResults.value[observation.id]
+  delete similarityErrors.value[observation.id]
   const previousRequest =
     selected.value?.id === observation.id ? selected.value.speciesRequest : null
   const lostDependency = previousRequest && !observation.speciesRequest
@@ -614,6 +700,11 @@ async function decide(decision: ReviewDecision) {
 }
 
 async function loadObservations() {
+  similarityRequest++
+  similarityAbort?.abort()
+  similarityLoading.value = ''
+  similarityResults.value = {}
+  similarityErrors.value = {}
   isLoading.value = true
   loadError.value = ''
   try {
@@ -639,6 +730,8 @@ watch(
 onBeforeUnmount(() => {
   disposed = true
   selectionRequest++
+  similarityRequest++
+  similarityAbort?.abort()
 })
 </script>
 
@@ -749,18 +842,17 @@ onBeforeUnmount(() => {
             </td>
             <td>
               <button
-                v-if="similarityFor(observation.displayId)?.status === 'available'"
                 class="similarity-badge-button"
                 type="button"
-                :aria-label="`View prototype visual similarity results for ${observation.displayId}: ${formatSimilarity(similarityFor(observation.displayId)!.highestSimilarity)}`"
-                @click="openSimilarity(similarityFor(observation.displayId)!, $event)"
+                :disabled="similarityLoading === observation.id || reviewBusy"
+                :aria-label="`Check BioCLIP similarity for ${observation.displayId}`"
+                @click="checkSimilarity(observation, $event)"
               >
-                <strong>{{
-                  formatSimilarity(similarityFor(observation.displayId)!.highestSimilarity)
-                }}</strong>
-                <span>Prototype</span>
+                <strong>{{ similarityLoading === observation.id ? 'Checking...' :
+                  similarityFor(observation.id) ? formatSimilarity(similarityFor(observation.id)!.highestSimilarity) : 'Check similarity' }}</strong>
+                <span>BioCLIP 2</span>
               </button>
-              <span v-else class="similarity-unavailable">{{ rt('similarityUnavailable') }}</span>
+              <small v-if="similarityErrors[observation.id]" class="similarity-unavailable" role="alert">{{ similarityErrors[observation.id] }}</small>
             </td>
             <td>
               <button class="action-button" :disabled="reviewBusy" @click="open(observation)">
@@ -1109,23 +1201,24 @@ onBeforeUnmount(() => {
           <p class="section-kicker">{{ ct('REVIEW DECISION') }}</p>
           <section class="review-similarity-summary" aria-labelledby="review-similarity-heading">
             <div>
-              <span>Frontend prototype</span>
+              <span>BioCLIP 2</span>
               <h3 id="review-similarity-heading">AI Plant Similarity</h3>
-              <p v-if="similarityFor(selected.displayId)?.status === 'available'">
-                Highest mock visual match:
+              <p v-if="similarityFor(selected.id)?.status === 'available'">
+                Highest visual similarity:
                 <strong>{{
-                  formatSimilarity(similarityFor(selected.displayId)!.highestSimilarity)
+                  formatSimilarity(similarityFor(selected.id)!.highestSimilarity)
                 }}</strong>
               </p>
-              <p v-else>{{ rt('similarityUnavailable') }}</p>
+              <p v-else>Compare this submission with approved plant photos.</p>
+              <p v-if="similarityErrors[selected.id]" role="alert">{{ similarityErrors[selected.id] }}</p>
             </div>
             <button
-              v-if="similarityFor(selected.displayId)?.status === 'available'"
               class="secondary-button"
               type="button"
-              @click="openSimilarity(similarityFor(selected.displayId)!, $event)"
+              :disabled="similarityLoading === selected.id || reviewBusy"
+              @click="checkSimilarity(selected, $event)"
             >
-              View matches
+              {{ similarityLoading === selected.id ? 'Checking...' : similarityFor(selected.id) ? 'View matches' : 'Check similarity' }}
             </button>
           </section>
           <h3>{{ rt('loadedHistory') }}</h3>

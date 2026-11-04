@@ -7,7 +7,6 @@ import ts from 'typescript'
 import * as vue from 'vue'
 import { formatObservationId } from '../src/utils/observationId.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
-import { plantSimilarityByObservation } from '../src/data/plantSimilarityPrototype.ts'
 import * as speciesRequestIntegration from '../src/services/reviewSpeciesRequest.ts'
 
 // Execute the actual SFC setup/render code with an in-memory HTTP boundary.
@@ -79,6 +78,8 @@ function harness(fetchHandler, query = {}) {
   const context = {
     exports,
     AbortSignal,
+    AbortController,
+    window: { setTimeout, clearTimeout },
     console,
     HTMLElement: class {},
     fetch: async (url, options) => {
@@ -106,7 +107,6 @@ function harness(fetchHandler, query = {}) {
         }
       if (name.endsWith('observationId')) return { formatObservationId }
       if (name.endsWith('plantId')) return { formatPlantId }
-      if (name.endsWith('plantSimilarityPrototype')) return { plantSimilarityByObservation }
       if (name.endsWith('reviewSpeciesRequest')) return speciesRequestIntegration
       if (name.endsWith('.vue')) return { name }
       throw Error(`Unexpected import: ${name}`)
@@ -158,7 +158,7 @@ test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery and sim
     for (const key of ['latitude', 'longitude', 'gpsAccuracy']) assert.equal(observation[key], '0')
     assert.equal(observation.createdAt, row.created_at)
     assert.equal(h.state.similarityFor(observation.displayId), undefined)
-    assert.ok(h.state.similarityFor(h.state.observations.value[1].displayId))
+    assert.equal(h.state.similarityFor(h.state.observations.value[1].id), undefined)
     h.state.open(observation)
     await flush()
     assert.equal(h.route.query.review, firstId)
@@ -173,6 +173,71 @@ test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery and sim
   } finally {
     h.stop()
   }
+})
+
+test('similarity loads real UUID results through the plant proxy, preserves missing distance and clears on refresh', async () => {
+  const h = harness(async (url, options) => {
+    if (url.endsWith('/similarity')) {
+      assert.equal(url, `/api/data/observations/${firstId}/similarity`)
+      assert.equal(options.credentials, 'same-origin')
+      return Response.json({ observationId: firstId, plantId: 'PL001', status: 'available',
+        highestSimilarity: 0.92, candidates: [
+          { rank: 1, plantId: 'PL008', observationId: secondId, similarity: 0.92, distanceMeters: 0 },
+          { rank: 2, plantId: 'PL009', observationId: '2', similarity: 0.8 },
+        ] })
+    }
+    return Response.json({ observations: [fixture()] })
+  })
+  try {
+    await h.state.loadObservations()
+    const observation = h.state.observations.value[0]
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    const analysis = h.state.similarityFor(firstId)
+    assert.equal(analysis.candidates[0].plantId, 'PL008')
+    assert.equal(analysis.candidates[0].observationId, secondId)
+    assert.equal(analysis.candidates[0].distanceMeters, 0)
+    assert.equal(analysis.candidates[1].distanceMeters, undefined)
+    assert.equal(analysis.candidates[1].observationId, 'OBS002')
+    assert.equal(h.state.similarityAnalysis.value, analysis)
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.equal(h.calls.filter((call) => call.url.endsWith('/similarity')).length, 1)
+    await h.state.loadObservations()
+    assert.equal(h.state.similarityFor(firstId), undefined)
+  } finally { h.stop() }
+})
+
+test('similarity failures and mismatched observations never display demo results; stale requests are ignored', async () => {
+  let mode = 'offline', release
+  const h = harness(async (url) => {
+    if (!url.endsWith('/similarity')) return Response.json({ observations: [fixture()] })
+    if (mode === 'offline') return Response.json({ error: 'BioCLIP unavailable' }, { status: 503 })
+    if (mode === 'invalid') return Response.json({ observationId: secondId })
+    return new Promise((resolve) => { release = () => resolve(Response.json({
+      observationId: firstId, plantId: 'PL001', status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: secondId, similarity: 0.9 }],
+    })) })
+  })
+  try {
+    await h.state.loadObservations()
+    const observation = h.state.observations.value[0]
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.match(h.state.similarityErrors.value[firstId], /BioCLIP unavailable/)
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    mode = 'invalid'
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.match(h.state.similarityErrors.value[firstId], /invalid result/)
+    assert.equal(h.state.similarityAnalysis.value, null)
+    mode = 'delayed'
+    const pending = h.state.checkSimilarity(observation, { currentTarget: null })
+    await flush()
+    assert.equal(h.state.similarityLoading.value, firstId)
+    await h.state.loadObservations()
+    release()
+    await pending
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
+    assert.equal(h.state.similarityLoading.value, '')
+  } finally { h.stop() }
 })
 
 test('UUID deep links outside list cap and reactive query changes load detail; stale responses are ignored', async () => {

@@ -13,7 +13,8 @@ const { mountUploads } = require("./uploads.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
-function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
+const { mountPlantSimilarity } = require("./plant-similarity.cjs");
+function createPlantApp({ auth, pool, origins = configuredOrigins(), similaritySearch }) {
   const app = express();
   app.disable("x-powered-by");
   // Do not generate ETags for uncached, authenticated JSON reads.
@@ -49,6 +50,7 @@ function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow });
   mountIoT(app, { pool, allow });
+  mountPlantSimilarity(app, { pool, allow, search: similaritySearch });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {
     await pool.query("SELECT 1");
     res.json({ connected: true, database: "postgresql" });
