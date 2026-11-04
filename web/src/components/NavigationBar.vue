@@ -9,7 +9,7 @@ import { currentUser, logout as serverLogout } from '../services/auth'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const navSearch = ref('')
 
 type UserRole = 'admin' | 'conservation-officer' | null
@@ -60,6 +60,7 @@ const submitNavSearch = () => {
 }
 
 const navTrack = ref<HTMLElement | null>(null)
+let navResizeObserver: ResizeObserver | null = null
 
 const thumbLeft = ref(0)
 const thumbWidth = ref(0)
@@ -90,6 +91,7 @@ const updateNavThumb = async () => {
   }
 
   const links = track.querySelectorAll<HTMLElement>('.nav-link')
+  links.forEach((link) => navResizeObserver?.observe(link))
 
   const activeLink = links[activeNavIndex.value]
 
@@ -116,6 +118,13 @@ const handleResize = () => {
 }
 
 onMounted(async () => {
+  navResizeObserver = new ResizeObserver(() => {
+    void updateNavThumb()
+  })
+  if (navTrack.value) navResizeObserver.observe(navTrack.value)
+  void updateNavThumb()
+  window.addEventListener('resize', handleResize)
+
   const user = await currentUser()
   if (user && !user.mustChangePassword && user.role !== 'Botanist') {
     isLoggedIn.value = true
@@ -124,16 +133,21 @@ onMounted(async () => {
   }
   updateNavThumb()
 
-  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
+  navResizeObserver?.disconnect()
+  navResizeObserver = null
   window.removeEventListener('resize', handleResize)
 })
 
-watch([() => route.path, isLoggedIn, userRole], () => {
-  updateNavThumb()
-})
+watch(
+  [() => route.path, locale, isLoggedIn, userRole],
+  () => {
+    void updateNavThumb()
+  },
+  { flush: 'post' },
+)
 
 const mobileMenuOpen = ref(false)
 const mobileSearchOpen = ref(false)
