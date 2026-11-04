@@ -9,6 +9,7 @@ const {
   assertReview,
 } = require("../shared/rbac.cjs");
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+const { requestsAvailable, observationRequestSql, assertSpeciesResolved, mountSpeciesRequests } = require("./species-requests.cjs");
 const fail = (status, message) => {
   throw Object.assign(Error(message), { status });
 };
@@ -183,6 +184,7 @@ function mountDomain(app, { pool, auth, allow }) {
     });
     res.status(201).json({ qr_codes: qrCodes });
   });
+  mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, id, assertNewSpecies });
   app.get("/api/species", allow("plants.public.read"), async (req, res) => {
     const scientific = req.query.scope === "scientific";
     if (scientific && !permitted(req.user, "plants.scientific.read"))
@@ -365,10 +367,86 @@ function mountDomain(app, { pool, auth, allow }) {
     )
       fail(400, "Invalid observation identifier.");
     const officer = req.user.role === "Conservation Officer";
+    const requestSql = observationRequestSql(await requestsAvailable(pool));
     const rows = (
       await pool.query(
-        "SELECT o.*,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'content_type',a.content_type) ORDER BY CASE WHEN a.client_key ~ ':photo:[0-9]+$' THEN substring(a.client_key from ':photo:([0-9]+)$')::numeric END ASC NULLS LAST,a.created_at ASC,a.id ASC) FROM plant_asset a WHERE a.observation_id=o.id),'[]') AS assets,p.species_id,CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($3::text[]) THEN s.scientific_name END AS scientific_name,CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($3::text[]) THEN s.common_name END AS common_name,r.comment AS review_comment,r.decision AS review_decision,r.created_at AS reviewed_at FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id JOIN species s ON s.species_id=p.species_id LEFT JOIN LATERAL (SELECT comment,decision,created_at FROM observation_review WHERE observation_id=o.id ORDER BY created_at DESC LIMIT 1) r ON true LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id WHERE ($1 OR o.owner_subject=$2) AND (CASE WHEN $5 THEN o.owner_subject=$2 AND p.registered_subject=$2 ELSE (COALESCE(v.visibility,'protected') = ANY($3::text[]) OR (o.owner_subject=$2 AND p.registered_subject=$2 AND p.rbac_status<>'Approved' AND s.rbac_data->>'submittedBy'=$2 AND s.rbac_data->>'approvalStatus' IN ('Pending Review','Rejected','Correction Required'))) END) AND ($4::text IS NULL OR o.id=$4) ORDER BY o.created_at DESC LIMIT 500",
-        [officer, subject(req.user), visibilityFor(req.user), observationId, mine],
+
+        `SELECT o.*,
+          COALESCE((
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'id', a.id,
+                'content_type', a.content_type
+              )
+              ORDER BY
+                CASE
+                  WHEN a.client_key ~ ':photo:[0-9]+$'
+                  THEN substring(a.client_key from ':photo:([0-9]+)$')::numeric
+                END ASC NULLS LAST,
+                a.created_at ASC,
+                a.id ASC
+            )
+            FROM plant_asset a
+            WHERE a.observation_id = o.id
+          ), '[]') AS assets,
+          p.species_id,
+          CASE
+            WHEN NOT $5
+              OR COALESCE(v.visibility, 'protected') = ANY($3::text[])
+            THEN s.scientific_name
+          END AS scientific_name,
+          CASE
+            WHEN NOT $5
+              OR COALESCE(v.visibility, 'protected') = ANY($3::text[])
+            THEN s.common_name
+          END AS common_name,
+          r.comment AS review_comment,
+          r.decision AS review_decision,
+          r.created_at AS reviewed_at,
+          ${requestSql.select}
+        FROM plant_observation o
+        JOIN plant_record p ON p.plant_id = o.plant_id
+        JOIN species s ON s.species_id = p.species_id
+        ${requestSql.join}
+        LEFT JOIN LATERAL (
+          SELECT comment, decision, created_at
+          FROM observation_review
+          WHERE observation_id = o.id
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) r ON true
+        LEFT JOIN rbac_species_visibility v
+          ON v.species_id = p.species_id
+        WHERE ($1 OR o.owner_subject = $2)
+          AND (
+            CASE
+              WHEN $5 THEN
+                o.owner_subject = $2
+                AND p.registered_subject = $2
+              ELSE (
+                COALESCE(v.visibility, 'protected') = ANY($3::text[])
+                OR (
+                  o.owner_subject = $2
+                  AND p.registered_subject = $2
+                  AND p.rbac_status <> 'Approved'
+                  AND s.rbac_data->>'submittedBy' = $2
+                  AND s.rbac_data->>'approvalStatus'
+                    IN ('Pending Review', 'Rejected', 'Correction Required')
+                )
+              )
+            END
+          )
+          AND ($4::text IS NULL OR o.id = $4)
+        ORDER BY o.created_at DESC
+        LIMIT 500`,
+        [
+          officer,
+          subject(req.user),
+          visibilityFor(req.user),
+          observationId,
+          mine,
+        ],
+
       )
     ).rows;
     if (observationId !== null) {
@@ -524,6 +602,7 @@ function mountDomain(app, { pool, auth, allow }) {
           fail(denied, "Review is not permitted or feedback is missing.");
         if (row.revision !== req.body.revision)
           fail(409, "Observation changed. Reload before reviewing.");
+        await assertSpeciesResolved(c, row.plant_id, fail);
         await c.query(
           "INSERT INTO observation_review(id,observation_id,reviewer_subject,decision,comment) VALUES($1,$2,$3,$4,$5)",
           [

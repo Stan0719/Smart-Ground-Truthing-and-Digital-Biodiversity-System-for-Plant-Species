@@ -9,43 +9,12 @@ import SensorHistoryChart, {
 } from '../../components/conservation/SensorHistoryChart.vue'
 import { useConservationText } from '../../composables/useConservationText'
 import { formatPlantId } from '../../utils/plantId'
-
-interface ApiSensorReading {
-  reading_id: string | number
-  plant_id: string | number
-  temperature_c: string | number | null
-  humidity: string | number | null
-  soil_moisture: string | number | null
-  rainfall_mm: string | number | null
-  motion_detected: boolean | null
-  gps_latitude: string | number | null
-  gps_longitude: string | number | null
-  recorded_at: string
-}
-
-interface ApiSensorDevice {
-  sensor_id: string | number
-  device_name: string
-  device_type: string
-  serial_number: string | null
-  location_description: string | null
-  status: string
-  installed_at: string | null
-  latest_reading: ApiSensorReading | null
-}
-
-interface IoTDevicesResponse {
-  message: string
-  count: number
-  devices: ApiSensorDevice[]
-}
-
-interface SensorReadingsResponse {
-  message: string
-  sensor: Omit<ApiSensorDevice, 'installed_at' | 'latest_reading'>
-  count: number
-  readings: ApiSensorReading[]
-}
+import {
+  loadCanonicalDevices,
+  loadCanonicalHistory,
+  type IoTDevice as ApiSensorDevice,
+  type IoTReading as ApiSensorReading,
+} from '../../services/iotMonitoring'
 
 const { t } = useI18n()
 const { ct, dt } = useConservationText()
@@ -55,6 +24,7 @@ const selectedDevice = ref<ApiSensorDevice | null>(null)
 const selectedReading = ref<ApiSensorReading | null>(null)
 const historyDevice = ref<ApiSensorDevice | null>(null)
 const historyReadings = ref<ApiSensorReading[]>([])
+const historyHasMore = ref(false)
 const isHistoryLoading = ref(false)
 const historyErrorMessage = ref('')
 const search = ref('')
@@ -67,10 +37,7 @@ const loadDevices = async () => {
   isLoading.value = true
   errorMessage.value = ''
   try {
-    const response = await fetch('/api/iot/devices')
-    const result = (await response.json()) as Partial<IoTDevicesResponse>
-    if (!response.ok) throw new Error(result.message || 'Unable to retrieve IoT devices.')
-    devices.value = Array.isArray(result.devices) ? result.devices : []
+    devices.value = await loadCanonicalDevices()
   } catch (error) {
     devices.value = []
     errorMessage.value = error instanceof Error ? error.message : 'Unable to retrieve IoT devices.'
@@ -84,9 +51,9 @@ onMounted(loadDevices)
 const filteredDevices = computed(() =>
   devices.value.filter((device) => {
     const reading = device.latest_reading
-    const plantId = reading ? formatPlantId(reading.plant_id) : ''
+    const plantId = reading?.plant_id ? formatPlantId(reading.plant_id) : ''
     const matchesSearch =
-      `${device.sensor_id} ${device.device_name} ${device.device_type} ${device.serial_number ?? ''} ${device.location_description ?? ''} ${plantId ?? ''}`
+      `${device.sensor_id} ${device.device_name} ${device.device_type} ${device.status} ${device.serial_number ?? ''} ${device.location_description ?? ''} ${plantId ?? ''}`
         .toLowerCase()
         .includes(search.value.toLowerCase())
     return (
@@ -108,11 +75,15 @@ const cards = computed(() => [
   ['totalDevices', devices.value.length],
   [
     'onlineDevices',
-    devices.value.filter((device) => device.status.toLowerCase() === 'online').length,
+    devices.value.some((device) => device.status.toLowerCase() === 'online')
+      ? devices.value.filter((device) => device.status.toLowerCase() === 'online').length
+      : '—',
   ],
   [
     'offlineDevices',
-    devices.value.filter((device) => device.status.toLowerCase() === 'offline').length,
+    devices.value.some((device) => device.status.toLowerCase() === 'offline')
+      ? devices.value.filter((device) => device.status.toLowerCase() === 'offline').length
+      : '—',
   ],
   ['latestReadings', latestReadings.value.length],
 ])
@@ -120,7 +91,7 @@ const cards = computed(() => [
 const valueOrDash = (value: string | number | null | undefined, suffix = '') =>
   value === null || value === undefined || value === '' ? '—' : `${value}${suffix}`
 const plantDisplayId = (reading: ApiSensorReading | null) =>
-  reading ? formatPlantId(reading.plant_id) || '—' : '—'
+  reading?.plant_id ? formatPlantId(reading.plant_id) || '—' : '—'
 const gpsValue = (reading: ApiSensorReading | null) =>
   reading?.gps_latitude !== null &&
   reading?.gps_latitude !== undefined &&
@@ -137,7 +108,7 @@ const viewDeviceAlerts = (device: ApiSensorDevice) => {
   selectedDevice.value = null
   void router.push({
     name: 'conservation-alerts',
-    query: { sensor: String(device.sensor_id) },
+    query: { device: String(device.sensor_id) },
   })
 }
 
@@ -150,7 +121,7 @@ const viewReadingAlerts = (reading: ApiSensorReading) => {
 }
 
 const viewReadingOnMap = (reading: ApiSensorReading, source: 'device' | 'reading') => {
-  const plantId = formatPlantId(reading.plant_id)
+  const plantId = reading.plant_id ? formatPlantId(reading.plant_id) : null
   if (!plantId) return
 
   if (source === 'device') selectedDevice.value = null
@@ -163,13 +134,13 @@ const loadReadingHistory = async (device: ApiSensorDevice) => {
   historyDevice.value = device
   selectedDevice.value = null
   historyReadings.value = []
+  historyHasMore.value = false
   historyErrorMessage.value = ''
   isHistoryLoading.value = true
   try {
-    const response = await fetch(`/api/iot/sensors/${device.sensor_id}/readings`)
-    const result = (await response.json()) as Partial<SensorReadingsResponse>
-    if (!response.ok) throw new Error(result.message || 'Unable to retrieve sensor readings.')
-    historyReadings.value = Array.isArray(result.readings) ? result.readings : []
+    const result = await loadCanonicalHistory(device)
+    historyReadings.value = result.readings
+    historyHasMore.value = result.hasMore
   } catch (error) {
     historyErrorMessage.value =
       error instanceof Error ? error.message : 'Unable to retrieve sensor readings.'
@@ -181,6 +152,7 @@ const loadReadingHistory = async (device: ApiSensorDevice) => {
 const closeReadingHistory = () => {
   historyDevice.value = null
   historyReadings.value = []
+  historyHasMore.value = false
   historyErrorMessage.value = ''
 }
 
@@ -413,7 +385,8 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       </button>
       <button
         v-if="
-          selectedDevice.latest_reading && formatPlantId(selectedDevice.latest_reading.plant_id)
+          selectedDevice.latest_reading?.plant_id &&
+          formatPlantId(selectedDevice.latest_reading.plant_id)
         "
         class="action-button"
         type="button"
@@ -442,6 +415,9 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       No historical readings are available for this sensor.
     </p>
     <template v-else>
+      <p v-if="historyHasMore" class="state-message">
+        Showing the latest {{ historyReadings.length }} readings. More history is available.
+      </p>
       <section class="history-charts" aria-label="Historical sensor charts">
         <SensorHistoryChart
           title="Temperature over time"
@@ -545,7 +521,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         View Alerts
       </button>
       <button
-        v-if="formatPlantId(selectedReading.plant_id)"
+        v-if="selectedReading.plant_id && formatPlantId(selectedReading.plant_id)"
         class="action-button"
         type="button"
         @click="viewReadingOnMap(selectedReading, 'reading')"

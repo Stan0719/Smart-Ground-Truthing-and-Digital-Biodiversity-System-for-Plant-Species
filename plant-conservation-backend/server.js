@@ -10,7 +10,6 @@ const {
 const { mountDomain } = require("./domain.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
 const { mountUploads } = require("./uploads.cjs");
-const { mountSpeciesRequests } = require("./species-requests.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
@@ -45,7 +44,6 @@ function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
   mountDomain(app, { auth, pool, allow });
-  mountSpeciesRequests(app, { pool, allow });
   mountPlantSubmissions(app, { pool, allow });
   mountRecordChanges(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
@@ -152,9 +150,9 @@ async function start() {
 if (require.main === module)
   start().catch((error) => {
     console.error(
-      "Plant API startup failed; verify configuration:",
-      error.code ?? error.name,
+      "Plant API startup failed; verify configuration:"
     );
+    console.error(error);
     process.exitCode = 1;
   });
 module.exports = { createPlantApp };

@@ -617,7 +617,7 @@ onBeforeUnmount(() => {
                 <img
                   v-if="plant.image || plant.images?.find((image) => image.path)?.path"
                   :src="plant.image || plant.images?.find((image) => image.path)?.path"
-                  :alt="t(`plantNames.${plant.slug}`)"
+                  :alt="plant.name?.trim() || t('homeContent.unnamedSpecies')"
                   class="home-plant-photo"
                   draggable="false"
                 />
@@ -632,17 +632,17 @@ onBeforeUnmount(() => {
 
               <div class="home-plant-info">
                 <h3>
-                  {{ t(`plantNames.${plant.slug}`) }}
+                  {{ plant.name?.trim() || t('homeContent.unnamedSpecies') }}
                 </h3>
 
                 <p class="home-plant-scientific">
-                  {{ t(`scientificNames.${plant.slug}`) }}
+                  {{ plant.scientificName?.trim() || t('homeContent.scientificNameUnavailable') }}
                 </p>
 
                 <RouterLink
                   :to="{ name: 'species-detail', params: { slug: plant.slug } }"
                   class="view-plant"
-                  :aria-label="`View species details for ${plant.scientificName}`"
+                  :aria-label="t('homeContent.viewSpeciesDetails', { name: plant.scientificName?.trim() || plant.name?.trim() || t('homeContent.unnamedSpecies') })"
                   draggable="false"
                 >
                   {{ t('common.viewDetails') }} →
@@ -661,7 +661,7 @@ onBeforeUnmount(() => {
                 <img
                   v-if="plant.image || plant.images?.find((image) => image.path)?.path"
                   :src="plant.image || plant.images?.find((image) => image.path)?.path"
-                  :alt="t(`plantNames.${plant.slug}`)"
+                  :alt="plant.name?.trim() || t('homeContent.unnamedSpecies')"
                   class="home-plant-photo"
                   draggable="false"
                 />
@@ -676,17 +676,17 @@ onBeforeUnmount(() => {
 
               <div class="home-plant-info">
                 <h3>
-                  {{ t(`plantNames.${plant.slug}`) }}
+                  {{ plant.name?.trim() || t('homeContent.unnamedSpecies') }}
                 </h3>
 
                 <p class="home-plant-scientific">
-                  {{ t(`scientificNames.${plant.slug}`) }}
+                  {{ plant.scientificName?.trim() || t('homeContent.scientificNameUnavailable') }}
                 </p>
 
                 <RouterLink
                   :to="{ name: 'species-detail', params: { slug: plant.slug } }"
                   class="view-plant"
-                  :aria-label="`View species details for ${plant.scientificName}`"
+                  :aria-label="t('homeContent.viewSpeciesDetails', { name: plant.scientificName?.trim() || plant.name?.trim() || t('homeContent.unnamedSpecies') })"
                   tabindex="-1"
                   draggable="false"
                 >

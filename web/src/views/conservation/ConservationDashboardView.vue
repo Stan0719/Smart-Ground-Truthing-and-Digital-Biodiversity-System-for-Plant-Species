@@ -3,30 +3,27 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import BiodiversityMapPreview from '../../components/conservation/BiodiversityMapPreview.vue'
-import { useConservationText } from '../../composables/useConservationText'
 import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
 
 interface ApiObservation {
-  observation_id: string | number
+  id: string | number
   plant_id: string | number
-  recorded_by?: string | number | null
+  owner_subject?: string | null
   status?: string | null
-  verification_status?: string | null
   scientific_name?: string | null
   common_name?: string | null
 }
 
 interface ApiPlant {
   plant_id: string | number
-  registered_by?: string | number | null
-  current_status?: string | null
+  species_id: string | number
+  registered_subject?: string | null
+  rbac_status?: string | null
   registered_at?: string | null
-  scientific_name?: string | null
-  common_name?: string | null
   latitude?: string | number | null
   longitude?: string | number | null
-  last_verified_at?: string | null
+  observed_at?: string | null
 }
 
 interface ApiSpecies {
@@ -46,8 +43,32 @@ interface ApiAlert {
 }
 
 const router = useRouter()
-const { t, te } = useI18n()
-const { dt } = useConservationText()
+const { t, te, locale } = useI18n()
+const today = new Date()
+const dateLocale = computed(() => (locale.value === 'ms' ? 'ms-MY' : locale.value))
+const currentDate = computed(() =>
+  new Intl.DateTimeFormat(dateLocale.value, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(today),
+)
+const currentDateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+const dt = (value?: string | null) => {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isFinite(date.getTime())
+    ? new Intl.DateTimeFormat(dateLocale.value, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(date)
+    : '—'
+}
 const go = (name: string, query?: Record<string, string>) => router.push({ name, query })
 
 const observations = ref<ApiObservation[]>([])
@@ -64,10 +85,32 @@ const speciesError = ref('')
 const alertsError = ref('')
 
 const loadJson = async <T,>(url: string, collection: string): Promise<T[]> => {
-  const response = await fetch(url)
-  const result = (await response.json()) as Record<string, unknown>
-  if (!response.ok) throw new Error(String(result.message || 'Unable to load dashboard data.'))
-  return Array.isArray(result[collection]) ? (result[collection] as T[]) : []
+  let response: Response
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(15000) })
+  } catch {
+    throw new Error('Dashboard data unavailable. Please try again later.')
+  }
+  let result: Record<string, unknown>
+  try {
+    const body: unknown = await response.json()
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error()
+    result = body as Record<string, unknown>
+  } catch {
+    throw new Error('Dashboard data unavailable: invalid server response.')
+  }
+  if (!response.ok) {
+    const message = [result.message, result.error].find(
+      (value): value is string => typeof value === 'string' && Boolean(value.trim()),
+    )
+    throw new Error(message || 'Dashboard data unavailable. Please try again later.')
+  }
+  if (
+    !Array.isArray(result[collection]) ||
+    result[collection].some((item) => !item || typeof item !== 'object' || Array.isArray(item))
+  )
+    throw new Error('Dashboard data unavailable: invalid server response.')
+  return result[collection] as T[]
 }
 
 const loadObservations = async () => {
@@ -98,7 +141,7 @@ const loadSpecies = async () => {
   speciesLoading.value = true
   speciesError.value = ''
   try {
-    species.value = await loadJson<ApiSpecies>('/api/species', 'species')
+    species.value = await loadJson<ApiSpecies>('/api/species?scope=scientific', 'species')
   } catch (error) {
     species.value = []
     speciesError.value = error instanceof Error ? error.message : 'Species data unavailable.'
@@ -124,13 +167,27 @@ onMounted(() => {
 })
 
 const effectiveObservationStatus = (observation: ApiObservation) =>
-  (observation.verification_status || observation.status || '').trim()
+  typeof observation.status === 'string' ? observation.status.trim() : ''
+// Preserve the existing review-required grouping, including correction/flagged records.
 const requiresReview = (observation: ApiObservation) => {
   const status = effectiveObservationStatus(observation).toLowerCase().replace(/[_-]+/g, ' ')
   return ['pending', 'pending review', 'correction required', 'flagged'].includes(status)
 }
 const pending = computed(() => observations.value.filter(requiresReview).slice(0, 4))
-const recentPlants = computed(() => plants.value.slice(0, 4))
+const timestamp = (value?: string | null) => {
+  const parsed = value ? Date.parse(value) : NaN
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
+}
+// Most recently registered among the loaded records; missing dates sort last.
+const recentPlants = computed(() =>
+  [...plants.value]
+    .sort((a, b) => timestamp(b.registered_at) - timestamp(a.registered_at))
+    .slice(0, 4),
+)
+const speciesById = computed(
+  () => new Map(species.value.map((item) => [String(item.species_id), item])),
+)
+const speciesForPlant = (plant: ApiPlant) => speciesById.value.get(String(plant.species_id))
 const recentAlerts = computed(() =>
   [...alerts.value]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -138,12 +195,16 @@ const recentAlerts = computed(() =>
 )
 const mapPlants = computed(() =>
   plants.value.flatMap((plant) => {
+    // This overview represents approved biodiversity records, not the review queue.
+    if (normalizeStatus(plant.rbac_status) !== 'approved') return []
     const id = formatPlantId(plant.plant_id)
     if (
       plant.latitude === null ||
       plant.latitude === undefined ||
       plant.longitude === null ||
-      plant.longitude === undefined
+      plant.longitude === undefined ||
+      String(plant.latitude).trim() === '' ||
+      String(plant.longitude).trim() === ''
     )
       return []
     const latitude = Number(plant.latitude)
@@ -163,21 +224,26 @@ const mapPlants = computed(() =>
         id,
         latitude,
         longitude,
-        scientificName: plant.scientific_name || '',
-        commonName: plant.common_name || '',
+        scientificName: speciesForPlant(plant)?.scientific_name || '',
+        commonName: speciesForPlant(plant)?.common_name || '',
       },
     ]
   }),
 )
 
+const normalizeStatus = (value?: string | null) =>
+  (typeof value === 'string' ? value : '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
 const endangeredSpeciesCount = computed(
   () =>
-    species.value.filter((item) =>
-      (item.conservation_status || '').toLowerCase().includes('endangered'),
-    ).length,
+    species.value.filter((item) => normalizeStatus(item.conservation_status).includes('endangered'))
+      .length,
 )
 const activeAlertCount = computed(
-  () => alerts.value.filter((alert) => alert.status.toLowerCase() !== 'resolved').length,
+  () => alerts.value.filter((alert) => normalizeStatus(alert.status) !== 'resolved').length,
 )
 const summaries = computed(() => [
   [
@@ -225,14 +291,18 @@ const biodiversityStatuses = [
   'Critically Endangered',
 ]
 const statusCount = (status: string) =>
-  species.value.filter((item) => item.conservation_status === status).length
+  species.value.filter(
+    (item) => normalizeStatus(item.conservation_status) === normalizeStatus(status),
+  ).length
 const dataLabel = (value: string) => {
   const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
   return te(key) ? t(key) : value
 }
 const valueOrDash = (value: string | number | null | undefined) =>
   value === null || value === undefined || value === '' ? '—' : String(value)
-const observationId = (item: ApiObservation) => formatObservationId(item.observation_id) || '—'
+// Numeric legacy IDs retain their presentation; current UUIDs stay intact, including in links.
+const observationId = (item: ApiObservation) => formatObservationId(item.id) || String(item.id)
+const statusClass = (status?: string | null) => normalizeStatus(status).replaceAll(' ', '-')
 const plantId = (value: string | number) => formatPlantId(value) || '—'
 const alertId = (value: string | number) => {
   const numeric = Number(value)
@@ -240,8 +310,8 @@ const alertId = (value: string | number) => {
     ? `ALT${String(numeric).padStart(3, '0')}`
     : String(value)
 }
-const speciesName = (item: { scientific_name?: string | null; common_name?: string | null }) =>
-  item.scientific_name || item.common_name || 'Not available'
+const speciesName = (item?: { scientific_name?: string | null; common_name?: string | null }) =>
+  item?.scientific_name || item?.common_name || t('conservationDashboard.speciesUnavailable')
 </script>
 
 <template>
@@ -251,7 +321,7 @@ const speciesName = (item: { scientific_name?: string | null; common_name?: stri
       <h2>{{ t('conservationDashboard.greeting') }}</h2>
       <p>{{ t('conservationDashboard.intro') }}</p>
     </div>
-    <time datetime="2026-10-03">{{ t('conservationDashboard.date') }}</time>
+    <time :datetime="currentDateKey">{{ currentDate }}</time>
   </section>
 
   <section class="summary-grid">
@@ -294,15 +364,17 @@ const speciesName = (item: { scientific_name?: string | null; common_name?: stri
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in pending" :key="String(item.observation_id)">
+            <tr v-for="item in pending" :key="String(item.id)">
               <td>
-                <strong>{{ observationId(item) }}</strong>
+                <strong class="observation-id" :title="String(item.id)">{{
+                  observationId(item)
+                }}</strong>
               </td>
               <td>{{ plantId(item.plant_id) }}</td>
               <td>
                 <em>{{ speciesName(item) }}</em>
               </td>
-              <td>{{ valueOrDash(item.recorded_by) }}</td>
+              <td>{{ valueOrDash(item.owner_subject) }}</td>
               <td>
                 <span class="badge pending-review">{{
                   dataLabel(effectiveObservationStatus(item))
@@ -373,13 +445,15 @@ const speciesName = (item: { scientific_name?: string | null; common_name?: stri
               >
             </td>
             <td>
-              <em>{{ speciesName(plant) }}</em>
+              <em>{{ speciesName(speciesForPlant(plant)) }}</em>
             </td>
-            <td>{{ valueOrDash(plant.registered_by) }}</td>
-            <td>{{ plant.registered_at ? dt(plant.registered_at) : '—' }}</td>
-            <td>{{ plant.last_verified_at ? dt(plant.last_verified_at) : '—' }}</td>
+            <td>{{ valueOrDash(plant.registered_subject) }}</td>
+            <td>{{ dt(plant.registered_at) }}</td>
+            <td>{{ dt(plant.observed_at) }}</td>
             <td>
-              <span class="badge approved">{{ valueOrDash(plant.current_status) }}</span>
+              <span class="badge" :class="statusClass(plant.rbac_status)">{{
+                valueOrDash(plant.rbac_status)
+              }}</span>
             </td>
           </tr>
         </tbody>
@@ -393,6 +467,7 @@ const speciesName = (item: { scientific_name?: string | null; common_name?: stri
         <div>
           <p class="section-kicker">{{ t('conservationDashboard.parkCoverage') }}</p>
           <h2>{{ t('conservationDashboard.speciesDistribution') }}</h2>
+          <span class="panel-description">{{ t('conservationDashboard.approvedMapRecords') }}</span>
         </div>
         <button class="secondary-button" @click="go('conservation-map')">
           {{ t('conservationDashboard.openFullMap') }} →
@@ -430,8 +505,8 @@ const speciesName = (item: { scientific_name?: string | null; common_name?: stri
             {{ dt(alert.created_at) }} · {{ alert.status }}</small
           >
         </div>
-        <span class="badge alert-severity-badge" :class="alert.severity.toLowerCase()">{{
-          alert.severity
+        <span class="badge alert-severity-badge" :class="statusClass(alert.severity)">{{
+          valueOrDash(alert.severity)
         }}</span>
       </button>
     </section>
@@ -494,6 +569,13 @@ const speciesName = (item: { scientific_name?: string | null; common_name?: stri
 </template>
 
 <style scoped>
+.observation-id {
+  display: block;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .overview-row {
   padding: 12px 0;
   display: flex;

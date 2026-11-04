@@ -63,17 +63,33 @@
       "description": "探索砂拉越最非凡的国家公园之一，认识这里的植物、生物多样性与自然遗产。",
       "cta": "探索植物"
     },
-    "about": { "eyebrow": "关于尼亚", "title": "尼亚国家公园" },
-    "explore": { "eyebrow": "探索尼亚", "title": "非凡的自然景观", "why": "为何选择尼亚？" },
-    "experience": { "eyebrow": "体验尼亚", "title": "亲眼感受这段旅程" },
-    "journey": { "eyebrow": "您的旅程", "title": "探险在抵达洞穴之前就已开始" },
+    "about": {
+      "eyebrow": "关于尼亚",
+      "title": "尼亚国家公园"
+    },
+    "explore": {
+      "eyebrow": "探索尼亚",
+      "title": "非凡的自然景观",
+      "why": "为何选择尼亚？"
+    },
+    "experience": {
+      "eyebrow": "体验尼亚",
+      "title": "亲眼感受这段旅程"
+    },
+    "journey": {
+      "eyebrow": "您的旅程",
+      "title": "探险在抵达洞穴之前就已开始"
+    },
     "flora": {
       "eyebrow": "探索植物群",
       "title": "发现尼亚植物群",
       "subtitle": "认识塑造尼亚国家公园雨林生态的非凡植物。",
       "more": "探索更多植物物种"
     },
-    "prepare": { "eyebrow": "探索之前", "title": "为探险做好准备" }
+    "prepare": {
+      "eyebrow": "探索之前",
+      "title": "为探险做好准备"
+    }
   },
   "species": {
     "heroTitle": "尼亚植物",
@@ -216,9 +232,18 @@
     "tradersCave": "商人洞穴",
     "enterCave": "进入洞穴景观",
     "mainDestination": "主要目的地",
-    "ancientArt": "古老艺术在此等候"
+    "ancientArt": "古老艺术在此等候",
+    "unnamedSpecies": "未命名物种",
+    "scientificNameUnavailable": "学名不可用",
+    "viewSpeciesDetails": "查看{name}的物种详情"
   },
-  "categories": { "trees": "乔木", "flowers": "花卉", "ferns": "蕨类", "climbers": "攀缘植物" },
+  "categories": {
+    "trees": "乔木",
+    "flowers": "花卉",
+    "ferns": "蕨类",
+    "climbers": "攀缘植物",
+    "uncategorized": "未分类"
+  },
   "plantNames": {
     "tropical-pitcher-plant": "莱佛士猪笼草",
     "wild-ginger": "野姜花",
@@ -451,7 +476,11 @@
         "message": "在 PL010 附近检测到高温。",
         "time": "15 分钟前"
       },
-      "N004": { "title": "系统警告", "message": "传感器网络报告了连接警告。", "time": "25 分钟前" }
+      "N004": {
+        "title": "系统警告",
+        "message": "传感器网络报告了连接警告。",
+        "time": "25 分钟前"
+      }
     },
     "conservation": {
       "CN-001": {
@@ -642,7 +671,6 @@
     "overview": "概览",
     "greeting": "下午好，保育专员",
     "intro": "以下是生物多样性记录与保育活动的最新概览。",
-    "date": "2026年10月3日，星期六",
     "requiresReview": "需要审核",
     "pendingObservationReviews": "待审核观察记录",
     "pendingDescription": "植物学家最近提交的野外观察记录",
@@ -655,6 +683,7 @@
     "viewAllPlants": "查看所有植株",
     "parkCoverage": "园区覆盖",
     "speciesDistribution": "物种分布",
+    "approvedMapRecords": "具有有效坐标的已批准植株 · 仅限已加载记录",
     "openFullMap": "打开完整地图",
     "attentionRequired": "需要处理",
     "conservationAlerts": "保育警报",
@@ -665,17 +694,17 @@
     "speciesUnavailable": "物种资料不可用",
     "summary": {
       "plantSpecies": "植物物种",
-      "digitalKnowledgeBase": "数字知识库",
+      "digitalKnowledgeBase": "已加载物种 · 最多200条",
       "plantRecords": "植物记录",
-      "registeredPlants": "已登记植株",
+      "registeredPlants": "已加载植株 · 最多500条",
       "pendingReviews": "待审核项目",
-      "requiresVerification": "需要核实",
+      "requiresVerification": "最多500条已加载观察记录中需要审核的项目",
       "endangeredSpecies": "濒危物种",
-      "underMonitoring": "监测中",
+      "underMonitoring": "已加载物种中 · 最多200条",
       "activeThreats": "活跃威胁",
-      "needsAttention": "需要注意",
-      "recentObservations": "最近观察记录",
-      "currentDataset": "当前模拟数据集"
+      "needsAttention": "已加载记录中未解决的警报",
+      "recentObservations": "已加载观察记录",
+      "currentDataset": "已加载观察记录 · 最多500条"
     },
     "table": {
       "observationId": "观察编号",
@@ -741,7 +770,9 @@
     }
   },
   "adminModules": {
-    "common": { "needsAttention": "需要关注" },
+    "common": {
+      "needsAttention": "需要关注"
+    },
     "iot": {
       "eyebrow": "实时监控",
       "intro": "监控尼亚各处的实时环境读数和传感器连接状态。",
@@ -950,7 +981,11 @@
       "Botanist": "植物学家",
       "Visitor": "访客"
     },
-    "statuses": { "active": "启用", "inactive": "停用", "suspended": "已暂停" }
+    "statuses": {
+      "active": "启用",
+      "inactive": "停用",
+      "suspended": "已暂停"
+    }
   },
   "conservationText": {
     "maintenance": "维护中",
@@ -1085,6 +1120,7 @@
     "describetheresponseorinvestigation": "描述响应行动或调查情况",
     "alertidplantidortype": "警报编号、植物编号或类型",
     "activealerts": "活跃警报",
+    "newalerts": "新警报",
     "highseverity": "高严重程度",
     "underreview": "审核中",
     "lowsoilmoisture": "土壤湿度低",
@@ -1227,6 +1263,32 @@
       "photo": "{name}照片",
       "empty": "没有符合筛选条件的观察记录。",
       "unconfirmedSpecies": "物种尚未确认",
+      "submittedBy": "提交者",
+      "allSubmitters": "所有提交者",
+      "created": "创建时间",
+      "lastUpdated": "最后更新",
+      "reviewState": "审核状态",
+      "taxonomy": "提交的分类信息",
+      "newSpeciesRequest": "新物种申请",
+      "loadedLimit": "搜索和筛选仅适用于已加载的最多 500 条观察记录。",
+      "skipped": "已跳过 {count} 条格式错误的记录",
+      "loading": "正在加载观察记录…",
+      "loadingDetails": "正在刷新权威观察详情…",
+      "loadFailed": "无法加载观察记录。",
+      "retry": "重试",
+      "historyLimit": "仅显示该植物已加载的观察记录；这不是完整的数据库历史。",
+      "noAssets": "没有提交的图片或附件。",
+      "attachment": "附件",
+      "imageUnavailable": "图片不可用",
+      "imageAlt": "观察记录 {observation}，提交的资源 {asset}",
+      "errors": {
+        "network": "无法连接观察服务。请重试。",
+        "invalidResponse": "观察服务返回了无效响应。",
+        "unauthorized": "您的会话已过期。请重新登录。",
+        "forbidden": "您无权查看这些观察记录。",
+        "notFound": "该观察记录已不可用。",
+        "requestFailed": "观察请求失败（{status}）。"
+      },
       "values": {
         "draft": "草稿",
         "pendingreview": "待审核",
@@ -1305,25 +1367,207 @@
         }
       }
     },
-    "common": { "allZones": "所有区域" },
+    "common": {
+      "allZones": "所有区域"
+    },
     "species": {
       "knowledgeBase": "知识库",
+      "title": "植物物种",
+      "intro": "管理持久化的分类、生态、保护状态和可见性信息。",
       "searchSpecies": "搜索物种",
-      "searchPlaceholder": "学名、常用名或科名",
-      "plantRecords": "植物记录",
-      "lastUpdated": "最后更新",
+      "searchPlaceholder": "编号、名称、分类、保护状态或可见性",
+      "family": "科",
+      "allFamilies": "所有科",
+      "allStatuses": "所有状态",
+      "allVisibility": "所有可见性级别",
+      "createSpecies": "创建物种",
+      "editSpecies": "编辑物种",
+      "deleteSpecies": "删除物种",
+      "speciesId": "物种编号",
+      "scientificName": "学名",
+      "commonName": "常用名",
+      "genus": "属",
+      "conservationStatus": "保护状态",
+      "visibility": "可见性",
+      "actions": "操作",
+      "view": "查看",
+      "visibilityPublic": "公开",
+      "visibilityInternal": "内部 / 科学",
+      "visibilityProtected": "受保护",
+      "unavailable": "不可用",
+      "loadedLimit": "客户端搜索和筛选适用于最多 200 条已加载物种记录。",
+      "skipped": "已跳过 {count} 条格式错误的记录",
+      "loading": "正在加载物种…",
+      "loadFailed": "无法加载物种。",
+      "retry": "重试",
+      "noMatches": "没有符合筛选条件的物种。",
+      "empty": "没有可用的物种记录。",
+      "formSubtitle": "更改将写入由 PostgreSQL 支持的物种登记册。",
+      "loadingDetail": "正在加载权威物种详情…",
+      "taxonomyUnavailable": "分类选择不可用：",
+      "noGenus": "未指定属",
+      "familyDerived": "科（由属派生）",
+      "noConservationStatus": "未指定保护状态",
+      "description": "描述",
+      "habitat": "栖息地 / 生态信息",
+      "culturalSignificance": "文化意义",
+      "speciesImages": "物种图片",
+      "imageLimitation": "物种 CRUD 目前不支持图片上传或图片引用。不会存储本地数据 URL。",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "正在保存…",
+      "deleting": "正在删除…",
+      "deleteConfirmTitle": "删除物种？",
+      "deleteConfirmation": "此操作将通过后端永久删除该物种。",
+      "deleteReferenceWarning": "如果植物、申请或其他记录引用该物种，删除可能失败。本页面不会删除相关记录。",
+      "errors": {
+        "invalidResponse": "物种服务返回了无效响应。",
+        "load": "无法加载物种。",
+        "taxonomy": "无法加载分类信息。",
+        "detail": "无法加载物种详情。",
+        "save": "无法保存物种。",
+        "delete": "无法删除物种。",
+        "savedRefresh": "物种已保存，但无法刷新持久化数据：{message}",
+        "deletedRefresh": "物种已删除，但无法刷新列表：{message}"
+      },
       "feedback": {
-        "added": "已为本次会话添加物种。",
-        "edited": "已为本次会话保存物种更改。",
-        "deleted": "已从本次会话中移除物种。",
-        "editError": "无法为本次会话保存物种更改。请重试。",
-        "deleteError": "无法从本次会话中移除物种。请重试。"
+        "added": "物种已创建，并通过持久化后端数据验证。",
+        "edited": "物种更改已保存，并通过持久化后端数据验证。",
+        "deleted": "物种已永久删除，持久化列表已刷新。"
+      }
+    },
+    "reports": {
+      "eyebrow": "PostgreSQL 报告",
+      "title": "报告",
+      "intro": "查看并下载当前植物后端支持的报告数据。",
+      "reportType": "报告类型",
+      "supportedDescription": "未支持的报告类型仅用于说明路线图，不能生成原型数据。",
+      "speciesApprovedSummary": "物种与已批准植物摘要",
+      "observationSummary": "观察摘要",
+      "threatIncidentReport": "威胁 / 事件报告",
+      "iotMonitoringReport": "IoT 监测报告",
+      "cameraIncidentReport": "摄像头事件报告",
+      "customDateReport": "自定义日期报告",
+      "realBackendReport": "真实的 PostgreSQL 后端报告",
+      "backendUnavailable": "后端集成尚不可用",
+      "dataScope": "数据范围",
+      "allAvailableData": "所有可用报告数据",
+      "dateUnsupported": "当前后端汇总不支持日期筛选。",
+      "search": "搜索已加载行",
+      "searchPlaceholder": "学名或常用名",
+      "sort": "排序",
+      "sortScientific": "学名 A–Z",
+      "sortApprovedDesc": "已批准植物：从高到低",
+      "sortApprovedAsc": "已批准植物：从低到高",
+      "refresh": "刷新",
+      "loading": "正在加载真实报告数据…",
+      "loadFailed": "报告加载失败。",
+      "retry": "重试",
+      "generatedAt": "生成时间",
+      "totalSpecies": "物种总数",
+      "totalApprovedPlants": "已批准植物总数",
+      "matchingRows": "匹配行数",
+      "chartTitle": "各物种已批准植物数量",
+      "chartLimit": "图表显示已批准植物数量最高的 {count} 个物种；表格包含所有匹配行。",
+      "scientificName": "学名",
+      "commonName": "常用名",
+      "approvedPlants": "已批准植物",
+      "unavailable": "不可用",
+      "empty": "没有可用的报告数据。",
+      "noMatches": "没有符合搜索条件的报告行。",
+      "exportCsv": "导出 CSV",
+      "exportPdf": "导出 PDF",
+      "downloadOnly": "CSV 和 PDF 文件仅下载到本地。后端不会保存生成的报告文件或报告历史。",
+      "csvDownloaded": "CSV 报告已下载。",
+      "pdfDownloaded": "PDF 报告已下载。",
+      "errors": {
+        "load": "无法加载报告。",
+        "export": "无法导出报告。"
       }
     },
     "reviews": {
+      "speciesRequest": {
+        "title": "新物种申请",
+        "proposed": "拟议新物种",
+        "requiredFirst": "须先完成物种审核",
+        "approvedSpecies": "已批准物种",
+        "comment": "物种决定评论",
+        "storedComment": "物种审核评论／原因",
+        "approve": "批准物种",
+        "reject": "拒绝物种",
+        "correct": "请求修改物种信息",
+        "refresh": "刷新提交记录及物种处理状态",
+        "plantDecision": "植株审核决定",
+        "resolveFirst": "请先处理上方的新物种申请，再审核此植株提交记录。只有后端确认申请已批准且已关联生成的物种后，才能提交植株决定。",
+        "loadFailed": "无法核实关联的物种申请。植株审核仍被锁定。",
+        "imageAlt": "提交的物种申请图片{id}",
+        "states": {
+          "loading": "正在加载物种处理状态",
+          "pending": "待审核",
+          "approved": "物种申请已批准",
+          "rejected": "物种申请已拒绝",
+          "correction": "需要修改",
+          "incomplete": "已批准，但物种关联不完整",
+          "unavailable": "物种申请不可用",
+          "error": "无法核实物种申请",
+          "unknown": "物种申请状态不可用",
+          "saving": "正在保存物种审核决定…"
+        },
+        "notices": {
+          "loading": "正在刷新提交记录以核实关联的物种申请。植株审核暂时锁定。",
+          "pending": "此记录提出了新物种。请先审核并处理物种申请，再对植株观察作出决定。",
+          "approved": "返回的申请已批准，且生成的物种与此提交记录相符。可按观察记录状态继续审核植株。",
+          "rejected": "物种申请已拒绝。植株观察未被自动拒绝；植株审核仍被锁定。",
+          "correction": "必须先修改物种信息，才能审核此植株提交记录。",
+          "incomplete": "申请显示已批准，但提交记录缺少相符且具有学名的生成物种。植株审核仍被锁定。",
+          "unavailable": "此记录引用了物种申请，但详情不可用。需要后端提供关联申请契约；植株审核仍被锁定。",
+          "error": "无法加载关联申请或申请身份不一致。观察详情仍可查看；植株审核仍被锁定。",
+          "unknown": "物种申请状态缺失或不受支持。在核实处理结果前，植株审核仍被锁定。",
+          "saving": "正在保存物种审核决定并核实提交记录。植物审核保持锁定。"
+        },
+        "commentHelp": "拒绝或要求更正时必须填写意见。最多 4,000 个字符。",
+        "commentRequired": "请填写拒绝或要求更正的物种审核意见。",
+        "commentTooLong": "物种审核意见不得超过 4,000 个字符。",
+        "saved": "物种审核决定已保存，提交记录已刷新。",
+        "conflict": "您审核期间，此物种申请已发生变化。最新状态已重新加载。",
+        "conflictReloadFailed": "此物种申请已发生变化，但无法加载最新状态。请刷新提交记录后重试。您的意见已保留。",
+        "savedReloadFailed": "物种审核决定已保存，但无法核实结果状态。请刷新提交记录后再继续。",
+        "plantObservation": "植物观察记录"
+      },
+      "loading": "加载中…",
+      "unavailable": "不可用",
+      "loadedCounts": "仅限已加载观察记录 · 列表最多500条",
+      "loadingDetail": "正在加载提交记录…",
+      "skippedRecords": "有{count}条格式错误的记录无法显示。",
+      "recordCreated": "记录创建时间",
+      "lastUpdated": "最后更新时间",
+      "reviewedAt": "审核时间",
+      "reviewDecision": "最新审核决定",
+      "submissionLocation": "提交的观察位置",
+      "noAssets": "没有提交的图片或附件。",
+      "imageAlt": "观察记录{id}的提交图片{asset}",
+      "imageUnavailable": "图片不可用",
+      "attachment": "非图片附件 · 无法预览",
+      "similarityUnavailable": "相似度不可用",
+      "loadedHistory": "已加载的观察历史",
+      "historyLimit": "按记录创建时间排列；仅包含已加载列表中的观察，并非完整植株历史。",
+      "saving": "正在保存审核并重新加载提交记录…",
+      "reloadLatest": "重新加载最新提交记录",
+      "acknowledgeLatest": "我已查看最新版本，可以提交新的审核决定。",
       "feedback": {
-        "observationNotSaved": "未保存“{decision}”决定。后端审核持久化尚未实现。",
-        "speciesRequestNotSaved": "未保存“{decision}”决定。物种申请持久化尚未实现。"
+        "network": "无法连接审核服务。您的评论已保留。",
+        "invalidResponse": "审核服务返回了无效响应。请重新加载最新记录后再尝试提交决定。",
+        "session": "会话不可用，请重新登录。",
+        "forbidden": "您无权审核此提交记录。",
+        "requestFailed": "审核请求失败（{status}）。",
+        "invalidId": "观察编号无效。",
+        "loadFailed": "无法加载提交记录。",
+        "commentRequired": "拒绝、请求修改或标记时必须填写审核评论。",
+        "saved": "审核已保存，最新提交记录已重新加载。",
+        "reloaded": "最新提交记录已重新加载。您的评论已保留，请查看当前状态后再提交决定。",
+        "conflict": "审核期间此记录已发生变化，最新版本已重新加载。您的评论已保留，请查看最新状态后再尝试。",
+        "conflictReloadFailed": "此记录已发生变化，但无法加载最新版本。请先重新加载再尝试。您的评论已保留。",
+        "savedReloadFailed": "审核已保存，但无法加载最新记录。请重新加载后再进行其他操作。"
       }
     },
     "iot": {
