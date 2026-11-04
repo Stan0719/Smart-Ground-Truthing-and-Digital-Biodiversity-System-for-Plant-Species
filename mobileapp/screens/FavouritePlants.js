@@ -1,7 +1,7 @@
+import { useAppTranslation, t, translateLabel } from "../translations/i18n";
 import React from "react";
 
 import {
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +9,7 @@ import {
   View,
   Image,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 
@@ -17,6 +18,7 @@ import { plants } from "../data/mockData";
 export default function FavouritePlantsScreen({
   navigation,
 }) {
+  useAppTranslation();
 
   // Temporary frontend data
   // Later this will come from the logged-in visitor's account.
@@ -52,9 +54,7 @@ export default function FavouritePlantsScreen({
             />
           </TouchableOpacity>
 
-          <Text style={styles.title}>
-            Favourite Plants
-          </Text>
+          <Text style={styles.title}>{t("navigation.favouritePlants")}</Text>
 
         </View>
 
@@ -70,13 +70,9 @@ export default function FavouritePlantsScreen({
               color="#9CDBA6"
             />
 
-            <Text style={styles.emptyTitle}>
-              No Favourite Plants
-            </Text>
+            <Text style={styles.emptyTitle}>{t("favouritePlants.noFavouritePlants")}</Text>
 
-            <Text style={styles.emptyText}>
-              Plants you favourite will appear here.
-            </Text>
+            <Text style={styles.emptyText}>{t("favouritePlants.plantsYouFavouriteWillAppearHere")}</Text>
 
           </View>
 
@@ -131,7 +127,7 @@ export default function FavouritePlantsScreen({
                   </Text>
 
                   <Text style={styles.category}>
-                    {plant.category}
+                    {translateLabel(plant.category)}
                   </Text>
 
                 </View>

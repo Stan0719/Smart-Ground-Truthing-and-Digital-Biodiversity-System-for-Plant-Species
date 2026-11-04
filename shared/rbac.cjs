@@ -76,6 +76,10 @@ function projectSpecies(row, scientific = false) {
     habitat: data.habitat || "",
     culturalSignificance: data.culturalSignificance || "",
   };
+  if (row.image_asset_id) Object.assign(result, {
+    image_asset_id: String(row.image_asset_id),
+    image_url: `/api/assets/${encodeURIComponent(row.image_asset_id)}`,
+  });
   if (scientific)
     Object.assign(result, {
       conservation_status: row.conservation_status,

@@ -1,13 +1,15 @@
+import LanguageSelector from "../components/LanguageSelector";
+import { useAppTranslation, t } from "../translations/i18n";
 import React from "react";
 
 import {
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 
@@ -16,6 +18,7 @@ export default function AccountScreen({
   user,
   onLogout,
 }) {
+  useAppTranslation();
   function handleLogout() {
     if (onLogout) {
       onLogout();
@@ -29,7 +32,10 @@ export default function AccountScreen({
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <Text style={styles.title}>Account</Text>
+        <View style={styles.header}>
+          <Text style={styles.title}>{t("account.account")}</Text>
+          <LanguageSelector />
+        </View>
 
         {/* Profile Card */}
         <View style={styles.profileCard}>
@@ -43,17 +49,23 @@ export default function AccountScreen({
 
           <View style={styles.profileInfo}>
             <Text style={styles.name}>
-              {user?.name || "Visitor"}
+              {user?.name || t("account.visitor")}
             </Text>
 
             <Text style={styles.email}>
-              {user?.email || "No email"}
+              {user?.email || t("account.noEmail")}
             </Text>
           </View>
         </View>
 
         {/* Account Options */}
         <View style={styles.section}>
+          {user?.role === "conservation-officer" && <TouchableOpacity style={styles.option} onPress={() => navigation.navigate("RecordChangeReview")}>
+            <View style={styles.iconContainer}><Ionicons name="document-text-outline" size={22} color="#468585" /></View>
+            <View style={styles.optionText}><Text style={styles.optionTitle}>{t("recordEdits.reviewTitle")}</Text>
+              <Text style={styles.optionSubtitle}>{t("recordEdits.reviewSubtitle")}</Text></View>
+            <Ionicons name="chevron-forward" size={22} color="#9BBDB4" />
+          </TouchableOpacity>}
           <TouchableOpacity
             style={styles.option}
             onPress={() => navigation.navigate("FavouritePlants")}
@@ -67,13 +79,9 @@ export default function AccountScreen({
             </View>
 
             <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>
-                Favourite Plants
-              </Text>
+              <Text style={styles.optionTitle}>{t("navigation.favouritePlants")}</Text>
 
-              <Text style={styles.optionSubtitle}>
-                View your favourite plants
-              </Text>
+              <Text style={styles.optionSubtitle}>{t("account.viewYourFavouritePlants")}</Text>
             </View>
 
             <Ionicons
@@ -96,13 +104,9 @@ export default function AccountScreen({
             </View>
 
             <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>
-                Scan History
-              </Text>
+              <Text style={styles.optionTitle}>{t("account.scanHistory")}</Text>
 
-              <Text style={styles.optionSubtitle}>
-                View your previous plant scans
-              </Text>
+              <Text style={styles.optionSubtitle}>{t("account.viewYourPreviousPlantScans")}</Text>
             </View>
 
             <Ionicons
@@ -124,9 +128,7 @@ export default function AccountScreen({
             color="#D9534F"
           />
 
-          <Text style={styles.logoutText}>
-            Log Out
-          </Text>
+          <Text style={styles.logoutText}>{t("account.logOut")}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -145,11 +147,13 @@ const styles = StyleSheet.create({
   },
 
   title: {
+    flex: 1,
     fontSize: 28,
     fontWeight: "700",
     color: "#468585",
-    marginBottom: 24,
   },
+
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 24 },
 
   profileCard: {
     flexDirection: "row",

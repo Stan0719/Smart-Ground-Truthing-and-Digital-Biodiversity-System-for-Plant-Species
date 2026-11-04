@@ -1,6 +1,8 @@
+import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/Species.js
+import LanguageSelector from "../components/LanguageSelector";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 
 import {
   View,
@@ -10,13 +12,16 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
+  RefreshControl,
 } from "react-native";
 
 import {
   getSpeciesBySlug,
 } from "../data/mockData";
+import { useFocusEffect } from "@react-navigation/native";
 import { getSpeciesImageSource } from "../data/speciesImages";
 import { fetchPlantRecords, fetchSpeciesCatalog } from "../utils/plantApi";
+import RefreshButton from "../components/RefreshButton";
 
 
 const healthOptions = [
@@ -62,6 +67,7 @@ export default function Species({
   navigation,
   user,
 }) {
+  useAppTranslation();
 
   const { slug, speciesId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
@@ -71,16 +77,19 @@ export default function Species({
   );
   const [speciesPlants, setSpeciesPlants] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const requestRef = useRef(null);
 
-  useEffect(() => {
-    let isMounted = true;
-    const loadSpeciesPlants = async () => {
+  const loadSpeciesPlants = useCallback((isRefresh = false) => {
+    if (requestRef.current) return requestRef.current;
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setErrorMessage("");
+    const request = (async () => {
       try {
-        setLoading(true);
-        setErrorMessage("");
-        const catalog = await fetchSpeciesCatalog();
-        const records = await fetchPlantRecords(catalog);
+        const catalog = await fetchSpeciesCatalog({ accountId: user?.id });
+        const records = await fetchPlantRecords(catalog, { accountId: user?.id });
         const matchedSpecies = catalog.find((item) =>
           speciesId != null
             ? String(item.id) === String(speciesId)
@@ -91,25 +100,23 @@ export default function Species({
           ? records.filter((record) => String(record.speciesId) === String(matchedId))
           : records.filter((record) => record.speciesSlug === slug);
 
-        if (isMounted) {
-          setSelectedSpecies(matchedSpecies);
-          setSpeciesPlants(recordsForSpecies);
-        }
+        setSelectedSpecies(matchedSpecies);
+        setSpeciesPlants(recordsForSpecies);
       } catch (error) {
-        if (isMounted) {
-          setErrorMessage(error.message || "Unable to load plant records.");
-          setSpeciesPlants([]);
-        }
+        setErrorMessage(error.message || "Unable to load plant records.");
       } finally {
-        if (isMounted) setLoading(false);
+        if (requestRef.current === request) requestRef.current = null;
+        setLoading(false);
+        setRefreshing(false);
       }
-    };
+    })();
+    requestRef.current = request;
+    return request;
+  }, [slug, speciesId, route.params?.species, user?.id]);
 
-    loadSpeciesPlants();
-    return () => {
-      isMounted = false;
-    };
-  }, [slug, speciesId, route.params?.species]);
+  useFocusEffect(useCallback(() => {
+    void loadSpeciesPlants(false);
+  }, [loadSpeciesPlants]));
 
 
   const [searchQuery, setSearchQuery] =
@@ -257,17 +264,19 @@ export default function Species({
     return (
       <View style={styles.notFound}>
 
+        <View style={styles.unavailableLanguageHeader}><LanguageSelector /></View>
+
         <Text style={styles.icon}>
           🌿
         </Text>
 
         <Text style={styles.title}>
-          {loading ? "Loading species..." : "Species not found"}
+          {loading ? t("plant.loadingSpecies") : t("plant.speciesNotFound")}
         </Text>
 
         {!!errorMessage && (
           <Text style={{ color: "#B42318", marginTop: 8, textAlign: "center" }}>
-            {errorMessage}
+            {translateUIMessage(errorMessage)}
           </Text>
         )}
 
@@ -277,9 +286,7 @@ export default function Species({
             navigation.navigate("Plants")
           }
         >
-          <Text style={styles.buttonText}>
-            Return to Species
-          </Text>
+          <Text style={styles.buttonText}>{t("plant.returnToSpecies")}</Text>
         </TouchableOpacity>
 
       </View>
@@ -291,30 +298,43 @@ export default function Species({
     <ScrollView
       style={styles.page}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => void loadSpeciesPlants(true)}
+          tintColor="#315B49"
+          colors={["#315B49"]}
+        />
+      }
     >
 
       {/* HEADER */}
 
       <View style={styles.header}>
 
+        <View style={styles.headerToolbar}>
         <TouchableOpacity
           style={styles.heroBackButton}
           onPress={() => navigation.goBack()}
           activeOpacity={0.8}
         >
-          <Text style={styles.heroBackText}>
-            ← Back
-          </Text>
+          <Text style={styles.heroBackText}>{t("plant.back")}</Text>
         </TouchableOpacity>
+        <LanguageSelector />
+        </View>
 
 
-        <Text style={styles.label}>
-          PLANT RECORDS
-        </Text>
+        <Text style={styles.label}>{t("plant.plantRecords")}</Text>
 
-        <Text style={styles.heading}>
-          All verified plants
-        </Text>
+        <View style={styles.headingRow}>
+          <Text style={styles.heading}>{t("plant.allVerifiedPlants")}</Text>
+          <RefreshButton
+            onPress={() => void loadSpeciesPlants(true)}
+            loading={loading || refreshing}
+            label={t("common.refresh")}
+            testID="plant-list-refresh"
+          />
+        </View>
 
         <Text style={styles.speciesName}>
           {selectedSpecies.name}
@@ -323,13 +343,11 @@ export default function Species({
         <Text style={styles.count}>
           {filteredPlants.length}{" "}
           {filteredPlants.length === 1
-            ? "plant"
-            : "plants"}{" "}
-          found
-        </Text>
+            ? t("plant.plant")
+            : t("plant.plants")}{" "}{t("plant.found")}</Text>
 
-        {loading && <Text style={{ marginTop: 8, color: "#52665C" }}>Loading plant records...</Text>}
-        {!!errorMessage && <Text style={{ marginTop: 8, color: "#B42318" }}>{errorMessage}</Text>}
+        {loading && <Text style={{ marginTop: 8, color: "#52665C" }}>{t("plant.loadingPlantRecords")}</Text>}
+        {!!errorMessage && <Text style={{ marginTop: 8, color: "#B42318" }}>{translateUIMessage(errorMessage)}</Text>}
 
       </View>
 
@@ -342,7 +360,7 @@ export default function Species({
           value={searchQuery}
           onChangeText={setSearchQuery}
                 maxLength={100}
-          placeholder="Search by Plant ID..."
+          placeholder={t("plant.searchByPlantId")}
           placeholderTextColor="#8A968F"
           style={styles.search}
         />
@@ -364,10 +382,8 @@ export default function Species({
               filtersOpen &&
                 styles.filterTextActive,
             ]}
-          >
-            Filters
-            {activeFilterCount > 0
-              ? ` (${activeFilterCount})`
+          >{t("plant.filters")}{activeFilterCount > 0
+              ? t("plant.label", { activeFilterCount: activeFilterCount })
               : ""}
           </Text>
         </TouchableOpacity>
@@ -382,7 +398,7 @@ export default function Species({
 
           {isBotanist && (
             <FilterSelector
-              label="Health"
+              label={t("plant.health")}
               options={healthOptions}
               value={healthFilter}
               setValue={setHealthFilter}
@@ -390,7 +406,7 @@ export default function Species({
           )}
 
           <FilterSelector
-            label="Life stage"
+            label={t("plant.lifeStage")}
             options={lifeStageOptions}
             value={lifeStageFilter}
             setValue={setLifeStageFilter}
@@ -399,14 +415,14 @@ export default function Species({
           {isBotanist && (
             <>
               <FilterSelector
-                label="QR status"
+                label={t("plant.qrStatus")}
                 options={qrOptions}
                 value={qrFilter}
                 setValue={setQrFilter}
               />
 
               <FilterSelector
-                label="Zone"
+                label={t("plant.zone")}
                 options={zoneOptions}
                 value={zoneFilter}
                 setValue={setZoneFilter}
@@ -415,7 +431,7 @@ export default function Species({
           )}
 
           <FilterSelector
-            label="Sort"
+            label={t("plant.sort")}
             options={[
               "Default",
               "Plant ID: A-Z",
@@ -464,9 +480,7 @@ export default function Species({
               style={styles.clearButton}
               onPress={clearFilters}
             >
-              <Text style={styles.clearText}>
-                Clear Filters
-              </Text>
+              <Text style={styles.clearText}>{t("map.clearFilters")}</Text>
             </TouchableOpacity>
           )}
 
@@ -499,10 +513,10 @@ export default function Species({
 
             <Text style={styles.emptyTitle}>
               {loading
-                ? "Loading plant records..."
+                ? t("plant.loadingPlantRecords")
                 : speciesPlants.length === 0
-                  ? "No plant records for this species yet."
-                  : "No plants match your current search or filters."}
+                  ? t("plant.noPlantRecordsForThisSpeciesYet")
+                  : t("plant.noPlantsMatchYourCurrentSearchOrFilters")}
             </Text>
 
             {activeFilterCount > 0 && (
@@ -510,9 +524,7 @@ export default function Species({
                 style={styles.clearButton}
                 onPress={clearFilters}
               >
-                <Text style={styles.clearText}>
-                  Clear Filters
-                </Text>
+                <Text style={styles.clearText}>{t("map.clearFilters")}</Text>
               </TouchableOpacity>
             )}
 
@@ -536,6 +548,7 @@ function FilterSelector({
   value,
   setValue,
 }) {
+  useAppTranslation();
 
   const [open, setOpen] =
     useState(false);
@@ -545,7 +558,7 @@ function FilterSelector({
     <View style={styles.filterGroup}>
 
       <Text style={styles.filterLabel}>
-        {label}
+        {translateLabel(label)}
       </Text>
 
 
@@ -556,7 +569,7 @@ function FilterSelector({
         }
       >
         <Text style={styles.selectorText}>
-          {value}
+          {translateFieldValue(label, value)}
         </Text>
 
         <Text>
@@ -589,7 +602,7 @@ function FilterSelector({
                     styles.optionTextSelected,
                 ]}
               >
-                {option}
+                {translateLabel(option)}
               </Text>
 
             </TouchableOpacity>
@@ -612,6 +625,7 @@ function PlantCard({
   navigation,
   user,
 }) {
+  useAppTranslation();
 
   const species = plant.species || getSpeciesBySlug(plant.speciesSlug) || {
     name: plant.commonName,
@@ -656,7 +670,7 @@ function PlantCard({
 
         {isBotanist && (
           <Text style={styles.zoneBadge}>
-            {plant.location?.zone || "Not recorded"}
+            {plant.location?.zone || t("plant.notRecorded")}
           </Text>
         )}
 
@@ -671,7 +685,7 @@ function PlantCard({
         </Text>
 
         <Text style={styles.species}>
-          {species?.name || "Plant record"}
+          {species?.name || t("plant.plantRecord")}
         </Text>
 
 
@@ -680,44 +694,44 @@ function PlantCard({
           {isBotanist ? (
             <>
               <Info
-                label="Health"
-                value={plant.latestApproved?.healthStatus || "Not recorded"}
+                label={t("plant.health")}
+                value={plant.latestApproved?.healthStatus || t("plant.notRecorded")}
               />
 
               <Info
-                label="Life Stage"
-                value={plant.latestApproved?.lifeStage || "Not recorded"}
+                label={t("plant.lifeStage2")}
+                value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
               />
 
               <Info
-                label="QR Status"
-                value={plant.qr?.status || "Not recorded"}
+                label={t("plant.qrStatus2")}
+                value={plant.qr?.status || t("plant.notRecorded")}
               />
 
               <Info
-                label="Height"
-                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : "Not recorded"}
+                label={t("plant.height")}
+                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
               />
             </>
           ) : (
             <>
               <Info
-                label="Height"
-                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : "Not recorded"}
+                label={t("plant.height")}
+                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
               />
 
               <Info
-                label="Life Stage"
-                value={plant.latestApproved?.lifeStage || "Not recorded"}
+                label={t("plant.lifeStage2")}
+                value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
               />
 
               <Info
-                label="Genus"
+                label={t("plant.genus")}
                 value={species?.genus || "-"}
               />
 
               <Info
-                label="Last Verified"
+                label={t("plant.lastVerified")}
                 value={formatDate(plant.latestApproved?.date)}
               />
             </>
@@ -728,9 +742,7 @@ function PlantCard({
 
         <View style={styles.viewRecord}>
 
-          <Text style={styles.viewRecordText}>
-            View Plant Record →
-          </Text>
+          <Text style={styles.viewRecordText}>{t("plant.viewPlantRecord")}</Text>
 
         </View>
 
@@ -746,14 +758,15 @@ function PlantCard({
 // =====================================================
 
 function Info({ label, value }) {
+  useAppTranslation();
   return (
     <View style={styles.info}>
       <Text style={styles.infoLabel}>
-        {label}
+        {translateLabel(label)}
       </Text>
 
       <Text style={styles.infoValue}>
-        {value}
+        {translateFieldValue(label, value)}
       </Text>
     </View>
   );
@@ -763,7 +776,7 @@ function formatDate(dateString) {
   if (!dateString) return "-";
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return dateString;
-  return date.toLocaleDateString("en-GB", {
+  return date.toLocaleDateString(dateLocale(), {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -788,9 +801,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#E8EFE3",
   },
 
+  headerToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+  headingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  unavailableLanguageHeader: { position: "absolute", top: 50, right: 22 },
+
   heroBackButton: {
-    alignSelf: "flex-start",
-    marginBottom: 20,
+    alignSelf: "center",
+    minHeight: 44,
+    justifyContent: "center",
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 999,
@@ -816,6 +834,7 @@ const styles = StyleSheet.create({
   },
 
   heading: {
+    flexShrink: 1,
     marginTop: 7,
     color: "#234A3C",
     fontSize: 30,

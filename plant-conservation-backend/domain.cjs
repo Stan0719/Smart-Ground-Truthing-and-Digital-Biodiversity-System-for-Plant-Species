@@ -24,6 +24,19 @@ const text = (value, max = 4000) => {
     fail(400, "Invalid text.");
   return value.trim();
 };
+// Prefer official approved species images, then the first upload from the latest
+// approved linked plant observation. Never promote private/pending photos.
+const speciesImageJoin = `LEFT JOIN LATERAL (
+  SELECT a.id FROM plant_asset a
+  LEFT JOIN plant_record ip ON ip.plant_id=a.plant_id
+  LEFT JOIN plant_observation io ON io.id=a.observation_id AND io.plant_id=a.plant_id
+  WHERE a.approved=TRUE AND a.content_type='image/jpeg' AND
+    (a.species_id=s.species_id OR (ip.species_id=s.species_id AND ip.rbac_status='Approved' AND io.status='Approved'))
+  ORDER BY CASE WHEN a.species_id=s.species_id THEN 0 ELSE 1 END,
+    io.updated_at DESC NULLS LAST,ip.plant_id DESC NULLS LAST,
+    CASE WHEN a.client_key ~ ':photo:[0-9]+$' THEN substring(a.client_key from ':photo:([0-9]+)$')::numeric END ASC NULLS LAST,
+    a.created_at ASC,a.id ASC LIMIT 1
+) preview ON true`;
 function fieldContent(body) {
   const allowed = [
     "heightCm",
@@ -35,6 +48,8 @@ function fieldContent(body) {
     "longitude",
     "accuracy_m",
     "taxonomy",
+    "zone",
+    "altitudeM",
   ];
   if (
     !body ||
@@ -60,6 +75,9 @@ function fieldContent(body) {
     fail(400, "Invalid notes.");
   if (body.notes !== undefined) body.notes = body.notes.trim();
   if (body.taxonomy !== undefined) body.taxonomy = text(body.taxonomy, 1000);
+  if (body.zone !== undefined && body.zone !== null) body.zone = text(body.zone, 200);
+  if (body.altitudeM !== undefined && body.altitudeM !== null && (typeof body.altitudeM !== "number" || !Number.isFinite(body.altitudeM)))
+    fail(400, "Invalid altitude.");
   if (body.latitude !== undefined || body.longitude !== undefined) {
     if (
       typeof body.latitude !== "number" ||
@@ -72,7 +90,7 @@ function fieldContent(body) {
       fail(400, "Invalid GPS.");
   }
   if (
-    body.accuracy_m !== undefined &&
+    body.accuracy_m !== undefined && body.accuracy_m !== null &&
     (typeof body.accuracy_m !== "number" ||
       !Number.isFinite(body.accuracy_m) ||
       body.accuracy_m < 0)
@@ -103,7 +121,7 @@ async function audit(c, user, action, target) {
 async function speciesRow(c, speciesId, user) {
   const row = (
     await c.query(
-      `SELECT s.*,g.genus_name,f.family_name,cs.status_name AS conservation_status,COALESCE(v.visibility,'protected') AS visibility FROM species s LEFT JOIN genus g ON g.genus_id=s.genus_id LEFT JOIN family f ON f.family_id=g.family_id LEFT JOIN conservation_status cs ON cs.status_id=s.status_id LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id WHERE s.species_id=$1 AND COALESCE(v.visibility,'protected') = ANY($2::text[])`,
+      `SELECT s.*,preview.id AS image_asset_id,g.genus_name,f.family_name,cs.status_name AS conservation_status,COALESCE(v.visibility,'protected') AS visibility FROM species s LEFT JOIN genus g ON g.genus_id=s.genus_id LEFT JOIN family f ON f.family_id=g.family_id LEFT JOIN conservation_status cs ON cs.status_id=s.status_id LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id ${speciesImageJoin} WHERE s.species_id=$1 AND COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved' AND COALESCE(v.visibility,'protected') = ANY($2::text[])`,
       [speciesId, visibilityFor(user)],
     )
   ).rows[0];
@@ -130,7 +148,41 @@ async function statusReference(c, body) {
     )
   ).rows[0].status_id;
 }
+async function assertNewSpecies(c, scientificName) {
+  await c.query("SELECT pg_advisory_xact_lock(hashtext(lower(btrim($1))))", [scientificName]);
+  if ((await c.query("SELECT species_id FROM species WHERE lower(btrim(scientific_name))=lower(btrim($1)) LIMIT 1", [scientificName])).rows.length)
+    fail(409, "This scientific name already exists. Select the existing species.");
+}
 function mountDomain(app, { pool, auth, allow }) {
+  app.get("/api/qr-codes", allow("plants.create"), async (_req, res) => {
+    const qrCodes = (
+      await pool.query(
+        "SELECT qr_id,plant_id,qr_code,status,generated_at,assigned_at,activated_at,retired_at FROM public.qr_code ORDER BY qr_id DESC LIMIT 500",
+      )
+    ).rows;
+    res.json({ qr_codes: qrCodes });
+  });
+  app.post("/api/qr-codes", allow("plants.create"), async (req, res) => {
+    const count = req.body?.count;
+    if (!Number.isInteger(count) || count < 1 || count > 3)
+      fail(400, "Generate between 1 and 3 QR codes at a time.");
+    const qrCodes = await transaction(pool, async (c) => {
+      const created = [];
+      for (let index = 0; index < count; index++) {
+        const code = randomBytes(24).toString("hex");
+        const row = (
+          await c.query(
+            "INSERT INTO public.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id,plant_id,qr_code,status,generated_at,assigned_at,activated_at,retired_at",
+            [code],
+          )
+        ).rows[0];
+        created.push(row);
+      }
+      await audit(c, req.user, "qr_codes_generated", created.map((row) => row.qr_id).join(","));
+      return created;
+    });
+    res.status(201).json({ qr_codes: qrCodes });
+  });
   app.get("/api/species", allow("plants.public.read"), async (req, res) => {
     const scientific = req.query.scope === "scientific";
     if (scientific && !permitted(req.user, "plants.scientific.read"))
@@ -141,7 +193,7 @@ function mountDomain(app, { pool, auth, allow }) {
     if (q.length > 200) fail(400, "Search is too long.");
     const rows = (
       await pool.query(
-        `SELECT s.*,g.genus_name,f.family_name,cs.status_name AS conservation_status,COALESCE(v.visibility,'protected') AS visibility FROM species s LEFT JOIN genus g ON g.genus_id=s.genus_id LEFT JOIN family f ON f.family_id=g.family_id LEFT JOIN conservation_status cs ON cs.status_id=s.status_id LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id WHERE COALESCE(v.visibility,'protected') = ANY($1::text[]) AND strpos(lower(coalesce(s.scientific_name,'')||' '||coalesce(s.common_name,'')||' '||coalesce(g.genus_name,'')||' '||coalesce(f.family_name,'')),lower($2))>0 ORDER BY s.scientific_name LIMIT 200`,
+        `SELECT s.*,preview.id AS image_asset_id,g.genus_name,f.family_name,cs.status_name AS conservation_status,COALESCE(v.visibility,'protected') AS visibility FROM species s LEFT JOIN genus g ON g.genus_id=s.genus_id LEFT JOIN family f ON f.family_id=g.family_id LEFT JOIN conservation_status cs ON cs.status_id=s.status_id LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id ${speciesImageJoin} WHERE COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved' AND COALESCE(v.visibility,'protected') = ANY($1::text[]) AND strpos(lower(coalesce(s.scientific_name,'')||' '||coalesce(s.common_name,'')||' '||coalesce(g.genus_name,'')||' '||coalesce(f.family_name,'')),lower($2))>0 ORDER BY s.scientific_name LIMIT 200`,
         [visibilityFor(req.user), q],
       )
     ).rows;
@@ -153,6 +205,10 @@ function mountDomain(app, { pool, auth, allow }) {
     res.json({ species: projectSpecies(row, scientific) });
   });
   const readPlants = async (req, res) => {
+    // Personal submission history is distinct from access to the species catalogue.
+    const mine = req.query.scope === "mine";
+    if (mine && !permitted(req.user, "plants.create"))
+      fail(req.user ? 403 : 401, "Botanist access required.");
     const plantId = req.params.id === undefined ? null : req.params.id;
     if (
       plantId !== null &&
@@ -162,12 +218,33 @@ function mountDomain(app, { pool, auth, allow }) {
     const staff = permitted(req.user, "plants.scientific.read");
     const rows = (
       await pool.query(
-        `SELECT p.plant_id,p.species_id,p.rbac_status,p.registered_subject,p.registered_at,l.latitude,l.longitude,l.accuracy_m,o.content AS latest_approved,o.updated_at AS observed_at FROM plant_record p LEFT JOIN plant_location l ON l.location_id=(SELECT location_id FROM plant_location WHERE plant_id=p.plant_id ORDER BY recorded_at DESC,location_id DESC LIMIT 1) LEFT JOIN plant_observation o ON o.id=(SELECT id FROM plant_observation WHERE plant_id=p.plant_id AND status='Approved' ORDER BY updated_at DESC,id DESC LIMIT 1) LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id WHERE COALESCE(v.visibility,'protected') = ANY($1::text[]) AND (p.rbac_status='Approved' OR p.registered_subject=$2 OR $3) AND ($4::integer IS NULL OR p.plant_id=$4) ORDER BY p.plant_id DESC LIMIT 500`,
+        `SELECT p.plant_id,p.species_id,p.scientific_name,p.rbac_status,p.registered_subject,p.registered_at,
+          p.qr_token,qr.qr_id,qr.status AS qr_status,
+          l.latitude,l.longitude,l.accuracy_m,o.content AS latest_approved,o.updated_at AS observed_at,
+          submitted.content AS latest_submission,submitted.id AS latest_observation_id,submitted.status AS observation_status,
+          CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($1::text[]) THEN s.common_name END AS common_name,
+          CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($1::text[]) THEN jsonb_build_object('species_id',s.species_id,'scientific_name',s.scientific_name,'common_name',s.common_name,
+            'description',s.description,'habitat',s.rbac_data->>'habitat','genus_name',g.genus_name,
+            'family_name',f.family_name,'conservation_status',cs.status_name) END AS species_details
+          FROM plant_record p JOIN species s ON s.species_id=p.species_id
+          LEFT JOIN public.qr_code qr ON qr.plant_id=p.plant_id AND qr.qr_code=p.qr_token
+          LEFT JOIN genus g ON g.genus_id=s.genus_id LEFT JOIN family f ON f.family_id=g.family_id
+          LEFT JOIN conservation_status cs ON cs.status_id=s.status_id
+          LEFT JOIN plant_location l ON l.location_id=(SELECT location_id FROM plant_location WHERE plant_id=p.plant_id ORDER BY recorded_at DESC,location_id DESC LIMIT 1)
+          LEFT JOIN plant_observation o ON o.id=(SELECT id FROM plant_observation WHERE plant_id=p.plant_id AND status='Approved' AND (NOT $5 OR owner_subject=$2) ORDER BY updated_at DESC,id DESC LIMIT 1)
+          LEFT JOIN LATERAL (SELECT id,content,status FROM plant_observation WHERE plant_id=p.plant_id AND (owner_subject=$2 OR $3) ORDER BY created_at DESC,id DESC LIMIT 1) submitted ON true
+          LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
+          WHERE (CASE WHEN $5 THEN p.registered_subject=$2 ELSE (COALESCE(v.visibility,'protected') = ANY($1::text[]) OR
+            (p.registered_subject=$2 AND p.rbac_status<>'Approved' AND s.rbac_data->>'submittedBy'=$2
+             AND s.rbac_data->>'approvalStatus' IN ('Pending Review','Rejected','Correction Required'))) END)
+          AND (p.rbac_status='Approved' OR p.registered_subject=$2 OR $3)
+          AND ($4::integer IS NULL OR p.plant_id=$4) ORDER BY p.plant_id DESC LIMIT 500`,
         [
           visibilityFor(req.user),
           req.user ? subject(req.user) : "",
           req.user?.role === "Conservation Officer",
           plantId,
+          mine,
         ],
       )
     ).rows;
@@ -196,6 +273,8 @@ function mountDomain(app, { pool, auth, allow }) {
         (k) =>
           ![
             "species_id",
+            "scientific_name",
+            "qr_id",
             "latitude",
             "longitude",
             "accuracy_m",
@@ -213,27 +292,45 @@ function mountDomain(app, { pool, auth, allow }) {
     });
     text(b.client_key, 100);
     id(String(b.species_id));
+    id(String(b.qr_id));
+    // Older API clients omit this field; never substitute the species name.
+    // Add Plant always sends it and requires manual entry before submission.
+    const hasPlantScientificName = Object.hasOwn(b, "scientific_name");
+    const plantScientificName = hasPlantScientificName ? text(b.scientific_name, 200) : null;
     const result = await transaction(pool, async (c) => {
       // BEGIN IMMEDIATE serializes writers before checking idempotency.
       const previous = (
         await c.query(
-          "SELECT o.* ,p.species_id FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id WHERE o.owner_subject=$1 AND o.client_key=$2",
+          "SELECT o.* ,p.species_id,p.scientific_name FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id WHERE o.owner_subject=$1 AND o.client_key=$2",
           [subject(req.user), b.client_key],
         )
       ).rows[0];
       if (previous) {
         if (String(previous.species_id) !== String(b.species_id))
           fail(409, "Draft key already belongs to a different species.");
+        if (hasPlantScientificName && previous.scientific_name !== plantScientificName)
+          fail(409, "Draft key already belongs to a different plant scientific name.");
         await speciesRow(c, previous.species_id, req.user);
         return previous;
       }
       await speciesRow(c, b.species_id, req.user);
-      const plant = (
+      const qr = (
         await c.query(
-          "INSERT INTO plant_record(species_id,registered_subject,qr_token) VALUES($1,$2,$3) RETURNING plant_id",
-          [b.species_id, subject(req.user), randomBytes(24).toString("hex")],
+          "SELECT qr_id,qr_code FROM public.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE",
+          [b.qr_id],
         )
       ).rows[0];
+      if (!qr) fail(409, "The selected QR code is no longer available.");
+      const plant = (
+        await c.query(
+          "INSERT INTO plant_record(species_id,registered_subject,qr_token,scientific_name) VALUES($1,$2,$3,$4) RETURNING plant_id",
+          [b.species_id, subject(req.user), qr.qr_code, plantScientificName],
+        )
+      ).rows[0];
+      await c.query(
+        "UPDATE public.qr_code SET plant_id=$1,status='assigned',assigned_at=CURRENT_TIMESTAMP WHERE qr_id=$2 AND plant_id IS NULL",
+        [plant.plant_id, qr.qr_id],
+      );
       await c.query(
         "INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES($1,$2,$3,$4)",
         [plant.plant_id, b.latitude, b.longitude, b.accuracy_m ?? null],
@@ -255,6 +352,9 @@ function mountDomain(app, { pool, auth, allow }) {
     res.status(201).json(result);
   });
   const readObservations = async (req, res) => {
+    const mine = req.query.scope === "mine";
+    if (mine && !permitted(req.user, "plants.create"))
+      fail(req.user ? 403 : 401, "Botanist access required.");
     const observationId = req.params.id ?? null;
     // Imported IDs may be numeric; new records use UUIDs.
     if (
@@ -267,8 +367,8 @@ function mountDomain(app, { pool, auth, allow }) {
     const officer = req.user.role === "Conservation Officer";
     const rows = (
       await pool.query(
-        "SELECT o.*,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'content_type',a.content_type)) FROM plant_asset a WHERE a.observation_id=o.id),'[]') AS assets,p.species_id,s.scientific_name,s.common_name,r.comment AS review_comment,r.decision AS review_decision,r.created_at AS reviewed_at FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id JOIN species s ON s.species_id=p.species_id LEFT JOIN LATERAL (SELECT comment,decision,created_at FROM observation_review WHERE observation_id=o.id ORDER BY created_at DESC LIMIT 1) r ON true LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id WHERE ($1 OR o.owner_subject=$2) AND COALESCE(v.visibility,'protected') = ANY($3::text[]) AND ($4::text IS NULL OR o.id=$4) ORDER BY o.created_at DESC LIMIT 500",
-        [officer, subject(req.user), visibilityFor(req.user), observationId],
+        "SELECT o.*,COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id,'content_type',a.content_type) ORDER BY CASE WHEN a.client_key ~ ':photo:[0-9]+$' THEN substring(a.client_key from ':photo:([0-9]+)$')::numeric END ASC NULLS LAST,a.created_at ASC,a.id ASC) FROM plant_asset a WHERE a.observation_id=o.id),'[]') AS assets,p.species_id,CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($3::text[]) THEN s.scientific_name END AS scientific_name,CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($3::text[]) THEN s.common_name END AS common_name,r.comment AS review_comment,r.decision AS review_decision,r.created_at AS reviewed_at FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id JOIN species s ON s.species_id=p.species_id LEFT JOIN LATERAL (SELECT comment,decision,created_at FROM observation_review WHERE observation_id=o.id ORDER BY created_at DESC LIMIT 1) r ON true LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id WHERE ($1 OR o.owner_subject=$2) AND (CASE WHEN $5 THEN o.owner_subject=$2 AND p.registered_subject=$2 ELSE (COALESCE(v.visibility,'protected') = ANY($3::text[]) OR (o.owner_subject=$2 AND p.registered_subject=$2 AND p.rbac_status<>'Approved' AND s.rbac_data->>'submittedBy'=$2 AND s.rbac_data->>'approvalStatus' IN ('Pending Review','Rejected','Correction Required'))) END) AND ($4::text IS NULL OR o.id=$4) ORDER BY o.created_at DESC LIMIT 500",
+        [officer, subject(req.user), visibilityFor(req.user), observationId, mine],
       )
     ).rows;
     if (observationId !== null) {
@@ -439,6 +539,9 @@ function mountDomain(app, { pool, auth, allow }) {
           [req.body.decision, row.id],
         );
         if (req.body.decision === "Approved") {
+          const species = (await c.query("SELECT s.rbac_data FROM species s JOIN plant_record p ON p.species_id=s.species_id WHERE p.plant_id=$1 FOR UPDATE OF s", [row.plant_id])).rows[0];
+          if (!species || (species.rbac_data?.approvalStatus || "Approved") !== "Approved")
+            fail(409, "Approve the species request before approving its plant record.");
           await c.query(
             "UPDATE plant_asset SET approved=true WHERE observation_id=$1",
             [row.id],
@@ -459,6 +562,11 @@ function mountDomain(app, { pool, auth, allow }) {
               ],
             );
         }
+        if ((await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available)
+          await c.query(`UPDATE record_version_history SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
+            WHERE id=(SELECT id FROM record_version_history WHERE plant_id=$4 AND status='Pending Review'
+              AND snapshot->>'observation_id'=$5 ORDER BY version_number DESC LIMIT 1)`,
+            [req.body.decision, subject(req.user), req.body.comment || "Verified.", row.plant_id, row.id]);
         await audit(c, req.user, `observation_${req.body.decision}`, row.id);
         return { reviewed: true };
       });
@@ -512,6 +620,7 @@ function mountDomain(app, { pool, auth, allow }) {
     if (!["public", "internal", "protected"].includes(b.visibility))
       fail(400, "Select visibility.");
     const result = await transaction(pool, async (c) => {
+      await assertNewSpecies(c, b.scientific_name);
       const row = (
         await c.query(
           "INSERT INTO species(scientific_name,common_name,genus_id,status_id,description,rbac_data) VALUES($1,$2,$3,$4,$5,$6) RETURNING species_id",
@@ -555,6 +664,7 @@ function mountDomain(app, { pool, auth, allow }) {
     if (!["public", "internal", "protected"].includes(b.visibility))
       fail(400, "Select visibility.");
     await transaction(pool, async (c) => {
+      await speciesRow(c, id(req.params.id), req.user);
       const changed = await c.query(
         "UPDATE species SET scientific_name=$1,common_name=$2,description=$3,status_id=$4,rbac_data=$5,genus_id=CASE WHEN $8 THEN $7 ELSE genus_id END WHERE species_id=$6 RETURNING species_id",
         [
@@ -619,4 +729,6 @@ module.exports = {
   text,
   id,
   hash,
+  assertNewSpecies,
+  speciesRow,
 };

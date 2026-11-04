@@ -2,7 +2,7 @@ param([ValidateSet('Check','Account','Face')][string]$Mode='Check')
 $ErrorActionPreference='Stop'
 $faceRoot=Join-Path $PSScriptRoot '..\face_backend'
 $faceRoot=[System.IO.Path]::GetFullPath($faceRoot)
-$pythonRuntime=Join-Path $faceRoot '.runtime\python311\python.exe'
+$pythonRuntime=Join-Path $faceRoot '.venv-win\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $pythonRuntime)) { throw 'Restore the workspace Python 3.11 runtime first. See docs/face-service-windows.md.' }
 $keyPath=Join-Path $faceRoot 'data\account-service.key'
 if ($Mode -eq 'Check') {
@@ -37,3 +37,4 @@ if ($Mode -eq 'Account') {
  & $pythonRuntime -B -u (Join-Path $faceRoot 'run_backend.py') --host 127.0.0.1 --port 8000
 }
 exit $LASTEXITCODE
+

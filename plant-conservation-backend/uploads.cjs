@@ -137,14 +137,17 @@ function mountUploads(app, { pool, allow }) {
     ).rows[0];
     if (!row) fail(404, "Asset unavailable.");
     const speciesId = row.species_id || row.plant_species;
-    const visibility =
-      (
-        await pool.query(
-          "SELECT visibility FROM rbac_species_visibility WHERE species_id=$1",
-          [speciesId],
-        )
-      ).rows[0]?.visibility || "protected";
-    if (!visibilityFor(req.user).includes(visibility))
+    const classification = (await pool.query(
+      "SELECT v.visibility,s.rbac_data FROM species s LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id WHERE s.species_id=$1", [speciesId],
+    )).rows[0];
+    const visibility = classification?.visibility || "protected";
+    const owner = req.user ? subject(req.user) : "";
+    const ownProposalPhoto = Boolean(row.plant_id && row.owner_subject === owner && row.registered_subject === owner &&
+      row.rbac_status !== "Approved" && classification?.rbac_data?.submittedBy === owner &&
+      ["Pending Review", "Rejected", "Correction Required"].includes(classification?.rbac_data?.approvalStatus));
+    const ownSubmissionPhoto = req.query.scope === "mine" && permitted(req.user, "plants.create") &&
+      row.plant_id && row.owner_subject === owner && row.registered_subject === owner;
+    if (!visibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto)
       fail(404, "Asset unavailable.");
     if (
       row.plant_id &&

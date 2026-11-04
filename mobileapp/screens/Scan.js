@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
+import React, { useRef, useState } from "react";
 
 import {
   View,
@@ -13,15 +14,17 @@ import {
   useCameraPermissions,
 } from "expo-camera";
 
-import { plants } from "../data/mockData";
+import { fetchPlantByQRCode, fetchPlantDetail } from "../utils/plantApi";
 
 
 export default function ScanScreen({ navigation }) {
+  useAppTranslation();
 
   const [permission, requestPermission] =
     useCameraPermissions();
 
   const [cameraKey, setCameraKey] = useState(0);
+  const scanInProgress = useRef(false);
 
 
   // ==========================================
@@ -33,9 +36,7 @@ export default function ScanScreen({ navigation }) {
     return (
       <View style={styles.loading}>
 
-        <Text style={styles.loadingText}>
-          Loading camera...
-        </Text>
+        <Text style={styles.loadingText}>{t("scan.loadingCamera")}</Text>
 
       </View>
     );
@@ -60,14 +61,10 @@ export default function ScanScreen({ navigation }) {
         </View>
 
 
-        <Text style={styles.permissionTitle}>
-          Camera Permission
-        </Text>
+        <Text style={styles.permissionTitle}>{t("scan.cameraPermission")}</Text>
 
 
-        <Text style={styles.permissionText}>
-          Camera access is required to scan plant QR codes.
-        </Text>
+        <Text style={styles.permissionText}>{t("scan.cameraAccessIsRequiredToScanPlantQrCodes")}</Text>
 
 
         <TouchableOpacity
@@ -75,9 +72,7 @@ export default function ScanScreen({ navigation }) {
           onPress={requestPermission}
         >
 
-          <Text style={styles.buttonText}>
-            Allow Camera
-          </Text>
+          <Text style={styles.buttonText}>{t("scan.allowCamera")}</Text>
 
         </TouchableOpacity>
 
@@ -90,89 +85,36 @@ export default function ScanScreen({ navigation }) {
   // QR Scanner
   // ==========================================
 
-  function handleBarcodeScanned({ data }) {
-
-    console.log("QR DATA:", data);
-
-
-    let plantId = data;
-
-
-    // ========================================
-    // Extract Plant ID from URL
-    // ========================================
-
-    if (data.includes("/plants/")) {
-
-      plantId =
-        data.split("/plants/")[1];
-
-
-      plantId =
-        plantId.split("?")[0];
-
-
-      plantId =
-        plantId.split("#")[0];
-    }
-
-
-    console.log("PLANT ID:", plantId);
-
-
-    // ========================================
-    // Find Plant
-    // ========================================
-
-    const plant = plants.find(
-      (item) =>
-        item.id === plantId ||
-        `NIAH-PLANT-${item.slug}` === plantId
-    );
-
-
-    // ========================================
-    // Plant Not Found
-    // ========================================
-
-    if (!plant) {
-
-      Alert.alert(
-        "Plant Not Found",
-        `No plant was found for:\n${plantId}`
-      );
-
-      return;
-    }
-
-
-    // ========================================
-    // Add ID if Missing
-    // ========================================
-
-    if (!plant.id) {
-
-      plant.id =
-        `NIAH-PLANT-${plant.slug}`;
-    }
-
-
-    console.log(
-      "Plant Found:",
-      plant.name
-    );
-
-
-    // ========================================
-    // Open Plant Details
-    // ========================================
-
-    navigation.navigate(
-      "PlantDetails",
-      {
-        plant,
+  async function handleBarcodeScanned({ data }) {
+    if (scanInProgress.current) return;
+    scanInProgress.current = true;
+    try {
+      let token = String(data || "").trim();
+      if (/^https?:\/\//i.test(token)) {
+        const scannedUrl = new URL(token);
+        const qrRoute = scannedUrl.pathname.match(/\/api\/qr\/([^/]+)\/?$/);
+        if (!qrRoute) {
+          throw new Error("This QR code is not a plant record code.");
+        }
+        token = decodeURIComponent(qrRoute[1]);
       }
-    );
+
+      const result = await fetchPlantByQRCode(token);
+      const plantId = result?.plant?.plant_id;
+      if (!plantId) throw new Error("The QR code did not resolve to a plant record.");
+      const plant = await fetchPlantDetail(plantId);
+      navigation.navigate("PlantDetails", { plant });
+    } catch (error) {
+      Alert.alert(
+        t("scan.plantQrUnavailable"),
+        error instanceof Error
+          ? translateUIMessage(error.message)
+          : t("scan.couldNotLoadThePlantRecordForThisQrCode"),
+      );
+      setCameraKey((current) => current + 1);
+    } finally {
+      scanInProgress.current = false;
+    }
   }
 
 
@@ -211,13 +153,9 @@ export default function ScanScreen({ navigation }) {
 
       <View style={styles.topContent}>
 
-        <Text style={styles.title}>
-          Scan Plant QR
-        </Text>
+        <Text style={styles.title}>{t("scan.scanPlantQr")}</Text>
 
-        <Text style={styles.subtitle}>
-          Scan the QR code attached to a plant
-        </Text>
+        <Text style={styles.subtitle}>{t("scan.scanTheQrCodeAttachedToAPlant")}</Text>
 
       </View>
 
@@ -243,9 +181,7 @@ export default function ScanScreen({ navigation }) {
           Instruction
           ==================================== */}
 
-      <Text style={styles.instruction}>
-        Position the QR code inside the box
-      </Text>
+      <Text style={styles.instruction}>{t("scan.positionTheQrCodeInsideTheBox")}</Text>
 
     </View>
   );

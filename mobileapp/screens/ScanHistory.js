@@ -1,13 +1,14 @@
+import { useAppTranslation, t } from "../translations/i18n";
 import React from "react";
 
 import {
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 
@@ -17,6 +18,7 @@ import { plants } from "../data/mockData";
 export default function ScanHistoryScreen({
   navigation,
 }) {
+  useAppTranslation();
 
   // Temporary frontend data
   // Later this will come from the logged-in visitor's scan history.
@@ -74,9 +76,7 @@ export default function ScanHistoryScreen({
             />
           </TouchableOpacity>
 
-          <Text style={styles.title}>
-            Scan History
-          </Text>
+          <Text style={styles.title}>{t("account.scanHistory")}</Text>
 
         </View>
 
@@ -92,13 +92,9 @@ export default function ScanHistoryScreen({
               color="#9CDBA6"
             />
 
-            <Text style={styles.emptyTitle}>
-              No Scan History
-            </Text>
+            <Text style={styles.emptyTitle}>{t("scanHistory.noScanHistory")}</Text>
 
-            <Text style={styles.emptyText}>
-              Plants you scan will appear here.
-            </Text>
+            <Text style={styles.emptyText}>{t("scanHistory.plantsYouScanWillAppearHere")}</Text>
 
           </View>
 

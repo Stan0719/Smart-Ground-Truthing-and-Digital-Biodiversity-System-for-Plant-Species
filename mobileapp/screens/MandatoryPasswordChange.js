@@ -1,8 +1,11 @@
+import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 ﻿import React, { useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 // Rendered in place of Login; a pending bearer token never enters route parameters.
 export default function MandatoryPasswordChangeScreen({ onSubmit, onCancel }) {
+  useAppTranslation();
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState("");
@@ -25,13 +28,13 @@ export default function MandatoryPasswordChangeScreen({ onSubmit, onCancel }) {
   return <SafeAreaView style={styles.page}>
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text accessibilityRole="header" style={styles.title}>Change your temporary password</Text>
-        <Text style={styles.description}>Choose a new password with 15 to 128 characters before continuing. You will sign in again after the change.</Text>
-        <TextInput accessibilityLabel="New password" placeholder="New password" style={styles.input} value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="new-password" editable={!busy} />
-        <TextInput accessibilityLabel="Confirm new password" placeholder="Confirm new password" style={styles.input} value={confirmation} onChangeText={setConfirmation} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="new-password" editable={!busy} returnKeyType="done" onSubmitEditing={submit} />
-        {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
-        <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={submit} style={styles.button}><Text style={styles.buttonText}>{busy ? "Please wait…" : "Change password"}</Text></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={cancel} style={styles.cancel}><Text>Sign out and return to login</Text></TouchableOpacity>
+        <Text accessibilityRole="header" style={styles.title}>{t("mandatoryPasswordChange.changeYourTemporaryPassword")}</Text>
+        <Text style={styles.description}>{t("mandatoryPasswordChange.chooseANewPasswordWith15To128CharactersBefore")}</Text>
+        <TextInput accessibilityLabel={t("mandatoryPasswordChange.newPassword")} placeholder={t("mandatoryPasswordChange.newPassword")} style={styles.input} value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="new-password" editable={!busy} />
+        <TextInput accessibilityLabel={t("mandatoryPasswordChange.confirmNewPassword")} placeholder={t("mandatoryPasswordChange.confirmNewPassword")} style={styles.input} value={confirmation} onChangeText={setConfirmation} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="new-password" editable={!busy} returnKeyType="done" onSubmitEditing={submit} />
+        {!!error && <Text accessibilityRole="alert" style={styles.error}>{translateUIMessage(error)}</Text>}
+        <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={submit} style={styles.button}><Text style={styles.buttonText}>{busy ? t("common.pleaseWait") : t("mandatoryPasswordChange.changePassword")}</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={cancel} style={styles.cancel}><Text>{t("mandatoryPasswordChange.signOutAndReturnToLogin")}</Text></TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   </SafeAreaView>;

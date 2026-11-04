@@ -1,6 +1,8 @@
+import { t, translateLabel, translateUIMessage, useAppTranslation } from "../translations/i18n";
 // screens/Plant.js
+import LanguageSelector from "../components/LanguageSelector";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
 import {
   View,
@@ -10,12 +12,13 @@ import {
   TouchableOpacity,
   FlatList,
   Image,
-  SafeAreaView,
   Dimensions,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantRecords, fetchSpeciesCatalog } from "../utils/plantApi";
+import { useSpeciesCatalog } from "../utils/useSpeciesCatalog";
+import RefreshButton from "../components/RefreshButton";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -34,50 +37,10 @@ const categories = [
 
 
 export default function Plant({ navigation, user }) {
+  useAppTranslation();
   const isBotanist = user?.role?.toLowerCase() === "botanist";
 
-  const [plants, setPlants] = useState([]);
-  const [plantCounts, setPlantCounts] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadBackendData = async () => {
-      try {
-        setLoading(true);
-        setErrorMessage("");
-        const speciesCatalog = await fetchSpeciesCatalog();
-        const records = await fetchPlantRecords(speciesCatalog);
-        const counts = records.reduce((result, record) => {
-          result[record.speciesId] = (result[record.speciesId] || 0) + 1;
-          return result;
-        }, {});
-
-        if (isMounted) {
-          setPlants(speciesCatalog);
-          setPlantCounts(counts);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setErrorMessage(
-            error.message || "Unable to load species."
-          );
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadBackendData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const { species: plants, counts: plantCounts, loading, error: errorMessage, refresh } = useSpeciesCatalog(user?.id);
 
   const [activeCategory, setActiveCategory] = useState("All");
 
@@ -147,7 +110,7 @@ export default function Plant({ navigation, user }) {
   // =====================================================
 
   const renderSpeciesCard = ({ item }) => {
-    const plantCount = plantCounts[item.id] || 0;
+    const plantCount = plantCounts?.[item.id] || 0;
     const imageSource = getSpeciesImageSource(item);
 
 
@@ -163,20 +126,18 @@ export default function Plant({ navigation, user }) {
           ) : (
             <View style={styles.imagePlaceholder}>
               <Text style={styles.placeholderIcon}>🌿</Text>
-              <Text style={styles.placeholderText}>
-                Image coming soon
-              </Text>
+              <Text style={styles.placeholderText}>{t("species.imageComingSoon")}</Text>
             </View>
           )}
 
           <View style={styles.badgeContainer}>
             <Text style={styles.categoryBadge}>
-              {item.category}
+              {translateLabel(item.category)}
             </Text>
 
             {isBotanist && item.conservationStatus && (
               <Text style={styles.statusBadge}>
-                {item.conservationStatus}
+                {translateLabel(item.conservationStatus)}
               </Text>
             )}
           </View>
@@ -190,8 +151,7 @@ export default function Plant({ navigation, user }) {
           </Text>
 
           {item.family && (
-            <Text style={styles.family}>
-              Family: {item.family}
+            <Text style={styles.family}>{t("species.family")}{item.family}
             </Text>
           )}
 
@@ -199,10 +159,10 @@ export default function Plant({ navigation, user }) {
             {item.description}
           </Text>
 
-          <Text style={styles.recordCount}>
-            {plantCount} verified{" "}
-            {plantCount === 1 ? "plant" : "plants"}
-          </Text>
+          {plantCounts !== null && <Text style={styles.recordCount}>
+            {plantCount}{t("species.verified")}{" "}
+            {plantCount === 1 ? t("plant.plant") : t("plant.plants")}
+          </Text>}
 
           <View style={styles.actions}>
             <TouchableOpacity
@@ -210,12 +170,11 @@ export default function Plant({ navigation, user }) {
               onPress={() =>
                 navigation.navigate("SpeciesDetail", {
                   slug: item.slug,
+                  speciesId: item.id,
                 })
               }
             >
-              <Text style={styles.secondaryText}>
-                View Species
-              </Text>
+              <Text style={styles.secondaryText}>{t("species.viewSpecies")}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -228,9 +187,7 @@ export default function Plant({ navigation, user }) {
                 })
               }
             >
-              <Text style={styles.primaryText}>
-                View Plants →
-              </Text>
+              <Text style={styles.primaryText}>{t("species.viewPlants")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -246,6 +203,8 @@ export default function Plant({ navigation, user }) {
     <SafeAreaView style={styles.safeArea}>
       <FlatList
         data={filteredSpecies}
+        refreshing={loading}
+        onRefresh={refresh}
         keyExtractor={(item) => item.slug}
         renderItem={renderSpeciesCard}
         numColumns={2}
@@ -257,41 +216,42 @@ export default function Plant({ navigation, user }) {
             {/* LIBRARY HEADER */}
 
             <View style={styles.libraryHeader}>
-              <View>
-                <Text style={styles.sectionLabel}>
-                  EXPLORE THE COLLECTION
-                </Text>
-
-                <Text style={styles.sectionTitle}>
-                  Discover Niah's flora
-                </Text>
+              <View style={styles.libraryHeaderRow}>
+              <View style={styles.libraryHeading}>
+                <Text style={styles.sectionLabel}>{t("species.exploreTheCollection")}</Text>
+                <View style={styles.libraryTitleRow}>
+                  <Text style={styles.sectionTitle}>{t("species.discoverNiahSFlora")}</Text>
+                  <RefreshButton
+                    onPress={refresh}
+                    loading={loading}
+                    label={t("species.refreshSpecies")}
+                    testID="catalogue-species-refresh"
+                  />
+                </View>
+              </View>
+              <LanguageSelector />
               </View>
 
               <Text style={styles.speciesCount}>
-                {filteredSpecies.length} species found
-              </Text>
+                {filteredSpecies.length}{t("species.speciesFound")}</Text>
             </View>
 
             {/* LOADING AND ERROR MESSAGES */}
 
             {loading && (
-              <Text style={styles.messageText}>
-                Loading species...
-              </Text>
+              <Text style={styles.messageText}>{t("plant.loadingSpecies")}</Text>
             )}
 
             {!loading && errorMessage !== "" && (
               <Text style={styles.errorText}>
-                {errorMessage}
+                {translateUIMessage(errorMessage)}
               </Text>
             )}
 
             {!loading &&
               !errorMessage &&
-              plants.length === 0 && (
-                <Text style={styles.messageText}>
-                  No species found.
-                </Text>
+              filteredSpecies.length === 0 && (
+                <Text style={styles.messageText}>{t("species.noSpeciesFound")}</Text>
               )}
 
             {/* SEARCH AND SORT */}
@@ -301,7 +261,7 @@ export default function Plant({ navigation, user }) {
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 maxLength={100}
-                placeholder="Search by name..."
+                placeholder={t("species.searchByName")}
                 placeholderTextColor="#8A968F"
                 style={styles.searchInput}
               />
@@ -310,16 +270,14 @@ export default function Plant({ navigation, user }) {
                 style={styles.sortButton}
                 onPress={() => setSortOpen(!sortOpen)}
               >
-                <Text style={styles.sortButtonText}>
-                  ☷ Sort
-                </Text>
+                <Text style={styles.sortButtonText}>{t("species.sort")}</Text>
               </TouchableOpacity>
             </View>
 
             {sortOpen && (
               <View style={styles.sortMenu}>
                 <SortOption
-                  label="Default order"
+                  label={t("species.defaultOrder")}
                   selected={sortOption === "default"}
                   onPress={() => {
                     setSortOption("default");
@@ -328,7 +286,7 @@ export default function Plant({ navigation, user }) {
                 />
 
                 <SortOption
-                  label="Name: A-Z"
+                  label={t("species.nameAZ")}
                   selected={sortOption === "name-asc"}
                   onPress={() => {
                     setSortOption("name-asc");
@@ -337,7 +295,7 @@ export default function Plant({ navigation, user }) {
                 />
 
                 <SortOption
-                  label="Name: Z-A"
+                  label={t("species.nameZA")}
                   selected={sortOption === "name-desc"}
                   onPress={() => {
                     setSortOption("name-desc");
@@ -346,7 +304,7 @@ export default function Plant({ navigation, user }) {
                 />
 
                 <SortOption
-                  label="Scientific name: A-Z"
+                  label={t("species.scientificNameAZ")}
                   selected={sortOption === "scientific-asc"}
                   onPress={() => {
                     setSortOption("scientific-asc");
@@ -380,7 +338,7 @@ export default function Plant({ navigation, user }) {
                         styles.categoryTextActive,
                     ]}
                   >
-                    {item}
+                    {translateLabel(item)}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -392,14 +350,9 @@ export default function Plant({ navigation, user }) {
             <View style={styles.emptyState}>
               <Text style={styles.emptyIcon}>🌿</Text>
 
-              <Text style={styles.emptyTitle}>
-                No matching species
-              </Text>
+              <Text style={styles.emptyTitle}>{t("species.noMatchingSpecies")}</Text>
 
-              <Text style={styles.emptyDescription}>
-                Try another search term or select a
-                different category.
-              </Text>
+              <Text style={styles.emptyDescription}>{t("species.tryAnotherSearchTermOrSelectADifferentCategory")}</Text>
 
               <TouchableOpacity
                 style={styles.clearButton}
@@ -408,9 +361,7 @@ export default function Plant({ navigation, user }) {
                   setActiveCategory("All");
                 }}
               >
-                <Text style={styles.clearButtonText}>
-                  Clear Filters
-                </Text>
+                <Text style={styles.clearButtonText}>{t("map.clearFilters")}</Text>
               </TouchableOpacity>
             </View>
           ) : null
@@ -428,6 +379,7 @@ export default function Plant({ navigation, user }) {
 // SORT OPTION
 
 function SortOption({ label, selected, onPress }) {
+  useAppTranslation();
   return (
     <TouchableOpacity
       style={[
@@ -443,7 +395,7 @@ function SortOption({ label, selected, onPress }) {
         ]}
       >
         {selected ? "✓ " : ""}
-        {label}
+        {translateLabel(label)}
       </Text>
     </TouchableOpacity>
   );
@@ -472,6 +424,10 @@ const styles = StyleSheet.create({
     paddingBottom: SCREEN_WIDTH < 500 ? 14 : 18,
   },
 
+  libraryHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  libraryHeading: { flex: 1, minWidth: 0 },
+  libraryTitleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+
   sectionLabel: {
     color: "#50A078",
     fontSize: 10,
@@ -481,6 +437,7 @@ const styles = StyleSheet.create({
   },
 
   sectionTitle: {
+    flexShrink: 1,
     color: "#254B42",
     fontSize: SCREEN_WIDTH < 500 ? 26 : 28,
     lineHeight: SCREEN_WIDTH < 500 ? 32 : 34,

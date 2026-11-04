@@ -14,6 +14,7 @@ export const faceSession = createFaceSessionManager({
   backend,
   api: faceApi,
   validUser: validFaceUser,
+  diagnostic: typeof __DEV__ === "boolean" && __DEV__ ? (entry) => console.info("[mobile-session]", entry) : undefined,
   authorizeOffline:async()=>Platform.OS!=="web"&&(await LocalAuthentication.authenticateAsync({promptMessage:"Unlock private offline drafts",disableDeviceFallback:false})).success,
   storage: {
     async get(key) { return await supported() ? SecureStore.getItemAsync(key, options) : memoryOnly; },

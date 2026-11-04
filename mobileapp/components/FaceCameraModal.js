@@ -1,11 +1,14 @@
+import { t, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import React, { useRef, useState } from "react";
-import { Modal, SafeAreaView, Text, TouchableOpacity, View } from "react-native";
+import { Modal, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { faceApi, validateFaceSession, faceReference, faceDiagnostic } from "../utils/faceApi";
 import { runFaceCapture, FACE_CAPTURE_VERSION } from "../utils/faceCaptureFlow";
 export { faceCameraConfigured } from "../utils/faceApi";
 
 function Capture({ request, onClose, onResult, isCurrent }) {
+  useAppTranslation();
   const [permission, askPermission] = useCameraPermissions();
   const camera = useRef(null);
   const lock = useRef(false);
@@ -72,25 +75,26 @@ function Capture({ request, onClose, onResult, isCurrent }) {
     return () => clearTimeout(timer);
   }, [request.mode, permission?.granted, ready]);
   return <SafeAreaView style={{ flex: 1, backgroundColor: "#244B47", padding: 20 }}>
-    <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={onClose}><Text style={{ color: "white", fontSize: 20, padding: 16 }}>Close — use password</Text></TouchableOpacity>
-    <Text accessibilityRole="header" style={{ color: "white", fontSize: 22, padding: 16 }}>{request.mode === "enroll" ? "Face Registration" : "Face Login"}</Text>
-    {typeof __DEV__ === "boolean" && __DEV__ && <Text style={{ color: "white", padding: 8 }}>Face flow: {FACE_CAPTURE_VERSION} · {request.mode}</Text>}
+    <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={onClose}><Text style={{ color: "white", fontSize: 20, padding: 16 }}>{t("faceCameraModal.closeUsePassword")}</Text></TouchableOpacity>
+    <Text accessibilityRole="header" style={{ color: "white", fontSize: 22, padding: 16 }}>{request.mode === "enroll" ? t("faceCameraModal.faceRegistration") : t("faceCameraModal.faceLogin")}</Text>
+    {typeof __DEV__ === "boolean" && __DEV__ && <Text style={{ color: "white", padding: 8 }}>{t("login.faceFlow")}{FACE_CAPTURE_VERSION} · {request.mode}</Text>}
     <Text style={{ color: "white", fontSize: 18, padding: 16 }}>{request.mode === "enroll"
       ? request.legacyProof
-        ? "Agree to save a new live facial template for your authenticated account. Your old template will be preserved for reference and removed from active matching. Both account passwords will be verified."
-        : "Agree to send a face photo to your project's computer and store a facial template for login. You can remove it from the login screen."
-      : "Face login prototype: face the camera in good lighting. Your project's computer must be running."}</Text>
-    {!permission?.granted ? <TouchableOpacity onPress={askPermission}><Text style={{ color: "#DEF9C4", fontSize: 22, padding: 16 }}>Allow camera</Text></TouchableOpacity>
+        ? t("faceCameraModal.agreeToSaveANewLiveFacialTemplateForYour")
+        : t("faceCameraModal.agreeToSendAFacePhotoToYourProjectS")
+      : t("faceCameraModal.faceLoginPrototypeFaceTheCameraInGoodLightingYour")}</Text>
+    {!permission?.granted ? <TouchableOpacity onPress={askPermission}><Text style={{ color: "#DEF9C4", fontSize: 22, padding: 16 }}>{t("faceCameraModal.allowCamera")}</Text></TouchableOpacity>
       : <CameraView ref={camera} style={{ flex: 1 }} facing="front" mirror={false} pictureSize={pictureSize} onCameraReady={cameraReady} onMountError={() => setError("Camera could not start. Use password login.")} />}
-    {permission?.granted && <Text style={{ color: "white", padding: 8 }}>Keep your forehead, chin and both cheeks visible. Hold still while capturing.</Text>}
-    {busy && <Text style={{ color: "white", padding: 12 }}>{stage} Please wait before closing.</Text>}
-    {!!error && <Text accessibilityRole="alert" style={{ color: "white", padding: 12 }}>{error}</Text>}
+    {permission?.granted && <Text style={{ color: "white", padding: 8 }}>{t("faceCameraModal.keepYourForeheadChinAndBothCheeksVisibleHoldStill")}</Text>}
+    {busy && <Text style={{ color: "white", padding: 12 }}>{translateUIMessage(stage)}{t("faceCameraModal.pleaseWaitBeforeClosing")}</Text>}
+    {!!error && <Text accessibilityRole="alert" style={{ color: "white", padding: 12 }}>{translateUIMessage(error)}</Text>}
     <View style={{ padding: 16 }}><TouchableOpacity accessibilityRole="button" disabled={!permission?.granted || !ready || busy} onPress={() => scan(request.mode === "enroll")}>
-      <Text style={{ color: "#DEF9C4", fontSize: 22 }}>{busy ? "Checking face…" : request.mode === "enroll" ? "Agree and register my face" : error ? "Retry face login" : "Scan and sign in"}</Text>
+      <Text style={{ color: "#DEF9C4", fontSize: 22 }}>{busy ? t("faceCameraModal.checkingFace") : request.mode === "enroll" ? t("faceCameraModal.agreeAndRegisterMyFace") : error ? t("faceCameraModal.retryFaceLogin") : t("faceCameraModal.scanAndSignIn")}</Text>
     </TouchableOpacity></View>
   </SafeAreaView>;
 }
 export default function FaceCameraModal({ request, onClose, onResult, isCurrent }) {
+  useAppTranslation();
   if (!request) return null;
   return <Modal visible animationType="slide" onRequestClose={() => onClose(request.id)}>
     {request && <Capture key={request.id} request={request} onClose={() => onClose(request.id)} onResult={onResult} isCurrent={isCurrent} />}

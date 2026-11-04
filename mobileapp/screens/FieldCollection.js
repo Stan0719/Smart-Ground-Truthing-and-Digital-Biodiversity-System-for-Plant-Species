@@ -1,3 +1,4 @@
+import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldLabel } from "../translations/i18n";
 import { canCollectDrafts } from "../utils/rbac";
 import React, { useEffect, useState, useRef } from "react";
 import {
@@ -34,6 +35,7 @@ const button = {
   borderRadius: 8,
 };
 export default function FieldCollection({ route, navigation, onLogout }) {
+  useAppTranslation();
   const [user, setUser] = useState(null),
     [species, setSpecies] = useState([]),
     [rows, setRows] = useState([]),
@@ -336,43 +338,43 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     >
       <Text style={{ fontSize: 25, color: "#234b3a" }}>
         {dashboard
-          ? "Botanist dashboard"
+          ? t("fieldCollection.botanistDashboard")
           : mode === "PlantQRCode"
-            ? "Plant QR codes"
+            ? t("fieldCollection.plantQrCodes")
             : edit
-              ? "Correct observation"
+              ? t("fieldCollection.correctObservation")
               : newPlant
-                ? "Register plant"
-                : "Add observation"}
+                ? t("fieldCollection.registerPlant")
+                : t("fieldCollection.addObservation")}
       </Text>
       <TouchableOpacity style={button} onPress={load}>
-        <Text>Refresh</Text>
+        <Text>{t("common.refresh")}</Text>
       </TouchableOpacity>
       {!!error && (
         <Text accessibilityRole="alert" style={{ color: "#a02020" }}>
-          {error}
+          {translateUIMessage(error)}
         </Text>
       )}
-      {!!message && <Text accessibilityLiveRegion="polite">{message}</Text>}
+      {!!message && <Text accessibilityLiveRegion="polite">{translateUIMessage(message)}</Text>}
       {user && dashboard && (
         <>
           {onLogout && (
             <TouchableOpacity style={button} onPress={onLogout}>
-              <Text>Sign out</Text>
+              <Text>{t("fieldCollection.signOut")}</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
             style={button}
             onPress={() => navigation.navigate("AddPlant", { botanist: user })}
           >
-            <Text>Register new plant</Text>
+            <Text>{t("fieldCollection.registerNewPlant")}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={button}
             disabled={busy}
             onPress={synchronize}
           >
-            <Text>Synchronize {draftCount} saved drafts</Text>
+            <Text>{t("fieldCollection.synchronize")}{draftCount}{t("fieldCollection.savedDrafts")}</Text>
           </TouchableOpacity>
         </>
       )}
@@ -393,20 +395,19 @@ export default function FieldCollection({ route, navigation, onLogout }) {
               )
             }
           >
-            <Text>
-              Recover saved draft:{" "}
-              {draft.body.content?.morphology?.slice(0, 60) || "Observation"}
+            <Text>{t("fieldCollection.recoverSavedDraft")}{" "}
+              {draft.body.content?.morphology?.slice(0, 60) || t("fieldCollection.observation")}
             </Text>
           </TouchableOpacity>
         ))}
       {user && !dashboard && mode !== "PlantQRCode" && (
         <>
-          <Text>Species reference</Text>
+          <Text>{t("fieldCollection.speciesReference")}</Text>
           {user.offline && newPlant && (
             <TextInput
               style={input}
-              accessibilityLabel="Species ID from your field reference"
-              placeholder="Known species ID"
+              accessibilityLabel={t("fieldCollection.speciesIdFromYourFieldReference")}
+              placeholder={t("fieldCollection.knownSpeciesId")}
               value={form.species_id}
               onChangeText={(value) => change("species_id", value)}
             />
@@ -426,8 +427,8 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           {mode === "AddObservation" && (
             <TextInput
               style={input}
-              accessibilityLabel="Approved plant ID"
-              placeholder="Approved plant ID"
+              accessibilityLabel={t("fieldCollection.approvedPlantId")}
+              placeholder={t("fieldCollection.approvedPlantId")}
               value={form.plant_id}
               onChangeText={(v) => change("plant_id", v)}
             />
@@ -444,9 +445,9 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             "accuracy_m",
           ].map((field) => (
             <View key={field}>
-              <Text>{field}</Text>
+              <Text>{translateFieldLabel(field)}</Text>
               <TextInput
-                accessibilityLabel={field}
+                accessibilityLabel={translateFieldLabel(field)}
                 style={input}
                 multiline={["notes", "morphology"].includes(field)}
                 value={form[field]}
@@ -455,13 +456,13 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             </View>
           ))}
           <TouchableOpacity style={button} onPress={locate}>
-            <Text>Record current GPS</Text>
+            <Text>{t("fieldCollection.recordCurrentGps")}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={button} onPress={() => capture(true)}>
-            <Text>Capture photo</Text>
+            <Text>{t("fieldCollection.capturePhoto")}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={button} onPress={() => capture(false)}>
-            <Text>Attach photo</Text>
+            <Text>{t("fieldCollection.attachPhoto")}</Text>
           </TouchableOpacity>
           {photos.map((p) => (
             <View key={p.client_key}>
@@ -471,14 +472,14 @@ export default function FieldCollection({ route, navigation, onLogout }) {
               />
               <TouchableOpacity
                 style={button}
-                accessibilityLabel="Remove attached photo"
+                accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
                 onPress={() =>
                   setPhotos((old) =>
                     old.filter((photo) => photo.client_key !== p.client_key),
                   )
                 }
               >
-                <Text>Remove photo</Text>
+                <Text>{t("fieldCollection.removePhoto")}</Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -487,14 +488,14 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             disabled={busy}
             onPress={() => save(false)}
           >
-            <Text>Save offline draft</Text>
+            <Text>{t("fieldCollection.saveOfflineDraft")}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={button}
             disabled={busy}
             onPress={() => save(true)}
           >
-            <Text>Submit and synchronize</Text>
+            <Text>{t("fieldCollection.submitAndSynchronize")}</Text>
           </TouchableOpacity>
         </>
       )}
@@ -505,12 +506,11 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             key={row.id}
             style={{ padding: 14, marginVertical: 8, backgroundColor: "white" }}
           >
-            <Text>
-              Plant {row.plant_id} · {row.status}
+            <Text>{t("fieldCollection.plant")}{row.plant_id} · {translateLabel(row.status)}
             </Text>
             <Text>{row.content.morphology}</Text>
             <TouchableOpacity style={button} onPress={() => showQr(row)}>
-              <Text>View persistent QR code</Text>
+              <Text>{t("fieldCollection.viewPersistentQrCode")}</Text>
             </TouchableOpacity>
             {["Draft", "Correction Required", "Rejected"].includes(
               row.status,
@@ -527,10 +527,10 @@ export default function FieldCollection({ route, navigation, onLogout }) {
                       ]),
                     ),
                   }));
-                  navigation.navigate("EditPlant", { observation: row });
+                  navigation.navigate("FieldCollectionEdit", { observation: row, plantId: row.plant_id });
                 }}
               >
-                <Text>Correct and resubmit own observation</Text>
+                <Text>{t("fieldCollection.correctAndResubmitOwnObservation")}</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
@@ -539,7 +539,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
                 navigation.navigate("AddObservation", { plantId: row.plant_id })
               }
             >
-              <Text>Add observation</Text>
+              <Text>{t("fieldCollection.addObservation")}</Text>
             </TouchableOpacity>
           </View>
         ))}
@@ -548,11 +548,12 @@ export default function FieldCollection({ route, navigation, onLogout }) {
   );
 }
 function QrDisplay({ value }) {
+  useAppTranslation();
   const QRCode = require("react-native-qrcode-svg").default;
   return (
     <View style={{ padding: 20, backgroundColor: "white" }}>
       <QRCode value={value} size={220} />
-      <Text>Code is usable after Officer approval.</Text>
+      <Text>{t("fieldCollection.codeIsUsableAfterOfficerApproval")}</Text>
     </View>
   );
 }

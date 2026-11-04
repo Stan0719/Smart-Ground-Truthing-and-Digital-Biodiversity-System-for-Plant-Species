@@ -4,7 +4,12 @@ import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {changeFirstLoginPassword} from '../utils/firstLoginPassword.js';
 import {createFaceCameraController,FACE_CAPTURE_VERSION} from '../utils/faceCaptureFlow.js';
+import {createLocalization,createDisplayTranslator} from '../translations/core.js';
 const require=createRequire(import.meta.url), ts=require('typescript'), React=require('react');
+const english=JSON.parse(readFileSync(new URL('../translations/en.json',import.meta.url),'utf8'));
+const fixtureI18n=createLocalization({storage:{getItem:async()=>null,setItem:async()=>{}},resources:{en:{translation:english}}}).i18n;
+const display=createDisplayTranslator(fixtureI18n,english);
+const translationFixture={t:(key,values)=>fixtureI18n.t(key,values),translateLabel:display.label,translateUIMessage:display.message,useAppTranslation:()=>({i18n:fixtureI18n})};
 const session={token:'a'.repeat(64),user:{id:'synthetic-user',name:'Synthetic',email:'synthetic@example.invalid',role:'botanist',mustChangePassword:true}};
 
 function loginFixture({cameraEnabled=false,register=false,pending=null,previousError='',busy=false,email='synthetic@example.invalid',api=async()=>session,development=false,connectionCheck='',probe=async()=>({base:'https://synthetic.invalid/api/mobile',reference:'abcdef123456',status:200})}={}) {
@@ -13,10 +18,11 @@ function loginFixture({cameraEnabled=false,register=false,pending=null,previousE
  const native={Alert:{alert:(...args)=>alerts.push(args)},StyleSheet:{create:styles=>styles},Platform:{OS:'android'},Animated:{Value:class{interpolate(){return 0}},View:'AnimatedView',Text:'AnimatedText'}};
  for(const name of ['SafeAreaView','KeyboardAvoidingView','ScrollView','Text','View','TextInput','TouchableOpacity','Switch'])native[name]=name;
  function MandatoryScreen(){}
- const deps={react:hooks,'react-native':native,'expo-router':{router:{push:path=>navigation.push(path)}},'@expo/vector-icons':{Ionicons:'Icon'},'expo-local-authentication':{},'expo-secure-store':{},'expo-constants':{},'../utils/faceCaptureFlow':{FACE_CAPTURE_VERSION,createFaceCameraController:options=>createFaceCameraController({...options,onChange:request=>{options.onChange(request);if(request)cameras.push(request);}})},'../utils/completeFaceLogin':{},'../utils/faceSession':{faceSession:{establish:async result=>{assert.notEqual(result.user.mustChangePassword,true,'Pending session entered normal features');return result.user;}}},'../utils/faceApi':{faceApi:async(...args)=>{requests.push(args);return api(...args)},validateFaceSession:value=>value,faceDiagnostic:()=>{},faceReference:()=> '123456abcdef'},'../components/FaceCameraModal':{default:'FaceCamera',faceCameraConfigured:()=>cameraEnabled},'./MandatoryPasswordChange':{default:MandatoryScreen},'../utils/firstLoginPassword':{changeFirstLoginPassword}};
+ const deps={'../translations/i18n':translationFixture,'../components/LanguageSelector':{default:'LanguageSelector'},react:hooks,'react-native':native,'expo-router':{router:{push:path=>navigation.push(path)}},'@expo/vector-icons':{Ionicons:'Icon'},'expo-local-authentication':{},'expo-secure-store':{},'expo-constants':{},'../utils/faceCaptureFlow':{FACE_CAPTURE_VERSION,createFaceCameraController:options=>createFaceCameraController({...options,onChange:request=>{options.onChange(request);if(request)cameras.push(request);}})},'../utils/completeFaceLogin':{},'../utils/faceSession':{faceSession:{establish:async result=>{assert.notEqual(result.user.mustChangePassword,true,'Pending session entered normal features');return result.user;}}},'../utils/faceApi':{faceApi:async(...args)=>{requests.push(args);return api(...args)},validateFaceSession:value=>value,faceDiagnostic:()=>{},faceReference:()=> '123456abcdef'},'../components/FaceCameraModal':{default:'FaceCamera',faceCameraConfigured:()=>cameraEnabled},'./MandatoryPasswordChange':{default:MandatoryScreen},'../utils/firstLoginPassword':{changeFirstLoginPassword}};
  const compiled=ts.transpileModule(readFileSync(new URL('../screens/Login.js',import.meta.url),'utf8'),{fileName:'Login.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
  deps['expo-constants']={default:{expoConfig:{hostUri:'192.0.2.1:8082'}}};
+ deps['react-native-safe-area-context']={SafeAreaView:'SafeAreaView'};
  deps['../utils/faceApi'].probeAuthConnection=probe;
  new Function('require','module','exports','__DEV__',compiled)(name=>{assert.ok(name in deps,`Unexpected dependency ${name}`);return {...deps[name],__esModule:name!=='react'}},module,module.exports,development);
  const tree=module.exports.default({navigation:{replace:()=>navigation.push('replace'),navigate:()=>navigation.push('navigate')},onLogin:()=>navigation.push('authenticated')});
@@ -24,6 +30,12 @@ function loginFixture({cameraEnabled=false,register=false,pending=null,previousE
 }
 function find(node,predicate){if(!node||typeof node!=='object')return; if(predicate(node))return node;for(const child of React.Children.toArray(node.props?.children)){const found=find(child,predicate);if(found)return found;}}
 function text(node){if(typeof node==='string')return node;return React.Children.toArray(node?.props?.children).map(child=>typeof child==='string'?child:text(child)).join('');}
+
+test('Login exposes the language selector without requiring authentication',()=>{
+ const login=loginFixture();
+ assert.ok(find(login.tree,node=>node?.type==='LanguageSelector'));
+ assert.equal(login.requests.length,0);
+});
 
 test('registration selection authenticates before opening enrollment and never opens recognition',async()=>{
  const permanent={...session,user:{...session.user,mustChangePassword:false}};
@@ -104,7 +116,7 @@ test('actual camera shows registration consent and only missing enrollment exits
     const key=index++;return [key===0?true:initial,value=>states.push(value)];
    }};
   const native={Modal:'Modal',SafeAreaView:'SafeAreaView',Text:'Text',TouchableOpacity:'TouchableOpacity',View:'View'};
-  const deps={react:hooks,'react-native':native,'expo-camera':{CameraView:'Camera',useCameraPermissions:()=>[{granted:true},()=>{}]},
+  const deps={'../translations/i18n':translationFixture,'../components/LanguageSelector':{default:'LanguageSelector'},react:hooks,'react-native':native,'expo-camera':{CameraView:'Camera',useCameraPermissions:()=>[{granted:true},()=>{}]},
    '../utils/faceApi':{faceReference:()=> 'abcdef123456',faceDiagnostic:()=>{}},
    '../utils/faceCaptureFlow':{runFaceCapture:async()=>{throw Object.assign(Error('Synthetic capture rejection'),{code});}}};
   const compiled=ts.transpileModule(readFileSync(new URL('../components/FaceCameraModal.js',import.meta.url),'utf8'),{fileName:'Camera.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -197,7 +209,7 @@ test('mandatory change UI contains only secure replacement fields and sign-out c
  const native={Alert:{alert:(...args)=>alerts.push(args)},StyleSheet:{create:styles=>styles},Platform:{OS:'android'}};
  for(const name of ['KeyboardAvoidingView','SafeAreaView','ScrollView','Text','TextInput','TouchableOpacity'])native[name]=name;
  const compiled=ts.transpileModule(readFileSync(new URL('../screens/MandatoryPasswordChange.js',import.meta.url),'utf8'),{fileName:'Mandatory.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
- const module={exports:{}};new Function('require','module','exports',compiled)(name=>name==='react'?hooks:native,module,module.exports);
+ const module={exports:{}};new Function('require','module','exports',compiled)(name=>name==='../translations/i18n'?translationFixture:name==='react'?hooks:native,module,module.exports);
  let submitted;
  const tree=module.exports.default({onSubmit:async(...args)=>{submitted=args},onCancel:async()=>{}});
  for(const label of ['New password','Confirm new password'])assert.equal(find(tree,node=>node.props?.accessibilityLabel===label).props.secureTextEntry,true);

@@ -1,6 +1,7 @@
+import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/PlantDetail.js
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 
 import {
   View,
@@ -9,6 +10,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  RefreshControl,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 
@@ -18,6 +20,7 @@ import {
 } from "../data/mockData";
 import { getSpeciesImageSource } from "../data/speciesImages";
 import { fetchPlantDetail } from "../utils/plantApi";
+import RefreshButton from "../components/RefreshButton";
 
 
 export default function PlantDetail({
@@ -25,49 +28,50 @@ export default function PlantDetail({
   navigation,
   user,
 }) {
+  useAppTranslation();
   const { plantId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const [plant, setPlant] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const requestRef = useRef(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      let isMounted = true;
+  const loadPlant = useCallback((isRefresh = false) => {
+    if (requestRef.current) return requestRef.current;
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setErrorMessage("");
 
-      const loadPlant = async () => {
-        setLoading(true);
-        setErrorMessage("");
+    if (!/^\d+$/.test(String(plantId ?? ""))) {
+      setPlant(getPlantById(plantId) || null);
+      setLoading(false);
+      setRefreshing(false);
+      return Promise.resolve();
+    }
 
-        if (!/^\d+$/.test(String(plantId ?? ""))) {
-          if (isMounted) {
-            setPlant(getPlantById(plantId) || null);
-            setLoading(false);
-          }
-          return;
-        }
+    const request = (async () => {
+      try {
+        const backendPlant = await fetchPlantDetail(plantId, {
+          includeObservations: isBotanist,
+          accountId: user?.id,
+        });
+        setPlant(backendPlant);
+      } catch (error) {
+        setErrorMessage(error.message || "Unable to load this plant record.");
+      } finally {
+        if (requestRef.current === request) requestRef.current = null;
+        setLoading(false);
+        setRefreshing(false);
+      }
+    })();
+    requestRef.current = request;
+    return request;
+  }, [plantId, isBotanist, user?.id]);
 
-        try {
-          const backendPlant = await fetchPlantDetail(plantId, {
-            includeObservations: isBotanist,
-          });
-          if (isMounted) setPlant(backendPlant);
-        } catch (error) {
-          if (isMounted) {
-            setPlant(null);
-            setErrorMessage(error.message || "Unable to load this plant record.");
-          }
-        } finally {
-          if (isMounted) setLoading(false);
-        }
-      };
-
-      loadPlant();
-      return () => {
-        isMounted = false;
-      };
-    }, [plantId, isBotanist])
-  );
+  useFocusEffect(useCallback(() => {
+    void loadPlant(false);
+  }, [loadPlant]));
 
   // =====================================================
   // PLANT NOT FOUND
@@ -76,7 +80,7 @@ export default function PlantDetail({
   if (loading && !plant) {
     return (
       <View style={styles.notFoundContainer}>
-        <Text style={styles.notFoundTitle}>Loading plant record...</Text>
+        <Text style={styles.notFoundTitle}>{t("plantDetail.loadingPlantRecord")}</Text>
       </View>
     );
   }
@@ -89,21 +93,17 @@ export default function PlantDetail({
           🌿
         </Text>
 
-        <Text style={styles.notFoundTitle}>
-          Plant record not found
-        </Text>
+        <Text style={styles.notFoundTitle}>{t("plantDetail.plantRecordNotFound")}</Text>
 
         <Text style={styles.notFoundText}>
-          {errorMessage || "The plant record you are looking for does not exist."}
+          {errorMessage || t("plantDetail.thePlantRecordYouAreLookingForDoesNotExist")}
         </Text>
 
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Text style={styles.backButtonText}>
-            Go Back
-          </Text>
+          <Text style={styles.backButtonText}>{t("common.goBack")}</Text>
         </TouchableOpacity>
 
       </View>
@@ -156,6 +156,14 @@ export default function PlantDetail({
     <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => void loadPlant(true)}
+          tintColor="#315B49"
+          colors={["#315B49"]}
+        />
+      }
     >
 
       {/* =================================================
@@ -163,13 +171,24 @@ export default function PlantDetail({
 ================================================= */}
 
 <View style={styles.header}>
+  {!!errorMessage && (
+    <Text style={styles.refreshError}>{translateUIMessage(errorMessage)}</Text>
+  )}
+  <View style={styles.heroToolbar}>
   <TouchableOpacity
     style={styles.heroBackButton}
     onPress={() => navigation.goBack()}
     activeOpacity={0.8}
   >
-    <Text style={styles.heroBackText}>← Back</Text>
+    <Text style={styles.heroBackText}>{t("plant.back")}</Text>
   </TouchableOpacity>
+  <RefreshButton
+    onPress={() => void loadPlant(true)}
+    loading={loading || refreshing}
+    label={t("common.refresh")}
+    testID="plant-detail-refresh"
+  />
+  </View>
 
   <View style={styles.heroGrid}>
     {/* Plant image */}
@@ -183,21 +202,16 @@ export default function PlantDetail({
       ) : (
         <View style={styles.imagePlaceholder}>
           <Text style={styles.placeholderIcon}>🌿</Text>
-          <Text style={styles.placeholderText}>
-            Field photograph coming soon
-          </Text>
+          <Text style={styles.placeholderText}>{t("plantDetail.fieldPhotographComingSoon")}</Text>
         </View>
       )}
     </View>
 
     {/* Plant information */}
     <View style={styles.heroCopy}>
-      <Text style={styles.headerLabel}>
-        PLANT RECORD
-      </Text>
+      <Text style={styles.headerLabel}>{t("plantDetail.plantRecord")}</Text>
 
-      <Text style={styles.plantId}>
-        Plant {plant.plantId}
+      <Text style={styles.plantId}>{t("fieldCollection.plant")}{plant.plantId}
       </Text>
 
       <Text style={styles.speciesName}>
@@ -211,17 +225,17 @@ export default function PlantDetail({
       <View style={styles.heroBadges}>
         {isBotanist && (
           <Text style={styles.heroBadge}>
-            {plant.latestApproved?.healthStatus || "Not recorded"}
+            {translateLabel(plant.latestApproved?.healthStatus || t("plant.notRecorded"))}
           </Text>
         )}
 
         <Text style={styles.heroBadge}>
-          {plant.latestApproved?.lifeStage || "Not recorded"}
+          {translateLabel(plant.latestApproved?.lifeStage || t("plant.notRecorded"))}
         </Text>
 
         {isBotanist && (
           <Text style={styles.heroBadge}>
-            {plant.location?.zone || "Not recorded"}
+            {plant.location?.zone || t("plant.notRecorded")}
           </Text>
         )}
       </View>
@@ -236,24 +250,20 @@ export default function PlantDetail({
 
       <View style={styles.section}>
 
-        <Text style={styles.sectionLabel}>
-          CURRENT VERIFIED RECORD
-        </Text>
+        <Text style={styles.sectionLabel}>{t("plantDetail.currentVerifiedRecord")}</Text>
 
-        <Text style={styles.sectionTitle}>
-          Plant information
-        </Text>
+        <Text style={styles.sectionTitle}>{t("plantDetail.plantInformation")}</Text>
 
 
         <View style={styles.card}>
 
           <InfoRow
-            label="Plant ID"
+            label={t("plantDetail.plantId")}
             value={plant.plantId}
           />
 
           <InfoRow
-            label="Species"
+            label={t("plantDetail.species")}
             value={
               selectedSpecies
                 ? selectedSpecies.name
@@ -262,7 +272,7 @@ export default function PlantDetail({
           />
 
           <InfoRow
-            label="Scientific name"
+            label={t("plantDetail.scientificName")}
             value={
               selectedSpecies
                 ? selectedSpecies.scientificName
@@ -272,45 +282,45 @@ export default function PlantDetail({
           />
 
           <InfoRow
-            label="Height"
-            value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : "Not recorded"}
+            label={t("plant.height")}
+            value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
           />
 
           {isBotanist && (
             <InfoRow
-              label="Health status"
-              value={plant.latestApproved?.healthStatus || "Not recorded"}
+              label={t("plantDetail.healthStatus")}
+              value={plant.latestApproved?.healthStatus || t("plant.notRecorded")}
             />
           )}
 
           <InfoRow
-            label="Life stage"
+            label={t("plant.lifeStage")}
             value={
-              plant.latestApproved?.lifeStage || "Not recorded"
+              plant.latestApproved?.lifeStage || t("plant.notRecorded")
             }
           />
 
           <InfoRow
-            label="Genus"
-              value={selectedSpecies?.genus || "Not recorded"}
+            label={t("plant.genus")}
+              value={selectedSpecies?.genus || t("plant.notRecorded")}
           />
 
           <InfoRow
-            label="Last verified"
+            label={t("plantDetail.lastVerified")}
             value={formatDate(plant.latestApproved?.date)}
           />
 
           {isBotanist && (
             <InfoRow
-              label="Location zone"
-              value={plant.location?.zone || "Not recorded"}
+              label={t("plantDetail.locationZone")}
+              value={plant.location?.zone || t("plant.notRecorded")}
             />
           )}
 
           <InfoRow
-            label="Morphology"
+            label={t("botanistPlantDetail.morphology")}
             value={
-              plant.latestApproved?.morphology || "Not recorded"
+              plant.latestApproved?.morphology || t("plant.notRecorded")
             }
           />
 
@@ -329,9 +339,7 @@ export default function PlantDetail({
               })
             }
           >
-            <Text style={styles.addObservationButtonText}>
-              + Add New Observation
-            </Text>
+            <Text style={styles.addObservationButtonText}>{t("plantDetail.addNewObservation")}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -344,38 +352,34 @@ export default function PlantDetail({
       {isBotanist && (
       <View style={styles.staffSection}>
 
-        <Text style={styles.sectionLabel}>
-          STAFF RECORD
-        </Text>
+        <Text style={styles.sectionLabel}>{t("plantDetail.staffRecord")}</Text>
 
 
         {/* GPS */}
 
         <View style={styles.subSection}>
 
-          <Text style={styles.subSectionTitle}>
-            GPS information
-          </Text>
+          <Text style={styles.subSectionTitle}>{t("plantDetail.gpsInformation")}</Text>
 
 
           <InfoRow
-            label="Latitude"
+            label={t("botanistPlantDetail.latitude")}
             value={formatCoordinate(plant.location?.latitude)}
           />
 
           <InfoRow
-            label="Longitude"
+            label={t("botanistPlantDetail.longitude")}
             value={formatCoordinate(plant.location?.longitude)}
           />
 
           <InfoRow
-            label="Altitude"
-            value={plant.location?.altitudeM != null ? `${plant.location.altitudeM} m` : "Not recorded"}
+            label={t("plantDetail.altitude")}
+            value={plant.location?.altitudeM != null ? `${plant.location.altitudeM} m` : t("plant.notRecorded")}
           />
 
           <InfoRow
-            label="GPS accuracy"
-            value={plant.location?.accuracyM != null ? `± ${plant.location.accuracyM} m` : "Not recorded"}
+            label={t("plantDetail.gpsAccuracy")}
+            value={plant.location?.accuracyM != null ? `± ${plant.location.accuracyM} m` : t("plant.notRecorded")}
           />
 
         </View>
@@ -385,14 +389,12 @@ export default function PlantDetail({
 
         <View style={styles.subSection}>
 
-          <Text style={styles.subSectionTitle}>
-            QR tag
-          </Text>
+          <Text style={styles.subSectionTitle}>{t("plantDetail.qrTag")}</Text>
 
 
           <InfoRow
-            label="QR code"
-            value={plant.qr?.code || "Not recorded"}
+            label={t("plantDetail.qrCode")}
+            value={plant.qr?.label || plant.qr?.code || t("plant.notRecorded")}
           />
 
 
@@ -413,7 +415,7 @@ export default function PlantDetail({
                   : styles.qrInactiveText,
               ]}
             >
-              {plant.qr?.status || "Not recorded"}
+              {translateLabel(plant.qr?.status || t("plant.notRecorded"))}
             </Text>
 
           </View>
@@ -425,18 +427,16 @@ export default function PlantDetail({
 
         <View style={styles.subSection}>
 
-          <Text style={styles.subSectionTitle}>
-            Registration
-          </Text>
+          <Text style={styles.subSectionTitle}>{t("plantDetail.registration")}</Text>
 
 
           <InfoRow
-            label="Registered by"
-            value={plant.registeredBy ?? "Not recorded"}
+            label={t("plantDetail.registeredBy")}
+            value={plant.registeredBy ?? t("plant.notRecorded")}
           />
 
           <InfoRow
-            label="Registered at"
+            label={t("plantDetail.registeredAt")}
             value={formatDate(
               plant.registeredAt
             )}
@@ -455,66 +455,62 @@ export default function PlantDetail({
       {isBotanist && latestApprovedObservation && (
         <View style={styles.observesection}>
 
-          <Text style={styles.sectionLabel}>
-            LATEST VERIFIED OBSERVATION
-          </Text>
+          <Text style={styles.sectionLabel}>{t("plantDetail.latestVerifiedObservation")}</Text>
 
-          <Text style={styles.sectionTitle}>
-            Observation details
-          </Text>
+          <Text style={styles.sectionTitle}>{t("plantDetail.observationDetails")}</Text>
 
 
           <View style={styles.observationCard}>
 
             <InfoRow
-              label="Observation ID"
+              label={t("plantDetail.observationId")}
               value={
                 latestApprovedObservation.observationId
               }
             />
 
             <InfoRow
-              label="Recorded by"
+              label={t("plantDetail.recordedBy")}
               value={
                 latestApprovedObservation.recordedBy
               }
             />
 
             <InfoRow
-              label="Date"
+              label={t("plantDetail.date")}
               value={formatDate(
                 latestApprovedObservation.date
               )}
             />
 
             <InfoRow
-              label="Height"
-              value={latestApprovedObservation.heightCm != null ? `${latestApprovedObservation.heightCm} cm` : "Not recorded"}
+              label={t("plant.height")}
+              value={latestApprovedObservation.heightCm != null ? `${latestApprovedObservation.heightCm} cm` : t("plant.notRecorded")}
             />
 
             <InfoRow
-              label="Health status"
+              label={t("plantDetail.healthStatus")}
               value={
                 latestApprovedObservation.healthStatus
               }
             />
 
             <InfoRow
-              label="Life stage"
+              label={t("plant.lifeStage")}
               value={
                 latestApprovedObservation.lifeStage
               }
             />
 
             <InfoRow
-              label="Morphology"
+              label={t("botanistPlantDetail.morphology")}
               value={
                 latestApprovedObservation.morphology
               }
             />
 
             <InfoRow
-              label="Notes"
+              label={t("plantDetail.notes")}
               value={
                 latestApprovedObservation.notes
               }
@@ -533,22 +529,16 @@ export default function PlantDetail({
       {isBotanist && (
       <View style={styles.historySection}>
 
-        <Text style={styles.sectionLabel}>
-          OBSERVATION HISTORY
-        </Text>
+        <Text style={styles.sectionLabel}>{t("plantDetail.observationHistory")}</Text>
 
-        <Text style={styles.sectionTitle}>
-          Field record timeline
-        </Text>
+        <Text style={styles.sectionTitle}>{t("plantDetail.fieldRecordTimeline")}</Text>
 
 
         {sortedObservations.length === 0 ? (
 
           <View style={styles.emptyHistory}>
 
-            <Text style={styles.emptyText}>
-              No observation history available.
-            </Text>
+            <Text style={styles.emptyText}>{t("plantDetail.noObservationHistoryAvailable")}</Text>
 
           </View>
 
@@ -582,11 +572,12 @@ function InfoRow({
   value,
   italic = false,
 }) {
+  useAppTranslation();
   return (
     <View style={styles.infoRow}>
 
       <Text style={styles.infoLabel}>
-        {label}
+        {translateLabel(label)}
       </Text>
 
       <Text
@@ -595,7 +586,7 @@ function InfoRow({
           italic && styles.italicValue,
         ]}
       >
-        {value || "-"}
+        {translateFieldValue(label, value || "-")}
       </Text>
 
     </View>
@@ -608,6 +599,7 @@ function InfoRow({
 // =====================================================
 
 function ObservationCard({ observation }) {
+  useAppTranslation();
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -622,8 +614,7 @@ function ObservationCard({ observation }) {
             {formatDate(observation.date)}
           </Text>
 
-          <Text style={styles.recordedBy}>
-            Recorded by {observation.recordedBy}
+          <Text style={styles.recordedBy}>{t("plantDetail.recordedBy2")}{observation.recordedBy}
           </Text>
         </View>
 
@@ -644,7 +635,7 @@ function ObservationCard({ observation }) {
                   : styles.pendingText,
               ]}
             >
-              {observation.status}
+              {translateLabel(observation.status)}
             </Text>
           </View>
 
@@ -663,26 +654,22 @@ function ObservationCard({ observation }) {
           </Text>
 
           <Text style={styles.observationSummary}>
-            {observation.heightCm != null ? `${observation.heightCm} cm` : "Height not recorded"}
+            {observation.heightCm != null ? t("plantDetail.cm", { heightCm: observation.heightCm }) : t("plantDetail.heightNotRecorded")}
             {" • "}
-            {observation.healthStatus || "Not recorded"}
+            {observation.healthStatus || t("plant.notRecorded")}
             {" • "}
-            {observation.lifeStage || "Not recorded"}
+            {observation.lifeStage || t("plant.notRecorded")}
           </Text>
 
-          <Text style={styles.historyLabel}>
-            Morphology
-          </Text>
+          <Text style={styles.historyLabel}>{t("botanistPlantDetail.morphology")}</Text>
 
           <Text style={styles.historyValue}>
-            {observation.morphology || "Not recorded"}
+            {observation.morphology || t("plant.notRecorded")}
           </Text>
 
           {observation.notes && (
             <>
-              <Text style={styles.historyLabel}>
-                Notes
-              </Text>
+              <Text style={styles.historyLabel}>{t("plantDetail.notes")}</Text>
 
               <Text style={styles.notes}>
                 {observation.notes}
@@ -706,7 +693,7 @@ function formatDate(dateString) {
   }
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return dateString;
-  return date.toLocaleDateString("en-GB", {
+  return date.toLocaleDateString(dateLocale(), {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -744,9 +731,21 @@ header: {
   backgroundColor: "#E8EFE3",
 },
 
+refreshError: {
+  marginBottom: 14,
+  paddingHorizontal: 14,
+  paddingVertical: 10,
+  borderRadius: 12,
+  color: "#8A2D2D",
+  backgroundColor: "#FCE8E6",
+  fontSize: 12,
+  lineHeight: 18,
+},
+
+heroToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+
 heroBackButton: {
   alignSelf: "flex-start",
-  marginBottom: 20,
   paddingHorizontal: 14,
   paddingVertical: 9,
   borderRadius: 999,

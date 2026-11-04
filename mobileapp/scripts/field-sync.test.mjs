@@ -7,14 +7,15 @@ const source = readFileSync(
 )
   .replace(/^import[^\n]*\n/gm, "")
   .replace("export function syncDrafts", "function syncDrafts");
-async function fixture({ fail = false, owner = "owner" } = {}) {
+async function fixture({ fail = false, owner = "owner", notificationFailure = false } = {}) {
   const calls = [],
-    removed = [];
+    removed = [], notifications = [];
   const factory = new Function(
     "readDrafts",
     "removeDraft",
     "plantApi",
     "faceSession",
+    "botanistNotifications",
     source + "\nreturn syncDrafts;",
   );
   const sync = factory(
@@ -33,8 +34,12 @@ async function fixture({ fail = false, owner = "owner" } = {}) {
       return { id: "observation", plant_id: 1 };
     },
     { restore: async () => ({ id: owner, role: "botanist" }) },
+    { recordSync: async (accountId, event) => {
+      if (notificationFailure) throw Error("Notification storage unavailable");
+      notifications.push({ accountId, ...event });
+    } },
   );
-  return { sync, calls, removed };
+  return { sync, calls, removed, notifications };
 }
 test("sync submits draft and removes it only after server confirmation", async () => {
   const f = await fixture();
@@ -43,16 +48,22 @@ test("sync submits draft and removes it only after server confirmation", async (
   assert.equal(f.calls[0].options.expectedAccountId, "owner");
   assert.equal(f.calls[1].path, "/observations/observation/submit");
   assert.deepEqual(f.removed, ["key"]);
+  assert.equal(f.notifications[0].type, "sync_completed");
+  assert.equal(f.notifications[0].count, 1);
+  assert.equal(f.notifications[0].accountId, "owner");
 });
 test("failed requests retain drafts for retry", async () => {
   const f = await fixture({ fail: true });
   await assert.rejects(f.sync("owner"), /offline/);
   assert.equal(f.removed.length, 0);
+  assert.equal(f.notifications[0].type, "sync_failed");
+  assert.equal(f.notifications[0].key, "key");
 });
 test("another account cannot synchronize a previous account draft", async () => {
   const f = await fixture({ owner: "other" });
   await assert.rejects(f.sync("owner"), /owner/);
   assert.equal(f.calls.length, 0);
+  assert.equal(f.notifications.length, 0);
 });
 
 test("partial photo failure retains the draft and retries with the same upload keys", async () => {
@@ -64,6 +75,7 @@ test("partial photo failure retains the draft and retries with the same upload k
     "removeDraft",
     "plantApi",
     "faceSession",
+    "botanistNotifications",
     source + "\nreturn syncDrafts;",
   );
   const draft = {
@@ -81,6 +93,7 @@ test("partial photo failure retains the draft and retries with the same upload k
       return { id: "observation", plant_id: 1 };
     },
     { restore: async () => ({ id: "owner", role: "botanist" }) },
+    { recordSync: async () => {} },
   );
   await assert.rejects(sync("owner"), /interrupted/);
   assert.deepEqual(removed, []);
@@ -111,6 +124,7 @@ test("offline corrections recover after a PATCH succeeded but its response was l
     "removeDraft",
     "plantApi",
     "faceSession",
+    "botanistNotifications",
     source + "\nreturn syncDrafts;",
   );
   const sync = factory(
@@ -136,10 +150,21 @@ test("offline corrections recover after a PATCH succeeded but its response was l
       return { id: "observation", plant_id: 1 };
     },
     { restore: async () => ({ id: "owner", role: "botanist" }) },
+    { recordSync: async () => {} },
   );
   await assert.rejects(sync("owner"), /lost response/);
   assert.deepEqual(removed, []);
   fail = false;
   assert.equal(await sync("owner"), 1);
   assert.deepEqual(removed, ["correction"]);
+});
+
+
+test("notification storage failures do not change synchronization success or its original error", async () => {
+  const success = await fixture({ notificationFailure: true });
+  assert.equal(await success.sync("owner"), 1);
+  assert.deepEqual(success.removed, ["key"]);
+  const failure = await fixture({ notificationFailure: true, fail: true });
+  await assert.rejects(failure.sync("owner"), /offline/);
+  assert.deepEqual(failure.removed, []);
 });

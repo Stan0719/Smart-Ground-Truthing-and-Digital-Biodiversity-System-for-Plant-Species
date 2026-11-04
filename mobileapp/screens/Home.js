@@ -1,6 +1,9 @@
+import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 // Home.js
+import LanguageSelector from "../components/LanguageSelector";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   View,
@@ -15,10 +18,12 @@ import {
   PanResponder,
   Linking,
   FlatList,
+  RefreshControl,
 } from 'react-native';
 
 import { getSpeciesImageSource } from '../data/speciesImages';
 import { fetchSpeciesCatalog } from '../utils/plantApi';
+import RefreshButton from '../components/RefreshButton';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -212,7 +217,7 @@ const AboutImageStack = () => {
     <View style={styles.aboutStackWrapper}>
       <TouchableOpacity
         accessibilityRole="button"
-        accessibilityLabel="Previous Niah image"
+        accessibilityLabel={t("home.previousNiahImage")}
         activeOpacity={0.75}
         disabled={isAnimating}
         hitSlop={6}
@@ -279,7 +284,7 @@ const AboutImageStack = () => {
 
       <TouchableOpacity
         accessibilityRole="button"
-        accessibilityLabel="Next Niah image"
+        accessibilityLabel={t("home.nextNiahImage")}
         activeOpacity={0.75}
         disabled={isAnimating}
         hitSlop={6}
@@ -298,6 +303,8 @@ const AboutImageStack = () => {
 // ==================================================
 
 export default function Home({ navigation }) {
+  useAppTranslation();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef(null);
   const carouselRef = useRef(null);
 
@@ -305,30 +312,40 @@ export default function Home({ navigation }) {
   const [species, setSpecies] = useState([]);
   const [speciesLoading, setSpeciesLoading] = useState(true);
   const [speciesError, setSpeciesError] = useState('');
+  const speciesRequestRef = useRef(null);
+  const mountedRef = useRef(false);
   const carouselSpecies = [...species, ...species];
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadSpecies = async () => {
+  const loadSpecies = useCallback(() => {
+    if (speciesRequestRef.current) return speciesRequestRef.current;
+    const request = (async () => {
       try {
         setSpeciesLoading(true);
         setSpeciesError('');
         const result = await fetchSpeciesCatalog();
-        if (isMounted) setSpecies(result);
+        if (mountedRef.current) setSpecies(result);
       } catch (error) {
-        if (isMounted) {
+        if (mountedRef.current) {
           setSpeciesError(error.message || 'Unable to load species.');
-          setSpecies([]);
         }
       } finally {
-        if (isMounted) setSpeciesLoading(false);
+        if (mountedRef.current) setSpeciesLoading(false);
+        if (speciesRequestRef.current === request) speciesRequestRef.current = null;
       }
-    };
-
-    loadSpecies();
-    return () => { isMounted = false; };
+    })();
+    speciesRequestRef.current = request;
+    return request;
   }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void loadSpecies();
+    const unsubscribe = navigation.addListener('focus', loadSpecies);
+    return () => {
+      mountedRef.current = false;
+      unsubscribe();
+    };
+  }, [navigation, loadSpecies]);
 
 
   // ==================================================
@@ -441,7 +458,7 @@ const renderPlant = ({ item }) => {
 
         <View style={styles.categoryBadge}>
           <Text style={styles.categoryText}>
-            {item.category}
+            {translateLabel(item.category)}
           </Text>
         </View>
       </View>
@@ -461,9 +478,7 @@ const renderPlant = ({ item }) => {
   style={styles.viewPlantButton}
   hitSlop={5}
 >
-  <Text style={styles.viewPlant}>
-    View Details →
-  </Text>
+  <Text style={styles.viewPlant}>{t("home.viewDetails")}</Text>
 </TouchableOpacity>
 
       </View>
@@ -475,10 +490,22 @@ const renderPlant = ({ item }) => {
   return (
     <View style={styles.container}>
 
+      <View style={[styles.languageHeader, { paddingTop: Math.max(insets.top, 8) }]}>
+        <LanguageSelector />
+      </View>
+
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={speciesLoading}
+            onRefresh={() => void loadSpecies()}
+            tintColor={COLORS.darkGreen}
+            colors={[COLORS.darkGreen]}
+          />
+        }
       >
 
 
@@ -497,29 +524,18 @@ const renderPlant = ({ item }) => {
           <View style={styles.heroContent}>
 
             <RevealView>
-              <Text style={styles.eyebrow}>
-                NIAH NATIONAL PARK
-              </Text>
+              <Text style={styles.eyebrow}>{t("home.niahNationalPark")}</Text>
             </RevealView>
 
 
             <RevealView delay={120}>
-              <Text style={styles.heroTitle}>
-                Discover the{' '}
-                <Text style={styles.heroHighlight}>
-                  Biodiversity
-                </Text>{' '}
-                of Niah
-              </Text>
+              <Text style={styles.heroTitle}>{t("home.discoverThe")}{' '}
+                <Text style={styles.heroHighlight}>{t("home.biodiversity")}</Text>{' '}{t("home.ofNiah")}</Text>
             </RevealView>
 
 
             <RevealView delay={240}>
-              <Text style={styles.heroDescription}>
-                Explore the plants, biodiversity, and natural
-                heritage of one of Sarawak's most remarkable
-                national parks.
-              </Text>
+              <Text style={styles.heroDescription}>{t("home.exploreThePlantsBiodiversityAndNaturalHeritageOfOneOf")}</Text>
             </RevealView>
 
 
@@ -532,9 +548,7 @@ const renderPlant = ({ item }) => {
                   activeOpacity={0.8}
                   hitSlop={5}
                 >
-                  <Text style={styles.exploreButtonText}>
-                    Explore Plants
-                  </Text>
+                  <Text style={styles.exploreButtonText}>{t("home.explorePlants")}</Text>
                 </TouchableOpacity>
 
               </View>
@@ -572,31 +586,16 @@ const renderPlant = ({ item }) => {
               style={styles.aboutContent}
             >
 
-              <Text style={styles.sectionLabel}>
-                ABOUT NIAH
-              </Text>
+              <Text style={styles.sectionLabel}>{t("home.aboutNiah")}</Text>
 
 
-              <Text style={styles.aboutTitle}>
-                Niah National Park
-              </Text>
+              <Text style={styles.aboutTitle}>{t("home.niahNationalPark2")}</Text>
 
 
-              <Text style={styles.aboutDescription}>
-                Niah National Park is a UNESCO World Heritage
-                Site known for its remarkable archaeological
-                significance, extensive cave systems,
-                prehistoric remains, rock art, and rich
-                biodiversity.
-              </Text>
+              <Text style={styles.aboutDescription}>{t("home.niahNationalParkIsAUnescoWorldHeritageSiteKnown")}</Text>
 
 
-              <Text style={styles.aboutDescription}>
-                The park is home to the famous Niah Caves,
-                where evidence of prehistoric human settlement
-                provides valuable insight into the early
-                history of Borneo.
-              </Text>
+              <Text style={styles.aboutDescription}>{t("home.theParkIsHomeToTheFamousNiahCavesWhere")}</Text>
 
 
               {/* Key Facts */}
@@ -608,9 +607,7 @@ const renderPlant = ({ item }) => {
                     40,000+
                   </Text>
 
-                  <Text style={styles.factLabel}>
-                    Years of Human History
-                  </Text>
+                  <Text style={styles.factLabel}>{t("home.yearsOfHumanHistory")}</Text>
                 </RevealView>
 
 
@@ -618,13 +615,9 @@ const renderPlant = ({ item }) => {
                   delay={100}
                   style={styles.factCard}
                 >
-                  <Text style={styles.factNumber}>
-                    UNESCO
-                  </Text>
+                  <Text style={styles.factNumber}>{t("home.unesco")}</Text>
 
-                  <Text style={styles.factLabel}>
-                    World Heritage Site
-                  </Text>
+                  <Text style={styles.factLabel}>{t("home.worldHeritageSite")}</Text>
                 </RevealView>
 
 
@@ -632,13 +625,9 @@ const renderPlant = ({ item }) => {
                   delay={200}
                   style={styles.factCard}
                 >
-                  <Text style={styles.factNumber}>
-                    Rich
-                  </Text>
+                  <Text style={styles.factNumber}>{t("home.rich")}</Text>
 
-                  <Text style={styles.factLabel}>
-                    Natural Biodiversity
-                  </Text>
+                  <Text style={styles.factLabel}>{t("home.naturalBiodiversity")}</Text>
                 </RevealView>
 
               </View>
@@ -657,26 +646,17 @@ const renderPlant = ({ item }) => {
             <View style={styles.exploreNiahHeading}>
 
               <RevealView>
-                <Text style={styles.sectionLabel}>
-                  EXPLORE NIAH
-                </Text>
+                <Text style={styles.sectionLabel}>{t("home.exploreNiah")}</Text>
               </RevealView>
 
 
               <RevealView delay={100}>
-                <Text style={styles.exploreNiahTitle}>
-                  Discover Niah's Remarkable Landscapes
-                </Text>
+                <Text style={styles.exploreNiahTitle}>{t("home.discoverNiahSRemarkableLandscapes")}</Text>
               </RevealView>
 
 
               <RevealView delay={200}>
-                <Text style={styles.exploreNiahDescription}>
-                  From vast limestone caves to ancient rock
-                  art and tropical rainforest, discover the
-                  places that make Niah National Park
-                  extraordinary.
-                </Text>
+                <Text style={styles.exploreNiahDescription}>{t("home.fromVastLimestoneCavesToAncientRockArtAndTropical")}</Text>
               </RevealView>
 
             </View>
@@ -703,19 +683,11 @@ const renderPlant = ({ item }) => {
 
                   <View style={styles.attractionContent}>
 
-                    <Text style={styles.featuredLabel}>
-                      FEATURED LANDSCAPE
-                    </Text>
+                    <Text style={styles.featuredLabel}>{t("home.featuredLandscape")}</Text>
 
-                    <Text style={styles.attractionTitle}>
-                      Great Cave
-                    </Text>
+                    <Text style={styles.attractionTitle}>{t("home.greatCave")}</Text>
 
-                    <Text style={styles.attractionDescription}>
-                      Step inside Niah's spectacular limestone
-                      cave system and explore one of its most
-                      important archaeological landscapes.
-                    </Text>
+                    <Text style={styles.attractionDescription}>{t("home.stepInsideNiahSSpectacularLimestoneCaveSystemAndExplore")}</Text>
 
                   </View>
 
@@ -742,14 +714,9 @@ const renderPlant = ({ item }) => {
 
                   <View style={styles.attractionContentSmall}>
 
-                    <Text style={styles.attractionTitleSmall}>
-                      Painted Cave
-                    </Text>
+                    <Text style={styles.attractionTitleSmall}>{t("home.paintedCave")}</Text>
 
-                    <Text style={styles.attractionDescriptionSmall}>
-                      Discover prehistoric rock paintings and
-                      traces of Niah's ancient human story.
-                    </Text>
+                    <Text style={styles.attractionDescriptionSmall}>{t("home.discoverPrehistoricRockPaintingsAndTracesOfNiahSAncient")}</Text>
 
                   </View>
 
@@ -776,15 +743,9 @@ const renderPlant = ({ item }) => {
 
                   <View style={styles.attractionContentSmall}>
 
-                    <Text style={styles.attractionTitleSmall}>
-                      Rainforest Trails
-                    </Text>
+                    <Text style={styles.attractionTitleSmall}>{t("home.rainforestTrails")}</Text>
 
-                    <Text style={styles.attractionDescriptionSmall}>
-                      Walk through lush tropical rainforest and
-                      boardwalks on the journey towards Niah's
-                      caves.
-                    </Text>
+                    <Text style={styles.attractionDescriptionSmall}>{t("home.walkThroughLushTropicalRainforestAndBoardwalksOnTheJourney")}</Text>
 
                   </View>
 
@@ -819,29 +780,17 @@ const renderPlant = ({ item }) => {
                 <View style={styles.whyNiah}>
 
                   <RevealView>
-                    <Text style={styles.visitorSectionLabel}>
-                      WHY NIAH?
-                    </Text>
+                    <Text style={styles.visitorSectionLabel}>{t("home.whyNiah")}</Text>
                   </RevealView>
 
 
                   <RevealView delay={100}>
-                    <Text style={styles.whyNiahTitle}>
-                      Where nature meets human history
-                    </Text>
+                    <Text style={styles.whyNiahTitle}>{t("home.whereNatureMeetsHumanHistory")}</Text>
                   </RevealView>
 
 
                   <RevealView delay={200}>
-                    <Text style={styles.whyNiahDescription}>
-                      Hidden within the rainforests of northern
-                      Sarawak, Niah National Park is a remarkable
-                      meeting point of nature and human history.
-                      Its vast limestone caves preserve
-                      archaeological discoveries, prehistoric
-                      paintings, and evidence of people who lived
-                      here thousands of years ago.
-                    </Text>
+                    <Text style={styles.whyNiahDescription}>{t("home.hiddenWithinTheRainforestsOfNorthernSarawakNiahNationalPark")}</Text>
                   </RevealView>
 
                 </View>
@@ -852,9 +801,7 @@ const renderPlant = ({ item }) => {
                 <View style={styles.visitorInfo}>
 
                   <RevealView>
-                    <Text style={styles.visitorTitle}>
-                      Plan your visit
-                    </Text>
+                    <Text style={styles.visitorTitle}>{t("home.planYourVisit")}</Text>
                   </RevealView>
 
 
@@ -870,13 +817,9 @@ const renderPlant = ({ item }) => {
                         </Text>
                       </View>
 
-                      <Text style={styles.visitorLabel}>
-                        OPENING HOURS
-                      </Text>
+                      <Text style={styles.visitorLabel}>{t("home.openingHours")}</Text>
 
-                      <Text style={styles.visitorValue}>
-                        Daily, 8 AM–5 PM
-                      </Text>
+                      <Text style={styles.visitorValue}>{t("home.daily8Am5Pm")}</Text>
 
                     </RevealView>
 
@@ -894,22 +837,16 @@ const renderPlant = ({ item }) => {
                         </Text>
                       </View>
 
-                      <Text style={styles.visitorLabel}>
-                        LOCATION
-                      </Text>
+                      <Text style={styles.visitorLabel}>{t("home.location")}</Text>
 
-                      <Text style={styles.visitorValue}>
-                        Niah, Miri Division
-                      </Text>
+                      <Text style={styles.visitorValue}>{t("home.niahMiriDivision")}</Text>
 
                       <TouchableOpacity
                         onPress={openGoogleMaps}
                         activeOpacity={0.7}
                         hitSlop={8}
                       >
-                        <Text style={styles.mapLink}>
-                          View on Google Maps →
-                        </Text>
+                        <Text style={styles.mapLink}>{t("home.viewOnGoogleMaps")}</Text>
                       </TouchableOpacity>
 
                     </RevealView>
@@ -928,13 +865,9 @@ const renderPlant = ({ item }) => {
                         </Text>
                       </View>
 
-                      <Text style={styles.visitorLabel}>
-                        MAIN EXPERIENCE
-                      </Text>
+                      <Text style={styles.visitorLabel}>{t("home.mainExperience")}</Text>
 
-                      <Text style={styles.visitorValue}>
-                        Cave & rainforest trekking
-                      </Text>
+                      <Text style={styles.visitorValue}>{t("home.caveRainforestTrekking")}</Text>
 
                     </RevealView>
 
@@ -952,13 +885,9 @@ const renderPlant = ({ item }) => {
                         </Text>
                       </View>
 
-                      <Text style={styles.visitorLabel}>
-                        BEST PERIOD
-                      </Text>
+                      <Text style={styles.visitorLabel}>{t("home.bestPeriod")}</Text>
 
-                      <Text style={styles.visitorValue}>
-                        March–September
-                      </Text>
+                      <Text style={styles.visitorValue}>{t("home.marchSeptember")}</Text>
 
                     </RevealView>
 
@@ -976,13 +905,9 @@ const renderPlant = ({ item }) => {
                         </Text>
                       </View>
 
-                      <Text style={styles.visitorLabel}>
-                        FROM MIRI
-                      </Text>
+                      <Text style={styles.visitorLabel}>{t("home.fromMiri")}</Text>
 
-                      <Text style={styles.visitorValue}>
-                        About 1.5 hours
-                      </Text>
+                      <Text style={styles.visitorValue}>{t("home.about15Hours")}</Text>
 
                     </RevealView>
 
@@ -1010,26 +935,17 @@ const renderPlant = ({ item }) => {
             <View style={styles.journeyHeading}>
 
               <RevealView>
-                <Text style={styles.sectionLabel}>
-                  YOUR JOURNEY
-                </Text>
+                <Text style={styles.sectionLabel}>{t("home.yourJourney")}</Text>
               </RevealView>
 
 
               <RevealView delay={100}>
-                <Text style={styles.journeyTitle}>
-                  The Adventure Begins Before the Cave
-                </Text>
+                <Text style={styles.journeyTitle}>{t("home.theAdventureBeginsBeforeTheCave")}</Text>
               </RevealView>
 
 
               <RevealView delay={200}>
-                <Text style={styles.journeyDescription}>
-                  Follow the journey from the park headquarters
-                  through rainforest, heritage sites and caves
-                  towards some of Niah's most remarkable
-                  landmarks.
-                </Text>
+                <Text style={styles.journeyDescription}>{t("home.followTheJourneyFromTheParkHeadquartersThroughRainforestHeritage")}</Text>
               </RevealView>
 
             </View>
@@ -1041,41 +957,41 @@ const renderPlant = ({ item }) => {
 
               <JourneyItem
                 number="01"
-                title="Park HQ"
+                title={t("home.parkHq")}
                 subtitle="Begin your visit"
               />
 
               <JourneyItem
                 number="02"
-                title="River Crossing"
+                title={t("home.riverCrossing")}
                 subtitle="Cross into the forest"
                 delay={80}
               />
 
               <JourneyItem
                 number="03"
-                title="Archaeology Museum"
+                title={t("home.archaeologyMuseum")}
                 subtitle="Discover Niah's story"
                 delay={160}
               />
 
               <JourneyItem
                 number="04"
-                title="Rainforest Boardwalk"
+                title={t("home.rainforestBoardwalk")}
                 subtitle="Walk beneath the canopy"
                 delay={240}
               />
 
               <JourneyItem
                 number="05"
-                title="Trader's Cave"
+                title={t("home.traderSCave")}
                 subtitle="Enter the cave landscape"
                 delay={320}
               />
 
               <JourneyItem
                 number="06"
-                title="Great Cave"
+                title={t("home.greatCave")}
                 subtitle="The main destination"
                 highlight
                 delay={400}
@@ -1083,7 +999,7 @@ const renderPlant = ({ item }) => {
 
               <JourneyItem
                 number="07"
-                title="Painted Cave"
+                title={t("home.paintedCave")}
                 subtitle="Ancient art awaits"
                 delay={480}
               />
@@ -1110,23 +1026,24 @@ const renderPlant = ({ item }) => {
               <View style={styles.exploreHeading}>
 
                 <RevealView>
-                  <Text style={styles.sectionLabel}>
-  EXPLORE THE SPECIES
-</Text>
+                  <Text style={styles.sectionLabel}>{t("home.exploreTheSpecies")}</Text>
                 </RevealView>
 
-<RevealView delay={100}>
-  <Text style={styles.exploreTitle}>
-    Species of Niah
-  </Text>
-</RevealView>
+                <RevealView delay={100}>
+                  <View style={styles.exploreTitleRow}>
+                    <Text style={styles.exploreTitle}>{t("home.speciesOfNiah")}</Text>
+                    <RefreshButton
+                      onPress={() => void loadSpecies()}
+                      loading={speciesLoading}
+                      label={t("species.refreshSpecies")}
+                      testID="home-species-refresh"
+                    />
+                  </View>
+                </RevealView>
 
-<RevealView delay={200}>
-  <Text style={styles.exploreDescription}>
-    Discover the diverse tree, flower, fern, and climber
-    species found throughout Niah National Park.
-  </Text>
-</RevealView>
+                <RevealView delay={200}>
+                  <Text style={styles.exploreDescription}>{t("home.discoverTheDiverseTreeFlowerFernAndClimberSpeciesFound")}</Text>
+                </RevealView>
 
               </View>
 
@@ -1140,9 +1057,7 @@ const renderPlant = ({ item }) => {
                   hitSlop={5}
                 >
 
-                  <Text style={styles.exploreMoreText}>
-                    Explore More Plant Species
-                  </Text>
+                  <Text style={styles.exploreMoreText}>{t("home.exploreMorePlantSpecies")}</Text>
 
                   <Text style={styles.buttonArrow}>
                     →
@@ -1181,13 +1096,13 @@ const renderPlant = ({ item }) => {
             />
 
             {speciesLoading && (
-              <Text style={styles.exploreDescription}>Loading species from the database...</Text>
+              <Text style={styles.exploreDescription}>{t("home.loadingSpeciesFromTheDatabase")}</Text>
             )}
             {!speciesLoading && !!speciesError && (
-              <Text style={[styles.exploreDescription, { color: '#B42318' }]}>{speciesError}</Text>
+              <Text style={[styles.exploreDescription, { color: '#B42318' }]}>{translateUIMessage(speciesError)}</Text>
             )}
             {!speciesLoading && !speciesError && species.length === 0 && (
-              <Text style={styles.exploreDescription}>No species are available yet.</Text>
+              <Text style={styles.exploreDescription}>{t("home.noSpeciesAreAvailableForYourAccountYetAConservation")}</Text>
             )}
 
 
@@ -1238,27 +1153,19 @@ const renderPlant = ({ item }) => {
               <View style={styles.beforeExploreTitleContainer}>
 
                 <RevealView>
-                  <Text style={styles.sectionLabel}>
-                    BEFORE YOU EXPLORE
-                  </Text>
+                  <Text style={styles.sectionLabel}>{t("home.beforeYouExplore")}</Text>
                 </RevealView>
 
 
                 <RevealView delay={100}>
-                  <Text style={styles.beforeExploreTitle}>
-                    Come Prepared for the Adventure
-                  </Text>
+                  <Text style={styles.beforeExploreTitle}>{t("home.comePreparedForTheAdventure")}</Text>
                 </RevealView>
 
               </View>
 
 
               <RevealView delay={200}>
-                <Text style={styles.beforeExploreDescription}>
-                  A little preparation will make your journey
-                  through Niah's rainforest and caves safer and
-                  more comfortable.
-                </Text>
+                <Text style={styles.beforeExploreDescription}>{t("home.aLittlePreparationWillMakeYourJourneyThroughNiahS")}</Text>
               </RevealView>
 
             </View>
@@ -1270,27 +1177,27 @@ const renderPlant = ({ item }) => {
 
               <PreparationItem
                 icon="♢"
-                title="Good Footwear"
+                title={t("home.goodFootwear")}
                 description="Wear comfortable shoes with good grip as trails and cave surfaces can be slippery."
               />
 
               <PreparationItem
                 icon="◉"
-                title="Bring a Torch"
+                title={t("home.bringATorch")}
                 description="Some sections of the caves are naturally dark, so bring a reliable torch."
                 delay={100}
               />
 
               <PreparationItem
                 icon="♧"
-                title="Carry Water"
+                title={t("home.carryWater")}
                 description="Stay hydrated during the walk through the tropical rainforest and cave system."
                 delay={200}
               />
 
               <PreparationItem
                 icon="☀"
-                title="Insect Repellent"
+                title={t("home.insectRepellent")}
                 description="Bring insect repellent for greater comfort while travelling through the rainforest."
                 delay={300}
               />
@@ -1353,11 +1260,11 @@ const JourneyItem = ({
             highlight && styles.journeyItemTitleHighlight,
           ]}
         >
-          {title}
+          {translateLabel(title)}
         </Text>
 
         <Text style={styles.journeyItemSubtitle}>
-          {subtitle}
+          {translateLabel(subtitle)}
         </Text>
 
       </View>
@@ -1393,11 +1300,11 @@ const PreparationItem = ({
       <View style={styles.preparationContent}>
 
         <Text style={styles.preparationTitle}>
-          {title}
+          {translateLabel(title)}
         </Text>
 
         <Text style={styles.preparationDescription}>
-          {description}
+          {translateLabel(description)}
         </Text>
 
       </View>
@@ -1412,6 +1319,12 @@ const PreparationItem = ({
 // ==================================================
 
 const styles = StyleSheet.create({
+  languageHeader: {
+    alignItems: 'flex-end',
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    backgroundColor: COLORS.offWhite,
+  },
 
   // ==================================================
   // CONTAINER
@@ -2383,18 +2296,25 @@ exploreHeader: {
     flex: 1,
   },
 
-exploreTitle: {
-  color: '#315F5F',
-  fontSize:
-    SCREEN_WIDTH < 500
-      ? 30
-      : 54,
-  lineHeight:
-    SCREEN_WIDTH < 500
-      ? 36
-      : 60,
-  fontWeight: '800',
-},
+  exploreTitle: {
+    flexShrink: 1,
+    color: '#315F5F',
+    fontSize:
+      SCREEN_WIDTH < 500
+        ? 30
+        : 54,
+    lineHeight:
+      SCREEN_WIDTH < 500
+        ? 36
+        : 60,
+    fontWeight: '800',
+  },
+
+  exploreTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SCREEN_WIDTH < 500 ? 12 : 16,
+  },
 
 exploreDescription: {
   maxWidth: 560,

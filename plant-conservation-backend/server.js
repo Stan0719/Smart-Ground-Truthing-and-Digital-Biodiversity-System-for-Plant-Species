@@ -1,5 +1,6 @@
 "use strict";
 const express = require("express");
+const { createServer } = require("node:http");
 const {
   configuredOrigins,
   browserBoundary,
@@ -9,9 +10,15 @@ const {
 const { mountDomain } = require("./domain.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
 const { mountUploads } = require("./uploads.cjs");
+const { mountSpeciesRequests } = require("./species-requests.cjs");
+const { mountPlantSubmissions } = require("./plant-submissions.cjs");
+const { mountRecordChanges } = require("./record-changes.cjs");
+const { mountRecordVersionHistory } = require("./record-version-history.cjs");
 function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
   const app = express();
   app.disable("x-powered-by");
+  // Do not generate ETags for uncached, authenticated JSON reads.
+  app.disable("etag");
   app.use((req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -29,11 +36,19 @@ function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
       return res.status(415).json({ error: "JSON required." });
     next();
   });
+  app.use("/api/plant-submissions", express.json({ limit: "64mb" }));
+  app.use("/api/my-plants", express.json({ limit: "64mb" }));
+  app.use("/api/my-species-requests", express.json({ limit: "8mb" }));
+  app.use("/api/record-changes", express.json({ limit: "64mb" }));
   app.use(express.json({ limit: "6mb" }));
   mountDeviceIngestion(app, { pool });
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
   mountDomain(app, { auth, pool, allow });
+  mountSpeciesRequests(app, { pool, allow });
+  mountPlantSubmissions(app, { pool, allow });
+  mountRecordChanges(app, { pool, allow });
+  mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow });
   mountIoT(app, { pool, allow });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {
@@ -51,6 +66,8 @@ function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
   );
   app.use((_req, res) => res.status(404).json({ error: "Not found." }));
   app.use((error, _req, res, _next) => {
+    if (["42P01", "42703"].includes(error.code))
+      return res.status(503).json({ error: "Plant database setup is incomplete. Apply the supplied Add Plant migrations and restart the plant API." });
     const status =
       error.type === "entity.too.large"
         ? 413
@@ -62,6 +79,13 @@ function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
               : ["23514", "22P02"].includes(error.code)
                 ? 400
                 : 503);
+    if (error.code === "23503")
+      console.error("Plant API foreign key violation:", JSON.stringify({
+        code: error.code,
+        schema: error.schema,
+        table: error.table,
+        constraint: error.constraint,
+      }));
     if (status >= 500)
       console.error("Plant API request failed:", error.code ?? error.name);
     res.status(status).json({
@@ -95,6 +119,7 @@ async function start() {
       "SELECT plant_id,registered_subject,rbac_status,qr_token FROM plant_record LIMIT 0",
     );
     await pool.query("SELECT species_id,rbac_data FROM species LIMIT 0");
+    await pool.query("SELECT qr_id,qr_code,plant_id,status FROM public.qr_code LIMIT 0");
     await pool.query(
       "SELECT id,owner_subject,revision FROM plant_observation LIMIT 0",
     );
@@ -103,16 +128,19 @@ async function start() {
     throw error;
   }
   const app = createPlantApp({ auth, pool });
-  const server = app.listen(
-    Number(process.env.PORT || 3000),
-    process.env.HOST || "127.0.0.1",
-    () => console.log("Plant API listening on port " + server.address().port),
-  );
-  server.on("error", async () => {
-    console.error("Plant API startup failed; verify configuration.");
+  const server = createServer(app);
+  const port = Number(process.env.PORT || 3000);
+  server.once("listening", () => console.log("Plant API listening on port " + server.address().port));
+  server.on("error", async (error) => {
+    console.error(
+      "Plant API startup failed:",
+      error.code ?? error.name,
+      ...(error.code === "EADDRINUSE" ? [`Port ${port} is already in use. Stop the existing plant API before starting another instance.`] : []),
+    );
     await Promise.allSettled([auth.db.close(), pool.end()]);
     process.exitCode = 1;
   });
+  server.listen(port, process.env.HOST || "127.0.0.1");
   for (const signal of ["SIGINT", "SIGTERM"])
     process.once(signal, () =>
       server.close(async () => {
