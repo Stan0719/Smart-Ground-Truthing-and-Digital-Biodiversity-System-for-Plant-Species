@@ -44,7 +44,6 @@ import SpeciesScreen from "./screens/Species";
 import SpeciesDetailScreen from "./screens/SpeciesDetail";
 import BotanistPlantDetailScreen from "./screens/BotanistPlantDetail";
 import BotanistSpeciesRequestDetailScreen from "./screens/BotanistSpeciesRequestDetail";
-import AddObservationScreen from "./screens/AddObservation";
 import FieldCollectionScreen from "./screens/FieldCollection";
 import PersistentKnowledgeScreen from "./screens/PersistentKnowledge";
 
@@ -170,11 +169,12 @@ function ScanStack({ user }) {
 
       <Stack.Screen
         name="Scan"
-        component={ScanScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <ScanScreen {...props} user={user} />}
+      </Stack.Screen>
 
       <Stack.Screen
         name="PlantDetails"
@@ -213,11 +213,12 @@ function MapStack({ user }) {
 
       <Stack.Screen
         name="Map"
-        component={MapScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <MapScreen {...props} user={user} />}
+      </Stack.Screen>
 
       <Stack.Screen
         name="PlantDetails"
@@ -269,7 +270,6 @@ function AccountStack({
 
       <Stack.Screen
         name="FavouritePlants"
-        component={FavouritePlantsScreen}
         options={{
           title: t("navigation.favouritePlants"),
           headerTintColor: theme.dark,
@@ -277,7 +277,9 @@ function AccountStack({
             backgroundColor: theme.light,
           },
         }}
-      />
+      >
+        {(props) => <FavouritePlantsScreen {...props} user={user} />}
+      </Stack.Screen>
 
       {/* Plant Details */}
       <Stack.Screen
@@ -301,11 +303,20 @@ function AccountStack({
 
       <Stack.Screen
         name="ScanHistory"
-        component={ScanHistoryScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <ScanHistoryScreen {...props} user={user} />}
+      </Stack.Screen>
+
+      <Stack.Screen name="SpeciesDetail" options={{ headerShown: false }}>
+        {(props) => <SpeciesDetailScreen {...props} user={user} />}
+      </Stack.Screen>
+
+      <Stack.Screen name="Species" options={{ headerShown: false }}>
+        {(props) => <PlantsScreen {...props} user={user} />}
+      </Stack.Screen>
 
     </Stack.Navigator>
   );
@@ -329,9 +340,9 @@ function MainTabs({
 
         headerShown: false,
 
-        tabBarActiveTintColor: theme.primary,
+        tabBarActiveTintColor: theme.dark,
 
-        tabBarInactiveTintColor: "#7A8A80",
+        tabBarInactiveTintColor: "#6D7F75",
 
         tabBarStyle: {
           height: 65,
@@ -339,11 +350,12 @@ function MainTabs({
           paddingBottom: 8,
           paddingTop: 5,
 
-          backgroundColor: "#FFFFFF",
+          backgroundColor: "#F7FBF4",
 
-          borderTopWidth: 0,
+          borderTopWidth: 1,
+          borderTopColor: "#E2EDE0",
 
-          elevation: 10,
+          elevation: 4,
         },
 
         tabBarLabelStyle: {
@@ -761,22 +773,9 @@ export default function App({ homeRequest }) {
 
         <RootStack.Screen
           name="AddObservation"
-          options={{
-            headerShown: true,
-            title: t("navigation.addNewObservation"),
-            headerTintColor: theme.dark,
-            headerStyle: {
-              backgroundColor: theme.light,
-            },
-          }}
-        >
-          {(props) => (
-            <AddObservationScreen
-              {...props}
-              user={user}
-            />
-          )}
-        </RootStack.Screen>
+          component={FieldCollectionScreen}
+          options={{ headerShown: true, title: t("navigation.addNewObservation"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
+        />
 
 
 

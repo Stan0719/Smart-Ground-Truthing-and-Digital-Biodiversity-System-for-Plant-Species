@@ -1,4 +1,4 @@
-import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
+import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 // PlantQRCode.js
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
@@ -26,7 +26,7 @@ import { plantApi } from "../utils/plantApi";
 import QRRefreshButton from "../components/QRRefreshButton";
 
 import { createQRInventoryLoader, emptyQRInventory } from "../utils/qrInventory";
-import { buildQRPrintHtml, qrImageData } from "../utils/qrPrint";
+import { A4_PRINT_OPTIONS, buildQRPrintHtml } from "../utils/qrPrint";
 
 
 export default function PlantQRCodeScreen({ route }) {
@@ -39,13 +39,12 @@ export default function PlantQRCodeScreen({ route }) {
   const generatingRef = useRef(false);
   const printingRef = useRef(false);
   const focusedRef = useRef(false);
-  const qrImages = useRef(new Map());
   const loader = useMemo(() => createQRInventoryLoader(
     () => plantApi("/qr-codes", { expectedAccountId: accountId }),
     setInventory,
   ), [accountId]);
   const { records: plantQRCodes, loading: loadingRecords, hasLoaded, error: loadError } = inventory;
-  const availableQRCodes = plantQRCodes.filter((qr) => qr.status === "generated" && !qr.plantId);
+  const availableQRCodes = plantQRCodes.filter((qr) => !qr.plantId);
   const loadingPrint = printingId !== null;
 
   const loadPlantQRCodes = useCallback(() => {
@@ -107,11 +106,9 @@ export default function PlantQRCodeScreen({ route }) {
     try {
       const pages = [];
       for (const qr of records) {
-        const rendered = qrImages.current.get(qr.id);
-        if (rendered?.value !== qr.value) throw Error("QR image is not ready. Please try again.");
-        pages.push({ qr, image: await qrImageData(rendered.svg) });
+        pages.push({ qr });
       }
-      await Print.printAsync({ html: buildQRPrintHtml(pages, {
+      await Print.printAsync({ ...A4_PRINT_OPTIONS, html: buildQRPrintHtml(pages, {
         park: t("qrPrint.park"), plant: t("qrPrint.plant"),
         tag: t("qrPrint.tag"), instruction: t("qrPrint.instruction"),
       }) });
@@ -128,31 +125,6 @@ export default function PlantQRCodeScreen({ route }) {
 
   const handlePrintQR = (qr) => printCodes([qr], qr.id);
   const handlePrintAll = () => printCodes(availableQRCodes, "all");
-
-  function getStatusText(status) {
-    return ({
-      generated: "Available to print",
-      assigned: "Assigned to plant",
-      active: "Active",
-      retired: "Retired",
-    })[status] || status || "Status unavailable";
-  }
-
-
-  function getStatusStyle(status) {
-    switch (status) {
-      case "active":
-        return styles.approvedBadge;
-      case "generated":
-      case "assigned":
-        return styles.pendingBadge;
-      case "retired":
-        return styles.rejectedBadge;
-      default:
-        return styles.availableBadge;
-    }
-  }
-
 
   return (
     <View style={styles.container}>
@@ -207,7 +179,7 @@ export default function PlantQRCodeScreen({ route }) {
               <Text style={styles.sectionDescription}>{t("plantQRCode.printUnusedTagsForYourFieldVisitOrReprintAn")}</Text>
             </View>
             <View style={styles.countBadge}>
-              <Text style={styles.countText}>{hasLoaded ? plantQRCodes.length : "—"}</Text>
+              <Text style={styles.countText}>{hasLoaded ? availableQRCodes.length : "—"}</Text>
             </View>
           </View>
 
@@ -234,14 +206,14 @@ export default function PlantQRCodeScreen({ route }) {
               <ActivityIndicator color="#468585" />
               <Text style={styles.emptyQRText}>{t("plantQRCode.loadingYourPlantQrCodes")}</Text>
             </View>
-          ) : hasLoaded && !loadError && plantQRCodes.length === 0 ? (
+          ) : hasLoaded && !loadError && availableQRCodes.length === 0 ? (
             <View style={styles.emptyQR}>
               <Text style={styles.emptyQRTitle}>{t("plantQRCode.noQrCodesYet")}</Text>
               <Text style={styles.emptyQRText}>{t("plantQRCode.generateCodesAboveToPrintThemBeforeYourFieldVisit")}</Text>
             </View>
-          ) : plantQRCodes.length > 0 ? (
+          ) : availableQRCodes.length > 0 ? (
             <View>
-              {plantQRCodes.map((qr) => (
+              {availableQRCodes.map((qr) => (
                 <View key={qr.id} style={styles.qrCard}>
                   <View style={styles.qrDetails}>
                     <View style={styles.qrPreview}>
@@ -251,17 +223,13 @@ export default function PlantQRCodeScreen({ route }) {
                         quietZone={20}
                         backgroundColor="#FFFFFF"
                         color="#000000"
-                        getRef={(svg) => {
-                          if (svg) qrImages.current.set(qr.id, { svg, value: qr.value });
-                          else qrImages.current.delete(qr.id);
-                        }}
                       />
                     </View>
                     <View style={styles.qrInfo}>
                       <Text style={styles.qrId} selectable>{qr.label}</Text>
-                      <Text style={styles.qrPlantId}>{qr.plantId ? t("plantQRCode.plant", { plantId: qr.plantId }) : t("plantQRCode.notAssignedToAPlant")}</Text>
-                      <View style={[styles.statusBadge, getStatusStyle(qr.status)]}>
-                        <Text style={styles.statusText}>{translateLabel(getStatusText(qr.status))}</Text>
+                      <Text style={styles.qrPlantId}>{t("plantQRCode.notAssignedToAPlant")}</Text>
+                      <View style={[styles.statusBadge, styles.pendingBadge]}>
+                        <Text style={styles.statusText}>{t("plantQRCode.unused")}</Text>
                       </View>
                     </View>
                   </View>
@@ -290,7 +258,7 @@ export default function PlantQRCodeScreen({ route }) {
                       <Text style={[styles.recordButtonText, styles.deleteButtonText]}>{t("common.delete")}</Text>
                     </TouchableOpacity>
                   </View>
-                  <Text style={styles.deleteHint}>{qr.plantId ? t("plantQRCode.assignedTagProtectedFromDeletion") : t("plantQRCode.deletionIsNotAvailableYet")}</Text>
+                  <Text style={styles.deleteHint}>{t("plantQRCode.deletionIsNotAvailableYet")}</Text>
                 </View>
               ))}
 
@@ -320,11 +288,27 @@ export default function PlantQRCodeScreen({ route }) {
           ) : (
             plantQRCodes.map((qr) => (
               <View key={qr.id} style={styles.statusRow}>
-                <Text style={styles.statusQRId}>
-                  {qr.plantId ? t("plantQRCode.plant", { plantId: qr.plantId }) : qr.label}
-                </Text>
-                <View style={[styles.statusBadge, getStatusStyle(qr.status)]}>
-                  <Text style={styles.statusText}>{translateLabel(getStatusText(qr.status))}</Text>
+                <View style={styles.statusQRPreview}>
+                  <QRCode
+                    value={qr.value}
+                    size={42}
+                    quietZone={5}
+                    backgroundColor="#FFFFFF"
+                    color="#000000"
+                  />
+                </View>
+                <View style={styles.statusInfo}>
+                  <Text style={styles.statusQRId}>{qr.label}</Text>
+                  <Text style={styles.qrPlantId}>{qr.plantName || (qr.plantId ? t("plantQRCode.plant", { plantId: qr.plantId }) : t("plantQRCode.notAssignedToAPlant"))}</Text>
+                </View>
+                <View style={styles.statusActions}>
+                  <View style={[styles.statusBadge, qr.plantId ? styles.approvedBadge : styles.pendingBadge]}>
+                    <Text style={styles.statusText}>{qr.plantId ? t("plantQRCode.used") : t("plantQRCode.unused")}</Text>
+                  </View>
+                  <TouchableOpacity style={[styles.statusPrintButton, loadingPrint && styles.disabledButton]} onPress={() => handlePrintQR(qr)} disabled={loadingPrint} accessibilityRole="button" accessibilityLabel={t("plantQRCode.print", { label: qr.label })} accessibilityState={{ disabled: loadingPrint, busy: printingId === qr.id }}>
+                    {printingId === qr.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="print-outline" size={16} color="#FFFFFF" />}
+                    <Text style={styles.recordButtonText}>{t("common.print")}</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ))
@@ -720,6 +704,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#EEF3EF",
   },
+
+  statusQRPreview: { width: 48, height: 48, alignItems: "center", justifyContent: "center", marginRight: 10, backgroundColor: "#FFFFFF" },
+  statusInfo: { flex: 1, minWidth: 0, marginRight: 8 },
+  statusActions: { alignItems: "flex-end", gap: 8 },
+  statusPrintButton: { backgroundColor: "#35786F", borderColor: "#35786F", borderWidth: 1, borderRadius: 9, minHeight: 38, paddingHorizontal: 11, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
 
   statusQRId: {
     color: "#468585",

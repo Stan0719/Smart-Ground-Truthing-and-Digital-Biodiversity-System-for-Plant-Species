@@ -8,6 +8,7 @@ const { createPlantApp } = require("../server.js");
 const {
   permitted,
   projectGps,
+  projectApprovedPlantGps,
   assertEdit,
   assertReview,
   projectSpecies,
@@ -145,6 +146,33 @@ test("exact GPS permission and nested field projection are Officer-only", () => 
     projectGps({ latitude: 1, nested: { gps_longitude: 2 } }, user("Conservation Officer")),
     { latitude: 1, nested: { gps_longitude: 2 } },
   );
+});
+test("approved plant GPS projection is Botanist-scoped and preserves Officer exact GPS", () => {
+  assert.equal(permitted(user("Botanist"), "plants.gps.approved.read"), true);
+  assert.equal(permitted(user("Conservation Officer"), "plants.gps.approved.read"), false);
+  assert.equal(permitted(user("Conservation Officer"), "plants.gps.exact.read"), true);
+  for (const role of ["Visitor", "Administrator"])
+    assert.equal(permitted(user(role), "plants.gps.approved.read"), false, role);
+});
+test("Botanist plant projection keeps only the approved top-level location", () => {
+  const projected = projectApprovedPlantGps({
+    plant_id: 1,
+    latitude: 4,
+    longitude: 113,
+    accuracy_m: 6,
+    altitude_m: 28,
+    zone: "Zone A",
+    latest_approved: { latitude: 4, longitude: 113, zone: "Zone A" },
+    latest_submission: { latitude: 9, longitude: 119, altitudeM: 99, zone: "Pending" },
+  }, user("Botanist"));
+  assert.equal(projected.latitude, 4);
+  assert.equal(projected.longitude, 113);
+  assert.equal(projected.altitude_m, 28);
+  assert.equal(projected.zone, "Zone A");
+  assert.equal(projected.latest_approved.latitude, undefined);
+  assert.equal(projected.latest_submission.latitude, undefined);
+  assert.equal(projected.latest_submission.altitudeM, undefined);
+  assert.equal(projected.latest_submission.zone, undefined);
 });
 test("HTTP access matrix rejects unauthorized roles before database calls", async (t) => {
   const { createTestAuth } = await import(

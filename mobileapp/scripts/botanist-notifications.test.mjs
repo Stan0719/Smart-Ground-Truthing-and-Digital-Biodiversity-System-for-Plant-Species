@@ -157,3 +157,55 @@ test("storage is namespaced to the backend and concurrent marking cannot undo re
   const other = createBotanistNotificationStore({ ...f.dependencies, backend: "https://other.example", fetchObservations: async () => ({ observations: [] }) });
   assert.deepEqual((await other.load("alice")).items, []);
 });
+
+test("backend history is complete, deduplicated, newest first, and read state survives refresh and a new service session", async () => {
+  const values = new Map();
+  let history = Array.from({ length: 1005 }, (_, index) => ({
+    id: `server-${index}`,
+    type: index % 2 ? "observation_rejected" : "observation_approved",
+    observationId: String(index + 1),
+    plantId: "9",
+    createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+    read: index < 1003,
+  })).reverse();
+  let failWrite = false;
+  const storage = { getItem: async key => values.get(key) || null, setItem: async (key, value) => values.set(key, value) };
+  const dependencies = {
+    storage, backend: "https://plant.example", authorize: async () => ({ id: "alice", role: "botanist" }),
+    fetchNotifications: async () => ({ notifications: [...history, history[0]] }),
+    markNotificationsRead: async (_account, request) => {
+      if (failWrite) throw Error("Notification read update failed");
+      const ids = new Set(request.all ? history.map(item => item.id) : request.ids);
+      history = history.map(item => ids.has(item.id) ? { ...item, read: true } : item);
+    },
+    recordSyncRemote: async () => { throw Error("not used"); },
+  };
+  const firstStore = createBotanistNotificationStore(dependencies);
+  const initial = await firstStore.load("alice");
+  assert.equal(initial.items.length, 1005);
+  assert.equal(initial.items[0].id, "server-1004");
+  assert.equal(initial.items.filter(item => !item.read).length, 2);
+  await firstStore.markRead("alice", ["server-1004"]);
+  const afterRefresh = await firstStore.load("alice");
+  assert.equal(afterRefresh.items.find(item => item.id === "server-1004").read, true);
+  assert.equal(afterRefresh.items.filter(item => !item.read).length, 1);
+  const secondStore = createBotanistNotificationStore(dependencies);
+  assert.equal((await secondStore.load("alice")).items.find(item => item.id === "server-1004").read, true);
+  await secondStore.markRead("alice", [], { all: true });
+  assert.equal((await createBotanistNotificationStore(dependencies).load("alice")).items.filter(item => !item.read).length, 0);
+});
+
+test("failed persistent read updates leave the notification unread", async () => {
+  let read = false;
+  const values = new Map();
+  const store = createBotanistNotificationStore({
+    storage: { getItem: async key => values.get(key) || null, setItem: async (key, value) => values.set(key, value) },
+    backend: "https://plant.example", authorize: async () => ({ id: "alice", role: "botanist" }),
+    fetchNotifications: async () => ({ notifications: [{ id: "one", type: "observation_approved", observationId: "1", plantId: "2", createdAt: "2026-11-03T00:00:00.000Z", read }] }),
+    markNotificationsRead: async () => { throw Error("Database update failed"); },
+  });
+  const first = await store.load("alice");
+  await assert.rejects(store.markRead("alice", ["one"]), /Database update failed/);
+  assert.equal((await store.load("alice")).items[0].read, false);
+  assert.equal(first.items[0].read, false);
+});

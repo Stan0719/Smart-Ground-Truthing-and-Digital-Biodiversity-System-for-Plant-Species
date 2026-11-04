@@ -33,6 +33,11 @@ test("one atomic submission supports existing and pending species without partia
   const plant = { scientific_name: "Independent individual plant name", latitude: 4.5, longitude: 113.7, qr_id: 1, client_key: "existing-1", photos: [photo, photo, photo], content: { heightCm: 80, healthStatus: "Healthy", lifeStage: "Juvenile", morphology: "Plant morphology", zone: "Zone A", altitudeM: 5 } };
   const count = async (table) => Number((await database.query(`SELECT count(*) AS count FROM ${table}`)).rows[0].count);
   await t.test("existing species creates only a linked plant; photos and QR assignment commit together", async () => {
+    const before = await call("/qr-codes");
+    assert.equal(before.status, 200);
+    assert.equal(before.data.qr_codes.length, 4);
+    assert.ok(before.data.qr_codes.every((code) => code.plant_id == null));
+    assert.deepEqual((await call("/qr/qr-1", "guest")).data, { assigned: false });
     const r = await call("/plant-submissions", "bot", "POST", { ...plant, species_id: 1 });
     assert.equal(r.status, 201, JSON.stringify(r.data)); assert.equal(await count("species"), 1); assert.equal(await count("plant_record"), 1);
     assert.equal(r.data.qr_token, "qr-1"); assert.equal(r.data.species_request_id, null);
@@ -40,6 +45,10 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(Number(saved.species_id), 1); assert.equal(saved.scientific_name, plant.scientific_name);
     assert.equal((await database.query("SELECT scientific_name FROM species WHERE species_id=1")).rows[0].scientific_name, "Existing species");
     assert.equal(await count("plant_asset"), 3);
+    const inventory = (await call("/qr-codes")).data.qr_codes;
+    assert.equal(inventory.find((code) => Number(code.qr_id) === 1).plant_id, r.data.plant_id);
+    assert.equal(inventory.find((code) => Number(code.qr_id) === 1).status, "assigned");
+    assert.equal(inventory.find((code) => Number(code.qr_id) === 1).plant_name, plant.scientific_name);
   });
   const proposed = { ...plant, new_species: species, qr_id: 2, client_key: "new-1" };
   let combined;
@@ -130,6 +139,14 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(own.data.plant.rbac_status, "Approved");
     assert.equal(own.data.plant.registered_subject, "staff:bot");
     assert.equal(own.data.plant.scientific_name, plant.scientific_name);
+    const resolved = await call(`/qr/${combined.qr_token}`, "bot");
+    assert.equal(resolved.status, 200, JSON.stringify(resolved.data));
+    assert.equal(resolved.data.assigned, true);
+    assert.equal(String(resolved.data.plant.plant_id), String(combined.plant_id));
+    const photos = await call(`/assets?plant_id=${combined.plant_id}`, "bot");
+    assert.equal(photos.status, 200);
+    assert.equal(photos.data.assets.length, 3);
+    assert.equal((await call(`/assets?plant_id=${combined.plant_id}`, "guest")).data.assets.length, 0);
     assert.ok((await call("/plants?scope=mine")).data.plants.some((p) => String(p.plant_id) === String(combined.plant_id)));
     assert.ok((await call("/species?scope=scientific")).data.species.some((s) => String(s.species_id) === String(combined.species_id)));
     assert.equal((await call(`/plants/${combined.plant_id}?scope=mine`, "other")).status, 404);

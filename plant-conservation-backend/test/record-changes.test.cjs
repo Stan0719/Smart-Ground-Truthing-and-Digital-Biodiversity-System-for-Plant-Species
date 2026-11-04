@@ -30,7 +30,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     plant_id INTEGER UNIQUE,qr_code TEXT UNIQUE NOT NULL,status TEXT NOT NULL,assigned_at TIMESTAMPTZ,activated_at TIMESTAMPTZ,retired_at TIMESTAMPTZ)`);
   await pool.query(`INSERT INTO public.qr_code(plant_id,qr_code,status) VALUES($1,'qr-edit-approved','assigned'),($2,'qr-edit-pending','assigned'),(NULL,'qr-edit-free','generated'),(NULL,'qr-edit-free-two','generated')`,
   [approvedPlant, pendingPlant]);
-  const content = { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Original", taxonomy: "Existing taxonomy", latitude: 4.5, longitude: 113.7, notes: "" };
+  const content = { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Original", taxonomy: "Existing taxonomy", latitude: 4.5, longitude: 113.7, altitudeM: 14, zone: "Original zone", notes: "" };
   await pool.query("INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES('approved-observation',$1,'staff:bot','Approved',$2,'approved-obs-key'),('pending-observation',$3,'staff:bot','Pending Review',$2,'pending-obs-key')", [approvedPlant, content, pendingPlant]);
   await pool.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES('old-photo',$1,'staff:bot','old-photo-key','approved-observation',TRUE,'image/jpeg',$2)", [approvedPlant, photo]);
   const roles = { bot: "Botanist", other: "Botanist", officer: "Conservation Officer" };
@@ -47,8 +47,8 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     const response = await fetch(base + path, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokens[role]}` }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, data: await response.json() };
   }
-  const plant = (name) => ({ species_id: species, scientific_name: name,
-    content: { ...content, heightCm: 30, morphology: "Changed" } });
+  const plant = (name, latitude = content.latitude, longitude = content.longitude) => ({ species_id: species, scientific_name: name,
+    content: { ...content, latitude, longitude, heightCm: 30, morphology: "Changed" } });
   const speciesData = (name) => ({ scientific_name: name, common_name: "Common B", genus_name: "Genus B", family_name: "Family B",
     conservation_status: "Near Threatened", description: "Updated description", habitat: "Wet forest" });
 
@@ -66,7 +66,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal((await call(`/my-plants/${pendingPlant}`, "bot", "PATCH", patch)).status, 409);
   });
   await t.test("approved plant proposal stays separate, rejection retains original", async () => {
-    const body = { kind: "plant", target_id: approvedPlant, proposed: { ...plant("Plant Proposed"), qr_id: 3 }, client_key: "approved-edit-1" };
+    const body = { kind: "plant", target_id: approvedPlant, proposed: { ...plant("Plant Proposed", 45.5, 115.7), qr_id: 3 }, client_key: "approved-edit-1" };
     assert.equal((await call("/record-changes", "other", "POST", body)).status, 404);
     const response = await call("/record-changes", "bot", "POST", body);
     assert.equal(response.status, 201, JSON.stringify(response.data));
@@ -76,21 +76,51 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal((await call("/record-changes", "other")).data.changes.length, 0);
     assert.equal((await call(`/record-changes/${changeId}`, "other")).status, 404);
     assert.equal((await call(`/record-changes/${changeId}/review`, "bot", "POST", { decision: "Approved", comment: "Self" })).status, 403);
+    const whilePending = await call(`/plants/${approvedPlant}`, "officer");
+    assert.equal(whilePending.data.plant.latitude, content.latitude);
+    assert.equal(whilePending.data.plant.longitude, content.longitude);
+    const whilePendingBotanist = await call(`/plants/${approvedPlant}`, "bot");
+    assert.equal(whilePendingBotanist.data.plant.latitude, content.latitude);
+    assert.equal(whilePendingBotanist.data.plant.longitude, content.longitude);
+    assert.equal(whilePendingBotanist.data.plant.zone, content.zone);
     assert.equal((await pool.query("SELECT scientific_name FROM plant_record WHERE plant_id=$1", [approvedPlant])).rows[0].scientific_name, "Plant A");
     assert.equal((await call(`/record-changes/${changeId}/review`, "officer", "POST", { decision: "Rejected", comment: "Needs more evidence" })).status, 200);
     assert.equal((await pool.query("SELECT scientific_name FROM plant_record WHERE plant_id=$1", [approvedPlant])).rows[0].scientific_name, "Plant A");
+    const afterRejection = await call(`/plants/${approvedPlant}`, "officer");
+    assert.equal(afterRejection.data.plant.latitude, content.latitude);
+    assert.equal(afterRejection.data.plant.longitude, content.longitude);
     assert.equal((await pool.query("SELECT qr_token FROM plant_record WHERE plant_id=$1", [approvedPlant])).rows[0].qr_token, "qr-edit-approved");
     assert.equal((await pool.query("SELECT status FROM public.qr_code WHERE qr_id=3")).rows[0].status, "generated");
     assert.equal((await call(`/record-changes/${changeId}/review`, "officer", "POST", { decision: "Approved", comment: "Again" })).status, 409);
   });
   await t.test("officer approval applies plant proposal once and preserves its photo", async () => {
-    const response = await call("/record-changes", "bot", "POST", { kind: "plant", target_id: approvedPlant, proposed: plant("Plant Approved Edit"), client_key: "approved-edit-2" });
+    const proposal = plant("Plant Approved Edit", 6.5, 114.7);
+    proposal.content.altitudeM = 55;
+    proposal.content.zone = "Approved zone";
+    const response = await call("/record-changes", "bot", "POST", { kind: "plant", target_id: approvedPlant, proposed: proposal, client_key: "approved-edit-2" });
     assert.equal(response.status, 201, JSON.stringify(response.data));
+    const whilePending = await call(`/plants/${approvedPlant}`, "officer");
+    assert.equal(whilePending.data.plant.latitude, content.latitude);
+    assert.equal(whilePending.data.plant.longitude, content.longitude);
+    const whilePendingBotanist = await call(`/plants/${approvedPlant}`, "bot");
+    assert.equal(whilePendingBotanist.data.plant.latitude, content.latitude);
+    assert.equal(whilePendingBotanist.data.plant.longitude, content.longitude);
+    assert.equal(whilePendingBotanist.data.plant.zone, content.zone);
     assert.equal((await call(`/record-changes/${response.data.change.id}/review`, "officer", "POST", { decision: "Approved", comment: "Verified" })).status, 200);
     assert.equal((await pool.query("SELECT scientific_name,rbac_status FROM plant_record WHERE plant_id=$1", [approvedPlant])).rows[0].scientific_name, "Plant Approved Edit");
     assert.equal((await pool.query("SELECT content->>'morphology' AS morphology FROM plant_observation WHERE id='approved-observation'")).rows[0].morphology, "Changed");
     assert.equal((await pool.query("SELECT content->>'taxonomy' AS taxonomy FROM plant_observation WHERE id='approved-observation'")).rows[0].taxonomy, "Existing taxonomy");
     assert.equal((await pool.query("SELECT approved FROM plant_asset WHERE id='old-photo'")).rows[0].approved, true);
+    const afterApproval = await call(`/plants/${approvedPlant}`, "officer");
+    assert.equal(afterApproval.data.plant.latitude, 6.5);
+    assert.equal(afterApproval.data.plant.longitude, 114.7);
+    assert.equal(afterApproval.data.plant.altitude_m, 55);
+    assert.equal(afterApproval.data.plant.zone, "Approved zone");
+    const botanistAfterApproval = await call(`/plants/${approvedPlant}`, "bot");
+    assert.equal(botanistAfterApproval.data.plant.latitude, 6.5);
+    assert.equal(botanistAfterApproval.data.plant.longitude, 114.7);
+    assert.equal(botanistAfterApproval.data.plant.altitude_m, 55);
+    assert.equal(botanistAfterApproval.data.plant.zone, "Approved zone");
   });
   await t.test("approved species proposal is private until officer approval", async () => {
     const body = { kind: "species", target_id: request, proposed: speciesData("Species B"), client_key: "species-edit-1" };

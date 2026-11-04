@@ -22,6 +22,8 @@ import { fetchPlantRecords, fetchSpeciesDetail } from "../utils/plantApi";
 
 import PlantCard from "../components/PlantCard";
 import RefreshButton from "../components/RefreshButton";
+import FavouriteHeart from "../components/FavouriteHeart";
+import useVisitorFavourites from "../hooks/useVisitorFavourites";
 
 export default function SpeciesDetail({
   route,
@@ -32,6 +34,8 @@ export default function SpeciesDetail({
 
   const { slug, speciesId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const isVisitor = user?.role?.toLowerCase() === "visitor";
+  const favourites = useVisitorFavourites(user);
 
   const [selectedSpecies, setSelectedSpecies] = useState(
     route.params?.species || getSpeciesBySlug(slug) || null
@@ -115,10 +119,10 @@ export default function SpeciesDetail({
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => void loadSpeciesDetails(true)}
-          tintColor="#315B49"
-          colors={["#315B49"]}
+          refreshing={refreshing || favourites.refreshing}
+          onRefresh={() => { void loadSpeciesDetails(true); void favourites.refresh(true); }}
+          tintColor="#468585"
+          colors={["#468585"]}
         />
       }
     >
@@ -137,12 +141,19 @@ export default function SpeciesDetail({
           <Text style={styles.backText}>{t("plant.back")}</Text>
         </TouchableOpacity>
         <RefreshButton
-          onPress={() => void loadSpeciesDetails(true)}
-          loading={loading || refreshing}
+          onPress={() => { void loadSpeciesDetails(true); void favourites.refresh(true); }}
+          loading={loading || refreshing || favourites.refreshing}
           label={t("common.refresh")}
           testID="species-detail-refresh"
         />
+        {isVisitor && <FavouriteHeart
+          active={favourites.isFavourite("species", selectedSpecies.id ?? speciesId)}
+          pending={favourites.isPending("species", selectedSpecies.id ?? speciesId)}
+          disabled={favourites.loading}
+          onPress={() => void favourites.toggle("species", selectedSpecies.id ?? speciesId)}
+        />}
         </View>
+        {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.refreshError}>{translateUIMessage(favourites.mutationError)}</Text>}
 
 
         <View style={styles.heroImage}>
@@ -480,14 +491,16 @@ const styles = StyleSheet.create({
 
   page: {
     flex: 1,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
 
   hero: {
     padding: 20,
     paddingTop: 50,
-    backgroundColor: "#E1EADB",
+    backgroundColor: "#E7F2E2",
   },
+
+  refreshError: { color: "#A52A3A", fontSize: 12, marginBottom: 10 },
 
   heroToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
 
@@ -500,7 +513,7 @@ const styles = StyleSheet.create({
   },
 
   backText: {
-    color: "#315B49",
+    color: "#468585",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -553,8 +566,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: "#D4E4CF",
-    color: "#35652F",
+    backgroundColor: "#E1F0EA",
+    color: "#468585",
     fontSize: 9,
     fontWeight: "700",
   },
@@ -570,21 +583,21 @@ const styles = StyleSheet.create({
   },
 
   title: {
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 36,
     fontWeight: "600",
   },
 
   scientificName: {
     marginTop: 7,
-    color: "#7C6955",
+    color: "#6D7F75",
     fontSize: 17,
     fontStyle: "italic",
   },
 
   summary: {
     marginTop: 15,
-    color: "#50675D",
+    color: "#6D7F75",
     fontSize: 13,
     lineHeight: 21,
   },
@@ -595,21 +608,21 @@ const styles = StyleSheet.create({
 
   sectionLabel: {
     marginBottom: 8,
-    color: "#50A078",
+    color: "#468585",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 1.7,
   },
 
   sectionTitle: {
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 28,
     fontWeight: "600",
     marginBottom: 18,
   },
 
   paragraph: {
-    color: "#50675D",
+    color: "#6D7F75",
     fontSize: 13,
     lineHeight: 22,
   },
@@ -617,7 +630,7 @@ const styles = StyleSheet.create({
   subTitle: {
     marginTop: 25,
     marginBottom: 8,
-    color: "#315F4E",
+    color: "#234B3A",
     fontSize: 20,
     fontWeight: "600",
   },
@@ -634,14 +647,14 @@ const styles = StyleSheet.create({
 
   quickTitle: {
     marginBottom: 18,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 25,
     fontWeight: "600",
   },
 
   characteristicTitle: {
     marginBottom: 12,
-    color: "#315F4E",
+    color: "#234B3A",
     fontSize: 14,
     fontWeight: "700",
   },
@@ -653,13 +666,13 @@ const styles = StyleSheet.create({
 
   check: {
     width: 25,
-    color: "#50A078",
+    color: "#468585",
     fontWeight: "800",
   },
 
   characteristicText: {
     flex: 1,
-    color: "#405F56",
+    color: "#6D7F75",
     fontSize: 12,
     lineHeight: 18,
   },
@@ -684,14 +697,14 @@ const styles = StyleSheet.create({
   },
 
   factValue: {
-    color: "#315447",
+    color: "#234B3A",
     fontSize: 13,
     fontWeight: "600",
   },
 
   individualSection: {
     padding: 24,
-    backgroundColor: "#E8EFE3",
+    backgroundColor: "#E7F2E2",
   },
 
   sectionDescription: {
@@ -726,7 +739,7 @@ const styles = StyleSheet.create({
   },
 
   plantId: {
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 14,
     fontWeight: "700",
   },
@@ -746,7 +759,7 @@ const styles = StyleSheet.create({
 
   plantView: {
     marginTop: 7,
-    color: "#315B49",
+    color: "#468585",
     fontSize: 10,
     fontWeight: "700",
   },
@@ -757,7 +770,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 11,
     borderRadius: 999,
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   viewAllText: {
@@ -777,7 +790,7 @@ const styles = StyleSheet.create({
 
   gallerySection: {
     padding: 24,
-    backgroundColor: "#E8EFE3",
+    backgroundColor: "#E7F2E2",
   },
 
   galleryGrid: {
@@ -805,14 +818,14 @@ const styles = StyleSheet.create({
 
   caption: {
     padding: 12,
-    color: "#405F56",
+    color: "#6D7F75",
     fontSize: 11,
     fontWeight: "700",
   },
 
   distribution: {
     padding: 24,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
 
   statsRow: {
@@ -913,7 +926,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     borderRadius: 999,
     backgroundColor: "#FFF4D8",
-    color: "#315B49",
+    color: "#468585",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -932,14 +945,14 @@ const styles = StyleSheet.create({
 
   notFoundTitle: {
     marginTop: 15,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 25,
     fontWeight: "600",
   },
 
   notFoundText: {
     marginTop: 8,
-    color: "#50675D",
+    color: "#6D7F75",
     fontSize: 13,
     textAlign: "center",
   },
@@ -949,7 +962,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 11,
     borderRadius: 999,
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   notFoundButtonText: {

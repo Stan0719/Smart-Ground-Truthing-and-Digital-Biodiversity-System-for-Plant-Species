@@ -27,6 +27,37 @@ const orderNewest = (items) => [...items].sort((a, b) =>
 );
 const validDate = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));
 const validObservationId = (value) => /^(?:[1-9]\d{0,18}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(String(value));
+function normalizeRemoteNotification(item) {
+  if (!item || typeof item.id !== "string" || !Object.hasOwn(notificationPresentation, item.type) ||
+      !validDate(typeof item.createdAt === "string" ? item.createdAt : new Date(item.createdAt).toISOString()) || typeof item.read !== "boolean")
+    throw Error("The server returned an invalid notification list.");
+  const createdAt = typeof item.createdAt === "string" ? item.createdAt : new Date(item.createdAt).toISOString();
+  return {
+    id: item.id,
+    type: item.type,
+    createdAt,
+    read: item.read,
+    ...(typeof item.sourceKey === "string" ? { sourceKey: item.sourceKey } : {}),
+    ...(item.observationId != null ? { observationId: String(item.observationId) } : {}),
+    ...(item.plantId != null ? { plantId: String(item.plantId) } : {}),
+    ...(typeof item.comment === "string" ? { comment: item.comment } : {}),
+    ...(Number.isInteger(item.count) && item.count > 0 ? { count: item.count } : {}),
+    ...(typeof item.draftKey === "string" ? { draftKey: item.draftKey } : {}),
+  };
+}
+function notificationSourceKey(item) {
+  if (item.sourceKey) return item.sourceKey;
+  if (item.type === "sync_failed") return `sync:sync_failed:${item.draftKey || item.id.slice("sync_failed:".length)}`;
+  if (item.type === "sync_completed") return `sync:sync_completed:${item.id.slice("sync_completed:".length)}`;
+  return null;
+}
+function sameNotification(a, b) {
+  if (a.id === b.id) return true;
+  const aSource = notificationSourceKey(a), bSource = notificationSourceKey(b);
+  if (aSource && bSource && aSource === bSource) return true;
+  return Boolean(a.observationId && b.observationId && a.type === b.type &&
+    a.observationId === b.observationId && Date.parse(a.createdAt) === Date.parse(b.createdAt));
+}
 
 export function eventsFromObservations(payload, accountId) {
   if (!Array.isArray(payload?.observations)) throw Error("The server returned an invalid observation list.");
@@ -57,7 +88,7 @@ export function eventsFromObservations(payload, accountId) {
 }
 
 // Storage contains event references/read flags, never Officer comments or field notes.
-export function createBotanistNotificationStore({ storage, authorize, fetchObservations, backend, now = () => new Date().toISOString() }) {
+export function createBotanistNotificationStore({ storage, authorize, fetchObservations, fetchNotifications, markNotificationsRead, recordSyncRemote, backend, now = () => new Date().toISOString() }) {
   const queues = new Map();
   const comments = new Map();
   const listeners = new Set();
@@ -112,6 +143,47 @@ export function createBotanistNotificationStore({ storage, authorize, fetchObser
         let error = "";
         if (refresh && !user.offline) {
           try {
+            if (fetchNotifications) {
+              const payload = await fetchNotifications(accountId);
+              if (!Array.isArray(payload?.notifications)) throw Error("The server returned an invalid notification list.");
+              await verify(accountId);
+              const remoteById = new Map();
+              for (const notification of payload.notifications.map(normalizeRemoteNotification)) {
+                if (!remoteById.has(notification.id)) remoteById.set(notification.id, notification);
+              }
+              let remote = orderNewest([...remoteById.values()]);
+              const pendingSync = items.filter((item) => ["sync_failed", "sync_completed"].includes(item.type));
+              for (const local of pendingSync) {
+                if (remote.some((item) => sameNotification(local, item)) || !recordSyncRemote) continue;
+                const key = local.type === "sync_failed" ? local.draftKey : local.id.slice("sync_completed:".length);
+                try {
+                  const recorded = await recordSyncRemote(accountId, {
+                    type: local.type, key,
+                    ...(local.type === "sync_completed" ? { count: local.count } : {}),
+                  });
+                  const item = normalizeRemoteNotification(recorded?.notification);
+                  await verify(accountId);
+                  remote.push(item);
+                  if (local.read && markNotificationsRead) {
+                    await markNotificationsRead(accountId, { ids: [item.id] });
+                    item.read = true;
+                  }
+                } catch { /* Keep locally saved sync notices until the backend is reachable. */ }
+              }
+
+              const pendingRead = remote.filter((item) => !item.read && items.some((saved) => saved.read && sameNotification(saved, item)));
+              if (pendingRead.length && markNotificationsRead) {
+                await markNotificationsRead(accountId, { ids: pendingRead.map((item) => item.id) });
+                pendingRead.forEach((item) => { item.read = true; });
+              }
+              await verify(accountId);
+              comments.set(accountId, new Map(remote.filter((item) => item.comment).map((item) => [item.id, item.comment])));
+              const localOnly = items.filter((saved) => !remote.some((item) => sameNotification(saved, item)));
+              const next = orderNewest([...remote, ...localOnly]);
+              await write(accountId, next);
+              items = next;
+              return { items: present(accountId, items), error };
+            }
             const payload = await fetchObservations(accountId);
             await verify(accountId);
             const events = eventsFromObservations(payload, accountId);
@@ -136,27 +208,39 @@ export function createBotanistNotificationStore({ storage, authorize, fetchObser
         return { items: present(accountId, items), error };
       });
     },
-    markRead(accountId, ids) {
+    markRead(accountId, ids, { all = false } = {}) {
       return enqueue(accountId, async () => {
-        await verify(accountId);
+        const user = await verify(accountId);
         const selected = new Set(ids);
         const items = await read(accountId);
-        await write(accountId, items.map((item) => selected.has(item.id) ? { ...item, read: true } : item));
+        if (markNotificationsRead && !user.offline) {
+          await markNotificationsRead(accountId, all ? { all: true } : { ids: [...selected] });
+          await verify(accountId);
+        }
+        await write(accountId, items.map((item) => selected.has(item.id) || all ? { ...item, read: true } : item));
         emit(accountId);
       });
     },
     recordSync(accountId, { type, key, count }) {
       return enqueue(accountId, async () => {
-        await verify(accountId);
+        const user = await verify(accountId);
         if (!["sync_completed", "sync_failed"].includes(type) || typeof key !== "string" || !key ||
             (type === "sync_completed" && (!Number.isInteger(count) || count < 1))) throw Error("Invalid synchronization notification.");
         const items = await read(accountId);
         const id = `${type}:${key}`;
-        if (!items.some((item) => item.id === id)) {
-          items.push({ id, type, createdAt: now(), read: false, ...(type === "sync_completed" ? { count } : { draftKey: key }) });
-          await write(accountId, orderNewest(items));
-          emit(accountId);
+        if (items.some((item) => item.id === id || notificationSourceKey(item) === `sync:${type}:${key}`)) return;
+        let item = null;
+        if (!user.offline && recordSyncRemote) {
+          try {
+            const result = await recordSyncRemote(accountId, { type, key, ...(type === "sync_completed" ? { count } : {}) });
+            item = normalizeRemoteNotification(result?.notification);
+            await verify(accountId);
+          } catch { /* Preserve sync outcomes locally if notification delivery is unavailable. */ }
         }
+        if (!item) item = { id, sourceKey: `sync:${type}:${key}`, type, createdAt: now(), read: false, ...(type === "sync_completed" ? { count } : { draftKey: key }) };
+        const next = orderNewest([...items.filter((saved) => !sameNotification(saved, item)), item]);
+        await write(accountId, next);
+        emit(accountId);
       });
     },
   };

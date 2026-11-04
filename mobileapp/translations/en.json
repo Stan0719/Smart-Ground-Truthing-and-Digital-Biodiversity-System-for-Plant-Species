@@ -377,6 +377,17 @@
     "noFavouritePlants": "No Favourite Plants",
     "plantsYouFavouriteWillAppearHere": "Plants you favourite will appear here."
   },
+  "favourites": {
+    "addFavourite": "Add to favourites",
+    "removeFavourite": "Remove from favourites",
+    "plantsTab": "Plants",
+    "speciesTab": "Species",
+    "loading": "Loading your favourites…",
+    "noFavouriteSpecies": "No Favourite Species",
+    "noFavouriteSpeciesHint": "Species you favourite will appear here.",
+    "unnamedRecord": "Plant record",
+    "plantId": "Plant ID: "
+  },
   "fieldCollection": {
     "offlineDraftModeLocalDraftsOnlyReconnectToSynchronizeAccess": "Offline draft mode: local drafts only. Reconnect to synchronize; access expires after 15 minutes from the last online verification.",
     "offlineAccessExpiredOrTheSessionWasRejectedReconnectAnd": "Offline access expired or the session was rejected. Reconnect and sign in to recover saved drafts. Your current form remains in memory.",
@@ -398,6 +409,11 @@
     "recoverSavedDraft": "Recover saved draft:",
     "observation": "Observation",
     "speciesReference": "Species reference",
+    "plantSpeciesSection": "Plant and species",
+    "observationSection": "Observation details",
+    "locationSection": "GPS and location",
+    "photosSection": "Plant photographs",
+    "submissionSection": "Save and submit",
     "speciesIdFromYourFieldReference": "Species ID from your field reference",
     "knownSpeciesId": "Known species ID",
     "approvedPlantId": "Approved plant ID",
@@ -482,7 +498,7 @@
     "traderSCave": "Trader's Cave",
     "exploreTheSpecies": "EXPLORE THE SPECIES",
     "speciesOfNiah": "Species of Niah",
-    "discoverTheDiverseTreeFlowerFernAndClimberSpeciesFound": "Discover the diverse tree, flower, fern, and climber species found throughout Niah National Park.",
+    "discoverTheDiverseTreeFlowerFernAndClimberSpeciesFound": "Explore the diverse plant species documented in Niah National Park.",
     "exploreMorePlantSpecies": "Explore More Plant Species",
     "loadingSpeciesFromTheDatabase": "Loading species from the database...",
     "noSpeciesAreAvailableForYourAccountYetAConservation": "No species are available for your account yet. A Conservation Officer can review species visibility.",
@@ -588,11 +604,16 @@
     "exploreDocumentedPlantLocationsInNiahNationalPark": "Explore documented plant locations in Niah National Park",
     "searchPlants": "Search plants...",
     "totalRecords": "Total Records",
-    "categories": "Categories",
+    "location": "Location",
+    "locationRestricted": "Location restricted",
+    "locationNotRecorded": "Location not recorded",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
     "documentedPlants": "Documented Plants",
     "tapARecordToViewItsDetails": "Tap a record to view its details",
     "noRecordsFound": "No records found",
-    "trySearchingForAnotherPlantOrSelectingADifferentCategory": "Try searching for another plant or selecting a different category.",
+    "tryAnotherSearchOrClearYourSearch": "Try another search or clear your search.",
+    "clearSearch": "Clear Search",
     "clearFilters": "Clear Filters"
   },
   "notificationObservation": {
@@ -714,6 +735,8 @@
     "deletionIsNotAvailableYet": "Deletion is not available yet",
     "printAllUnusedQrCodes": "Print All Unused QR Codes",
     "qrCodeStatus": "QR Code Status",
+    "used": "Used",
+    "unused": "Unused",
     "statusUnavailableUntilQrCodesLoad": "Status unavailable until QR codes load.",
     "loadingQrCodeStatus": "Loading QR code status...",
     "couldNotRefreshQrCodeStatus": "Could not refresh QR code status.",
@@ -738,13 +761,17 @@
     "theQrCodeDidNotResolveToAPlantRecord": "The QR code did not resolve to a plant record.",
     "plantQrUnavailable": "Plant QR Unavailable",
     "couldNotLoadThePlantRecordForThisQrCode": "Could not load the plant record for this QR code.",
+    "qrCodeNotAssigned": "This QR code has not been assigned to a plant yet.",
     "scanPlantQr": "Scan Plant QR",
     "scanTheQrCodeAttachedToAPlant": "Scan the QR code attached to a plant",
     "positionTheQrCodeInsideTheBox": "Position the QR code inside the box"
   },
   "scanHistory": {
     "noScanHistory": "No Scan History",
-    "plantsYouScanWillAppearHere": "Plants you scan will appear here."
+    "plantsYouScanWillAppearHere": "Plants you scan will appear here.",
+    "loading": "Loading your scan history…",
+    "dateUnavailable": "Date unavailable",
+    "historySaveFailedTitle": "Scan history not saved"
   },
   "species": {
     "imageComingSoon": "Image coming soon",
@@ -886,6 +913,13 @@
     "theBackendReturnedAnUnexpectedListResponse": "The backend returned an unexpected list response.",
     "theSelectedPlantDoesNotHaveABackendId": "The selected plant does not have a backend ID.",
     "theScannedQrCodeDoesNotContainAValidPlant": "The scanned QR code does not contain a valid plant token."
+  },
+  "visitorApi": {
+    "visitorApiRouteWasNotFoundHttpForDeployOr": "Visitor API route was not found (HTTP 404) for {{method}} {{path}}. Deploy or restart the Plant API with the Visitor routes.",
+    "visitorSignInIsRequiredHttpSignInAgainAndRetry": "Visitor sign-in is required (HTTP 401). Sign in again and retry.",
+    "visitorAccountAccessWasDeniedHttp": "Visitor account access was denied (HTTP 403).",
+    "visitorServiceIsUnavailableHttpCheckPlantApiReadinessAnd": "Visitor service is unavailable (HTTP 503). Check Plant API readiness and the Visitor database migration.",
+    "cannotReachTheVisitorServiceCheckTheConfiguredApiUrlNetwork": "Cannot reach the Visitor service. Check the configured API URL, network, and running backend."
   },
   "faceApi": {
     "configureTheApiHttpsUrlWithoutCredentialsQueryParametersOr": "Configure the {{value0}} API HTTPS URL without credentials, query parameters or fragments.",

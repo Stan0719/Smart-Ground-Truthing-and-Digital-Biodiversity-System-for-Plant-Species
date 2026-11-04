@@ -21,6 +21,9 @@ import {
 import { getSpeciesImageSource } from "../data/speciesImages";
 import { fetchPlantDetail } from "../utils/plantApi";
 import RefreshButton from "../components/RefreshButton";
+import FavouriteHeart from "../components/FavouriteHeart";
+import useVisitorFavourites from "../hooks/useVisitorFavourites";
+import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 
 
 export default function PlantDetail({
@@ -31,7 +34,10 @@ export default function PlantDetail({
   useAppTranslation();
   const { plantId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const isVisitor = user?.role?.toLowerCase() === "visitor";
+  const favourites = useVisitorFavourites(user);
   const [plant, setPlant] = useState(null);
+  const locationDisplay = getPlantLocationDisplay(plant?.location, user?.role);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -52,10 +58,18 @@ export default function PlantDetail({
 
     const request = (async () => {
       try {
-        const backendPlant = await fetchPlantDetail(plantId, {
-          includeObservations: isBotanist,
-          accountId: user?.id,
-        });
+        const options = { includeObservations: isBotanist, accountId: user?.id };
+        let backendPlant;
+        if (isBotanist) {
+          try {
+            backendPlant = await fetchPlantDetail(plantId, { ...options, scopeMine: true });
+          } catch (error) {
+            if (error?.status !== 404) throw error;
+            backendPlant = await fetchPlantDetail(plantId, options);
+          }
+        } else {
+          backendPlant = await fetchPlantDetail(plantId, options);
+        }
         setPlant(backendPlant);
       } catch (error) {
         setErrorMessage(error.message || "Unable to load this plant record.");
@@ -158,10 +172,10 @@ export default function PlantDetail({
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => void loadPlant(true)}
-          tintColor="#315B49"
-          colors={["#315B49"]}
+          refreshing={refreshing || favourites.refreshing}
+          onRefresh={() => { void loadPlant(true); void favourites.refresh(true); }}
+          tintColor="#468585"
+          colors={["#468585"]}
         />
       }
     >
@@ -183,12 +197,19 @@ export default function PlantDetail({
     <Text style={styles.heroBackText}>{t("plant.back")}</Text>
   </TouchableOpacity>
   <RefreshButton
-    onPress={() => void loadPlant(true)}
-    loading={loading || refreshing}
+    onPress={() => { void loadPlant(true); void favourites.refresh(true); }}
+    loading={loading || refreshing || favourites.refreshing}
     label={t("common.refresh")}
     testID="plant-detail-refresh"
   />
+  {isVisitor && <FavouriteHeart
+    active={favourites.isFavourite("plant", plant.plantId)}
+    pending={favourites.isPending("plant", plant.plantId)}
+    disabled={favourites.loading}
+    onPress={() => void favourites.toggle("plant", plant.plantId)}
+  />}
   </View>
+  {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.refreshError}>{translateUIMessage(favourites.mutationError)}</Text>}
 
   <View style={styles.heroGrid}>
     {/* Plant image */}
@@ -235,13 +256,21 @@ export default function PlantDetail({
 
         {isBotanist && (
           <Text style={styles.heroBadge}>
-            {plant.location?.zone || t("plant.notRecorded")}
+            {locationDisplay.zone || t("plant.notRecorded")}
           </Text>
         )}
       </View>
     </View>
   </View>
 </View>
+
+{plant.photos?.length > 0 && (
+  <View style={styles.plantPhotoGallery}>
+    {plant.photos.map((photo) => (
+      <Image key={photo.id} source={{ uri: photo.uri }} style={styles.plantPhoto} resizeMode="cover" />
+    ))}
+  </View>
+)}
 
 
       {/* =================================================
@@ -313,7 +342,7 @@ export default function PlantDetail({
           {isBotanist && (
             <InfoRow
               label={t("plantDetail.locationZone")}
-              value={plant.location?.zone || t("plant.notRecorded")}
+              value={locationDisplay.zone || t("plant.notRecorded")}
             />
           )}
 
@@ -362,24 +391,26 @@ export default function PlantDetail({
           <Text style={styles.subSectionTitle}>{t("plantDetail.gpsInformation")}</Text>
 
 
-          <InfoRow
-            label={t("botanistPlantDetail.latitude")}
-            value={formatCoordinate(plant.location?.latitude)}
-          />
-
-          <InfoRow
-            label={t("botanistPlantDetail.longitude")}
-            value={formatCoordinate(plant.location?.longitude)}
-          />
+          {locationDisplay.status === "available" ? (
+            <>
+              <InfoRow label={t("botanistPlantDetail.latitude")} value={formatCoordinate(locationDisplay.latitude)} />
+              <InfoRow label={t("botanistPlantDetail.longitude")} value={formatCoordinate(locationDisplay.longitude)} />
+            </>
+          ) : (
+            <InfoRow
+              label={t("map.location")}
+              value={locationDisplay.status === "restricted" ? t("map.locationRestricted") : t("map.locationNotRecorded")}
+            />
+          )}
 
           <InfoRow
             label={t("plantDetail.altitude")}
-            value={plant.location?.altitudeM != null ? `${plant.location.altitudeM} m` : t("plant.notRecorded")}
+            value={locationDisplay.altitudeM != null ? `${locationDisplay.altitudeM} m` : t("plant.notRecorded")}
           />
 
           <InfoRow
             label={t("plantDetail.gpsAccuracy")}
-            value={plant.location?.accuracyM != null ? `± ${plant.location.accuracyM} m` : t("plant.notRecorded")}
+            value={locationDisplay.accuracyM != null ? `± ${locationDisplay.accuracyM} m` : t("plant.notRecorded")}
           />
 
         </View>
@@ -715,8 +746,11 @@ const styles = StyleSheet.create({
 
   container: {
     flex: 1,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
+
+  plantPhotoGallery: { flexDirection: "row", flexWrap: "wrap", gap: 10, paddingHorizontal: 18, paddingVertical: 14, backgroundColor: "#FFFFFF" },
+  plantPhoto: { width: 112, height: 112, borderRadius: 12, backgroundColor: "#E7EFE8" },
 
 
   // ===================================================
@@ -728,7 +762,7 @@ header: {
   paddingHorizontal: 20,
   paddingTop: 50,
   paddingBottom: 30,
-  backgroundColor: "#E8EFE3",
+  backgroundColor: "#E7F2E2",
 },
 
 refreshError: {
@@ -753,7 +787,7 @@ heroBackButton: {
 },
 
 heroBackText: {
-  color: "#315B49",
+  color: "#468585",
   fontSize: 12,
   fontWeight: "700",
 },
@@ -802,14 +836,14 @@ heroCopy: {
 headerLabel: {
   alignSelf: "flex-start",
   marginBottom: 10,
-  color: "#438565",
+  color: "#468585",
   fontSize: 10,
   fontWeight: "700",
   letterSpacing: 1.5,
 },
 
 plantId: {
-  color: "#234A3C",
+  color: "#234B3A",
   fontSize: 30,
   fontWeight: "700",
   letterSpacing: -0.6,
@@ -817,7 +851,7 @@ plantId: {
 
 speciesName: {
   marginTop: 8,
-  color: "#405F56",
+  color: "#6D7F75",
   fontSize: 19,
   fontWeight: "600",
   lineHeight: 26,
@@ -825,7 +859,7 @@ speciesName: {
 
 scientificName: {
   marginTop: 5,
-  color: "#7C6955",
+  color: "#6D7F75",
   fontSize: 14,
   fontStyle: "italic",
   lineHeight: 21,
@@ -844,7 +878,7 @@ heroBadge: {
   paddingVertical: 8,
   borderRadius: 20,
   backgroundColor: "#D2E4D0",
-  color: "#315B49",
+  color: "#468585",
   fontSize: 11,
   fontWeight: "600",
 },
@@ -863,12 +897,12 @@ heroBadge: {
     paddingTop:30,
     paddingBottom: 50,
     marginBottom:20,
-    backgroundColor: "#E0EBDD",
+    backgroundColor: "#E9F7E4",
   }, 
 
   sectionLabel: {
     marginBottom: 8,
-    color: "#50A078",
+    color: "#468585",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 1.7,
@@ -876,7 +910,7 @@ heroBadge: {
 
   sectionTitle: {
     marginBottom: 18,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 27,
     fontWeight: "600",
   },
@@ -908,7 +942,7 @@ heroBadge: {
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 14,
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   addObservationButtonText: {
@@ -931,7 +965,7 @@ heroBadge: {
   },
 
   infoValue: {
-    color: "#315447",
+    color: "#234B3A",
     fontSize: 13,
     fontWeight: "600",
     lineHeight: 19,
@@ -967,7 +1001,7 @@ heroBadge: {
 
   subSectionTitle: {
     marginBottom: 15,
-    color: "#315F4E",
+    color: "#234B3A",
     fontSize: 16,
     fontWeight: "700",
   },
@@ -1029,7 +1063,7 @@ heroBadge: {
 },
 
 observationArrow: {
-  color: "#315B49",
+  color: "#468585",
   fontSize: 10,
   fontWeight: "700",
 },
@@ -1065,7 +1099,7 @@ observationArrow: {
   },
 
   observationDate: {
-    color: "#315447",
+    color: "#234B3A",
     fontSize: 13,
     fontWeight: "700",
   },
@@ -1111,14 +1145,14 @@ observationArrow: {
   },
 
   observationId: {
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 12,
     fontWeight: "700",
   },
 
   observationSummary: {
     marginTop: 6,
-    color: "#50675D",
+    color: "#6D7F75",
     fontSize: 11,
     fontWeight: "600",
   },
@@ -1134,7 +1168,7 @@ observationArrow: {
   },
 
   historyValue: {
-    color: "#405F56",
+    color: "#6D7F75",
     fontSize: 11,
     lineHeight: 17,
   },
@@ -1151,12 +1185,12 @@ observationArrow: {
     alignItems: "center",
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#BDC8BD",
+    borderColor: "#E2EDE0",
     borderRadius: 15,
   },
 
   emptyText: {
-    color: "#6A7B73",
+    color: "#6D7F75",
     fontSize: 12,
   },
 
@@ -1169,7 +1203,7 @@ observationArrow: {
     alignItems: "center",
     justifyContent: "center",
     padding: 30,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
 
   notFoundIcon: {
@@ -1178,14 +1212,14 @@ observationArrow: {
 
   notFoundTitle: {
     marginTop: 15,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 24,
     fontWeight: "600",
   },
 
   notFoundText: {
     marginTop: 8,
-    color: "#63736A",
+    color: "#6D7F75",
     fontSize: 12,
     textAlign: "center",
   },
@@ -1195,7 +1229,7 @@ observationArrow: {
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   backButtonText: {

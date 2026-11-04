@@ -16,6 +16,7 @@ export function normalizeQRCodes(payload) {
       id,
       label: `QR-${id.padStart(4, "0")}`,
       plantId: code.plant_id == null ? null : String(code.plant_id),
+      plantName: typeof code.plant_name === "string" && code.plant_name.trim() ? code.plant_name.trim() : "",
       value: code.qr_code,
       status: code.status,
     };
