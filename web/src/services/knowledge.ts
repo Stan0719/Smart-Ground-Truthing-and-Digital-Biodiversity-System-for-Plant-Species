@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { mapPlantCardMetadata } from './plantCardMapping'
 import { plantApi, type Species } from './plantApi'
 import { plants } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
@@ -15,6 +16,8 @@ interface RecordRow {
   latitude?: number
   longitude?: number
   accuracy_m?: number
+  zone?: string | null
+  altitude_m?: number | null
   registered_at?: string
   observed_at?: string
   registered_subject?: string
@@ -72,21 +75,7 @@ export async function refreshKnowledge() {
           speciesId: String(r.species_id),
           speciesName: s?.scientificName || '',
           commonName: s?.name || '',
-          latestApproved: {
-            date: r.observed_at?.slice(0, 10) || r.registered_at?.slice(0, 10) || '',
-            heightCm: r.latest_approved?.heightCm ?? NaN,
-            healthStatus: r.latest_approved?.healthStatus || '',
-            lifeStage: r.latest_approved?.lifeStage || '',
-            morphology: r.latest_approved?.morphology || '',
-            notes: r.latest_approved?.notes || '',
-          },
-          location: {
-            zone: '',
-            latitude: r.latitude === undefined ? NaN : Number(r.latitude),
-            longitude: r.longitude === undefined ? NaN : Number(r.longitude),
-            altitudeM: NaN,
-            accuracyM: Number(r.accuracy_m ?? NaN),
-          },
+          ...mapPlantCardMetadata(r),
           qr: { code: '', status: r.rbac_status || r.status || '' },
           registeredBy: r.registered_subject || '',
           registeredAt: r.registered_at?.slice(0, 10) || '',

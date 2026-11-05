@@ -5,6 +5,7 @@ import type { PlantRecord } from '../data/plantRecords'
 import { plants as species } from '../data/plants'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 import { webAssetUrl } from '../services/assetImages'
+import { plantReviewStatuses } from '../services/plantCardMapping'
 
 const props = withDefaults(
   defineProps<{
@@ -28,8 +29,14 @@ const selectedSpecies = computed(() =>
 const { isLoggedIn, userRole } = usePrototypeSession()
 const canViewStaffPlantData = computed(
   () =>
-    isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && userRole.value === 'conservation-officer',
 )
+const reviewStatus = computed(() => plantReviewStatuses.find(status => status === props.plant.reviewStatus) || '')
+const statusKey = computed(() => reviewStatus.value.toLowerCase().replace(/\s+/g, ''))
+const statusLabel = computed(() => {
+  const key = `conservationPages.observations.values.${statusKey.value}`
+  return te(key) ? t(key) : reviewStatus.value
+})
 
 const optionLabel = (value: string) => {
   if (!value) return '—'
@@ -81,11 +88,13 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
         @error="imageFailed"
       />
       <div v-else class="record-placeholder" aria-hidden="true">🌿</div>
-      <span>{{ plant.plantId }}</span>
+      <span v-if="reviewStatus" class="review-status" :class="`status-${statusKey}`">{{ statusLabel }}</span>
     </div>
 
     <div class="record-copy">
-      <h3>{{ plant.plantId }}</h3>
+      <div class="record-heading">
+        <h3>{{ plant.plantId }}</h3>
+      </div>
       <p class="record-common-name">{{ displayName }}</p>
       <p class="record-species">{{ displayScientificName }}</p>
       <dl v-if="canViewStaffPlantData">
@@ -171,17 +180,14 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   background: linear-gradient(145deg, #dfe9da, #c8d9c3);
   font-size: 48px;
 }
-.record-image > span {
-  position: absolute;
-  left: 14px;
-  bottom: 12px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #214638;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 800;
-}
+.record-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.record-heading h3 { min-width: 0; overflow-wrap: anywhere; }
+.review-status { position: absolute; top: 10px; right: 10px; max-width: calc(100% - 20px); box-sizing: border-box; padding: 5px 9px; border-radius: 8px; background: #eef1ed; color: #374c42; font-size: 11px; font-weight: 700; line-height: 1.4; text-align: right; white-space: normal; overflow-wrap: anywhere; }
+.status-approved { background: #e1eedf; color: #285331; }
+.status-pendingreview { background: #fff0ce; color: #735014; }
+.status-rejected { background: #f9e3e2; color: #87352f; }
+.status-correctionrequired { background: #fbe9d6; color: #7a451c; }
+.status-flagged { background: #eee4f6; color: #654179; }
 .record-copy {
   padding: 21px;
 }
@@ -216,6 +222,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   text-transform: uppercase;
 }
 .record-copy dd {
+  overflow-wrap: anywhere;
   margin: 3px 0 0;
   color: #315447;
   font-size: 12px;
