@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -9,40 +9,40 @@ import {
   buildReportTable,
   filterAndSortReportRows,
   requestReport,
+  reportRequestUrl,
+  type ReportFilters,
+  type ReportPeriod,
   type ApprovedPlantReport,
   type ReportSort,
 } from '../../services/reporting'
 
-type ReportType = 'species-approved' | 'observations' | 'threats' | 'iot' | 'camera' | 'custom-date'
 const { t, locale } = useI18n()
 const rt = (key: string, params: Record<string, string | number> = {}) =>
   t(`conservationPages.reports.${key}`, params)
-const reportTypes: { id: ReportType; label: string; supported: boolean }[] = [
-  { id: 'species-approved', label: 'speciesApprovedSummary', supported: true },
-  { id: 'observations', label: 'observationSummary', supported: false },
-  { id: 'threats', label: 'threatIncidentReport', supported: false },
-  { id: 'iot', label: 'iotMonitoringReport', supported: false },
-  { id: 'camera', label: 'cameraIncidentReport', supported: false },
-  { id: 'custom-date', label: 'customDateReport', supported: false },
-]
-const reportType = ref<ReportType>('species-approved')
+const reportType = ref('species-approved')
+const pendingPeriod = ref<ReportPeriod>('all-time')
+const pendingStart = ref('')
+const pendingEnd = ref('')
+const appliedFilters = ref<ReportFilters>({ period: 'all-time' })
+const filterError = ref('')
+const retryFilters = ref<ReportFilters>({ period: 'all-time' })
+let requestSequence = 0
+onBeforeUnmount(() => { requestSequence++ })
 const report = ref<ApprovedPlantReport | null>(null)
 const isLoading = ref(true)
 const loadError = ref('')
 const search = ref('')
 const sort = ref<ReportSort>('scientific-asc')
-const unsupportedMessage = ref('')
 const toast = ref<{ tone: 'success' | 'error'; message: string } | null>(null)
 const reportChart = ref<{ toDataUrl: () => string | null } | null>(null)
 
-const selectedType = computed(() => reportTypes.find((item) => item.id === reportType.value)!)
 const filteredRows = computed(() =>
   filterAndSortReportRows(report.value?.rows || [], search.value, sort.value))
 const totalSpecies = computed(() => report.value?.rows.length || 0)
 const totalApprovedPlants = computed(() =>
-  report.value?.rows.reduce((sum, row) => sum + row.approvedPlants, 0) || 0)
+  filteredRows.value.reduce((sum, row) => sum + row.approvedPlants, 0))
 const chartRows = computed(() =>
-  [...(report.value?.rows || [])]
+  [...filteredRows.value]
     .sort((a, b) => b.approvedPlants - a.approvedPlants || a.scientificName.localeCompare(b.scientificName))
     .slice(0, 12))
 const chartSpec = computed(() => ({
@@ -51,13 +51,30 @@ const chartSpec = computed(() => ({
   values: chartRows.value.map((row) => row.approvedPlants),
   colors: chartRows.value.map((_, index) => index % 2 ? '#65a556' : '#32745b'),
 }))
+const appliedScope = computed(() => {
+  const scope = report.value?.scope
+  return `${scope?.startDate ? `${scope.startDate} to ${scope.endDate}` : rt('periodAllTime')} | Asia/Kuala_Lumpur`
+})
+// Page copy uses the returned snapshot; export metadata retains its existing scope.
+const appliedPeriodLabel = computed(() => {
+  const scope = report.value?.scope
+  const period = scope?.period || 'all-time'
+  let label = rt(period === 'this-month' ? 'periodThisMonth' : period === 'last-month' ? 'periodLastMonth' : 'periodAllTime')
+  if (period === 'custom' && scope?.startDate && scope.endDate) {
+    const dateLocale = locale.value === 'zh-CN' ? 'zh-CN' : locale.value === 'ms' ? 'ms-MY' : 'en-GB'
+    label = new Intl.DateTimeFormat(dateLocale, {
+      timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric',
+    }).formatRange(new Date(`${scope.startDate}T12:00:00+08:00`), new Date(`${scope.endDate}T12:00:00+08:00`))
+  }
+  return rt('appliedPeriod', { period: label })
+})
 const generatedAt = computed(() => {
   if (!report.value) return rt('unavailable')
   const parsed = new Date(report.value.generatedAt)
   if (Number.isNaN(parsed.getTime())) return rt('unavailable')
   const dateLocale = locale.value === 'zh-CN' ? 'zh-CN' : locale.value === 'ms' ? 'ms-MY' : 'en-MY'
   return new Intl.DateTimeFormat(dateLocale, {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: 'Asia/Kuala_Lumpur', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(parsed)
 })
 
@@ -65,27 +82,36 @@ const errorMessage = (error: unknown, fallback: string) =>
   typeof error === 'object' && error !== null && 'message' in error &&
   typeof error.message === 'string' && error.message.trim() ? error.message : fallback
 
-async function loadReport() {
-  if (!selectedType.value.supported) {
-    unsupportedMessage.value = rt('backendUnavailable')
-    return
-  }
+async function loadReport(filters: ReportFilters = appliedFilters.value) {
+  const sequence = ++requestSequence
+  const snapshot = { ...filters }
+  retryFilters.value = snapshot
   isLoading.value = true
   loadError.value = ''
-  unsupportedMessage.value = ''
-  try { report.value = await requestReport() }
-  catch (error) {
+  try {
+    const result = await requestReport(snapshot)
+    if (sequence !== requestSequence) return
+    report.value = result
+    appliedFilters.value = snapshot
+  } catch (error) {
+    if (sequence !== requestSequence) return
     report.value = null
     loadError.value = errorMessage(error, rt('errors.load'))
-  } finally { isLoading.value = false }
+  } finally { if (sequence === requestSequence) isLoading.value = false }
 }
-function chooseReportType() {
-  if (!selectedType.value.supported) {
-    unsupportedMessage.value = rt('backendUnavailable')
-    return
-  }
-  unsupportedMessage.value = ''
-  if (!report.value && !isLoading.value) void loadReport()
+async function applyFilters() {
+  filterError.value = ''
+  const filters: ReportFilters = { period: pendingPeriod.value,
+    ...(pendingPeriod.value === 'custom' ? { start: pendingStart.value, end: pendingEnd.value } : {}) }
+  try { reportRequestUrl(filters) }
+  catch { filterError.value = rt('invalidRange'); return }
+  await loadReport(filters)
+}
+async function resetFilters() {
+  reportType.value = 'species-approved'
+  pendingPeriod.value = 'all-time'; pendingStart.value = ''; pendingEnd.value = ''
+  search.value = ''; sort.value = 'scientific-asc'; filterError.value = ''
+  await loadReport({ period: 'all-time' })
 }
 
 const filename = (extension: 'csv' | 'pdf') => {
@@ -103,9 +129,9 @@ const downloadBlob = (blob: Blob, name: string) => {
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 function exportCsv() {
-  if (!report.value || !filteredRows.value.length) return
+  if (isLoading.value || !report.value || !filteredRows.value.length) return
   try {
-    const csv = buildReportCsv(report.value, filteredRows.value)
+    const csv = buildReportCsv(report.value, filteredRows.value, search.value.trim())
     downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), filename('csv'))
     toast.value = { tone: 'success', message: rt('csvDownloaded') }
   } catch {
@@ -139,7 +165,7 @@ function exportUnicodePdf() {
     if (y + size * 1.6 > canvas.height - margin) flush()
     context.font = `${bold ? 'bold ' : ''}${size}px sans-serif`
     context.fillStyle = color
-    context.fillText(value, margin, y + size)
+    context.fillText(value, margin, y + size, canvas.width - margin * 2)
     y += size * 1.5
   }
   const drawTableHeader = () => {
@@ -159,6 +185,10 @@ function exportUnicodePdf() {
   line(`${rt('generatedAt')}: ${generatedAt.value}`, 24)
   line(`${rt('totalSpecies')}: ${totalSpecies.value}`, 24)
   line(`${rt('totalApprovedPlants')}: ${totalApprovedPlants.value}`, 24)
+  line(`${rt('matchingRows')}: ${filteredRows.value.length}`, 24)
+  line(rt('registrationScope'), 24)
+  line(appliedScope.value, 24)
+  if (search.value.trim()) line(`${rt('search')}: ${search.value.trim()}`, 24)
   y += 18
   const maximum = Math.max(...chartRows.value.map((row) => row.approvedPlants), 1)
   chartRows.value.forEach((row) => {
@@ -192,8 +222,10 @@ function exportUnicodePdf() {
   flush()
   doc.save(filename('pdf'))
 }
-function exportPdf() {
-  if (!report.value || !filteredRows.value.length) return
+async function exportPdf() {
+  await nextTick()
+  await nextTick()
+  if (isLoading.value || !report.value || !filteredRows.value.length) return
   try {
     if (locale.value === 'zh-CN') {
       exportUnicodePdf()
@@ -209,11 +241,15 @@ function exportPdf() {
     doc.text(`${rt('generatedAt')}: ${generatedAt.value}`, 14, 26)
     doc.text(`${rt('totalSpecies')}: ${totalSpecies.value}`, 14, 32)
     doc.text(`${rt('totalApprovedPlants')}: ${totalApprovedPlants.value}`, 14, 38)
-    let tableStart = 46
+    doc.text(`${rt('matchingRows')}: ${filteredRows.value.length}`, 14, 44)
+    doc.text(rt('registrationScope'), 14, 50)
+    doc.text(appliedScope.value, 14, 56)
+    if (search.value.trim()) doc.text(`${rt('search')}: ${search.value.trim()}`, 14, 62)
+    let tableStart = 70
     const chartImage = reportChart.value?.toDataUrl()
     if (chartImage) {
-      doc.addImage(chartImage, 'PNG', 14, 44, 175, 78)
-      tableStart = 128
+      doc.addImage(chartImage, 'PNG', 14, 68, 175, 78)
+      tableStart = 152
     }
     autoTable(doc, {
       startY: tableStart,
@@ -230,38 +266,40 @@ function exportPdf() {
   }
 }
 
-onMounted(loadReport)
+onMounted(() => loadReport())
 </script>
 
 <template>
   <section class="page-intro"><div><p class="page-kicker">{{ rt('eyebrow') }}</p><h2>{{ rt('title') }}</h2><p>{{ rt('intro') }}</p></div></section>
   <section class="panel reports-panel">
-    <header class="panel-header"><div><h2>{{ rt('reportType') }}</h2><span class="panel-description">{{ rt('supportedDescription') }}</span></div></header>
-    <div class="report-type-grid" role="list">
-      <label v-for="item in reportTypes" :key="item.id" class="report-type-option" :class="{ unsupported: !item.supported }">
-        <input v-model="reportType" type="radio" :value="item.id" :disabled="!item.supported" @change="chooseReportType" />
-        <span><strong>{{ rt(item.label) }}</strong><small>{{ item.supported ? rt('realBackendReport') : rt('backendUnavailable') }}</small></span>
-      </label>
-    </div>
-
-    <p v-if="unsupportedMessage" class="unsupported-note" role="status">{{ unsupportedMessage }}</p>
-    <div class="scope-note"><strong>{{ rt('dataScope') }}</strong><span>{{ rt('allAvailableData') }}</span><small>{{ rt('dateUnsupported') }}</small></div>
+    <form class="control-bar report-filters" aria-labelledby="report-filters-title" @submit.prevent="applyFilters">
+      <h3 id="report-filters-title" class="filter-heading">{{ rt('filters') }}</h3>
+      <label class="field category-field" for="report-category"><span>{{ rt('reportCategory') }}</span><select id="report-category" v-model="reportType"><option value="species-approved">{{ rt('speciesApprovedSummary') }}</option></select></label>
+      <label class="field" for="report-period"><span>{{ rt('reportingPeriod') }}</span><select id="report-period" v-model="pendingPeriod"><option value="all-time">{{ rt('periodAllTime') }}</option><option value="this-month">{{ rt('periodThisMonth') }}</option><option value="last-month">{{ rt('periodLastMonth') }}</option><option value="custom">{{ rt('periodCustom') }}</option></select></label>
+      <template v-if="pendingPeriod === 'custom'">
+        <label class="field" for="report-start"><span>{{ rt('startDate') }}</span><input id="report-start" v-model="pendingStart" type="date" required :aria-invalid="Boolean(filterError)" aria-describedby="report-filter-error" /></label>
+        <label class="field" for="report-end"><span>{{ rt('endDate') }}</span><input id="report-end" v-model="pendingEnd" type="date" required :aria-invalid="Boolean(filterError)" aria-describedby="report-filter-error" /></label>
+      </template>
+      <div class="filter-actions"><button class="primary-button" type="submit" :disabled="isLoading">{{ rt('apply') }}</button><button class="secondary-button" type="button" @click="resetFilters">{{ rt('reset') }}</button></div>
+      <p v-if="filterError" id="report-filter-error" class="filter-error" role="alert">{{ filterError }}</p>
+    </form>
 
     <div class="control-bar report-controls">
       <label class="field search-field"><span>{{ rt('search') }}</span><input v-model="search" :placeholder="rt('searchPlaceholder')" :disabled="!report" /></label>
       <label class="field"><span>{{ rt('sort') }}</span><select v-model="sort" :disabled="!report"><option value="scientific-asc">{{ rt('sortScientific') }}</option><option value="approved-desc">{{ rt('sortApprovedDesc') }}</option><option value="approved-asc">{{ rt('sortApprovedAsc') }}</option></select></label>
-      <button class="secondary-button" type="button" :disabled="isLoading" @click="loadReport">{{ rt('refresh') }}</button>
+      <button class="secondary-button" type="button" :disabled="isLoading" @click="loadReport()">{{ rt('refresh') }}</button>
     </div>
 
     <div v-if="isLoading" class="report-state" role="status" aria-live="polite">{{ rt('loading') }}</div>
-    <div v-else-if="loadError" class="report-state error" role="alert"><strong>{{ rt('loadFailed') }}</strong><span>{{ loadError }}</span><button class="primary-button" type="button" @click="loadReport">{{ rt('retry') }}</button></div>
+    <div v-else-if="loadError" class="report-state error" role="alert"><strong>{{ rt('loadFailed') }}</strong><span>{{ loadError }}</span><button class="primary-button" type="button" @click="loadReport(retryFilters)">{{ rt('retry') }}</button></div>
     <article v-else-if="report" class="report-preview">
-      <header class="report-title"><p class="section-kicker">{{ rt('realBackendReport') }}</p><h2>{{ rt('speciesApprovedSummary') }}</h2><p>{{ rt('generatedAt') }}: <strong>{{ generatedAt }}</strong></p></header>
+      <header class="report-title"><h2>{{ rt('speciesApprovedSummary') }}</h2><p class="applied-scope">{{ appliedPeriodLabel }}</p><p>{{ rt('generatedAt') }}: <strong>{{ generatedAt }}</strong></p></header>
       <div class="metric-grid"><div class="metric"><span>{{ rt('totalSpecies') }}</span><strong>{{ totalSpecies }}</strong></div><div class="metric"><span>{{ rt('totalApprovedPlants') }}</span><strong>{{ totalApprovedPlants }}</strong></div><div class="metric"><span>{{ rt('matchingRows') }}</span><strong>{{ filteredRows.length }}</strong></div></div>
-      <ReportChart v-if="report.rows.length" ref="reportChart" :title="chartSpec.title" :labels="chartSpec.labels" :values="chartSpec.values" :colors="chartSpec.colors" />
-      <p v-if="report.rows.length > chartRows.length" class="chart-note">{{ rt('chartLimit', { count: chartRows.length }) }}</p>
-      <div class="table-scroll"><table><thead><tr><th>{{ rt('scientificName') }}</th><th>{{ rt('commonName') }}</th><th>{{ rt('approvedPlants') }}</th></tr></thead><tbody><tr v-for="row in filteredRows" :key="row.scientificName"><td><em>{{ row.scientificName }}</em></td><td>{{ row.commonName || rt('unavailable') }}</td><td>{{ row.approvedPlants }}</td></tr><tr v-if="!filteredRows.length"><td colspan="3" class="empty-row">{{ report.rows.length ? rt('noMatches') : rt('empty') }}</td></tr></tbody></table></div>
-      <div class="modal-actions report-actions"><button type="button" class="secondary-button" :disabled="!filteredRows.length" @click="exportPdf">{{ rt('exportPdf') }}</button><button type="button" class="secondary-button" :disabled="!filteredRows.length" @click="exportCsv">{{ rt('exportCsv') }}</button></div>
+      <p v-if="filteredRows.length && totalApprovedPlants === 0" class="chart-note" role="status">{{ rt('noPlantsInPeriod') }}</p>
+      <ReportChart v-if="filteredRows.length" ref="reportChart" :title="chartSpec.title" :labels="chartSpec.labels" :values="chartSpec.values" :colors="chartSpec.colors" />
+      <p v-if="filteredRows.length > chartRows.length" class="chart-note">{{ rt('chartLimit', { count: chartRows.length }) }}</p>
+      <div class="table-scroll"><table><thead><tr><th>{{ rt('scientificName') }}</th><th>{{ rt('commonName') }}</th><th>{{ rt('approvedPlants') }}</th></tr></thead><tbody><tr v-for="row in filteredRows" :key="row.speciesId || row.scientificName"><td><em>{{ row.scientificName }}</em></td><td>{{ row.commonName || rt('unavailable') }}</td><td>{{ row.approvedPlants }}</td></tr><tr v-if="!filteredRows.length"><td colspan="3" class="empty-row">{{ report.rows.length ? rt('noMatches') : rt('empty') }}</td></tr></tbody></table></div>
+      <div class="modal-actions report-actions"><button type="button" class="secondary-button" :disabled="isLoading || !filteredRows.length" @click="exportPdf">{{ rt('exportPdf') }}</button><button type="button" class="secondary-button" :disabled="isLoading || !filteredRows.length" @click="exportCsv">{{ rt('exportCsv') }}</button></div>
       <p class="persistence-note">{{ rt('downloadOnly') }}</p>
     </article>
   </section>
@@ -270,14 +308,13 @@ onMounted(loadReport)
 
 <style scoped>
 .reports-panel { display: grid; gap: 20px; }
-.report-type-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
-.report-type-option { display: flex; gap: 10px; padding: 15px; border: 1px solid #dce6de; border-radius: 12px; background: #fff; }
-.report-type-option span, .report-type-option small { display: block; }
-.report-type-option small { margin-top: 5px; color: #71827a; font-size: 10px; }
-.report-type-option.unsupported { background: #f4f4ef; color: #7b817d; }
-.unsupported-note, .scope-note, .persistence-note, .chart-note { padding: 12px 14px; border-radius: 10px; background: #f4f7f2; color: #63776d; font-size: 11px; }
-.scope-note { display: flex; flex-wrap: wrap; gap: 8px 18px; }
-.scope-note small { flex-basis: 100%; }
+.report-filters { margin: 0; gap: 14px; }
+.filter-heading { flex-basis: 100%; margin: 0; color: #315749; font-size: 13px; }
+.category-field { flex: 1.6; }
+.filter-actions { display: flex; gap: 8px; }
+.filter-error { flex-basis: 100%; margin: 0; color: #9b3d35; font-size: 12px; }
+.persistence-note, .chart-note { color: #63776d; font-size: 11px; }
+.applied-scope { line-height: 1.6; }
 .report-controls { margin: 0; }
 .report-state { padding: 45px 20px; text-align: center; color: #64776e; }
 .report-state span { display: block; margin: 7px 0 14px; }
@@ -286,6 +323,6 @@ onMounted(loadReport)
 .report-actions { padding-top: 18px; border-top: 1px solid #edf0ed; }
 .persistence-note { margin-bottom: 0; }
 .toast.error { background: #8f3128; }
-@media (max-width: 800px) { .report-type-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
-@media (max-width: 520px) { .report-type-grid { grid-template-columns: 1fr; } .report-preview { padding: 18px; } .metric-grid { grid-template-columns: 1fr; } }
+
+@media (max-width: 520px) { .filter-actions > button { flex: 1; } .report-preview { padding: 18px; } .metric-grid { grid-template-columns: 1fr; } }
 </style>

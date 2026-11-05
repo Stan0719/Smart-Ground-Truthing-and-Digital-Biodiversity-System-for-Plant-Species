@@ -1,5 +1,7 @@
 "use strict";
 const { randomUUID, randomBytes, createHash } = require("node:crypto");
+const { originColumnAvailable, classifyObservations } = require("./observation-origin.cjs");
+const { queueOptions, queuePage } = require("./observation-queue.cjs");
 const {
   permitted,
   projectGps,
@@ -10,7 +12,7 @@ const {
   assertReview,
 } = require("../shared/rbac.cjs");
 const hash = (value) => createHash("sha256").update(value).digest("hex");
-const { requestsAvailable, observationRequestSql, assertSpeciesResolved, mountSpeciesRequests } = require("./species-requests.cjs");
+const { requestsAvailable, provenanceAvailable, observationRequestSql, assertSpeciesResolved, mountSpeciesRequests } = require("./species-requests.cjs");
 const fail = (status, message) => {
   throw Object.assign(Error(message), { status });
 };
@@ -149,6 +151,13 @@ async function speciesRow(c, speciesId, user) {
   if (!row) fail(404, "Species unavailable.");
   return row;
 }
+// Public species responses are explicit allowlists; scientific contracts stay intact.
+function readableSpecies(row, user, scientific) {
+  const result = projectSpecies(row, scientific);
+  if (permitted(user, "plants.scientific.read")) return result;
+  return Object.fromEntries(["species_id", "scientific_name", "common_name", "genus_name", "family_name", "description", "image_asset_id", "image_url"]
+    .filter(key => Object.hasOwn(result, key)).map(key => [key, result[key]]));
+}
 async function statusReference(c, body) {
   if (body.conservation_status === undefined || body.conservation_status === "")
     return body.status_id || null;
@@ -174,7 +183,7 @@ async function assertNewSpecies(c, scientificName) {
   if ((await c.query("SELECT species_id FROM species WHERE lower(btrim(scientific_name))=lower(btrim($1)) LIMIT 1", [scientificName])).rows.length)
     fail(409, "This scientific name already exists. Select the existing species.");
 }
-function mountDomain(app, { pool, auth, allow }) {
+function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
   app.get("/api/qr-codes", allow("plants.create"), async (_req, res) => {
     const qrCodes = (
       await pool.query(
@@ -226,12 +235,12 @@ function mountDomain(app, { pool, auth, allow }) {
         [visibilityFor(req.user), q],
       )
     ).rows;
-    res.json({ species: rows.map((r) => projectSpecies(r, scientific)) });
+    res.json({ species: rows.map((r) => readableSpecies(r, req.user, scientific)) });
   });
   app.get("/api/species/:id", allow("plants.public.read"), async (req, res) => {
     const scientific = permitted(req.user, "plants.scientific.read"),
       row = await speciesRow(pool, id(req.params.id), req.user);
-    res.json({ species: projectSpecies(row, scientific) });
+    res.json({ species: readableSpecies(row, req.user, scientific) });
   });
   const readPlants = async (req, res) => {
     // Personal submission history is distinct from access to the species catalogue.
@@ -320,6 +329,7 @@ function mountDomain(app, { pool, auth, allow }) {
             (p.registered_subject=$2 AND p.rbac_status<>'Approved' AND s.rbac_data->>'submittedBy'=$2
              AND s.rbac_data->>'approvalStatus' IN ('Pending Review','Rejected','Correction Required'))) END)
           AND (p.rbac_status='Approved' OR p.registered_subject=$2 OR $3)
+          AND ($6 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
           AND ($4::integer IS NULL OR p.plant_id=$4) ORDER BY p.plant_id DESC LIMIT 500`,
         [
           visibilityFor(req.user),
@@ -327,6 +337,7 @@ function mountDomain(app, { pool, auth, allow }) {
           req.user?.role === "Conservation Officer",
           plantId,
           mine,
+          staff,
         ],
       )
     ).rows;
@@ -336,9 +347,7 @@ function mountDomain(app, { pool, auth, allow }) {
         : {
             plant_id: r.plant_id,
             species_id: r.species_id,
-            status: r.rbac_status,
-            registered_at: r.registered_at,
-            plant_image_asset_id: r.plant_image_asset_id == null ? null : String(r.plant_image_asset_id),
+            ...(r.plant_image_asset_id == null ? {} : { plant_image_asset_id: String(r.plant_image_asset_id) }),
           },
     );
     const projectedPlants = req.user?.role === "Botanist"
@@ -442,6 +451,7 @@ function mountDomain(app, { pool, auth, allow }) {
     if (mine && !permitted(req.user, "plants.create"))
       fail(req.user ? 403 : 401, "Botanist access required.");
     const observationId = req.params.id ?? null;
+    const pageOptions = observationId === null ? queueOptions(req.query, fail) : null;
     // Imported IDs may be numeric; new records use UUIDs.
     if (
       observationId !== null &&
@@ -451,11 +461,11 @@ function mountDomain(app, { pool, auth, allow }) {
     )
       fail(400, "Invalid observation identifier.");
     const officer = req.user.role === "Conservation Officer";
-    const requestSql = observationRequestSql(await requestsAvailable(pool));
+    const requestSql = observationRequestSql(await requestsAvailable(pool), await provenanceAvailable(pool));
     const rows = (
       await pool.query(
 
-        `SELECT o.*,
+        `SELECT o.*,${pageOptions ? `to_char(o.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS queue_created_at,` : ""}
           COALESCE((
             SELECT jsonb_agg(
               jsonb_build_object(
@@ -521,23 +531,30 @@ function mountDomain(app, { pool, auth, allow }) {
             END
           )
           AND ($4::text IS NULL OR o.id = $4)
-        ORDER BY o.created_at DESC
-        LIMIT 500`,
+          ${pageOptions ? "AND ($6::text='' OR o.status=$6) AND ($7::timestamptz IS NULL OR (o.created_at,o.id)<($7::timestamptz,$8::text))" : ""}
+        ORDER BY o.created_at DESC,o.id DESC
+        LIMIT ${pageOptions ? "$9" : "500"}`,
         [
           officer,
           subject(req.user),
           visibilityFor(req.user),
           observationId,
           mine,
+          ...(pageOptions ? [pageOptions.status, pageOptions.cursor?.at || null, pageOptions.cursor?.id || null, pageOptions.limit + 1] : []),
         ],
 
       )
     ).rows;
     if (observationId !== null) {
       if (!rows.length) fail(404, "Observation unavailable.");
-      return res.json({ observation: projectGps(rows[0], req.user) });
+      return res.json({ observation: projectGps((await classifyObservations(pool, rows))[0], req.user) });
     }
-    res.json({ observations: projectGps(rows, req.user) });
+    const hasMore = pageOptions && rows.length > pageOptions.limit;
+    const batch = pageOptions ? rows.slice(0, pageOptions.limit) : rows;
+    const classified = await classifyObservations(pool, batch);
+    const visible = pageOptions?.origin ? classified.filter(row => row.origin_type === pageOptions.origin) : classified;
+    res.json({ observations: projectGps(visible.map(({ queue_created_at, ...row }) => row), req.user),
+      ...(pageOptions ? { page: queuePage(batch, pageOptions, Boolean(hasMore)) } : {}) });
   };
   app.get(
     "/api/observations",
@@ -634,9 +651,10 @@ function mountDomain(app, { pool, auth, allow }) {
         ).rows[0];
         if (!plant) fail(404, "Approved plant not found.");
         await speciesRow(c, plant.species_id, req.user);
+        const withOrigin = await originColumnAvailable(c);
         const row = (
           await c.query(
-            "INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES($1,$2,$3,'Draft',$4,$5) ON CONFLICT(owner_subject,client_key) DO NOTHING RETURNING *",
+            `INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key${withOrigin ? ",origin_type" : ""}) VALUES($1,$2,$3,'Draft',$4,$5${withOrigin ? ",'subsequent_observation'" : ""}) ON CONFLICT(owner_subject,client_key) DO NOTHING RETURNING *`,
             [
               randomUUID(),
               req.params.id,
@@ -696,6 +714,7 @@ function mountDomain(app, { pool, auth, allow }) {
           [randomUUID(), row.owner_subject, `submission:${row.id}:${row.revision}`, row.id, row.plant_id],
         );
         await audit(c, req.user, "observation_submitted", row.id);
+        if (officerNotifications) await officerNotifications.enqueue(c, row.id);
       });
       res.json({ submitted: true });
     },
@@ -760,7 +779,7 @@ function mountDomain(app, { pool, auth, allow }) {
           fail(denied, "Review is not permitted or feedback is missing.");
         if (row.revision !== req.body.revision)
           fail(409, "Observation changed. Reload before reviewing.");
-        await assertSpeciesResolved(c, row.plant_id, fail);
+        await assertSpeciesResolved(c, row.plant_id, fail, row.id);
         const review = (await c.query(
           "INSERT INTO observation_review(id,observation_id,reviewer_subject,decision,comment) VALUES($1,$2,$3,$4,$5) RETURNING id",
           [
@@ -836,9 +855,10 @@ function mountDomain(app, { pool, auth, allow }) {
     const species = await speciesRow(pool, row.species_id, req.user);
     res.json({
       assigned: true,
-      plant: { plant_id: row.plant_id, scientific_name: row.scientific_name },
-      species: projectSpecies(
+      plant: permitted(req.user, "plants.scientific.read") ? row : { plant_id: row.plant_id, species_id: row.species_id },
+      species: readableSpecies(
         species,
+        req.user,
         permitted(req.user, "plants.scientific.read"),
       ),
     });
@@ -889,14 +909,13 @@ function mountDomain(app, { pool, auth, allow }) {
         plants: plantRows.rows.map((row) => ({
           plant_id: row.plant_id,
           scientific_name: row.plant_scientific_name,
-          registered_at: row.registered_at,
-          species_id: row.species_id,
-          species_details: projectSpecies(row, false),
+            species_id: row.species_id,
+          species_details: readableSpecies(row, req.user, false),
           image_asset_id: row.image_asset_id,
           favourited_at: row.favourited_at,
         })),
         species: speciesRows.rows.map((row) => ({
-          ...projectSpecies(row, false),
+          ...readableSpecies(row, req.user, false),
           favourited_at: row.favourited_at,
         })),
       },
@@ -987,9 +1006,8 @@ function mountDomain(app, { pool, auth, allow }) {
       plant: {
         plant_id: result.row.plant_id,
         scientific_name: result.row.plant_scientific_name,
-        registered_at: result.row.registered_at,
         species_id: result.row.species_id,
-        species_details: projectSpecies(result.row, false),
+        species_details: readableSpecies(result.row, req.user, false),
         image_asset_id: result.row.image_asset_id,
       },
     });
@@ -1020,9 +1038,8 @@ function mountDomain(app, { pool, auth, allow }) {
       plant: {
         plant_id: row.plant_id,
         scientific_name: row.plant_scientific_name,
-        registered_at: row.registered_at,
         species_id: row.species_id,
-        species_details: projectSpecies(row, false),
+        species_details: readableSpecies(row, req.user, false),
         image_asset_id: row.image_asset_id,
       },
     })) });
@@ -1140,12 +1157,14 @@ function mountDomain(app, { pool, auth, allow }) {
     res.json({ deleted: true });
   });
   app.get("/api/reports", allow("reports.read"), async (req, res) => {
+    const scope = require("./report-period.cjs").reportPeriod(req.query);
     const rows = (
       await pool.query(
-        "SELECT s.scientific_name,s.common_name,COUNT(p.plant_id) AS approved_plants FROM species s LEFT JOIN plant_record p ON p.species_id=s.species_id AND p.rbac_status='Approved' GROUP BY s.species_id,s.scientific_name,s.common_name ORDER BY s.scientific_name",
+        "SELECT s.species_id::text AS species_id,s.scientific_name,s.common_name,COUNT(p.plant_id) AS approved_plants FROM species s LEFT JOIN plant_record p ON p.species_id=s.species_id AND p.rbac_status='Approved' AND ($1::timestamptz IS NULL OR p.registered_at >= $1::timestamptz) AND ($2::timestamptz IS NULL OR p.registered_at < $2::timestamptz) GROUP BY s.species_id,s.scientific_name,s.common_name ORDER BY s.scientific_name",
+        [scope.startInclusive, scope.endExclusive],
       )
     ).rows;
-    res.json({ generatedAt: new Date().toISOString(), rows });
+    res.json({ generatedAt: new Date().toISOString(), scope, rows });
   });
   app.get("/api/audit", allow("audit.read"), async (req, res) =>
     res.json({

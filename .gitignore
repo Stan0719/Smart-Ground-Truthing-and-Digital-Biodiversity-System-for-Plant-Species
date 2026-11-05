@@ -10,6 +10,7 @@ node_modules/
 # Python virtual environment
 .venv/
 .venv-win/
+.venv311/
 
 # Build output
 dist/

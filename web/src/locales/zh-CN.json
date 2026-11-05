@@ -460,6 +460,21 @@
     }
   },
   "dashboardNotifications": {
+    "officerLive": {
+      "registrationTitle": "新的植物登记",
+      "fieldTitle": "新的野外观察",
+      "registrationMessage": "收到一项植物登记。打开当前记录以查看审核状态。",
+      "speciesFirst": "此登记包含新物种提案。审核植物前，请先确认物种已获批准。",
+      "fieldMessage": "收到一项野外观察。请打开观察队列查看当前状态。",
+      "loading": "正在加载通知…",
+      "loadFailed": "无法加载通知。现有结果可能已过时。",
+      "openFailed": "无法打开记录或保存已读状态。请检查访问权限后重试。",
+      "readFailed": "无法确认已读状态。请刷新后再试。",
+      "sessionUnavailable": "当前会话无法访问通知。请通过正常账户流程登录。",
+      "retry": "重试",
+      "more": "加载更多通知",
+      "unread": "未读"
+    },
     "admin": {
       "N001": {
         "title": "高严重度威胁警报",
@@ -988,6 +1003,8 @@
     }
   },
   "conservationText": {
+    "back": "返回",
+    "speciesrepresentativeimage": "物种代表图像",
     "maintenance": "维护中",
     "resolved": "已解决",
     "shoreaniahensis": "尼亚娑罗双",
@@ -1212,10 +1229,13 @@
     "niahmeranti": "尼亚梅兰蒂木",
     "shorea": "娑罗双属",
     "dipterocarpaceae": "龙脑香科",
-    "notassessed": "未评估"
+    "notassessed": "未评估",
+    "plantinformation": "植物信息",
+    "verifyyoursessiontoviewthisplant": "无法验证您的会话。请重试。"
   },
   "conservationPages": {
     "observations": {
+      "reviewSubmission": "审核提交",
       "eyebrow": "实地记录",
       "title": "观察记录",
       "intro": "浏览植物学家在不同时间提交的测量数据，同时保留植物历史记录。",
@@ -1437,9 +1457,9 @@
       }
     },
     "reports": {
-      "eyebrow": "PostgreSQL 报告",
+      "eyebrow": "保护报告",
       "title": "报告",
-      "intro": "查看并下载当前植物后端支持的报告数据。",
+      "intro": "按登记期间查看当前已批准植物并下载结果。",
       "reportType": "报告类型",
       "supportedDescription": "未支持的报告类型仅用于说明路线图，不能生成原型数据。",
       "speciesApprovedSummary": "物种与已批准植物摘要",
@@ -1448,7 +1468,6 @@
       "iotMonitoringReport": "IoT 监测报告",
       "cameraIncidentReport": "摄像头事件报告",
       "customDateReport": "自定义日期报告",
-      "realBackendReport": "真实的 PostgreSQL 后端报告",
       "backendUnavailable": "后端集成尚不可用",
       "dataScope": "数据范围",
       "allAvailableData": "所有可用报告数据",
@@ -1464,9 +1483,9 @@
       "loadFailed": "报告加载失败。",
       "retry": "重试",
       "generatedAt": "生成时间",
-      "totalSpecies": "物种总数",
-      "totalApprovedPlants": "已批准植物总数",
-      "matchingRows": "匹配行数",
+      "totalSpecies": "范围内所有物种",
+      "totalApprovedPlants": "已批准植物（匹配物种）",
+      "matchingRows": "匹配物种",
       "chartTitle": "各物种已批准植物数量",
       "chartLimit": "图表显示已批准植物数量最高的 {count} 个物种；表格包含所有匹配行。",
       "scientificName": "学名",
@@ -1483,9 +1502,63 @@
       "errors": {
         "load": "无法加载报告。",
         "export": "无法导出报告。"
-      }
+      },
+      "filters": "报告筛选",
+      "reportCategory": "报告类别",
+      "reportingPeriod": "报告期间",
+      "periodAllTime": "全部时间",
+      "periodThisMonth": "本月",
+      "periodLastMonth": "上月",
+      "periodCustom": "自定义日期范围",
+      "startDate": "开始日期",
+      "endDate": "结束日期",
+      "apply": "应用",
+      "reset": "重置",
+      "invalidRange": "请选择有效且按顺序排列的起止日期（最长100年）。",
+      "registrationScope": "当前已批准植物，按登记日期筛选",
+      "noPlantsInPeriod": "匹配物种在此期间没有登记当前已批准的植物。",
+      "appliedPeriod": "报告期间：{period}"
     },
     "reviews": {
+      "queues": {
+        "registrations": "新植株登记",
+        "registrationIntro": "审核植株初始登记及关联的物种申请。未分类记录仍可在历史记录待审队列中查看。",
+        "reviewQueue": "审核队列",
+        "legacy": "未分类 / 历史观察记录",
+        "originUnverified": "记录来源未经核实",
+        "fieldObservations": "后续野外观察",
+        "fieldIntro": "审核后续野外观察，或选择所有来源浏览观察历史。",
+        "allOrigins": "所有来源",
+        "history": "观察历史",
+        "loadedScope": "仅包含已加载的记录。搜索、筛选、计数和历史仅涵盖此子集。请继续加载以查看更早的记录；结果并非实时快照。",
+        "loadMore": "加载更多 / 继续查找",
+        "noRegistrations": "已加载结果中没有登记记录。",
+        "noFieldObservations": "已加载结果中没有野外观察记录。",
+        "noRecords": "已加载结果中没有匹配记录。",
+        "originMoved": "最新记录来源属于其他审核队列。此页面无法审核该记录，请使用相应队列。",
+        "registrationReview": "登记 / 未分类记录审核",
+        "initialRegistration": "初始登记",
+        "subsequentObservation": "后续野外观察"
+      },
+      "currentPlantQr": "当前植株二维码信息",
+      "qrIdentity": "二维码 / 二维码标识",
+      "qrStatus": "二维码状态",
+      "notRecorded": "未记录",
+      "qrLoading": "正在加载二维码信息…",
+      "qrLoadFailed": "无法加载二维码信息",
+      "selectedSpecies": "所选物种",
+      "speciesScientificName": "物种学名",
+      "speciesCommonName": "物种常用名",
+      "noLinkedSpeciesRequest": "未报告关联的物种申请",
+      "requestDetailsUnavailable": "申请详情不可用",
+      "loadingLatestObservation": "正在加载最新观察记录…",
+      "unableToRefreshObservation": "无法刷新观察记录。请重试后再审核。",
+      "retryRefresh": "重试",
+      "speciesRequestIdLabel": "物种申请编号",
+      "officerReview": "官员审核",
+      "reviewComment": "审核意见（拒绝、要求修正或标记时必填）",
+      "reviewUnavailable": "暂时无法审核。请查看最新详情及关联的物种申请。",
+      "decisions": {"approved":"批准","rejected":"拒绝","correction":"要求修正","flagged":"标记"},
       "speciesRequest": {
         "title": "新物种申请",
         "proposed": "拟议新物种",

@@ -14,7 +14,9 @@ const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
 const { mountPlantSimilarity } = require("./plant-similarity.cjs");
-function createPlantApp({ auth, pool, origins = configuredOrigins(), similaritySearch }) {
+const { mountStaffNotifications } = require("./staff-notifications.cjs");
+const { createOfficerNotificationDelivery } = require("./officer-notification-delivery.cjs");
+function createPlantApp({ auth, pool, origins = configuredOrigins(), similaritySearch, officerNotifications = null }) {
   const app = express();
   app.disable("x-powered-by");
   // Do not generate ETags for uncached, authenticated JSON reads.
@@ -44,8 +46,9 @@ function createPlantApp({ auth, pool, origins = configuredOrigins(), similarityS
   mountDeviceIngestion(app, { pool });
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
-  mountDomain(app, { auth, pool, allow });
-  mountPlantSubmissions(app, { pool, allow });
+  mountStaffNotifications(app, { pool });
+  mountDomain(app, { auth, pool, allow, officerNotifications });
+  mountPlantSubmissions(app, { pool, allow, officerNotifications });
   mountRecordChanges(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow });
@@ -127,10 +130,14 @@ async function start() {
     await Promise.allSettled([auth.db.close(), pool.end()]);
     throw error;
   }
-  const app = createPlantApp({ auth, pool });
+  const officerNotifications = createOfficerNotificationDelivery({ pool, auth });
+  const app = createPlantApp({ auth, pool, officerNotifications });
   const server = createServer(app);
   const port = Number(process.env.PORT || 3000);
-  server.once("listening", () => console.log("Plant API listening on port " + server.address().port));
+  server.once("listening", () => {
+    console.log("Plant API listening on port " + server.address().port);
+    officerNotifications.start();
+  });
   server.on("error", async (error) => {
     console.error(
       "Plant API startup failed:",
@@ -144,6 +151,7 @@ async function start() {
   for (const signal of ["SIGINT", "SIGTERM"])
     process.once(signal, () =>
       server.close(async () => {
+        await officerNotifications.stop();
         await Promise.allSettled([auth.db.close(), pool.end()]);
         process.exit(0);
       }),

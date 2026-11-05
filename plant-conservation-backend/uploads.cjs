@@ -120,8 +120,10 @@ function mountUploads(app, { pool, allow }) {
       const rows = (await pool.query(
         `SELECT a.id,a.content_type FROM plant_asset a
          JOIN plant_record p ON p.plant_id=a.plant_id
+         JOIN species s ON s.species_id=p.species_id
          LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
          WHERE a.plant_id=$1 AND p.rbac_status='Approved'
+           AND COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved'
            AND a.content_type IN ('image/jpeg','image/png')
            AND ((a.observation_id IS NULL AND a.approved=TRUE) OR EXISTS (
              SELECT 1 FROM plant_observation o
@@ -136,11 +138,13 @@ function mountUploads(app, { pool, allow }) {
     const speciesId = id(String(req.query.species_id || ""));
     const rows = (
       await pool.query(
-        "SELECT a.id,a.content_type FROM plant_asset a JOIN rbac_species_visibility v ON v.species_id=a.species_id WHERE a.species_id=$1 AND v.visibility = ANY($2::text[]) AND (a.content_type='image/jpeg' OR $3)",
+        "SELECT a.id,a.content_type FROM plant_asset a JOIN species s ON s.species_id=a.species_id JOIN rbac_species_visibility v ON v.species_id=a.species_id WHERE a.species_id=$1 AND v.visibility = ANY($2::text[]) AND (a.content_type='image/jpeg' OR $3) AND ((a.approved AND COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved') OR $4 OR ($3 AND a.owner_subject=$5))",
         [
           speciesId,
           visibilityFor(req.user),
           permitted(req.user, "plants.scientific.read"),
+          permitted(req.user, "species.manage"),
+          req.user ? subject(req.user) : "",
         ],
       )
     ).rows;
@@ -177,6 +181,14 @@ function mountUploads(app, { pool, allow }) {
         : row.approved)
       : row.approved;
     if (!visibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto)
+      fail(404, "Asset unavailable.");
+    if (!classification) fail(404, "Asset unavailable.");
+    if (row.species_id && (!row.approved || (classification.rbac_data?.approvalStatus || "Approved") !== "Approved") &&
+        !permitted(req.user, "species.manage") &&
+        !(permitted(req.user, "plants.scientific.read") && row.owner_subject === owner))
+      fail(404, "Asset unavailable.");
+    if (!permitted(req.user, "plants.scientific.read") &&
+        (classification.rbac_data?.approvalStatus || "Approved") !== "Approved")
       fail(404, "Asset unavailable.");
     if (
       row.plant_id &&

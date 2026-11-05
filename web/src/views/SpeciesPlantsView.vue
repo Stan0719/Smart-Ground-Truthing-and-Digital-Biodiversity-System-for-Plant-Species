@@ -322,9 +322,7 @@ watch(
   <main v-else-if="selectedSpecies" class="species-plants-page">
     <section class="page-hero">
       <div class="page-container">
-        <RouterLink :to="`/species/${selectedSpecies.slug}`" class="back-link"
-          >← {{ t('species.records.back', { name: displayName }) }}</RouterLink
-        >
+        <RouterLink :to="`/species/${selectedSpecies.slug}`" class="back-link"><svg class="back-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14" /></svg><span>{{ t('conservationText.back') }}</span></RouterLink>
         <div class="hero-grid">
           <img v-if="primaryImage" :src="primaryImage" :alt="displayName" />
           <div class="hero-copy">
@@ -489,17 +487,6 @@ watch(
 .page-hero {
   padding: 64px 0 76px;
   background: linear-gradient(135deg, #e1eadb, #f7f3e8);
-}
-.back-link {
-  display: inline-block;
-  margin-bottom: 34px;
-  color: #477462;
-  font-size: 14px;
-  font-weight: 700;
-  text-decoration: none;
-}
-.back-link:hover {
-  text-decoration: underline;
 }
 .hero-grid {
   display: grid;
@@ -718,11 +705,7 @@ watch(
   .page-hero {
     padding: 34px 0 38px;
   }
-  .back-link {
-    margin-bottom: 20px;
-    font-size: 12px;
-  }
-  .hero-grid {
+.hero-grid {
     grid-template-columns: 1fr;
     gap: 18px;
   }
@@ -986,4 +969,10 @@ watch(
     font-size: 8px;
   }
 }
+
+.back-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; box-sizing: border-box; margin-bottom: 20px; border: 1px solid #a8bfae; border-radius: 12px; background: #ffffff80; color: #315f4e; font-weight: 700; line-height: 1.25; text-decoration: none; }
+.back-link:hover { background: #468585; border-color: #468585; color: #fff; }
+.back-link:active { background: #356f70; border-color: #356f70; color: #fff; }
+.back-icon { width: 20px; height: 20px; flex: none; }
+.back-link:focus-visible { outline: 3px solid #315f4e; outline-offset: 4px; }
 </style>

@@ -5,6 +5,8 @@ import vm from 'node:vm'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import * as observationReview from '../src/services/observationReview.ts'
+import * as observationQueue from '../src/services/observationQueue.ts'
 import { formatObservationId } from '../src/utils/observationId.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
 import * as speciesRequestIntegration from '../src/services/reviewSpeciesRequest.ts'
@@ -30,6 +32,7 @@ const messages = JSON.parse(
 const firstId = 'aa3bd8be-988f-40a7-b4ea-59408b85dbb1'
 const secondId = 'bb3bd8be-988f-40a7-b4ea-59408b85dbb2'
 const fixture = (overrides = {}) => ({
+  origin_type: 'initial_registration',
   id: firstId,
   plant_id: 1,
   owner_subject: 'staff:botanist-uuid',
@@ -63,8 +66,15 @@ const flush = async () => {
     await new Promise(setImmediate)
   }
 }
-function harness(fetchHandler, query = {}) {
+function fixtureResponse(url, rows) {
+  return Response.json(url === '/api/observations' ? { observations: rows } : { observation: rows?.find(row => String(row?.id) === url.split('/').pop()) });
+}
+function harness(fetchHandler, query = {}, language = 'en', plantHandler = async url => Response.json({ plant: { plant_id: url.split('/').pop(), qr_token: null, qr_status: null } }), queueHandler = null) {
+  const messages = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
   const scope = vue.effectScope()
+  const cleanup = []
+  let sessionListener
+  let session = { user: { id: 'verified-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }, pending: false }
   const route = vue.reactive({ query })
   const calls = []
   const t = (key, params = {}) => {
@@ -77,6 +87,7 @@ function harness(fetchHandler, query = {}) {
   const exports = {}
   const context = {
     exports,
+    Error,
     AbortSignal,
     AbortController,
     window: { setTimeout, clearTimeout },
@@ -84,12 +95,20 @@ function harness(fetchHandler, query = {}) {
     HTMLElement: class {},
     fetch: async (url, options) => {
       calls.push({ url, options })
+      if (url.startsWith('/api/plants/')) return plantHandler(url, options)
+      if (url.startsWith('/api/observations?')) {
+        if (queueHandler) return queueHandler(url, options)
+        const response = await fetchHandler('/api/observations', options)
+        if (!response.ok) return response
+        const result = await response.json()
+        return Response.json({ ...result, page: { has_more: false, next_cursor: null } })
+      }
       return fetchHandler(url, options)
     },
     require(name) {
       // DOM directives are not mounted by this VNode-only render harness.
       if (name === 'vue')
-        return { ...vue, onMounted() {}, onBeforeUnmount() {}, withDirectives: (node) => node }
+        return { ...vue, onMounted() {}, onBeforeUnmount(fn) { cleanup.push(fn) }, resolveComponent: name => name, withDirectives: (node) => node }
       if (name === 'vue-router')
         return {
           useRoute: () => route,
@@ -105,7 +124,11 @@ function harness(fetchHandler, query = {}) {
         return {
           useConservationText: () => ({ ct: (value) => String(value), locale: vue.ref('en') }),
         }
+      if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { sessionListener = fn; return () => { sessionListener = null } } }
       if (name.endsWith('observationId')) return { formatObservationId }
+      if (name.endsWith('observationReview')) return observationReview
+      if (name.endsWith('observationQueue')) return observationQueue
+      if (name.endsWith('reviewSpeciesRequest')) return speciesRequestIntegration
       if (name.endsWith('plantId')) return { formatPlantId }
       if (name.endsWith('reviewSpeciesRequest')) return speciesRequestIntegration
       if (name.endsWith('.vue')) return { name }
@@ -119,7 +142,8 @@ function harness(fetchHandler, query = {}) {
     state,
     route,
     calls,
-    stop: () => scope.stop(),
+    emitSession(user, pending = false) { session = { user, pending }; sessionListener?.(user, pending) },
+    stop: () => { cleanup.forEach(fn => fn()); scope.stop() },
     render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}),
   }
 }
@@ -138,8 +162,7 @@ function nodes(root) {
 
 test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery and similarity isolation', async () => {
   const row = fixture()
-  const h = harness(async () =>
-    Response.json({ observations: [row, null, {}, fixture({ id: 1 })] }),
+  const h = harness(async (url) => fixtureResponse(url, [row, null, {}, fixture({ id: 1 })]),
   )
   try {
     assert.match(h.state.countValue(0), /Loading/)
@@ -159,7 +182,7 @@ test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery and sim
     assert.equal(observation.createdAt, row.created_at)
     assert.equal(h.state.similarityFor(observation.displayId), undefined)
     assert.equal(h.state.similarityFor(h.state.observations.value[1].id), undefined)
-    h.state.open(observation)
+    await h.state.open(observation)
     await flush()
     assert.equal(h.route.query.review, firstId)
     let images = nodes(h.render()).filter((node) => node.type === 'img')
@@ -203,6 +226,69 @@ test('similarity loads real UUID results through the plant proxy, preserves miss
     assert.equal(h.calls.filter((call) => call.url.endsWith('/similarity')).length, 1)
     await h.state.loadObservations()
     assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
+  } finally { h.stop() }
+})
+
+test('similarity session changes clear cached evidence and invalidate pending responses', async () => {
+  for (const action of ['logout', 'account', 'pending']) {
+    const rows = [fixture(), fixture({ id: secondId, plant_id: 2 })]
+    const analysis = (id) => ({ observationId: id, plantId: id === firstId ? 'PL001' : 'PL002',
+      status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: '8', similarity: 0.9 }] })
+    let release
+    const h = harness(async url => {
+      if (url === `/api/data/observations/${firstId}/similarity`) return Response.json(analysis(firstId))
+      if (url === `/api/data/observations/${secondId}/similarity`)
+        return new Promise(resolve => { release = () => resolve(Response.json(analysis(secondId))) })
+      return fixtureResponse(url, rows)
+    })
+    try {
+      await h.state.loadObservations()
+      const [first, second] = h.state.observations.value
+      await h.state.checkSimilarity(first, { currentTarget: null })
+      assert.ok(h.state.similarityFor(firstId))
+      const pending = h.state.checkSimilarity(second, { currentTarget: null })
+      await flush()
+      if (action === 'account') h.emitSession({ id: 'another-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false })
+      else h.emitSession(null, action === 'pending')
+      // Let a late server response finish even if the HTTP mock ignores abort.
+      release()
+      await pending
+      assert.equal(h.calls.find(call => call.url.endsWith(`${secondId}/similarity`)).options.signal.aborted, true)
+      assert.equal(h.state.similarityFor(firstId), undefined)
+      assert.equal(h.state.similarityFor(secondId), undefined)
+      assert.equal(h.state.similarityAnalysis.value, null)
+      assert.equal(h.state.similarityLoading.value, '')
+      if (action !== 'account') {
+        const before = h.calls.length
+        await h.state.checkSimilarity(first, { currentTarget: null })
+        assert.equal(h.calls.length, before)
+      }
+    } finally { h.stop() }
+  }
+})
+
+test('loading another queue page preserves BioCLIP results while a full refresh clears them', async () => {
+  const rows = [fixture(), fixture({ id: secondId, plant_id: 2 })]
+  const h = harness(async url => url.endsWith('/similarity')
+    ? Response.json({ observationId: firstId, plantId: 'PL001', status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: '8', similarity: 0.9 }] })
+    : fixtureResponse(url, rows), {}, 'en', undefined, async url => {
+      const more = new URL(url, 'https://fixture.invalid').searchParams.has('cursor')
+      return Response.json({ observations: [rows[more ? 1 : 0]],
+        page: { has_more: !more, next_cursor: more ? null : 'next-page' } })
+    })
+  try {
+    await h.state.loadObservations()
+    await h.state.checkSimilarity(h.state.observations.value[0], { currentTarget: null })
+    const cached = h.state.similarityFor(firstId)
+    await h.state.loadObservations(true)
+    assert.equal(h.state.observations.value.length, 2)
+    assert.equal(h.state.similarityFor(firstId), cached)
+    await h.state.loadObservations()
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
   } finally { h.stop() }
 })
 
@@ -293,7 +379,7 @@ test('review commits exact body, refetches persisted state, survives simulated p
   })
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     const save = h.state.decide('Approved')
     await flush()
     assert.equal(h.state.isSaving.value, true)
@@ -314,10 +400,10 @@ test('review commits exact body, refetches persisted state, survives simulated p
 })
 
 test('comment requirements and canonical transitions block invalid POSTs', async () => {
-  const h = harness(async () => Response.json({ observations: [fixture()] }))
+  const h = harness(async (url) => fixtureResponse(url, [fixture()]))
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     for (const decision of ['Rejected', 'Correction Required', 'Flagged'])
       await h.state.decide(decision)
     assert.equal(h.calls.filter((call) => call.options.method === 'POST').length, 0)
@@ -397,16 +483,18 @@ test('all four decisions read back saved status, revision and review fields in a
 
 test('failed conflict reload keeps stale decisions blocked until a successful read and acknowledgment', async () => {
   let detailAvailable = false
+  let initialDetail = 2
   const h = harness(async (url, options) => {
     if (options.method === 'POST') return Response.json({ error: 'Changed' }, { status: 409 })
     if (url === '/api/observations') return Response.json({ observations: [fixture()] })
+    if (initialDetail && url !== '/api/observations') { initialDetail--; return Response.json({ observation: fixture() }) }
     return detailAvailable
       ? Response.json({ observation: fixture({ revision: 5 }) })
       : Response.json({ error: 'Unavailable' }, { status: 503 })
   })
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     h.state.comment.value = 'Preserve my evidence'
     await h.state.decide('Rejected')
     assert.equal(h.state.needsReload.value, true)
@@ -437,7 +525,7 @@ test('409 refetches latest revision, preserves comment, requires acknowledgment 
   )
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     h.state.comment.value = 'Officer notes'
     await h.state.decide('Rejected')
     assert.equal(h.state.selected.value.revision, 4)
@@ -454,14 +542,14 @@ test('409 refetches latest revision, preserves comment, requires acknowledgment 
 test('400/401/403/404, network and malformed responses retain comments and surface errors', async () => {
   for (const status of [400, 401, 403, 404, 'network', 'malformed']) {
     const h = harness(async (url, options) => {
-      if (options.method !== 'POST') return Response.json({ observations: [fixture()] })
+      if (options.method !== 'POST') return fixtureResponse(url, [fixture()])
       if (status === 'network') throw Error('Disconnected')
       if (status === 'malformed') return new Response('<html>gateway</html>')
       return Response.json({ message: `Backend error ${status}` }, { status })
     })
     try {
       await h.state.loadObservations()
-      h.state.open(h.state.observations.value[0])
+      await h.state.open(h.state.observations.value[0])
       h.state.comment.value = 'Keep this comment'
       await h.state.decide('Rejected')
       assert.equal(h.state.comment.value, 'Keep this comment')
@@ -476,16 +564,16 @@ test('400/401/403/404, network and malformed responses retain comments and surfa
 })
 
 test('committed review with failed refetch is never reported as an unsaved transaction', async () => {
-  const h = harness(async (url, options) =>
-    options.method === 'POST'
-      ? Response.json({ reviewed: true })
-      : url === '/api/observations'
-        ? Response.json({ observations: [fixture()] })
-        : Response.json({ error: 'Unavailable' }, { status: 503 }),
-  )
+  let initialDetail = 2
+  const h = harness(async (url, options) => {
+    if (options.method === 'POST') return Response.json({ reviewed: true })
+    if (url === '/api/observations') return Response.json({ observations: [fixture()] })
+    if (initialDetail) { initialDetail--; return Response.json({ observation: fixture() }) }
+    return Response.json({ error: 'Unavailable' }, { status: 503 })
+  })
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     await h.state.decide('Approved')
     assert.match(h.state.reviewMessage.value.message, /review was saved/)
     assert.equal(h.state.needsReload.value, true)
@@ -495,14 +583,14 @@ test('committed review with failed refetch is never reported as an unsaved trans
 })
 
 test('malformed list produces unavailable counts, while empty lists and missing images stay truthful', async () => {
-  const h = harness(async () => Response.json({ observations: null }))
+  const h = harness(async (url) => fixtureResponse(url, null))
   try {
     await h.state.loadObservations()
     assert.equal(h.state.countValue(0), 'Unavailable')
     const empty = h.state.mapObservation(fixture({ assets: [], content: {} }))
     assert.equal(empty.assets.length, 0)
     assert.equal(empty.latitude, '')
-    h.state.open(empty)
+    await h.state.open(empty)
     const rendered = nodes(h.render())
     assert.equal(rendered.filter((node) => node.type === 'img').length, 0)
     assert.ok(rendered.some((node) => node.children === 'No submitted images or attachments.'))
@@ -528,16 +616,13 @@ const requestFixture = (overrides = {}) => ({
 })
 
 test('pending linked request appears before observation details and blocks every plant decision', async () => {
-  const h = harness(async () =>
-    Response.json({
-      observations: [
+  const h = harness(async (url) => fixtureResponse(url, [
         fixture({ species_request_id: 'request-42', species_request: requestFixture() }),
-      ],
-    }),
+      ]),
   )
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     assert.equal(h.state.speciesRequestState.value, 'pending')
     assert.equal(h.state.canReviewPlant.value, false)
     assert.equal(h.state.speciesReviewComment.value, 'Species-specific comment')
@@ -577,16 +662,13 @@ test('only backend-approved request with matching resulting species and real nam
     [{ approved_species_id: null }, false],
     [{ approved_species_id: 9 }, false],
   ]) {
-    const h = harness(async () =>
-      Response.json({
-        observations: [
+    const h = harness(async (url) => fixtureResponse(url, [
           fixture({ species_request: requestFixture({ request_status: 'Approved', ...extra }) }),
-        ],
-      }),
+        ]),
     )
     try {
       await h.state.loadObservations()
-      h.state.open(h.state.observations.value[0])
+      await h.state.open(h.state.observations.value[0])
       assert.equal(h.state.canDecide('Approved'), unlocked)
       assert.equal(h.state.speciesRequestState.value, unlocked ? 'approved' : 'incomplete')
       if (unlocked) {
@@ -613,10 +695,10 @@ test('rejected, correction, unknown, ID-only and malformed request references fa
     { species_request_id: 'different', species_request: requestFixture() },
     { species_request: {} },
   ]) {
-    const h = harness(async () => Response.json({ observations: [fixture(extra)] }))
+    const h = harness(async (url) => fixtureResponse(url, [fixture(extra)]))
     try {
       await h.state.loadObservations()
-      h.state.open(h.state.observations.value[0])
+      await h.state.open(h.state.observations.value[0])
       assert.ok(h.state.selectedSpeciesRequest.value)
       assert.equal(h.state.canReviewPlant.value, false)
       assert.equal(h.state.canReviewSpecies.value, false)
@@ -631,9 +713,12 @@ test('resolution refresh fails independently, verifies association on GET, and r
   let fail = true,
     release
   const linked = fixture({ species_request: requestFixture() })
+  let initialDetail = true
   const h = harness(async (url) => {
     if (url === '/api/observations')
       return Response.json({ observations: [linked, fixture({ id: secondId })] })
+    if (url.endsWith(secondId)) return Response.json({ observation: fixture({ id: secondId }) })
+    if (initialDetail && url !== '/api/observations') { initialDetail = false; return Response.json({ observation: linked }) }
     if (fail) return Response.json({ error: 'Request service unavailable' }, { status: 503 })
     return new Promise((resolve) => {
       release = () =>
@@ -651,7 +736,7 @@ test('resolution refresh fails independently, verifies association on GET, and r
   })
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     h.state.comment.value = 'Plant comment to preserve'
     await h.state.refreshSpeciesRequest()
     assert.equal(h.state.speciesRequestState.value, 'error')
@@ -668,7 +753,7 @@ test('resolution refresh fails independently, verifies association on GET, and r
     assert.equal(h.state.canReviewPlant.value, true)
     assert.equal(h.state.comment.value, 'Plant comment to preserve')
     h.state.speciesReviewComment.value = 'Unsaved species note'
-    h.state.open(h.state.observations.value[1])
+    await h.state.open(h.state.observations.value[1])
     await flush()
     assert.equal(h.state.selectedSpeciesRequest.value, null)
     assert.equal(h.state.speciesReviewComment.value, '')
@@ -690,12 +775,12 @@ test('request dependency cannot silently disappear on resolution refresh', async
   )
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     await h.state.refreshSpeciesRequest()
     assert.ok(h.state.speciesLoadError.value)
     assert.equal(h.state.canReviewPlant.value, false)
     h.state.closeReview()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     assert.equal(h.state.canReviewPlant.value, false)
   } finally {
     h.stop()
@@ -715,6 +800,7 @@ test('real species approval posts explicit visibility with decision/comment and 
       review_comment: '',
     }),
   })
+  let initialDetail = 2
   const h = harness(async (url, options) => {
     if (url === '/api/observations')
       return Response.json({ observations: [pending, fixture({ id: secondId })] })
@@ -727,6 +813,7 @@ test('real species approval posts explicit visibility with decision/comment and 
           resolve(Response.json({ reviewed: true, species_request: approved.species_request }))
       })
     }
+    if (initialDetail && url !== '/api/observations') { initialDetail--; return Response.json({ observation: pending }) }
     assert.equal(url, `/api/observations/${firstId}`)
     return new Promise((resolve) => {
       releaseRead = () => resolve(Response.json({ observation: approved }))
@@ -734,7 +821,7 @@ test('real species approval posts explicit visibility with decision/comment and 
   })
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     h.state.comment.value = 'Independent plant comment'
     h.state.speciesVisibility.value = 'internal'
     const save = h.state.decideSpecies('Approved')
@@ -744,7 +831,7 @@ test('real species approval posts explicit visibility with decision/comment and 
     assert.equal(h.state.canReviewPlant.value, false)
     assert.equal(h.state.canReviewSpecies.value, false)
     h.state.closeReview()
-    h.state.open(h.state.observations.value[1])
+    await h.state.open(h.state.observations.value[1])
     assert.equal(h.state.selected.value.id, firstId)
     await h.state.decideSpecies('Approved')
     assert.equal(h.calls.filter((c) => c.options.method === 'POST').length, 1)
@@ -788,7 +875,7 @@ test('species rejection/correction validate comments, refetch saved reasons, and
     })
     try {
       await h.state.loadObservations()
-      h.state.open(h.state.observations.value[0])
+      await h.state.open(h.state.observations.value[0])
       for (const invalid of ['   ', 'x'.repeat(4001)]) {
         h.state.speciesReviewComment.value = invalid
         await h.state.decideSpecies(decision)
@@ -826,7 +913,7 @@ test('species 400/401/403/404 and network failures preserve comments and require
     })
     try {
       await h.state.loadObservations()
-      h.state.open(h.state.observations.value[0])
+      await h.state.open(h.state.observations.value[0])
       h.state.speciesReviewComment.value = 'Keep species note'
       await h.state.decideSpecies('Rejected')
       assert.equal(h.state.speciesReviewComment.value, 'Keep species note')
@@ -855,11 +942,13 @@ test('species 400/401/403/404 and network failures preserve comments and require
 })
 
 test('species 409 reloads latest state without resubmitting and preserves the draft comment', async () => {
+  let initialDetail = 2
   const h = harness(async (url, options) => {
     if (url === '/api/observations')
       return Response.json({ observations: [fixture({ species_request: requestFixture() })] })
     if (options.method === 'POST')
       return Response.json({ error: 'Already resolved' }, { status: 409 })
+    if (initialDetail && url !== '/api/observations') { initialDetail--; return Response.json({ observation: fixture({ species_request: requestFixture() }) }) }
     return Response.json({
       observation: fixture({
         species_request: requestFixture({ request_status: 'Approved', approved_species_id: 8 }),
@@ -868,7 +957,7 @@ test('species 409 reloads latest state without resubmitting and preserves the dr
   })
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     h.state.speciesReviewComment.value = 'My competing reason'
     await h.state.decideSpecies('Rejected')
     assert.equal(h.state.speciesReviewComment.value, 'My competing reason')
@@ -884,7 +973,8 @@ test('species 409 reloads latest state without resubmitting and preserves the dr
 test('species conflict/readback failures and malformed POST responses stay locked until refreshed', async () => {
   for (const mode of ['conflict', 'committed', 'malformed', 'lost-link']) {
     let recover = false
-    const h = harness(async (url, options) => {
+    let initialDetail = 2
+  const h = harness(async (url, options) => {
       if (url === '/api/observations')
         return Response.json({ observations: [fixture({ species_request: requestFixture() })] })
       if (options.method === 'POST')
@@ -896,6 +986,7 @@ test('species conflict/readback failures and malformed POST responses stay locke
               : { reviewed: true },
           { status: mode === 'conflict' ? 409 : 200 },
         )
+    if (initialDetail && url !== '/api/observations') { initialDetail--; return Response.json({ observation: fixture({ species_request: requestFixture() }) }) }
       if (!recover)
         return mode === 'lost-link'
           ? Response.json({ observation: fixture() })
@@ -908,7 +999,7 @@ test('species conflict/readback failures and malformed POST responses stay locke
     })
     try {
       await h.state.loadObservations()
-      h.state.open(h.state.observations.value[0])
+      await h.state.open(h.state.observations.value[0])
       h.state.speciesReviewComment.value = 'Preserve this species comment'
       h.state.speciesVisibility.value = 'internal'
       await h.state.decideSpecies('Approved')
@@ -929,20 +1020,17 @@ test('species conflict/readback failures and malformed POST responses stay locke
 })
 
 test('request photo uses the protected same-origin asset URL and fails independently', async () => {
-  const h = harness(async () =>
-    Response.json({
-      observations: [
+  const h = harness(async (url) => fixtureResponse(url, [
         fixture({
           species_request: requestFixture({
             assets: [{ id: 'species-request-1', content_type: 'image/jpeg' }],
           }),
         }),
-      ],
-    }),
+      ]),
   )
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     assert.ok(
       nodes(h.render()).some(
         (n) => n.type === 'img' && n.props.src === '/api/data/assets/species-request-1',
@@ -967,6 +1055,7 @@ test('request photo uses the protected same-origin asset URL and fails independe
 
 test('route changes during species save are deferred; another observation gets clean species state', async () => {
   let release
+  let initialDetail = 2
   const h = harness(async (url, options) => {
     if (url === '/api/observations')
       return Response.json({
@@ -976,6 +1065,8 @@ test('route changes during species save are deferred; another observation gets c
       return new Promise((resolve) => {
         release = () => resolve(Response.json({ reviewed: true }))
       })
+    if (url.endsWith(secondId)) return Response.json({ observation: fixture({ id: secondId }) })
+    if (initialDetail && url !== '/api/observations') { initialDetail--; return Response.json({ observation: fixture({ species_request: requestFixture() }) }) }
     return Response.json({
       observation: fixture({
         species_request: requestFixture({
@@ -987,7 +1078,7 @@ test('route changes during species save are deferred; another observation gets c
   })
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     h.state.speciesReviewComment.value = 'Species reason'
     const saving = h.state.decideSpecies('Rejected')
     await flush()
@@ -1009,13 +1100,361 @@ test('route changes during species save are deferred; another observation gets c
 })
 
 test('species approval requires an explicit visibility choice without a default', async () => {
-  const h = harness(async () => Response.json({ observations: [fixture({ species_request: requestFixture() })] }))
+  const h = harness(async (url) => fixtureResponse(url, [fixture({ species_request: requestFixture() })]))
   try {
     await h.state.loadObservations()
-    h.state.open(h.state.observations.value[0])
+    await h.state.open(h.state.observations.value[0])
     assert.equal(h.state.speciesVisibility.value, '')
     await h.state.decideSpecies('Approved')
     assert.equal(h.calls.filter(c => c.options.method === 'POST').length, 0)
     assert.match(h.state.speciesSaveError.value, /visibility/i)
   } finally { h.stop() }
+})
+
+test('existing-species registration with null request metadata shows its selected species and no new-request controls', async () => {
+  const row = fixture({ species_request_id: null, species_request: null })
+  const h = harness(async (url) => fixtureResponse(url, [row]))
+  try {
+    await h.state.loadObservations()
+    await h.state.open(h.state.observations.value[0]); await flush()
+    assert.equal(h.state.selectedSpeciesRequest.value, null)
+    assert.equal(h.state.speciesResolved.value, true)
+    assert.equal(h.state.canReviewPlant.value, true)
+    assert.equal(h.state.selected.value.speciesId, String(row.species_id))
+    assert.ok(!nodes(h.render()).some(n => n.props?.class === 'species-request-card'))
+    assert.ok(!nodes(h.render()).some(n => n.props?.class === 'species-request-list'))
+  } finally { h.stop() }
+})
+const renderText = h => nodes(h.render()).map(node => typeof node.children === 'string' ? node.children : '').join(' ')
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done }); return { promise, resolve } }
+
+test('opening Review refreshes corrected catalogue identity and locks decisions until validated', async () => {
+  const pending = deferred()
+  const stale = fixture({ species_id: 1, scientific_name: 'Old catalogue', common_name: 'Old common' })
+  const h = harness(async url => url === '/api/observations' ? fixtureResponse(url, [stale]) : pending.promise)
+  try {
+    await h.state.loadObservations()
+    const opening = h.state.open(h.state.observations.value[0])
+    await flush()
+    assert.equal(h.state.selectionLoading.value, true)
+    assert.equal(h.state.canDecide('Approved'), false)
+    assert.equal(h.state.canReviewSpecies.value, false)
+    assert.match(renderText(h), /Loading latest observation/)
+    await h.state.decide('Approved')
+    assert.equal(h.calls.filter(c => c.options.method === 'POST').length, 0)
+    pending.resolve(Response.json({ observation: fixture({ species_id: 6, scientific_name: 'Corrected catalogue', common_name: 'Corrected common', revision: 9 }) }))
+    await opening
+    assert.equal(h.state.selected.value.speciesId, '6')
+    assert.equal(h.state.selected.value.scientificName, 'Corrected catalogue')
+    assert.equal(h.state.selected.value.commonName, 'Corrected common')
+    assert.equal(h.state.selected.value.revision, 9)
+    assert.equal(h.state.observations.value[0].speciesId, '6')
+    assert.equal(h.state.canDecide('Approved'), true)
+    assert.equal(h.calls.filter(c => c.url === `/api/observations/${firstId}`).length, 1)
+    assert.doesNotMatch(renderText(h), /Old catalogue|Species Category/)
+  } finally { h.stop() }
+})
+
+test('failed, missing, malformed and mismatched fresh details never enable stale decisions; retry preserves comment', async () => {
+  for (const response of [() => { throw Error('offline') }, () => Response.json({}, { status: 503 }), () => Response.json({}), () => Response.json({ observation: fixture({ id: secondId }) }), () => Response.json({ observation: fixture({ revision: 0 }) }), () => Response.json({ observation: fixture({ status: 'unknown', species_request: requestFixture() }) })]) {
+    let recover = false
+    const h = harness(async url => url === '/api/observations' ? fixtureResponse(url, [fixture()]) : recover ? Response.json({ observation: fixture({ revision: 8 }) }) : response())
+    try {
+      await h.state.loadObservations()
+      await h.state.open(h.state.observations.value[0])
+      assert.equal(h.state.canDecide('Approved'), false)
+      assert.equal(h.state.canReviewSpecies.value, false)
+      assert.ok(h.state.selectionError.value)
+      assert.match(renderText(h), /Unable to refresh observation/)
+      h.state.comment.value = 'Keep field evidence'
+      await h.state.decide('Rejected')
+      assert.equal(h.calls.filter(c => c.options.method === 'POST').length, 0)
+      recover = true
+      await h.state.retrySelection()
+      assert.equal(h.state.selected.value.revision, 8)
+      assert.equal(h.state.comment.value, 'Keep field evidence')
+      assert.equal(h.state.canDecide('Approved'), true)
+    } finally { h.stop() }
+  }
+})
+
+test('late modal loads cannot overwrite another selection or restore data after close, logout, account change or unmount', async () => {
+  for (const action of ['switch', 'close', 'logout', 'account', 'unmount']) {
+    const pending = deferred()
+    const rows = [fixture(), fixture({ id: secondId })]
+    const h = harness(async url => url === '/api/observations' ? fixtureResponse(url, rows) : url.endsWith(firstId) ? pending.promise : fixtureResponse(url, rows))
+    try {
+      await h.state.loadObservations()
+      const opening = h.state.open(h.state.observations.value[0])
+      if (action === 'switch') await h.state.open(h.state.observations.value[1])
+      if (action === 'close') h.state.closeReview()
+      if (action === 'logout') h.emitSession(null)
+      if (action === 'account') h.emitSession({ id: 'another-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false })
+      if (action === 'unmount') h.stop()
+      pending.resolve(Response.json({ observation: fixture({ scientific_name: 'Late private result' }) }))
+      await opening; await flush()
+      assert.notEqual(h.state.selected.value?.scientificName, 'Late private result')
+      if (action === 'switch') assert.equal(h.state.selected.value.id, secondId)
+      if (['close', 'logout', 'account'].includes(action)) assert.equal(h.state.selected.value, null)
+    } finally { if (action !== 'unmount') h.stop() }
+  }
+})
+
+test('species labels and request absence/details states render accurately in all three languages', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const locale = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
+    const labels = locale.conservationPages.reviews
+    for (const extra of [{ species_request: null, species_request_id: null }, { species_request_id: '42' }, { species_request: requestFixture({ request_id: '42', request_status: 'Approved', approved_species_id: 8 }) }]) {
+      const row = fixture(extra)
+      const h = harness(async url => fixtureResponse(url, [row]), {}, language)
+      try {
+        await h.state.loadObservations(); await h.state.open(h.state.observations.value[0])
+        const text = renderText(h)
+        for (const key of ['selectedSpecies', 'speciesScientificName', 'speciesCommonName', 'speciesRequestIdLabel']) {
+          assert.equal(typeof labels[key], 'string'); assert.ok(text.includes(labels[key]), key)
+          assert.doesNotMatch(labels[key], /\{id\}/)
+        }
+        assert.doesNotMatch(text, /Species Category|\{id\}/)
+        assert.ok(text.includes('Actual species')); assert.ok(text.includes('Actual name'))
+        if (extra.species_request_id === null) {
+          assert.ok(text.includes(labels.noLinkedSpeciesRequest))
+          assert.equal(h.state.selectedSpeciesRequest.value, null)
+        } else if (!extra.species_request) {
+          assert.ok(text.includes(labels.requestDetailsUnavailable))
+          assert.ok(!text.includes(labels.noLinkedSpeciesRequest))
+          assert.equal(h.state.canReviewPlant.value, false)
+        } else {
+          assert.ok(text.includes('42')); assert.ok(text.includes('Approved'))
+          assert.ok(nodes(h.render()).some(n => n.props?.class === 'species-request-card'))
+        }
+      } finally { h.stop() }
+    }
+  }
+})
+
+test('modal source layout supports 320, 375, 390, 768 and desktop widths without changing shared actions', () => {
+  // CSS contract verification only: no browser geometry or visual rendering claim.
+  const css = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
+  const source = readFileSync(filename, 'utf8')
+  const narrow = css.slice(css.indexOf('@media (max-width: 920px)'))
+  const phone = css.slice(css.indexOf('@media (max-width: 620px)'))
+  for (const width of [320, 375, 390, 768, 1280]) {
+    if (width <= 920) assert.match(narrow, /\.two-column\s*\{\s*grid-template-columns: 1fr/)
+    else assert.match(css, /\.two-column\s*\{[^}]*grid-template-columns: minmax\(0, 1.4fr\)/)
+    if (width <= 620) assert.match(phone, /\.detail-list\s*\{\s*grid-template-columns: 1fr/)
+  }
+  assert.match(source, /\.detail-list dd\s*\{[^}]*overflow-wrap: anywhere/)
+  assert.match(css, /\.officer-layout \.modal-card\s*\{[^}]*max-height:[^}]*overflow: auto/)
+  assert.match(css, /\.action-group\s*\{\s*display: flex;/)
+  assert.match(css, /\.table-scroll\s*\{[^}]*overflow-x: auto/)
+  assert.match(source, /@close="closeReview"/)
+})
+
+test('logout also invalidates conflict recovery loads and prevents privileged deep-link reloads', async () => {
+  const pending = deferred(); let detailCalls = 0
+  const h = harness(async url => {
+    if (url === '/api/observations') return fixtureResponse(url, [fixture()])
+    detailCalls++
+    return detailCalls === 1 ? Response.json({ observation: fixture() }) : pending.promise
+  })
+  try {
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0])
+    h.state.needsReload.value = true
+    const reload = h.state.reloadSelected()
+    h.emitSession(null)
+    pending.resolve(Response.json({ observation: fixture({ revision: 12 }) }))
+    await reload; await flush()
+    await h.state.resolveQuery()
+    assert.equal(h.state.selected.value, null)
+    assert.equal(detailCalls, 2)
+  } finally { h.stop() }
+})
+
+test('submitted zone is preserved in the row and selected modal; missing values are not recorded', async () => {
+  const rows = [fixture({ content: { ...fixture().content, zone: '  Field zone A  ', altitudeM: -5 } }), fixture({ id: secondId, plant_id: 2, content: { ...fixture().content, zone: 'Zone B', altitudeM: 125.5 } })]
+  const h = harness(async url => fixtureResponse(url, rows))
+  try {
+    await h.state.loadObservations()
+    assert.equal(h.state.observations.value[0].zone, '  Field zone A  ')
+    assert.ok(nodes(h.render()).some(n => n.type === 'td' && n.children === '  Field zone A  '))
+    await h.state.open(h.state.observations.value[0]); await flush()
+    assert.ok(nodes(h.render()).some(n => n.type === 'dd' && n.children === '  Field zone A  '))
+    assert.ok(renderText(h).includes('-5 m'))
+    await h.state.open(h.state.observations.value[1]); await flush()
+    assert.equal(h.state.selected.value.zone, 'Zone B')
+    assert.ok(nodes(h.render()).some(n => n.type === 'dd' && n.children === 'Zone B'))
+    assert.ok(renderText(h).includes('125.5 m'))
+    for (const zone of [null, undefined, '', '   ', 42]) assert.equal(h.state.mapObservation(fixture({ content: { ...fixture().content, zone } })).zone, '')
+  } finally { h.stop() }
+})
+
+test('altitude keeps finite zero, negative and decimal values and never fabricates a missing elevation', async () => {
+  for (const altitude of [0, -5, 125.5, null, undefined, '', '125', Infinity, NaN]) {
+    const row = fixture({ content: { ...fixture().content, altitudeM: altitude } })
+    const h = harness(async url => fixtureResponse(url, [row]))
+    try {
+      const expected = typeof altitude === 'number' && Number.isFinite(altitude) ? String(altitude) : ''
+      assert.equal(h.state.mapObservation(row).altitude, expected)
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+      assert.ok(nodes(h.render()).some(n => n.type === 'dd' && n.children === (expected === '' ? 'Not recorded' : `${expected} m`)))
+    } finally { h.stop() }
+  }
+})
+
+test('QR uses only validated current plant fields after fresh observation and never overwrites submission evidence', async () => {
+  const stale = fixture({ plant_id: 1 })
+  const fresh = fixture({ plant_id: 13, content: { ...fixture().content, zone: 'Submitted zone', altitudeM: 0 } })
+  const h = harness(async url => url === '/api/observations' ? fixtureResponse(url, [stale]) : Response.json({ observation: fresh }), {}, 'en', async (url, options) => {
+    assert.equal(url, '/api/plants/13'); assert.equal(options.method, 'GET'); assert.equal(options.credentials, 'same-origin')
+    return Response.json({ plant: { plant_id: 13, qr_id: 99, qr_token: 'actual-current-token', qr_status: 'retired', rbac_status: 'Approved', latitude: 70, longitude: 80, zone: 'Approved zone', altitude_m: 999, latest_approved: { heightCm: 900 }, original_qr_token: 'old-token' } })
+  })
+  try {
+    await h.state.loadObservations()
+    assert.equal(h.calls.filter(c => c.url.startsWith('/api/plants/')).length, 0)
+    await h.state.open(h.state.observations.value[0]); await flush()
+    assert.equal(h.state.plantQr.value.identity, 'actual-current-token')
+    assert.equal(h.state.plantQr.value.status, 'retired')
+    assert.equal(h.state.selected.value.zone, 'Submitted zone'); assert.equal(h.state.selected.value.altitude, '0')
+    assert.equal(h.state.selected.value.latitude, '0'); assert.equal(h.state.selected.value.longitude, '0'); assert.equal(h.state.selected.value.gpsAccuracy, '0')
+    assert.equal(h.state.selected.value.height, '12 cm'); assert.equal(h.state.selected.value.assets.length, 3)
+    assert.match(renderText(h), /Current Plant QR Information/)
+    assert.ok(renderText(h).includes('actual-current-token')); assert.ok(renderText(h).includes('retired'))
+    assert.ok(!renderText(h).includes('old-token')); assert.equal(h.state.canDecide('Approved'), true)
+  } finally { h.stop() }
+})
+
+test('missing QR fields stay not recorded; failed or mismatched plant lookup never fabricates or blocks valid review', async () => {
+  for (const mode of ['missing', 'wrong-id', 'missing-id', 'malformed', 'network', 401, 403, 404, 503]) {
+    const h = harness(async url => fixtureResponse(url, [fixture()]), {}, 'en', async () => {
+      if (mode === 'network') throw Error('offline')
+      if (typeof mode === 'number') return Response.json({ error: 'Failure' }, { status: mode })
+      if (mode === 'malformed') return Response.json({ plant: [] })
+      return Response.json({ plant: { ...(mode === 'missing-id' ? {} : { plant_id: mode === 'wrong-id' ? 99 : 1 }), qr_token: mode === 'missing' ? null : 'must-not-display', qr_status: null } })
+    })
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+      assert.equal(h.state.canDecide('Approved'), true)
+      assert.equal(h.state.selected.value.height, '12 cm')
+      assert.equal(h.state.qrLoading.value, false)
+      if (mode === 'missing') {
+        assert.equal(h.state.plantQr.value.identity, ''); assert.equal(h.state.qrError.value, '')
+        assert.match(renderText(h), /Not recorded/)
+      } else {
+        assert.equal(h.state.plantQr.value, null)
+        assert.equal(h.state.qrError.value, 'Unable to load QR information')
+        assert.ok(!renderText(h).includes('must-not-display'))
+      }
+    } finally { h.stop() }
+  }
+})
+
+test('QR loading is independent of review and late responses cannot cross selection, modal or account boundaries', async () => {
+  for (const action of ['switch', 'close', 'logout', 'account', 'pending-session', 'unmount']) {
+    const pending = deferred()
+    const rows = [fixture(), fixture({ id: secondId, plant_id: 2 })]
+    const h = harness(async url => fixtureResponse(url, rows), {}, 'en', async url => url.endsWith('/1') ? pending.promise : Response.json({ plant: { plant_id: '2', qr_token: 'plant-two-token', qr_status: 'assigned' } }))
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+      assert.equal(h.state.qrLoading.value, true); assert.equal(h.state.plantQr.value, null)
+      assert.equal(h.state.canDecide('Approved'), true)
+      assert.match(renderText(h), /Loading QR information/)
+      if (action === 'switch') { await h.state.open(h.state.observations.value[1]); await flush() }
+      if (action === 'close') h.state.closeReview()
+      if (action === 'logout') h.emitSession(null)
+      if (action === 'account') h.emitSession({ id: 'new-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false })
+      if (action === 'pending-session') h.emitSession(null, true)
+      if (action === 'unmount') h.stop()
+      pending.resolve(Response.json({ plant: { plant_id: 1, qr_token: 'late-private-token', qr_status: 'active' } }))
+      await flush()
+      assert.notEqual(h.state.plantQr.value?.identity, 'late-private-token')
+      if (action === 'switch') assert.equal(h.state.plantQr.value.identity, 'plant-two-token')
+      else assert.equal(h.state.plantQr.value, null)
+    } finally { if (action !== 'unmount') h.stop() }
+  }
+})
+
+test('zone altitude and QR loading/error labels use natural localized values without changing action layout', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews
+    let failQr = true
+    const h = harness(async url => fixtureResponse(url, [fixture()]), {}, language, async () => {
+      if (failQr) throw Error('offline')
+      return Response.json({ plant: { plant_id: 1, qr_token: 'localized-token', qr_status: 'assigned' } })
+    })
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+      assert.ok(renderText(h).includes(labels.currentPlantQr))
+      assert.ok(renderText(h).includes(labels.qrLoadFailed))
+      assert.ok(renderText(h).includes(labels.notRecorded))
+      failQr = false
+      await h.state.retrySelection(); await flush()
+      assert.ok(renderText(h).includes(labels.qrIdentity))
+      assert.ok(renderText(h).includes(labels.qrStatus))
+      assert.ok(renderText(h).includes('localized-token'))
+      for (const key of ['currentPlantQr', 'qrIdentity', 'qrStatus', 'notRecorded', 'qrLoading', 'qrLoadFailed']) assert.equal(typeof labels[key], 'string')
+    } finally { h.stop() }
+  }
+  const css = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
+  assert.match(css, /\.action-group\s*\{\s*display: flex;/)
+  assert.match(css, /\.table-scroll\s*\{[^}]*overflow-x: auto/)
+})
+
+test('registration and legacy queues request authoritative origins, preserve all statuses and continue empty filtered pages', async () => {
+  const initial = fixture(), proposed = fixture({ id: secondId, species_request: requestFixture() })
+  const legacy = fixture({ id: '123', origin_type: 'unknown', status: 'Flagged' })
+  let failMore = false
+  const h = harness(async url => fixtureResponse(url, [initial, proposed, legacy]), {}, 'en', undefined, async url => {
+    const query = new URL(url, 'https://fixture.invalid').searchParams
+    assert.equal(query.get('limit'), '100')
+    if (query.get('origin_type') === 'unknown') return Response.json({ observations: [legacy], page: { has_more: false, next_cursor: null } })
+    if (!query.has('cursor')) return Response.json({ observations: [], page: { has_more: true, next_cursor: 'scan-next' } })
+    if (failMore) return Response.json({ error: 'Retry this page' }, { status: 503 })
+    return Response.json({ observations: [initial, proposed], page: { has_more: false, next_cursor: null } })
+  })
+  try {
+    await h.state.loadObservations()
+    assert.equal(h.state.filtered.value.length, 0); assert.equal(h.state.hasMore.value, true)
+    failMore = true; await h.state.loadObservations(true)
+    assert.ok(h.state.loadError.value); assert.equal(h.state.nextCursor.value, 'scan-next')
+    failMore = false; await h.state.loadObservations(true)
+    assert.equal(h.state.filtered.value.length, 2); assert.equal(h.state.hasMore.value, false)
+    assert.equal(h.state.filtered.value[0].speciesRequest, null)
+    assert.ok(h.state.filtered.value[1].speciesRequest)
+    h.state.observations.value.push(h.state.mapObservation(fixture({ id: '321', origin_type: 'subsequent_observation' })))
+    assert.equal(h.state.filtered.value.length, 2)
+    h.state.queueOrigin.value = 'unknown'; await h.state.loadObservations()
+    assert.equal(h.state.filtered.value.length, 1)
+    await h.state.open(h.state.filtered.value[0]); await flush()
+    assert.equal(h.state.selected.value.origin, 'unknown'); assert.equal(h.state.canDecide('Approved'), true)
+    assert.match(renderText(h), /Origin not verified/)
+    assert.match(renderText(h), /Loaded records only/)
+  } finally { h.stop() }
+})
+
+test('fresh origin change before a registration decision prevents POST and refreshes its queue', async () => {
+  let row = fixture()
+  const h = harness(async url => fixtureResponse(url, [row]))
+  try {
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+    row = fixture({ origin_type: 'subsequent_observation' })
+    await h.state.decide('Approved'); await flush()
+    assert.equal(h.calls.filter(c => c.options.method === 'POST').length, 0)
+    assert.equal(h.state.canDecide('Approved'), false)
+    assert.match(renderText(h), /latest origin belongs to another/)
+    assert.equal(h.state.filtered.value.length, 0)
+  } finally { h.stop() }
+})
+
+test('legacy deep links select the explicit fallback; all queue labels render in three languages', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const row = fixture({ origin_type: 'unknown' })
+    const h = harness(async url => fixtureResponse(url, [row]), { review: firstId }, language)
+    try {
+      await h.state.loadObservations(); await flush()
+      assert.equal(h.state.queueOrigin.value, 'unknown'); assert.equal(h.state.selected.value.origin, 'unknown')
+      const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews.queues
+      for (const key of ['registrations', 'legacy', 'originUnverified', 'loadedScope', 'loadMore', 'originMoved']) assert.equal(typeof labels[key], 'string')
+      assert.ok(renderText(h).includes(labels.originUnverified))
+    } finally { h.stop() }
+  }
 })

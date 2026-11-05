@@ -586,6 +586,7 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
     "INSERT INTO plant_record(species_id,registered_subject,rbac_status,qr_token) VALUES(3,$1,'Approved','protected-test-qr')",
     ["staff:" + users.bot.id],
   );
+  await pool.query("INSERT INTO public.qr_code(plant_id,qr_code,status) SELECT plant_id,qr_token,'active' FROM plant_record WHERE qr_token='protected-test-qr'");
   for (const role of [undefined, "visitor", "bot", "other", "admin"]) {
     const expected = role === "admin" ? 403 : 404;
     for (const path of [
