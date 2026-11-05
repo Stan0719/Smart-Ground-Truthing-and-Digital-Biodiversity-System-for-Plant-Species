@@ -28,19 +28,19 @@ import RefreshButton from '../components/RefreshButton';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const COLORS = {
-  lightGreen: '#DEF9C4',
-  paleGreen: '#E0EBDD',
-  green: '#50B498',
+  lightGreen: '#E7F2E2',
+  paleGreen: '#E9F7E4',
+  green: '#468585',
   darkGreen: '#468585',
-  deepGreen: '#173F34',
-  cream: '#FFF6DC',
-  offWhite: '#F8F6EE',
-  textGreen: '#405F5B',
-  darkText: '#254B42',
-  mutedText: '#60756F',
+  deepGreen: '#234B3A',
+  cream: '#F7FBF4',
+  offWhite: '#F7FBF4',
+  textGreen: '#6D7F75',
+  darkText: '#234B3A',
+  mutedText: '#6D7F75',
   white: '#FFFFFF',
-  journeyBackground: '#F5F3E9',
-  beforeBackground: '#E8EFE3',
+  journeyBackground: '#F7FBF4',
+  beforeBackground: '#E7F2E2',
 };
 
 const CARD_WIDTH = SCREEN_WIDTH < 500 ? 190 : 240;
@@ -71,6 +71,26 @@ const ABOUT_STACK_IMAGES = [
 
 const ABOUT_STACK_SWIPE_THRESHOLD = 75;
 const ABOUT_STACK_ANIMATION_DURATION = 300;
+
+export function SpeciesCardImage({ species }) {
+  useAppTranslation();
+  const source = getSpeciesImageSource(species, undefined, {
+    allowUnmappedRemote: false,
+    preferVerifiedBackend: true,
+  });
+  const [failedSource, setFailedSource] = useState(null);
+
+  if (!source || failedSource === source) {
+    return (
+      <View style={styles.plantImagePlaceholder}>
+        <Text style={styles.plantPlaceholderIcon}>🌿</Text>
+        <Text style={styles.plantPlaceholderText}>{t("speciesDetail.plantImageComingSoon")}</Text>
+      </View>
+    );
+  }
+
+  return <Image source={source} style={styles.plantImageActual} resizeMode="cover" onError={() => setFailedSource(source)} />;
+}
 
 
 // ==================================================
@@ -314,7 +334,6 @@ export default function Home({ navigation }) {
   const [speciesError, setSpeciesError] = useState('');
   const speciesRequestRef = useRef(null);
   const mountedRef = useRef(false);
-  const carouselSpecies = [...species, ...species];
 
   const loadSpecies = useCallback(() => {
     if (speciesRequestRef.current) return speciesRequestRef.current;
@@ -450,17 +469,7 @@ const renderPlant = ({ item }) => {
       onPress={() => openPlant(item)}
     >
       <View style={styles.plantImage}>
-        <Image
-          source={getSpeciesImageSource(item)}
-          style={styles.plantImageActual}
-          resizeMode="cover"
-        />
-
-        <View style={styles.categoryBadge}>
-          <Text style={styles.categoryText}>
-            {translateLabel(item.category)}
-          </Text>
-        </View>
+        <SpeciesCardImage species={item} />
       </View>
 
       <View style={styles.plantInfo}>
@@ -1074,11 +1083,9 @@ const renderPlant = ({ item }) => {
 
             <FlatList
               ref={carouselRef}
-              data={carouselSpecies}
+              data={species}
               renderItem={renderPlant}
-              keyExtractor={(item, index) =>
-                `${item.slug}-${index}`
-              }
+              keyExtractor={(item) => String(item.id)}
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.carouselContent}
@@ -1645,7 +1652,7 @@ exploreNiahHeading: {
 },
 
 exploreNiahTitle: {
-  color: '#315F5F',
+  color: '#234B3A',
   fontSize:
     SCREEN_WIDTH < 500
       ? 30
@@ -2115,7 +2122,7 @@ journeyHeading: {
 },
 
 journeyTitle: {
-  color: '#315F5F',
+  color: '#234B3A',
   fontSize:
     SCREEN_WIDTH < 500
       ? 30
@@ -2178,12 +2185,12 @@ journeyMarker: {
   borderRadius: 50,
   alignItems: 'center',
   justifyContent: 'center',
-  backgroundColor: '#D9E8D9',
+  backgroundColor: '#E7F2E2',
   elevation: 2,
 },
 
   journeyMarkerHighlight: {
-    backgroundColor: '#2F7358',
+    backgroundColor: '#468585',
 
     borderColor: COLORS.journeyBackground,
 
@@ -2298,7 +2305,7 @@ exploreHeader: {
 
   exploreTitle: {
     flexShrink: 1,
-    color: '#315F5F',
+    color: '#234B3A',
     fontSize:
       SCREEN_WIDTH < 500
         ? 30
@@ -2373,7 +2380,7 @@ plantImageActual: {
 
     borderWidth: 1,
     borderColor:
-      'rgba(49, 91, 70, 0.1)',
+      '#E2EDE0',
 
     borderRadius: 18,
 
@@ -2391,7 +2398,7 @@ plantImageActual: {
 
     overflow: 'hidden',
 
-    backgroundColor: '#DCE8D6',
+    backgroundColor: '#E9F7E4',
   },
 
   plantImagePlaceholder: {
@@ -2400,35 +2407,17 @@ plantImageActual: {
     alignItems: 'center',
     justifyContent: 'center',
 
-    backgroundColor: '#C5DCC9',
+    backgroundColor: '#E7F2E2',
   },
 
   plantPlaceholderIcon: {
     fontSize: 55,
   },
-
-  categoryBadge: {
-    position: 'absolute',
-
-    top: 10,
-    right: 10,
-
-    paddingVertical: 5,
-    paddingHorizontal: 9,
-
-    borderRadius: 999,
-
-    backgroundColor:
-      'rgba(20, 54, 37, 0.86)',
-  },
-
-  categoryText: {
-    color: COLORS.white,
-
-    fontSize: 9,
-    fontWeight: '700',
-
-    letterSpacing: 0.5,
+  plantPlaceholderText: {
+    marginTop: 6,
+    color: COLORS.mutedText,
+    fontSize: 11,
+    textAlign: 'center',
   },
 
   plantInfo: {
@@ -2448,14 +2437,14 @@ plantImageActual: {
   scientificName: {
     marginTop: 4,
 
-    color: '#88735D',
+    color: '#6D7F75',
 
     fontSize: SCREEN_WIDTH < 500 ? 12 : 13,
     fontStyle: 'italic',
   },
 
   viewPlant: {
-    color: '#508A6A',
+    color: '#468585',
 
     fontSize: SCREEN_WIDTH < 500 ? 10 : 11,
     fontWeight: '700',
@@ -2540,7 +2529,7 @@ beforeExploreHeading: {
   },
 
 beforeExploreTitle: {
-  color: '#315F5F',
+  color: '#234B3A',
   fontSize:
     SCREEN_WIDTH < 360
       ? 27
@@ -2606,7 +2595,7 @@ preparationItem: {
   borderWidth: 1,
   borderColor: 'rgba(70, 133, 133, 0.18)',
   borderRadius: 16,
-  backgroundColor: 'rgba(255, 250, 235, 0.85)',
+  backgroundColor: 'rgba(247, 251, 244, 0.92)',
 },
 
 preparationIcon: {
@@ -2618,7 +2607,7 @@ preparationIcon: {
   justifyContent: 'center',
 
   borderRadius: 12,
-  backgroundColor: '#DCE9D9',
+  backgroundColor: '#E7F2E2',
 },
 
 preparationIconText: {

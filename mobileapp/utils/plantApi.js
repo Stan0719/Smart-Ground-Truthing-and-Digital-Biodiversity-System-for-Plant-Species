@@ -56,6 +56,9 @@ export function mapBackendSpecies(species) {
   const commonName = species.common_name ?? species.commonName ?? species.name ?? "Unknown species";
   const existingSpecies = undefined;
   const id = String(species.species_id ?? species.id ?? scientificName ?? commonName);
+  const imageAssetId = typeof species.image_asset_id === "string" && species.image_asset_id.trim()
+    ? species.image_asset_id.trim()
+    : null;
 
   return {
     ...existingSpecies,
@@ -67,14 +70,14 @@ export function mapBackendSpecies(species) {
     scientificName: scientificName || existingSpecies?.scientificName || "",
     genus: species.genus_name ?? species.genus ?? existingSpecies?.genus ?? "",
     family: species.family_name ?? species.family ?? existingSpecies?.family ?? "",
-    category: species.category ?? existingSpecies?.category ?? "Other",
     conservationStatus:
       species.conservation_status ??
       species.conservationStatus ??
       existingSpecies?.conservationStatus ??
       "Not recorded",
     description: species.description ?? existingSpecies?.description ?? "",
-    image: species.image_asset_id ? { uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(species.image_asset_id) } : undefined,
+    image: imageAssetId ? { uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(imageAssetId) } : undefined,
+    speciesImageVerified: Boolean(imageAssetId),
     registeredAt: species.registered_at ?? species.registeredAt ?? null,
   };
 }
@@ -130,7 +133,17 @@ function mapBackendObservation(record) {
 }
 
 export function mapBackendPlant(record, speciesById = new Map()) {
+  const projectedLocation = Object.fromEntries(
+    ["latitude", "longitude", "accuracy_m", "altitude_m", "zone"]
+      .filter((field) => Object.prototype.hasOwnProperty.call(record, field))
+      .map((field) => [field, record[field]]),
+  );
+  const hasProjectedField = (field) => Object.prototype.hasOwnProperty.call(projectedLocation, field);
   record = { ...record, ...record.latest_approved };
+  // The backend's top-level location fields are the authorized, approved
+  // location projection. Do not let a different latest-observation payload
+  // overwrite them during the general observation-field merge.
+  Object.assign(record, projectedLocation);
   const speciesId = String(record.species_id ?? record.speciesId ?? "");
   const species = speciesById.get(speciesId) || (record.species_details ? {
     ...mapBackendSpecies(record.species_details), habitat: record.species_details.habitat || "",
@@ -151,6 +164,7 @@ export function mapBackendPlant(record, speciesById = new Map()) {
     genus: record.genus_name ?? record.genus ?? species?.genus ?? "",
     family: record.family_name ?? record.family ?? species?.family ?? "",
     currentStatus: record.rbac_status ?? record.status ?? record.current_status ?? record.currentStatus ?? "Not recorded",
+    plantImageAssetId: record.plant_image_asset_id == null ? null : String(record.plant_image_asset_id),
     latestApproved: {
       heightCm: record.height_cm ?? record.heightCm ?? null,
       healthStatus: record.health_status ?? record.healthStatus ?? "Not recorded",
@@ -160,11 +174,11 @@ export function mapBackendPlant(record, speciesById = new Map()) {
       notes: record.notes ?? "",
     },
     location: {
-      zone: record.zone ?? record.location?.zone ?? "Not recorded",
-      latitude: record.latitude ?? record.location?.latitude ?? null,
-      longitude: record.longitude ?? record.location?.longitude ?? null,
-      altitudeM: record.altitude_m ?? record.altitudeM ?? record.location?.altitudeM ?? null,
-      accuracyM: record.accuracy_m ?? record.location?.accuracyM ?? null,
+      zone: hasProjectedField("zone") ? record.zone : record.zone ?? record.location?.zone ?? "Not recorded",
+      latitude: hasProjectedField("latitude") ? record.latitude : record.latitude ?? record.location?.latitude ?? null,
+      longitude: hasProjectedField("longitude") ? record.longitude : record.longitude ?? record.location?.longitude ?? null,
+      altitudeM: hasProjectedField("altitude_m") ? record.altitude_m : record.altitude_m ?? record.altitudeM ?? record.location?.altitudeM ?? null,
+      accuracyM: hasProjectedField("accuracy_m") ? record.accuracy_m : record.accuracy_m ?? record.location?.accuracyM ?? null,
     },
     qr: {
       code: record.qr_token ?? record.qr_code ?? record.qr?.code ?? "Not recorded",
@@ -180,7 +194,7 @@ export function mapBackendPlant(record, speciesById = new Map()) {
 
 export async function plantAssetSources(assets, accountId, { ownSubmission = false } = {}) {
   return faceSession.withToken(async (token, user) => {
-    if (String(user.id) !== String(accountId)) throw Error("Sign in with the correct account.");
+    if (accountId != null && String(user.id) !== String(accountId)) throw Error("Sign in with the correct account.");
     return assets.map((asset) => ({ uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(asset.id) + (ownSubmission ? "?scope=mine" : ""),
       headers: { Authorization: "Bearer " + token } }));
   });
@@ -194,27 +208,48 @@ export async function speciesRequestPhotoSources(requests, accountId) {
   });
 }
 
-export async function fetchPlantRecords(speciesCatalog = [], options = {}) {
-  const payload = await getJson("/api/plants", options);
+export async function fetchPlantRecords(speciesCatalog = [], { scopeMine = false, ...options } = {}) {
+  const payload = await getJson(`/api/plants${scopeMine ? "?scope=mine" : ""}`, options);
   const speciesById = new Map(speciesCatalog.map((species) => [String(species.id), species]));
-  return unwrapList(payload, ["plants", "data", "results"]).map((record) =>
+  const plants = unwrapList(payload, ["plants", "data", "results"]).map((record) =>
     mapBackendPlant(record, speciesById)
   );
+  const withPhotos = plants.filter((plant) => plant.plantImageAssetId);
+  if (!withPhotos.length) return plants;
+  const assets = withPhotos.map((plant) => ({ id: plant.plantImageAssetId }));
+  const sources = faceSession.hasSession()
+    ? await plantAssetSources(assets, options.accountId)
+    : assets.map((asset) => ({ uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(asset.id) }));
+  const sourceByPlantId = new Map(withPhotos.map((plant, index) => [plant.id, sources[index]]));
+  return plants.map((plant) => sourceByPlantId.has(plant.id)
+    ? { ...plant, plantImage: sourceByPlantId.get(plant.id) }
+    : plant);
 }
 
-export async function fetchPlantDetail(plantId, { includeObservations = false, accountId } = {}) {
+export async function fetchPlantDetail(plantId, { includeObservations = false, scopeMine = false, accountId } = {}) {
   const id = String(plantId ?? "");
   if (!/^\d+$/.test(id)) {
     throw new Error("The selected plant does not have a backend ID.");
   }
 
   const [plantPayload, catalog] = await Promise.all([
-    getJson(`/api/plants/${encodeURIComponent(id)}`, { accountId }),
+    getJson(`/api/plants/${encodeURIComponent(id)}${scopeMine ? "?scope=mine" : ""}`, { accountId }),
     fetchSpeciesCatalog({ accountId }),
   ]);
   const record = plantPayload?.plant ?? plantPayload;
   const speciesById = new Map(catalog.map((species) => [String(species.id), species]));
   const plant = mapBackendPlant(record, speciesById);
+  try {
+    const photoPayload = await getJson(`/api/assets?plant_id=${encodeURIComponent(id)}`, { accountId });
+    const assets = (photoPayload?.assets || []).filter((asset) => asset?.id);
+    const sources = accountId
+      ? await plantAssetSources(assets, accountId)
+      : assets.map((asset) => ({ uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(asset.id) }));
+    plant.photos = assets.map((asset, index) => ({ id: asset.id, ...sources[index] }));
+  } catch {
+    // Plant detail remains usable if an older backend does not expose photo listing.
+    plant.photos = [];
+  }
 
   if (includeObservations) {
     const observationsPayload = await getJson("/api/observations", { accountId });

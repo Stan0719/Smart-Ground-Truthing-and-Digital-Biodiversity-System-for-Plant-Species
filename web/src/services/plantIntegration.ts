@@ -9,6 +9,7 @@ export interface SpeciesContract {
   conservationStatus: string
   description: string
   habitat: string
+  imageUrl: string
 }
 
 export interface ApprovedObservationContent {
@@ -69,6 +70,7 @@ export const mapSpeciesContract = (value: unknown): SpeciesContract | null => {
     conservationStatus: text(item.conservation_status),
     description: text(item.description),
     habitat: text(item.habitat),
+    imageUrl: /^\/api\/assets\/[A-Za-z0-9_-]+$/.test(text(item.image_url)) ? text(item.image_url) : '',
   }
 }
 

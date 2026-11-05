@@ -35,6 +35,7 @@ async function fixture(language = "en", initial = {}, api) {
     "expo-location": {}, "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => ({ status: "granted" }), launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: proposal.photoUri }] }) },
     "expo-file-system/legacy": { EncodingType: { Base64: "base64" }, readAsStringAsync: async () => "cGhvdG8=" },
     "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" }, "../components/QRRefreshButton": { default: "QRRefreshButton" }, "../components/RefreshButton": { default: "RefreshButton" },
+    "../components/fieldFormStyles": { fieldFormStyles: native.StyleSheet.create(Object.fromEntries(["container", "scrollView", "scrollContent", "card", "sectionTitle", "label", "input", "textArea", "locationButton", "locationButtonText", "photoButtonRow", "photoButton", "photoButtonText", "submitButton", "submitButtonText"].map((key) => [key, {}]))) },
     "../utils/plantApi": { fetchSpeciesCatalog: async (options) => { speciesReads.push(options); return [species]; }, plantApi: async (...args) => {
       network.push(args); if (api) return api(...args);
       if (args[0] === "/species-requests") return { species_request: { request_id: 12, request_status: "Pending Review" } };

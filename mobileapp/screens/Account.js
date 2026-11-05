@@ -125,7 +125,7 @@ export default function AccountScreen({
           <Ionicons
             name="log-out-outline"
             size={22}
-            color="#D9534F"
+            color="#468585"
           />
 
           <Text style={styles.logoutText}>{t("account.logOut")}</Text>
@@ -138,7 +138,7 @@ export default function AccountScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8FFF5",
+    backgroundColor: "#F7FBF4",
   },
 
   content: {
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 28,
     fontWeight: "700",
-    color: "#468585",
+    color: "#234B3A",
   },
 
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 24 },
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   profileCard: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#DEF9C4",
+    backgroundColor: "#E7F2E2",
     borderRadius: 18,
     padding: 20,
     marginBottom: 28,
@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 20,
     fontWeight: "700",
-    color: "#315E59",
+    color: "#234B3A",
     marginBottom: 5,
   },
 
@@ -192,7 +192,9 @@ const styles = StyleSheet.create({
 
   section: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 18,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E2EDE0",
     overflow: "hidden",
     marginBottom: 24,
   },
@@ -202,14 +204,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 18,
     borderBottomWidth: 1,
-    borderBottomColor: "#E8F1E8",
+    borderBottomColor: "#E2EDE0",
   },
 
   iconContainer: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#DEF9C4",
+    backgroundColor: "#E7F2E2",
     justifyContent: "center",
     alignItems: "center",
     marginRight: 14,
@@ -222,7 +224,7 @@ const styles = StyleSheet.create({
   optionTitle: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#315E59",
+    color: "#234B3A",
     marginBottom: 4,
   },
 
@@ -235,17 +237,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    paddingVertical: 15,
-    borderWidth: 1,
-    borderColor: "#F0D5D5",
+    minHeight: 44,
+    backgroundColor: "#E7F2E2",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
   },
 
   logoutText: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: "600",
-    color: "#D9534F",
+    color: "#468585",
     marginLeft: 8,
   },
 });

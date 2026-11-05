@@ -19,10 +19,10 @@ export default function LanguageSelector() {
     <TouchableOpacity
       style={styles.button} onPress={() => setVisible(true)} disabled={saving}
       activeOpacity={0.7} accessibilityRole="button"
-      accessibilityLabel={`${translateLabel("Language")}: ${language === "ms" ? "Bahasa Melayu" : "English"}`}
+      accessibilityLabel={`${translateLabel("Language")}: ${language === "ms" ? "Bahasa Melayu" : language === "zh" ? "中文" : "English"}`}
     >
       <Ionicons name="language-outline" size={18} color="#35786F" />
-      <Text style={styles.shortLabel}>{language === "ms" ? "BM" : "EN"}</Text>
+      <Text style={styles.shortLabel}>{language === "ms" ? "BM" : language === "zh" ? "中文" : "EN"}</Text>
       <Ionicons name="chevron-down" size={13} color="#35786F" />
     </TouchableOpacity>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
@@ -30,7 +30,7 @@ export default function LanguageSelector() {
         <Pressable style={StyleSheet.absoluteFill} onPress={() => setVisible(false)} accessibilityLabel={translateLabel("Cancel")} />
         <View style={styles.sheet} accessibilityViewIsModal>
           <Text style={styles.title}>{translateLabel("Choose language")}</Text>
-          {[{ code: "en", name: "English", short: "EN" }, { code: "ms", name: "Bahasa Melayu", short: "BM" }].map((option) =>
+          {[{ code: "en", name: "English", short: "EN" }, { code: "ms", name: "Bahasa Melayu", short: "BM" }, { code: "zh", name: "中文", short: "简体中文" }].map((option) =>
             <TouchableOpacity key={option.code} style={[styles.option, language === option.code && styles.selected]} onPress={() => choose(option.code)} accessibilityRole="radio" accessibilityState={{ checked: language === option.code }}>
               <View style={styles.optionText}><Text style={styles.optionName}>{option.name}</Text><Text style={styles.optionCode}>{option.short}</Text></View>
               {language === option.code && <Ionicons name="checkmark-circle" size={22} color="#35786F" />}

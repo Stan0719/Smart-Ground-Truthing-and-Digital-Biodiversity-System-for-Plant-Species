@@ -1,33 +1,56 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { logout } from '../services/auth'
-import {
-  conservationNotifications,
-  markAllConservationNotificationsRead,
-  unreadConservationNotificationCount,
-  type ConservationNotification,
-} from '../data/conservationNotifications'
+import { logout, sessionSnapshot, subscribeSession } from '../services/auth'
+import { createOfficerInbox, type OfficerNotice } from '../services/officerNotifications'
 import { conservationProfile } from '../data/conservationProfile'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 
 const router = useRouter()
-const { t, te } = useI18n()
+const { t, locale } = useI18n()
 const actionsWrap = ref<HTMLElement | null>(null)
 const notificationsOpen = ref(false)
 const profileOpen = ref(false)
-const notificationText = (
-  notification: ConservationNotification,
-  field: 'title' | 'message' | 'time',
-) => {
-  const key = `dashboardNotifications.conservation.${notification.id}.${field}`
-  return te(key) ? t(key) : notification[field]
+const notificationButton = ref<HTMLButtonElement | null>(null)
+const inbox = createOfficerInbox({ transport: (...args) => fetch(...args), navigate: async destination => {
+  await router.push(destination)
+  return router.currentRoute.value.name === destination.name &&
+    (!destination.query?.review || router.currentRoute.value.query.review === destination.query.review)
+} })
+const notificationState = inbox.state
+const nt = (key: string) => t('dashboardNotifications.officerLive.' + key)
+const noticeTitle = (notice: OfficerNotice) => nt(notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
+const noticeMessage = (notice: OfficerNotice) => nt(notice.event_type === 'registration_submitted'
+  ? notice.species_review_required ? 'speciesFirst' : 'registrationMessage' : 'fieldMessage')
+const noticeTime = (notice: OfficerNotice) => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(notice.created_at))
+let mounted = false
+let poll: ReturnType<typeof setInterval> | null = null
+const syncPolling = () => {
+  if (poll) clearInterval(poll)
+  poll = null
+  if (mounted && notificationState.ready) poll = setInterval(() => {
+    if (document.visibilityState === 'visible' && !notificationsOpen.value) void inbox.refreshCount()
+  }, 60000)
+}
+watch(() => notificationState.ready, syncPolling)
+const initialSession = sessionSnapshot()
+inbox.setSession(initialSession.user, initialSession.pending)
+const unsubscribe = subscribeSession((user, pending) => {
+  if (inbox.setSession(user, pending)) {
+    closeMenus()
+    if (mounted && notificationState.ready) void inbox.load()
+  }
+})
+const onKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && notificationsOpen.value) {
+    closeMenus(); notificationButton.value?.focus()
+  }
 }
 
 const toggleNotifications = () => {
   notificationsOpen.value = !notificationsOpen.value
-  if (notificationsOpen.value) profileOpen.value = false
+  if (notificationsOpen.value) { profileOpen.value = false; void inbox.load() }
 }
 
 const toggleProfile = () => {
@@ -40,10 +63,8 @@ const closeMenus = () => {
   profileOpen.value = false
 }
 
-const openNotification = async (notification: ConservationNotification) => {
-  notification.read = true
-  closeMenus()
-  if (notification.route) await router.push(notification.route)
+const openNotification = async (notification: OfficerNotice) => {
+  if (await inbox.open(notification)) closeMenus()
 }
 
 const openProfileSettings = async () => {
@@ -62,8 +83,19 @@ const handleOutsideClick = (event: MouseEvent) => {
   if (!actionsWrap.value?.contains(event.target as Node)) closeMenus()
 }
 
-onMounted(() => document.addEventListener('click', handleOutsideClick))
-onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
+onMounted(() => {
+  mounted = true
+  document.addEventListener('click', handleOutsideClick)
+  document.addEventListener('keydown', onKeydown)
+  void inbox.load()
+  syncPolling()
+})
+onBeforeUnmount(() => {
+  mounted = false; unsubscribe(); inbox.dispose()
+  if (poll) clearInterval(poll)
+  document.removeEventListener('click', handleOutsideClick)
+  document.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
@@ -71,6 +103,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
     <div class="dashboard-language"><LanguageSwitcher /></div>
     <div class="notification-wrap">
       <button
+        ref="notificationButton"
         class="notification-button"
         type="button"
         :aria-label="t('dashboardNav.notifications')"
@@ -81,8 +114,8 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" />
         </svg>
-        <span v-if="unreadConservationNotificationCount" class="notification-count">
-          {{ unreadConservationNotificationCount }}
+        <span v-if="notificationState.unread !== null && notificationState.unread > 0" class="notification-count" aria-live="polite">
+          {{ notificationState.unread }}
         </span>
       </button>
 
@@ -96,43 +129,40 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
           <strong>{{ t('dashboardNav.notifications') }}</strong>
           <button
             type="button"
-            :disabled="unreadConservationNotificationCount === 0"
-            @click="markAllConservationNotificationsRead"
+            :disabled="notificationState.busy || notificationState.loading || !notificationState.boundary || !notificationState.unread"
+            @click="inbox.markAll()"
           >
             {{ t('dashboardNav.markAllRead') }}
           </button>
         </header>
-        <div v-if="conservationNotifications.length" class="notification-list">
+        <p v-if="notificationState.loading" class="notification-empty" role="status">{{ nt('loading') }}</p>
+        <div v-if="notificationState.error" class="notification-empty" role="alert">
+          <p>{{ nt(notificationState.error) }}</p>
+          <button type="button" :disabled="notificationState.loading || notificationState.busy || !notificationState.ready" @click="inbox.load(notificationState.error === 'loadFailed' && Boolean(notificationState.cursor))">{{ nt('retry') }}</button>
+        </div>
+        <div v-if="notificationState.items.length || notificationState.hasMore" class="notification-list">
           <button
-            v-for="notification in conservationNotifications.slice(0, 5)"
+            v-for="notification in notificationState.items"
             :key="notification.id"
             class="notification-item"
-            :class="{ unread: !notification.read }"
+            :class="{ unread: notification.read_at === null }"
+            :disabled="notificationState.busy || !notificationState.ready"
             type="button"
             @click="openNotification(notification)"
           >
-            <span class="notification-type" :class="notification.type" aria-hidden="true">
-              {{
-                notification.type === 'review'
-                  ? '✓'
-                  : notification.type === 'species'
-                    ? '♧'
-                    : notification.type === 'threat' || notification.type === 'camera'
-                      ? '!'
-                      : notification.type === 'sensor'
-                        ? '×'
-                        : '⌁'
-              }}
-            </span>
+            <span class="notification-type review" aria-hidden="true">✓</span>
             <span class="notification-copy">
-              <strong>{{ notificationText(notification, 'title') }}</strong>
-              <span>{{ notificationText(notification, 'message') }}</span>
-              <time>{{ notificationText(notification, 'time') }}</time>
+              <strong>{{ noticeTitle(notification) }}</strong>
+              <span>{{ noticeMessage(notification) }}</span>
+              <small>{{ notification.resource.id }}</small>
+              <time :datetime="notification.created_at">{{ noticeTime(notification) }}</time>
+              <small v-if="notification.read_at === null">{{ nt('unread') }}</small>
             </span>
-            <i v-if="!notification.read" aria-hidden="true"></i>
+            <i v-if="notification.read_at === null" aria-hidden="true"></i>
           </button>
+          <button v-if="notificationState.hasMore" type="button" class="notification-item" :disabled="notificationState.loading || notificationState.busy" @click="inbox.load(true)">{{ nt('more') }}</button>
         </div>
-        <p v-else class="notification-empty">{{ t('dashboardNav.noNotifications') }}</p>
+        <p v-if="!notificationState.loading && !notificationState.error && !notificationState.items.length" class="notification-empty">{{ t('dashboardNav.noNotifications') }}</p>
         <footer>{{ t('dashboardNav.notificationHint') }}</footer>
       </section>
     </div>

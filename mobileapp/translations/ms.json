@@ -377,6 +377,17 @@
     "noFavouritePlants": "Tiada Tumbuhan Kegemaran",
     "plantsYouFavouriteWillAppearHere": "Tumbuhan yang anda tandakan sebagai kegemaran akan dipaparkan di sini."
   },
+  "favourites": {
+    "addFavourite": "Tambah ke kegemaran",
+    "removeFavourite": "Buang daripada kegemaran",
+    "plantsTab": "Tumbuhan",
+    "speciesTab": "Spesies",
+    "loading": "Memuatkan kegemaran anda…",
+    "noFavouriteSpecies": "Tiada Spesies Kegemaran",
+    "noFavouriteSpeciesHint": "Spesies yang anda gemari akan dipaparkan di sini.",
+    "unnamedRecord": "Rekod tumbuhan",
+    "plantId": "ID Tumbuhan: "
+  },
   "fieldCollection": {
     "offlineDraftModeLocalDraftsOnlyReconnectToSynchronizeAccess": "Mod draf luar talian: draf setempat sahaja. Sambung semula untuk menyegerakkan; akses tamat 15 minit selepas pengesahan dalam talian terakhir.",
     "offlineAccessExpiredOrTheSessionWasRejectedReconnectAnd": "Akses luar talian telah tamat atau sesi ditolak. Sambung semula dan log masuk untuk memulihkan draf tersimpan. Borang semasa masih berada dalam memori.",
@@ -398,6 +409,11 @@
     "recoverSavedDraft": "Pulihkan draf tersimpan:",
     "observation": "Pemerhatian",
     "speciesReference": "Rujukan spesies",
+    "plantSpeciesSection": "Tumbuhan dan spesies",
+    "observationSection": "Butiran pemerhatian",
+    "locationSection": "GPS dan lokasi",
+    "photosSection": "Foto tumbuhan",
+    "submissionSection": "Simpan dan hantar",
     "speciesIdFromYourFieldReference": "ID spesies daripada rujukan lapangan anda",
     "knownSpeciesId": "ID spesies yang diketahui",
     "approvedPlantId": "ID tumbuhan yang diluluskan",
@@ -482,7 +498,7 @@
     "traderSCave": "Gua Dagang",
     "exploreTheSpecies": "TEROKAI SPESIES",
     "speciesOfNiah": "Spesies di Niah",
-    "discoverTheDiverseTreeFlowerFernAndClimberSpeciesFound": "Temui pelbagai spesies pokok, bunga, paku-pakis dan tumbuhan memanjat di seluruh Taman Negara Niah.",
+    "discoverTheDiverseTreeFlowerFernAndClimberSpeciesFound": "Terokai kepelbagaian spesies tumbuhan yang didokumenkan di Taman Negara Niah.",
     "exploreMorePlantSpecies": "Terokai Lebih Banyak Spesies Tumbuhan",
     "loadingSpeciesFromTheDatabase": "Memuatkan spesies daripada pangkalan data...",
     "noSpeciesAreAvailableForYourAccountYetAConservation": "Belum ada spesies yang tersedia untuk akaun anda. Pegawai Pemuliharaan boleh menyemak keterlihatan spesies.",
@@ -588,11 +604,16 @@
     "exploreDocumentedPlantLocationsInNiahNationalPark": "Terokai lokasi tumbuhan yang didokumentasikan di Taman Negara Niah",
     "searchPlants": "Cari tumbuhan...",
     "totalRecords": "Jumlah Rekod",
-    "categories": "Kategori",
+    "location": "Lokasi",
+    "locationRestricted": "Lokasi dihadkan",
+    "locationNotRecorded": "Lokasi belum direkodkan",
+    "latitude": "Latitud",
+    "longitude": "Longitud",
     "documentedPlants": "Tumbuhan yang Didokumentasikan",
     "tapARecordToViewItsDetails": "Tekan rekod untuk melihat butirannya",
     "noRecordsFound": "Tiada rekod ditemukan",
-    "trySearchingForAnotherPlantOrSelectingADifferentCategory": "Cuba cari tumbuhan lain atau pilih kategori yang berbeza.",
+    "tryAnotherSearchOrClearYourSearch": "Cuba carian lain atau kosongkan carian anda.",
+    "clearSearch": "Kosongkan Carian",
     "clearFilters": "Kosongkan Penapis"
   },
   "notificationObservation": {
@@ -714,6 +735,8 @@
     "deletionIsNotAvailableYet": "Pemadaman belum tersedia",
     "printAllUnusedQrCodes": "Cetak Semua Kod QR Belum Digunakan",
     "qrCodeStatus": "Status Kod QR",
+    "used": "Digunakan",
+    "unused": "Belum digunakan",
     "statusUnavailableUntilQrCodesLoad": "Status tidak tersedia sehingga kod QR dimuatkan.",
     "loadingQrCodeStatus": "Memuatkan status kod QR...",
     "couldNotRefreshQrCodeStatus": "Status kod QR tidak dapat dimuat semula.",
@@ -738,13 +761,17 @@
     "theQrCodeDidNotResolveToAPlantRecord": "Kod QR tidak merujuk kepada rekod tumbuhan.",
     "plantQrUnavailable": "QR Tumbuhan Tidak Tersedia",
     "couldNotLoadThePlantRecordForThisQrCode": "Rekod tumbuhan untuk kod QR ini tidak dapat dimuatkan.",
+    "qrCodeNotAssigned": "Kod QR ini belum ditetapkan kepada tumbuhan.",
     "scanPlantQr": "Imbas QR Tumbuhan",
     "scanTheQrCodeAttachedToAPlant": "Imbas kod QR yang dipasang pada tumbuhan",
     "positionTheQrCodeInsideTheBox": "Letakkan kod QR di dalam kotak"
   },
   "scanHistory": {
     "noScanHistory": "Tiada Sejarah Imbasan",
-    "plantsYouScanWillAppearHere": "Tumbuhan yang anda imbas akan dipaparkan di sini."
+    "plantsYouScanWillAppearHere": "Tumbuhan yang anda imbas akan dipaparkan di sini.",
+    "loading": "Memuatkan sejarah imbasan anda…",
+    "dateUnavailable": "Tarikh tidak tersedia",
+    "historySaveFailedTitle": "Sejarah imbasan tidak disimpan"
   },
   "species": {
     "imageComingSoon": "Imej akan datang",
@@ -886,6 +913,13 @@
     "theBackendReturnedAnUnexpectedListResponse": "Pelayan mengembalikan respons senarai yang tidak dijangka.",
     "theSelectedPlantDoesNotHaveABackendId": "Tumbuhan yang dipilih tidak mempunyai ID pelayan.",
     "theScannedQrCodeDoesNotContainAValidPlant": "Kod QR yang diimbas tidak mengandungi token tumbuhan yang sah."
+  },
+  "visitorApi": {
+    "visitorApiRouteWasNotFoundHttpForDeployOr": "Laluan API Pelawat tidak ditemukan (HTTP 404) untuk {{method}} {{path}}. Sebarkan atau mulakan semula API Tumbuhan dengan laluan Pelawat.",
+    "visitorSignInIsRequiredHttpSignInAgainAndRetry": "Log masuk Pelawat diperlukan (HTTP 401). Log masuk semula dan cuba lagi.",
+    "visitorAccountAccessWasDeniedHttp": "Akses akaun Pelawat ditolak (HTTP 403).",
+    "visitorServiceIsUnavailableHttpCheckPlantApiReadinessAnd": "Perkhidmatan Pelawat tidak tersedia (HTTP 503). Semak kesiapsiagaan API Tumbuhan dan migrasi pangkalan data Pelawat.",
+    "cannotReachTheVisitorServiceCheckTheConfiguredApiUrlNetwork": "Perkhidmatan Pelawat tidak dapat dicapai. Semak URL API, rangkaian dan pelayan yang sedang berjalan."
   },
   "faceApi": {
     "configureTheApiHttpsUrlWithoutCredentialsQueryParametersOr": "Tetapkan URL HTTPS API {{value0}} tanpa butiran log masuk, parameter pertanyaan atau fragmen.",

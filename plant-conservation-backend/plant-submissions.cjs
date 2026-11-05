@@ -1,6 +1,7 @@
 "use strict";
 const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
+const { originColumnAvailable } = require("./observation-origin.cjs");
 const { transaction, audit, subject, fail, text, id, fieldContent, assertNewSpecies, speciesRow } = require("./domain.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const canonical = (value) => Array.isArray(value) ? value.map(canonical)
@@ -33,7 +34,7 @@ async function createSpecies(c, data, user) {
   await c.query("INSERT INTO rbac_species_visibility(species_id,visibility) VALUES($1,'protected')", [row.species_id]);
   return row.species_id;
 }
-function mountPlantSubmissions(app, { pool, allow }) {
+function mountPlantSubmissions(app, { pool, allow, officerNotifications = null }) {
   app.post("/api/plant-submissions", allow("plants.create"), async (req, res) => {
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b) || Object.keys(b).some((key) =>
@@ -73,7 +74,8 @@ function mountPlantSubmissions(app, { pool, allow }) {
       await c.query("UPDATE public.qr_code SET plant_id=$1,status='assigned',assigned_at=CURRENT_TIMESTAMP WHERE qr_id=$2 AND plant_id IS NULL", [plant.plant_id, qr.qr_id]);
       await c.query("INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES($1,$2,$3,$4)", [plant.plant_id, b.latitude, b.longitude, b.accuracy_m ?? null]);
       const observationId = randomUUID();
-      await c.query("INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES($1,$2,$3,'Pending Review',$4,$5)", [observationId, plant.plant_id, subject(req.user), content, clientKey]);
+      const withOrigin = await originColumnAvailable(c);
+      await c.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key${withOrigin ? ",origin_type" : ""}) VALUES($1,$2,$3,'Pending Review',$4,$5${withOrigin ? ",'initial_registration'" : ""})`, [observationId, plant.plant_id, subject(req.user), content, clientKey]);
       for (const [index, bytes] of photos.entries())
         await c.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES($1,$2,$3,$4,$5,FALSE,'image/jpeg',$6)", [randomUUID(), plant.plant_id, subject(req.user), `${clientKey}:photo:${index}`, observationId, bytes]);
       let requestId = null;
@@ -88,6 +90,7 @@ function mountPlantSubmissions(app, { pool, allow }) {
       const response = { plant_id: plant.plant_id, id: observationId, species_id: speciesId, qr_token: qr.qr_code,
         status: "Pending Review", species_request_id: requestId };
       await c.query("INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES($1,$2,$3,$4)", [subject(req.user), clientKey, payloadHash, response]);
+      if (officerNotifications) await officerNotifications.enqueue(c, observationId, requestId !== null);
       return response;
     });
     res.status(201).json(result);

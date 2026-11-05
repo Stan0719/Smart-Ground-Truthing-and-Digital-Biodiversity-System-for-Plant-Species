@@ -4,11 +4,14 @@ const { ct, locale } = useConservationText()
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { sessionSnapshot, subscribeSession } from '../../services/auth'
+import { ReviewApiError, createReviewRequest, performObservationReview, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions as transitions, type ReviewDecision } from '../../services/observationReview'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import PlantSimilarityDrawer from '../../components/conservation/PlantSimilarityDrawer.vue'
 import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
+import { observationOrigin, observationQueueUrl, readQueuePage, type ObservationOrigin } from '../../services/observationQueue'
 import {
   mapLinkedSpeciesRequest,
   hasResolvedSpecies,
@@ -24,11 +27,15 @@ import {
 } from '../../data/plantSimilarityPrototype'
 
 interface ReviewObservation {
+  origin: ObservationOrigin
   // Raw backend ID is authoritative; displayId preserves numeric legacy presentation only.
   id: string
   displayId: string
   revision: number
   plantId: string
+  plantRawId: string
+  zone: string
+  altitude: string
   recordedBy: string
   height: string
   growthStage: string
@@ -61,9 +68,18 @@ const date = ref('')
 const selected = ref<ReviewObservation | null>(null)
 const comment = ref('')
 const observations = ref<ReviewObservation[]>([])
+const queueOrigin = ref<'initial_registration' | 'unknown'>('initial_registration')
+const hasMore = ref(false)
+const nextCursor = ref<string | null>(null)
+let listRequest = 0
 const isLoading = ref(true)
 const loadError = ref('')
 const selectionLoading = ref(false)
+const selectionError = ref('')
+const plantQr = ref<{ identity: string; status: string } | null>(null)
+const qrLoading = ref(false)
+const qrError = ref('')
+let qrRequest = 0
 const isSaving = ref(false)
 const needsReload = ref(false)
 const conflictAcknowledged = ref(true)
@@ -155,17 +171,21 @@ const mapObservation = (value: unknown): ReviewObservation | null => {
     !observationIdPattern.test(id) ||
     !plantId ||
     !content ||
-    typeof item.revision !== 'number' ||
+    !positiveRevision(item.revision) ||
     !Number.isSafeInteger(item.revision) ||
     item.revision < 1
   )
     return null
   const height = numericValue(content.heightCm, 0)
   return {
+    origin: observationOrigin(item.origin_type),
     id,
     displayId: formatObservationId(id) || id,
     revision: item.revision,
     plantId,
+    plantRawId: String(Number(stringValue(item.plant_id))),
+    zone: typeof content.zone === 'string' && content.zone.trim() ? content.zone : '',
+    altitude: numericValue(content.altitudeM, -Infinity),
     recordedBy: stringValue(item.owner_subject),
     height: height ? `${height} cm` : '',
     growthStage: stringValue(content.lifeStage),
@@ -216,6 +236,7 @@ const counts = computed(() => [
 
 const filtered = computed(() =>
   observations.value.filter((observation) => {
+    if (observation.origin !== queueOrigin.value) return false
     const searchable = `${observation.id} ${observation.plantId} ${observation.speciesId} ${observation.scientificName} ${observation.commonName} ${observation.recordedBy} ${observation.status}`
     const matchesDate = !date.value || dateKey(observation.createdAt) === date.value
     return (
@@ -249,20 +270,37 @@ const speciesRequestState = computed(() => {
     : request?.state || 'unavailable'
 })
 const speciesNotice = computed(() => rt(`speciesRequest.notices.${speciesRequestState.value}`))
+const reviewSession = ref(sessionSnapshot())
+const officerSessionReady = computed(() => !reviewSession.value.pending && reviewSession.value.user?.role === 'Conservation Officer' &&
+  reviewSession.value.user.status === 'Active' && reviewSession.value.user.mustChangePassword === false)
+const unsubscribeReviewSession = subscribeSession((user, pending) => {
+  const old = reviewSession.value.user?.id
+  reviewSession.value = { user, pending }
+  if (pending || !user || user.role !== 'Conservation Officer' || user.status !== 'Active' || user.mustChangePassword || old !== user.id) {
+    clearPlantQr()
+    listRequest++; observations.value = []; hasMore.value = false; nextCursor.value = null; isLoading.value = false
+    selectionRequest++; selectionLoading.value = false; selectionError.value = ''; selected.value = null; comment.value = ''; needsReload.value = true
+  }
+})
 const canReviewPlant = computed(
   () =>
     !reviewBusy.value &&
+    selected.value?.origin === queueOrigin.value &&
+    !selectionLoading.value && !selectionError.value &&
     !needsReload.value &&
     conflictAcknowledged.value &&
     !speciesRefreshing.value &&
     !speciesLoadError.value &&
     !speciesNeedsReload.value &&
     speciesResolved.value &&
-    Boolean(selected.value && transitions[selected.value.status]?.length),
+    Boolean(selected.value && reviewEligible(reviewSession.value.user, reviewSession.value.pending, { ...selected.value, owner: selected.value.recordedBy })),
 )
 const canReviewSpecies = computed(
   () =>
     speciesRequestCanDecide(selectedSpeciesRequest.value) &&
+    selected.value?.origin === queueOrigin.value &&
+    !selectionLoading.value && !selectionError.value &&
+    officerSessionReady.value &&
     !reviewBusy.value &&
     !speciesRefreshing.value &&
     !speciesLoadError.value &&
@@ -291,10 +329,9 @@ const speciesOptions = computed(() => {
   return [...options].map(([id, name]) => ({ id, name }))
 })
 
-function open(observation: ReviewObservation) {
-  if (reviewBusy.value) return
-  selectionRequest++
-  selectionLoading.value = false
+async function open(observation: ReviewObservation) {
+  if (reviewBusy.value || !officerSessionReady.value) return
+  const token = ++selectionRequest
   selected.value = observation
   comment.value = observation.reviewComment || ''
   reviewMessage.value = null
@@ -303,12 +340,41 @@ function open(observation: ReviewObservation) {
   failedAssets.value = new Set()
   resetSpeciesState(observation)
   void router.replace({ query: { ...route.query, review: observation.id } })
+  await refreshSelection(observation.id, token)
+}
+
+async function refreshSelection(id: string, token: number) {
+  clearPlantQr()
+  selectionLoading.value = true
+  selectionError.value = ''
+  try {
+    const fresh = await fetchObservation(id)
+    if (disposed || token !== selectionRequest || selected.value?.id !== id) return
+    updateObservation(fresh)
+  } catch {
+    if (!disposed && token === selectionRequest && selected.value?.id === id) {
+      selectionError.value = rt('unableToRefreshObservation')
+      needsReload.value = true
+    }
+  } finally {
+    if (!disposed && token === selectionRequest) selectionLoading.value = false
+  }
+}
+
+async function retrySelection() {
+  if (!selected.value || reviewBusy.value || selectionLoading.value) return
+  const id = selected.value.id
+  const token = ++selectionRequest
+  await refreshSelection(id, token)
+  if (token === selectionRequest && !selectionError.value && selected.value?.id === id) needsReload.value = false
 }
 
 function closeReview() {
   if (reviewBusy.value) return
+  clearPlantQr()
   selectionRequest++
   selectionLoading.value = false
+  selectionError.value = ''
   selected.value = null
   resetSpeciesState()
   const query = { ...route.query }
@@ -330,11 +396,6 @@ function closeSimilarity() {
   void nextTick(() => similarityTrigger.value?.focus())
 }
 
-type ReviewDecision = 'Approved' | 'Rejected' | 'Correction Required' | 'Flagged'
-const transitions: Partial<Record<string, ReviewDecision[]>> = {
-  'Pending Review': ['Approved', 'Rejected', 'Correction Required', 'Flagged'],
-  Flagged: ['Approved', 'Rejected', 'Correction Required'],
-}
 const canDecide = (decision: ReviewDecision) =>
   canReviewPlant.value &&
   Boolean(selected.value && transitions[selected.value.status]?.includes(decision))
@@ -345,56 +406,41 @@ const imageFailed = (id: string) => {
   failedAssets.value = new Set([...failedAssets.value, id])
 }
 
-class ReviewApiError extends Error {
-  constructor(
-    message: string,
-    readonly status = 0,
-  ) {
-    super(message)
-  }
+const request = createReviewRequest(rt, (...args) => fetch(...args))
+function clearPlantQr() {
+  qrRequest++
+  plantQr.value = null
+  qrLoading.value = false
+  qrError.value = ''
 }
-async function request(
-  url: string,
-  body?: { decision: ReviewDecision; comment: string; revision?: number },
-): Promise<Record<string, unknown>> {
-  let response: Response
+async function loadPlantQr(observation: ReviewObservation) {
+  clearPlantQr()
+  if (!officerSessionReady.value || disposed) return
+  const token = qrRequest
+  const current = () => !disposed && token === qrRequest && officerSessionReady.value &&
+    selected.value?.id === observation.id && selected.value.plantRawId === observation.plantRawId
+  qrLoading.value = true
   try {
-    response = await fetch(url, {
-      method: body ? 'POST' : 'GET',
-      credentials: 'same-origin',
-      ...(body
-        ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-        : {}),
-      signal: AbortSignal.timeout(15000),
-    })
+    const result = await request(`/api/plants/${encodeURIComponent(observation.plantRawId)}`)
+    if (!current()) return
+    const plant = record(result.plant)
+    if (!plant || stringValue(plant.plant_id) !== observation.plantRawId)
+      throw new ReviewApiError(rt('feedback.invalidResponse'))
+    // Only plant-level QR fields are composed here. Never substitute plant location/content.
+    plantQr.value = {
+      identity: typeof plant.qr_token === 'string' && plant.qr_token.trim() ? plant.qr_token : '',
+      status: typeof plant.qr_status === 'string' && plant.qr_status.trim() ? plant.qr_status : '',
+    }
   } catch {
-    throw new ReviewApiError(rt('feedback.network'))
+    if (current()) qrError.value = rt('qrLoadFailed')
+  } finally {
+    if (current()) qrLoading.value = false
   }
-  let result: Record<string, unknown> | null
-  try {
-    result = record(await response.json())
-  } catch {
-    throw new ReviewApiError(rt('feedback.invalidResponse'), response.status)
-  }
-  if (!response.ok) {
-    const message = [result?.message, result?.error].find(
-      (value): value is string => typeof value === 'string' && Boolean(value.trim()),
-    )
-    const fallback =
-      response.status === 401
-        ? rt('feedback.session')
-        : response.status === 403
-          ? rt('feedback.forbidden')
-          : rt('feedback.requestFailed', { status: response.status })
-    throw new ReviewApiError(message || fallback, response.status)
-  }
-  if (!result) throw new ReviewApiError(rt('feedback.invalidResponse'), response.status)
-  return result
 }
 async function fetchObservation(id: string) {
   const result = await request(`/api/observations/${encodeURIComponent(id)}`)
   const observation = mapObservation(result.observation)
-  if (!observation || observation.id !== id)
+  if (!observation || observation.id !== id || !observation.status)
     throw new ReviewApiError(rt('feedback.invalidResponse'))
   return observation
 }
@@ -408,12 +454,17 @@ function updateObservation(observation: ReviewObservation) {
   observations.value = observations.value.map((item) =>
     item.id === observation.id ? observation : item,
   )
+  if (observation.origin !== queueOrigin.value) {
+    observations.value = observations.value.filter(item => item.id !== observation.id)
+    void loadObservations()
+  }
   selected.value = observation
+  void loadPlantQr(observation)
   resetSpeciesState(observation)
   if (lostDependency) speciesLoadError.value = rt('speciesRequest.loadFailed')
 }
 async function refreshSpeciesRequest() {
-  if (!selected.value || reviewBusy.value || speciesRefreshing.value) return
+  if (!selected.value || reviewBusy.value || speciesRefreshing.value || selectionLoading.value || selectionError.value) return
   const id = selected.value.id
   const token = ++selectionRequest
   speciesRefreshing.value = true
@@ -456,6 +507,14 @@ async function decideSpecies(decision: SpeciesRequestDecision) {
   let committed = false
   const current = () => !disposed && token === selectionRequest
   try {
+    const latest = await fetchObservation(observationId)
+    if (!current()) return
+    if (latest.origin !== queueOrigin.value || latest.speciesRequest?.id !== requestId || latest.speciesRequest.state !== 'pending') {
+      updateObservation(latest)
+      speciesReviewComment.value = typedComment
+      showFeedback(latest.origin !== queueOrigin.value ? rt('queues.originMoved') : rt('speciesRequest.conflict'))
+      return
+    }
     const result = await request(speciesRequestReviewUrl(requestId), {
       decision,
       comment: typedComment,
@@ -515,11 +574,12 @@ async function decideSpecies(decision: SpeciesRequestDecision) {
   }
 }
 async function resolveQuery() {
-  if (isLoading.value || reviewBusy.value || disposed) return
+  if (isLoading.value || reviewBusy.value || disposed || !officerSessionReady.value) return
   const id = typeof route.query.review === 'string' ? route.query.review : ''
   if (id && selected.value?.id === id) return
   const token = ++selectionRequest
   selected.value = null
+  clearPlantQr()
   resetSpeciesState()
   selectionLoading.value = false
   if (!id) return
@@ -529,16 +589,21 @@ async function resolveQuery() {
   }
   selectionLoading.value = true
   try {
-    const observation =
-      observations.value.find((item) => item.id === id) || (await fetchObservation(id))
+    const observation = await fetchObservation(id)
     if (disposed || token !== selectionRequest) return
     selected.value = observation
+    if (observation.origin === 'unknown' && queueOrigin.value !== 'unknown') {
+      queueOrigin.value = 'unknown'
+      void loadObservations()
+    }
+    void loadPlantQr(observation)
     comment.value = observation.reviewComment || ''
     reviewMessage.value = null
     needsReload.value = false
     conflictAcknowledged.value = true
     failedAssets.value = new Set()
     resetSpeciesState(observation)
+    selectionError.value = ''
   } catch (error) {
     if (!disposed && token === selectionRequest)
       showFeedback(error instanceof Error ? error.message : rt('feedback.loadFailed'))
@@ -547,24 +612,28 @@ async function resolveQuery() {
   }
 }
 async function reloadSelected() {
-  if (!selected.value || reviewBusy.value) return
+  if (!selected.value || reviewBusy.value || selectionLoading.value || selectionError.value) return
   const id = selected.value.id
+  const token = ++selectionRequest
   isSaving.value = true
   try {
-    updateObservation(await fetchObservation(id))
+    const fresh = await fetchObservation(id)
+    if (disposed || token !== selectionRequest || selected.value?.id !== id) return
+    updateObservation(fresh)
     needsReload.value = false
     conflictAcknowledged.value = false
     showFeedback(rt('feedback.reloaded'))
   } catch (error) {
-    showFeedback(error instanceof Error ? error.message : rt('feedback.loadFailed'))
+    if (!disposed && token === selectionRequest)
+      showFeedback(error instanceof Error ? error.message : rt('feedback.loadFailed'))
   } finally {
     isSaving.value = false
-    if (route.query.review !== id) void resolveQuery()
+    if (!disposed && token === selectionRequest && route.query.review !== id) void resolveQuery()
   }
 }
 async function decide(decision: ReviewDecision) {
   if (!selected.value || !canDecide(decision)) return
-  if (decision !== 'Approved' && !comment.value.trim()) {
+  if (!reviewCommentValid(decision, comment.value)) {
     showFeedback(rt('feedback.commentRequired'))
     return
   }
@@ -572,63 +641,62 @@ async function decide(decision: ReviewDecision) {
   const typedComment = comment.value
   isSaving.value = true
   reviewMessage.value = null
-  let committed = false
+  const token = selectionRequest
   try {
-    const result = await request(`/api/observations/${encodeURIComponent(id)}/review`, {
-      decision,
-      comment: typedComment,
-      revision,
-    })
-    if (result.reviewed !== true) throw new ReviewApiError(rt('feedback.invalidResponse'))
-    committed = true
-    updateObservation(await fetchObservation(id))
-    comment.value = selected.value?.reviewComment || ''
-    showFeedback(rt('feedback.saved'), 'success')
-  } catch (error) {
-    comment.value = typedComment
-    if (error instanceof ReviewApiError && error.status === 409) {
-      conflictAcknowledged.value = false
-      try {
-        updateObservation(await fetchObservation(id))
-        showFeedback(rt('feedback.conflict'))
-      } catch {
-        needsReload.value = true
-        showFeedback(rt('feedback.conflictReloadFailed'))
-      }
-    } else {
-      // A lost/malformed response may follow a committed POST; require a read before retrying.
-      needsReload.value =
-        committed || !(error instanceof ReviewApiError) || ![400, 401, 403].includes(error.status)
-      showFeedback(
-        committed
-          ? rt('feedback.savedReloadFailed')
-          : error instanceof Error
-            ? error.message
-            : rt('feedback.requestFailed', { status: 0 }),
-      )
+    try {
+      const latest = await fetchObservation(id)
+      if (disposed || token !== selectionRequest || selected.value?.id !== id) return
+      if (latest.origin !== queueOrigin.value) { updateObservation(latest); showFeedback(rt('queues.originMoved')); return }
+    } catch (error) {
+      if (!disposed && token === selectionRequest) { needsReload.value = true; showFeedback(error instanceof Error ? error.message : rt('feedback.loadFailed')) }
+      return
+    }
+    const result = await performObservationReview({ id, revision, decision, comment: typedComment, request, read: fetchObservation,
+      current: () => !disposed && token === selectionRequest && selected.value?.id === id, invalidResponse: rt('feedback.invalidResponse') })
+    if (!result) return
+    if (result.observation) updateObservation(result.observation)
+    needsReload.value = result.needsReload
+    if (result.kind === 'saved') { comment.value = selected.value?.reviewComment || ''; showFeedback(rt('feedback.saved'), 'success') }
+    else {
+      comment.value = typedComment
+      if (result.kind === 'conflict') { conflictAcknowledged.value = false; showFeedback(rt(result.needsReload ? 'feedback.conflictReloadFailed' : 'feedback.conflict')) }
+      else showFeedback(result.committed ? rt('feedback.savedReloadFailed') : result.error instanceof Error ? result.error.message : rt('feedback.requestFailed', { status: 0 }))
     }
   } finally {
     isSaving.value = false
     if (route.query.review !== id) void resolveQuery()
   }
+
 }
 
-async function loadObservations() {
+function changeQueue() {
+  closeReview()
+  void loadObservations()
+}
+async function loadObservations(append = false) {
+  if (append && (isLoading.value || !hasMore.value)) return
+  const token = ++listRequest
+  const cursor = append ? nextCursor.value : null
+  if (!append) { observations.value = []; nextCursor.value = null; hasMore.value = false; skippedRecords.value = 0 }
   isLoading.value = true
   loadError.value = ''
   try {
-    const result = await request('/api/observations')
-    if (!Array.isArray(result.observations))
+    const result = await request(observationQueueUrl(queueOrigin.value, status.value, cursor))
+    if (disposed || token !== listRequest) return
+    const page = readQueuePage(result.page)
+    if (!Array.isArray(result.observations) || !page || (page.cursor !== null && page.cursor === cursor))
       throw new ReviewApiError(rt('feedback.invalidResponse'))
-    observations.value = result.observations
+    const mapped = result.observations
       .map(mapObservation)
       .filter((item): item is ReviewObservation => item !== null)
-    skippedRecords.value = result.observations.length - observations.value.length
+    observations.value = [...new Map([...(append ? observations.value : []), ...mapped].map(item => [item.id, item])).values()]
+    skippedRecords.value += result.observations.length - mapped.length
+    hasMore.value = page.hasMore; nextCursor.value = page.cursor
   } catch (loadFailure) {
+    if (disposed || token !== listRequest) return
     loadError.value = loadFailure instanceof Error ? loadFailure.message : rt('feedback.loadFailed')
   } finally {
-    isLoading.value = false
-    void resolveQuery()
+    if (!disposed && token === listRequest) { isLoading.value = false; void resolveQuery() }
   }
 }
 onMounted(loadObservations)
@@ -638,7 +706,10 @@ watch(
 )
 onBeforeUnmount(() => {
   disposed = true
+  clearPlantQr()
+  unsubscribeReviewSession()
   selectionRequest++
+  listRequest++
 })
 </script>
 
@@ -655,25 +726,29 @@ onBeforeUnmount(() => {
   <section class="page-intro">
     <div>
       <p class="page-kicker">{{ ct('VERIFICATION WORKFLOW') }}</p>
-      <h2>{{ ct('Review Submissions') }}</h2>
-      <p>{{ ct('Verify botanist observations and preserve a clear review decision.') }}</p>
+      <h2>{{ rt('queues.registrations') }}</h2>
+      <p>{{ rt('queues.registrationIntro') }}</p>
     </div>
   </section>
   <section class="summary-grid">
     <article v-for="count in counts" :key="String(count[0])" class="summary-card">
       <p>{{ ct(count[0]) }}</p>
       <strong>{{ countValue(count[1]!) }}</strong
-      ><small>{{ rt('loadedCounts') }}</small>
+      ><small>{{ rt('queues.loadedScope') }}</small>
     </article>
   </section>
   <div class="control-bar">
+    <label class="field"><span>{{ rt('queues.reviewQueue') }}</span><select v-model="queueOrigin" :disabled="reviewBusy" @change="changeQueue">
+      <option value="initial_registration">{{ rt('queues.registrations') }}</option>
+      <option value="unknown">{{ rt('queues.legacy') }}</option>
+    </select></label>
     <label class="field search-field"
       ><span>{{ ct('Search') }}</span
       ><input v-model="search" :placeholder="ct('Observation ID, Plant ID, species or botanist')"
     /></label>
     <label class="field"
       ><span>{{ ct('Review status') }}</span
-      ><select v-model="status">
+      ><select v-model="status" @change="loadObservations()">
         <option value="">{{ ct('All statuses') }}</option>
         <option
           v-for="reviewStatus in [
@@ -705,6 +780,8 @@ onBeforeUnmount(() => {
   </div>
   <p v-if="selectionLoading" role="status">{{ rt('loadingDetail') }}</p>
   <p v-if="skippedRecords" role="status">{{ rt('skippedRecords', { count: skippedRecords }) }}</p>
+  <p>{{ rt('queues.loadedScope') }}</p>
+  <p v-if="queueOrigin === 'unknown'">{{ rt('queues.originUnverified') }}</p>
   <section class="panel">
     <div class="table-scroll">
       <table>
@@ -740,7 +817,7 @@ onBeforeUnmount(() => {
               <span v-else>{{ ct('Species unavailable') }}</span>
             </td>
             <td>{{ observation.recordedBy || '—' }}</td>
-            <td>{{ rt('unavailable') }}</td>
+            <td>{{ observation.zone || rt('notRecorded') }}</td>
             <td>{{ formatDate(observation.createdAt) }}</td>
             <td>
               <span class="badge" :class="observation.status.toLowerCase().replaceAll(' ', '-')">{{
@@ -773,13 +850,14 @@ onBeforeUnmount(() => {
               {{
                 isLoading
                   ? 'Loading review submissions...'
-                  : loadError || ct('No review submissions found.')
+                  : loadError || rt(queueOrigin === 'unknown' ? 'queues.noRecords' : 'queues.noRegistrations')
               }}
             </td>
           </tr>
         </tbody>
       </table>
     </div>
+    <button v-if="hasMore || loadError" class="action-button" :disabled="isLoading" @click="loadObservations(Boolean(nextCursor))">{{ rt('queues.loadMore') }}</button>
   </section>
 
   <AppModal
@@ -791,6 +869,13 @@ onBeforeUnmount(() => {
     wide
     @close="closeReview"
   >
+    <p v-if="selected.origin === 'unknown'" role="status">{{ rt('queues.originUnverified') }}</p>
+    <p v-if="selected.origin !== queueOrigin" role="status">{{ rt('queues.originMoved') }} <RouterLink :to="{ name: 'conservation-observations' }">{{ rt('queues.fieldObservations') }}</RouterLink></p>
+    <p v-if="selectionLoading" role="status">{{ rt('loadingLatestObservation') }}</p>
+    <div v-if="selectionError" role="alert">
+      <p>{{ selectionError }}</p>
+      <button class="secondary-button" :disabled="selectionLoading || reviewBusy" @click="retrySelection">{{ rt('retryRefresh') }}</button>
+    </div>
     <section
       v-if="selectedSpeciesRequest"
       class="species-request-card"
@@ -959,6 +1044,7 @@ onBeforeUnmount(() => {
       <p class="section-kicker">{{ ct('PLANT & SPECIES INFORMATION') }}</p>
       <div class="two-column">
         <div>
+          <h4>{{ rt('selectedSpecies') }}</h4>
           <dl class="detail-list">
             <div>
               <dt>{{ ct('Plant ID') }}</dt>
@@ -969,20 +1055,21 @@ onBeforeUnmount(() => {
               <dd>{{ selected.speciesId || '—' }}</dd>
             </div>
             <div>
-              <dt>{{ ct('Scientific Name') }}</dt>
+              <dt>{{ rt('speciesScientificName') }}</dt>
               <dd>{{ selectedSpecies?.scientificName || '—' }}</dd>
             </div>
             <div>
-              <dt>{{ ct('Common Name') }}</dt>
+              <dt>{{ rt('speciesCommonName') }}</dt>
               <dd>{{ selectedSpecies?.commonName || '—' }}</dd>
             </div>
             <div>
-              <dt>{{ ct('Species Category') }}</dt>
-              <dd>{{ rt('unavailable') }}</dd>
-            </div>
-            <div>
-              <dt>{{ ct('Species Request ID') }}</dt>
-              <dd>{{ selectedSpeciesRequest?.id || rt('unavailable') }}</dd>
+              <dt>{{ rt('speciesRequestIdLabel') }}</dt>
+              <dd v-if="selectedSpeciesRequest">
+                {{ selectedSpeciesRequest.id || rt('requestDetailsUnavailable') }}
+                <span v-if="selectedSpeciesRequest.state === 'unavailable' || selectedSpeciesRequest.status.toLowerCase() === 'unavailable'"> · {{ rt('requestDetailsUnavailable') }}</span>
+                <span v-else> · {{ ct(selectedSpeciesRequest.status || rt('requestDetailsUnavailable')) }}</span>
+              </dd>
+              <dd v-else>{{ rt('noLinkedSpeciesRequest') }}</dd>
             </div>
           </dl>
 
@@ -1018,7 +1105,7 @@ onBeforeUnmount(() => {
           <dl class="detail-list">
             <div>
               <dt>{{ ct('Location Zone') }}</dt>
-              <dd>{{ rt('unavailable') }}</dd>
+              <dd>{{ selected.zone || rt('notRecorded') }}</dd>
             </div>
             <div>
               <dt>{{ ct('Latitude') }}</dt>
@@ -1030,7 +1117,7 @@ onBeforeUnmount(() => {
             </div>
             <div>
               <dt>{{ ct('Altitude') }}</dt>
-              <dd>{{ rt('unavailable') }}</dd>
+              <dd>{{ selected.altitude !== '' ? `${selected.altitude} m` : rt('notRecorded') }}</dd>
             </div>
             <div>
               <dt>{{ ct('GPS Accuracy') }}</dt>
@@ -1040,15 +1127,17 @@ onBeforeUnmount(() => {
             </div>
           </dl>
 
-          <p class="section-kicker review-subsection-heading">{{ ct('QR INFORMATION') }}</p>
-          <dl class="detail-list">
+          <p class="section-kicker review-subsection-heading">{{ rt('currentPlantQr') }}</p>
+          <p v-if="qrLoading" role="status">{{ rt('qrLoading') }}</p>
+          <p v-else-if="qrError" role="alert">{{ qrError }}</p>
+          <dl v-else-if="plantQr" class="detail-list">
             <div>
-              <dt>{{ ct('QR Code') }}</dt>
-              <dd>{{ rt('unavailable') }}</dd>
+              <dt>{{ rt('qrIdentity') }}</dt>
+              <dd>{{ plantQr.identity || rt('notRecorded') }}</dd>
             </div>
             <div>
-              <dt>{{ ct('QR Status') }}</dt>
-              <dd>{{ rt('unavailable') }}</dd>
+              <dt>{{ rt('qrStatus') }}</dt>
+              <dd>{{ plantQr.status || rt('notRecorded') }}</dd>
             </div>
           </dl>
 
@@ -1147,7 +1236,7 @@ onBeforeUnmount(() => {
             ><span>{{ ct('Observation Review Comment') }}</span
             ><textarea
               v-model="comment"
-              :disabled="reviewBusy"
+              :disabled="reviewBusy || selectionLoading"
               :placeholder="ct('Record the observation decision or required action')"
             ></textarea>
           </label>
@@ -1165,7 +1254,7 @@ onBeforeUnmount(() => {
     </p>
     <p v-if="isSaving" role="status">{{ rt('saving') }}</p>
     <button
-      v-if="needsReload"
+      v-if="needsReload && !selectionError"
       class="secondary-button"
       :disabled="reviewBusy"
       @click="reloadSelected"
@@ -1235,6 +1324,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.two-column > div { min-width: 0; }
+.detail-list dd { min-width: 0; overflow-wrap: anywhere; }
 .species-request-card {
   margin-bottom: 24px;
   padding: 18px;
