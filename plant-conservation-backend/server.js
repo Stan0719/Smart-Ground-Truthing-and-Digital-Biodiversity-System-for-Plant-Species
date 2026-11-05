@@ -10,6 +10,7 @@ const {
 const { mountDomain } = require("./domain.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
 const { mountUploads } = require("./uploads.cjs");
+const { mountPlantGallery } = require("./plant-gallery.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
@@ -51,6 +52,7 @@ function createPlantApp({ auth, pool, origins = configuredOrigins(), officerNoti
   mountRecordChanges(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow });
+  mountPlantGallery(app, { pool, allow });
   mountIoT(app, { pool, allow });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {
     await pool.query("SELECT 1");

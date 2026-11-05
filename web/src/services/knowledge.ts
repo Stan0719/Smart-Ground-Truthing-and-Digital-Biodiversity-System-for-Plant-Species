@@ -3,9 +3,11 @@ import { plantApi, type Species } from './plantApi'
 import { plants } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
 import { refreshSession } from '../composables/usePrototypeSession'
+import { plantThumbnailImages, speciesImageSelection } from './assetImages'
 export const knowledgeError = ref('')
 let generation = 0
 interface RecordRow {
+  plant_image_asset_id?: string
   plant_id: string
   species_id: string
   rbac_status?: string
@@ -88,7 +90,7 @@ export async function refreshKnowledge() {
           qr: { code: '', status: r.rbac_status || r.status || '' },
           registeredBy: r.registered_subject || '',
           registeredAt: r.registered_at?.slice(0, 10) || '',
-          images: [],
+          images: plantThumbnailImages(r),
           observations: [],
         }
       }),
@@ -100,10 +102,8 @@ export async function refreshKnowledge() {
             `/assets?species_id=${s.speciesId}`,
           )
           if (attempt !== generation) return
-          s.images = result.assets
-            .filter((a) => a.content_type.startsWith('image/'))
-            .map((a) => ({ path: `/api/data/assets/${a.id}`, caption: 'Official species photo' }))
-          s.image = s.images[0]?.path
+          const preview = catalog.species.find(row => String(row.species_id) === s.speciesId)?.image_url
+          Object.assign(s, speciesImageSelection(result.assets, preview))
         }),
       )
       if (attempt !== generation) return

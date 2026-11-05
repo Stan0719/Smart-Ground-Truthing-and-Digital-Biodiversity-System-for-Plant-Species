@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PlantRecord } from '../data/plantRecords'
 import { plants as species } from '../data/plants'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
+import { webAssetUrl } from '../services/assetImages'
 
 const props = withDefaults(
   defineProps<{
@@ -14,7 +15,13 @@ const props = withDefaults(
 )
 const { t, te, locale } = useI18n()
 
-const primaryImage = computed(() => props.plant.images.find((image) => image.path)?.path)
+const primaryImage = computed(() => webAssetUrl(props.plant.images.find((image) => image.path)?.path))
+const failedImage = ref('')
+watch(() => [props.plant.plantId, primaryImage.value], () => { failedImage.value = '' })
+function imageFailed(event: Event) {
+  const src = (event.currentTarget as HTMLImageElement | null)?.getAttribute('src')
+  if (src) failedImage.value = src
+}
 const selectedSpecies = computed(() =>
   species.find((item) => item.slug === props.plant.speciesSlug),
 )
@@ -68,9 +75,10 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   <article class="plant-record-card" :class="{ compact }">
     <div class="record-image">
       <img
-        v-if="primaryImage"
+        v-if="primaryImage && failedImage !== primaryImage"
         :src="primaryImage"
         :alt="t('common.fieldRecordAlt', { id: plant.plantId })"
+        @error="imageFailed"
       />
       <div v-else class="record-placeholder" aria-hidden="true">🌿</div>
       <span>{{ plant.plantId }}</span>

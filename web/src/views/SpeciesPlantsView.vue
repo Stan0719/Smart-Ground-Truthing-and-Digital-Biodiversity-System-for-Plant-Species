@@ -8,6 +8,7 @@ import { plants as prototypeSpecies, type Plant } from '../data/plants'
 import type { PlantRecord } from '../data/plantRecords'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 import { formatPlantId } from '../utils/plantId'
+import { plantThumbnailImages, webAssetUrl } from '../services/assetImages'
 
 type SortOption = 'default' | 'id-asc' | 'verified-newest' | 'verified-oldest'
 
@@ -31,6 +32,7 @@ const isLoading = ref(true)
 const loadError = ref('')
 
 interface ApiSpecies {
+  image_url?: string
   species_id: string | number
   scientific_name: string
   common_name: string
@@ -41,6 +43,9 @@ interface ApiSpecies {
 }
 
 interface ApiPlant {
+  plant_image_asset_id?: string
+  rbac_status?: string
+  status?: string
   plant_id: string | number
   species_id: string | number
   registered_by: string | number
@@ -113,6 +118,7 @@ const loadPlants = async () => {
 
     selectedSpecies.value = {
       ...(prototype || {}),
+      image: prototype?.image || webAssetUrl(apiSpecies.image_url) || undefined,
       speciesId: String(apiSpecies.species_id),
       slug,
       name: apiSpecies.common_name || apiSpecies.scientific_name,
@@ -163,7 +169,7 @@ const loadPlants = async () => {
         qr: { code: '', status: '' },
         registeredBy: String(item.registered_by || ''),
         registeredAt: item.registered_at || '',
-        images: [],
+        images: plantThumbnailImages(item),
         observations: [],
         detailLinkEnabled: true,
       }))
