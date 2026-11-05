@@ -52,7 +52,7 @@ test("Visitor favourites and scan history are owner-scoped and public-record-onl
   const qrUnused = "9007199254741001";
   await database.query(`
     INSERT INTO species(species_id,scientific_name,common_name,rbac_data)
-    VALUES (${speciesVisible},'Nepenthes mirabilis','Common pitcher plant','{"approvalStatus":"Approved"}'),
+    VALUES (${speciesVisible},'Nepenthes mirabilis','Common pitcher plant','{"approvalStatus":"Approved","habitat":"Staff habitat"}'),
            (${speciesProtected},'Private species','Private common','{"approvalStatus":"Approved"}');
     INSERT INTO rbac_species_visibility(species_id,visibility)
       VALUES (${speciesVisible},'public'),(${speciesProtected},'protected');
@@ -176,6 +176,9 @@ test("Visitor favourites and scan history are owner-scoped and public-record-onl
     assert.equal(second.status, 201, JSON.stringify(second.data));
     assert.equal(first.data.scan.qr_identifier, `QR-${qrVisible}`);
     assert.equal(first.data.plant.plant_id, plantVisible);
+    assert.equal(first.data.plant.registered_at, undefined);
+    assert.equal(first.data.plant.species_details.habitat, undefined);
+    assert.equal(first.data.plant.species_details.conservation_status, undefined);
     assert.equal((await call("/visitor/scan-history", "visitorA", "POST", { qr_code: "visitor-unused-token" })).status, 404);
     assert.equal((await call("/visitor/scan-history", "visitorA", "POST", { qr_code: "visitor-private-token" })).status, 404);
     assert.equal((await call("/visitor/scan-history", "visitorA", "POST", { qr_code: "visitor-pending-token" })).status, 404);

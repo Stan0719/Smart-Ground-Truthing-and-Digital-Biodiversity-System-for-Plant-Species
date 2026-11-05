@@ -1,0 +1,259 @@
+/* Shared dashboard controls. Public pages and Leaflet controls retain their styles. */
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) {
+  --dashboard-button-height: 44px;
+  --dashboard-button-compact: 32px;
+  --dashboard-button-radius: 9px;
+  --dashboard-button-focus: #468585;
+}
+
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer)
+:is(.primary-button, .secondary-button, .danger-button, .action-button, .table-action, .view-button, .primary-link, button.primary, button.secondary, button.danger, .row-actions button, .staff-page .actions button, .staff-form .actions button) {
+  box-sizing: border-box;
+  min-height: var(--dashboard-button-height);
+  border-radius: var(--dashboard-button-radius);
+  font-family: inherit;
+  line-height: 1.4;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer)
+:is(.primary-button, .secondary-button, .danger-button, .action-button, .primary-link, button.primary, button.danger, .view-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 15px;
+  text-align: center;
+}
+
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer)
+:is(.table-scroll, .table-wrap, .table-wrapper) table
+:is(.action-button, .table-action, .view-button, .delete-action, .row-actions button, .sensor-actions button, .actions button, a.secondary-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--dashboard-button-compact);
+  min-height: var(--dashboard-button-compact);
+  padding: 2px 11px;
+}
+
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer)
+:is(.modal-actions, .form-actions) {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar nav {
+  display: grid;
+  gap: 5px;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell)
+.sidebar nav a {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 11px;
+  width: 100%;
+  min-height: var(--dashboard-button-height);
+  padding: 10px 13px;
+  border: 0;
+  border-radius: var(--dashboard-button-radius);
+  background: transparent;
+  color: #c9dfd5;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  text-decoration: none;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 21px;
+  width: 21px;
+  height: 21px;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar-nav-svg {
+  width: 20px;
+  height: 20px;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell)
+:is(.sidebar nav a.router-link-active, .sidebar nav a.active) {
+  background: #2b6754;
+  color: #fff;
+  box-shadow: inset 3px 0 #9ed7b5;
+}
+
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer)
+:is(.sidebar-close-button, .menu-button, .close-button, .drawer-close-button, .notification-button, .staff-dialog-card > header > button) {
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 8px;
+}
+
+@media (hover: hover) {
+  :is(.officer-layout.officer-layout, .admin-shell.admin-shell)
+  .sidebar nav a:hover {
+    background: #285e4e;
+    color: #fff;
+    filter: none;
+  }
+  :is(.officer-layout.officer-layout, .admin-shell.admin-shell)
+  :is(.sidebar nav a.router-link-active, .sidebar nav a.active):hover {
+    background: #2b6754;
+    color: #fff;
+  }
+}
+
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer)
+:is(button, a):focus-visible {
+  outline: 3px solid var(--dashboard-button-focus);
+  outline-offset: 3px;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar :is(button, a):focus-visible {
+  outline-color: #b9e6cd;
+  outline-offset: -3px;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer)
+button:is(:disabled, [aria-disabled='true']) {
+  opacity: .55;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer)
+  :is(button, a, button svg, a svg) {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* Keep long translated navigation labels reachable on short viewports. */
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar { overflow-y: auto; }
+
+/* Existing project semantic colors; individual action classes keep their own greens. */
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) { --dashboard-action-green: #3c7d64; --dashboard-action-red: #b84d42; }
+.admin-shell.admin-shell .row-actions button { --dashboard-action-green: #3d7862; }
+.admin-shell.admin-shell .table-action { --dashboard-action-green: #3c795f; }
+.admin-shell.admin-shell .delete-action { --dashboard-action-red: #a64b40; }
+.admin-shell.admin-shell .danger-button { --dashboard-action-red: #b84b3a; }
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) .staff-page td .actions button { --dashboard-action-green: #32745b; }
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(.action-button, .table-action, .view-button, .row-actions button, :where(.staff-page td .actions) button) {
+  --dashboard-action-fill: var(--dashboard-action-green);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--dashboard-action-fill);
+  background: #fff;
+  color: var(--dashboard-action-fill);
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(.danger-button, button.danger, .action-button.danger, .delete-action) {
+  --dashboard-action-fill: var(--dashboard-action-red);
+  border: 1px solid var(--dashboard-action-fill);
+  background: #fff;
+  color: var(--dashboard-action-fill);
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(:is(.action-button, .table-action, .view-button, .row-actions button, :where(.staff-page td .actions) button), :is(.danger-button, button.danger, .action-button.danger, .delete-action)) :is(span, svg, i) { color: inherit; }
+
+/* Logout is filled, unlike outlined destructive table actions. */
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar-footer button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: var(--dashboard-button-height);
+  padding: 10px 13px;
+  border: 0;
+  border-radius: var(--dashboard-button-radius);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  text-align: center;
+  gap: 11px;
+  background: #b84d42;
+  color: #fff;
+  transition: background-color 180ms ease;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar-footer button span { width: auto; font: inherit; }
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .logout-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  color: inherit;
+}
+@media (hover: hover) {
+  :is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(:is(.action-button, .table-action, .view-button, .row-actions button, :where(.staff-page td .actions) button), :is(.danger-button, button.danger, .action-button.danger, .delete-action)):not(:disabled):not([aria-disabled='true']):hover {
+    background: var(--dashboard-action-fill);
+    border-color: var(--dashboard-action-fill);
+    color: #fff;
+    filter: none;
+  }
+  :is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar-footer button:not(:disabled):not([aria-disabled='true']):hover {
+    background: #a13c37;
+    color: #fff;
+    filter: none;
+  }
+}
+/* Existing unguarded page hover rules must not recolor disabled actions. */
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(:is(.action-button, .table-action, .view-button, .row-actions button, :where(.staff-page td .actions) button), :is(.danger-button, button.danger, .action-button.danger, .delete-action)):is(:disabled, [aria-disabled='true']):hover {
+  background: #fff;
+  color: var(--dashboard-action-fill);
+  border-color: var(--dashboard-action-fill);
+  filter: none;
+  box-shadow: none;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar-footer button:is(:disabled, [aria-disabled='true']):hover {
+  background: #b84d42;
+  color: #fff;
+}
+/* Preserve intrinsic button widths so the table scrolls instead of squeezing actions. */
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) table :is(.action-group, .action-buttons, .row-actions, .sensor-actions, .actions) {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  min-width: max-content;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) table :is(button, a.action-button, a.secondary-button, a.table-action, a.view-button, .action-group > a) {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(.table-scroll, .table-wrap, .table-wrapper) > table {
+  table-layout: auto;
+}
+/* Only dialog actions wrap; data-table actions always remain in one row. */
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(.modal-button-group, .species-request-actions) { flex-wrap: wrap; }
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(.table-scroll, .table-wrap, .table-wrapper) { min-width: 0; max-width: 100%; overflow-x: auto; }
+@media (max-width: 620px) {
+  :is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask, .similarity-drawer-layer.similarity-drawer-layer) :is(.modal-actions, .modal-button-group, .form-actions, .species-request-actions) > button { max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.officer-layout.officer-layout, .admin-shell.admin-shell) .sidebar-footer button { transition: none; }
+}
+
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask)
+:is(.action-button, .table-action, .view-button, .delete-action, .row-actions button, .sidebar-footer button) svg [stroke]:not([stroke='none']) { stroke: currentColor; }
+:is(.officer-layout.officer-layout, .admin-shell.admin-shell, .staff-dialog-mask.staff-dialog-mask)
+:is(.action-button, .table-action, .view-button, .delete-action, .row-actions button, .sidebar-footer button) svg [fill]:not([fill='none']) { fill: currentColor; }

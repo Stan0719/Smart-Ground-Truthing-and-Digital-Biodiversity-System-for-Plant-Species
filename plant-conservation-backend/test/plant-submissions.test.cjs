@@ -72,7 +72,8 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(own.data.plant.latest_submission.heightCm, 80);
     assert.equal(own.data.plant.species_details.scientific_name, species.scientific_name);
     assert.equal(own.data.plant.scientific_name, plant.scientific_name);
-    assert.equal(own.data.plant.latitude, undefined); // Exact GPS permission is unchanged.
+    assert.equal(own.data.plant.latitude, null); // No approved observation location exists yet.
+    assert.equal(own.data.plant.latest_submission.latitude, undefined);
     assert.ok((await call("/plants")).data.plants.some((p) => String(p.plant_id) === String(combined.plant_id)));
     const observation = await call(`/observations/${combined.id}`);
     assert.equal(observation.status, 200); assert.equal(observation.data.observation.owner_subject, "staff:bot");
@@ -153,6 +154,26 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal((await call("/plants?scope=mine", "guest")).status, 401);
     assert.equal((await call("/plants?scope=mine", "visitor")).status, 403);
   });
+  await t.test("existing-species registration by another Botanist and later visits do not inherit the originating species request", async () => {
+    const beforeRequests = await count("species_request_submission");
+    const created = await call("/plant-submissions", "other", "POST", { ...plant, qr_id: 4, client_key: "reuse-approved-species", species_id: Number(combined.species_id) });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    assert.equal(created.data.species_request_id, null);
+    assert.equal(await count("species_request_submission"), beforeRequests);
+    const detail = await call(`/observations/${created.data.id}`, "officer");
+    assert.equal(detail.data.observation.species_request, null);
+    assert.equal(detail.data.observation.species_request_id, null);
+    assert.equal((await call(`/observations/${created.data.id}/review`, "officer", "POST", { decision: "Approved", comment: "Existing species", revision: 1 })).status, 200);
+    const visit = await call(`/plants/${created.data.plant_id}/observations`, "other", "POST", { content: plant.content, client_key: "later-existing-species-visit" });
+    assert.equal(visit.status, 201);
+    assert.equal((await call(`/observations/${visit.data.id}/submit`, "other", "POST", {})).status, 200);
+    const later = await call(`/observations/${visit.data.id}`, "officer");
+    assert.equal(later.data.observation.species_request, null);
+    assert.equal((await call(`/observations/${visit.data.id}/review`, "officer", "POST", { decision: "Approved", comment: "New visit", revision: 1 })).status, 200);
+    const original = await call(`/observations/${combined.id}`, "officer");
+    assert.equal(original.data.observation.species_request_id, String(combined.species_request_id));
+  });
+
   await t.test("own history survives protected classification at every plant status without exposing the protected catalogue", async () => {
     await database.query("UPDATE rbac_species_visibility SET visibility='protected' WHERE species_id=$1", [combined.species_id]);
     const asset = (await database.query("SELECT id FROM plant_asset WHERE plant_id=$1 LIMIT 1", [combined.plant_id])).rows[0];
@@ -163,7 +184,8 @@ test("one atomic submission supports existing and pending species without partia
       assert.equal(own.data.plant.rbac_status, status);
       assert.equal(own.data.plant.species_details, null);
       assert.equal(own.data.plant.common_name, null);
-      assert.equal(own.data.plant.latitude, undefined);
+      assert.equal(own.data.plant.latitude, 4.5); // Only the existing approved observation location is projected.
+      assert.equal(own.data.plant.latest_approved.latitude, undefined);
       assert.equal(own.data.plant.registered_subject, "staff:bot");
       assert.equal((await call(`/plants/${combined.plant_id}?scope=mine`, "other")).status, 404);
       assert.equal((await call(`/species/${combined.species_id}`)).status, 404);

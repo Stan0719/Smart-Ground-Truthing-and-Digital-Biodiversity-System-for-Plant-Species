@@ -168,10 +168,7 @@ const displayDescription = computed(() =>
   <main v-else-if="selectedSpecies" class="detail-page">
     <section class="detail-hero">
       <div class="detail-container">
-        <RouterLink to="/species" class="back-link">
-          <span class="back-arrow" aria-hidden="true">←</span>
-          <span>{{ t('common.backToSpecies') }}</span>
-        </RouterLink>
+        <RouterLink to="/species" class="back-link"><svg class="back-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14" /></svg><span>{{ t('conservationText.back') }}</span></RouterLink>
 
         <div class="hero-grid">
           <div v-if="primaryImage" class="species-image-card">
@@ -464,62 +461,6 @@ const displayDescription = computed(() =>
   font-weight: 700;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-}
-
-.back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-
-  margin-bottom: 36px;
-  padding: 10px 16px;
-
-  border: 1px solid rgba(71, 116, 98, 0.22);
-  border-radius: 999px;
-
-  background: rgba(255, 255, 255, 0.58);
-  color: #315b49;
-
-  box-shadow: 0 5px 14px rgba(37, 75, 58, 0.08);
-
-  font-size: 13px;
-  font-weight: 700;
-  text-decoration: none;
-
-  transition:
-    transform 0.2s ease,
-    background 0.2s ease,
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.back-arrow {
-  display: inline-block;
-  font-size: 16px;
-  line-height: 1;
-  transition: transform 0.2s ease;
-}
-
-.back-link:hover {
-  background: #ffffff;
-  border-color: rgba(71, 116, 98, 0.38);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 18px rgba(37, 75, 58, 0.12);
-}
-
-.back-link:hover .back-arrow {
-  transform: translateX(-3px);
-}
-
-.back-link:focus-visible {
-  outline: 3px solid rgba(80, 160, 120, 0.22);
-  outline-offset: 3px;
-}
-
-.back-link:focus-visible {
-  outline: 3px solid rgba(80, 160, 120, 0.25);
-  outline-offset: 4px;
-  border-radius: 4px;
 }
 
 .hero-badges {
@@ -869,11 +810,7 @@ const displayDescription = computed(() =>
     height: 380px;
   }
 
-  .back-link {
-    margin-bottom: 24px;
-  }
-
-  .gallery-grid {
+.gallery-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1050,13 +987,7 @@ const displayDescription = computed(() =>
     font-size: 19px;
   }
 
-  .back-link {
-    margin-bottom: 20px;
-    padding: 8px 13px;
-    font-size: 11px;
-  }
-
-  .back-arrow {
+.back-arrow {
     font-size: 14px;
   }
 
@@ -1183,4 +1114,10 @@ const displayDescription = computed(() =>
     font-size: 8px;
   }
 }
+
+.back-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; box-sizing: border-box; margin-bottom: 20px; border: 1px solid #a8bfae; border-radius: 12px; background: #ffffff80; color: #315f4e; font-weight: 700; line-height: 1.25; text-decoration: none; }
+.back-link:hover { background: #468585; border-color: #468585; color: #fff; }
+.back-link:active { background: #356f70; border-color: #356f70; color: #fff; }
+.back-icon { width: 20px; height: 20px; flex: none; }
+.back-link:focus-visible { outline: 3px solid #315f4e; outline-offset: 4px; }
 </style>

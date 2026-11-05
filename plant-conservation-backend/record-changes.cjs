@@ -4,6 +4,7 @@ const sharp = require("sharp");
 const { permitted, visibilityFor } = require("../shared/rbac.cjs");
 const { transaction, audit, subject, fail, text, id, fieldContent, speciesRow } = require("./domain.cjs");
 const { historyAvailable, appendVersion, plantPhotoRefs, plantProposedSnapshot } = require("./record-version-history.cjs");
+const { assertSpeciesReassignment } = require("./species-requests.cjs");
 
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -196,7 +197,10 @@ function mountRecordChanges(app, { pool, allow }) {
       const before = await pendingPlantSnapshot(c, plant, observation);
       if ((plant.species_data?.approvalStatus || "Approved") !== "Approved" && proposal.species_id !== String(plant.species_id))
         fail(409, "Finish the linked species request before changing this plant's species.");
-      if (proposal.species_id !== String(plant.species_id)) await speciesRow(c, proposal.species_id, req.user);
+      if (proposal.species_id !== String(plant.species_id)) {
+        await assertSpeciesReassignment(c, plant.plant_id, plant, fail);
+        await speciesRow(c, proposal.species_id, req.user);
+      }
       await applyQrChange(c, plant, proposal.qr_id);
       await c.query("UPDATE plant_record SET species_id=$1,scientific_name=$2,rbac_status='Pending Review' WHERE plant_id=$3",
         [proposal.species_id, proposal.scientific_name, plant.plant_id]);

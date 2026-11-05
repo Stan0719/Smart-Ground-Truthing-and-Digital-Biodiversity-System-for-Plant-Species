@@ -475,6 +475,21 @@
     }
   },
   "dashboardNotifications": {
+    "officerLive": {
+      "registrationTitle": "Pendaftaran tumbuhan baharu",
+      "fieldTitle": "Pemerhatian lapangan baharu",
+      "registrationMessage": "Pendaftaran tumbuhan telah dihantar. Buka rekod semasa untuk menyemak status semakannya.",
+      "speciesFirst": "Pendaftaran ini mengandungi cadangan spesies baharu. Semak kelulusan spesies sebelum menyemak tumbuhan.",
+      "fieldMessage": "Pemerhatian lapangan telah dihantar. Buka senarai Pemerhatian untuk memeriksa status semasanya.",
+      "loading": "Memuatkan pemberitahuan…",
+      "loadFailed": "Pemberitahuan tidak dapat dimuatkan. Hasil sedia ada mungkin tidak terkini.",
+      "openFailed": "Rekod tidak dapat dibuka atau status dibaca tidak dapat disimpan. Cuba lagi selepas menyemak akses.",
+      "readFailed": "Status dibaca tidak dapat disahkan. Muat semula sebelum mencuba lagi.",
+      "sessionUnavailable": "Pemberitahuan tidak tersedia untuk sesi ini. Log masuk melalui proses akaun biasa.",
+      "retry": "Cuba lagi",
+      "more": "Muatkan lagi pemberitahuan",
+      "unread": "Belum dibaca"
+    },
     "admin": {
       "N001": {
         "title": "Amaran ancaman tahap tinggi",
@@ -997,6 +1012,8 @@
     "statuses": { "active": "Aktif", "inactive": "Tidak Aktif", "suspended": "Digantung" }
   },
   "conservationText": {
+    "back": "Kembali",
+    "speciesrepresentativeimage": "Imej perwakilan spesies",
     "maintenance": "Penyelenggaraan",
     "resolved": "Diselesaikan",
     "shoreaniahensis": "Shorea niahensis",
@@ -1200,7 +1217,7 @@
     "observationstatusstatus": "Status pemerhatian: {status}",
     "any": "Sebarang",
     "nosubjectmatchtheselectedfilters": "Tiada {subject} sepadan dengan penapis dipilih.",
-    "observations": "pemerhatian",
+    "observations": "Pemerhatian",
     "startdatemustnotbeafterenddate": "Tarikh mula tidak boleh selepas tarikh akhir.",
     "metric": "Metrik",
     "value": "Nilai",
@@ -1221,10 +1238,13 @@
     "niahmeranti": "Meranti Niah",
     "shorea": "Shorea",
     "dipterocarpaceae": "Dipterocarpaceae",
-    "notassessed": "Belum Dinilai"
+    "notassessed": "Belum Dinilai",
+    "plantinformation": "Maklumat Tumbuhan",
+    "verifyyoursessiontoviewthisplant": "Sesi anda tidak dapat disahkan. Sila cuba lagi."
   },
   "conservationPages": {
     "observations": {
+      "reviewSubmission": "Semak Penyerahan",
       "eyebrow": "Rekod Lapangan",
       "title": "Pemerhatian",
       "intro": "Lihat ukuran pada masa tertentu yang dihantar oleh ahli botani tanpa menimpa sejarah tumbuhan.",
@@ -1444,9 +1464,9 @@
       }
     },
     "reports": {
-      "eyebrow": "Pelaporan PostgreSQL",
+      "eyebrow": "Pelaporan Konservasi",
       "title": "Laporan",
-      "intro": "Semak dan muat turun data laporan yang disokong oleh backend tumbuhan semasa.",
+      "intro": "Semak tumbuhan yang kini diluluskan mengikut tempoh pendaftaran dan muat turun hasil.",
       "reportType": "Jenis Laporan",
       "supportedDescription": "Jenis laporan tidak disokong ditunjukkan untuk kejelasan hala tuju tetapi tidak boleh menjana data prototaip.",
       "speciesApprovedSummary": "Ringkasan Spesies & Tumbuhan Diluluskan",
@@ -1455,7 +1475,6 @@
       "iotMonitoringReport": "Laporan Pemantauan IoT",
       "cameraIncidentReport": "Laporan Insiden Kamera",
       "customDateReport": "Laporan Tarikh Tersuai",
-      "realBackendReport": "Laporan sebenar bersandarkan PostgreSQL",
       "backendUnavailable": "Integrasi backend belum tersedia",
       "dataScope": "Skop data",
       "allAvailableData": "Semua data laporan tersedia",
@@ -1471,9 +1490,9 @@
       "loadFailed": "Laporan gagal dimuatkan.",
       "retry": "Cuba Lagi",
       "generatedAt": "Dijana Pada",
-      "totalSpecies": "Jumlah Spesies",
-      "totalApprovedPlants": "Jumlah Tumbuhan Diluluskan",
-      "matchingRows": "Baris Sepadan",
+      "totalSpecies": "Semua spesies dalam skop",
+      "totalApprovedPlants": "Tumbuhan diluluskan (spesies sepadan)",
+      "matchingRows": "Spesies sepadan",
       "chartTitle": "Tumbuhan Diluluskan mengikut Spesies",
       "chartLimit": "Carta menunjukkan {count} spesies teratas mengikut bilangan tumbuhan diluluskan; jadual mengandungi semua baris sepadan.",
       "scientificName": "Nama Saintifik",
@@ -1490,9 +1509,63 @@
       "errors": {
         "load": "Tidak dapat memuatkan laporan.",
         "export": "Laporan tidak dapat dieksport."
-      }
+      },
+      "filters": "Penapis laporan",
+      "reportCategory": "Kategori laporan",
+      "reportingPeriod": "Tempoh laporan",
+      "periodAllTime": "Sepanjang masa",
+      "periodThisMonth": "Bulan ini",
+      "periodLastMonth": "Bulan lepas",
+      "periodCustom": "Julat tarikh tersuai",
+      "startDate": "Tarikh mula",
+      "endDate": "Tarikh akhir",
+      "apply": "Terapkan",
+      "reset": "Tetapkan semula",
+      "invalidRange": "Pilih tarikh mula dan akhir yang sah mengikut urutan (maksimum 100 tahun).",
+      "registrationScope": "Tumbuhan yang kini diluluskan, ditapis mengikut tarikh pendaftaran",
+      "noPlantsInPeriod": "Tiada tumbuhan yang kini diluluskan didaftarkan dalam tempoh ini untuk spesies sepadan.",
+      "appliedPeriod": "Tempoh laporan: {period}"
     },
     "reviews": {
+      "queues": {
+        "registrations": "Pendaftaran Tumbuhan Baharu",
+        "registrationIntro": "Semak pendaftaran awal tumbuhan dan permohonan spesies berkaitan. Rekod belum dikelaskan kekal tersedia dalam baris gilir legasi.",
+        "reviewQueue": "Baris Gilir Semakan",
+        "legacy": "Pemerhatian Belum Dikelaskan / Legasi",
+        "originUnverified": "Asal rekod belum disahkan",
+        "fieldObservations": "Pemerhatian Lapangan Susulan",
+        "fieldIntro": "Semak pemerhatian lapangan susulan atau pilih semua asal rekod untuk melihat sejarah pemerhatian.",
+        "allOrigins": "Semua Asal Rekod",
+        "history": "Sejarah Pemerhatian",
+        "loadedScope": "Rekod yang dimuatkan sahaja. Carian, penapis, kiraan dan sejarah meliputi subset ini. Teruskan memuatkan untuk mencapai rekod lama; hasil bukan petikan keadaan langsung.",
+        "loadMore": "Muatkan lagi / Teruskan carian",
+        "noRegistrations": "Tiada pendaftaran dalam hasil yang dimuatkan.",
+        "noFieldObservations": "Tiada pemerhatian lapangan dalam hasil yang dimuatkan.",
+        "noRecords": "Tiada rekod sepadan dalam hasil yang dimuatkan.",
+        "originMoved": "Asal rekod terkini tergolong dalam baris gilir lain. Keputusan tidak boleh dibuat di halaman ini; gunakan baris gilir yang sesuai.",
+        "registrationReview": "Semakan Pendaftaran / Legasi",
+        "initialRegistration": "Pendaftaran Awal",
+        "subsequentObservation": "Pemerhatian Lapangan Susulan"
+      },
+      "currentPlantQr": "Maklumat QR Tumbuhan Semasa",
+      "qrIdentity": "Kod QR / Identiti QR",
+      "qrStatus": "Status QR",
+      "notRecorded": "Tidak direkodkan",
+      "qrLoading": "Memuatkan maklumat QR…",
+      "qrLoadFailed": "Maklumat QR tidak dapat dimuatkan",
+      "selectedSpecies": "Spesies Dipilih",
+      "speciesScientificName": "Nama Saintifik Spesies",
+      "speciesCommonName": "Nama Biasa Spesies",
+      "noLinkedSpeciesRequest": "Tiada permohonan spesies berkaitan dilaporkan",
+      "requestDetailsUnavailable": "Butiran permohonan tidak tersedia",
+      "loadingLatestObservation": "Memuatkan pemerhatian terkini…",
+      "unableToRefreshObservation": "Pemerhatian tidak dapat dimuat semula. Cuba lagi sebelum menyemak.",
+      "retryRefresh": "Cuba lagi",
+      "speciesRequestIdLabel": "ID Permohonan Spesies",
+      "officerReview": "Semakan Pegawai",
+      "reviewComment": "Ulasan semakan (wajib untuk penolakan, pembetulan atau penandaan)",
+      "reviewUnavailable": "Semakan tidak tersedia. Semak butiran terkini dan permohonan spesies yang dipautkan.",
+      "decisions": {"approved":"Luluskan","rejected":"Tolak","correction":"Minta Pembetulan","flagged":"Tandakan"},
       "speciesRequest": {
         "title": "Permohonan Spesies Baharu",
         "proposed": "Spesies baharu yang dicadangkan",
