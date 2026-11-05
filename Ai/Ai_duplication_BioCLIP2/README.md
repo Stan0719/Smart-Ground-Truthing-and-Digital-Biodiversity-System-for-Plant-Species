@@ -87,6 +87,11 @@ times out after three minutes.
 
 ## Evaluate before using for decisions
 
+For a labelled same-plant/different-plant folder comparison against the original
+OpenAI CLIP model family, follow [EVALUATION.md](EVALUATION.md). The separate
+`compare_models.py` tool creates a visual report and CSV using real model scores;
+it does not change this app's retrieval or officer-review behaviour.
+
 No training is performed. Knowing the individual plant IDs helps you evaluate:
 does another view of the same plant appear in the first five results, and do
 different plants of the same species rank incorrectly? BioCLIP 2's biological
