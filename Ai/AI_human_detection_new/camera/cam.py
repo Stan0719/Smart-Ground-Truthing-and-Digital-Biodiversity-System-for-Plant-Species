@@ -21,7 +21,7 @@ except ImportError:
 
 WINDOW_NAME = "Human and Animal Detection"
 BASE_DIR = Path(__file__).resolve().parent
-CAMERA_INDEX = 1
+CAMERA_INDEX = 0
 FRAME_SIZE = (960, 540)
 PANEL_WIDTH = 300
 ALERT_COOLDOWN_SECONDS = 3
