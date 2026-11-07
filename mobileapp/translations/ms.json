@@ -293,6 +293,12 @@
     "logout": "Log Keluar",
     "myPlants": "Tumbuhan Saya",
     "pendingApproval": "Menunggu Kelulusan",
+    "correctionRequired": "Pembetulan Diperlukan",
+    "correctionRequests": "Permintaan Pembetulan",
+    "loadingCorrectionRequests": "Memuatkan permintaan pembetulan...",
+    "noCorrectionRequests": "Tiada tumbuhan yang memerlukan pembetulan pada masa ini.",
+    "noOfficerNoteProvided": "Tiada nota Pegawai disertakan.",
+    "editPlantCorrection": "Edit Tumbuhan",
     "qrCodeManagement": "Pengurusan Kod QR",
     "generateAndManageQrCodes": "Jana dan urus kod QR",
     "addNewPlantRecord": "+ Tambah Rekod Tumbuhan Baharu",
@@ -1114,6 +1120,9 @@
     "reviewComments": "Ulasan Penyemak"
   },
   "recordEdits": {
+    "originalInformation": "Maklumat Asal",
+    "updatedInformation": "Maklumat Dikemas Kini",
+    "informationNotAvailable": "Tidak tersedia",
     "qrAssignment": "Penetapan Kod QR",
     "qr_id": "Kod QR",
     "qr_token": "Token QR",

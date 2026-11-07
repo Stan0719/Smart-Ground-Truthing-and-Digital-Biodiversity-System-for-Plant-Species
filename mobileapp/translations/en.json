@@ -293,6 +293,12 @@
     "logout": "Logout",
     "myPlants": "My Plants",
     "pendingApproval": "Pending Approval",
+    "correctionRequired": "Correction Required",
+    "correctionRequests": "Correction Requests",
+    "loadingCorrectionRequests": "Loading correction requests...",
+    "noCorrectionRequests": "No plants currently require corrections.",
+    "noOfficerNoteProvided": "No Officer note was included.",
+    "editPlantCorrection": "Edit Plant",
     "qrCodeManagement": "QR Code Management",
     "generateAndManageQrCodes": "Generate and manage QR codes",
     "addNewPlantRecord": "+ Add New Plant Record",
@@ -1114,6 +1120,9 @@
     "reviewComments": "Reviewer Comments"
   },
   "recordEdits": {
+    "originalInformation": "Original Information",
+    "updatedInformation": "Updated Information",
+    "informationNotAvailable": "Not available",
     "qrAssignment": "QR Code Assignment",
     "qr_id": "QR Code",
     "qr_token": "QR Token",

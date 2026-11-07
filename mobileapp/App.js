@@ -553,11 +553,13 @@ export default function App({ homeRequest }) {
   }, [homeRequest, navigationRef]);
 
   const [user, setUser] = useState(null);
+  const userRef = useRef(null);
   const [restoringSession, setRestoringSession] = useState(true);
   const authGeneration = useRef(0);
   const faceNavigationReference = useRef(null);
   const restoredUser = useRef(null);
   const applyServerUser = (verifiedUser) => {
+    userRef.current = verifiedUser;
     setUser(verifiedUser);
     if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "MainTabs", params: { screen: verifiedUser.role === "botanist" ? "AccountTab" : "HomeTab" } }] });
     else restoredUser.current = verifiedUser;
@@ -577,26 +579,37 @@ export default function App({ homeRequest }) {
       try {
         const verifiedUser = await faceSession.restore();
         if (active && generation === authGeneration.current) {
-          setUser(verifiedUser || null);
-          if (!verifiedUser && navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+          if (verifiedUser) {
+            userRef.current = verifiedUser;
+            setUser(verifiedUser);
+          } else if (userRef.current) {
+            userRef.current = null;
+            setUser(null);
+            if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+              navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+          }
         }
       } catch (error) {
         if (error.transient === true || [502, 503, 504].includes(error.status)) return;
         if (active && generation === authGeneration.current) {
+          const hadAuthenticatedUser = Boolean(userRef.current);
+          userRef.current = null;
           setUser(null);
-          if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+          if (hadAuthenticatedUser && navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+            navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
         }
       }
     }
     const listener = AppState.addEventListener("change", (state) => { if (state === "active") revalidate(); });
     const unsubscribe = faceSession.subscribe?.(({ authenticated }) => {
       if (!active || authenticated) return;
+      const hadAuthenticatedUser = Boolean(userRef.current);
       authGeneration.current += 1;
+      userRef.current = null;
       setUser(null);
-      if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+      if (hadAuthenticatedUser && navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
         navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
     });
-    void revalidate();
     const timer = setInterval(revalidate, 60000);
     return () => { active = false; listener.remove(); unsubscribe?.(); clearInterval(timer); };
   }, [navigationRef, faceSession]);
@@ -609,6 +622,7 @@ export default function App({ homeRequest }) {
   function handleLogin(loggedInUser, metadata) {
     faceNavigationReference.current = metadata?.reference || null;
     authGeneration.current += 1;
+    userRef.current = loggedInUser;
     setUser(loggedInUser);
     if (metadata?.reference) faceDiagnostic("auth_context_updated", metadata.reference);
   }
@@ -616,6 +630,7 @@ export default function App({ homeRequest }) {
   async function handleLogout() {
     authGeneration.current += 1;
     restoredUser.current = null;
+    userRef.current = null;
     setUser(null);
     if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
     try { await faceSession.logout(); }

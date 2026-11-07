@@ -9,6 +9,7 @@ import { fetchBotanistPlant } from "../utils/botanistRecords";
 import { fetchSpeciesCatalog, plantApi } from "../utils/plantApi";
 import { normalizeQRCodes } from "../utils/qrInventory";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
+import OriginalUpdatedField from "../components/OriginalUpdatedField";
 
 const fields = ["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "notes", "zone", "latitude", "longitude", "accuracy_m", "altitudeM"];
 const numeric = new Set(["heightCm", "latitude", "longitude", "accuracy_m", "altitudeM"]);
@@ -24,6 +25,21 @@ export default function EditPlantRecord({ route, navigation }) {
   const [saving, setSaving] = useState(false), [locating, setLocating] = useState(false);
   const [reload, setReload] = useState(0);
   const busy = useRef(false), clientKey = useRef(key());
+  const originalObservation = state.plant?.status === "Approved"
+    ? state.plant.observations?.find((observation) => observation.status === "Approved")
+    : state.plant?.latestObservation;
+  const originalContent = originalObservation?.content || state.plant?.latest_submission || state.plant?.latest_approved || {};
+  const originalFallbacks = {
+    latitude: state.plant?.location?.latitude,
+    longitude: state.plant?.location?.longitude,
+    accuracy_m: state.plant?.location?.accuracyM,
+    altitudeM: state.plant?.location?.altitudeM,
+  };
+  const originalFieldValue = (field) => field === "scientific_name"
+    ? state.plant?.scientificName
+    : originalContent[field] ?? originalFallbacks[field];
+  const originalSpecies = state.plant?.speciesDetails?.scientificName || state.plant?.scientificName ||
+    state.species.find((item) => String(item.id) === String(state.plant?.speciesId))?.scientificName;
   useFocusEffect(useCallback(() => {
     let active = true;
     (async () => {
@@ -142,16 +158,18 @@ export default function EditPlantRecord({ route, navigation }) {
     <Text style={styles.title}>{t("recordEdits.editPlant")}</Text>
     <Text style={styles.note}>{state.plant.status === "Approved" ? t("recordEdits.approvedNotice") : t("recordEdits.pendingNotice")}</Text>
     {state.plant.status === "Approved" && !state.available && <Text style={styles.error}>{t("recordEdits.migrationRequired")}</Text>}
-    <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.plantInformation")}</Text><Text style={styles.label}>{t("recordEdits.species")}</Text>
+    <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.plantInformation")}</Text>
+      <OriginalUpdatedField label={t("recordEdits.species")} originalValue={originalSpecies}>
       {state.species.map((item) => <TouchableOpacity key={item.id} style={[styles.speciesOption, form.species_id === String(item.id) && styles.selected]} onPress={() => change("species_id", String(item.id))}>
         <Text style={styles.optionText}>{item.scientificName} · {item.commonName}</Text></TouchableOpacity>)}
-      {fields.map((field) => <View key={field}>
+      </OriginalUpdatedField>
+      {fields.map((field) => <OriginalUpdatedField key={field} label={t(`recordEdits.${field}`)} originalValue={originalFieldValue(field)}>
         {field === "latitude" && <TouchableOpacity style={styles.secondary} onPress={detectLocation} disabled={locating} accessibilityRole="button" accessibilityLabel={t("addPlant.getCurrentLocation")}>
           {locating ? <ActivityIndicator color="#28665E" /> : <Text style={styles.secondaryText}>{t("addPlant.getCurrentLocation")}</Text>}
         </TouchableOpacity>}
-        <Text style={styles.label}>{t(`recordEdits.${field}`)}</Text>
         <TextInput style={[styles.input, ["morphology", "notes"].includes(field) && styles.multiline]} value={form[field]} onChangeText={(next) => change(field, next)}
-          multiline={["morphology", "notes"].includes(field)} keyboardType={numeric.has(field) ? "decimal-pad" : "default"} /></View>)}
+          multiline={["morphology", "notes"].includes(field)} keyboardType={numeric.has(field) ? "decimal-pad" : "default"} />
+      </OriginalUpdatedField>)}
     </View>
     <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.qrAssignment")}</Text>
       <Text style={styles.note}>{t("recordEdits.currentQr")}: {state.plant.qrCode || t("botanistPlantDetail.notAssigned")}</Text>
@@ -160,14 +178,20 @@ export default function EditPlantRecord({ route, navigation }) {
       {!!qrError && <Text style={styles.error}>{translateUIMessage(qrError)}</Text>}
       <TouchableOpacity style={styles.secondary} onPress={refreshQr} disabled={qrLoading} accessibilityRole="button" accessibilityLabel={t("recordEdits.refreshQr")}>
         <Text style={styles.secondaryText}>{t("recordEdits.refreshQr")}</Text></TouchableOpacity>
+      <OriginalUpdatedField label={t("recordEdits.qr_id")} originalValue={state.plant.qrCode || state.plant.qrId}>
       {qrList.map((qr) => { const current = qr.id === str(state.plant.qrId);
         const available = current || (qr.status === "generated" && qr.plantId == null);
         return <TouchableOpacity key={qr.id} style={[styles.speciesOption, form.qr_id === qr.id && styles.selected, !available && styles.disabled]}
           disabled={!available} onPress={() => change("qr_id", qr.id)} accessibilityRole="radio" accessibilityState={{ selected: form.qr_id === qr.id, disabled: !available }}>
           <Text style={styles.optionText}>{qr.label} · {current ? t("recordEdits.currentQr") : available ? t("recordEdits.availableQr") : t("recordEdits.unavailableQr")}</Text>
         </TouchableOpacity>; })}
+      </OriginalUpdatedField>
     </View>
     <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.plantPhotos")}</Text>
+      <OriginalUpdatedField label={t("recordEdits.plantPhotos")}
+        originalContent={(state.plant.latestObservation?.assets || []).length > 0
+          ? <View style={styles.photoRow}>{state.plant.latestObservation.assets.map((asset, index) => <Image key={asset.id} source={state.plant.photos?.[index]} style={styles.photo} />)}</View>
+          : null}>
       <View style={styles.photoRow}>{(state.plant.latestObservation?.assets || []).map((asset, index) => removedPhotos.includes(asset.id) ? null :
         <View key={asset.id} style={styles.photoTile}><Image source={state.plant.photos?.[index]} style={styles.photo} />
           <TouchableOpacity style={styles.removePhoto} onPress={() => removeExisting(asset.id)} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
@@ -177,6 +201,7 @@ export default function EditPlantRecord({ route, navigation }) {
             <Ionicons name="close" size={17} color="#FFFFFF" /></TouchableOpacity></View>)}</View>
       <View style={styles.photoActions}><TouchableOpacity style={styles.secondary} onPress={() => pickPhotos(true)} accessibilityRole="button"><Text style={styles.secondaryText}>{t("recordEdits.takePhoto")}</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={() => pickPhotos(false)} accessibilityRole="button"><Text style={styles.secondaryText}>{t("recordEdits.addGallery")}</Text></TouchableOpacity></View>
+      </OriginalUpdatedField>
     </View>
     <TouchableOpacity style={[styles.primary, saving && styles.disabled]} onPress={submit} disabled={saving}><Text style={styles.primaryText}>{saving ? t("recordEdits.saving") : t("recordEdits.submitChanges")}</Text></TouchableOpacity>
     <TouchableOpacity style={styles.secondary} onPress={() => navigation.goBack()} disabled={saving}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity>

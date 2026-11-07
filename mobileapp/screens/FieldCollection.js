@@ -14,12 +14,13 @@ import {
 } from "react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
-import { plantApi } from "../utils/plantApi";
+import { plantApi, plantAssetSources } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
 import { saveDraft, readDrafts } from "../utils/fieldStorage";
 import { syncDrafts } from "../utils/fieldSync";
 import { createFieldCapture } from "../utils/fieldCapture";
 import { fieldFormStyles } from "../components/fieldFormStyles";
+import OriginalUpdatedField from "../components/OriginalUpdatedField";
 const fieldCapture = createFieldCapture({
   imagePicker: ImagePicker,
   location: Location,
@@ -60,7 +61,23 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     edit = mode === "EditPlant" || mode === "FieldCollectionEdit",
     newPlant = mode === "AddPlant" || mode === "FieldCollectionPlant",
     dashboard = mode === "BotanistDashboard" || mode === "AccountTab";
+  const draftObservationId = route.params?.draft?.method === "PATCH" ? route.params.draft.path.split("/").pop() : null;
+  const originalObservation = route.params?.observation || rows.find((row) => String(row.id) === String(draftObservationId)) || null;
+  const originalObservationContent = originalObservation?.content || {};
+  const originalAssets = originalObservation?.assets;
+  const originalAssetKey = (originalAssets || []).map((asset) => asset.id).join(",");
+  const originalPhotoStateKey = `${user?.id || ""}:${originalAssetKey}`;
+  const [originalPhotoState, setOriginalPhotoState] = useState({ key: "", sources: [] });
+  const originalPhotos = originalPhotoState.key === originalPhotoStateKey ? originalPhotoState.sources : [];
   const change = (key, value) => setForm((old) => ({ ...old, [key]: value }));
+  useEffect(() => {
+    let active = true;
+    if (!edit || !user?.id || !originalAssets?.length) return () => { active = false; };
+    plantAssetSources(originalAssets, user.id, { ownSubmission: true })
+      .then((sources) => { if (active) setOriginalPhotoState({ key: originalPhotoStateKey, sources }); })
+      .catch(() => { if (active) setOriginalPhotoState({ key: originalPhotoStateKey, sources: [] }); });
+    return () => { active = false; };
+  }, [edit, user?.id, originalObservation?.id, originalAssets, originalPhotoStateKey]);
   async function load() {
     setError("");
     try {
@@ -435,6 +452,11 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             <>
               <Text style={styles.sectionTitle}>{t("fieldCollection.plantSpeciesSection")}</Text>
               <Text style={styles.label}>{t("fieldCollection.speciesReference")}</Text>
+              {edit && <>
+                <Text style={styles.originalInformationLabel}>{t("recordEdits.originalInformation")}</Text>
+                <Text style={styles.originalInformationValue}>{originalObservation?.scientific_name || species.find((item) => String(item.species_id) === String(originalObservation?.species_id))?.scientific_name || originalObservation?.species_id || t("recordEdits.informationNotAvailable")}</Text>
+                <Text style={styles.originalInformationLabel}>{t("recordEdits.updatedInformation")}</Text>
+              </>}
               {user.offline && newPlant && (
                 <TextInput style={styles.input}
                   accessibilityLabel={t("fieldCollection.speciesIdFromYourFieldReference")}
@@ -455,9 +477,14 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           <Text style={styles.sectionTitle}>{t("fieldCollection.observationSection")}</Text>
           {["heightCm", "healthStatus", "lifeStage", "morphology", "taxonomy", "notes"].map((field) => (
             <View key={field} style={styles.fieldGroup}>
-              <Text style={styles.label}>{translateFieldLabel(field)}</Text>
-              <TextInput accessibilityLabel={translateFieldLabel(field)} style={[styles.input, ["notes", "morphology"].includes(field) && styles.multiline]}
-                multiline={["notes", "morphology"].includes(field)} value={form[field]} onChangeText={(v) => change(field, v)} />
+              {edit ? <OriginalUpdatedField label={translateFieldLabel(field)} originalValue={originalObservationContent[field] ?? originalObservation?.[field]}>
+                <TextInput accessibilityLabel={translateFieldLabel(field)} style={[styles.input, ["notes", "morphology"].includes(field) && styles.multiline]}
+                  multiline={["notes", "morphology"].includes(field)} value={form[field]} onChangeText={(v) => change(field, v)} />
+              </OriginalUpdatedField> : <>
+                <Text style={styles.label}>{translateFieldLabel(field)}</Text>
+                <TextInput accessibilityLabel={translateFieldLabel(field)} style={[styles.input, ["notes", "morphology"].includes(field) && styles.multiline]}
+                  multiline={["notes", "morphology"].includes(field)} value={form[field]} onChangeText={(v) => change(field, v)} />
+              </>}
             </View>
           ))}
           </View>
@@ -465,8 +492,12 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           <Text style={styles.sectionTitle}>{t("fieldCollection.locationSection")}</Text>
           {["latitude", "longitude", "accuracy_m"].map((field) => (
             <View key={field} style={styles.fieldGroup}>
-              <Text style={styles.label}>{translateFieldLabel(field)}</Text>
-              <TextInput accessibilityLabel={translateFieldLabel(field)} style={styles.input} value={form[field]} onChangeText={(v) => change(field, v)} keyboardType="decimal-pad" />
+              {edit ? <OriginalUpdatedField label={translateFieldLabel(field)} originalValue={originalObservationContent[field] ?? originalObservation?.[field]}>
+                <TextInput accessibilityLabel={translateFieldLabel(field)} style={styles.input} value={form[field]} onChangeText={(v) => change(field, v)} keyboardType="decimal-pad" />
+              </OriginalUpdatedField> : <>
+                <Text style={styles.label}>{translateFieldLabel(field)}</Text>
+                <TextInput accessibilityLabel={translateFieldLabel(field)} style={styles.input} value={form[field]} onChangeText={(v) => change(field, v)} keyboardType="decimal-pad" />
+              </>}
             </View>
           ))}
           <TouchableOpacity style={styles.locationButton} onPress={locate} disabled={locating} accessibilityRole="button" accessibilityState={{ disabled: locating }}>
@@ -475,6 +506,12 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           </View>
           <View style={styles.card}>
           <Text style={styles.sectionTitle}>{t("fieldCollection.photosSection")}</Text>
+          {edit && <>
+            <Text style={styles.originalInformationLabel}>{t("recordEdits.originalInformation")}</Text>
+            {originalPhotos.length ? <View style={styles.photoList}>{originalPhotos.map((source, index) => <Image key={`${originalAssetKey}-${index}`} source={source} style={styles.photoPreview} resizeMode="cover" />)}</View>
+              : <Text style={styles.originalInformationValue}>{t("recordEdits.informationNotAvailable")}</Text>}
+            <Text style={styles.originalInformationLabel}>{t("recordEdits.updatedInformation")}</Text>
+          </>}
           <View style={styles.actionRow}>
           <TouchableOpacity style={[styles.photoButton, styles.actionFlex]} onPress={() => capture(true)} accessibilityRole="button">
             <Text style={styles.photoButtonText}>{t("addPlant.camera")}</Text>
@@ -576,6 +613,8 @@ const styles = StyleSheet.create({
   sectionTitle: fieldFormStyles.sectionTitle,
   label: fieldFormStyles.label,
   fieldGroup: { marginBottom: 7 },
+  originalInformationLabel: { marginTop: 5, color: "#718078", fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
+  originalInformationValue: { minHeight: 40, padding: 11, borderRadius: 10, borderWidth: 1, borderColor: "#E2EDE0", backgroundColor: "#F7FBF4", color: "#52665A", fontSize: 14, lineHeight: 20, textAlignVertical: "center" },
   input: [fieldFormStyles.input, { width: "100%", marginTop: 6 }],
   multiline: fieldFormStyles.textArea,
   choiceButton: { minHeight: 48, justifyContent: "center", paddingHorizontal: 14, paddingVertical: 11, marginTop: 7, borderRadius: 11, backgroundColor: "#f3f8f4", borderWidth: 1, borderColor: "#e0ebe3" },

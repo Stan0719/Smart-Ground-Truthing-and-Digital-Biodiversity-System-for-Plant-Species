@@ -180,6 +180,7 @@ test("actual plant detail loads the existing owned ID from API and displays its 
     "../translations/i18n": { useAppTranslation: () => {}, t, translateLabel: (v) => v, translateFieldValue: (_, v) => v, translateUIMessage: (v) => v },
     "../data/mockData": { botanistPlantRecords: [], botanistSpeciesRequests: [], plants: [] },
     "../components/EditAction": { default: "EditAction" },
+    "../components/OriginalUpdatedField": { default: ({ children }) => React.createElement("View", null, children) },
   });
   const render = () => { index = 0; return screen.default({ route: { params: { plantId: "8", botanist: { id: "owner", name: "Owner" } } }, navigation: {} }); };
   render(); const cleanup = focus(); await new Promise((resolve) => setImmediate(resolve)); const tree = render();
