@@ -3,7 +3,7 @@ const test = require("node:test"),
   assert = require("node:assert/strict");
 const { createPlantDatabase } = require("./postgres-fixture.cjs");
 const { transaction } = require("../domain.cjs");
-const { configured } = require("../database.cjs");
+const { configured, poolMax } = require("../database.cjs");
 test("PostgreSQL starts empty and preserves relational constraints and rollback", async () => {
   const pool = await createPlantDatabase();
   try {
@@ -43,4 +43,16 @@ test("PostgreSQL configuration recognizes connection URLs and local fallback set
     true,
   );
   assert.equal(configured({ PLANT_DB: "old.sqlite" }), false);
+});
+test("PostgreSQL pool limits use safe defaults and validated overrides", () => {
+  assert.equal(poolMax({}, "PLANT_PG_POOL_MAX", 4), 4);
+  assert.equal(poolMax({ PLANT_PG_POOL_MAX: "3" }, "PLANT_PG_POOL_MAX", 4), 3);
+  assert.throws(
+    () => poolMax({ PLANT_PG_POOL_MAX: "0" }, "PLANT_PG_POOL_MAX", 4),
+    /integer from 1 to 100/,
+  );
+  assert.throws(
+    () => poolMax({ PLANT_PG_POOL_MAX: "101" }, "PLANT_PG_POOL_MAX", 4),
+    /integer from 1 to 100/,
+  );
 });

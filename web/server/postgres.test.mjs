@@ -141,6 +141,22 @@ test('configuration refuses SQLite paths, keeps verified TLS, and preserves quot
   )
 })
 
+test('authentication pool limits use a small default and validated override', () => {
+  assert.equal(connectionOptions({ DATABASE_URL: 'postgresql://fixture@localhost/db' }).max, 2)
+  assert.equal(
+    connectionOptions({ DATABASE_URL: 'postgresql://fixture@localhost/db', AUTH_PG_POOL_MAX: '3' }).max,
+    3,
+  )
+  assert.throws(
+    () => connectionOptions({ DATABASE_URL: 'postgresql://fixture@localhost/db', AUTH_PG_POOL_MAX: '0' }),
+    /integer from 1 to 100/,
+  )
+  assert.throws(
+    () => connectionOptions({ DATABASE_URL: 'postgresql://fixture@localhost/db', AUTH_PG_POOL_MAX: '101' }),
+    /integer from 1 to 100/,
+  )
+})
+
 test('private schemas reject managed Supabase and PostgreSQL namespaces', () => {
   for (const schema of ['public', 'auth', 'storage', 'pg_catalog', 'information_schema'])
     assert.throws(() => postgresDatabase({}, schema), /schema name/)

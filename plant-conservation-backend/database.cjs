@@ -9,6 +9,13 @@ function configured(env = process.env) {
       (env.DB_USER || env.PGUSER)),
   );
 }
+function poolMax(env, name, fallback) {
+  const value = env[name];
+  if (value === undefined || value === "") return fallback;
+  if (!/^[1-9][0-9]*$/.test(String(value)) || Number(value) > 100)
+    throw Error(`${name} must be an integer from 1 to 100.`);
+  return Number(value);
+}
 function poolFromEnvironment(env = process.env) {
   if (!configured(env))
     throw Object.assign(Error("PostgreSQL configuration is missing."), {
@@ -56,6 +63,7 @@ function poolFromEnvironment(env = process.env) {
     ...config,
     ...(ssl ? { ssl } : {}),
     connectionTimeoutMillis: 10000,
+    max: poolMax(env, "PLANT_PG_POOL_MAX", 4),
   });
   pool.on("error", (error) =>
     console.error(
@@ -107,6 +115,7 @@ function connectionFailure() {
 }
 module.exports = {
   configured,
+  poolMax,
   poolFromEnvironment,
   connectionFailure,
   scopedPool,

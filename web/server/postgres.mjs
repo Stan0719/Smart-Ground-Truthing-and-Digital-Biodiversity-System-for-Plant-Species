@@ -57,6 +57,16 @@ export function connectionOptions(env = process.env) {
     : remote
       ? { rejectUnauthorized: true }
       : undefined
+  const configuredPoolMax = env.AUTH_PG_POOL_MAX
+  const poolMax = configuredPoolMax === undefined || configuredPoolMax === ''
+    ? 2
+    : Number(configuredPoolMax)
+  if (
+    configuredPoolMax !== undefined &&
+    configuredPoolMax !== '' &&
+    (!/^[1-9][0-9]*$/.test(String(configuredPoolMax)) || poolMax > 100)
+  )
+    throw new Error('AUTH_PG_POOL_MAX must be an integer from 1 to 100.')
   return {
     ...(connectionString
       ? { connectionString }
@@ -69,7 +79,7 @@ export function connectionOptions(env = process.env) {
         }),
     ...(ssl ? { ssl } : {}),
     connectionTimeoutMillis: 10000,
-    max: 5,
+    max: poolMax,
   }
 }
 

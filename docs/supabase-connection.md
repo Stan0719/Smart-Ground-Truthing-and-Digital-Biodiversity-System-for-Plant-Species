@@ -26,6 +26,28 @@ backend `.env` enables `DATABASE_URL_REQUIRED=1` to prevent that fallback.
    Codespace session as required for the secret to enter the process environment.
    Process environment variables take precedence over `.env`.
 
+## Local connection budget
+
+The Plant Backend creates one plant-data pool and one authentication pool at
+startup. Their defaults are deliberately small:
+
+```text
+PLANT_PG_POOL_MAX=4
+AUTH_PG_POOL_MAX=2
+```
+
+Both values accept integers from 1 to 100. They can be set in the backend
+`.env` or in the process environment; process environment values take
+precedence. These limits apply per backend process, not per request.
+
+The standalone authentication API in `web/server/index.mjs` creates its own
+authentication pool. Do not run it alongside the Plant Backend unless the
+separate API is required, because the Plant Backend already starts
+authentication internally. If both services must run, they should share the
+small authentication limit and be included in the team's total connection
+budget. Prefer a shared development backend or a non-production database
+instead of having multiple developers connect local processes to production.
+
 `.env` is ignored by Git and should remain permission 600. Never paste the URI in
 chat, commit it, or include it in screenshots. No usable session-pooler URI was
 available when these changes were made, so live Supabase verification is blocked.
