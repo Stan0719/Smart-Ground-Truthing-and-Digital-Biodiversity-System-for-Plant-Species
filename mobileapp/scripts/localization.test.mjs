@@ -195,9 +195,9 @@ function screenFixture(name, app, stateValues = [], notificationItems = []) {
     "../components/QRRefreshButton": { default: "QRRefreshButton" }, "../components/RefreshButton": { default: "RefreshButton" }, "@expo/vector-icons/Ionicons": { default: "Icon" },
     "../components/fieldFormStyles": { fieldFormStyles: native.StyleSheet.create(Object.fromEntries(["container", "scrollView", "scrollContent", "card", "sectionTitle", "label", "input", "textArea", "locationButton", "locationButtonText", "photoButtonRow", "photoButton", "photoButtonText", "photoPreview", "removePhotoButton", "submitButton", "submitButtonText"].map((key) => [key, {}]))) },
     "react-native-qrcode-svg": { default: "QRCode" }, "expo-location": {}, "expo-image-picker": {}, "expo-file-system/legacy": {}, "expo-print": { printAsync: async (job) => printJobs.push(job) },
-    "../utils/plantApi": { plantApi: (...args) => network.push(args) },
+    "../utils/plantApi": { plantApi: (...args) => { network.push(args); return Promise.resolve({ deleted: true }); } },
     "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails },
-    "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
+    "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }), refresh: async () => { network.push(["inventory-refresh"]); return true; }, addGenerated: () => 1, removeDeleted: (id) => network.push(["inventory-remove", id]) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
     "../utils/qrPrint": { A4_PRINT_OPTIONS, buildQRPrintHtml }, "../data/mockData": { botanistPlantRecords: [] },
     "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ items: notificationItems, loading: false, loaded: true, error: "", unreadCount: notificationItems.filter((item) => !item.read).length }) },
     "../utils/useBotanistRecords": { useBotanistRecords: () => ({ plants: [], observations: [], requests: [], loading: false, loaded: true, error: "", refresh: async () => {} }) },
@@ -249,12 +249,33 @@ test("actual Dashboard, Add Plant, QR and Notification screens render all three 
     assert.equal(qr.printJobs[0].height, A4_PRINT_OPTIONS.height);
     assert.ok(qr.printJobs[0].html.includes("QR-0017"));
     assert.ok(qr.printJobs[0].html.includes(language === "ms" ? "Tag pengenalan tumbuhan" : language === "zh" ? "植物识别标签" : "Plant identification tag"));
-    assert.equal(find(qr.tree, (node) => node?.props?.accessibilityLabel?.startsWith(language === "ms" ? "Padam QR-0017" : language === "zh" ? "删除 QR-0017" : "Delete QR-0017"))?.props.disabled, true);
+    const deleteButton = find(qr.tree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.deleteQrCode", { label: code.label }));
+    assert.equal(deleteButton?.props.disabled, false);
     const notifications = screenFixture("BotanistNotifications", app, [], [item]);
     assert.ok(text(notifications.tree).includes(language === "ms" ? "Pemerhatian Diluluskan" : language === "zh" ? "观察记录已批准" : "Observation Approved"));
     assert.ok(text(notifications.tree).includes(item.comment));
     assert.deepEqual([...dashboard.network, ...add.network, ...qr.network, ...notifications.network], []);
   }
+});
+
+test("QR inventory confirms deletion, calls the selected QR endpoint, and refreshes", async () => {
+  const app = fixture();
+  const code = { id: "17", label: "QR-0017", plantId: null, value: "stable-qr-payload", status: "generated" };
+  const retired = { id: "18", label: "QR-0018", plantId: null, value: "retired-payload", status: "retired" };
+  const qr = screenFixture("PlantQRCode", app, ["3", { records: [code, retired], hasLoaded: true, loading: false, error: "" }, false, null, null]);
+  const button = find(qr.tree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.deleteQrCode", { label: code.label }));
+  assert.equal(button?.props.disabled, false);
+  assert.equal(find(qr.tree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.deleteQrCode", { label: retired.label })), undefined);
+  assert.ok(text(qr.tree).includes(app.i18n.t("plantQRCode.retired")));
+  button.props.onPress();
+  assert.equal(qr.alerts[0][0], app.i18n.t("plantQRCode.confirmDeleteQrCodeTitle"));
+  const destructive = qr.alerts[0][2].find((action) => action.style === "destructive");
+  assert.ok(destructive);
+  destructive.onPress();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(qr.network.some(([path, options]) => path === "/qr-codes/17" && options.method === "DELETE" && options.expectedAccountId === "owner"));
+  assert.ok(qr.network.some(([action, id]) => action === "inventory-remove" && id === "17"));
+  assert.ok(qr.network.some(([action]) => action === "inventory-refresh"));
 });
 
 test("language selector exposes the English, Bahasa Melayu and 中文 options", () => {

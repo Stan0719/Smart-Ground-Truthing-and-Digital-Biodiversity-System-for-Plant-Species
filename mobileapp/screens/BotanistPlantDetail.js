@@ -4,6 +4,7 @@ import React, { useCallback, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchBotanistPlant, fetchBotanistRecordChanges } from "../utils/botanistRecords";
 import EditAction from "../components/EditAction";
+import OriginalUpdatedField from "../components/OriginalUpdatedField";
 
 import {
   View,
@@ -14,7 +15,9 @@ import {
   StyleSheet,
   Image,
   Alert,
+  Modal,
 } from "react-native";
+import { stepPhotoIndex } from "../utils/plantPhotoGallery";
 
 import {
   botanistPlantRecords,
@@ -307,6 +310,9 @@ export default function BotanistPlantDetailScreen({
   const [retry, setRetry] = useState(0);
   const [changeInfo, setChangeInfo] = useState(null);
   const [changeError, setChangeError] = useState("");
+  const [selectedPhotoUri, setSelectedPhotoUri] = useState(null);
+  const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
+  const [failedPhotoUris, setFailedPhotoUris] = useState([]);
 
  
 function findPlant() {
@@ -326,6 +332,9 @@ function findPlant() {
     setPlant(null);
     setChangeInfo(null);
     setChangeError("");
+    setSelectedPhotoUri(null);
+    setPhotoViewerVisible(false);
+    setFailedPhotoUris([]);
     fetchBotanistPlant(botanist?.id, plantId).then((record) => {
       if (active) setPlant({ ...record, botanist: botanist?.name || record.registeredBy });
     }).catch((error) => { if (active) setLoadError(error.message); })
@@ -553,30 +562,27 @@ function findPlant() {
   }) {
     return (
       <View style={styles.field} key={field}>
-        <Text style={styles.label}>{translateLabel(label)}</Text>
-
         {isEditing ? (
-          <TextInput
-            style={[
-              styles.input,
-              multiline && styles.multiline,
-            ]}
-            value={String(form[field] ?? "")}
-            onChangeText={(value) =>
-              updateField(field, value)
-            }
-            placeholder={t("botanistPlantDetail.enter", { value0: label.toLowerCase() })}
-            placeholderTextColor="#9AA7A0"
-            keyboardType={numeric ? "numeric" : "default"}
-            multiline={multiline}
-            textAlignVertical={
-              multiline ? "top" : "center"
-            }
-          />
+          <OriginalUpdatedField
+            label={translateLabel(label)}
+            originalValue={translateFieldValue(field, formatValue(getPlantFieldValue(plant, field)))}
+          >
+            <TextInput
+              style={[styles.input, multiline && styles.multiline]}
+              value={String(form[field] ?? "")}
+              onChangeText={(value) => updateField(field, value)}
+              placeholder={t("botanistPlantDetail.enter", { value0: label.toLowerCase() })}
+              placeholderTextColor="#9AA7A0"
+              keyboardType={numeric ? "numeric" : "default"}
+              multiline={multiline}
+              textAlignVertical={multiline ? "top" : "center"}
+            />
+          </OriginalUpdatedField>
         ) : (
-          <Text style={styles.value}>
-            {translateFieldValue(field, formatValue(getPlantFieldValue(plant, field)))}
-          </Text>
+          <>
+            <Text style={styles.label}>{translateLabel(label)}</Text>
+            <Text style={styles.value}>{translateFieldValue(field, formatValue(getPlantFieldValue(plant, field)))}</Text>
+          </>
         )}
       </View>
     );
@@ -678,12 +684,20 @@ const rawPhotos = Array.isArray(plant.photos)
       : [];
 
 
-  const photos = rawPhotos
+  const allPhotos = rawPhotos
     .map((photo) => ({
       original: photo,
-      uri: getPhotoUri(photo),
+      uri: getPhotoUri(photo)?.trim(),
     }))
-    .filter((photo) => photo.uri);
+    .filter((photo, index, source) => photo.uri && source.findIndex((candidate) => candidate.uri === photo.uri) === index);
+  const photos = allPhotos.filter((photo) => !failedPhotoUris.includes(photo.uri));
+  const selectedPhoto = photos.find((photo) => photo.uri === selectedPhotoUri) || photos[0] || null;
+  const selectedPhotoIndex = selectedPhoto ? photos.findIndex((photo) => photo.uri === selectedPhoto.uri) : 0;
+  const stepSelectedPhoto = (direction) => setSelectedPhotoUri(photos[stepPhotoIndex(selectedPhotoIndex, direction, photos.length)]?.uri || null);
+  const failPhoto = (uri) => {
+    if (allPhotos.every((photo) => failedPhotoUris.includes(photo.uri) || photo.uri === uri)) setPhotoViewerVisible(false);
+    setFailedPhotoUris((current) => current.includes(uri) ? current : [...current, uri]);
+  };
 
   // ===================================================
   // UI
@@ -784,43 +798,31 @@ const rawPhotos = Array.isArray(plant.photos)
           )}
 
           <View style={styles.field}>
-            <Text style={styles.label}>{t("botanistPlantDetail.category")}</Text>
-
             {isEditing ? (
-              <View style={styles.categoryRow}>
-                {CATEGORIES.map((category) => {
-                  const selected =
-                    form.category === category;
+              <OriginalUpdatedField label={t("botanistPlantDetail.category")} originalValue={translateLabel(formatValue(plant.category))}>
+                <View style={styles.categoryRow}>
+                  {CATEGORIES.map((category) => {
+                    const selected = form.category === category;
 
-                  return (
-                    <TouchableOpacity
-                      key={category}
-                      style={[
-                        styles.categoryButton,
-                        selected &&
-                          styles.categoryButtonSelected,
-                      ]}
-                      onPress={() =>
-                        updateField("category", category)
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.categoryText,
-                          selected &&
-                            styles.categoryTextSelected,
-                        ]}
+                    return (
+                      <TouchableOpacity
+                        key={category}
+                        style={[styles.categoryButton, selected && styles.categoryButtonSelected]}
+                        onPress={() => updateField("category", category)}
                       >
-                        {translateLabel(category)}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+                        <Text style={[styles.categoryText, selected && styles.categoryTextSelected]}>
+                          {translateLabel(category)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </OriginalUpdatedField>
             ) : (
-              <Text style={styles.value}>
-                {translateLabel(formatValue(plant.category))}
-              </Text>
+              <>
+                <Text style={styles.label}>{t("botanistPlantDetail.category")}</Text>
+                <Text style={styles.value}>{translateLabel(formatValue(plant.category))}</Text>
+              </>
             )}
           </View>
         </View>
@@ -887,20 +889,24 @@ const rawPhotos = Array.isArray(plant.photos)
           {photos.length > 0 ? (
             <View style={styles.photoGrid}>
               {photos.map((photo, index) => (
-                <View
+                <TouchableOpacity
                   style={styles.photoCard}
                   key={`${photo.uri}-${index}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t("plantDetail.photoNumber", { value0: index + 1 })}, ${index + 1} / ${photos.length}`}
+                  onPress={() => { setSelectedPhotoUri(photo.uri); setPhotoViewerVisible(true); }}
                 >
                   <Image
                     source={{ uri: photo.uri, ...(photo.original?.headers ? { headers: photo.original.headers } : {}) }}
                     style={styles.photo}
                     resizeMode="cover"
+                    onError={() => failPhoto(photo.uri)}
                   />
 
                   <Text style={styles.photoCaption}>
                     {photo.original?.caption || t("botanistPlantDetail.photo", { value0: index + 1 })}
                   </Text>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           ) : (
@@ -956,6 +962,30 @@ const rawPhotos = Array.isArray(plant.photos)
           <Text style={styles.secondaryButtonText}>{t("botanistPlantDetail.backToDashboard")}</Text>
         </TouchableOpacity>
       </ScrollView>
+      <Modal visible={photoViewerVisible && Boolean(selectedPhoto)} animationType="fade" onRequestClose={() => setPhotoViewerVisible(false)}>
+        <View style={styles.photoViewer}>
+          <View style={styles.photoViewerTopBar}>
+            <View />
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.closeImageViewer")} onPress={() => setPhotoViewerVisible(false)} style={styles.photoViewerClose}>
+              <Text style={styles.photoViewerCloseText}>×</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.photoViewerStage}>
+            {selectedPhoto && <Image
+              key={selectedPhoto.uri}
+              source={{ uri: selectedPhoto.uri, ...(selectedPhoto.original?.headers ? { headers: selectedPhoto.original.headers } : {}) }}
+              style={styles.photoViewerImage}
+              resizeMode="contain"
+              onError={() => failPhoto(selectedPhoto.uri)}
+            />}
+            {photos.length > 1 && <>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.previousPhoto")} onPress={() => stepSelectedPhoto(-1)} style={[styles.photoViewerNav, styles.photoViewerPrevious]}><Text style={styles.photoViewerNavText}>‹</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.nextPhoto")} onPress={() => stepSelectedPhoto(1)} style={[styles.photoViewerNav, styles.photoViewerNext]}><Text style={styles.photoViewerNavText}>›</Text></TouchableOpacity>
+            </>}
+          </View>
+          {photos.length > 1 && <Text style={styles.photoViewerCounter}>{selectedPhotoIndex + 1} / {photos.length}</Text>}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1246,6 +1276,18 @@ const styles = StyleSheet.create({
     height: 140,
     backgroundColor: "#E9F0E5",
   },
+
+  photoViewer: { flex: 1, paddingHorizontal: 12, paddingTop: 30, paddingBottom: 18, backgroundColor: "#101812" },
+  photoViewerTopBar: { height: 48, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  photoViewerClose: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22, backgroundColor: "#FFFFFF20" },
+  photoViewerCloseText: { color: "#FFFFFF", fontSize: 30, lineHeight: 34 },
+  photoViewerStage: { flex: 1, alignItems: "center", justifyContent: "center" },
+  photoViewerImage: { width: "100%", height: "100%" },
+  photoViewerNav: { position: "absolute", top: "45%", width: 46, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 27, backgroundColor: "#FFFFFF35" },
+  photoViewerPrevious: { left: 4 },
+  photoViewerNext: { right: 4 },
+  photoViewerNavText: { color: "#FFFFFF", fontSize: 36, lineHeight: 40, fontWeight: "600" },
+  photoViewerCounter: { paddingVertical: 12, color: "#FFFFFF", textAlign: "center", fontSize: 14, fontWeight: "700" },
 
   photoCaption: {
     padding: 9,

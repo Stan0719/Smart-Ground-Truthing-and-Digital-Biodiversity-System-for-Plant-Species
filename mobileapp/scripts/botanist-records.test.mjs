@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
+import { getPlantLocationDisplay } from "../utils/plantLocationDisplay.js";
 const require = createRequire(import.meta.url), ts = require("typescript"), React = require("react");
 const read = (file) => readFileSync(new URL("../" + file, import.meta.url), "utf8");
 function moduleFrom(file, deps) {
@@ -33,6 +34,65 @@ test("plant mapping displays the saved QR inventory label without replacing the 
   assert.equal(record.qr.code, "real-qr-token");
   assert.equal(record.qr.status, "assigned");
   assert.equal(context.mapBackendPlant({ ...rows[0], qr_token: "legacy-token" }).qrCode, "legacy-token");
+});
+
+test("Plant Detail mapping shows saved pending botanical fields without treating them as approved GPS", () => {
+  const mapped = context.mapBackendPlant({
+    ...rows[0],
+    latest_submission: { heightCm: 0, healthStatus: "Healthy", lifeStage: "Seedling", morphology: "Young leaves", notes: "Observed", taxonomy: "Family A", latitude: 4.5, longitude: 113.7, zone: "Pending zone" },
+  });
+  assert.equal(mapped.latestSubmission.heightCm, 0);
+  assert.equal(mapped.latestSubmission.lifeStage, "Seedling");
+  assert.equal(mapped.latestSubmission.morphology, "Young leaves");
+  assert.equal(mapped.latestSubmission.notes, "Observed");
+  assert.equal(mapped.latestSubmission.taxonomy, "Family A");
+  assert.equal(mapped.latestSubmission.latitude, undefined);
+  assert.equal(mapped.latestSubmission.zone, undefined);
+  assert.equal(mapped.location.latitude, null);
+  assert.equal(mapped.location.longitude, null);
+});
+
+test("pending submitted values never replace an approved observation", () => {
+  const mapped = context.mapBackendPlant({
+    ...rows[1],
+    latest_approved: { heightCm: 25, lifeStage: "Mature", morphology: "Approved morphology" },
+    latest_submission: { heightCm: 99, lifeStage: "Pending stage", morphology: "Pending morphology", latitude: 4.5, longitude: 113.7 },
+  });
+  assert.equal(mapped.latestApproved.heightCm, 25);
+  assert.equal(mapped.latestApproved.lifeStage, "Mature");
+  assert.equal(mapped.latestSubmission, null);
+});
+
+test("approved observation selection uses approval state and updated time", () => {
+  const latest = context.selectLatestApprovedObservation([
+    { observationId: "old-approved", status: "Approved", date: "2026-01-01", updatedAt: "2026-01-01", heightCm: 10 },
+    { observationId: "edited-approved", status: "Approved", date: "2025-12-01", updatedAt: "2026-02-01", heightCm: 20 },
+    { observationId: "new-pending", status: "Pending Review", date: "2026-03-01", updatedAt: "2026-03-01", heightCm: 99 },
+  ]);
+  assert.equal(latest.observationId, "edited-approved");
+  assert.equal(latest.heightCm, 20);
+});
+
+test("zero latitude and longitude remain valid mapped coordinates", () => {
+  const mapped = context.mapBackendPlant({ plant_id: 20, rbac_status: "Approved", latitude: 0, longitude: 0 });
+  assert.equal(mapped.location.latitude, 0);
+  assert.equal(mapped.location.longitude, 0);
+});
+
+test("restricted coordinates remain hidden and display as restricted", () => {
+  const mapped = context.mapBackendPlant({ plant_id: 21, rbac_status: "Approved", gps_access_restricted: true, latitude: null, longitude: null });
+  assert.equal(mapped.location.latitude, null);
+  assert.equal(getPlantLocationDisplay(mapped.location, "Botanist").status, "restricted");
+});
+
+test("Species Detail filters by species and renders each plant ID once", () => {
+  const rows = [
+    { id: "8", plantId: "8", speciesId: "6" },
+    { id: "11", plantId: "11", speciesId: "6" },
+    { id: "8", plantId: "8", speciesId: "6", stale: true },
+    { id: "20", plantId: "20", speciesId: "7" },
+  ];
+  assert.deepEqual(context.filterUniqueSpeciesPlantRecords(rows, "6", "unused").map((row) => row.id), ["8", "11"]);
 });
 
 test("projection uses immutable subject ownership and keeps pending plant, observation, request and names distinct", () => {
@@ -110,15 +170,17 @@ test("actual plant detail loads the existing owned ID from API and displays its 
   const messages = JSON.parse(read("translations/en.json"));
   const t = (key) => key.split(".").reduce((a, k) => a?.[k], messages) || key;
   const native = { StyleSheet: { create: (v) => v }, Alert: { alert: () => {} } };
-  for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "ScrollView", "Image"]) native[name] = name;
+  for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "ScrollView", "Image", "Modal"]) native[name] = name;
   const record = fixture().projectBotanistRecords("owner", rows, observations, requests).plants[0];
   record.photos = [{ uri: "https://example.invalid/assets/private", headers: { Authorization: "Bearer test-only" } }];
   const screen = moduleFrom("screens/BotanistPlantDetail.js", { react: hooks, "react-native": native,
     "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
     "../utils/botanistRecords": { fetchBotanistPlant: async (...args) => { requested = args; return record; }, fetchBotanistRecordChanges: async () => [] },
+    "../utils/plantPhotoGallery": { stepPhotoIndex: (index, direction, count) => count < 2 ? 0 : (index + direction + count) % count },
     "../translations/i18n": { useAppTranslation: () => {}, t, translateLabel: (v) => v, translateFieldValue: (_, v) => v, translateUIMessage: (v) => v },
     "../data/mockData": { botanistPlantRecords: [], botanistSpeciesRequests: [], plants: [] },
     "../components/EditAction": { default: "EditAction" },
+    "../components/OriginalUpdatedField": { default: ({ children }) => React.createElement("View", null, children) },
   });
   const render = () => { index = 0; return screen.default({ route: { params: { plantId: "8", botanist: { id: "owner", name: "Owner" } } }, navigation: {} }); };
   render(); const cleanup = focus(); await new Promise((resolve) => setImmediate(resolve)); const tree = render();

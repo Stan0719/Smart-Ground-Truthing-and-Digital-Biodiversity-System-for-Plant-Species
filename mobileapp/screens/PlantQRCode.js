@@ -36,15 +36,17 @@ export default function PlantQRCodeScreen({ route }) {
   const [inventory, setInventory] = useState(emptyQRInventory);
   const [generating, setGenerating] = useState(false);
   const [printingId, setPrintingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const generatingRef = useRef(false);
   const printingRef = useRef(false);
+  const deletingRef = useRef(false);
   const focusedRef = useRef(false);
   const loader = useMemo(() => createQRInventoryLoader(
     () => plantApi("/qr-codes", { expectedAccountId: accountId }),
     setInventory,
   ), [accountId]);
   const { records: plantQRCodes, loading: loadingRecords, hasLoaded, error: loadError } = inventory;
-  const availableQRCodes = plantQRCodes.filter((qr) => !qr.plantId);
+  const availableQRCodes = plantQRCodes.filter((qr) => !qr.plantId && qr.status === "generated");
   const loadingPrint = printingId !== null;
 
   const loadPlantQRCodes = useCallback(() => {
@@ -125,6 +127,41 @@ export default function PlantQRCodeScreen({ route }) {
 
   const handlePrintQR = (qr) => printCodes([qr], qr.id);
   const handlePrintAll = () => printCodes(availableQRCodes, "all");
+  async function deleteQR(qr) {
+    if (deletingRef.current) return;
+    deletingRef.current = true;
+    setDeletingId(qr.id);
+    try {
+      await plantApi(`/qr-codes/${encodeURIComponent(qr.id)}`, {
+        method: "DELETE",
+        body: {},
+        expectedAccountId: accountId,
+      });
+      loader.removeDeleted(qr.id);
+      await loader.refresh();
+      if (focusedRef.current) {
+        Alert.alert(t("plantQRCode.qrCodeDeleted"), t("plantQRCode.qrCodeDeletedMessage", { label: qr.label }));
+      }
+    } catch (error) {
+      await loader.refresh();
+      if (focusedRef.current) {
+        Alert.alert(t("plantQRCode.qrCodeDeleteFailed"), translateUIMessage(error instanceof Error ? error.message : "Could not delete this QR code."));
+      }
+    } finally {
+      deletingRef.current = false;
+      setDeletingId(null);
+    }
+  }
+  function confirmDeleteQR(qr) {
+    Alert.alert(
+      t("plantQRCode.confirmDeleteQrCodeTitle"),
+      t("plantQRCode.confirmDeleteQrCodeMessage", { label: qr.label }),
+      [
+        { text: t("common.cancel"), style: "cancel" },
+        { text: t("common.delete"), style: "destructive", onPress: () => { void deleteQR(qr); } },
+      ],
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -247,18 +284,17 @@ export default function PlantQRCodeScreen({ route }) {
                       <Text style={styles.recordButtonText}>{printingId === qr.id ? t("plantQRCode.preparing") : t("common.print")}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.recordButton, styles.deleteButton, styles.disabledButton]}
-                      disabled
+                      style={[styles.recordButton, styles.deleteButton, (loadingRecords || generating || deletingId !== null) && styles.disabledButton]}
+                      onPress={() => confirmDeleteQR(qr)}
+                      disabled={loadingRecords || generating || deletingId !== null}
                       accessibilityRole="button"
-                      accessibilityLabel={t("plantQRCode.deleteUnavailable", { label: qr.label })}
-                      accessibilityState={{ disabled: true }}
-                      accessibilityHint={qr.plantId ? t("plantQRCode.assignedQrCodesAreProtected") : t("plantQRCode.qrDeletionIsNotAvailableYet")}
+                      accessibilityLabel={t("plantQRCode.deleteQrCode", { label: qr.label })}
+                      accessibilityState={{ disabled: loadingRecords || generating || deletingId !== null, busy: deletingId === qr.id }}
                     >
-                      <Ionicons name="trash-outline" size={18} color="#A34740" />
-                      <Text style={[styles.recordButtonText, styles.deleteButtonText]}>{t("common.delete")}</Text>
+                      {deletingId === qr.id ? <ActivityIndicator size="small" color="#A34740" /> : <Ionicons name="trash-outline" size={18} color="#A34740" />}
+                      <Text style={[styles.recordButtonText, styles.deleteButtonText]}>{deletingId === qr.id ? t("plantQRCode.deleting") : t("common.delete")}</Text>
                     </TouchableOpacity>
                   </View>
-                  <Text style={styles.deleteHint}>{t("plantQRCode.deletionIsNotAvailableYet")}</Text>
                 </View>
               ))}
 
@@ -302,8 +338,8 @@ export default function PlantQRCodeScreen({ route }) {
                   <Text style={styles.qrPlantId}>{qr.plantName || (qr.plantId ? t("plantQRCode.plant", { plantId: qr.plantId }) : t("plantQRCode.notAssignedToAPlant"))}</Text>
                 </View>
                 <View style={styles.statusActions}>
-                  <View style={[styles.statusBadge, qr.plantId ? styles.approvedBadge : styles.pendingBadge]}>
-                    <Text style={styles.statusText}>{qr.plantId ? t("plantQRCode.used") : t("plantQRCode.unused")}</Text>
+                  <View style={[styles.statusBadge, qr.plantId ? styles.approvedBadge : qr.status === "generated" ? styles.pendingBadge : styles.retiredBadge]}>
+                    <Text style={styles.statusText}>{qr.plantId ? t("plantQRCode.used") : qr.status === "generated" ? t("plantQRCode.unused") : t("plantQRCode.retired")}</Text>
                   </View>
                   <TouchableOpacity style={[styles.statusPrintButton, loadingPrint && styles.disabledButton]} onPress={() => handlePrintQR(qr)} disabled={loadingPrint} accessibilityRole="button" accessibilityLabel={t("plantQRCode.print", { label: qr.label })} accessibilityState={{ disabled: loadingPrint, busy: printingId === qr.id }}>
                     {printingId === qr.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="print-outline" size={16} color="#FFFFFF" />}
@@ -606,6 +642,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF3D6",
   },
 
+  retiredBadge: {
+    backgroundColor: "#E9EDEB",
+  },
+
   approvedBadge: {
     backgroundColor: "#DEF9C4",
   },
@@ -644,7 +684,6 @@ const styles = StyleSheet.create({
   disabledButton: { opacity: 0.5 },
   recordButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700", flexShrink: 1 },
   deleteButtonText: { color: "#A34740" },
-  deleteHint: { color: "#77847C", fontSize: 11, lineHeight: 16, marginTop: 8 },
   errorNotice: { backgroundColor: "#FFF6E8", borderRadius: 12, padding: 12, marginBottom: 14 },
   errorTitle: { color: "#87562F", fontSize: 14, fontWeight: "700", marginBottom: 4 },
   errorText: { color: "#785F4B", fontSize: 13, lineHeight: 19 },

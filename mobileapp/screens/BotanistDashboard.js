@@ -11,6 +11,7 @@ import {
   FlatList,
   StyleSheet,
   Image,
+  ActivityIndicator,
 } from "react-native";
 
 import { submissionStatus } from "../utils/botanistRecords";
@@ -37,6 +38,9 @@ export default function BotanistDashboardScreen({
   const setFilter = (value) => setFilters((previous) => ({ ...previous, [tab]: value }));
   const pendingApproval = myPlants.filter((plant) => submissionStatus(plant.status) === "pending");
   const approvedPlants = myPlants.filter((plant) => submissionStatus(plant.status) === "approved");
+  const correctionRequests = botanist?.id
+    ? myPlants.filter((plant) => plant.latestObservation?.owner_subject === `staff:${botanist.id}` && plant.latestObservation.status === "Correction Required")
+    : [];
   const displayedPlants = myPlants.filter((plant) => filter === "all" || submissionStatus(plant.status) === filter);
   const displayedRequests = requests.filter((request) => filter === "all" || submissionStatus(request.request_status) === filter);
   const data = tab === "plants" ? displayedPlants : displayedRequests;
@@ -142,6 +146,30 @@ export default function BotanistDashboardScreen({
         {!!(isPlant && item.observationStatus) && <Text style={styles.plantId}>{t("botanistRecords.observationStatus")}{translateLabel(item.observationStatus)}</Text>}
       </View>
     </TouchableOpacity>;
+  }
+
+  function renderCorrectionRequest(plant) {
+    const observation = plant.latestObservation;
+    const plantName = plant.commonName || plant.scientificName || t("submissions.notRecorded");
+    return <View key={plant.id} style={styles.correctionCard}>
+      <Text style={styles.correctionPlantName}>{plantName}</Text>
+      {!!plant.scientificName && plant.scientificName !== plantName && <Text style={styles.correctionScientificName}>{plant.scientificName}</Text>}
+      <Text style={styles.correctionPlantId}>{t("submissions.plantId")} {plant.id}</Text>
+      <View style={styles.correctionStatus}><Text style={styles.correctionStatusText}>{translateLabel(observation.status)}</Text></View>
+      <Text style={styles.correctionFeedbackLabel}>{t("notificationObservation.officerFeedback")}</Text>
+      <Text style={styles.correctionFeedback}>{typeof observation.review_comment === "string" && observation.review_comment.length
+        ? observation.review_comment
+        : t("botanistDashboard.noOfficerNoteProvided")}</Text>
+      <TouchableOpacity
+        style={styles.correctionEditButton}
+        onPress={() => navigation.navigate("FieldCollectionEdit", { observation, plantId: observation.plant_id })}
+        accessibilityRole="button"
+        accessibilityLabel={`${t("botanistDashboard.editPlantCorrection")}: ${plantName}, ${t("submissions.plantId")} ${plant.id}`}
+      >
+        <Ionicons name="create-outline" size={17} color="#FFFFFF" />
+        <Text style={styles.correctionEditButtonText}>{t("botanistDashboard.editPlantCorrection")}</Text>
+      </TouchableOpacity>
+    </View>;
   }
 
   // =====================================================
@@ -373,6 +401,34 @@ export default function BotanistDashboardScreen({
 
         </TouchableOpacity>
 
+      </View>
+
+
+      <View style={styles.correctionSummaryCard}>
+        <View style={styles.correctionSummaryIcon}><Ionicons name="alert-circle-outline" size={25} color="#8C5D20" /></View>
+        <Text style={styles.correctionSummaryLabel}>{t("botanistDashboard.correctionRequired")}</Text>
+        {!loaded && loading ? <ActivityIndicator color="#468585" /> : <Text style={styles.correctionSummaryNumber}>{error ? "—" : correctionRequests.length}</Text>}
+      </View>
+
+      <View style={styles.correctionSection}>
+        <Text style={styles.correctionSectionTitle}>{t("botanistDashboard.correctionRequests")}</Text>
+        {!loaded && loading ? <View style={styles.correctionMessage}>
+          <ActivityIndicator color="#468585" />
+          <Text style={styles.correctionEmptyText}>{t("botanistDashboard.loadingCorrectionRequests")}</Text>
+        </View> : error && correctionRequests.length === 0 ? <View style={styles.correctionMessage}>
+          <Text style={styles.correctionErrorText} accessibilityRole="alert">{error.split("\n").map(translateUIMessage).join("\n")}</Text>
+          <TouchableOpacity style={styles.correctionRetryButton} onPress={() => { void refresh(); }} accessibilityRole="button">
+            <Text style={styles.correctionRetryText}>{t("common.tryAgain")}</Text>
+          </TouchableOpacity>
+        </View> : correctionRequests.length === 0 ? <Text style={styles.correctionEmptyText}>{t("botanistDashboard.noCorrectionRequests")}</Text> : <>
+          {!!error && <View style={styles.correctionErrorBox}>
+            <Text style={styles.correctionErrorText} accessibilityRole="alert">{error.split("\n").map(translateUIMessage).join("\n")}</Text>
+            <TouchableOpacity style={styles.correctionRetryButton} onPress={() => { void refresh(); }} accessibilityRole="button">
+              <Text style={styles.correctionRetryText}>{t("common.tryAgain")}</Text>
+            </TouchableOpacity>
+          </View>}
+          {correctionRequests.map(renderCorrectionRequest)}
+        </>}
       </View>
 
 
@@ -630,6 +686,29 @@ const styles =
       fontSize: 11,
       color: "#6D7F75",
     },
+
+    correctionSummaryCard: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 68, padding: 14, marginBottom: 20, borderRadius: 15, borderWidth: 1, borderColor: "#E9D6B7", backgroundColor: "#FFF9EF" },
+    correctionSummaryIcon: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "#F8E9D2" },
+    correctionSummaryLabel: { flex: 1, color: "#77501D", fontSize: 14, fontWeight: "700" },
+    correctionSummaryNumber: { color: "#77501D", fontSize: 24, fontWeight: "800" },
+    correctionSection: { marginBottom: 20 },
+    correctionSectionTitle: { color: "#234B3A", fontSize: 18, fontWeight: "700", marginBottom: 11 },
+    correctionCard: { padding: 15, marginBottom: 10, borderRadius: 15, borderWidth: 1, borderColor: "#E8D6B9", backgroundColor: "#FFFFFF" },
+    correctionPlantName: { color: "#234B3A", fontSize: 16, fontWeight: "700" },
+    correctionScientificName: { color: "#52665A", fontSize: 13, fontStyle: "italic", marginTop: 3 },
+    correctionPlantId: { color: "#718078", fontSize: 12, marginTop: 6 },
+    correctionStatus: { alignSelf: "flex-start", marginTop: 10, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 15, backgroundColor: "#F8E9D2" },
+    correctionStatusText: { color: "#77501D", fontSize: 12, fontWeight: "700" },
+    correctionFeedbackLabel: { color: "#234B3A", fontSize: 13, fontWeight: "700", marginTop: 14, marginBottom: 5 },
+    correctionFeedback: { color: "#52665A", fontSize: 14, lineHeight: 21 },
+    correctionEditButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 44, marginTop: 14, paddingHorizontal: 14, borderRadius: 11, backgroundColor: "#35786F" },
+    correctionEditButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
+    correctionMessage: { alignItems: "center", padding: 18, borderRadius: 13, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E2EDE0" },
+    correctionEmptyText: { color: "#718078", fontSize: 13, lineHeight: 19, textAlign: "center", marginTop: 7 },
+    correctionErrorBox: { padding: 13, marginBottom: 10, borderRadius: 12, backgroundColor: "#FFF2EB" },
+    correctionErrorText: { color: "#A34436", fontSize: 13, lineHeight: 20 },
+    correctionRetryButton: { minHeight: 44, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 4 },
+    correctionRetryText: { color: "#35786F", fontSize: 13, fontWeight: "700" },
 
 
     // -------------------------------------------------

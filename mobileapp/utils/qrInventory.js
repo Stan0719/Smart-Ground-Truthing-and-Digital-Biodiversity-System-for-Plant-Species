@@ -87,5 +87,15 @@ export function createQRInventoryLoader(fetchCodes, onChange) {
       update({ records: [...combined.values()].sort((a, b) => b.id.length - a.id.length || b.id.localeCompare(a.id)), hasLoaded: true, loading: false, error: "" });
       return generated.length;
     },
+    removeDeleted(id) {
+      version += 1;
+      pending = null;
+      update({
+        records: state.records.filter((qr) => qr.id !== String(id)),
+        hasLoaded: true,
+        loading: false,
+        error: "",
+      });
+    },
   };
 }

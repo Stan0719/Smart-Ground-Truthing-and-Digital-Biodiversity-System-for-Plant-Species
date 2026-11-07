@@ -8,6 +8,8 @@ import { plants as prototypeSpecies, type Plant } from '../data/plants'
 import type { PlantRecord } from '../data/plantRecords'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 import { formatPlantId } from '../utils/plantId'
+import { plantThumbnailImages, webAssetUrl } from '../services/assetImages'
+import { mapPlantCardMetadata } from '../services/plantCardMapping'
 
 type SortOption = 'default' | 'id-asc' | 'verified-newest' | 'verified-oldest'
 
@@ -31,6 +33,7 @@ const isLoading = ref(true)
 const loadError = ref('')
 
 interface ApiSpecies {
+  image_url?: string
   species_id: string | number
   scientific_name: string
   common_name: string
@@ -41,10 +44,12 @@ interface ApiSpecies {
 }
 
 interface ApiPlant {
+  plant_image_asset_id?: string
+  rbac_status?: string
+  status?: string
   plant_id: string | number
   species_id: string | number
-  registered_by: string | number
-  current_status?: string | null
+  registered_subject?: string
   registered_at?: string | null
   scientific_name?: string | null
   common_name?: string | null
@@ -52,13 +57,10 @@ interface ApiPlant {
   latitude?: string | number | null
   longitude?: string | number | null
   accuracy_m?: string | number | null
-  latest_observation_id?: string | number | null
-  height_cm?: string | number | null
-  life_stage?: string | null
-  health_status?: string | null
-  morphology?: string | null
-  notes?: string | null
-  last_verified_at?: string | null
+  altitude_m?: string | number | null
+  zone?: string | null
+  observed_at?: string | null
+  latest_approved?: Record<string, unknown> | null
 }
 
 interface SpeciesResponse {
@@ -78,13 +80,9 @@ const generatedSlug = (item: ApiSpecies) => {
     .replace(/^-|-$/g, '')
 }
 
-const numericValue = (value: string | number | null | undefined) => {
-  if (value === null || value === undefined || value === '') return Number.NaN
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : Number.NaN
-}
-
+let loadRequest = 0
 const loadPlants = async () => {
+  const attempt = ++loadRequest
   isLoading.value = true
   loadError.value = ''
   selectedSpecies.value = null
@@ -98,6 +96,7 @@ const loadPlants = async () => {
     if (!speciesResponse.ok) throw new Error('Unable to load plant records.')
 
     const speciesResult: SpeciesResponse = await speciesResponse.json()
+    if (attempt !== loadRequest) return
     const apiSpecies = prototypeForSlug
       ? speciesResult.species.find(
           (item) =>
@@ -113,6 +112,7 @@ const loadPlants = async () => {
 
     selectedSpecies.value = {
       ...(prototype || {}),
+      image: prototype?.image || webAssetUrl(apiSpecies.image_url) || undefined,
       speciesId: String(apiSpecies.species_id),
       slug,
       name: apiSpecies.common_name || apiSpecies.scientific_name,
@@ -132,6 +132,7 @@ const loadPlants = async () => {
     if (!plantsResponse.ok) throw new Error('Unable to load plant records.')
 
     const plantsResult: PlantsResponse = await plantsResponse.json()
+    if (attempt !== loadRequest) return
     const speciesId = String(apiSpecies.species_id)
 
     speciesPlants.value = plantsResult.plants
@@ -145,36 +146,22 @@ const loadPlants = async () => {
         speciesName: item.scientific_name || apiSpecies.scientific_name,
         commonName: item.common_name || apiSpecies.common_name || apiSpecies.scientific_name,
         genus: item.genus_name || apiSpecies.genus_name || '',
-        latestApproved: {
-          date: item.last_verified_at || '',
-          heightCm: numericValue(item.height_cm),
-          healthStatus: item.health_status || '',
-          lifeStage: item.life_stage || '',
-          morphology: item.morphology || '',
-          notes: item.notes || '',
-        },
-        location: {
-          zone: '',
-          latitude: numericValue(item.latitude),
-          longitude: numericValue(item.longitude),
-          altitudeM: Number.NaN,
-          accuracyM: numericValue(item.accuracy_m),
-        },
+        ...mapPlantCardMetadata(item),
         qr: { code: '', status: '' },
-        registeredBy: String(item.registered_by || ''),
+        registeredBy: item.registered_subject || '',
         registeredAt: item.registered_at || '',
-        images: [],
+        images: plantThumbnailImages(item),
         observations: [],
         detailLinkEnabled: true,
       }))
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
+    if (attempt === loadRequest) loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
   } finally {
-    isLoading.value = false
+    if (attempt === loadRequest) isLoading.value = false
   }
 }
 
-watch(() => route.params.slug, loadPlants, { immediate: true })
+watch(() => [route.params.slug, isLoggedIn.value, userRole.value], loadPlants, { immediate: true, flush: 'sync' })
 
 const primaryImage = computed(
   () =>
@@ -343,7 +330,7 @@ watch(
         <div class="section-heading">
           <div>
             <p class="section-label">{{ t('species.records.section') }}</p>
-            <h2 id="plant-records-title">{{ t('species.records.title') }}</h2>
+            <h2 id="plant-records-title">{{ t('species.records.section') }}</h2>
           </div>
           <p>
             {{
@@ -875,12 +862,6 @@ watch(
   }
   :deep(.record-placeholder) {
     font-size: 34px;
-  }
-  :deep(.record-image > span) {
-    left: 7px;
-    bottom: 7px;
-    padding: 4px 6px;
-    font-size: 8px;
   }
   :deep(.record-copy) {
     flex: 1;

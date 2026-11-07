@@ -6,6 +6,7 @@ import {parse,compileScript,compileTemplate} from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
 import * as integration from '../src/services/plantIntegration.ts'
+import * as galleryService from '../src/services/plantGallery.ts'
 const file=new URL('../src/views/PlantDetailView.vue',import.meta.url)
 const {descriptor}=parse(readFileSync(file,'utf8'))
 const script=compileScript(descriptor,{id:'plant-privacy'})
@@ -15,11 +16,13 @@ const officer={id:'officer',role:'Conservation Officer',status:'Active',mustChan
 const publicPlant={plant_id:1,species_id:1}
 const privatePlant={...publicPlant,rbac_status:'Approved',registered_subject:'staff:bot',registered_at:'2026-11-01T00:00:00Z',latitude:1,longitude:2,accuracy_m:3,latest_approved:{heightCm:12,notes:'Private notes',taxonomy:{}}}
 const species={species_id:1,scientific_name:'Public scientific',common_name:'Public common',genus_name:'Genus',family_name:'Family',description:'Description',habitat:'Private habitat',conservation_status:'Vulnerable',image_url:'/api/assets/approved-image'}
+const submittedPlant={...privatePlant,rbac_status:'Pending Review',latitude:null,longitude:null,accuracy_m:null,latest_approved:null,observation_status:'Pending Review',latest_submission:{latitude:4,longitude:113,accuracy_m:8.96,altitudeM:18.55,zone:'Private submitted zone'}}
 const flush=async()=>{for(let i=0;i<8;i++){await vue.nextTick();await new Promise(setImmediate)}}
 function nodes(value){const out=[];function walk(n){if(Array.isArray(n))return n.forEach(walk);if(!n||typeof n!=='object')return;out.push(n);if(Array.isArray(n.children))walk(n.children);else if(n.children?.default)walk(n.children.default())}walk(value);return out}
-function harness(initial=null,handler,previous=null){
+function harness(initial=null,handler,previous=null,galleryHandler=null){
  const scope=vue.effectScope(),route=vue.reactive({params:{plantId:'PL001'}}),listeners=new Set(),calls=[]
  let verified=initial,pending=false
+ const galleryCalls=[]
  const exports={}
  const context={exports,console,require(name){
   if(name==='vue')return {...vue,onMounted(){},onBeforeUnmount(){},resolveComponent:name=>name,withDirectives:n=>n}
@@ -27,18 +30,19 @@ function harness(initial=null,handler,previous=null){
   if(name.endsWith('useConservationText'))return {useConservationText:()=>({ct:x=>String(x),dt:x=>x})}
   if(name.endsWith('/auth'))return {currentUser:async()=>verified,sessionSnapshot:()=>({user:verified,pending}),subscribeSession:fn=>{listeners.add(fn);return()=>listeners.delete(fn)}}
   if(name.endsWith('plantIntegration'))return {...integration,requestPlantApi:async url=>{calls.push(url);if(handler)return handler(url);return url.startsWith('/api/plants/')?{plant:verified?privatePlant:publicPlant}:{species}}}
+  if(name.endsWith('plantGallery'))return {...galleryService,createPlantGallery:()=>galleryService.createPlantGallery({transport:async(url,options)=>{galleryCalls.push(url);if(galleryHandler)return galleryHandler(url,options);return Response.json({plant_id:String(url).match(/plants\/(\d+)/)[1],assets:[],page:{limit:20,has_more:false,next_cursor:null}})}})}
   if(name.endsWith('.vue'))return {name}
   throw Error(name)
  }}
  vm.runInNewContext(`(function(){${js(script.content)}})()`,context)
  const state=scope.run(()=>exports.default.setup({}, {expose(){}}))
  vm.runInNewContext(`(function(){${js(template.code)}})()`,context)
- return {state,calls,route,change(user,checking=false){verified=user;pending=checking;for(const fn of listeners)fn(user,checking)},render:()=>exports.render({},[],{},vue.proxyRefs(state),{},{}),stop:()=>scope.stop()}
+ return {state,calls,galleryCalls,route,change(user,checking=false){verified=user;pending=checking;for(const fn of listeners)fn(user,checking)},render:()=>exports.render({},[],{},vue.proxyRefs(state),{},{}),stop:()=>{state.gallery.reset();scope.stop()}}
 }
 test('anonymous detail renders public facts/image and no restricted cards or private requests',async()=>{
  const h=harness();try{await flush();assert.equal(h.state.plant.value.id,'1');const tree=nodes(h.render());
  for(const cls of ['staff-panel','latest-section','history-section','hero-badges'])assert.ok(!tree.some(n=>n.props?.class===cls),cls)
- assert.ok(tree.some(n=>n.children==='Public scientific'));assert.ok(tree.some(n=>n.type==='img'&&n.props.src==='/api/assets/approved-image'))
+ assert.ok(tree.some(n=>n.children==='Public scientific'));assert.ok(tree.some(n=>n.type==='img'&&n.props.src==='/api/data/assets/approved-image'))
  assert.ok(!tree.some(n=>n.children==='Private habitat'));assert.ok(!tree.some(n=>n.children==='Vulnerable'))
  assert.deepEqual(h.calls,['/api/plants/1','/api/species/1'])
  }finally{h.stop()}
@@ -46,6 +50,47 @@ test('anonymous detail renders public facts/image and no restricted cards or pri
 test('verified Officer keeps exact GPS, registration and available observation content',async()=>{
  const h=harness(officer);try{await flush();const tree=nodes(h.render());for(const cls of ['staff-panel','latest-section','history-section','hero-badges'])assert.ok(tree.some(n=>n.props?.class===cls),cls)
  assert.ok(tree.some(n=>n.children==='staff:bot'));assert.ok(tree.some(n=>n.children==='Private notes'));assert.ok(tree.some(n=>n.children==='Vulnerable'));assert.equal(h.state.plant.value.latitude,1)
+ }finally{h.stop()}
+})
+
+test('Officer sees submitted evidence separately while approved GPS is unavailable',async()=>{
+ const h=harness(officer,async url=>url.startsWith('/api/plants/')?{plant:submittedPlant}:{species})
+ try{await flush();const tree=nodes(h.render());
+ for(const label of ['Approved Plant Location','Submitted GPS Evidence','Pending Review','Private submitted zone','No approved plant location is available.'])assert.ok(tree.some(n=>n.children===label),label)
+ assert.equal(h.state.hasLocation.value,false);assert.equal(h.state.hasSubmittedGps.value,true)
+ assert.equal(h.state.plant.value.latitude,null);assert.equal(h.state.submittedGps.value.latitude,4)
+ assert.ok(!tree.some(n=>n.children==='No valid submitted GPS coordinates are available.'))
+ }finally{h.stop()}
+})
+
+test('public, Administrator and Botanist views never render submitted GPS evidence',async()=>{
+ for(const user of [null,{...officer,role:'Administrator'},{...officer,role:'Botanist'}]){
+  // Even unexpected privileged payloads must not render for an unauthorized viewer.
+  // Backend authorization remains the actual privacy boundary.
+  const h=harness(user,async url=>url.startsWith('/api/plants/')?{plant:submittedPlant}:{species})
+  try{await flush();assert.equal(h.state.submittedGps.value,null);assert.ok(!nodes(h.render()).some(n=>n.children==='Submitted GPS Evidence'||n.children==='Private submitted zone'))}finally{h.stop()}
+ }
+})
+
+test('location sections render together and optional metadata does not control GPS validity',async()=>{
+ for(const [content,valid] of [[{latitude:0,longitude:-113},true],[{latitude:null,longitude:113},false]]){
+  const h=harness(officer,async url=>url.startsWith('/api/plants/')?{plant:{...privatePlant,latest_submission:content,observation_status:'Draft'}}:{species})
+  try{await flush();const tree=nodes(h.render());assert.equal(h.state.hasLocation.value,true);assert.equal(h.state.hasSubmittedGps.value,valid)
+   for(const label of ['Approved Plant Location','Submitted GPS Evidence','Draft'])assert.ok(tree.some(n=>n.children===label),label)
+   assert.equal(tree.some(n=>n.children==='No valid submitted GPS coordinates are available.'),!valid)
+   const submittedSection=tree.find(n=>n.props?.class==='submitted-gps');const evidence=nodes(submittedSection)
+   for(const label of ['GPS Accuracy','Altitude','Zone'])assert.ok(!evidence.some(n=>n.children===label),label)
+  }finally{h.stop()}
+ }
+})
+
+test('account changes clear submitted GPS immediately and stale responses cannot restore it',async()=>{
+ let late;let delay=false
+ const h=harness(officer,async url=>url.startsWith('/api/plants/')?(delay?new Promise(resolve=>{late=resolve}):{plant:submittedPlant}):{species})
+ try{await flush();assert.equal(h.state.submittedGps.value.zone,'Private submitted zone')
+ delay=true;h.route.params.plantId='PL002';await flush()
+ h.change({...officer,id:'another'},true);assert.equal(h.state.plant.value,null);assert.equal(h.state.submittedGps.value,null)
+ late({plant:{...submittedPlant,plant_id:2}});await flush();assert.equal(h.state.plant.value,null);assert.equal(h.state.submittedGps.value,null)
  }finally{h.stop()}
 })
 test('logout clears privileged data immediately and late Officer responses cannot restore it',async()=>{
@@ -69,6 +114,36 @@ test('account/role changes and failed verification hide old details; Admin denia
 test('image adapter accepts only same-origin authorized asset paths',()=>{
  assert.equal(integration.mapSpeciesContract({...species,image_url:'https://external.invalid/image'}).imageUrl,'')
  assert.equal(integration.mapSpeciesContract({...species,image_url:'data:image/jpeg,abc'}).imageUrl,'')
+})
+
+const galleryFixture=(plantId,id='private-photo')=>Response.json({plant_id:plantId,assets:[{
+ asset_id:id,content_type:'image/jpeg',observation_id:'101',linkage:'observation',effective_origin:'initial_registration',
+ observation_date:null,observation_status:null,observation_revision:null,photo_order:'0',
+}],page:{limit:20,has_more:false,next_cursor:null}})
+test('gallery waits for accessible plant details; public denied plant never requests evidence',async()=>{
+ const denied=harness(null,async()=>{throw Object.assign(Error('Unavailable'),{status:404})},null,async()=>{throw Error('must not request gallery')})
+ try{await flush();assert.equal(denied.galleryCalls.length,0);assert.equal(denied.state.gallery.state.assets.length,0)}finally{denied.stop()}
+ const publicView=harness(null,undefined,null,async()=>galleryFixture('1','approved-photo'))
+ try{await flush();assert.equal(publicView.galleryCalls.length,1);assert.match(publicView.galleryCalls[0],/^\/api\/data\/plants\/1\/gallery/);assert.equal(publicView.state.galleryGroups.value[0].assets[0].id,'approved-photo')}finally{publicView.stop()}
+})
+test('logout/account uncertainty clears gallery immediately and late private photos cannot return',async()=>{
+ let resolve;const response=new Promise(yes=>{resolve=yes})
+ const h=harness(officer,undefined,null,async()=>response)
+ try{await flush();assert.equal(h.state.gallery.state.loading,true);h.change(null,true)
+ assert.equal(h.state.gallery.state.assets.length,0);assert.equal(h.state.plant.value,null)
+ resolve(galleryFixture('1'));await flush();assert.equal(h.state.gallery.state.assets.length,0)
+ assert.equal(h.state.gallery.state.error,'')
+ }finally{h.stop()}
+})
+test('route and role changes discard old gallery context while retaining current authorized results',async()=>{
+ let resolve;const old=new Promise(yes=>{resolve=yes})
+ const h=harness(officer,async url=>url.startsWith('/api/plants/')?{plant:{...privatePlant,plant_id:url.split('/').at(-1)}}:{species},null,
+  async url=>String(url).includes('/plants/1/')?old:galleryFixture('2','new-photo'))
+ try{await flush();h.route.params.plantId='PL002';await flush();assert.equal(h.state.gallery.state.plantId,'2')
+ assert.equal(h.state.gallery.state.assets[0].id,'new-photo');resolve(galleryFixture('1'));await flush()
+ assert.equal(h.state.gallery.state.assets[0].id,'new-photo')
+ h.change({...officer,role:'Visitor'},true);assert.equal(h.state.gallery.state.assets.length,0)
+ }finally{h.stop()}
 })
 
 test('shared session notifications clear before logout and reject stale session verification',async()=>{

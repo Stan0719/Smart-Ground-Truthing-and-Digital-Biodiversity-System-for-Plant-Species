@@ -187,8 +187,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
   app.get("/api/qr-codes", allow("plants.create"), async (_req, res) => {
     const qrCodes = (
       await pool.query(
-        `SELECT q.qr_id,q.plant_id,q.qr_code,
-          CASE WHEN q.plant_id IS NULL THEN 'generated' ELSE 'assigned' END AS status,
+        `SELECT q.qr_id,q.plant_id,q.qr_code,q.status,
           CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) THEN p.scientific_name END AS plant_name,
           q.generated_at,q.assigned_at,q.activated_at,q.retired_at
           FROM public.qr_code q LEFT JOIN plant_record p ON p.plant_id=q.plant_id
@@ -198,6 +197,26 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
       )
     ).rows;
     res.json({ qr_codes: qrCodes });
+  });
+  app.delete("/api/qr-codes/:id", allow("plants.create"), async (req, res) => {
+    const qrId = id(String(req.params.id));
+    const deleted = await transaction(pool, async (c) => {
+      const qr = (await c.query(
+        "SELECT qr_id,plant_id,status FROM public.qr_code WHERE qr_id=$1 FOR UPDATE",
+        [qrId],
+      )).rows[0];
+      if (!qr) fail(404, "QR code not found.");
+      if (qr.plant_id != null || qr.status !== "generated")
+        fail(409, "Only unused QR codes can be deleted.");
+      const result = (await c.query(
+        "DELETE FROM public.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' RETURNING qr_id",
+        [qrId],
+      )).rows[0];
+      if (!result) fail(409, "QR code is no longer available.");
+      await audit(c, req.user, "qr_code_deleted", result.qr_id);
+      return String(result.qr_id);
+    });
+    res.json({ deleted: true, qr_id: deleted });
   });
   app.post("/api/qr-codes", allow("plants.create"), async (req, res) => {
     const count = req.body?.count;
@@ -259,13 +278,20 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
         `SELECT p.plant_id,p.species_id,p.scientific_name,p.rbac_status,p.registered_subject,p.registered_at,
           p.qr_token,qr.qr_id,qr.status AS qr_status,
           plant_preview.id AS plant_image_asset_id,
-          COALESCE(approved_location_row.latitude,approved_location.latitude) AS latitude,
-          COALESCE(approved_location_row.longitude,approved_location.longitude) AS longitude,
-          COALESCE(approved_location_row.accuracy_m,approved_location.accuracy_m) AS accuracy_m,
-          approved_location.altitude_m,approved_location.zone,
+          CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) OR ($5 AND p.registered_subject=$2)
+            THEN COALESCE(approved_location_row.latitude,approved_location.latitude) END AS latitude,
+          CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) OR ($5 AND p.registered_subject=$2)
+            THEN COALESCE(approved_location_row.longitude,approved_location.longitude) END AS longitude,
+          CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) OR ($5 AND p.registered_subject=$2)
+            THEN COALESCE(approved_location_row.accuracy_m,approved_location.accuracy_m) END AS accuracy_m,
+          CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) OR ($5 AND p.registered_subject=$2)
+            THEN approved_location.altitude_m END AS altitude_m,
+          CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) OR ($5 AND p.registered_subject=$2)
+            THEN approved_location.zone END AS zone,
           o.content AS latest_approved,o.updated_at AS observed_at,
           submitted.content AS latest_submission,submitted.id AS latest_observation_id,submitted.status AS observation_status,
           CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($1::text[]) THEN s.common_name END AS common_name,
+          COALESCE(v.visibility,'protected') AS species_visibility,
           CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($1::text[]) THEN jsonb_build_object('species_id',s.species_id,'scientific_name',s.scientific_name,'common_name',s.common_name,
             'description',s.description,'habitat',s.rbac_data->>'habitat','genus_name',g.genus_name,
             'family_name',f.family_name,'conservation_status',cs.status_name) END AS species_details
@@ -279,9 +305,24 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
               AND image_observation.plant_id=p.plant_id
             WHERE a.plant_id=p.plant_id
               AND a.content_type IN ('image/jpeg','image/png')
-              AND p.rbac_status='Approved'
-              AND ((a.observation_id IS NULL AND a.approved=TRUE)
-                OR (image_observation.id IS NOT NULL AND image_observation.status='Approved'))
+              AND (
+                (p.rbac_status='Approved' AND (
+                  (a.observation_id IS NULL AND a.approved=TRUE)
+                  OR (image_observation.id IS NOT NULL AND image_observation.status='Approved'
+                    AND image_observation.id=(SELECT current_observation.id FROM plant_observation current_observation
+                      WHERE current_observation.plant_id=p.plant_id AND current_observation.status='Approved'
+                      ORDER BY current_observation.updated_at DESC,current_observation.id DESC LIMIT 1))
+                ))
+                OR ($6 AND p.rbac_status<>'Approved' AND p.registered_subject=$2
+                  AND a.owner_subject=$2
+                  AND image_observation.id IS NOT NULL
+                  AND (image_observation.status='Pending Review' OR
+                    (image_observation.status='Approved' AND image_observation.id=(
+                      SELECT current_observation.id FROM plant_observation current_observation
+                      WHERE current_observation.plant_id=p.plant_id AND current_observation.status='Approved'
+                      ORDER BY current_observation.updated_at DESC,current_observation.id DESC LIMIT 1
+                    ))))
+              )
             ORDER BY a.created_at,a.id
             LIMIT 1
           ) plant_preview ON true
@@ -329,7 +370,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
             (p.registered_subject=$2 AND p.rbac_status<>'Approved' AND s.rbac_data->>'submittedBy'=$2
              AND s.rbac_data->>'approvalStatus' IN ('Pending Review','Rejected','Correction Required'))) END)
           AND (p.rbac_status='Approved' OR p.registered_subject=$2 OR $3)
-          AND ($6 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
+          AND ($7 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
           AND ($4::integer IS NULL OR p.plant_id=$4) ORDER BY p.plant_id DESC LIMIT 500`,
         [
           visibilityFor(req.user),
@@ -337,19 +378,24 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
           req.user?.role === "Conservation Officer",
           plantId,
           mine,
+          permitted(req.user, "plants.create"),
           staff,
         ],
       )
     ).rows;
-    const plants = rows.map((r) =>
-      staff
-        ? r
+    const plants = rows.map((r) => {
+      const plant = staff
+        ? { ...r }
         : {
             plant_id: r.plant_id,
             species_id: r.species_id,
             ...(r.plant_image_asset_id == null ? {} : { plant_image_asset_id: String(r.plant_image_asset_id) }),
-          },
-    );
+          };
+      delete plant.species_visibility;
+      if (req.user?.role === "Botanist" && !visibilityFor(req.user).includes(r.species_visibility ?? "protected") && !(mine && r.registered_subject === subject(req.user)))
+        plant.gps_access_restricted = true;
+      return plant;
+    });
     const projectedPlants = req.user?.role === "Botanist"
       ? projectApprovedPlantGps(plants, req.user)
       : projectGps(plants, req.user);

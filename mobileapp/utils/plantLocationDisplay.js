@@ -2,6 +2,7 @@ export function getPlantLocationDisplay(location, role) {
   const normalizedRole = String(role || "").toLowerCase();
   if (normalizedRole !== "botanist" && normalizedRole !== "conservation officer")
     return { status: "restricted" };
+  if (location?.restricted) return { status: "restricted" };
 
   const latitude = location?.latitude;
   const longitude = location?.longitude;

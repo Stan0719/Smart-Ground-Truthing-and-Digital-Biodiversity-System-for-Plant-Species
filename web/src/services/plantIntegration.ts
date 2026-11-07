@@ -1,4 +1,5 @@
 import { formatPlantId, parsePlantId } from '../utils/plantId.ts'
+import { webAssetUrl } from './assetImages.ts'
 
 export interface SpeciesContract {
   id: string
@@ -24,6 +25,15 @@ export interface ApprovedObservationContent {
   taxonomy: Record<string, string>
 }
 
+export interface SubmittedGpsEvidence {
+  status: string
+  latitude: number | null
+  longitude: number | null
+  accuracyM: number | null
+  altitudeM: number | null
+  zone: string
+}
+
 export interface PlantContract {
   id: string
   displayId: string
@@ -36,6 +46,9 @@ export interface PlantContract {
   accuracyM: number | null
   observedAt: string
   latestApproved: ApprovedObservationContent | null
+  altitudeM: number | null
+  zone: string
+  submittedGps: SubmittedGpsEvidence | null
 }
 
 export interface EnrichedPlant extends PlantContract {
@@ -70,7 +83,11 @@ export const mapSpeciesContract = (value: unknown): SpeciesContract | null => {
     conservationStatus: text(item.conservation_status),
     description: text(item.description),
     habitat: text(item.habitat),
+<<<<<<< Updated upstream
+    imageUrl: webAssetUrl(item.image_url),
+=======
     imageUrl: /^\/api\/assets\/[A-Za-z0-9_-]+$/.test(text(item.image_url)) ? text(item.image_url) : '',
+>>>>>>> Stashed changes
   }
 }
 
@@ -98,6 +115,27 @@ const mapApprovedContent = (value: unknown): ApprovedObservationContent | null =
   }
 }
 
+// Submitted evidence is distinct from the approved top-level location.
+const gpsNumber = (value: unknown, min = -Infinity, max = Infinity) =>
+  (typeof value === 'number' || (typeof value === 'string' && value.trim() !== ''))
+    ? number(value, min, max) : null
+
+const mapSubmittedGps = (value: unknown, status: unknown): SubmittedGpsEvidence | null => {
+  const item = record(value)
+  if (!item) return null
+  const latitude = gpsNumber(item.latitude, -90, 90)
+  const longitude = gpsNumber(item.longitude, -180, 180)
+  const validPair = latitude !== null && longitude !== null
+  return {
+    status: text(status),
+    latitude: validPair ? latitude : null,
+    longitude: validPair ? longitude : null,
+    accuracyM: gpsNumber(item.accuracy_m, 0),
+    altitudeM: gpsNumber(item.altitudeM ?? item.altitude_m),
+    zone: typeof item.zone === 'string' ? item.zone.trim() : '',
+  }
+}
+
 export const mapPlantContract = (value: unknown): PlantContract | null => {
   const item = record(value)
   if (!item) return null
@@ -116,6 +154,9 @@ export const mapPlantContract = (value: unknown): PlantContract | null => {
     accuracyM: number(item.accuracy_m, 0),
     observedAt: text(item.observed_at),
     latestApproved: item.latest_approved == null ? null : mapApprovedContent(item.latest_approved),
+    altitudeM: gpsNumber(item.altitude_m),
+    zone: typeof item.zone === 'string' ? item.zone.trim() : '',
+    submittedGps: mapSubmittedGps(item.latest_submission, item.observation_status),
   }
 }
 

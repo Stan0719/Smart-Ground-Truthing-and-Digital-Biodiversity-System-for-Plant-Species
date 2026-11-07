@@ -8,6 +8,7 @@ import {refreshKnowledge} from '../services/knowledge'
 import { plants as prototypeSpecies, type Plant } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
+import { webAssetUrl } from '../services/assetImages'
 
 const route = useRoute()
 const { t, te } = useI18n()
@@ -17,6 +18,7 @@ const isLoading = ref(true)
 const loadError = ref('')
 
 interface ApiSpecies {
+  image_url?: string
   species_id: string | number
   scientific_name: string
   common_name: string
@@ -83,6 +85,7 @@ const loadSpecies = async () => {
 
     selectedSpecies.value = {
       ...(prototype || {}),
+      image: prototype?.image || webAssetUrl(item.image_url) || undefined,
       speciesId: String(item.species_id),
       slug,
       name: item.common_name || item.scientific_name,

@@ -21,6 +21,11 @@ export default defineConfig({
         changeOrigin: false,
         rewrite: (path) => path.replace(/^\/api\/data/, '/api'),
       },
+      // Compatibility for backend asset URLs. New web mappings use /api/data/assets.
+      '^/api/assets(?:[/?]|$)': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: false,
+      },
       '/api/iot': {
         target: 'http://localhost:3000',
         changeOrigin: true,
