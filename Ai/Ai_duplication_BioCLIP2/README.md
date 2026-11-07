@@ -2,8 +2,8 @@
 
 This separate desktop app uses pretrained `imageomics/bioclip-2` weights via
 OpenCLIP. No training dataset or database is needed. Your existing Plants folder
-is the default reference gallery and is read only. The original CLIP detector
-and firmware remain separate. The website can also request comparisons
+is the default reference gallery and is read only. Firmware remains separate.
+The website can also request comparisons
 through the plant backend, as described below.
 
 ## Setup (PowerShell, from the repository root)
@@ -19,12 +19,12 @@ Python 3.10 or newer is recommended. First indexing downloads the pretrained
 weights and requires internet access and enough disk space for a large ViT-L/14
 model. CPU works but may be slow; compatible CUDA PyTorch is used automatically
 when available. Weights and image features are cached under this folder's
-`.cache`, separate from the original detector's cache. No photos are uploaded
+`.cache`. No photos are uploaded
 to a remote inference API: inference runs locally.
 
 ## Try your photos
 
-1. Leave Reference folder set to the existing `Ai_duplication_Prevention/Plants`,
+1. Leave Reference folder set to the existing `Ai_duplication_BioCLIP2/Plants`,
    or browse to another folder. Subfolders are included.
 2. Click **Load plant photos** and wait. The first photo is compared automatically.
 3. Select a photo from the left to compare another one. Alternatively, use

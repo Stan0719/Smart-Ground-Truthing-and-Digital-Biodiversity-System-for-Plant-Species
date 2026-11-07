@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageOps, ImageTk
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_PLANTS = HERE.parent / "Ai_duplication_Prevention" / "Plants"
+DEFAULT_PLANTS = HERE / "Plants"
 
 
 class App:
