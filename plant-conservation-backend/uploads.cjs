@@ -123,16 +123,6 @@ function mountUploads(app, { pool, allow }) {
          JOIN plant_record p ON p.plant_id=a.plant_id
          JOIN species s ON s.species_id=p.species_id
          LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
-<<<<<<< Updated upstream
-         WHERE a.plant_id=$1 AND p.rbac_status='Approved'
-           AND COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved'
-           AND a.content_type IN ('image/jpeg','image/png')
-           AND ((a.observation_id IS NULL AND a.approved=TRUE) OR EXISTS (
-             SELECT 1 FROM plant_observation o
-             WHERE o.id=a.observation_id AND o.plant_id=a.plant_id AND o.status='Approved'
-           ))
-           AND COALESCE(v.visibility,'protected') = ANY($2::text[])
-=======
          WHERE a.plant_id=$1 AND a.content_type IN ('image/jpeg','image/png')
            AND (
              (p.rbac_status='Approved'
@@ -155,7 +145,6 @@ function mountUploads(app, { pool, allow }) {
                   )))
               ))
            )
->>>>>>> Stashed changes
          ORDER BY a.created_at,a.id`,
         [plantId, visibilityFor(req.user), ownPreview, req.user ? subject(req.user) : ""],
       )).rows;

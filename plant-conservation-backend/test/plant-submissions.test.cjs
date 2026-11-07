@@ -77,11 +77,7 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(own.data.plant.latest_submission.longitude, undefined);
     assert.equal(own.data.plant.species_details.scientific_name, species.scientific_name);
     assert.equal(own.data.plant.scientific_name, plant.scientific_name);
-<<<<<<< Updated upstream
-    assert.equal(own.data.plant.latitude, null); // No approved observation location exists yet.
-=======
     assert.equal(own.data.plant.latitude, null); // Pending plant GPS is not projected as approved.
->>>>>>> Stashed changes
     assert.equal(own.data.plant.latest_submission.latitude, undefined);
     assert.ok((await call("/plants")).data.plants.some((p) => String(p.plant_id) === String(combined.plant_id)));
     const observation = await call(`/observations/${combined.id}`);
@@ -193,14 +189,9 @@ test("one atomic submission supports existing and pending species without partia
       assert.equal(own.data.plant.rbac_status, status);
       assert.equal(own.data.plant.species_details, null);
       assert.equal(own.data.plant.common_name, null);
-<<<<<<< Updated upstream
-      assert.equal(own.data.plant.latitude, 4.5); // Only the existing approved observation location is projected.
-      assert.equal(own.data.plant.latest_approved.latitude, undefined);
-=======
       assert.equal(own.data.plant.latitude, 4.5); // Owner scope exposes only the existing approved location.
       assert.equal(own.data.plant.latest_approved.latitude, undefined);
       assert.equal(own.data.plant.gps_access_restricted, undefined);
->>>>>>> Stashed changes
       assert.equal(own.data.plant.registered_subject, "staff:bot");
       assert.equal((await call(`/plants/${combined.plant_id}?scope=mine`, "other")).status, 404);
       assert.equal((await call(`/species/${combined.species_id}`)).status, 404);

@@ -370,11 +370,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
             (p.registered_subject=$2 AND p.rbac_status<>'Approved' AND s.rbac_data->>'submittedBy'=$2
              AND s.rbac_data->>'approvalStatus' IN ('Pending Review','Rejected','Correction Required'))) END)
           AND (p.rbac_status='Approved' OR p.registered_subject=$2 OR $3)
-<<<<<<< Updated upstream
-          AND ($6 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
-=======
           AND ($7 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
->>>>>>> Stashed changes
           AND ($4::integer IS NULL OR p.plant_id=$4) ORDER BY p.plant_id DESC LIMIT 500`,
         [
           visibilityFor(req.user),
@@ -382,10 +378,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
           req.user?.role === "Conservation Officer",
           plantId,
           mine,
-<<<<<<< Updated upstream
-=======
           permitted(req.user, "plants.create"),
->>>>>>> Stashed changes
           staff,
         ],
       )
@@ -397,17 +390,12 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
             plant_id: r.plant_id,
             species_id: r.species_id,
             ...(r.plant_image_asset_id == null ? {} : { plant_image_asset_id: String(r.plant_image_asset_id) }),
-<<<<<<< Updated upstream
-          },
-    );
-=======
           };
       delete plant.species_visibility;
       if (req.user?.role === "Botanist" && !visibilityFor(req.user).includes(r.species_visibility ?? "protected") && !(mine && r.registered_subject === subject(req.user)))
         plant.gps_access_restricted = true;
       return plant;
     });
->>>>>>> Stashed changes
     const projectedPlants = req.user?.role === "Botanist"
       ? projectApprovedPlantGps(plants, req.user)
       : projectGps(plants, req.user);
