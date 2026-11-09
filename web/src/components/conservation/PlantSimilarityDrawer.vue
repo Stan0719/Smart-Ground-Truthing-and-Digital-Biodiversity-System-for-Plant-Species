@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="similarity-drawer-layer">
+    <div class="similarity-drawer-layer officer-type-layer">
       <button
         class="similarity-drawer-backdrop"
         type="button"

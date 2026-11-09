@@ -1,0 +1,169 @@
+/* Shared Officer header only. The query uses space left after the sidebar,
+   so a collapsed sidebar and text/browser zoom adapt without route-specific rules. */
+.officer-layout.officer-layout .topbar {
+  display: block;
+  container-type: inline-size;
+  container-name: officer-topbar;
+  height: auto;
+}
+
+.officer-layout.officer-layout .officer-header-content {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr) auto;
+  grid-template-areas: "toggle identity actions";
+  align-items: center;
+  column-gap: clamp(.75rem, 2vw, 1.5rem);
+  row-gap: .5rem;
+  min-width: 0;
+  width: 100%;
+  padding-block: .75rem;
+}
+
+.officer-layout.officer-layout .officer-header-content > .menu-button {
+  grid-area: toggle;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.officer-layout.officer-layout .officer-header-content > .page-heading {
+  grid-area: identity;
+  min-width: 0;
+  margin: 0;
+}
+
+.officer-layout.officer-layout .officer-header-content .page-heading h1 {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.officer-layout.officer-layout .officer-header-content .page-heading p {
+  margin-bottom: 2px;
+}
+
+.officer-layout.officer-layout .officer-header-content > .conservation-topbar-actions {
+  grid-area: actions;
+  justify-self: end;
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: clamp(.375rem, 1vw, .8125rem);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.officer-layout.officer-layout .officer-header-content :is(.notification-button, .profile-button) {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  height: auto;
+  flex-shrink: 0;
+}
+
+.officer-layout.officer-layout .officer-header-content .notification-button {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.officer-layout.officer-layout .officer-header-content .profile-copy {
+  min-width: 0;
+  max-inline-size: 14rem;
+  overflow-wrap: anywhere;
+}
+
+.officer-layout.officer-layout .officer-header-content .avatar {
+  flex-shrink: 0;
+}
+
+.officer-layout.officer-layout .officer-header-content :is(.notification-wrap, .profile-wrap) {
+  position: static;
+  flex-shrink: 0;
+}
+
+.officer-layout.officer-layout .officer-header-content .dashboard-language {
+  min-width: 0;
+}
+
+.officer-layout.officer-layout .officer-header-content .dashboard-language .language-switcher {
+  position: relative;
+  width: auto;
+}
+
+.officer-layout.officer-layout .officer-header-content .dashboard-language .language-trigger {
+  width: auto;
+  min-height: 2.75rem;
+  padding-inline: .625rem;
+}
+
+.officer-layout.officer-layout .officer-header-content :is(.notification-menu, .profile-menu) {
+  top: calc(100% + .5rem);
+  right: 0;
+  max-width: calc(100vw - 2rem);
+}
+
+.officer-layout.officer-layout .officer-header-content .dashboard-language .language-menu {
+  position: absolute;
+  width: max-content;
+  min-width: min(11rem, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  top: calc(100% + 6px);
+  left: 50%;
+  right: auto;
+  transform: translateX(calc(-50% + var(--officer-language-shift, 0px)));
+  margin: 0;
+}
+
+.officer-layout.officer-layout .officer-header-content .profile-menu {
+  width: max-content;
+  min-width: 12rem;
+  max-width: min(20rem, calc(100vw - 2rem));
+}
+
+.officer-layout.officer-layout .officer-header-content .profile-menu-identity {
+  display: grid;
+  gap: .25rem;
+  padding: .5rem .625rem .75rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.officer-layout.officer-layout .officer-header-content .profile-menu-identity strong {
+  font-size: var(--officer-text, .875rem);
+  line-height: 1.5;
+}
+
+.officer-layout.officer-layout .officer-header-content .profile-menu-identity small {
+  font-size: var(--officer-small, .75rem);
+  line-height: 1.5;
+}
+
+@container officer-topbar (max-width: 60rem) {
+  .officer-layout.officer-layout .officer-header-content { grid-template-columns: 2.75rem minmax(0, 1fr); grid-template-areas: "toggle actions" "identity identity"; }
+  .officer-layout.officer-layout .officer-header-content .page-heading { justify-self: stretch; }
+  .officer-layout.officer-layout .officer-header-content :is(.profile-copy, .chevron) { display: none; }
+  .officer-layout.officer-layout .officer-header-content .profile-button { padding: 0; justify-content: center; }
+  .officer-layout.officer-layout .officer-header-content .dashboard-language .language-full { display: none; }
+  .officer-layout.officer-layout .officer-header-content .dashboard-language .language-short { display: inline; }
+}
+/* Keep all four controls reachable at phone widths and browser zoom. */
+@container officer-topbar (max-width: 20rem) {
+  .officer-layout.officer-layout .officer-header-content .dashboard-language .language-trigger { min-width: 2.75rem; justify-content: center; gap: .25rem; padding-inline: .375rem; }
+  .officer-layout.officer-layout .officer-header-content .dashboard-language .language-trigger svg, .officer-layout.officer-layout .officer-header-content .dashboard-language .language-chevron { display: none; }
+}
+/* Preserve the same two-row fallback on browsers without container queries. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 1200px) {
+  .officer-layout.officer-layout .officer-header-content { grid-template-columns: 2.75rem minmax(0, 1fr); grid-template-areas: "toggle actions" "identity identity"; }
+  .officer-layout.officer-layout .officer-header-content .page-heading { justify-self: stretch; }
+  .officer-layout.officer-layout .officer-header-content :is(.profile-copy, .chevron) { display: none; }
+  .officer-layout.officer-layout .officer-header-content .profile-button { padding: 0; justify-content: center; }
+  .officer-layout.officer-layout .officer-header-content .dashboard-language .language-full { display: none; }
+  .officer-layout.officer-layout .officer-header-content .dashboard-language .language-short { display: inline; }
+  }
+  @media (max-width: 380px) {
+  .officer-layout.officer-layout .officer-header-content .dashboard-language .language-trigger { min-width: 2.75rem; justify-content: center; gap: .25rem; padding-inline: .375rem; }
+  .officer-layout.officer-layout .officer-header-content .dashboard-language .language-trigger svg, .officer-layout.officer-layout .officer-header-content .dashboard-language .language-chevron { display: none; }
+  }
+}

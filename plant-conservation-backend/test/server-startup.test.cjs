@@ -28,10 +28,11 @@ test("actual startup code handles an occupied port without dereferencing a null 
   const code = source.slice(begin, source.indexOf("  for (const signal", begin));
   const logs = []; let authClosed = false, poolClosed = false, workerStarted = false;
   const processState = { env: { PORT: String(occupied.address().port), HOST: "127.0.0.1" }, exitCode: 0 };
-  const server = new Function("createPlantApp", "auth", "pool", "process", "createServer", "console", "createOfficerNotificationDelivery", code + "\nreturn server;")(
+  const server = new Function("createPlantApp", "auth", "pool", "process", "createServer", "console", "createOfficerNotificationDelivery", "speciesPhotoWritesEnabled", code + "\nreturn server;")(
     () => (_req, res) => res.end("ok"), { db: { close: async () => { authClosed = true; } } },
     { end: async () => { poolClosed = true; } }, processState, createServer, { log: (...args) => logs.push(args), error: (...args) => logs.push(args) },
     () => ({ start: () => { workerStarted = true; } }),
+    false,
   );
   const [error] = await once(server, "error"); await new Promise((r) => setImmediate(r));
   assert.equal(error.code, "EADDRINUSE"); assert.equal(processState.exitCode, 1);

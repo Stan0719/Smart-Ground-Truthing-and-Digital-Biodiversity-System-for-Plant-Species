@@ -19,7 +19,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
   await pool.query(migration("009-record-version-history.sql"));
   const photo = await sharp({ create: { width: 4, height: 4, channels: 3, background: "green" } }).jpeg().toBuffer();
   const species = (await pool.query("INSERT INTO species(scientific_name,common_name,description,rbac_data) VALUES('Species A','Common A','Original description',$1) RETURNING species_id",
-    [{ habitat: "Forest", approvalStatus: "Approved", submittedBy: "staff:bot" }])).rows[0].species_id;
+    [{ habitat: "Forest", culturalSignificance: "Existing cultural knowledge", retainedMetadata: { source: "fixture" }, approvalStatus: "Approved", submittedBy: "staff:bot" }])).rows[0].species_id;
   await pool.query("INSERT INTO rbac_species_visibility(species_id,visibility) VALUES($1,'public')", [species]);
   const request = (await pool.query(`INSERT INTO species_request_submission(owner_subject,client_key,payload_hash,scientific_name,common_name,genus_name,family_name,conservation_status,description,habitat,photo,request_status,approved_species_id)
     VALUES('staff:bot','species-key','hash','Species A','Common A','Genus A','Family A','Least Concern','Original description','Forest',$1,'Approved',$2) RETURNING request_id`,
@@ -130,6 +130,10 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal((await pool.query("SELECT scientific_name FROM species WHERE species_id=$1", [species])).rows[0].scientific_name, "Species A");
     assert.equal((await call(`/record-changes/${response.data.change.id}/review`, "officer", "POST", { decision: "Approved", comment: "Taxonomy checked" })).status, 200);
     assert.equal((await pool.query("SELECT scientific_name FROM species WHERE species_id=$1", [species])).rows[0].scientific_name, "Species B");
+    const metadata = (await pool.query("SELECT rbac_data FROM species WHERE species_id=$1", [species])).rows[0].rbac_data;
+    assert.equal(metadata.culturalSignificance, "Existing cultural knowledge");
+    assert.deepEqual(metadata.retainedMetadata, { source: "fixture" });
+    assert.equal(metadata.habitat, body.proposed.habitat);
     assert.equal((await pool.query("SELECT scientific_name,request_status FROM species_request_submission WHERE request_id=$1", [request])).rows[0].scientific_name, "Species B");
     assert.equal((await pool.query("SELECT visibility FROM rbac_species_visibility WHERE species_id=$1", [species])).rows[0].visibility, "public");
     assert.equal((await pool.query("SELECT count(*)::integer AS count FROM species")).rows[0].count, 1);

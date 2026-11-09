@@ -68,6 +68,9 @@ test("reconciled species requests: authoritative linkage and dependency guards",
       (request_id,owner_subject,client_key,payload_hash,scientific_name,common_name,genus_name,family_name,conservation_status,description,habitat,photo,request_status,proposed_species_id,approved_species_id)
       VALUES($1,$2,$3,'hash','Proposed','Common','Genus','Family','Least Concern','Description','Habitat',$4,$5,$6,$7)`,
       [n, `staff:${owner}`, clientKey, photo, status, species, status === "Approved" ? species : null]);
+    // Match the atomic submission pipeline: the request has its own image asset.
+    if (request) await pool.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,$5,'image/jpeg',$6)",
+      [randomUUID(),species,`staff:${owner}`,`${clientKey}:species-photo`,status === 'Approved',photo]);
     if (provenance) await pool.query("INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES($1,$2,'hash',$3)", [`staff:${owner}`, clientKey, { id: observation, plant_id: plant, species_id: species, species_request_id: request ? n : null }]);
     return { request: n, species: String(species), plant, observation };
   }

@@ -5,11 +5,11 @@ const test = require("node:test"),
   { resolve } = require("node:path"),
   { pathToFileURL } = require("node:url"),
   { once } = require("node:events");
-const { createPlantDatabase } = require("./postgres-fixture.cjs"),
+const { createReadySpeciesPhotoDatabase } = require("./species-photo-bigint-fixture.cjs"),
   sharp = require("sharp"),
   { createPlantApp } = require("../server.js");
 test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async (t) => {
-  const pool = await createPlantDatabase(),
+  const pool = await createReadySpeciesPhotoDatabase(),
     pg = pool;
   t.after(() => pool.end());
   // Isolated QR inventory matches the existing Add Plant test contract.
@@ -57,6 +57,7 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   const app = createPlantApp({
       pool,
       auth,
+      speciesPhotoWritesEnabled: true,
       origins: new Set(["http://localhost:5173"]),
     }),
     server = app.listen(0, "127.0.0.1");

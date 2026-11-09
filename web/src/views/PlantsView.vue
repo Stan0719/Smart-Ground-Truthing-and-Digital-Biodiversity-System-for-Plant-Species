@@ -10,13 +10,28 @@ import {refreshKnowledge,knowledgeError} from '../services/knowledge'
 const species = ref<Plant[]>([])
 const isLoading = ref(true)
 const loadError = ref('')
-const categories = ['All', 'Trees', 'Flowers', 'Ferns', 'Climbers'] as const
-const activeCategory = ref<(typeof categories)[number]>('All')
+const normalizeFamily = (value: string | null | undefined) => value?.trim().replace(/\s+/g, ' ') || ''
+const familyKey = (value: string | null | undefined) => normalizeFamily(value).toLowerCase()
+const activeFamily = ref('')
+// Options describe only the authorized species returned by the existing capped API.
+const families = computed(() => {
+  const labels = new Map<string, string>()
+  for (const item of species.value) {
+    const label = normalizeFamily(item.family)
+    if (label && !labels.has(familyKey(label))) labels.set(familyKey(label), label)
+  }
+  return [...labels].sort((a, b) => a[1].localeCompare(b[1]))
+})
+watch(families, (options) => {
+  if (activeFamily.value && !options.some(([key]) => key === activeFamily.value)) activeFamily.value = ''
+})
 const sortOption = ref<'default' | 'name-asc' | 'name-desc' | 'scientific-asc'>('default')
 const sortMenuOpen = ref(false)
 const sortMenu = ref<HTMLElement | null>(null)
 const route = useRoute()
 const { t, te } = useI18n()
+// Keep the translated title intact, including Chinese word order.
+const heroTitleParts = computed(() => t('species.heroTitle').split(/(Niah|尼亚)/u))
 const { isLoggedIn, userRole } = usePrototypeSession()
 const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search.slice(0, 100) : '')
 
@@ -27,7 +42,7 @@ const selectSort = (option: typeof sortOption.value) => {
 
 const clearFilters = () => {
   searchQuery.value = ''
-  activeCategory.value = 'All'
+  activeFamily.value = ''
 }
 
 interface ApiSpecies {
@@ -105,18 +120,17 @@ const filteredSpecies = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
 
   const filtered = species.value.filter((item) => {
-    const matchesCategory = activeCategory.value === 'All' || item.category === activeCategory.value
+    const matchesFamily = !activeFamily.value || familyKey(item.family) === activeFamily.value
     const matchesSearch =
       !query ||
       item.name.toLowerCase().includes(query) ||
       displayName(item).toLowerCase().includes(query) ||
       item.scientificName.toLowerCase().includes(query) ||
       item.genus?.toLowerCase().includes(query) ||
-      item.category.toLowerCase().includes(query) ||
       item.family?.toLowerCase().includes(query) ||
       item.description.toLowerCase().includes(query)
 
-    return matchesCategory && matchesSearch
+    return matchesFamily && matchesSearch
   })
 
   const sorted = [...filtered]
@@ -146,7 +160,7 @@ const filteredSpecies = computed(() => {
 
       <div class="hero-content">
         <p class="eyebrow">NIAH NATIONAL PARK</p>
-        <h1>{{ t('species.heroTitle') }}</h1>
+        <h1><template v-for="(part, index) in heroTitleParts" :key="index"><span v-if="part === 'Niah' || part === '尼亚'" class="hero-place-name">{{ part }}</span><template v-else>{{ part }}</template></template></h1>
         <p class="hero-lead">{{ t('species.heroLead') }}</p>
         <p class="hero-copy">{{ t('species.heroDescription') }}</p>
       </div>
@@ -234,15 +248,19 @@ const filteredSpecies = computed(() => {
             </div>
           </div>
 
-          <div class="category-filters" aria-label="Filter species by plant group">
+          <div class="family-filters" role="group" :aria-label="t('common.family')">
+            <button type="button" :class="{ active: activeFamily === '' }" :aria-pressed="activeFamily === ''" @click="activeFamily = ''">
+              {{ t('common.all') }}
+            </button>
             <button
-              v-for="category in categories"
-              :key="category"
+              v-for="[key, label] in families"
+              :key="key"
               type="button"
-              :class="{ active: activeCategory === category }"
-              @click="activeCategory = category"
+              :class="{ active: activeFamily === key }"
+              :aria-pressed="activeFamily === key"
+              @click="activeFamily = key"
             >
-              {{ t(`species.categories.${category.toLowerCase()}`) }}
+              {{ label }}
             </button>
           </div>
         </div>
@@ -276,9 +294,6 @@ const filteredSpecies = computed(() => {
                 <span>{{ t('species.imageComingSoon') }}</span>
               </div>
               <div class="card-badges">
-                <span v-if="item.category" class="category-badge">{{
-                  t(`categories.${item.category.toLowerCase()}`)
-                }}</span>
                 <span
                   v-if="canViewConservationStatus && item.conservationStatus"
                   class="status-badge"
@@ -310,7 +325,6 @@ const filteredSpecies = computed(() => {
                   :aria-label="`View individual plants for ${item.scientificName}`"
                 >
                   <span>{{ t('common.viewPlants') }}</span>
-                  <span class="action-arrow" aria-hidden="true">→</span>
                 </RouterLink>
               </div>
             </div>
@@ -318,7 +332,7 @@ const filteredSpecies = computed(() => {
         </div>
 
         <div v-else class="empty-state">
-          <span aria-hidden="true">🌿</span>
+          <span aria-hidden="true">ðŸŒ¿</span>
           <h3>{{ t('species.notFound') }}</h3>
           <p>{{ t('species.noMatch') }}</p>
           <button type="button" @click="clearFilters">
@@ -345,7 +359,7 @@ const filteredSpecies = computed(() => {
   min-height: 460px;
   display: flex;
   align-items: flex-end;
-  background-image: url('/images/hero.jpg');
+  background-image: url('/images/background_PlantsView.png');
   background-position: center 48%;
   background-size: cover;
   overflow: hidden;
@@ -388,6 +402,10 @@ const filteredSpecies = computed(() => {
   font-weight: 600;
   line-height: 1;
   letter-spacing: -2px;
+}
+
+.hero-place-name {
+  color: #A8D8B2;
 }
 
 .hero-lead {
@@ -484,12 +502,17 @@ const filteredSpecies = computed(() => {
   font: inherit;
 }
 
-.category-filters {
+.family-filters {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 9px;
 }
 
-.category-filters button {
+.family-filters button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  min-height: 44px;
   padding: 13px 20px;
   border: 0;
   border-radius: 999px;
@@ -502,11 +525,16 @@ const filteredSpecies = computed(() => {
   transition: 0.2s ease;
 }
 
-.category-filters button:hover {
+.family-filters button:focus-visible {
+  outline: 3px solid #35652f;
+  outline-offset: 3px;
+}
+
+.family-filters button:hover {
   background: #dfe8da;
 }
 
-.category-filters button.active {
+.family-filters button.active {
   background: #35652f;
   color: #fff;
 }
@@ -586,8 +614,8 @@ const filteredSpecies = computed(() => {
 
 .plant-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
 }
 
 .plant-card {
@@ -656,11 +684,10 @@ const filteredSpecies = computed(() => {
   left: 14px;
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
 }
 
-.category-badge,
 .status-badge {
   padding: 7px 11px;
   border-radius: 999px;
@@ -679,24 +706,26 @@ const filteredSpecies = computed(() => {
 }
 
 .plant-card-content {
-  padding: 22px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 12px 16px;
 }
 
 .plant-card h3 {
   margin: 0;
   color: #203f35;
-  font-size: 23px;
+  font-size: 21px;
 }
 
 .scientific-name {
-  margin: 5px 0 9px;
+  margin: 3px 0 6px;
   color: #7c6c5b;
   font-size: 15px;
   font-style: italic;
 }
 
 .plant-family {
-  margin: 0 0 14px;
+  margin: 0 0 8px;
   color: #66786f;
   font-size: 11px;
 }
@@ -707,8 +736,7 @@ const filteredSpecies = computed(() => {
 }
 
 .plant-description {
-  min-height: 66px;
-  margin: 0 0 20px;
+  margin: 0 0 12px;
   color: #617068;
   font-size: 13px;
   line-height: 1.65;
@@ -743,12 +771,14 @@ const filteredSpecies = computed(() => {
 }
 
 .card-action-link {
-  min-height: 42px;
+  min-width: 0;
+  text-align: center;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 6px 8px;
 
   border-radius: 999px;
 
@@ -793,16 +823,7 @@ const filteredSpecies = computed(() => {
   box-shadow: 0 8px 18px rgba(35, 74, 60, 0.18);
 }
 
-.action-arrow {
-  display: inline-block;
-  font-size: 15px;
-  line-height: 1;
-  transition: transform 0.2s ease;
-}
 
-.card-action-primary:hover .action-arrow {
-  transform: translateX(3px);
-}
 
 .card-action-link:focus-visible {
   outline: 3px solid rgba(49, 91, 73, 0.22);
@@ -914,7 +935,7 @@ const filteredSpecies = computed(() => {
 }
 
 .empty-state p {
-  margin: 0 0 20px;
+  margin: 0 0 12px;
 }
 
 .empty-state button {
@@ -967,13 +988,19 @@ const filteredSpecies = computed(() => {
   border: 0;
 }
 
+@media (max-width: 1199px) {
+  .plant-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 950px) {
-  .category-filters {
+  .family-filters {
     overflow-x: auto;
     padding-bottom: 4px;
   }
 
-  .category-filters button {
+  .family-filters button {
     flex: 0 0 auto;
   }
 
@@ -1089,16 +1116,16 @@ const filteredSpecies = computed(() => {
     min-width: 0;
   }
 
-  .category-filters {
+  .family-filters {
     gap: 6px;
     scrollbar-width: none;
   }
 
-  .category-filters::-webkit-scrollbar {
+  .family-filters::-webkit-scrollbar {
     display: none;
   }
 
-  .category-filters button {
+  .family-filters button {
     padding: 8px 13px;
     font-size: 11px;
   }
@@ -1144,7 +1171,6 @@ const filteredSpecies = computed(() => {
     gap: 4px;
   }
 
-  .category-badge,
   .status-badge {
     padding: 4px 6px;
     font-size: 8px;
@@ -1159,7 +1185,7 @@ const filteredSpecies = computed(() => {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 11px;
+    padding: 8px;
   }
 
   .plant-card h3 {
@@ -1182,14 +1208,12 @@ const filteredSpecies = computed(() => {
   }
 
   .plant-description {
-    min-height: 30px;
-    margin-bottom: 10px;
-    display: -webkit-box;
-    overflow: hidden;
+    min-height: 0;
+    margin-bottom: 6px;
+    display: block;
+    overflow-wrap: anywhere;
     font-size: 10px;
     line-height: 1.45;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
   }
 
   .card-actions {
@@ -1199,18 +1223,15 @@ const filteredSpecies = computed(() => {
   }
 
   .card-action-link {
-    min-height: 32px;
+    min-height: 44px;
     width: 100%;
     box-sizing: border-box;
     gap: 3px;
     padding: 5px 4px;
     font-size: 9px;
-    white-space: nowrap;
+    white-space: normal;
   }
 
-  .action-arrow {
-    font-size: 11px;
-  }
 
   .empty-state {
     padding: 42px 18px;
@@ -1273,13 +1294,11 @@ const filteredSpecies = computed(() => {
   }
 
   .card-action-link {
-    min-height: 35px;
+    min-height: 44px;
     padding-inline: 6px;
     font-size: 9px;
   }
 
-  .action-arrow {
-    font-size: 11px;
-  }
 }
+
 </style>

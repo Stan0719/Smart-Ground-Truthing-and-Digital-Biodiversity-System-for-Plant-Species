@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
+import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+import postcss from 'postcss'
 import {
   alertResponsePath,
   loadCanonicalAlerts,
@@ -110,7 +112,7 @@ test('legacy alert route is no longer authoritative and canonical deep links are
 
 test('camera prototype remains separate and cannot be posted as a canonical response', () => {
   assert.match(page, /prototypeCameraEvents/)
-  assert.match(page, /Frontend prototype events/)
+  assert.doesNotMatch(page, /Frontend prototype events/)
   assert.match(cameraFixture, /Frontend-only fixtures/)
   assert.doesNotMatch(cameraFixture, /saveAlertResponse|\/api\/data\/alerts/)
   assert.match(page, /if \(selectedCameraEvent\.value\) return/)
@@ -120,7 +122,30 @@ test('design structure and styling remain in place', () => {
   assert.match(page, /class="summary-grid"/)
   assert.match(page, /class="control-bar"/)
   assert.match(page, /class="panel camera-alert-panel"/)
-  assert.match(page, /class="table-scroll"/)
+  assert.match(page, /class="table-scroll officer-table-scroll"/)
   assert.match(page, /class="detail-list real-alert-details"/)
   assert.match(page, /<style scoped>/)
+})
+
+test('summary cards omit technical helper text and use four distinct status color themes', () => {
+  const { descriptor } = parse(page), rules = []
+  postcss.parse(descriptor.styles[0].content).walkRules(rule => rules.push(rule))
+  const palette = { 'Active Alerts': ['#fbe8e5', '#a33f35'], 'New Alerts': ['#e8f0f5', '#315d78'], 'Under Review': ['#fff1db', '#926119'], Resolved: ['#e7f3e9', '#287347'] }
+  for (const [status, [background, ink]] of Object.entries(palette)) {
+    const rule = rules.find(rule => rule.selector.endsWith(`[data-status="${status}"]`))
+    const values = Object.fromEntries(rule.nodes.map(node => [node.prop, node.value]))
+    assert.equal(values['--alert-card-background'], background); assert.equal(values['--alert-card-ink'], ink)
+  }
+  const card = rules.find(rule => rule.selector === '.alert-summary-card')
+  assert.ok(card.nodes.some(node => node.prop === 'border' && node.value === '1px solid var(--alert-card-ink)'))
+  assert.match(page, /:data-status="String\(card\[0\]\)"/)
+  assert.match(page, /<strong>\{\{ card\[1\] \}\}<\/strong>/)
+  assert.doesNotMatch(page, /PostgreSQL alert register|Frontend prototype events|Canonical alerts and response records|PostgreSQL Threat Alerts/)
+})
+
+test('Threat Alerts heading and scroll label use existing localization; updated template compiles', () => {
+  assert.match(page, /<h2>\{\{ ct\('Threat Alerts'\) \}\}<\/h2>/)
+  assert.match(page, /:aria-label="ct\('Threat Alerts'\)"/)
+  const { descriptor } = parse(page), script = compileScript(descriptor, { id: 'threat-summary' })
+  assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename: 'ThreatAlertsView.vue', id: 'threat-summary', compilerOptions: { bindingMetadata: script.bindings } }).errors, [])
 })

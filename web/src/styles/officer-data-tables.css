@@ -1,0 +1,163 @@
+/* Opt-in tables only: IoT devices/latest/history, camera events, canonical alerts,
+   and the report preview. Other Officer tables and exported report data are untouched. */
+.officer-layout.officer-layout .officer-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.officer-layout .officer-table-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table {
+  width: 100%;
+  min-width: 90rem;
+  table-layout: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table :is(th, td) {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: middle;
+  line-height: 1.5;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table th {
+  background: #245443;
+  color: #fff;
+  border-bottom-color: #245443;
+  font-size: var(--officer-small, .75rem);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table thead th:first-child {
+  border-top-left-radius: 10px;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table thead th:last-child {
+  border-top-right-radius: 10px;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table td {
+  font-size: var(--officer-text, .875rem);
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table :is(.badge, .action-button) {
+  white-space: nowrap;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .action-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 7px;
+  width: max-content;
+  min-width: max-content;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .action-group > * {
+  flex: 0 0 auto;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-id {
+  width: 18rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-identifier {
+  width: 16rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-name {
+  width: 14rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-type {
+  width: 10rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-plant {
+  width: 7rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-description {
+  width: 18rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-status {
+  width: 10rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-time {
+  width: 13rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-metric {
+  width: 9rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-coordinates {
+  width: 14rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .officer-data-table .column-actions {
+  width: 1%;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .iot-device-table {
+  min-width: 104rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .iot-reading-table {
+  min-width: 100rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .iot-history-table {
+  min-width: 90rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .camera-event-table {
+  min-width: 92rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .threat-alert-table {
+  min-width: 112rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .report-summary-table {
+  min-width: 48rem;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .report-summary-table .column-report-scientific {
+  width: 45%;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .report-summary-table .column-report-common {
+  width: 40%;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .report-summary-table .column-report-count {
+  width: 15%;
+}
+
+.officer-layout.officer-layout .officer-table-scroll .iot-device-table td:nth-child(1),
+.officer-layout.officer-layout .officer-table-scroll .iot-device-table td:nth-child(4),
+.officer-layout.officer-layout .officer-table-scroll .iot-device-table td:nth-child(5),
+.officer-layout.officer-layout .officer-table-scroll .iot-device-table td:nth-child(8),
+.officer-layout.officer-layout .officer-table-scroll .iot-device-table td:nth-child(9),
+.officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(1),
+.officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(2),
+.officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(3),
+.officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(10),
+.officer-layout.officer-layout .officer-table-scroll .iot-history-table td:nth-child(1),
+.officer-layout.officer-layout .officer-table-scroll .iot-history-table td:nth-child(2),
+.officer-layout.officer-layout .officer-table-scroll .iot-history-table td:nth-child(3),
+.officer-layout.officer-layout .officer-table-scroll .camera-event-table td:nth-child(1),
+.officer-layout.officer-layout .officer-table-scroll .camera-event-table td:nth-child(3),
+.officer-layout.officer-layout .officer-table-scroll .camera-event-table td:nth-child(4),
+.officer-layout.officer-layout .officer-table-scroll .camera-event-table td:nth-child(7),
+.officer-layout.officer-layout .officer-table-scroll .threat-alert-table td:nth-child(1),
+.officer-layout.officer-layout .officer-table-scroll .threat-alert-table td:nth-child(3),
+.officer-layout.officer-layout .officer-table-scroll .threat-alert-table td:nth-child(5),
+.officer-layout.officer-layout .officer-table-scroll .threat-alert-table td:nth-child(6),
+.officer-layout.officer-layout .officer-table-scroll .threat-alert-table td:nth-child(10),
+.officer-layout.officer-layout .officer-table-scroll .report-summary-table td:nth-child(3) { white-space: nowrap; }

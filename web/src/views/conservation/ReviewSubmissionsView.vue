@@ -28,6 +28,7 @@ interface ReviewObservation {
   // Raw backend ID is authoritative; displayId preserves numeric legacy presentation only.
   id: string
   displayId: string
+  isCorrectionResubmission: boolean
   revision: number
   plantId: string
   plantRawId: string
@@ -58,11 +59,21 @@ interface ReviewObservation {
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n({ useScope: 'global' })
+const copyFeedback = ref('')
+const copyFailed = ref(false)
+const copyPending = ref(false)
+const copiedKey = ref('')
+let copyAttempt = 0
+function clearCopyState() {
+  copyAttempt++
+  copyFeedback.value = ''; copiedKey.value = ''; copyFailed.value = false; copyPending.value = false
+}
 const search = ref('')
 const status = ref('')
 const species = ref('')
 const date = ref('')
 const selected = ref<ReviewObservation | null>(null)
+const standaloneRequest = ref<LinkedSpeciesRequest | null>(null)
 const comment = ref('')
 const observations = ref<ReviewObservation[]>([])
 const queueOrigin = ref<'initial_registration' | 'unknown'>('initial_registration')
@@ -76,6 +87,12 @@ const selectionError = ref('')
 const plantQr = ref<{ identity: string; status: string } | null>(null)
 const qrLoading = ref(false)
 const qrError = ref('')
+const qrCopyFeedback = ref('')
+const qrCopyFailed = ref(false)
+const qrCopyPending = ref(false)
+const qrCopied = ref(false)
+const knownQrIdentities = ref(new Set<string>())
+let qrCopyAttempt = 0
 let qrRequest = 0
 const isSaving = ref(false)
 const needsReload = ref(false)
@@ -183,6 +200,7 @@ const mapObservation = (value: unknown): ReviewObservation | null => {
     origin: observationOrigin(item.origin_type),
     id,
     displayId: formatObservationId(id) || id,
+    isCorrectionResubmission: item.is_correction_resubmission === true && observationOrigin(item.origin_type) !== 'unknown',
     revision: item.revision,
     plantId,
     plantRawId: String(Number(stringValue(item.plant_id))),
@@ -228,6 +246,7 @@ const counts = computed(() => [
     observations.value.filter((o) => o.status === 'Correction Required').length,
   ],
   ['Flagged', observations.value.filter((o) => o.status === 'Flagged').length],
+  ['Rejected', observations.value.filter((o) => o.status === 'Rejected').length],
   [
     'Approved Today',
     observations.value.filter(
@@ -236,10 +255,65 @@ const counts = computed(() => [
   ],
 ])
 
+// Display only: canonical IDs/subjects remain unchanged on each observation.
+function compactIdentifierTokens(values: readonly string[], part: (value: string) => string = value => value) {
+  const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
+  const entries = [...new Set(values)].map(value => {
+    const raw = part(value), isUuid = uuid.test(raw)
+    return { value, token: isUuid ? raw.replaceAll('-', '').toUpperCase() : raw, isUuid }
+  })
+  const counts = new Map<string, number>()
+  for (const { token } of entries) {
+    let length = Math.min(8, token.length)
+    while (true) {
+      const prefix = token.slice(0, length)
+      counts.set(prefix, (counts.get(prefix) || 0) + 1)
+      if (length === token.length) break
+      length = Math.min(length + 4, token.length)
+    }
+  }
+  return new Map(entries.map(({ value, token, isUuid }) => {
+    let length = Math.min(8, token.length)
+    while ((counts.get(token.slice(0, length)) || 0) > 1 && length < token.length) length = Math.min(length + 4, token.length)
+    // Normalized UUIDs differing only in case still retain their exact, distinct identities.
+    const label = (counts.get(token.slice(0, length)) || 0) > 1 ? value : token.slice(0, length) + (length < token.length && !isUuid ? '\u2026' : '')
+    return [value, label]
+  }))
+}
+const observationLabels = computed(() => compactIdentifierTokens([...observations.value.map(item => item.id), ...(selected.value ? [selected.value.id] : [])]))
+const observationLabel = (id: string) => `OBS-${/^[0-9]+$/.test(id) ? id : observationLabels.value.get(id) || id}`
+const subjectPart = (subject: string) => /^(staff|visitor):/.test(subject) ? subject.slice(subject.indexOf(':') + 1) : subject
+const subjectTokens = computed(() => compactIdentifierTokens([...observations.value.map(item => item.recordedBy), ...(selected.value ? [selected.value.recordedBy] : [])].filter(Boolean), subjectPart))
+const submitterLabel = (subject: string) => {
+  if (!subject) return rt('unavailable')
+  const account = reviewSession.value.user
+  // The existing authenticated session can identify only this exact account.
+  // Other submitters have no authorized name/directory mapping on this page.
+  if (officerSessionReady.value && account && subject === `staff:${account.id}` && account.name?.trim()) return account.name.trim()
+  const key = subject.startsWith('staff:') ? 'staffIdentifier' : subject.startsWith('visitor:') ? 'visitorIdentifier' : 'submitterIdentifier'
+  return t('conservationPages.observations.' + key, { id: subjectTokens.value.get(subject) || subjectPart(subject) })
+}
+async function copyIdentifier(value: string, kind: 'observation' | 'subject') {
+  if (!officerSessionReady.value || copyPending.value || !observations.value.some(item => (kind === 'observation' ? item.id : item.recordedBy) === value) || !value) return
+  const attempt = ++copyAttempt, actor = reviewSession.value.user?.id
+  const current = () => !disposed && attempt === copyAttempt && officerSessionReady.value && actor === reviewSession.value.user?.id
+  copyPending.value = true; copiedKey.value = ''; copyFeedback.value = ''; copyFailed.value = false
+  try {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(value)
+    if (!current()) return
+    copiedKey.value = `${kind}:${value}`
+    copyFeedback.value = t('conservationPages.observations.' + (kind === 'observation' ? 'copiedObservation' : 'copiedSubject'), { id: kind === 'observation' ? observationLabel(value) : submitterLabel(value) })
+  } catch {
+    if (current()) { copyFailed.value = true; copyFeedback.value = t('conservationPages.observations.copyUnavailable') }
+  } finally { if (current()) copyPending.value = false }
+}
+
+
 const filtered = computed(() =>
   observations.value.filter((observation) => {
     if (observation.origin !== queueOrigin.value) return false
-    const searchable = `${observation.id} ${observation.plantId} ${observation.speciesId} ${observation.scientificName} ${observation.commonName} ${observation.recordedBy} ${observation.status}`
+    const searchable = `${observation.id} ${observation.plantId} ${observation.speciesId} ${observation.scientificName} ${observation.commonName} ${observation.recordedBy} ${observation.status} ${observationLabel(observation.id)} ${submitterLabel(observation.recordedBy)}`
     const matchesDate = !date.value || dateKey(observation.createdAt) === date.value
     return (
       searchable.toLowerCase().includes(search.value.toLowerCase()) &&
@@ -251,7 +325,7 @@ const filtered = computed(() =>
 )
 
 const selectedSpecies = computed(() => selected.value)
-const selectedSpeciesRequest = computed(() => selected.value?.speciesRequest || null)
+const selectedSpeciesRequest = computed(() => standaloneRequest.value || selected.value?.speciesRequest || null)
 const speciesResolved = computed(() =>
   Boolean(
     selected.value &&
@@ -267,7 +341,7 @@ const speciesRequestState = computed(() => {
   if (speciesRefreshing.value) return 'loading'
   if (speciesLoadError.value || speciesSaveError.value) return 'error'
   const request = selectedSpeciesRequest.value
-  return request?.state === 'approved' && !speciesResolved.value
+  return !standaloneRequest.value && request?.state === 'approved' && !speciesResolved.value
     ? 'incomplete'
     : request?.state || 'unavailable'
 })
@@ -286,9 +360,12 @@ const unsubscribeReviewSession = subscribeSession((user, pending) => {
     similarityErrors.value = {}
     similarityAnalysis.value = null
     similarityTrigger.value = null
+    clearCopyState()
+    knownQrIdentities.value = new Set()
+
     clearPlantQr()
     listRequest++; observations.value = []; hasMore.value = false; nextCursor.value = null; isLoading.value = false
-    selectionRequest++; selectionLoading.value = false; selectionError.value = ''; selected.value = null; comment.value = ''; needsReload.value = true
+    selectionRequest++; selectionLoading.value = false; selectionError.value = ''; selected.value = null; standaloneRequest.value = null; speciesSaving.value = false; speciesRefreshing.value = false; comment.value = ''; needsReload.value = true
   }
 })
 const canReviewPlant = computed(
@@ -307,7 +384,8 @@ const canReviewPlant = computed(
 const canReviewSpecies = computed(
   () =>
     speciesRequestCanDecide(selectedSpeciesRequest.value) &&
-    selected.value?.origin === queueOrigin.value &&
+    selectedSpeciesRequest.value?.requestedBy !== `staff:${reviewSession.value.user?.id}` &&
+    (Boolean(standaloneRequest.value) || selected.value?.origin === queueOrigin.value) &&
     !selectionLoading.value && !selectionError.value &&
     officerSessionReady.value &&
     !reviewBusy.value &&
@@ -393,6 +471,8 @@ function closeReview() {
   selected.value = null
   resetSpeciesState()
   const query = { ...route.query }
+  standaloneRequest.value = null
+  delete query.speciesRequest
   delete query.review
   void router.replace({ query })
 }
@@ -494,7 +574,25 @@ const imageFailed = (id: string) => {
 }
 
 const request = createReviewRequest(rt, (...args) => fetch(...args))
+const qrLabel = (value: string) => compactIdentifierTokens([...knownQrIdentities.value, value]).get(value) || value
+async function copyQrIdentity() {
+  const value = plantQr.value?.identity, observationId = selected.value?.id
+  if (!officerSessionReady.value || !value || !observationId || qrLoading.value || qrError.value || qrCopyPending.value) return
+  const attempt = ++qrCopyAttempt, actor = reviewSession.value.user?.id
+  const current = () => !disposed && attempt === qrCopyAttempt && officerSessionReady.value &&
+    actor === reviewSession.value.user?.id && selected.value?.id === observationId && plantQr.value?.identity === value
+  qrCopyPending.value = true; qrCopyFeedback.value = ''; qrCopyFailed.value = false; qrCopied.value = false
+  try {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(value)
+    if (current()) { qrCopied.value = true; qrCopyFeedback.value = rt('qrCopied') }
+  } catch {
+    if (current()) { qrCopyFailed.value = true; qrCopyFeedback.value = rt('qrCopyUnavailable') }
+  } finally { if (current()) qrCopyPending.value = false }
+}
 function clearPlantQr() {
+  qrCopyAttempt++
+  qrCopyFeedback.value = ''; qrCopyFailed.value = false; qrCopyPending.value = false; qrCopied.value = false
   qrRequest++
   plantQr.value = null
   qrLoading.value = false
@@ -518,6 +616,7 @@ async function loadPlantQr(observation: ReviewObservation) {
       identity: typeof plant.qr_token === 'string' && plant.qr_token.trim() ? plant.qr_token : '',
       status: typeof plant.qr_status === 'string' && plant.qr_status.trim() ? plant.qr_status : '',
     }
+    if (plantQr.value.identity) knownQrIdentities.value = new Set([...knownQrIdentities.value, plantQr.value.identity])
   } catch {
     if (current()) qrError.value = rt('qrLoadFailed')
   } finally {
@@ -558,6 +657,7 @@ function updateObservation(observation: ReviewObservation) {
   if (lostDependency) speciesLoadError.value = rt('speciesRequest.loadFailed')
 }
 async function refreshSpeciesRequest() {
+  if (standaloneRequest.value) { await refreshStandaloneRequest(); return }
   if (!selected.value || reviewBusy.value || speciesRefreshing.value || selectionLoading.value || selectionError.value) return
   const id = selected.value.id
   const token = ++selectionRequest
@@ -578,7 +678,7 @@ async function refreshSpeciesRequest() {
   }
 }
 async function decideSpecies(decision: SpeciesRequestDecision) {
-  if (!selected.value || !canReviewSpecies.value || !selectedSpeciesRequest.value) return
+  if ((!selected.value && !standaloneRequest.value) || !canReviewSpecies.value || !selectedSpeciesRequest.value) return
   if (decision === 'Approved' && !speciesVisibility.value) {
     speciesSaveError.value = 'Select visibility.'
     return
@@ -592,7 +692,8 @@ async function decideSpecies(decision: SpeciesRequestDecision) {
     )
     return
   }
-  const observationId = selected.value.id
+  if (standaloneRequest.value) { await decideStandaloneSpecies(decision, typedComment); return }
+  const observationId = selected.value!.id
   const requestId = selectedSpeciesRequest.value.id
   const token = ++selectionRequest
   speciesSaving.value = true
@@ -667,8 +768,78 @@ async function decideSpecies(decision: SpeciesRequestDecision) {
     }
   }
 }
+async function fetchStandaloneRequest(id: string) {
+  if (!/^[1-9][0-9]{0,9}$/.test(id) || BigInt(id) > 2147483647n) throw new ReviewApiError(rt('feedback.invalidId'))
+  const result = await request('/api/species-requests/' + encodeURIComponent(id))
+  const data = record(result.species_request)
+  if (!data || String(data.request_id) !== id) throw new ReviewApiError(rt('feedback.invalidResponse'))
+  const mapped = mapLinkedSpeciesRequest({ species_request_id: id, species_request: {
+    ...data, proposed_scientific_name: data.scientific_name,
+    assets: [{ id: 'species-request-' + id, content_type: 'image/jpeg' }],
+  } })
+  if (!mapped || ['error','unknown','unavailable'].includes(mapped.state)) throw new ReviewApiError(rt('feedback.invalidResponse'))
+  return mapped
+}
+async function refreshStandaloneRequest() {
+  if (!standaloneRequest.value || reviewBusy.value || speciesRefreshing.value || !officerSessionReady.value) return
+  const id = standaloneRequest.value.id, token = ++selectionRequest
+  speciesRefreshing.value = true; speciesLoadError.value = ''
+  try {
+    const fresh = await fetchStandaloneRequest(id)
+    if (!disposed && token === selectionRequest && officerSessionReady.value) { standaloneRequest.value = fresh; speciesNeedsReload.value = false; speciesSaveError.value = '' }
+  } catch (error) { if (!disposed && token === selectionRequest) speciesLoadError.value = error instanceof Error ? error.message : rt('speciesRequest.loadFailed') }
+  finally { if (!disposed && token === selectionRequest) speciesRefreshing.value = false }
+}
+async function decideStandaloneSpecies(decision: SpeciesRequestDecision, typedComment: string) {
+  const id = standaloneRequest.value!.id, token = ++selectionRequest
+  speciesSaving.value = true; speciesSaveError.value = ''; reviewMessage.value = null
+  let committed = false
+  const current = () => !disposed && token === selectionRequest && officerSessionReady.value && route.query.speciesRequest === id
+  try {
+    const fresh = await fetchStandaloneRequest(id)
+    if (!current()) return
+    standaloneRequest.value = fresh
+    if (fresh.state !== 'pending' || fresh.requestedBy === `staff:${reviewSession.value.user?.id}`) throw new ReviewApiError(rt('speciesRequest.conflict'), 409)
+    const result = await request(speciesRequestReviewUrl(id), { decision, comment: typedComment,
+      ...(decision === 'Approved' ? { visibility: speciesVisibility.value } : {}) })
+    if (!current()) return
+    if (result.reviewed !== true) throw new ReviewApiError(rt('feedback.invalidResponse'))
+    committed = true
+    const saved = await fetchStandaloneRequest(id)
+    if (!current()) return
+    standaloneRequest.value = saved
+    if (saved.status !== decision) throw new ReviewApiError(rt('feedback.invalidResponse'))
+    showFeedback(rt('speciesRequest.saved'), 'success')
+  } catch (error) {
+    if (!current()) return
+    if (error instanceof ReviewApiError && error.status === 409 && !committed) {
+      try { const fresh = await fetchStandaloneRequest(id); if (!current()) return; standaloneRequest.value = fresh }
+      catch { if (current()) { speciesNeedsReload.value = true; speciesLoadError.value = rt('speciesRequest.conflictReloadFailed') } }
+    } else speciesNeedsReload.value = committed || !(error instanceof ReviewApiError) || ![400,401,403].includes(error.status)
+    speciesSaveError.value = committed ? rt('speciesRequest.savedReloadFailed') : error instanceof Error ? error.message : rt('speciesRequest.loadFailed')
+    speciesReviewComment.value = typedComment
+  } finally {
+    if (!disposed && token === selectionRequest) { speciesSaving.value = false; if (route.query.speciesRequest !== id) void resolveQuery() }
+  }
+}
+async function resolveStandaloneQuery() {
+  const id = route.query.speciesRequest
+  if (standaloneRequest.value?.id === id) return
+  const token = ++selectionRequest
+  selected.value = null; standaloneRequest.value = null; clearPlantQr(); resetSpeciesState()
+  selectionError.value = ''; selectionLoading.value = true; needsReload.value = false; reviewMessage.value = null
+  try {
+    if (route.query.review || typeof id !== 'string') throw new ReviewApiError(rt('feedback.invalidId'))
+    const fresh = await fetchStandaloneRequest(id)
+    if (!disposed && token === selectionRequest && officerSessionReady.value) { standaloneRequest.value = fresh; speciesReviewComment.value = fresh.reviewComment; failedAssets.value = new Set() }
+  } catch (error) {
+    if (!disposed && token === selectionRequest) { selectionError.value = error instanceof Error ? error.message : rt('speciesRequest.loadFailed'); showFeedback(selectionError.value) }
+  } finally { if (!disposed && token === selectionRequest) selectionLoading.value = false }
+}
 async function resolveQuery() {
   if (isLoading.value || reviewBusy.value || disposed || !officerSessionReady.value) return
+  if (route.query.speciesRequest !== undefined) { await resolveStandaloneQuery(); return }
+  standaloneRequest.value = null
   const id = typeof route.query.review === 'string' ? route.query.review : ''
   if (id && selected.value?.id === id) return
   const token = ++selectionRequest
@@ -807,11 +978,12 @@ async function loadObservations(append = false) {
 }
 onMounted(loadObservations)
 watch(
-  () => route.query.review,
+  () => [route.query.review, route.query.speciesRequest, officerSessionReady.value],
   () => void resolveQuery(),
 )
 onBeforeUnmount(() => {
   disposed = true
+  clearCopyState()
   clearPlantQr()
   unsubscribeReviewSession()
   selectionRequest++
@@ -831,21 +1003,29 @@ onBeforeUnmount(() => {
     @dismiss="dismissFeedback"
   />
 
-  <section class="page-intro">
+  <section class="page-intro reviews-intro">
     <div>
-      <p class="page-kicker">{{ ct('VERIFICATION WORKFLOW') }}</p>
+      <p class="page-kicker">{{ rt('queues.registrationEyebrow') }}</p>
       <h2>{{ rt('queues.registrations') }}</h2>
       <p>{{ rt('queues.registrationIntro') }}</p>
     </div>
   </section>
-  <section class="summary-grid">
-    <article v-for="count in counts" :key="String(count[0])" class="summary-card">
-      <p>{{ ct(count[0]) }}</p>
-      <strong>{{ countValue(count[1]!) }}</strong
-      ><small>{{ rt('queues.loadedScope') }}</small>
+  <section class="summary-grid review-summary-grid">
+    <article v-for="count in counts" :key="String(count[0])" class="summary-card review-summary-card" :class="`review-summary-${String(count[0]).toLowerCase().replaceAll(' ', '-')}`">
+      <div class="review-summary-title">
+        <p>{{ ct(count[0]) }}</p>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <template v-if="count[0] === 'Pending Review'"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></template>
+          <path v-else-if="count[0] === 'Correction Required'" d="m15 4 5 5M4 20l5-1L21 7l-5-5L4 14z" />
+          <path v-else-if="count[0] === 'Flagged'" d="M5 21V3h14l-3 5 3 5H5" />
+          <template v-else-if="count[0] === 'Rejected'"><circle cx="12" cy="12" r="9" /><path d="m8 8 8 8M16 8l-8 8" /></template>
+          <template v-else><circle cx="12" cy="12" r="9" /><path d="m7 12 3 3 7-7" /></template>
+        </svg>
+      </div>
+      <strong>{{ countValue(count[1]!) }}</strong>
     </article>
   </section>
-  <div class="control-bar">
+  <div class="control-bar reviews-filters">
     <label class="field"><span>{{ rt('queues.reviewQueue') }}</span><select v-model="queueOrigin" :disabled="reviewBusy" @change="changeQueue">
       <option value="initial_registration">{{ rt('queues.registrations') }}</option>
       <option value="unknown">{{ rt('queues.legacy') }}</option>
@@ -882,38 +1062,36 @@ onBeforeUnmount(() => {
         </option>
       </select></label
     >
-    <label class="field"
-      ><span>{{ rt('recordCreated') }}</span> ><input v-model="date" type="date"
-    /></label>
+    <label class="field">
+      <span>{{ rt('recordCreated') }}</span>
+      <input v-model="date" type="date" />
+    </label>
   </div>
   <p v-if="selectionLoading" role="status">{{ rt('loadingDetail') }}</p>
   <p v-if="skippedRecords" role="status">{{ rt('skippedRecords', { count: skippedRecords }) }}</p>
-  <p>{{ rt('queues.loadedScope') }}</p>
   <p v-if="queueOrigin === 'unknown'">{{ rt('queues.originUnverified') }}</p>
-  <section class="panel">
-    <div class="table-scroll">
-      <table>
+  <section class="panel reviews-panel">
+    <p class="copy-feedback" :class="{ warning: copyFailed }" role="status" aria-live="polite" aria-atomic="true">{{ copyFeedback }}</p>
+    <div class="table-scroll reviews-scroll" role="region" :aria-label="rt('queues.registrations')" tabindex="0">
+      <table class="reviews-table">
+        <colgroup><col class="plant-column" /><col class="observation-column" /><col class="species-column" /><col class="submitter-column" /><col class="zone-column" /><col class="created-column" /><col class="status-column" /><col class="similarity-column" /><col class="actions-column" /></colgroup>
         <thead>
           <tr>
-            <th>{{ ct('Observation ID') }}</th>
-            <th>{{ ct('Plant ID') }}</th>
-            <th>{{ ct('Species') }}</th>
-            <th>{{ ct('Submitted By') }}</th>
-            <th>{{ ct('Location Zone') }}</th>
-            <th>{{ rt('recordCreated') }}</th>
-            <th>{{ ct('Status') }}</th>
-            <th>{{ ct('Similarity') }}</th>
-            <th>{{ ct('Actions') }}</th>
+            <th scope="col">{{ ct('Plant ID') }}</th>
+            <th scope="col">{{ ct('Observation ID') }}</th>
+            <th scope="col">{{ ct('Species') }}</th>
+            <th scope="col">{{ ct('Submitted By') }}</th>
+            <th scope="col">{{ ct('Location Zone') }}</th>
+            <th scope="col">{{ rt('recordCreated') }}</th>
+            <th scope="col">{{ ct('Status') }}</th>
+            <th scope="col">{{ ct('Similarity') }}</th>
+            <th scope="col">{{ ct('Actions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="observation in filtered" :key="observation.id">
-            <td>
-              <strong class="observation-id" :title="observation.id">{{
-                observation.displayId
-              }}</strong>
-            </td>
-            <td>{{ observation.plantId }}</td>
+            <td class="plant-id-cell">{{ observation.plantId }}</td>
+          <td class="identity-cell"><div class="identifier-line"><strong :title="observation.id">{{ observationLabel(observation.id) }}</strong><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" @click="copyIdentifier(observation.id, 'observation')"><svg v-if="copiedKey !== `observation:${observation.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></div></td>
             <td>
               <div v-if="observation.speciesRequest" class="species-request-list">
                 <span class="species-request-badge">{{ rt('speciesRequest.title') }}</span>
@@ -924,13 +1102,14 @@ onBeforeUnmount(() => {
               <em v-else-if="observation.scientificName">{{ observation.scientificName }}</em>
               <span v-else>{{ ct('Species unavailable') }}</span>
             </td>
-            <td>{{ observation.recordedBy || '—' }}</td>
+          <td class="identity-cell"><div class="identifier-line"><span :title="observation.recordedBy">{{ submitterLabel(observation.recordedBy) }}</span><template v-if="observation.recordedBy"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" @click="copyIdentifier(observation.recordedBy, 'subject')"><svg v-if="copiedKey !== `subject:${observation.recordedBy}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></div></td>
             <td>{{ observation.zone || rt('notRecorded') }}</td>
             <td>{{ formatDate(observation.createdAt) }}</td>
-            <td>
-              <span class="badge" :class="observation.status.toLowerCase().replaceAll(' ', '-')">{{
+            <td class="status-cell">
+              <span class="review-status-group"><span class="badge" :class="observation.status.toLowerCase().replaceAll(' ', '-')">{{
                 observation.status ? ct(observation.status) : '—'
               }}</span>
+              <span v-if="observation.status === 'Pending Review' && observation.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span>
             </td>
             <td>
               <button
@@ -946,11 +1125,11 @@ onBeforeUnmount(() => {
               </button>
               <small v-if="similarityErrors[observation.id]" class="similarity-unavailable" role="alert">{{ similarityErrors[observation.id] }}</small>
             </td>
-            <td>
+            <td class="actions-cell"><div class="action-group">
               <button class="action-button" :disabled="reviewBusy" @click="open(observation)">
                 {{ ct('Review') }}
               </button>
-            </td>
+            </div></td>
           </tr>
           <tr v-if="isLoading || loadError || !filtered.length">
             <td colspan="9">
@@ -968,14 +1147,18 @@ onBeforeUnmount(() => {
   </section>
 
   <AppModal
-    v-if="selected"
-    :title="ct('Review {id}', { id: selected.displayId })"
+    v-if="selected || standaloneRequest"
+    :title="standaloneRequest ? rt('speciesRequest.title') : ct('Review {id}', { id: observationLabel(selected!.id) })"
     :subtitle="
-      ct('{id} · submitted by {name}', { id: selected.plantId, name: selected.recordedBy })
+      standaloneRequest ? standaloneRequest.scientificName : ct('{id} · submitted by {name}', { id: selected!.plantId, name: submitterLabel(selected!.recordedBy) })
     "
     wide
     @close="closeReview"
   >
+    <template v-if="selected">
+    <dl v-if="copyFailed" class="detail-list">
+      <div><dt>{{ ct('Observation ID') }}</dt><dd class="full-identifier">{{ selected.id }}</dd></div>
+    </dl>
     <p v-if="selected.origin === 'unknown'" role="status">{{ rt('queues.originUnverified') }}</p>
     <p v-if="selected.origin !== queueOrigin" role="status">{{ rt('queues.originMoved') }} <RouterLink :to="{ name: 'conservation-observations' }">{{ rt('queues.fieldObservations') }}</RouterLink></p>
     <p v-if="selectionLoading" role="status">{{ rt('loadingLatestObservation') }}</p>
@@ -983,6 +1166,7 @@ onBeforeUnmount(() => {
       <p>{{ selectionError }}</p>
       <button class="secondary-button" :disabled="selectionLoading || reviewBusy" @click="retrySelection">{{ rt('retryRefresh') }}</button>
     </div>
+    </template>
     <section
       v-if="selectedSpeciesRequest"
       class="species-request-card"
@@ -991,7 +1175,7 @@ onBeforeUnmount(() => {
     >
       <header class="species-request-header">
         <div>
-          <p class="section-kicker">{{ rt('speciesRequest.requiredFirst') }}</p>
+          <p v-if="!standaloneRequest" class="section-kicker">{{ rt('speciesRequest.requiredFirst') }}</p>
           <h3 id="species-request-heading">{{ rt('speciesRequest.title') }}</h3>
         </div>
         <span class="species-request-badge">{{
@@ -999,7 +1183,7 @@ onBeforeUnmount(() => {
         }}</span>
       </header>
       <p :role="speciesLoadError ? 'alert' : 'status'" id="species-request-notice">
-        {{ speciesNotice }}
+        {{ standaloneRequest ? rt(`speciesRequest.states.${speciesRequestState}`) : speciesNotice }}
       </p>
       <p v-if="speciesLoadError" role="alert">{{ speciesLoadError }}</p>
       <p v-if="speciesSaveError" role="alert">{{ speciesSaveError }}</p>
@@ -1067,12 +1251,11 @@ onBeforeUnmount(() => {
               rt(asset.contentType.startsWith('image/') ? 'imageUnavailable' : 'attachment')
             }}</span>
           </div>
-          <small class="asset-id">{{ asset.id }} · {{ asset.contentType }}</small>
         </article>
       </div>
       <p v-else>{{ rt('noAssets') }}</p>
       <section
-        v-if="speciesResolved"
+        v-if="selected && speciesResolved"
         class="approved-species"
         aria-labelledby="approved-species-heading"
       >
@@ -1146,6 +1329,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </section>
+    <template v-if="selected">
     <section class="review-section">
       <h3>{{ rt('speciesRequest.plantObservation') }}</h3>
       <p class="section-kicker">{{ ct('PLANT & SPECIES INFORMATION') }}</p>
@@ -1240,7 +1424,18 @@ onBeforeUnmount(() => {
           <dl v-else-if="plantQr" class="detail-list">
             <div>
               <dt>{{ rt('qrIdentity') }}</dt>
-              <dd>{{ plantQr.identity || rt('notRecorded') }}</dd>
+              <dd>
+                <div v-if="plantQr.identity" class="identifier-line qr-identifier">
+                  <span :title="plantQr.identity">{{ qrLabel(plantQr.identity) }}</span>
+                  <button type="button" class="identifier-copy" :disabled="!officerSessionReady || qrCopyPending" :aria-label="rt('copyQrIdentity')" :title="rt('copyQrIdentity')" @click="copyQrIdentity">
+                    <svg v-if="!qrCopied" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg>
+                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg>
+                  </button>
+                </div>
+                <span v-else>{{ rt('notRecorded') }}</span>
+                <span class="qr-copy-feedback" role="status" aria-live="polite" aria-atomic="true">{{ qrCopyFeedback }}</span>
+                <span v-if="qrCopyFailed" class="full-identifier qr-copy-fallback">{{ plantQr.identity }}</span>
+              </dd>
             </div>
             <div>
               <dt>{{ rt('qrStatus') }}</dt>
@@ -1263,10 +1458,6 @@ onBeforeUnmount(() => {
                 <span v-else>{{
                   rt(asset.contentType.startsWith('image/') ? 'imageUnavailable' : 'attachment')
                 }}</span>
-              </div>
-              <div class="submitted-image-caption">
-                <strong class="asset-id" :title="asset.id">{{ asset.id }}</strong>
-                <small>{{ asset.contentType }}</small>
               </div>
             </article>
           </div>
@@ -1325,21 +1516,24 @@ onBeforeUnmount(() => {
               {{ similarityLoading === selected.id ? 'Checking...' : similarityFor(selected.id) ? 'View matches' : 'Check similarity' }}
             </button>
           </section>
-          <h3>{{ rt('loadedHistory') }}</h3>
-          <p>{{ rt('historyLimit') }}</p>
-          <div
-            v-for="observation in observations.filter((item) => item.plantId === selected?.plantId)"
-            :key="observation.id"
-            class="history-item"
-          >
-            <strong class="observation-id" :title="observation.id">{{
-              observation.displayId
-            }}</strong
-            ><span
-              >{{ formatDate(observation.createdAt) }} · {{ observation.height || '—' }} ·
-              {{ observation.health ? ct(observation.health) : '—' }}</span
+          <template v-if="selected.origin !== 'initial_registration'">
+            <h3>{{ rt('loadedHistory') }}</h3>
+            <p>{{ rt('historyLimit') }}</p>
+            <div
+              v-for="observation in observations.filter((item) => item.plantId === selected?.plantId)"
+              :key="observation.id"
+              class="history-item"
             >
-          </div>
+              <strong class="observation-id" :title="observation.id">{{
+                observationLabel(observation.id)
+              }}</strong>
+              <span class="history-date">{{ formatDate(observation.createdAt) }}</span>
+              <div class="history-details">
+                <span v-if="observation.health" class="history-health">{{ ct('Health Status') }}: {{ ct(observation.health) }}</span>
+                <span v-if="observation.height">{{ ct('Height') }}: {{ observation.height }}</span>
+              </div>
+            </div>
+          </template>
           <label class="form-field officer-comment"
             ><span>{{ ct('Observation Review Comment') }}</span
             ><textarea
@@ -1373,7 +1567,6 @@ onBeforeUnmount(() => {
       <input v-model="conflictAcknowledged" type="checkbox" :disabled="reviewBusy" />
       {{ rt('acknowledgeLatest') }}
     </label>
-    <h3>{{ rt('speciesRequest.plantDecision') }}</h3>
     <p
       v-if="
         selectedSpeciesRequest &&
@@ -1390,7 +1583,7 @@ onBeforeUnmount(() => {
       {{ rt('speciesRequest.resolveFirst') }}
     </p>
     <div
-      class="modal-actions"
+      class="modal-actions plant-review-actions"
       role="group"
       :aria-label="rt('speciesRequest.plantDecision')"
       :aria-busy="reviewBusy"
@@ -1422,6 +1615,8 @@ onBeforeUnmount(() => {
         {{ ct('Flag') }}
       </button>
     </div>
+    </template>
+    <p v-if="standaloneRequest && reviewMessage" :role="reviewMessage.variant === 'error' ? 'alert' : 'status'">{{ reviewMessage.message }}</p>
   </AppModal>
 
   <PlantSimilarityDrawer
@@ -1432,6 +1627,75 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.review-status-group { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.reviews-table .status-cell .review-status-group .resubmission-tag { background: #FFF1DB; color: #926119; font-size: 12px; padding: 3px 8px; flex-shrink: 0; }
+
+.reviews-intro h2 { font-size: 28px; line-height: 1.2; }
+.reviews-intro p { font-size: 14px; line-height: 1.55; }
+.reviews-intro .page-kicker { font-size: 12px; line-height: 1.4; }
+.reviews-panel > .action-button { font-size: 13px; }
+
+.reviews-filters { align-items: stretch; }
+.reviews-filters > .field { grid-template-rows: 1fr 44px; }
+.reviews-filters > .field > span { align-self: end; font-size: 12px; line-height: 1.4; }
+.reviews-filters > .field > input, .reviews-filters > .field > select { box-sizing: border-box; height: 44px; padding: 9px 10px; font-size: 14px; line-height: 1.4; }
+.review-summary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.review-summary-card { min-width: 0; padding: 18px; border: 1px solid currentColor; border-radius: 14px; background: var(--review-summary-background); color: var(--review-summary-ink); box-shadow: none; }
+.review-summary-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.review-summary-title p { margin: 0; color: inherit; font-size: 14px; line-height: 1.5; }
+.review-summary-title svg { flex: 0 0 20px; width: 20px; height: 20px; }
+.review-summary-card strong { color: inherit; font-size: 30px; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.review-summary-pending-review { --review-summary-background: #e8f0f5; --review-summary-ink: #315d78; }
+.review-summary-correction-required { --review-summary-background: #fff1db; --review-summary-ink: #926119; }
+.review-summary-flagged { --review-summary-background: #f0eaf8; --review-summary-ink: #69459a; }
+.review-summary-rejected { --review-summary-background: #fbe8e5; --review-summary-ink: #a33f35; }
+.review-summary-approved-today { --review-summary-background: #e7f3e9; --review-summary-ink: #287347; }
+@media (max-width: 1280px) { .review-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .review-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .review-summary-grid { grid-template-columns: minmax(0, 1fr); } }
+.reviews-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.reviews-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }
+.reviews-table { width: 100%; min-width: 96rem; table-layout: auto; white-space: normal; border-collapse: separate; border-spacing: 0; }
+.reviews-table .observation-column { width: 12rem; }
+.reviews-table .submitter-column { width: 13rem; }
+.reviews-table .plant-column { width: 6rem; }
+.reviews-table .species-column { width: 13rem; }
+.reviews-table .zone-column { width: 8rem; }
+.reviews-table .similarity-column { width: 8rem; }
+.reviews-table .status-column, .reviews-table .actions-column { width: 1%; }
+.reviews-table .created-column { width: 12rem; }
+.reviews-table th, .reviews-table td { padding: 12px 14px; text-align: left; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
+.reviews-table th { background: #245443; color: #fff; border-bottom-color: #245443; font-size: 12px; font-weight: 700; line-height: 1.4; }
+.reviews-table thead th:first-child { border-top-left-radius: 10px; }
+.reviews-table thead th:last-child { border-top-right-radius: 10px; }
+.reviews-table td { font-size: 14px; line-height: 1.5; }
+.reviews-table .plant-id-cell { color: #315749; font-weight: 700; }
+.reviews-table .identity-cell strong { color: inherit; font-weight: 400; }
+.reviews-table .status-cell, .reviews-table .actions-cell { white-space: nowrap; }
+.reviews-table .badge { display: inline-flex; align-items: center; width: max-content; max-width: none; box-sizing: border-box; white-space: nowrap; overflow-wrap: normal; font-size: 12px; line-height: 1.4; vertical-align: middle; }
+/* Auto-layout lets nonwrapping status/action content set its own minimum column width. */
+.reviews-scroll .reviews-table .action-group { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 7px; width: max-content; min-width: max-content; }
+.reviews-table .action-group > .action-button { flex: 0 0 auto; width: max-content; min-width: max-content; max-width: none; height: auto; min-height: 32px; white-space: nowrap; overflow-wrap: normal; font-size: 13px; }
+.reviews-scroll .reviews-table .identifier-copy { flex: 0 0 44px; width: 44px; min-width: 44px; max-width: 44px; }
+.reviews-table .state-cell { padding: 30px 14px; text-align: center; }
+@media (max-width: 767px) { .reviews-table .action-group > .action-button { min-height: 44px; } }
+.identity-cell { white-space: normal; }
+.identifier-line { display: inline-flex; align-items: center; justify-content: flex-start; flex-wrap: nowrap; gap: 7px; max-width: 100%; vertical-align: middle; }
+.identifier-line > strong, .identifier-line > span { min-width: 0; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.identifier-line > strong { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.identifier-copy { display: grid; place-items: center start; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #315b49; cursor: pointer; }
+.identifier-copy svg { display: block; width: 17px; height: 17px; }
+.identifier-copy:focus-visible { outline: 3px solid #315b49; outline-offset: 2px; }
+.identifier-copy:disabled { opacity: .5; cursor: not-allowed; }
+.copy-feedback { margin: 0; padding: 0 18px 12px; color: #315b49; font-size: 12px; overflow-wrap: anywhere; }
+.copy-feedback.warning { color: #8a6429; }
+.copy-feedback:empty { position: absolute; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); overflow: hidden; }
+.full-identifier { overflow-wrap: anywhere; white-space: normal; user-select: text; }
+
+/* Match the Pending Review badge currently displayed on Observations. */
+.reviews-table .badge.pending-review { background: #e8eff2; color: #53727c; }
+.reviews-table .badge.flagged { background: #f0eaf8; color: #69459a; }
+
 .two-column > div { min-width: 0; }
 .detail-list dd { min-width: 0; overflow-wrap: anywhere; }
 .species-request-card {
@@ -1451,6 +1715,18 @@ onBeforeUnmount(() => {
 }
 .species-request-header h3 {
   margin: 5px 0 10px;
+}
+.reviews-table .species-request-badge {
+  font-size: 12px;
+  line-height: 1.4;
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .species-request-badge {
   display: inline-block;
@@ -1529,6 +1805,8 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
+.reviews-table .similarity-badge-button strong { font-size: 14px; }
+.reviews-table .similarity-badge-button span { font-size: 12px; }
 .similarity-badge-button {
   min-width: 58px;
   padding: 5px 8px;
@@ -1561,8 +1839,9 @@ button:disabled {
   outline-offset: 2px;
 }
 .similarity-unavailable {
-  color: #89968f;
-  font-size: 9px;
+  color: #63776d;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .review-similarity-summary {
   margin: 10px 0 20px;
@@ -1631,20 +1910,6 @@ button:disabled {
   border-radius: inherit;
   object-fit: cover;
 }
-.submitted-image-caption {
-  padding: 8px 2px 0;
-  display: grid;
-  gap: 3px;
-}
-.submitted-image-caption strong {
-  color: #38594c;
-  font-size: 11px;
-}
-.submitted-image-caption small {
-  color: #71857b;
-  font-size: 10px;
-  line-height: 1.4;
-}
 .history-item {
   padding: 10px 0;
   display: grid;
@@ -1652,9 +1917,14 @@ button:disabled {
   border-bottom: 1px solid #edf0ed;
   font-size: 10px;
 }
-.history-item span {
-  color: #829088;
-}
+.history-item .observation-id { max-width: 100%; white-space: normal; }
+.history-date { color: #63776d; }
+.history-details { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.history-details:empty { display: none; }
+.plant-review-actions { margin-top: 20px; }
+.qr-identifier { max-width: 100%; }
+.qr-copy-feedback, .qr-copy-fallback { display: block; overflow-wrap: anywhere; line-height: 1.5; }
+.qr-copy-feedback:empty { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
 .officer-comment {
   margin-top: 18px;
 }

@@ -38,6 +38,10 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      '/api/taxonomy': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: false,
+      },
       '/api/tables': {
         target: 'http://localhost:3000',
         changeOrigin: true,
