@@ -207,9 +207,14 @@ test("HTTP access matrix rejects unauthorized roles before database calls", asyn
     )
   ).token;
   let calls = 0;
+  let galleryInstalled = false;
   const pool = {
-    query: async () => {
+    query: async (sql) => {
       calls++;
+      // A scalar catalog SELECT returns one boolean row, even for a missing
+      // relation. Empty data lists still return no rows.
+      if (sql === "SELECT to_regclass(current_schema() || '.species_image_collection') IS NOT NULL AS available")
+        return { rows: [{ available: galleryInstalled }] };
       return { rows: [] };
     },
     connect: async () => {
@@ -312,13 +317,19 @@ test("HTTP access matrix rejects unauthorized roles before database calls", asyn
       );
       assert.equal(calls, before, "Denied request reached plant storage");
     }
-  const guest = await fetch(
-    `http://127.0.0.1:${server.address().port}/api/species`,
-  );
-  assert.equal(guest.status, 200);
-  const bot = await fetch(
-    `http://127.0.0.1:${server.address().port}/api/species?scope=scientific`,
-    { headers: { Authorization: `Bearer ${tokens.Botanist}` } },
-  );
-  assert.equal(bot.status, 200);
+  // The disabled-by-default write gate must not affect legacy or managed reads.
+  for (const installed of [false, true]) {
+    galleryInstalled = installed;
+    const guest = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/species`,
+    );
+    assert.equal(guest.status, 200);
+    assert.deepEqual(await guest.json(), { species: [] });
+    const bot = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/species?scope=scientific`,
+      { headers: { Authorization: `Bearer ${tokens.Botanist}` } },
+    );
+    assert.equal(bot.status, 200);
+    assert.deepEqual(await bot.json(), { species: [] });
+  }
 });

@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
+import SpeciesPhotoManager from '../../components/conservation/SpeciesPhotoManager.vue'
+import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import {
   mapManagedSpecies,
+  canManageSpeciesPhotos,
   mapTaxonomyGenus,
   requestSpeciesApi,
   speciesPayload,
@@ -34,6 +37,16 @@ const statusFilter = ref('')
 const visibilityFilter = ref('')
 const modal = ref<'form' | 'view' | 'delete' | null>(null)
 const selected = ref<ManagedSpecies | null>(null)
+const photoSession = shallowRef(sessionSnapshot())
+const canManagePhotos = computed(() => canManageSpeciesPhotos(photoSession.value.user, photoSession.value.pending))
+const photoEditor = ref<InstanceType<typeof SpeciesPhotoManager> | null>(null)
+const createdSpeciesId = ref('')
+const photoSaveNotice = ref('')
+const unsubscribePhotos = subscribeSession((user, pending) => {
+  photoSession.value = { user, pending }
+  if (!canManagePhotos.value) modal.value = null
+})
+onScopeDispose(unsubscribePhotos)
 const editing = ref(false)
 const detailLoading = ref(false)
 const mutation = ref<'create' | 'update' | 'delete' | null>(null)
@@ -51,10 +64,72 @@ const blankForm = (): SpeciesForm => ({
   visibility: 'protected',
   description: '',
   habitat: '',
-  culturalSignificance: '',
 })
 const form = reactive<SpeciesForm>(blankForm())
 const formErrors = ref<Partial<Record<keyof SpeciesForm, string>>>({})
+const speciesForm = ref<HTMLFormElement | null>(null)
+const validationAttempted = ref(false)
+const photoValidation = computed(() => photoEditor.value?.validationState?.())
+const invalidFields = computed(() => [
+  ...Object.keys(formErrors.value),
+  ...(validationAttempted.value && (photoValidation.value?.invalid || photoValidation.value?.pending) ? ['photos'] : []),
+])
+let highlightTimer: ReturnType<typeof setTimeout> | undefined
+let highlightedGroup: HTMLElement | null = null
+let validationRun = 0
+function clearValidationHighlight() {
+  if (highlightTimer !== undefined) clearTimeout(highlightTimer)
+  highlightTimer = undefined
+  highlightedGroup?.classList.remove('validation-highlight')
+  highlightedGroup = null
+}
+function resetValidation() {
+  validationRun++
+  validationAttempted.value = false
+  clearValidationHighlight()
+  formErrors.value = {}
+}
+function currentFormErrors() {
+  const errors = validateSpeciesForm(form, taxonomy.value, knownStatuses.value)
+  if (errors.genusId && taxonomyError.value) errors.genusId = `${st('taxonomyUnavailable')} ${taxonomyError.value}`
+  // novalidate avoids browser popups; native constraints join the same field error map.
+  for (const control of speciesForm.value?.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('[data-validation-field]') || []) {
+    const key = control.dataset.validationField as keyof SpeciesForm
+    if (key in form && !control.disabled && control.validity && !control.validity.valid && !errors[key]) errors[key] = control.validationMessage || st('validationInvalid')
+  }
+  return errors
+}
+async function focusFirstInvalid() {
+  const run = ++validationRun
+  clearValidationHighlight()
+  await nextTick()
+  if (run !== validationRun || modal.value !== 'form') return
+  const control = Array.from(speciesForm.value?.querySelectorAll<HTMLElement>('[data-validation-field]') || [])
+    .find(control => invalidFields.value.includes(control.dataset.validationField || ''))
+  if (!control) return
+  const group = control.closest<HTMLElement>('[data-validation-group], .form-field') || control
+  const focusTarget = control.matches(':disabled') ? group.querySelector<HTMLElement>('[data-validation-focus]') || group : control
+  if (focusTarget === group) group.tabIndex = -1
+  focusTarget.focus({ preventScroll: true })
+  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const scroller = speciesForm.value?.closest<HTMLElement>('.modal-card')
+  if (scroller) {
+    const header = scroller.querySelector<HTMLElement>('.modal-header')
+    const stickyHeaderHeight = header && ['sticky', 'fixed'].includes(window.getComputedStyle(header).position) ? header.getBoundingClientRect().height : 0
+    scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + group.getBoundingClientRect().top - scroller.getBoundingClientRect().top - stickyHeaderHeight - 20), behavior: reduced ? 'instant' : 'smooth' })
+  }
+  if (!reduced) {
+    highlightedGroup = group
+    void group.offsetWidth // Restart the single pulse on a repeated Save attempt.
+    group.classList.add('validation-highlight')
+    highlightTimer = setTimeout(clearValidationHighlight, 1800)
+  }
+}
+watch([() => ({ ...form }), taxonomy, taxonomyError], () => {
+  if (validationAttempted.value) formErrors.value = currentFormErrors()
+}, { flush: 'post' })
+watch(modal, value => { if (value !== 'form') resetValidation() })
+onScopeDispose(() => { validationRun++; clearValidationHighlight() })
 const visibilities: SpeciesVisibility[] = ['public', 'internal', 'protected']
 const visibilityLabel = (value: string) => {
   if (value === 'public') return st('visibilityPublic')
@@ -139,9 +214,8 @@ function assignForm(item?: ManagedSpecies) {
     visibility: item.visibility || 'protected',
     description: item.description,
     habitat: item.habitat,
-    culturalSignificance: item.culturalSignificance,
   } : blankForm())
-  formErrors.value = {}
+  resetValidation()
   mutationError.value = ''
 }
 function openCreate() {
@@ -149,10 +223,14 @@ function openCreate() {
   editing.value = false
   selected.value = null
   assignForm()
+  createdSpeciesId.value = ''
+  photoSaveNotice.value = ''
   modal.value = 'form'
 }
 async function loadForModal(item: ManagedSpecies, mode: 'view' | 'form') {
   const requestId = ++detailRequest
+  createdSpeciesId.value = ''
+  photoSaveNotice.value = ''
   selected.value = item
   editing.value = mode === 'form'
   modal.value = mode
@@ -173,22 +251,31 @@ const view = (item: ManagedSpecies) => loadForModal(item, 'view')
 const openEdit = (item: ManagedSpecies) => loadForModal(item, 'form')
 
 async function save() {
-  if (mutation.value) return
-  formErrors.value = validateSpeciesForm(form, taxonomy.value, knownStatuses.value)
-  if (Object.keys(formErrors.value).length) return
+  if (mutation.value || detailLoading.value) return
+  validationAttempted.value = true
+  formErrors.value = currentFormErrors()
+  if (invalidFields.value.length) { await focusFirstInvalid(); return }
+  clearValidationHighlight()
   mutation.value = editing.value ? 'update' : 'create'
   mutationError.value = ''
   let committed = false
   try {
     const payload = speciesPayload(form)
-    const result = editing.value && selected.value
-      ? await requestSpeciesApi(`/api/species/${encodeURIComponent(selected.value.id)}`, { method: 'PATCH', body: payload })
+    const savedId = editing.value ? selected.value?.id : createdSpeciesId.value
+    const result = savedId
+      ? await requestSpeciesApi(`/api/species/${encodeURIComponent(savedId)}`, { method: 'PATCH', body: payload })
       : await requestSpeciesApi('/api/species', { method: 'POST', body: payload })
     committed = true
-    const id = editing.value && selected.value ? selected.value.id : String(result.species_id ?? '')
-    if (editing.value ? result.updated !== true : !id) throw new Error(st('errors.invalidResponse'))
+    const id = savedId || String(result.species_id ?? '')
+    if (!editing.value && id) createdSpeciesId.value = id
+    if (savedId ? result.updated !== true : !id) throw new Error(st('errors.invalidResponse'))
+    const photoResult = await photoEditor.value?.commitPhotos(id)
     await fetchSpeciesDetail(id)
     await fetchSpeciesList()
+    if (photoResult && !photoResult.complete) {
+      photoSaveNotice.value = st(photoResult.deferred ? 'photos.textSavedDeferred' : photoResult.conflict ? 'photos.conflict' : 'photos.partialFailure')
+      return
+    }
     modal.value = null
     await router.replace({ query: {} })
     showFeedback('success', editing.value ? st('feedback.edited') : st('feedback.added'))
@@ -241,31 +328,52 @@ onMounted(async () => {
   </div>
 
   <section class="panel">
-    <p v-if="!isLoading && !loadError" class="dataset-note">{{ st('loadedLimit') }}<span v-if="skippedRecords"> · {{ st('skipped', { count: skippedRecords }) }}</span></p>
-    <div class="table-scroll"><table><thead><tr><th>{{ st('speciesId') }}</th><th>{{ st('scientificName') }}</th><th>{{ st('commonName') }}</th><th>{{ st('genus') }}</th><th>{{ st('family') }}</th><th>{{ st('conservationStatus') }}</th><th>{{ st('visibility') }}</th><th>{{ st('actions') }}</th></tr></thead><tbody>
-      <tr v-for="item in filtered" :key="item.id"><td><strong>{{ item.id }}</strong></td><td><em>{{ item.scientificName || st('unavailable') }}</em></td><td>{{ item.commonName || st('unavailable') }}</td><td>{{ item.genus || st('unavailable') }}</td><td>{{ item.family || st('unavailable') }}</td><td>{{ item.conservationStatus || st('unavailable') }}</td><td><span class="badge">{{ visibilityLabel(item.visibility) }}</span></td><td><div class="action-group"><button class="action-button" @click="view(item)">{{ st('view') }}</button><button class="action-button" @click="openEdit(item)">{{ st('editSpecies') }}</button><button class="action-button danger" @click="confirmDelete(item)">{{ st('deleteSpecies') }}</button></div></td></tr>
-      <tr v-if="isLoading"><td colspan="8" class="empty-row">{{ st('loading') }}</td></tr>
-      <tr v-else-if="loadError"><td colspan="8" class="error-row"><strong>{{ st('loadFailed') }}</strong><span>{{ loadError }}</span><button class="action-button" @click="loadSpecies">{{ st('retry') }}</button></td></tr>
-      <tr v-else-if="!filtered.length"><td colspan="8" class="empty-row">{{ species.length ? st('noMatches') : st('empty') }}</td></tr>
-    </tbody></table></div>
+    <p v-if="!isLoading && !loadError && skippedRecords" class="dataset-note" role="status">{{ st('skipped', { count: skippedRecords }) }}</p>
+    <div class="table-scroll species-scroll" role="region" :aria-label="st('title')" :aria-description="st('loadedLimit')" tabindex="0">
+      <table class="species-table">
+        <colgroup>
+          <col class="species-id-column" /><col class="scientific-column" /><col class="common-column" /><col class="genus-column" /><col class="family-column" /><col class="status-column" /><col class="visibility-column" /><col class="actions-column" />
+        </colgroup>
+        <thead><tr>
+          <th scope="col">{{ st('speciesId') }}</th><th scope="col">{{ st('scientificName') }}</th><th scope="col">{{ st('commonName') }}</th><th scope="col">{{ st('genus') }}</th><th scope="col">{{ st('family') }}</th><th scope="col">{{ st('conservationStatus') }}</th><th scope="col">{{ st('visibility') }}</th><th scope="col">{{ st('actions') }}</th>
+        </tr></thead>
+        <tbody>
+          <tr v-for="item in filtered" :key="item.id">
+            <td><strong>{{ item.id }}</strong></td>
+            <td class="name-cell"><em>{{ item.scientificName || st('unavailable') }}</em></td>
+            <td class="name-cell">{{ item.commonName || st('unavailable') }}</td>
+            <td class="name-cell">{{ item.genus || st('unavailable') }}</td>
+            <td class="name-cell">{{ item.family || st('unavailable') }}</td>
+            <td class="status-cell">{{ item.conservationStatus || st('unavailable') }}</td>
+            <td><span class="badge">{{ visibilityLabel(item.visibility) }}</span></td>
+            <td class="actions-cell"><div class="action-group"><button class="action-button" @click="view(item)">{{ st('view') }}</button><button class="action-button" @click="openEdit(item)">{{ st('editSpecies') }}</button><button class="action-button danger" @click="confirmDelete(item)">{{ st('deleteSpecies') }}</button></div></td>
+          </tr>
+          <tr v-if="isLoading"><td colspan="8" class="empty-row">{{ st('loading') }}</td></tr>
+          <tr v-else-if="loadError"><td colspan="8" class="error-row"><strong>{{ st('loadFailed') }}</strong><span>{{ loadError }}</span><button class="action-button" @click="loadSpecies">{{ st('retry') }}</button></td></tr>
+          <tr v-else-if="!filtered.length"><td colspan="8" class="empty-row">{{ species.length ? st('noMatches') : st('empty') }}</td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
-  <AppModal v-if="modal === 'form'" :title="editing ? st('editSpecies') : st('createSpecies')" :subtitle="st('formSubtitle')" wide @close="!mutation && (modal = null)">
+
+
+  <AppModal v-if="modal === 'form'" :title="editing ? st('editSpecies') : st('createSpecies')" :subtitle="st('formSubtitle')" wide accessible @close="!mutation && (modal = null)">
     <p v-if="detailLoading" class="state-note">{{ st('loadingDetail') }}</p>
     <p v-if="taxonomyError" class="state-note warning">{{ st('taxonomyUnavailable') }} {{ taxonomyError }}</p>
     <p v-if="mutationError" class="state-note error">{{ mutationError }}</p>
-    <form class="form-grid" novalidate @submit.prevent="save">
-      <label class="form-field"><span>{{ st('scientificName') }} *</span><input v-model="form.scientificName" :disabled="detailLoading || Boolean(mutation)" /><small v-if="formErrors.scientificName" class="field-error">{{ formErrors.scientificName }}</small></label>
-      <label class="form-field"><span>{{ st('commonName') }} *</span><input v-model="form.commonName" :disabled="detailLoading || Boolean(mutation)" /><small v-if="formErrors.commonName" class="field-error">{{ formErrors.commonName }}</small></label>
-      <label class="form-field"><span>{{ st('genus') }}</span><select v-model="form.genusId" :disabled="detailLoading || Boolean(mutation) || Boolean(taxonomyError)"><option value="">{{ st('noGenus') }}</option><option v-for="item in taxonomy" :key="item.id" :value="item.id">{{ item.name }}</option></select><small v-if="formErrors.genusId" class="field-error">{{ formErrors.genusId }}</small></label>
-      <label class="form-field"><span>{{ st('familyDerived') }}</span><input :value="selectedGenus?.family || st('unavailable')" readonly class="readonly-field" /></label>
-      <label class="form-field"><span>{{ st('conservationStatus') }}</span><select v-model="form.conservationStatus" :disabled="detailLoading || Boolean(mutation)"><option value="">{{ st('noConservationStatus') }}</option><option v-for="item in knownStatuses" :key="item" :value="item">{{ item }}</option></select><small v-if="formErrors.conservationStatus" class="field-error">{{ formErrors.conservationStatus }}</small></label>
-      <label class="form-field"><span>{{ st('visibility') }} *</span><select v-model="form.visibility" :disabled="detailLoading || Boolean(mutation)"><option v-for="item in visibilities" :key="item" :value="item">{{ visibilityLabel(item) }}</option></select><small v-if="formErrors.visibility" class="field-error">{{ formErrors.visibility }}</small></label>
-      <label class="form-field full"><span>{{ st('description') }} *</span><textarea v-model="form.description" :disabled="detailLoading || Boolean(mutation)"></textarea><small v-if="formErrors.description" class="field-error">{{ formErrors.description }}</small></label>
-      <label class="form-field full"><span>{{ st('habitat') }}</span><textarea v-model="form.habitat" maxlength="4000" :disabled="detailLoading || Boolean(mutation)"></textarea><small v-if="formErrors.habitat" class="field-error">{{ formErrors.habitat }}</small></label>
-      <label class="form-field full"><span>{{ st('culturalSignificance') }}</span><textarea v-model="form.culturalSignificance" maxlength="4000" :disabled="detailLoading || Boolean(mutation)"></textarea><small v-if="formErrors.culturalSignificance" class="field-error">{{ formErrors.culturalSignificance }}</small></label>
-      <div class="form-field full image-limitation"><strong>{{ st('speciesImages') }}</strong><p>{{ st('imageLimitation') }}</p></div>
-      <div class="modal-actions form-field full"><button type="button" class="secondary-button" :disabled="Boolean(mutation)" @click="modal = null">{{ st('cancel') }}</button><button class="primary-button" :disabled="detailLoading || Boolean(mutation)">{{ mutation ? st('saving') : st('save') }}</button></div>
+    <form ref="speciesForm" class="form-grid" novalidate @submit.prevent="save">
+      <label class="form-field"><span>{{ st('scientificName') }} *</span><input v-model="form.scientificName" :placeholder="st('placeholders.scientificName')" data-validation-field="scientificName" aria-required="true" :aria-invalid="Boolean(formErrors.scientificName)" :aria-describedby="formErrors.scientificName ? 'species-scientificName-error' : undefined" :disabled="detailLoading || Boolean(mutation)" /><small id="species-scientificName-error" v-if="formErrors.scientificName" class="field-error">{{ formErrors.scientificName }}</small></label>
+      <label class="form-field"><span>{{ st('commonName') }} *</span><input v-model="form.commonName" :placeholder="st('placeholders.commonName')" data-validation-field="commonName" aria-required="true" :aria-invalid="Boolean(formErrors.commonName)" :aria-describedby="formErrors.commonName ? 'species-commonName-error' : undefined" :disabled="detailLoading || Boolean(mutation)" /><small id="species-commonName-error" v-if="formErrors.commonName" class="field-error">{{ formErrors.commonName }}</small></label>
+      <div class="form-field" data-validation-group><label for="species-genus-input"><span>{{ st('genus') }}</span></label><select id="species-genus-input" v-model="form.genusId" :title="st('placeholders.genus')" :aria-description="st('placeholders.genus')" data-validation-field="genusId" :aria-invalid="Boolean(formErrors.genusId)" :aria-describedby="formErrors.genusId ? 'species-genusId-error' : undefined" :disabled="detailLoading || Boolean(mutation) || Boolean(taxonomyError)"><option value="">{{ st('noGenus') }}</option><option v-for="item in taxonomy" :key="item.id" :value="item.id">{{ item.name }}</option></select><button v-if="taxonomyError" type="button" class="secondary-button taxonomy-retry" :disabled="detailLoading || Boolean(mutation)" :aria-describedby="formErrors.genusId ? 'species-genusId-error' : undefined" data-validation-focus @click="loadTaxonomy">{{ st('retry') }}</button><small id="species-genusId-error" v-if="formErrors.genusId" class="field-error">{{ formErrors.genusId }}</small></div>
+      <label class="form-field"><span>{{ st('familyDerived') }}</span><input :value="selectedGenus?.family || ''" :placeholder="st('placeholders.family')" readonly class="readonly-field" /></label>
+      <label class="form-field"><span>{{ st('conservationStatus') }}</span><select v-model="form.conservationStatus" :title="st('placeholders.conservationStatus')" :aria-description="st('placeholders.conservationStatus')" data-validation-field="conservationStatus" :aria-invalid="Boolean(formErrors.conservationStatus)" :aria-describedby="formErrors.conservationStatus ? 'species-conservationStatus-error' : undefined" :disabled="detailLoading || Boolean(mutation)"><option value="">{{ st('noConservationStatus') }}</option><option v-for="item in knownStatuses" :key="item" :value="item">{{ item }}</option></select><small id="species-conservationStatus-error" v-if="formErrors.conservationStatus" class="field-error">{{ formErrors.conservationStatus }}</small></label>
+      <label class="form-field"><span>{{ st('visibility') }} *</span><select v-model="form.visibility" :title="st('placeholders.visibility')" :aria-description="st('placeholders.visibility')" data-validation-field="visibility" aria-required="true" :aria-invalid="Boolean(formErrors.visibility)" :aria-describedby="formErrors.visibility ? 'species-visibility-error' : undefined" :disabled="detailLoading || Boolean(mutation)"><option value="" disabled>{{ st('placeholders.visibility') }}</option><option v-for="item in visibilities" :key="item" :value="item">{{ visibilityLabel(item) }}</option></select><small id="species-visibility-error" v-if="formErrors.visibility" class="field-error">{{ formErrors.visibility }}</small></label>
+      <label class="form-field full"><span>{{ st('description') }} *</span><textarea v-model="form.description" :placeholder="st('placeholders.description')" data-validation-field="description" aria-required="true" :aria-invalid="Boolean(formErrors.description)" :aria-describedby="formErrors.description ? 'species-description-error' : undefined" :disabled="detailLoading || Boolean(mutation)"></textarea><small id="species-description-error" v-if="formErrors.description" class="field-error">{{ formErrors.description }}</small></label>
+      <label class="form-field full"><span>{{ st('habitat') }}</span><textarea v-model="form.habitat" :placeholder="st('placeholders.habitat')" data-validation-field="habitat" :aria-invalid="Boolean(formErrors.habitat)" :aria-describedby="formErrors.habitat ? 'species-habitat-error' : undefined" maxlength="4000" :disabled="detailLoading || Boolean(mutation)"></textarea><small id="species-habitat-error" v-if="formErrors.habitat" class="field-error">{{ formErrors.habitat }}</small></label>
+      <SpeciesPhotoManager v-if="canManagePhotos && !detailLoading" ref="photoEditor" class="form-field full" embedded :species="editing ? selected : null" :busy="Boolean(mutation)" @retry="save" />
+      <p v-if="photoSaveNotice" class="form-field full state-note warning" role="status">{{ photoSaveNotice }}</p>
+      <div class="modal-actions form-field full"><p class="validation-summary" role="status" aria-live="polite" aria-atomic="true">{{ validationAttempted && invalidFields.length ? st('validationSummary', { count: invalidFields.length }) : '' }}</p><button type="button" class="secondary-button" :disabled="Boolean(mutation)" @click="modal = null">{{ st('cancel') }}</button><button class="primary-button" :disabled="detailLoading || Boolean(mutation)">{{ mutation ? st('saving') : st('save') }}</button></div>
     </form>
   </AppModal>
 
@@ -280,14 +388,48 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* Include the Officer boundary to outrank shared table defaults only in this table. */
+.officer-layout .species-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.species-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }
+.officer-layout .species-scroll .species-table { width: 100%; min-width: 88rem; table-layout: auto; border-collapse: separate; border-spacing: 0; }
+.species-table .species-id-column { width: 7rem; }
+.species-table .scientific-column { width: 16rem; }
+.species-table .common-column { width: 15rem; }
+.species-table .genus-column { width: 10rem; }
+.species-table .family-column { width: 11rem; }
+.species-table .status-column { width: 13rem; }
+.species-table .visibility-column { width: 9rem; }
+.species-table .actions-column { width: 1%; }
+.officer-layout .species-scroll .species-table th, .officer-layout .species-scroll .species-table td { padding: 12px 14px; text-align: left; vertical-align: middle; }
+.officer-layout .species-scroll .species-table th { background: #245443; color: #fff; border-bottom-color: #245443; font-size: var(--officer-small, .75rem); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; line-height: 1.5; }
+.species-table thead th:first-child { border-top-left-radius: 10px; }
+.species-table thead th:last-child { border-top-right-radius: 10px; }
+.officer-layout .species-scroll .species-table td { font-size: var(--officer-text, .875rem); line-height: 1.5; }
+.officer-layout .species-scroll .species-table td.name-cell { white-space: normal; overflow-wrap: normal; word-break: normal; }
+.officer-layout .species-scroll .species-table .status-cell, .officer-layout .species-scroll .species-table .actions-cell { white-space: nowrap; }
+.officer-layout .species-scroll .species-table .action-group { display: flex; align-items: center; flex-wrap: nowrap; gap: 7px; width: max-content; min-width: max-content; }
+
 .dataset-note, .state-note { margin: 0; padding: 12px 16px; color: #64776e; font-size: 11px; }
 .error-row { padding: 28px; text-align: center; color: #9b3d35; }
 .error-row span { display: block; margin: 6px 0 12px; }
 .state-note.error, .field-error { color: #a13f35; }
 .state-note.warning, .warning { color: #8a6429; }
 .form-grid { align-items: start; }
+.validation-summary { flex-basis: 100%; margin: 0; color: #a13f35; font-size: 13px; font-weight: 600; }
+.validation-summary:empty { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+.form-grid :deep([aria-invalid="true"]) { border-color: #a13f35; }
+.form-grid :deep(.validation-highlight) { border-radius: 8px; animation: validation-pulse 1.8s ease-out; }
+.taxonomy-retry { justify-self: start; }
+@keyframes validation-pulse { 0%, 30% { background-color: #fcecea; outline: 2px solid #c16b63; outline-offset: 5px; } 100% { background-color: transparent; outline: 2px solid transparent; outline-offset: 5px; } }
+@media (prefers-reduced-motion: reduce) { .form-grid :deep(.validation-highlight) { animation: none; } }
 .form-field { align-content: start; }
+.form-grid > .form-field > span,
+.form-grid > .form-field > label { display: block; margin: 0; font-size: 9px; line-height: 1.5; }
+.form-grid > .form-field > label > span { display: block; line-height: inherit; }
+.form-grid > .form-field > input,
+.form-grid > .form-field > select { height: 44px; min-height: 44px; line-height: 1.5; }
 .form-field textarea { min-height: 90px; }
+.form-grid input::placeholder, .form-grid textarea::placeholder { color: #64776e; opacity: 1; }
 .field-error { font-size: 10px; font-weight: 700; }
 .image-limitation { padding: 14px; border: 1px solid #d8e4dc; border-radius: 10px; background: #f7faf7; color: #5f746a; }
 .image-limitation p { margin: 5px 0 0; font-size: 11px; }

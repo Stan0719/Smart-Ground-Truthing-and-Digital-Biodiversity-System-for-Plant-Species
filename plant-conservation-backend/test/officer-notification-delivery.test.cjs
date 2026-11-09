@@ -13,9 +13,10 @@ test('Officer real notifications: isolated committed workflows and durable deliv
   await database.query(`CREATE TABLE public.qr_code(qr_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,plant_id INTEGER UNIQUE,qr_code TEXT UNIQUE,status TEXT,assigned_at timestamptz,activated_at timestamptz,retired_at timestamptz);
     INSERT INTO public.qr_code(qr_code,status) VALUES('one','generated'),('two','generated'),('three','generated');
     INSERT INTO species(scientific_name,common_name) VALUES('Fixture species','Fixture');INSERT INTO rbac_species_visibility VALUES(1,'public')`);
-  let failCommit=false,failFanout=false,fanoutWrites=0,directoryDown=false;
+  let failCorrection=false,failCommit=false,failFanout=false,fanoutWrites=0,directoryDown=false;
   const pool={query:(...args)=>database.query(...args),connect:async()=>{
     const c=await database.connect();return {release:()=>c.release(),query:async(sql,args)=>{
+      if(failCorrection&&sql.includes("VALUES($1,$2,'observation_resubmitted'")){failCorrection=false;throw Error('fixture outbox failure');}
       if(failCommit&&sql==='COMMIT'){failCommit=false;throw Error('fixture commit failure');}
       if(failFanout&&sql.includes('INSERT INTO plant_app.staff_notification(')&&++fanoutWrites===2){failFanout=false;throw Error('fixture delivery failure');}
       return c.query(sql,args);
@@ -104,4 +105,106 @@ test('Officer real notifications: isolated committed workflows and durable deliv
     await delivery.deliverBatch();
     assert.equal((await database.query("SELECT delivery_state FROM staff_notification_event WHERE source_key='fixture-admin'")).rows[0].delivery_state,'pending');
   });
+  await t.test('returned initial registration corrections enqueue transactionally once per revision, not pending edits',async()=>{
+    users.bot.role='Botanist';users.one.status='Active';users.two.role='Conservation Officer';
+    const created=await call('/plant-submissions','POST',registration(3,'correction-fixture'));assert.equal(created.status,201);const corrected=created.data;
+    await database.query("UPDATE plant_record SET rbac_status='Correction Required' WHERE plant_id=$1",[corrected.plant_id]);
+    await database.query("UPDATE plant_observation SET status='Correction Required' WHERE id=$1",[corrected.id]);
+    const before=await total('staff_notification_event');
+    const correction=()=>({expected_revision:1,species_id:1,scientific_name:'Fixture corrected',content:{heightCm:21,healthStatus:'Healthy',lifeStage:'Juvenile',morphology:'Corrected',latitude:4,longitude:113}});
+    failCommit=true;
+    assert.equal((await call(`/my-plants/${corrected.plant_id}`,'PATCH',correction())).status,503);
+    assert.equal(await total('staff_notification_event'),before);
+    assert.equal((await database.query('SELECT revision FROM plant_observation WHERE id=$1',[corrected.id])).rows[0].revision,1);
+    failCorrection=true;
+    assert.equal((await call(`/my-plants/${corrected.plant_id}`,'PATCH',correction())).status,503);
+    assert.equal(await total('staff_notification_event'),before);
+    assert.equal((await database.query('SELECT revision FROM plant_observation WHERE id=$1',[corrected.id])).rows[0].revision,1);
+    const saved=await call(`/my-plants/${corrected.plant_id}`,'PATCH',correction());assert.equal(saved.status,200,JSON.stringify(saved.data));
+    assert.equal(await total('staff_notification_event'),before+1);
+    assert.equal((await call(`/my-plants/${corrected.plant_id}`,'PATCH',correction())).status,409);
+    const retry=await pool.connect();try{await retry.query('BEGIN');await delivery.enqueueCorrection(retry,corrected.id,'Correction Required',1);await retry.query('COMMIT');}finally{retry.release();}
+    assert.equal(await total('staff_notification_event'),before+1);
+    await delivery.deliverBatch();
+    const inbox=(await call('/staff-notifications','GET',undefined,'one')).data.notifications;
+    assert.equal(inbox.filter(n=>n.event_type==='observation_resubmitted'&&n.resource.id===corrected.id).length,1);
+    const pending={...correction(),expected_revision:2};assert.equal((await call(`/my-plants/${corrected.plant_id}`,'PATCH',pending)).status,200);
+    assert.equal(await total('staff_notification_event'),before+1);
+    await database.query("UPDATE plant_observation SET status='Correction Required' WHERE id=$1",[corrected.id]);
+    assert.equal((await call(`/my-plants/${corrected.plant_id}`,'PATCH',{...correction(),expected_revision:3})).status,200);
+    assert.equal(await total('staff_notification_event'),before+2);
+    const c=await pool.connect();try{await c.query('BEGIN');assert.equal(await delivery.enqueueCorrection(c,field.id,'Correction Required',1),false);assert.equal(await delivery.enqueueCorrection(c,corrected.id,'Pending Review',3),false);await c.query('COMMIT');}finally{c.release();}
+  });
+
+  await t.test('standalone request producer is atomic, retry-safe, private and delivered through the existing inbox',async()=>{
+    const body={scientific_name:'Standalone fixture',common_name:'Standalone',genus_name:'Fixture',family_name:'Fixture',conservation_status:'Least Concern',description:'Fixture',habitat:'Fixture',photo,client_key:'standalone'};
+    const before=await total('staff_notification_event');failCommit=true;
+    assert.equal((await call('/species-requests','POST',body)).status,503);assert.equal(await total('staff_notification_event'),before);
+    const saved=await call('/species-requests','POST',body);assert.equal(saved.status,201,JSON.stringify(saved.data));const id=saved.data.species_request.request_id;
+    assert.equal((await call('/species-requests','POST',body)).status,201);assert.equal(await total('staff_notification_event'),before+1);
+    await delivery.deliverBatch();
+    const list=(await call('/staff-notifications','GET',undefined,'one')).data.notifications;
+    assert.equal(list.filter(n=>n.event_type==='species_request_submitted'&&n.resource.kind==='species_request'&&n.resource.id===String(id)).length,1);
+    assert.equal((await call('/staff-notifications','GET',undefined,'bot')).status,403);
+    assert.equal((await call(`/species-requests/${id}`,'GET',undefined,'admin')).status,403);
+    const events=(await database.query("SELECT species_request_id FROM staff_notification_event WHERE event_type='species_request_submitted'")).rows;
+    assert.equal(events.length,1);assert.equal(events[0].species_request_id,id);
+  });
+  await t.test('field correction cycles use real reviews, notify only on submit and never emit both event types',async()=>{
+    const content={heightCm:30,healthStatus:'Healthy',lifeStage:'Juvenile',morphology:'Field'};
+    const created=await call(`/plants/${existing.plant_id}/observations`,'POST',{client_key:'correction-field',content});assert.equal(created.status,201);const id=created.data.id;
+    await call(`/observations/${id}/submit`,'POST',{});
+    const events=async()=> (await database.query("SELECT event_type,source_key,metadata FROM staff_notification_event WHERE observation_id=$1 ORDER BY occurred_at",[id])).rows;
+    assert.deepEqual((await events()).map(e=>e.event_type),['field_observation_submitted']);
+    for(const revision of [1,3]){
+      const review=await call(`/observations/${id}/review`,'POST',{revision,decision:'Correction Required',comment:'Please correct'},'one');assert.equal(review.status,200,JSON.stringify(review.data));
+      const draft=await call(`/observations/${id}`,'PATCH',{revision:revision+1,content});assert.equal(draft.status,200);
+      assert.equal((await call(`/observations/${id}`,'GET',undefined,'one')).data.observation.is_correction_resubmission,false);
+      const before=(await events()).length;assert.equal(before,revision===1?1:2);
+      if(revision===1){failCorrection=true;assert.equal((await call(`/observations/${id}/submit`,'POST',{})).status,503);assert.equal((await events()).length,before)}
+      assert.equal((await call(`/observations/${id}/submit`,'POST',{})).status,200);
+      assert.equal((await call(`/observations/${id}/submit`,'POST',{})).status,200);
+      const rows=await events();assert.equal(rows.length,before+1);assert.equal(rows.at(-1).event_type,'observation_resubmitted');assert.equal(rows.at(-1).metadata.submitted_revision,revision+2);
+      assert.equal((await call(`/observations/${id}`,'GET',undefined,'one')).data.observation.is_correction_resubmission,true);
+    }
+    assert.equal(new Set((await events()).map(e=>e.source_key)).size,3);
+    await database.query("UPDATE business_audit SET action='fixture-hidden-submit' WHERE target=$1 AND action='observation_submitted'",[id]);
+    assert.equal((await call(`/observations/${id}`,'GET',undefined,'one')).data.observation.is_correction_resubmission,null,'events alone do not prove the cycle');
+    await database.query("UPDATE business_audit SET action='observation_submitted' WHERE target=$1 AND action='fixture-hidden-submit'",[id]);
+    assert.equal((await call(`/observations/${id}`,'GET',undefined,'one')).data.observation.is_correction_resubmission,true);
+
+    await database.query("INSERT INTO observation_review(id,observation_id,reviewer_subject,decision,comment,created_at) VALUES('tie-one',$1,'staff:one','Correction Required','tie','2026-01-01'),('tie-two',$1,'staff:two','Correction Required','tie','2026-01-01')",[id]);
+    await database.query("UPDATE observation_review SET created_at='2025-01-01' WHERE observation_id=$1 AND id NOT IN ('tie-one','tie-two')",[id]);
+    await database.query("UPDATE plant_observation SET status='Draft',revision=7,updated_at=clock_timestamp() WHERE id=$1",[id]);
+    await call(`/observations/${id}/submit`,'POST',{});assert.equal((await events()).length,3);
+    assert.equal((await call(`/observations/${id}`,'GET',undefined,'one')).data.observation.is_correction_resubmission,null,'tied histories fail closed');
+    await delivery.deliverBatch();const list=(await call('/staff-notifications','GET',undefined,'one')).data.notifications;
+    assert.equal(list.filter(n=>n.resource.id===id&&n.event_type==='observation_resubmitted').length,2);
+  });
+
+  await t.test('authorized read evidence verifies initial correction versions and fails closed after an ordinary edit',async()=>{
+    await database.query("INSERT INTO public.qr_code(qr_code,status) VALUES('evidence','generated')");
+    const qr=(await database.query("SELECT qr_id FROM public.qr_code WHERE qr_code='evidence'")).rows[0].qr_id;
+    const created=await call('/plant-submissions','POST',registration(qr,'read-evidence'));assert.equal(created.status,201);const row=created.data;
+    const read=async user=>(await call(`/observations/${row.id}`,'GET',undefined,user)).data.observation;
+    assert.equal((await read('one')).is_correction_resubmission,null);
+    assert.equal(Object.hasOwn(await read('bot'),'is_correction_resubmission'),false);
+    const decision=await call(`/observations/${row.id}/review`,'POST',{revision:1,decision:'Correction Required',comment:'Please correct'},'one');assert.equal(decision.status,200,JSON.stringify(decision.data));
+    assert.equal((await read('one')).is_correction_resubmission,false);
+    const edit={expected_revision:2,species_id:1,scientific_name:'Fixture correction',content:{heightCm:22,healthStatus:'Healthy',lifeStage:'Juvenile',morphology:'Corrected',latitude:4,longitude:113}};
+    const correction=await call(`/my-plants/${row.plant_id}`,'PATCH',edit);assert.equal(correction.status,200,JSON.stringify(correction.data));
+    const verified=await read('one');assert.equal(verified.is_correction_resubmission,true);assert.equal(verified.id,row.id);assert.equal(verified.status,'Pending Review');assert.equal(verified.revision,3);
+    const list=await call('/observations?origin_type=initial_registration&limit=100','GET',undefined,'one');assert.equal(list.data.observations.find(item=>item.id===row.id).is_correction_resubmission,true);
+    await database.query("DELETE FROM staff_notification_event WHERE observation_id=$1 AND event_type='observation_resubmitted'",[row.id]);
+    assert.equal((await read('one')).is_correction_resubmission,true,'initial versions prove the transition without a notification');
+    await call(`/my-plants/${row.plant_id}`,'PATCH',{...edit,expected_revision:3});assert.equal((await read('one')).is_correction_resubmission,null,'ordinary later pending edit is not a fresh correction');
+    await database.query("UPDATE plant_observation SET content=content||'{\"is_correction_resubmission\":true}'::jsonb WHERE id=$1",[row.id]);
+    assert.equal((await read('one')).is_correction_resubmission,null,'client content cannot override evidence');
+    const again=await call(`/observations/${row.id}/review`,'POST',{revision:4,decision:'Correction Required',comment:'Second cycle'},'one');assert.equal(again.status,200);
+    const repeated=await call(`/my-plants/${row.plant_id}`,'PATCH',{...edit,expected_revision:5});assert.equal(repeated.status,200);
+    assert.equal((await read('one')).is_correction_resubmission,true,'a second real cycle is verified');
+    await database.query("UPDATE observation_review SET decision='Rejected' WHERE observation_id=$1",[row.id]);assert.equal((await read('one')).is_correction_resubmission,null,'inconsistent persisted evidence is withheld');
+    await database.query("UPDATE plant_observation SET status='Draft' WHERE id=$1",[row.id]);assert.equal((await read('one')).is_correction_resubmission,false);
+  });
+
 });

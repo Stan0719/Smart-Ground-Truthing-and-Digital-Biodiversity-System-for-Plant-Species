@@ -91,8 +91,8 @@ export async function refreshKnowledge() {
             `/assets?species_id=${s.speciesId}`,
           )
           if (attempt !== generation) return
-          const preview = catalog.species.find(row => String(row.species_id) === s.speciesId)?.image_url
-          Object.assign(s, speciesImageSelection(result.assets, preview))
+          const portrait = catalog.species.find(row => String(row.species_id) === s.speciesId)
+          Object.assign(s, speciesImageSelection(result.assets, portrait?.image_url, portrait?.image_asset_id))
         }),
       )
       if (attempt !== generation) return

@@ -102,25 +102,12 @@ const csvEscape = (value: unknown) => {
 }
 
 export const buildReportCsv = (
-  report: ApprovedPlantReport,
+  _report: ApprovedPlantReport,
   rows: readonly ApprovedPlantReportRow[],
-  search = '',
+  _search = '',
 ) => {
-  const totalApproved = rows.reduce((sum, row) => sum + row.approvedPlants, 0)
-  const data: unknown[][] = [
-    ['Report', 'Species & Approved Plants Summary'],
-    ['Generated At', report.generatedAt],
-    ['Scope', 'Currently approved plants registered in the selected period'],
-    ['Reporting Period', reportScopeText(report)],
-    ['Search', search],
-    ['All Species in Scope', report.rows.length],
-    ['Matching Species', rows.length],
-    ['Total Approved Plants', totalApproved],
-    [],
-    ['Scientific Name', 'Common Name', 'Approved Plant Count'],
-    ...rows.map((row) => [row.scientificName, row.commonName, row.approvedPlants]),
-  ]
-  return `\uFEFF${data.map((row) => row.map(csvEscape).join(',')).join('\r\n')}`
+  const table = buildReportTable(rows)
+  return `\uFEFF${[table.headers, ...table.rows].map(row => row.map(csvEscape).join(',')).join('\r\n')}`
 }
 
 export const buildReportTable = (rows: readonly ApprovedPlantReportRow[]) => ({

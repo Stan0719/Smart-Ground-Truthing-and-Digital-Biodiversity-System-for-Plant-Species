@@ -1,12 +1,14 @@
 "use strict";
 const { createHash, randomUUID } = require("node:crypto");
 const sharp = require("sharp");
+const {proposedPhoto}=require("./species-photo-library.cjs");
+const {approveRequestPhoto,setPointer}=require("./species-photo-provenance.cjs");
 const { permitted } = require("../shared/rbac.cjs");
 
 const fields = ["scientific_name", "common_name", "genus_name", "family_name",
   "conservation_status", "description", "habitat"];
 const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id";
-const project = (row) => ({ ...row, photo_url: `/api/species-requests/${row.request_id}/photo` });
+const project = (row) => ({ ...row, photo_url: `/api/species-requests/${row.request_id}/photo`, proposed_photo_url: `/api/species-requests/${row.request_id}/proposed-photo` });
 
 // The deployed table predates this API. Older installations without it retain
 // ordinary observation behavior; no runtime DDL or migrations are performed.
@@ -135,7 +137,7 @@ async function assertSpeciesResolved(c, plantId, fail, observationId) {
     fail(409, "Species request provenance cannot be verified. Resolve the legacy dependency before review.");
 }
 
-function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, assertNewSpecies }) {
+function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, assertNewSpecies, officerNotifications = null }) {
   const requestId = (value) => {
     if (typeof value !== "string" || !/^[1-9][0-9]{0,9}$/.test(value) || BigInt(value) > 2147483647n)
       fail(400, "Invalid species request identifier.");
@@ -165,7 +167,13 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
   app.get("/api/assets/species-request-:id", allow("species.manage"), async (req, res) => {
     const row = (await pool.query("SELECT photo FROM species_request_submission WHERE request_id=$1", [requestId(req.params.id)])).rows[0];
     if (!row) fail(404, "Species request unavailable.");
-    await servePhoto(res, row.photo);
+    await servePhoto(res, await proposedPhoto(pool,requestId(req.params.id),req.user) || row.photo);
+  });
+  app.get("/api/species-requests/:id/proposed-photo",read,async(req,res)=>{
+    const key=requestId(req.params.id);
+    const row=(await pool.query("SELECT photo FROM species_request_submission WHERE request_id=$1 AND ($2 OR owner_subject=$3)",[key,permitted(req.user,"species.manage"),subject(req.user)])).rows[0];
+    if(!row)fail(404,"Species request unavailable.");
+    await servePhoto(res,await proposedPhoto(pool,key,req.user) || row.photo);
   });
   app.post("/api/species-requests", allow("plants.create"), async (req, res) => {
     const b = req.body;
@@ -205,6 +213,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${columns}`,
         [subject(req.user), clientKey, payloadHash, ...fields.map((key) => data[key]), bytes])).rows[0];
       await audit(c, req.user, "species_requested", row.request_id);
+      if (officerNotifications) await officerNotifications.enqueueSpeciesRequest(c,row.request_id);
       return row;
     });
     res.status(201).json({ species_request: project(result) });
@@ -257,7 +266,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
             fail(409, "This scientific name already exists. Resolve the duplicate before approval.");
           speciesId = row.proposed_species_id;
           await c.query("INSERT INTO rbac_species_visibility(species_id,visibility) VALUES($1,$2) ON CONFLICT(species_id) DO UPDATE SET visibility=EXCLUDED.visibility", [speciesId, b.visibility]);
-          await c.query("UPDATE plant_asset SET approved=TRUE WHERE species_id=$1", [speciesId]);
+          await approveRequestPhoto(c,row,speciesId,subject(req.user));
         }
         await c.query("UPDATE species SET rbac_data=rbac_data || $1::jsonb WHERE species_id=$2", [{ approvalStatus: b.decision }, row.proposed_species_id]);
       } else if (b.decision === "Approved") {
@@ -271,8 +280,10 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
         speciesId = (await c.query("INSERT INTO species(scientific_name,common_name,genus_id,status_id,description,rbac_data) VALUES($1,$2,$3,$4,$5,$6) RETURNING species_id",
           [row.scientific_name, row.common_name, genus.genus_id, status.status_id, row.description, { habitat: row.habitat }])).rows[0].species_id;
         await c.query("INSERT INTO rbac_species_visibility(species_id,visibility) VALUES($1,$2)", [speciesId, b.visibility]);
+        const photoId=randomUUID();
         await c.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,TRUE,'image/jpeg',$5)",
-          [randomUUID(), speciesId, row.owner_subject, `species-request:${row.request_id}`, row.photo]);
+          [photoId, speciesId, row.owner_subject, `species-request:${row.request_id}`, row.photo]);
+        await setPointer(c,row.request_id,photoId);
       }
       const reviewed = (await c.query(`UPDATE species_request_submission SET request_status=$1,review_comment=$2,reviewed_by=$3,reviewed_at=CURRENT_TIMESTAMP,approved_species_id=$4 WHERE request_id=$5 RETURNING ${columns}`,
         [b.decision, comment, subject(req.user), speciesId, row.request_id])).rows[0];

@@ -32,14 +32,14 @@ test('plant thumbnails use only supplied preview IDs and exclude pending/private
   assert.deepEqual(images.plantThumbnailImages({ plant_image_asset_id: '../private' }), [])
 })
 
-test('species fallback stays outside reference galleries and reference images take priority', () => {
+test('backend portrait takes priority and stays outside reference galleries when sourced from plant evidence', () => {
   const fallback = images.speciesImageSelection([], '/api/assets/plant-preview')
   assert.equal(fallback.image, '/api/data/assets/plant-preview'); assert.deepEqual(fallback.images, [])
   const selected = images.speciesImageSelection([
     { id: 'reference', content_type: 'image/jpeg' }, { id: 'second', content_type: 'image/png' },
     { id: 'document', content_type: 'application/pdf' }, { id: '../invalid', content_type: 'image/jpeg' },
   ], '/api/assets/plant-preview')
-  assert.equal(selected.image, '/api/data/assets/reference')
+  assert.equal(selected.image, '/api/data/assets/plant-preview')
   assert.deepEqual(selected.images.map(x => x.path), ['/api/data/assets/reference', '/api/data/assets/second'])
   assert.equal(images.speciesImageSelection([], 'https://external.invalid/a').image, undefined)
 })
@@ -80,7 +80,7 @@ test('knowledge refresh retains plant thumbnails and separates preview fallback 
       calls.push(path)
       if (path.startsWith('/species?')) return { species: [
         { species_id: '1', scientific_name: 'Fixture one', image_url: '/api/assets/preview' },
-        { species_id: '2', scientific_name: 'Fixture two', image_url: '/api/assets/fallback' },
+        { species_id: '2', scientific_name: 'Fixture two', image_asset_id: 'fallback' },
       ] }
       if (path === '/plants') return { plants: [
         { plant_id: '1', species_id: '1', plant_image_asset_id: 'plant-photo', rbac_status: 'Approved', observed_at: '2026-11-05T03:00:00Z', zone: 'Approved zone', latest_approved: { heightCm: 42, lifeStage: 'Mature' } },
@@ -93,7 +93,7 @@ test('knowledge refresh retains plant thumbnails and separates preview fallback 
   await exports.refreshKnowledge()
   assert.equal(exports.knowledgeError.value, '')
   assert.equal(plants[0].image, '/api/data/assets/preview'); assert.equal(plants[0].images.length, 0)
-  assert.equal(plants[1].image, '/api/data/assets/official')
+  assert.equal(plants[1].image, '/api/data/assets/fallback')
   assert.equal(records[0].images[0].path, '/api/data/assets/plant-photo')
   assert.equal(records[1].images.length, 0)
   assert.equal(records[0].latestApproved.heightCm, 42)
@@ -217,4 +217,14 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
     assert.ok(Number.isNaN(state.speciesPlants.value[1].location.latitude))
     assert.deepEqual(calls, ['/api/species', '/api/plants'])
   } finally { scope.stop() }
+})
+
+
+test('catalogue portrait URL, ID and safe gallery fallback have explicit priority', () => {
+  const refs = [{ id: 'gallery', content_type: 'image/png' }, { id: 'document', content_type: 'application/pdf' }]
+  assert.equal(images.speciesImageSelection(refs, '/api/assets/portrait', 'id-fallback').image, '/api/data/assets/portrait')
+  assert.equal(images.speciesImageSelection(refs, undefined, 'id-fallback').image, '/api/data/assets/id-fallback')
+  assert.equal(images.speciesImageSelection(refs, 'https://unsafe.test/photo', '../invalid').image, '/api/data/assets/gallery')
+  assert.equal(images.speciesImageSelection([], 'https://unsafe.test/photo', '../invalid').image, undefined)
+  assert.equal(images.speciesImageSelection([{ id: 'document', content_type: 'application/pdf' }], undefined).image, undefined)
 })

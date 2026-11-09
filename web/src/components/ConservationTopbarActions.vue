@@ -1,11 +1,51 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { logout, sessionSnapshot, subscribeSession } from '../services/auth'
 import { createOfficerInbox, type OfficerNotice } from '../services/officerNotifications'
 import { conservationProfile } from '../data/conservationProfile'
+import { monitoringLabels } from '../utils/officerMonitoringDisplay'
+import { formatObservationId } from '../utils/observationId'
+import { formatSpeciesRequestId } from '../utils/speciesRequestId'
 import LanguageSwitcher from './LanguageSwitcher.vue'
+
+// Officer-only anchoring: the shared selector keeps its existing behavior elsewhere.
+const languageAnchors = new WeakMap<HTMLElement, () => void>()
+const vLanguageAnchor = {
+  mounted(root: HTMLElement) {
+    const align = () => {
+      const trigger = root.querySelector<HTMLElement>('.language-trigger')
+      const menu = root.querySelector<HTMLElement>('.language-menu')
+      if (!trigger || !menu) return
+      const button = trigger.getBoundingClientRect()
+      const width = menu.getBoundingClientRect().width
+      const centered = button.left + button.width / 2 - width / 2
+      const edge = 8
+      const viewport = document.documentElement.clientWidth
+      const left = Math.min(Math.max(centered, edge), Math.max(edge, viewport - edge - width))
+      menu.style.setProperty('--officer-language-shift', `${left - centered}px`)
+    }
+    const resize = new ResizeObserver(align)
+    const observe = () => {
+      resize.disconnect(); resize.observe(root)
+      const menu = root.querySelector<HTMLElement>('.language-menu')
+      if (menu) resize.observe(menu)
+      align()
+    }
+    const mutation = new MutationObserver(observe)
+    mutation.observe(root, { childList: true, subtree: true })
+    window.addEventListener('resize', align)
+    window.addEventListener('scroll', align, true)
+    observe()
+    languageAnchors.set(root, () => {
+      resize.disconnect(); mutation.disconnect()
+      window.removeEventListener('resize', align)
+      window.removeEventListener('scroll', align, true)
+    })
+  },
+  unmounted(root: HTMLElement) { languageAnchors.get(root)?.(); languageAnchors.delete(root) },
+}
 
 const router = useRouter()
 const { t, locale } = useI18n()
@@ -16,13 +56,26 @@ const notificationButton = ref<HTMLButtonElement | null>(null)
 const inbox = createOfficerInbox({ transport: (...args) => fetch(...args), navigate: async destination => {
   await router.push(destination)
   return router.currentRoute.value.name === destination.name &&
-    (!destination.query?.review || router.currentRoute.value.query.review === destination.query.review)
+    Object.entries(destination.query || {}).every(([key, value]) => router.currentRoute.value.query[key] === value)
 } })
 const notificationState = inbox.state
 const nt = (key: string) => t('dashboardNotifications.officerLive.' + key)
-const noticeTitle = (notice: OfficerNotice) => nt(notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
-const noticeMessage = (notice: OfficerNotice) => nt(notice.event_type === 'registration_submitted'
-  ? notice.species_review_required ? 'speciesFirst' : 'registrationMessage' : 'fieldMessage')
+const noticeTitle = (notice: OfficerNotice) => nt(notice.event_type === 'species_request_submitted' ? 'speciesTitle' : notice.event_type === 'observation_resubmitted' ? 'correctionTitle' : notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
+// Labels are display-only. Navigation and acknowledgement retain the raw resource.
+const observationLabels = computed(() => monitoringLabels(notificationState.items
+  .filter(item => item.resource.kind === 'observation').map(item => item.resource.id)))
+const noticeReference = (notice: OfficerNotice) => {
+  const id = notice.resource.id
+  if (notice.resource.kind === 'species_request') return formatSpeciesRequestId(id)
+  const numeric = formatObservationId(id)
+  if (numeric) return numeric
+  const label = observationLabels.value.get(id) || id
+  if (label.length <= 17 && !label.includes('-')) return 'OBS-' + label
+  // Rare full-length/normalized collisions still need distinct, compact labels.
+  const prefix = id.replaceAll('-', '').slice(0, 8).toUpperCase()
+  const group = [...observationLabels.value.keys()].filter(value => value.replaceAll('-', '').slice(0, 8).toUpperCase() === prefix).sort()
+  return `OBS-${prefix} ? ${group.indexOf(id) + 1}`
+}
 const noticeTime = (notice: OfficerNotice) => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(notice.created_at))
 let mounted = false
 let poll: ReturnType<typeof setInterval> | null = null
@@ -100,7 +153,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="actionsWrap" class="conservation-topbar-actions">
-    <div class="dashboard-language"><LanguageSwitcher /></div>
+    <div v-language-anchor class="dashboard-language"><LanguageSwitcher /></div>
     <div class="notification-wrap">
       <button
         ref="notificationButton"
@@ -150,20 +203,25 @@ onBeforeUnmount(() => {
             type="button"
             @click="openNotification(notification)"
           >
-            <span class="notification-type review" aria-hidden="true">✓</span>
+            <span class="notification-type review" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                <path v-if="notification.event_type === 'observation_resubmitted'" d="M20 7v5h-5M4 17v-5h5M5.3 8a7 7 0 0 1 11.6-2L20 9M4 15l3.1 3A7 7 0 0 0 18.7 16" />
+                <path v-else-if="notification.event_type === 'species_request_submitted'" d="M5 20 19 6M5 16C2 6 10 3 21 3c0 11-3 19-13 16" />
+                <path v-else-if="notification.event_type === 'registration_submitted'" d="M12 21V11M12 15C4 15 3 10 3 5c6 0 9 3 9 10Zm0-4c0-6 3-9 9-9 0 6-3 9-9 9Z" />
+                <path v-else d="M9 4H5v17h14V4h-4M9 2h6v5H9zM8 12h8M8 16h6" />
+              </svg>
+            </span>
             <span class="notification-copy">
               <strong>{{ noticeTitle(notification) }}</strong>
-              <span>{{ noticeMessage(notification) }}</span>
-              <small>{{ notification.resource.id }}</small>
+              <span class="notification-reference">{{ noticeReference(notification) }}</span>
               <time :datetime="notification.created_at">{{ noticeTime(notification) }}</time>
-              <small v-if="notification.read_at === null">{{ nt('unread') }}</small>
+              <span v-if="notification.read_at === null" class="notification-unread-label">{{ nt('unread') }}</span>
             </span>
             <i v-if="notification.read_at === null" aria-hidden="true"></i>
           </button>
           <button v-if="notificationState.hasMore" type="button" class="notification-item" :disabled="notificationState.loading || notificationState.busy" @click="inbox.load(true)">{{ nt('more') }}</button>
         </div>
         <p v-if="!notificationState.loading && !notificationState.error && !notificationState.items.length" class="notification-empty">{{ t('dashboardNav.noNotifications') }}</p>
-        <footer>{{ t('dashboardNav.notificationHint') }}</footer>
       </section>
     </div>
 
@@ -173,6 +231,8 @@ onBeforeUnmount(() => {
         type="button"
         aria-haspopup="menu"
         :aria-expanded="profileOpen"
+        :aria-label="`${conservationProfile.fullName} · ${t('dashboardNav.conservationOfficer')}`"
+        :title="`${conservationProfile.fullName} · ${t('dashboardNav.conservationOfficer')}`"
         @click="toggleProfile"
       >
         <span class="avatar">O</span>
@@ -183,6 +243,10 @@ onBeforeUnmount(() => {
         <span class="chevron" aria-hidden="true">⌄</span>
       </button>
       <div v-if="profileOpen" class="profile-menu" role="menu">
+        <div class="profile-menu-identity" role="presentation">
+          <strong>{{ conservationProfile.fullName }}</strong>
+          <small>{{ t('dashboardNav.conservationOfficer') }}</small>
+        </div>
         <button type="button" role="menuitem" @click="openProfileSettings">
           {{ t('dashboardNav.profileSettings') }}
         </button>
@@ -259,7 +323,7 @@ onBeforeUnmount(() => {
   place-items: center;
   border: 2px solid #fff;
   border-radius: 999px;
-  background: #c95845;
+  background: #D94040;
   color: #fff;
   font-size: 8px;
   font-weight: 800;
@@ -314,7 +378,7 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: 12px 14px;
   display: grid;
-  grid-template-columns: 31px minmax(0, 1fr) 6px;
+  grid-template-columns: 31px minmax(0, 1fr) 8px;
   align-items: start;
   gap: 10px;
   border: 0;
@@ -361,29 +425,33 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 3px;
 }
-.notification-copy strong {
-  color: #35574a;
-  font-size: 10px;
+.notification-type svg { width: 18px; height: 18px; }
+.notification-menu .notification-list .notification-item .notification-copy > strong {
+  color: #35574a; font-size: 14px; font-weight: 400; line-height: 1.4;
 }
-.notification-item.unread .notification-copy strong {
-  color: #204c3d;
-  font-weight: 800;
+.notification-menu .notification-list .notification-item.unread .notification-copy > strong {
+  color: #204c3d; font-weight: 600;
 }
-.notification-copy > span {
-  color: #6f8078;
-  font-size: 9px;
-  line-height: 1.45;
+.notification-menu .notification-list .notification-item .notification-reference {
+  color: #526c61; font-size: 13px; line-height: 1.4;
 }
-.notification-copy time {
-  color: #98a39e;
-  font-size: 8px;
+.notification-menu .notification-list .notification-item .notification-copy > time {
+  color: #65786e; font-size: 12px; line-height: 1.4;
 }
+.notification-copy > strong, .notification-reference, .notification-copy time {
+  overflow-wrap: anywhere; white-space: normal;
+}
+.notification-unread-label {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.notification-item:focus-visible { outline: 2px solid #245443; outline-offset: -3px; }
 .notification-item > i {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   margin-top: 5px;
   border-radius: 50%;
-  background: #c95845;
+  background: #D94040;
 }
 .notification-empty {
   margin: 0;
@@ -392,13 +460,7 @@ onBeforeUnmount(() => {
   font-size: 10px;
   text-align: center;
 }
-.notification-menu footer {
-  padding: 9px 14px;
-  background: #f8faf8;
-  color: #87958f;
-  font-size: 8px;
-  text-align: center;
-}
+
 .profile-button {
   padding: 5px 8px 5px 5px;
   display: flex;

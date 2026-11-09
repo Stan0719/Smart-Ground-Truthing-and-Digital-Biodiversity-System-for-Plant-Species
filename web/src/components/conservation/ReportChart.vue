@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useConservationText } from '../../composables/useConservationText'
 const { ct } = useConservationText()
-import { Chart, registerables } from 'chart.js'
+import { Chart, registerables, type ChartConfiguration } from 'chart.js'
+import { printChart } from '../../utils/reportExport'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 Chart.register(...registerables)
@@ -20,13 +21,7 @@ const description = computed(() =>
   props.labels.map((label, index) => `${label}: ${props.values[index] ?? 0}`).join(', '),
 )
 
-const renderChart = async () => {
-  chart?.destroy()
-  chart = null
-  if (!hasData.value) return
-  await nextTick()
-  if (!canvas.value) return
-  chart = new Chart(canvas.value, {
+const configuration = (): ChartConfiguration<'bar'> => ({
     type: 'bar',
     data: {
       labels: props.labels,
@@ -48,15 +43,23 @@ const renderChart = async () => {
       devicePixelRatio: 2,
       plugins: { legend: { display: false }, tooltip: { enabled: true } },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#5f746a', font: { size: 10 } } },
+        x: { grid: { display: false }, ticks: { color: '#5f746a', font: { size: 12 } } },
         y: {
           beginAtZero: true,
-          ticks: { precision: 0, color: '#71817a', font: { size: 9 } },
+          ticks: { precision: 0, color: '#71817a', font: { size: 12 } },
           grid: { color: 'rgba(53, 89, 75, 0.09)' },
         },
       },
     },
   })
+
+const renderChart = async () => {
+  chart?.destroy()
+  chart = null
+  if (!hasData.value) return
+  await nextTick()
+  if (!canvas.value) return
+  chart = new Chart(canvas.value, configuration())
 }
 
 const toDataUrl = () => (hasData.value && canvas.value ? canvas.value.toDataURL('image/png') : null)
@@ -65,7 +68,7 @@ onMounted(renderChart)
 watch(() => [props.labels, props.values, props.colors], renderChart, { deep: true })
 onBeforeUnmount(() => chart?.destroy())
 
-defineExpose({ toDataUrl })
+defineExpose({ toDataUrl, toPrintDataUrl: () => hasData.value ? printChart(configuration()) : Promise.resolve(null) })
 </script>
 
 <template>
@@ -82,6 +85,9 @@ defineExpose({ toDataUrl })
 
 <style scoped>
 .report-chart {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 18px 0;
   padding: 18px;
   border: 1px solid #e0e7df;
@@ -95,8 +101,13 @@ defineExpose({ toDataUrl })
 }
 .chart-canvas {
   position: relative;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   height: 300px;
 }
+.chart-canvas canvas { display: block; max-width: 100%; }
+@container (max-width: 520px) { .chart-canvas { height: 260px; } }
 .report-chart p {
   margin: 0;
   padding: 35px 12px;
@@ -107,9 +118,6 @@ defineExpose({ toDataUrl })
 @media (max-width: 620px) {
   .report-chart {
     padding: 14px;
-  }
-  .chart-canvas {
-    height: 270px;
   }
 }
 </style>
