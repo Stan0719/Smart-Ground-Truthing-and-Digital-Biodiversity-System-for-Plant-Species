@@ -244,6 +244,7 @@
   "screens/PlantQRCode.js": [
     "plantApi(\"/qr-codes\",{expectedAccountId:accountId})",
     "plantApi(\"/qr-codes\",{method:\"POST\",body:{count},expectedAccountId:accountId})",
+    "plantApi(`/qr-codes/${encodeURIComponent(qr.id)}`,{method:\"DELETE\",body:{},expectedAccountId:accountId})",
     "Platform.OS===\"web\"",
     "printingId===\"all\""
   ],

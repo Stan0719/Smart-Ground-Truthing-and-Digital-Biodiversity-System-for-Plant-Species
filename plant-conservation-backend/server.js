@@ -14,11 +14,20 @@ const { mountPlantGallery } = require("./plant-gallery.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
+const { mountPlantSimilarity } = require("./plant-similarity.cjs");
 const { mountStaffNotifications } = require("./staff-notifications.cjs");
 const { createOfficerNotificationDelivery } = require("./officer-notification-delivery.cjs");
-const {mountSpeciesPhotoLibrary}=require("./species-photo-library.cjs");
+const { mountSpeciesPhotoLibrary } = require("./species-photo-library.cjs");
 const { speciesPhotoWritesRequested } = require("./species-photo-activation.cjs");
-function createPlantApp({ auth, pool, origins = configuredOrigins(), officerNotifications = null, speciesPhotoWritesEnabled = false }) {
+
+function createPlantApp({
+  auth,
+  pool,
+  origins = configuredOrigins(),
+  similaritySearch,
+  officerNotifications = null,
+  speciesPhotoWritesEnabled = false,
+}) {
   const app = express();
   app.disable("x-powered-by");
   // Do not generate ETags for uncached, authenticated JSON reads.
@@ -58,6 +67,7 @@ function createPlantApp({ auth, pool, origins = configuredOrigins(), officerNoti
   mountSpeciesPhotoLibrary(app, { pool, allow, writesEnabled: speciesPhotoWritesEnabled });
   mountPlantGallery(app, { pool, allow });
   mountIoT(app, { pool, allow });
+  mountPlantSimilarity(app, { pool, allow, search: similaritySearch });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {
     await pool.query("SELECT 1");
     res.json({ connected: true, database: "postgresql" });

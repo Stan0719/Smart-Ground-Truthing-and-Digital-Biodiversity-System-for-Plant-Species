@@ -18,7 +18,7 @@ import {
 } from "../data/mockData";
 import { useFocusEffect } from "@react-navigation/native";
 import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantRecords, fetchSpeciesDetail } from "../utils/plantApi";
+import { fetchPlantRecords, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords } from "../utils/plantApi";
 
 import PlantCard from "../components/PlantCard";
 import RefreshButton from "../components/RefreshButton";
@@ -60,9 +60,7 @@ export default function SpeciesDetail({
         ]);
         const resolvedSpecies = backendSpecies || route.params?.species || getSpeciesBySlug(slug) || null;
         const resolvedId = resolvedSpecies?.id ?? speciesId;
-        const recordsForSpecies = resolvedId != null
-          ? records.filter((record) => String(record.speciesId) === String(resolvedId))
-          : records.filter((record) => record.speciesSlug === slug);
+        const recordsForSpecies = filterUniqueSpeciesPlantRecords(records, resolvedId, slug);
 
         setSelectedSpecies(resolvedSpecies);
         setSpeciesPlants(recordsForSpecies);

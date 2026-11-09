@@ -19,8 +19,8 @@ import {
   getSpeciesBySlug,
 } from "../data/mockData";
 import { useFocusEffect } from "@react-navigation/native";
-import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantRecords, fetchSpeciesCatalog } from "../utils/plantApi";
+import { fetchPlantRecords, fetchSpeciesCatalog, getPlantDisplayObservation } from "../utils/plantApi";
+import { getPlantCardZoneLabel } from "../utils/plantCardDisplay";
 import RefreshButton from "../components/RefreshButton";
 import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
@@ -157,6 +157,7 @@ export default function Species({
 
     const filtered = speciesPlants.filter(
       (plant) => {
+        const observation = getPlantDisplayObservation(plant);
 
         const matchesSearch =
           !query ||
@@ -168,13 +169,13 @@ export default function Species({
         const matchesHealth =
           !isBotanist ||
           healthFilter === "All" ||
-          plant.latestApproved?.healthStatus ===
+          (observation?.healthStatus || "Not recorded") ===
             healthFilter;
 
 
         const matchesLifeStage =
           lifeStageFilter === "All" ||
-          plant.latestApproved?.lifeStage ===
+          (observation?.lifeStage || "Not recorded") ===
             lifeStageFilter;
 
 
@@ -638,18 +639,14 @@ function PlantCard({
   useAppTranslation();
   const [failedImageKey, setFailedImageKey] = useState(null);
 
-  const species = plant.species || getSpeciesBySlug(plant.speciesSlug) || {
-    name: plant.commonName,
-    genus: plant.genus,
-  };
-  const speciesImageSource = getSpeciesImageSource(species);
   const sourceKey = (source) => typeof source === "number" ? `local:${source}` : source?.uri || null;
-  const imageSource = plant.plantImage && sourceKey(plant.plantImage) !== failedImageKey
-    ? plant.plantImage
-    : speciesImageSource && sourceKey(speciesImageSource) !== failedImageKey
-      ? speciesImageSource
-      : null;
+  const imageSource = plant.plantImage && sourceKey(plant.plantImage) !== failedImageKey ? plant.plantImage : null;
+  const observation = getPlantDisplayObservation(plant);
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const zoneLabel = getPlantCardZoneLabel(plant, user?.role, {
+    restricted: t("map.locationRestricted"),
+    missing: t("plant.notRecorded"),
+  });
 
   return (
     <View style={styles.card}>
@@ -674,11 +671,12 @@ function PlantCard({
           </Text>
         )}
 
-        {isBotanist && (
-          <Text style={styles.zoneBadge}>
-            {plant.location?.zone || t("plant.notRecorded")}
+        <View pointerEvents="none" style={styles.imageBadges}>
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, plantStatusStyle(plant.currentStatus)]}>
+            {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
-        )}
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.zoneBadge]}>{zoneLabel}</Text>
+        </View>
 
       </View>
 
@@ -686,13 +684,11 @@ function PlantCard({
       {/* CONTENT */}
       <View style={styles.cardContent}>
 
-        <Text style={styles.plantId}>
-          {plant.plantId}
-        </Text>
-
         <Text style={styles.species}>
-          {species?.name || t("plant.plantRecord")}
+          {plant.plantScientificName || t("plant.unnamedPlant")}
         </Text>
+        <Text style={styles.plantId}>{t("plantDetail.plantId")}: {plant.plantId}</Text>
+        {!!plant.plantCommonName && <Text style={styles.infoValue}>{plant.plantCommonName}</Text>}
 
 
         <View style={styles.infoGrid}>
@@ -701,12 +697,12 @@ function PlantCard({
             <>
               <Info
                 label={t("plant.health")}
-                value={plant.latestApproved?.healthStatus || t("plant.notRecorded")}
+                value={observation?.healthStatus || t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lifeStage2")}
-                value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
+                value={observation?.lifeStage || t("plant.notRecorded")}
               />
 
               <Info
@@ -716,35 +712,38 @@ function PlantCard({
 
               <Info
                 label={t("plant.height")}
-                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
+                value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
               />
+              <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
+              <Info label={t("plant.locationZone")} value={zoneLabel} />
             </>
           ) : (
             <>
               <Info
                 label={t("plant.height")}
-                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
+                value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lifeStage2")}
-                value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
-              />
-
-              <Info
-                label={t("plant.genus")}
-                value={species?.genus || "-"}
+                value={observation?.lifeStage || t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lastVerified")}
                 value={formatDate(plant.latestApproved?.date)}
               />
+              <Info label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
+              <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
+              <Info label={t("plant.locationZone")} value={zoneLabel} />
             </>
           )}
 
         </View>
 
+        {isBotanist && plant.latestSubmission?.status ? (
+          <Text style={styles.infoValue}>{t("botanistRecords.observationStatus")}{translateLabel(plant.latestSubmission.status)}</Text>
+        ) : null}
 
         <View style={styles.viewRecord}>
 
@@ -764,6 +763,16 @@ function PlantCard({
       />}
     </View>
   );
+}
+
+function plantStatusStyle(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "approved": return styles.statusApproved;
+    case "pending review": return styles.statusPending;
+    case "rejected": return styles.statusRejected;
+    case "correction required": return styles.statusCorrection;
+    default: return styles.statusOther;
+  }
 }
 
 
@@ -1022,37 +1031,37 @@ filterToggle: {
     backgroundColor: "#DCE8D6",
     },
 
+  imageBadges: { position: "absolute", top: 9, left: 10, right: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 6 },
+  imageBadge: { maxWidth: "48%", overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, color: "#FFFFFF", fontSize: 9, lineHeight: 12, fontWeight: "700", textAlign: "center" },
+  statusBadge: { backgroundColor: "#315B49" },
+  statusApproved: { backgroundColor: "#23734D" },
+  statusPending: { backgroundColor: "#A76512" },
+  statusRejected: { backgroundColor: "#A53A35" },
+  statusCorrection: { backgroundColor: "#8C5D20" },
+  statusOther: { backgroundColor: "#52645A" },
+
     plantIcon: {
     fontSize: 45,
     },
 
-  zoneBadge: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: "#143625DD",
-    color: "#FFFFFF",
-    fontSize: 9,
-    fontWeight: "700",
-  },
+  zoneBadge: { backgroundColor: "#143625DD" },
 
   cardContent: {
     padding: 14,
   },
 
   plantId: {
-    color: "#234B3A",
-    fontSize: 16,
-    fontWeight: "700",
+    marginTop: 4,
+    color: "#7C8982",
+    fontSize: 11,
+    fontWeight: "600",
   },
 
   species: {
-    marginTop: 3,
-    color: "#7C8982",
-    fontSize: 10,
+    color: "#234B3A",
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: "700",
   },
 
   infoGrid: {

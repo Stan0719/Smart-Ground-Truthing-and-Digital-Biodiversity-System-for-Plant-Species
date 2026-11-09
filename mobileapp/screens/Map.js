@@ -1,7 +1,7 @@
 import { useAppTranslation, t } from "../translations/i18n";
 import React, { useCallback, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
-import { fetchPlantRecords } from "../utils/plantApi";
+import { fetchPlantRecords, getPlantDisplayObservation } from "../utils/plantApi";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 
 import {
@@ -70,13 +70,11 @@ export default function MapScreen({ navigation, user }) {
   // =====================================================
 
   const documentedPlants = useMemo(() => plants.map((record) => {
-    const commonName = record.common_name || (record.commonName === "Unknown species" ? "" : record.commonName);
-    const speciesName = record.species?.commonName;
     return {
       ...record,
-      name: commonName || (speciesName !== "Unknown species" ? speciesName : t("map.unknown")),
-      scientificName: record.scientific_name || record.scientificName || record.species?.scientificName || t("map.unknown"),
-      family: record.family ?? record.species?.family ?? "",
+      name: record.plantCommonName || "",
+      scientificName: record.plantScientificName || "",
+      family: record.family ?? "",
       id: record.plantId,
       status: record.currentStatus ?? record.status,
     };
@@ -139,6 +137,7 @@ export default function MapScreen({ navigation, user }) {
   function renderPlantCard({
     item,
   }) {
+    const observation = getPlantDisplayObservation(item);
     const photos =
       item.images ||
       item.photos ||
@@ -182,7 +181,7 @@ export default function MapScreen({ navigation, user }) {
           style={styles.plantName}
           numberOfLines={2}
         >
-          {item.scientificName}
+          {item.scientificName || t("plant.notRecorded")}
         </Text>
 
         {/* COMMON NAME */}
@@ -191,7 +190,7 @@ export default function MapScreen({ navigation, user }) {
           style={styles.commonName}
           numberOfLines={1}
         >
-          {item.name}
+          {item.name || t("plant.notRecorded")}
         </Text>
 
         {/* RECORD ID */}
@@ -201,6 +200,12 @@ export default function MapScreen({ navigation, user }) {
           numberOfLines={1}
         >
           {item.plantId}
+        </Text>
+
+        <Text style={styles.locationText} numberOfLines={2}>
+          {t("plant.height")}: {observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
+          {" · "}{t("plant.lifeStage2")}: {observation?.lifeStage || t("plant.notRecorded")}
+          {" · "}{t("plant.health")}: {observation?.healthStatus || t("plant.notRecorded")}
         </Text>
 
         <Text style={styles.locationText} numberOfLines={5}>

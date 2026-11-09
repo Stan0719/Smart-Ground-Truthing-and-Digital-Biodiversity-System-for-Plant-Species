@@ -16,6 +16,7 @@ import {
 
 import { fetchPlantByQRCode } from "../utils/plantApi";
 import { recordVisitorScan } from "../utils/visitorFeatures";
+import { parsePlantQrPayload } from "../utils/qrPayload";
 
 
 export default function ScanScreen({ navigation, user }) {
@@ -92,15 +93,7 @@ export default function ScanScreen({ navigation, user }) {
     scanInProgress.current = true;
     let navigated = false;
     try {
-      let token = String(data || "").trim();
-      if (/^https?:\/\//i.test(token)) {
-        const scannedUrl = new URL(token);
-        const qrRoute = scannedUrl.pathname.match(/\/(?:api\/)?qr\/([^/]+)\/?$/);
-        if (!qrRoute) {
-          throw new Error("This QR code is not a plant record code.");
-        }
-        token = decodeURIComponent(qrRoute[1]);
-      }
+      const token = parsePlantQrPayload(data);
 
       let result;
       let historyError = null;

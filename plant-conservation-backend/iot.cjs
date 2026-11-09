@@ -41,6 +41,40 @@ function positiveBigint(value) {
   }
 }
 function mountDeviceIngestion(app, { pool }) {
+  // A sensor key can read only its own movement, bound to its assigned plant.
+  // This route is mounted before browser-session authentication, like ingestion.
+  app.get("/api/device/movement", async (req, res) => {
+    const match = /^Device ([a-f0-9]{64})$/.exec(req.headers.authorization || "");
+    if (!match) fail(401, "Device authentication required.");
+    const deviceId = text(req.query.device_id, 100);
+    if (!positiveBigint(req.query.plant_id)) fail(400, "A valid plant ID is required.");
+    const device = (await pool.query(
+      "SELECT id,device_type,plant_id,status FROM iot_device WHERE id=$1 AND key_hash=$2",
+      [deviceId, hash(match[1])],
+    )).rows[0];
+    if (!device || device.status !== "Active") fail(401, "Device authentication failed.");
+    if (device.device_type !== "Sensor" || String(device.plant_id) !== req.query.plant_id)
+      fail(403, "The active sensor must be assigned to this plant.");
+    const reading = (await pool.query(
+      'SELECT id,"values",created_at FROM sensor_reading WHERE device_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',
+      [device.id],
+    )).rows[0];
+    const capture = reading?.values?._capture;
+    const movement = reading?.values?.movement;
+    const observed = typeof capture?.observed_at === "string" ? Date.parse(capture.observed_at) : NaN;
+    const capturedAge = Date.now() - observed;
+    const receivedAge = reading ? Date.now() - new Date(reading.created_at).getTime() : NaN;
+    let status = "unavailable";
+    if (capture?.mpu_connected === true && [0, 1].includes(movement) && Number.isFinite(observed)) {
+      status = capturedAge < -1000 || capturedAge > 5000 || receivedAge < -1000 || receivedAge > 5000
+        ? "stale" : movement === 1 ? "moving" : "stationary";
+    }
+    res.json({ deviceId: device.id, plantId: String(device.plant_id), status,
+      movement: ["moving", "stationary"].includes(status) ? movement : null,
+      observedAt: Number.isFinite(observed) ? capture.observed_at : null,
+      readingId: reading?.id ?? null, maxAgeSeconds: 5 });
+  });
+
   app.post("/api/device/readings", async (req, res) => {
     const match = /^Device ([a-f0-9]{64})$/.exec(
       req.headers.authorization || "",
@@ -48,6 +82,16 @@ function mountDeviceIngestion(app, { pool }) {
     if (!match) fail(401, "Device authentication required.");
     const b = req.body;
     thresholds(b.values);
+    let capture;
+    if (b.capture !== undefined) {
+      const c = b.capture;
+      if (!c || typeof c !== "object" || Array.isArray(c) ||
+          Object.keys(c).some((key) => !["observed_at", "mpu_connected"].includes(key)) ||
+          typeof c.observed_at !== "string" || !Number.isFinite(Date.parse(c.observed_at)) ||
+          ![true, false, null].includes(c.mpu_connected))
+        fail(400, "Invalid sensor capture metadata.");
+      capture = { observed_at: c.observed_at, mpu_connected: c.mpu_connected };
+    }
     if (b.client_key !== undefined) text(b.client_key, 100);
     for (const [metric, value] of Object.entries(b.values)) {
       if (metric === "humidity" && (value < 0 || value > 100))
@@ -100,7 +144,7 @@ function mountDeviceIngestion(app, { pool }) {
       const reading = randomUUID();
       await c.query(
         'INSERT INTO sensor_reading(id,device_id,"values") VALUES($1,$2,$3)',
-        [reading, device.id, b.values],
+        [reading, device.id, capture ? { ...b.values, _capture: capture } : b.values],
       );
       if (b.client_key)
         await c.query(

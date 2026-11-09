@@ -25,3 +25,9 @@ __pycache__/
 plant-conservation-backend/backups/
 web/server/data/
 mobileapp/face_backend/data/
+
+# Local model weights and camera recordings
+*.pt
+*.pth
+*.onnx
+Ai/**/camera/recordings/
