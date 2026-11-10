@@ -27,10 +27,11 @@ import PlantDetailsScreen from "./screens/PlantDetail";
 import ScanScreen from "./screens/Scan";
 import MapScreen from "./screens/Map";
 import LoginScreen from "./screens/Login";
-import BotanistDashboardScreen from "./screens/BotanistDashboard";
+import BotanistDashboardScreen, { BotanistSubmissionsScreen, BotanistCorrectionRequestsScreen } from "./screens/BotanistDashboard";
 import BotanistNotificationsScreen from "./screens/BotanistNotifications";
 import NotificationObservationScreen from "./screens/NotificationObservation";
 import AddPlantScreen from "./screens/AddPlant";
+import AddSpeciesRequestScreen from "./screens/AddSpeciesRequest";
 import EditPlantScreen from "./screens/EditPlant";
 import EditSpeciesRequestScreen from "./screens/EditSpeciesRequest";
 import RecordChangeReviewScreen from "./screens/RecordChangeReview";
@@ -44,8 +45,10 @@ import SpeciesScreen from "./screens/Species";
 import SpeciesDetailScreen from "./screens/SpeciesDetail";
 import BotanistPlantDetailScreen from "./screens/BotanistPlantDetail";
 import BotanistSpeciesRequestDetailScreen from "./screens/BotanistSpeciesRequestDetail";
+import BotanistMyDraftsScreen from "./screens/BotanistMyDrafts";
 import FieldCollectionScreen from "./screens/FieldCollection";
 import PersistentKnowledgeScreen from "./screens/PersistentKnowledge";
+import BackButton from "./components/BackButton";
 
 
 const Tab = createBottomTabNavigator();
@@ -59,6 +62,30 @@ const theme = {
   primary: "#50B498",
   dark: "#468585",
 };
+
+function centeredDetailHeader({ route, navigation, title }) {
+  const isHistoricalDetail = route.params?.historicalRecordDetail === true;
+  const backLabel = isHistoricalDetail ? t("submissions.title") : null;
+
+  return {
+    headerShown: true,
+    title,
+    headerBackTitle: backLabel || undefined,
+    headerBackVisible: false,
+    headerTitleAlign: "center",
+    headerTitleStyle: { fontSize: 17, fontWeight: "600", color: "#234A3C" },
+    headerLeft: ({ label }) => navigation.canGoBack() ? (
+      <BackButton
+        label={backLabel || label || t("common.goBack")}
+        accessibilityLabel={backLabel || label || t("common.goBack")}
+        onPress={() => navigation.goBack()}
+        variant="plain"
+      />
+    ) : null,
+    headerTintColor: theme.dark,
+    headerStyle: { backgroundColor: theme.light },
+  };
+}
 
 
 /* =========================================================
@@ -271,6 +298,7 @@ function AccountStack({
       <Stack.Screen
         name="FavouritePlants"
         options={{
+          headerShown: false,
           title: t("navigation.favouritePlants"),
           headerTintColor: theme.dark,
           headerStyle: {
@@ -665,6 +693,8 @@ export default function App({ homeRequest }) {
 
         screenOptions={{
           headerShown: false,
+          headerTintColor: theme.dark,
+          headerStyle: { backgroundColor: theme.light },
         }}
       >
 
@@ -747,30 +777,46 @@ export default function App({ homeRequest }) {
           }}
         />
 
+        <RootStack.Screen
+          name="BotanistSubmissions"
+          component={BotanistSubmissionsScreen}
+          options={{ headerShown: true, title: t("submissions.title"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
+        />
+
+        <RootStack.Screen name="BotanistMyDrafts" component={BotanistMyDraftsScreen}
+          options={{ headerShown: true, title: t("botanistDrafts.title"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
+
+        <RootStack.Screen
+          name="BotanistCorrectionRequests"
+          component={BotanistCorrectionRequestsScreen}
+          options={{ headerShown: true, title: t("botanistDashboard.correctionRequests"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
+        />
+
         
         <RootStack.Screen
           name="BotanistPlantDetail"
           component={BotanistPlantDetailScreen}
-          options={{
-            headerShown: true,
+          options={({ route, navigation }) => centeredDetailHeader({
+            route,
+            navigation,
             title: t("navigation.plantDetails"),
-            headerTintColor: theme.dark,
-            headerStyle: {
-              backgroundColor: theme.light,
-            },
-          }}
+          })}
         />
 
         <RootStack.Screen name="BotanistSpeciesRequestDetail" component={BotanistSpeciesRequestDetailScreen}
-          options={{ headerShown: true, title: t("submissions.requestDetails"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
+          options={({ route, navigation }) => centeredDetailHeader({
+            route,
+            navigation,
+            title: t("submissions.requestDetails"),
+          })} />
 
         <RootStack.Screen name="EditSpeciesRequest" component={EditSpeciesRequestScreen}
-          options={{ headerShown: true, title: t("recordEdits.editSpecies"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
+          options={{ headerShown: true, title: t("recordEdits.editSpecies"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light }, headerBackButtonMenuEnabled: false }} />
 
         <RootStack.Screen name="RecordChangeReview" component={RecordChangeReviewScreen}
           options={{ headerShown: true, title: t("recordEdits.reviewTitle"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
         <RootStack.Screen name="RecordVersionHistory" component={RecordVersionHistoryScreen}
-          options={{ headerShown: true, title: t("recordEdits.versionHistory"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
+          options={{ headerShown: false, title: t("recordEdits.versionHistory"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
 
         <RootStack.Screen
           name="BotanistNotifications"
@@ -789,7 +835,7 @@ export default function App({ homeRequest }) {
         <RootStack.Screen
           name="AddObservation"
           component={FieldCollectionScreen}
-          options={{ headerShown: true, title: t("navigation.addNewObservation"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
+          options={{ headerShown: true, title: t("navigation.addNewObservation"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light }, headerBackButtonMenuEnabled: false }}
         />
 
 
@@ -797,6 +843,9 @@ export default function App({ homeRequest }) {
         {/* ================================================
             ADD PLANT
         ================================================= */}
+
+        <RootStack.Screen name="AddSpeciesRequest" component={AddSpeciesRequestScreen}
+          options={{ headerShown: true, title: t("speciesRequestForm.title"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light }, headerBackButtonMenuEnabled: false }} />
 
         <RootStack.Screen
           name="AddPlant"
@@ -812,6 +861,7 @@ export default function App({ homeRequest }) {
             headerStyle: {
               backgroundColor: theme.light,
             },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -834,6 +884,7 @@ export default function App({ homeRequest }) {
             headerStyle: {
               backgroundColor: theme.light,
             },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -845,6 +896,7 @@ export default function App({ homeRequest }) {
             title: t("navigation.fieldCollection"),
             headerTintColor: theme.dark,
             headerStyle: { backgroundColor: theme.light },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -856,6 +908,7 @@ export default function App({ homeRequest }) {
             title: t("navigation.registerPlant"),
             headerTintColor: theme.dark,
             headerStyle: { backgroundColor: theme.light },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -867,6 +920,7 @@ export default function App({ homeRequest }) {
             title: t("navigation.correctObservation"),
             headerTintColor: theme.dark,
             headerStyle: { backgroundColor: theme.light },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -876,6 +930,7 @@ export default function App({ homeRequest }) {
         >
           {(props) => <PersistentKnowledgeScreen {...props} user={user} />}
         </RootStack.Screen>
+
 
         <RootStack.Screen
           name="KnowledgeMap"
@@ -889,7 +944,7 @@ export default function App({ homeRequest }) {
           component={PlantQRCodeScreen}
           options={{
             headerShown: true,
-            title: t("navigation.plantQrCode"),
+            title: t("plantQRCode.pageTitle"),
             headerTintColor: theme.dark,
             headerStyle: {
               backgroundColor: theme.light,

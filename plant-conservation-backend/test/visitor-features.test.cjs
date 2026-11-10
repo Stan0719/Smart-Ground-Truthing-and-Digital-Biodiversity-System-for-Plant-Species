@@ -46,10 +46,14 @@ test("Visitor favourites and scan history are owner-scoped and public-record-onl
   const plantVisible = "9007199254740995";
   const plantProtected = "9007199254740996";
   const plantPending = "9007199254740997";
+  const plantSameSpecies = "9007199254741002";
+  const plantWithoutPhoto = "9007199254741004";
   const qrVisible = "9007199254740998";
   const qrProtected = "9007199254740999";
   const qrPending = "9007199254741000";
   const qrUnused = "9007199254741001";
+  const qrSameSpecies = "9007199254741003";
+  const qrWithoutPhoto = "9007199254741005";
   await database.query(`
     INSERT INTO species(species_id,scientific_name,common_name,rbac_data)
     VALUES (${speciesVisible},'Nepenthes mirabilis','Common pitcher plant','{"approvalStatus":"Approved","habitat":"Staff habitat"}'),
@@ -59,12 +63,25 @@ test("Visitor favourites and scan history are owner-scoped and public-record-onl
     INSERT INTO plant_record(plant_id,species_id,registered_subject,rbac_status,qr_token,scientific_name)
     VALUES (${plantVisible},${speciesVisible},'staff:bot','Approved','visitor-visible-token','Visible plant'),
            (${plantProtected},${speciesProtected},'staff:bot','Approved','visitor-private-token','Private plant'),
-           (${plantPending},${speciesVisible},'staff:bot','Pending Review','visitor-pending-token','Pending plant');
+           (${plantPending},${speciesVisible},'staff:bot','Pending Review','visitor-pending-token','Pending plant'),
+           (${plantSameSpecies},${speciesVisible},'staff:bot','Approved','visitor-same-species-token','Another visible plant'),
+           (${plantWithoutPhoto},${speciesVisible},'staff:bot','Approved','visitor-no-photo-token','Plant without photo');
     INSERT INTO public.qr_code(qr_id,plant_id,qr_code,status)
     VALUES (${qrVisible},${plantVisible},'visitor-visible-token','assigned'),
            (${qrProtected},${plantProtected},'visitor-private-token','assigned'),
            (${qrPending},${plantPending},'visitor-pending-token','assigned'),
-           (${qrUnused},NULL,'visitor-unused-token','generated');
+           (${qrUnused},NULL,'visitor-unused-token','generated'),
+           (${qrSameSpecies},${plantSameSpecies},'visitor-same-species-token','assigned'),
+           (${qrWithoutPhoto},${plantWithoutPhoto},'visitor-no-photo-token','assigned');
+    INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content)
+      VALUES ('species-generic-photo',${speciesVisible},'staff:bot','species-photo',TRUE,'image/jpeg',decode('ffd8ff','hex'));
+    INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,created_at,updated_at)
+      VALUES ('visible-observation',${plantVisible},'staff:bot','Approved','{}','visible-observation','2026-11-01','2026-11-01'),
+             ('same-species-observation',${plantSameSpecies},'staff:bot','Approved','{}','same-species-observation','2026-11-01','2026-11-01');
+    INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content,created_at)
+      VALUES ('visible-photo-first',${plantVisible},'staff:bot','visible-photo-first','visible-observation',TRUE,'image/jpeg',decode('ffd8ff','hex'),'2026-11-01'),
+             ('visible-photo-second',${plantVisible},'staff:bot','visible-photo-second','visible-observation',TRUE,'image/jpeg',decode('ffd8ff','hex'),'2026-11-02'),
+             ('same-species-photo',${plantSameSpecies},'staff:bot','same-species-photo','same-species-observation',TRUE,'image/jpeg',decode('ffd8ff','hex'),'2026-11-01');
   `);
   await database.query("SET search_path TO public");
   await database.query(readFileSync(join(__dirname, "../migrations/010-visitor-favourites-scan-history.sql"), "utf8"));
@@ -149,20 +166,29 @@ test("Visitor favourites and scan history are owner-scoped and public-record-onl
     assert.deepEqual((await call("/visitor/favourites")).data.favourites, { plants: [], species: [] });
     assert.equal((await call("/visitor/favourites", "visitorA", "POST", { type: "plant", id: plantVisible })).status, 200);
     assert.equal((await call("/visitor/favourites", "visitorA", "POST", { type: "plant", id: plantVisible })).status, 200);
+    assert.equal((await call("/visitor/favourites", "visitorA", "POST", { type: "plant", id: plantSameSpecies })).status, 200);
+    assert.equal((await call("/visitor/favourites", "visitorA", "POST", { type: "plant", id: plantWithoutPhoto })).status, 200);
     assert.equal((await call("/visitor/favourites", "visitorA", "POST", { type: "species", id: speciesVisible })).status, 200);
     assert.equal((await call("/visitor/favourites", "visitorA", "POST", { type: "plant", id: plantProtected })).status, 404);
     assert.equal((await call("/visitor/favourites", "visitorA", "POST", { type: "species", id: speciesProtected })).status, 404);
     assert.equal((await call("/visitor/favourites", "visitorA", "POST", { type: "plant", id: plantVisible, visitor_id: "visitor-b" })).status, 400);
     const own = await call("/visitor/favourites");
-    assert.deepEqual(own.data.favourites.plants.map((row) => row.plant_id), [plantVisible]);
+    assert.deepEqual(new Set(own.data.favourites.plants.map((row) => row.plant_id)), new Set([plantVisible, plantSameSpecies, plantWithoutPhoto]));
+    assert.equal(own.data.favourites.plants.find((row) => row.plant_id === plantVisible).plant_image_asset_id, 'visible-photo-first');
+    assert.equal(own.data.favourites.plants.find((row) => row.plant_id === plantSameSpecies).plant_image_asset_id, 'same-species-photo');
+    assert.equal(own.data.favourites.plants.find((row) => row.plant_id === plantWithoutPhoto).plant_image_asset_id, null);
+    assert.equal(own.data.favourites.plants.find((row) => row.plant_id === plantVisible).image_asset_id, undefined);
+    assert.equal(own.data.favourites.plants.find((row) => row.plant_id === plantVisible).species_details.image_asset_id, 'species-generic-photo');
     assert.deepEqual(own.data.favourites.species.map((row) => row.species_id), [speciesVisible]);
     assert.equal(own.data.favourites.plants[0].species_details.common_name, "Common pitcher plant");
     assert.deepEqual((await call("/visitor/favourites", "visitorB")).data.favourites, { plants: [], species: [] });
     const otherDelete = await call(`/visitor/favourites/plant/${plantVisible}`, "visitorB", "DELETE", {});
     assert.equal(otherDelete.status, 200, JSON.stringify(otherDelete.data));
     assert.equal(otherDelete.data.favourited, false);
-    assert.equal((await call("/visitor/favourites", "visitorA")).data.favourites.plants.length, 1);
+    assert.equal((await call("/visitor/favourites", "visitorA")).data.favourites.plants.length, 3);
     assert.equal((await call(`/visitor/favourites/plant/${plantVisible}`, "visitorA", "DELETE", {})).data.favourited, false);
+    assert.equal((await call(`/visitor/favourites/plant/${plantSameSpecies}`, "visitorA", "DELETE", {})).data.favourited, false);
+    assert.equal((await call(`/visitor/favourites/plant/${plantWithoutPhoto}`, "visitorA", "DELETE", {})).data.favourited, false);
     assert.equal((await call(`/visitor/favourites/species/${speciesVisible}`, "visitorA", "DELETE", {})).data.favourited, false);
     assert.deepEqual((await call("/visitor/favourites")).data.favourites, { plants: [], species: [] });
     assert.equal((await call("/visitor/favourites", "botanist", "POST", { type: "plant", id: "1" })).status, 403);
@@ -176,6 +202,8 @@ test("Visitor favourites and scan history are owner-scoped and public-record-onl
     assert.equal(second.status, 201, JSON.stringify(second.data));
     assert.equal(first.data.scan.qr_identifier, `QR-${qrVisible}`);
     assert.equal(first.data.plant.plant_id, plantVisible);
+    assert.equal(first.data.plant.image_asset_id, 'visible-photo-first');
+    assert.equal(second.data.plant.image_asset_id, 'visible-photo-first');
     assert.equal(first.data.plant.registered_at, undefined);
     assert.equal(first.data.plant.species_details.habitat, undefined);
     assert.equal(first.data.plant.species_details.conservation_status, undefined);
@@ -185,9 +213,33 @@ test("Visitor favourites and scan history are owner-scoped and public-record-onl
     assert.equal((await call("/visitor/scan-history", "botanist", "POST", { qr_code: "visitor-visible-token" })).status, 403);
     const own = await call("/visitor/scan-history");
     assert.equal(own.data.scans.length, 2);
+    const otherPlantScan = await call("/visitor/scan-history", "visitorA", "POST", { qr_code: "visitor-same-species-token" });
+    assert.equal(otherPlantScan.status, 201, JSON.stringify(otherPlantScan.data));
+    assert.equal(otherPlantScan.data.plant.plant_id, plantSameSpecies);
+    assert.equal(otherPlantScan.data.plant.image_asset_id, 'same-species-photo');
+    const noPhotoScan = await call("/visitor/scan-history", "visitorA", "POST", { qr_code: "visitor-no-photo-token" });
+    assert.equal(noPhotoScan.status, 201, JSON.stringify(noPhotoScan.data));
+    assert.equal(noPhotoScan.data.plant.image_asset_id, null);
+    const updatedHistory = await call("/visitor/scan-history", "visitorA");
+    assert.equal(updatedHistory.data.scans.length, 4);
+    assert.equal(updatedHistory.data.scans.find((scan) => scan.plant.plant_id === plantSameSpecies).plant.image_asset_id, 'same-species-photo');
+    assert.equal(updatedHistory.data.scans.find((scan) => scan.plant.plant_id === plantWithoutPhoto).plant.image_asset_id, null);
     assert.deepEqual(own.data.scans.map((scan) => scan.scan_id), [...own.data.scans.map((scan) => scan.scan_id)].sort((a, b) => Number(b) - Number(a)));
     assert.ok(new Date(own.data.scans[0].scanned_at) >= new Date(own.data.scans[1].scanned_at));
     assert.deepEqual((await call("/visitor/scan-history", "visitorB")).data.scans, []);
-    assert.equal(Number((await database.query("SELECT count(*) AS n FROM visitor_scan_history")).rows[0].n), 2);
+    assert.equal(Number((await database.query("SELECT count(*) AS n FROM visitor_scan_history")).rows[0].n), 4);
+    await database.query(`INSERT INTO visitor_scan_history(visitor_subject,plant_id,plant_reference,qr_id,qr_identifier)
+      VALUES('visitor:visitor-a',NULL,123456,NULL,'QR-ORPHAN')`);
+    const firstPage = await call("/visitor/scan-history?limit=2&offset=0");
+    const secondPage = await call("/visitor/scan-history?limit=2&offset=2");
+    const lastPage = await call("/visitor/scan-history?limit=2&offset=4");
+    assert.equal(firstPage.data.scans.length, 2);
+    assert.equal(firstPage.data.page.has_more, true);
+    assert.equal(secondPage.data.page.has_more, true);
+    assert.equal(lastPage.data.scans.length, 1);
+    assert.equal(lastPage.data.page.has_more, false);
+    const allPages = [...firstPage.data.scans, ...secondPage.data.scans, ...lastPage.data.scans];
+    assert.equal(allPages.find((scan) => scan.qr_identifier === "QR-ORPHAN").plant, null);
+    assert.equal((await call("/visitor/scan-history?limit=0")).status, 400);
   });
 });

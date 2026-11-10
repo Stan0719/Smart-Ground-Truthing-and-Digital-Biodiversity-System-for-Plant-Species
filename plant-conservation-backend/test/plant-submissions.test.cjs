@@ -74,11 +74,18 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(own.data.plant.latest_submission.healthStatus, "Healthy");
     assert.equal(own.data.plant.latest_submission.morphology, "Plant morphology");
     assert.equal(own.data.plant.latest_submission.latitude, undefined);
+    const ownerScoped = await call(`/plants/${combined.plant_id}?scope=mine`);
+    assert.equal(ownerScoped.status, 200);
+    assert.equal(ownerScoped.data.plant.zone, "Zone A", "the owner-scoped pending response exposes the submitted Zone");
     assert.equal(own.data.plant.latest_submission.longitude, undefined);
     assert.equal(own.data.plant.species_details.scientific_name, species.scientific_name);
     assert.equal(own.data.plant.scientific_name, plant.scientific_name);
     assert.equal(own.data.plant.latitude, null); // Pending plant GPS is not projected as approved.
     assert.equal(own.data.plant.latest_submission.latitude, undefined);
+    const blockedVisit = await call(`/plants/${combined.plant_id}/observations`, "bot", "POST", {
+      content: { ...plant.content, heightCm: 90 }, client_key: "pending-plant-observation-blocked",
+    });
+    assert.equal(blockedVisit.status, 404, "initially pending plants must not accept new observations");
     assert.ok((await call("/plants")).data.plants.some((p) => String(p.plant_id) === String(combined.plant_id)));
     const observation = await call(`/observations/${combined.id}`);
     assert.equal(observation.status, 200); assert.equal(observation.data.observation.owner_subject, "staff:bot");
@@ -203,5 +210,33 @@ test("one atomic submission supports existing and pending species without partia
     }
     assert.equal((await call(`/qr/${combined.qr_token}`, "guest")).status, 404);
     assert.equal((await call(`/plants/${combined.plant_id}/qr`)).status, 404);
+  });
+  await t.test("Botanists can read approved observations on visible plants without seeing another Botanist's pending observations", async () => {
+    await database.query("UPDATE rbac_species_visibility SET visibility='internal' WHERE species_id=$1", [combined.species_id]);
+    await database.query("UPDATE plant_record SET rbac_status='Approved' WHERE plant_id=$1", [combined.plant_id]);
+    const approvedVisit = await call(`/plants/${combined.plant_id}/observations`, "other", "POST", {
+      content: { ...plant.content, heightCm: 55 }, client_key: "shared-approved-observation",
+    });
+    assert.equal(approvedVisit.status, 201, JSON.stringify(approvedVisit.data));
+    assert.equal((await call(`/observations/${approvedVisit.data.id}/submit`, "other", "POST", {})).status, 200);
+    assert.equal((await call(`/observations/${approvedVisit.data.id}/review`, "officer", "POST", {
+      decision: "Approved", comment: "Verified", revision: 1,
+    })).status, 200);
+
+    const ownerPlant = await call(`/plants/${combined.plant_id}?scope=mine`, "bot");
+    assert.equal(ownerPlant.status, 200);
+    assert.equal(ownerPlant.data.plant.latest_approved.heightCm, 55);
+    assert.equal((await call(`/observations/${approvedVisit.data.id}`, "bot")).status, 200);
+    assert.ok((await call("/observations", "bot")).data.observations.some((row) => row.id === approvedVisit.data.id));
+    assert.equal((await call(`/observations/${approvedVisit.data.id}`, "visitor")).status, 403);
+
+    const pendingVisit = await call(`/plants/${combined.plant_id}/observations`, "other", "POST", {
+      content: { ...plant.content, heightCm: 88 }, client_key: "shared-pending-observation",
+    });
+    assert.equal(pendingVisit.status, 201, JSON.stringify(pendingVisit.data));
+    assert.equal((await call(`/observations/${pendingVisit.data.id}/submit`, "other", "POST", {})).status, 200);
+    assert.equal((await call(`/observations/${pendingVisit.data.id}`, "bot")).status, 404);
+    assert.equal((await call("/observations", "bot")).data.observations.some((row) => row.id === pendingVisit.data.id), false);
+    assert.equal((await call(`/observations/${pendingVisit.data.id}`, "visitor")).status, 403);
   });
 });

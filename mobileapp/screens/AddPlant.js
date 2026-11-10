@@ -1,5 +1,5 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
   View,
@@ -18,12 +18,13 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import QRCode from "react-native-qrcode-svg";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import QRRefreshButton from "../components/QRRefreshButton";
 import RefreshButton from "../components/RefreshButton";
 import { fieldFormStyles } from "../components/fieldFormStyles";
 import { plantApi, fetchSpeciesCatalog } from "../utils/plantApi";
 import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation";
 import { useFocusEffect } from "@react-navigation/native";
+import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
+import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 
 const createPlantClientKey = () =>
   `plant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -80,7 +81,16 @@ export default function AddPlantScreen({
   useAppTranslation();
 
   const botanist = route.params?.botanist;
+  const accountId = botanist?.id;
+  const draftIdentity = useId();
   const clientKeyRef = useRef(createPlantClientKey());
+  const [localFormDraftKey, setLocalFormDraftKey] = useState(() => route.params?.formDraftKey || `add-plant-${draftIdentity}`);
+  const [draftKeyVersion, setDraftKeyVersion] = useState(0);
+  const [recoveryResolved, setRecoveryResolved] = useState(false);
+  const activeFormDraftKey = route.params?.formDraftKey || localFormDraftKey;
+  const restoredDraftRef = useRef(null);
+  const recoveryPromptedRef = useRef(false);
+  const [draftSaving, setDraftSaving] = useState(false), [draftMessage, setDraftMessage] = useState(""), [draftError, setDraftError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const submissionBusyRef = useRef(false);
   const [submittedQr, setSubmittedQr] = useState(null);
@@ -90,7 +100,7 @@ export default function AddPlantScreen({
   const [loadingQRCodes, setLoadingQRCodes] = useState(true);
   const [qrLoadError, setQrLoadError] = useState("");
 
-  async function loadAvailableQRCodes() {
+  const loadAvailableQRCodes = useCallback(async () => {
     setLoadingQRCodes(true);
     setQrLoadError("");
     try {
@@ -104,10 +114,6 @@ export default function AddPlantScreen({
     } finally {
       setLoadingQRCodes(false);
     }
-  }
-
-  useEffect(() => {
-    loadAvailableQRCodes();
   }, []);
 
 
@@ -129,7 +135,7 @@ export default function AddPlantScreen({
     setSpeciesCatalogError("");
     const request = (async () => {
       try {
-        const catalog = await fetchSpeciesCatalog({ accountId: botanist?.id });
+        const catalog = await fetchSpeciesCatalog({ accountId });
         setSpeciesCatalog(catalog);
         setSelectedSpecies((current) => current
           ? catalog.find((species) => String(species.id) === String(current.id)) || null : null);
@@ -144,11 +150,12 @@ export default function AddPlantScreen({
     })();
     speciesRequestRef.current = request;
     return request;
-  }, [botanist?.id]);
+  }, [accountId]);
 
   useFocusEffect(useCallback(() => {
     void loadSpeciesCatalog();
-  }, [loadSpeciesCatalog]));
+    void loadAvailableQRCodes();
+  }, [loadSpeciesCatalog, loadAvailableQRCodes]));
 
   const filteredSpecies = speciesCatalog
     .filter((species) => {
@@ -234,6 +241,80 @@ export default function AddPlantScreen({
   const [speciesDescription, setSpeciesDescription] = useState("");
   const [speciesHabitat, setSpeciesHabitat] = useState("");
   const [speciesImages, setSpeciesImages] = useState([]);
+  const [autoSaveState, setAutoSaveState] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    if (!route.params?.formDraftKey || !botanist?.id) return () => { active = false; };
+    (async () => {
+      try {
+        const draft = await getBotanistFormDraft(botanist.id, route.params.formDraftKey, "add-plant");
+        if (!active) return;
+        restoredDraftRef.current = draft;
+        const saved = draft.form;
+        clientKeyRef.current = draft.submission_client_key || saved.submissionClientKey || clientKeyRef.current;
+        setSelectedSpecies(saved.selectedSpecies || null); setSpeciesSearch(saved.speciesSearch || "");
+        setPlantScientificName(saved.plantScientificName || ""); setHeight(saved.height || ""); setDescription(saved.description || "");
+        setHealthStatus(saved.healthStatus || "Healthy"); setGrowthStage(saved.growthStage || ""); setMorphology(saved.morphology || ""); setZone(saved.zone || "");
+        setLatitude(saved.latitude || ""); setLongitude(saved.longitude || ""); setAltitude(saved.altitude || ""); setGpsAccuracy(saved.gpsAccuracy || "");
+        setShowSpeciesForm(Boolean(saved.showSpeciesForm)); setSpeciesScientificName(saved.speciesScientificName || "");
+        setSpeciesCommonName(saved.speciesCommonName || ""); setSpeciesGenus(saved.speciesGenus || ""); setSpeciesFamily(saved.speciesFamily || "");
+        setSpeciesConservationStatus(saved.speciesConservationStatus || "Not Assessed"); setSpeciesDescription(saved.speciesDescription || ""); setSpeciesHabitat(saved.speciesHabitat || "");
+        const refs = draft.photo_refs || [];
+        setGuidedPhotos(Object.fromEntries(REQUIRED_PHOTO_KEYS.concat("flowerFruit").map((slot) => [slot, refs.find((photo) => photo.slot === `guided:${slot}`)?.uri || null])));
+        setAdditionalPhotos(refs.filter((photo) => photo.slot?.startsWith("additional:")).sort((a, b) => a.slot.localeCompare(b.slot)).map((photo) => photo.uri));
+        setSpeciesImages(refs.filter((photo) => photo.slot?.startsWith("species:")).map((photo) => photo.uri));
+        setSelectedQRCode(saved.selectedQRCode || null);
+        setRecoveryResolved(true);
+      } catch (error) { if (active) { setDraftError(error.message || t("botanistDrafts.restoreFailed")); setRecoveryResolved(true); } }
+    })();
+    return () => { active = false; };
+  }, [botanist?.id, route.params?.formDraftKey]);
+
+  useEffect(() => {
+    if (!accountId || route.params?.formDraftKey || recoveryPromptedRef.current) return;
+    recoveryPromptedRef.current = true;
+    let active = true;
+    findBotanistFormDraft(accountId, "add-plant").then((draft) => {
+      if (!active) return;
+      if (!draft) { setRecoveryResolved(true); return; }
+      Alert.alert(t("botanistDrafts.recoveryTitle"), t("botanistDrafts.recoveryMessage"), [
+        { text: t("botanistDrafts.continueDraft"), onPress: () => navigation.setParams({ formDraftKey: draft.client_key }) },
+        { text: t("botanistDrafts.startNewDraft"), style: "cancel", onPress: () => {
+          setLocalFormDraftKey(`add-plant-${accountId}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+          setDraftKeyVersion((value) => value + 1);
+          setRecoveryResolved(true);
+        } },
+      ]);
+    }).catch((error) => { if (active) { setDraftError(translateUIMessage(error.message) || t("botanistDrafts.restoreFailed")); setRecoveryResolved(true); } });
+    return () => { active = false; };
+  }, [accountId, navigation, route.params?.formDraftKey]);
+
+  const buildDraftInput = (autoSaved = false) => {
+    const photos = [
+      ...Object.entries(guidedPhotos).filter(([, uri]) => uri).map(([slot, uri]) => ({ slot: `guided:${slot}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
+      ...additionalPhotos.map((uri, index) => ({ slot: `additional:${String(index).padStart(2, "0")}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
+      ...speciesImages.map((uri, index) => ({ slot: `species:${index}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
+    ];
+    return { client_key: activeFormDraftKey, form_type: "add-plant", submission_client_key: clientKeyRef.current,
+      title: plantScientificName.trim() || selectedSpecies?.scientificName || selectedSpecies?.name || "",
+      auto_saved: autoSaved,
+      form: { selectedSpecies: selectedSpecies ? { id: selectedSpecies.id, scientificName: selectedSpecies.scientificName, commonName: selectedSpecies.commonName, name: selectedSpecies.name } : null,
+        speciesSearch, plantScientificName, height, description, healthStatus, growthStage, morphology, zone, latitude, longitude, altitude, gpsAccuracy,
+        selectedQRCode: selectedQRCode ? { qr_id: selectedQRCode.qr_id, qr_code: selectedQRCode.qr_code, label: selectedQRCode.label } : null,
+        showSpeciesForm, speciesScientificName, speciesCommonName, speciesGenus, speciesFamily, speciesConservationStatus, speciesDescription, speciesHabitat,
+        submissionClientKey: clientKeyRef.current }, photos };
+  };
+  const autosaveSignature = JSON.stringify({ selectedSpecies: selectedSpecies?.id, plantScientificName, height, description, growthStage, morphology,
+    zone, latitude, longitude, altitude, gpsAccuracy, selectedQRCode: selectedQRCode?.qr_id, showSpeciesForm, speciesScientificName,
+    speciesCommonName, speciesGenus, speciesFamily, speciesConservationStatus, speciesDescription, speciesHabitat,
+    photos: [...Object.values(guidedPhotos), ...additionalPhotos, ...speciesImages] });
+  const hasMeaningfulDraft = Boolean(selectedSpecies || plantScientificName || height || description || growthStage || morphology || zone || latitude || longitude || altitude || gpsAccuracy || selectedQRCode || showSpeciesForm || speciesScientificName || speciesCommonName || speciesGenus || speciesFamily || speciesDescription || speciesHabitat || Object.values(guidedPhotos).some(Boolean) || additionalPhotos.length || speciesImages.length);
+  const autosave = useBotanistDraftAutosave({ enabled: Boolean(accountId && recoveryResolved && hasMeaningfulDraft && !submittedQr),
+    signature: autosaveSignature + draftKeyVersion, navigation, accountId, errorKey: accountId && route.key ? `${accountId}:${route.key}` : undefined,
+    onSaving: () => setAutoSaveState("saving"),
+    save: async ({ isMounted } = {}) => { const saved = await saveBotanistFormDraft(accountId, buildDraftInput(true)); restoredDraftRef.current = saved; if (isMounted?.()) setAutoSaveState("saved"); return saved; },
+    onError: (error) => { setAutoSaveState("error"); setDraftError(translateUIMessage(error.message) || t("botanistDrafts.autoSaveFailed")); } });
 
 
   // ===================================================
@@ -578,6 +659,22 @@ function handleRemoveSpeciesPhoto(index) {
 
 
   // One final action saves the species (when proposed), plant, photos and QR assignment.
+  async function saveLocalDraft() {
+    if (draftSaving || submitting || submittedQr) return;
+    setDraftSaving(true); setDraftError(""); setDraftMessage("");
+    try {
+      if (!botanist?.id) throw Error(t("botanistDrafts.ownerRequired"));
+      const draft = await saveBotanistFormDraft(botanist.id, buildDraftInput(false));
+      restoredDraftRef.current = draft;
+      await autosave.stop();
+      Alert.alert(t("botanistDrafts.savedStatus"), t("botanistDrafts.saved"), [{
+        text: t("common.ok"),
+        onPress: () => navigation.navigate("BotanistMyDrafts", { botanist, openDraftKey: draft.client_key }),
+      }]);
+    } catch (error) { setDraftError(translateUIMessage(error.message) || t("botanistDrafts.saveFailed")); }
+    finally { setDraftSaving(false); }
+  }
+
   async function handleSubmitPlant() {
     if (submissionBusyRef.current || submittedQr) return;
     const speciesData = showSpeciesForm ? {
@@ -679,11 +776,22 @@ function handleRemoveSpeciesPhoto(index) {
       });
       const plantId = String(created.plant_id ?? "");
       if (!/^\d+$/.test(plantId) || !created.qr_token) throw Error(t("addPlantWorkflow.invalidCombinedResponse"));
+      await autosave.stop();
+      if (restoredDraftRef.current) {
+        try {
+          const removed = await deleteBotanistFormDraft(botanist.id, activeFormDraftKey, restoredDraftRef.current?.saved_at);
+          if (!removed) setDraftError(t("botanistDrafts.newerDraftKept"));
+          else restoredDraftRef.current = null;
+        } catch { setDraftError(t("botanistDrafts.cleanupFailed")); }
+      }
       setSubmittedQr({ plantId, token: created.qr_token });
       clientKeyRef.current = createPlantClientKey();
       Alert.alert(
         t("addPlant.plantSubmitted"),
-        t(newSpecies ? "addPlantWorkflow.combinedSaved" : "addPlant.plantAndItsPhotosWereSavedTheQrCodeIs", { plantId })
+        t(newSpecies ? "addPlantWorkflow.combinedSaved" : "addPlant.plantAndItsPhotosWereSavedTheQrCodeIs", { plantId }),
+        [{ text: t("common.ok"), onPress: () => navigation.navigate("BotanistSubmissions", {
+          botanist, openTarget: { kind: "plant", recordId: plantId },
+        }) }],
       );
     } catch (error) {
       Alert.alert(
@@ -1436,7 +1544,7 @@ function handleRemoveSpeciesPhoto(index) {
                       </TouchableOpacity>
                     ))
                   )}
-                  <QRRefreshButton
+                  <RefreshButton
                     style={styles.qrRefreshSpacing}
                     onPress={loadAvailableQRCodes}
                     loading={loadingQRCodes}
@@ -1693,25 +1801,33 @@ function handleRemoveSpeciesPhoto(index) {
             FINAL SUBMIT
         ================================================= */}
 
-        <TouchableOpacity
-          style={
-            styles.submitButton
-          }
-          onPress={
-            handleSubmitPlant
-          }
-          disabled={submitting || Boolean(submittedQr)}
-          activeOpacity={0.8}
-        >
-          {submitting ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.submitButtonText}>
-              {submittedQr ? t("addPlant.plantSaved") : t("addPlantWorkflow.addPlantRecord")}
-            </Text>
-          )}
+        {autoSaveState === "saving" ? <Text style={styles.draftSuccess}>{t("botanistDrafts.autoSaving")}</Text> : null}
+        {autoSaveState === "saved" ? <Text style={styles.draftSuccess}>{t("botanistDrafts.autoSaved")}</Text> : null}
+        {draftMessage ? <Text style={styles.draftSuccess}>{draftMessage}</Text> : null}
+        {draftError ? <Text style={styles.draftError}>{draftError}</Text> : null}
+        {autoSaveState === "error" ? <TouchableOpacity onPress={() => { setDraftError(""); void autosave.retry().catch(() => {}); }} style={{ minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 4 }} accessibilityRole="button"><Text style={styles.saveDraftText}>{t("common.tryAgain")}</Text></TouchableOpacity> : null}
+        <View style={styles.formActionRow}>
+          <TouchableOpacity style={[styles.saveDraftButton, (draftSaving || submitting || Boolean(submittedQr)) && styles.disabledAction]} onPress={saveLocalDraft} disabled={draftSaving || submitting || Boolean(submittedQr)} accessibilityRole="button" accessibilityState={{ disabled: draftSaving || submitting || Boolean(submittedQr) }}>
+            {draftSaving ? <ActivityIndicator color="#2F6B4F" /> : <Text style={styles.saveDraftText}>{t("botanistDrafts.saveDraft")}</Text>}
+          </TouchableOpacity>
 
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.submitButton, (submitting || Boolean(submittedQr)) && styles.disabledAction]}
+            onPress={handleSubmitPlant}
+            disabled={submitting || Boolean(submittedQr)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: submitting || Boolean(submittedQr) }}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.submitButtonText}>
+                {submittedQr ? t("addPlant.plantSaved") : t("addPlantWorkflow.addPlantRecord")}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
 
         {/* =================================================
@@ -2436,7 +2552,8 @@ const styles = StyleSheet.create({
 
 
   qrRefreshSpacing: {
-    margin: 10,
+    alignSelf: "flex-start",
+    marginTop: 8,
   },
 
   qrDropdown: {
@@ -2514,7 +2631,14 @@ const styles = StyleSheet.create({
   // SUBMIT
   // ===================================================
 
-  submitButton: fieldFormStyles.submitButton,
+  formActionRow: { flexDirection: "row", flexWrap: "wrap", gap: 9, marginTop: 8 },
+  saveDraftButton: { flexGrow: 1, flexBasis: "45%", minWidth: 145, minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: "#AFCBB7", backgroundColor: "#E8EDDA", alignItems: "center", justifyContent: "center", paddingHorizontal: 12, paddingVertical: 8 },
+  disabledAction: { opacity: 0.58 },
+  saveDraftText: { color: "#2F6B4F", fontSize: 14, fontWeight: "700", textAlign: "center" },
+  draftSuccess: { color: "#2F6B4F", fontSize: 13, textAlign: "center" },
+  draftError: { color: "#A34436", fontSize: 13, lineHeight: 19 },
+
+  submitButton: [fieldFormStyles.submitButton, { flexGrow: 1, flexBasis: "45%", minWidth: 145, marginTop: 0, minHeight: 48, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }],
 
 
   submitButtonText: fieldFormStyles.submitButtonText,

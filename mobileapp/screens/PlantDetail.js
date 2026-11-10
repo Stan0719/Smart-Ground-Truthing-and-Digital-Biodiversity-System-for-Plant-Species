@@ -19,12 +19,15 @@ import {
   getPlantById,
   getSpeciesBySlug,
 } from "../data/mockData";
-import { fetchPlantDetail, getPlantDisplayObservation } from "../utils/plantApi";
+import { fetchPlantDetail, getPlantDisplayObservation, getObservationRecorderDisplayName, getPlantRegisteredByDisplayName, isOwnedPendingPlant, selectLatestApprovedObservation } from "../utils/plantApi";
 import RefreshButton from "../components/RefreshButton";
+import BackButton from "../components/BackButton";
 import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 import { stepPhotoIndex, uniquePlantPhotos } from "../utils/plantPhotoGallery";
+import { fetchPlantObservationEligibility } from "../utils/fieldSync";
+import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 
 
 export default function PlantDetail({
@@ -34,20 +37,46 @@ export default function PlantDetail({
 }) {
   useAppTranslation();
   const { plantId } = route.params || {};
+  const focusObservationId = route.params?.focusObservationId;
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isVisitor = user?.role?.toLowerCase() === "visitor";
   const favourites = useVisitorFavourites(user);
   const [plant, setPlant] = useState(null);
+  const [observationEligibility, setObservationEligibility] = useState("checking");
   const [failedPhotoUris, setFailedPhotoUris] = useState([]);
   const [selectedPhotoUri, setSelectedPhotoUri] = useState(null);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const locationDisplay = getPlantLocationDisplay(plant?.location, user?.role);
+  const ownPendingPlant = isBotanist && isOwnedPendingPlant(plant, user?.id);
+  const locationZoneValue = locationDisplay.zone || (
+    locationDisplay.status === "restricted"
+      ? t("map.locationRestricted")
+      : plant?.currentStatus === "Approved" || ownPendingPlant
+        ? t("plant.notRecorded")
+        : t("plantDetail.locationUnavailableUntilApproved")
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const requestRef = useRef(null);
   const activePlantIdRef = useRef(plantId);
+  const plantApprovalStatus = String(observationEligibility === "checking"
+    ? plant?.currentStatus || "checking"
+    : observationEligibility).trim().toLowerCase();
+  const canAddObservation = plantApprovalStatus === "approved";
+  const isPendingInitialReview = plant?.currentStatus === "Pending Review";
+  const showObservationHistory = isBotanist && !isPendingInitialReview;
+  const observationBlockedMessageKey = plantApprovalStatus === "pending review" || plantApprovalStatus === "pending"
+    ? "fieldCollection.plantObservationPendingApproval"
+    : plantApprovalStatus === "rejected"
+      ? "fieldCollection.plantObservationRejected"
+      : plantApprovalStatus === "correction required" || plantApprovalStatus === "correctionrequired"
+        ? "fieldCollection.plantObservationCorrectionRequired"
+        : plantApprovalStatus === "checking"
+          ? "fieldCollection.checkingPlantApproval"
+          : "fieldCollection.plantObservationEligibilityUnavailable";
 
+  /* eslint-disable react-hooks/set-state-in-effect -- clear the previous record when the route target changes. */
   useEffect(() => {
     activePlantIdRef.current = plantId;
     requestRef.current = null;
@@ -55,13 +84,16 @@ export default function PlantDetail({
     setFailedPhotoUris([]);
     setImageViewerVisible(false);
     setPlant(null);
+    setObservationEligibility("checking");
   }, [plantId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const loadPlant = useCallback((isRefresh = false) => {
     if (requestRef.current) return requestRef.current;
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setErrorMessage("");
+    if (isBotanist) setObservationEligibility("checking");
 
     if (!/^\d+$/.test(String(plantId ?? ""))) {
       setPlant(getPlantById(plantId) || null);
@@ -84,10 +116,18 @@ export default function PlantDetail({
         } else {
           backendPlant = await fetchPlantDetail(plantId, options);
         }
-        if (String(activePlantIdRef.current) === String(plantId)) setPlant(backendPlant);
+        if (String(activePlantIdRef.current) === String(plantId)) {
+          setPlant(backendPlant);
+          if (isBotanist) {
+            const eligibility = await fetchPlantObservationEligibility(user?.id, plantId);
+            if (String(activePlantIdRef.current) === String(plantId)) setObservationEligibility(eligibility);
+          }
+        }
       } catch (error) {
-        if (String(activePlantIdRef.current) === String(plantId))
+        if (String(activePlantIdRef.current) === String(plantId)) {
           setErrorMessage(error.message || "Unable to load this plant record.");
+          if (isBotanist) setObservationEligibility("unavailable");
+        }
       } finally {
         if (String(activePlantIdRef.current) === String(plantId)) {
           if (requestRef.current === request) requestRef.current = null;
@@ -98,7 +138,7 @@ export default function PlantDetail({
     })();
     requestRef.current = request;
     return request;
-  }, [plantId, isBotanist, user?.id]);
+  }, [plantId, isBotanist, user]);
 
   useFocusEffect(useCallback(() => {
     void loadPlant(false);
@@ -110,8 +150,14 @@ export default function PlantDetail({
 
   if (loading && !plant) {
     return (
-      <View style={styles.notFoundContainer}>
-        <Text style={styles.notFoundTitle}>{t("plantDetail.loadingPlantRecord")}</Text>
+      <View style={styles.viewerRoot}>
+        <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1 }}>
+          <View style={styles.header}><View style={styles.heroToolbar}>
+            <BackButton label={t("plant.back")} variant="glass" onPress={() => navigation.goBack()} />
+            <RefreshButton onPress={() => { void loadPlant(false); }} loading={loading} label={t("common.refresh")} testID="plant-detail-loading-retry" />
+          </View></View>
+          <DetailSkeletonContent label={t("plantDetail.loadingPlantRecord")} sections={4} />
+        </ScrollView>
       </View>
     );
   }
@@ -120,22 +166,20 @@ export default function PlantDetail({
     return (
       <View style={styles.notFoundContainer}>
 
+        <View style={[styles.heroToolbar, { width: "100%", justifyContent: "space-between" }]}>
+          <BackButton label={t("plant.back")} variant="glass" onPress={() => navigation.goBack()} />
+          <RefreshButton onPress={() => { void loadPlant(false); }} loading={loading} label={t("common.tryAgain")} testID="plant-detail-error-retry" />
+        </View>
+
         <Text style={styles.notFoundIcon}>
           🌿
         </Text>
 
-        <Text style={styles.notFoundTitle}>{t("plantDetail.plantRecordNotFound")}</Text>
+        <Text style={styles.notFoundTitle}>{errorMessage ? t("plantDetail.plantDetailsUnavailable") : t("plantDetail.plantRecordNotFound")}</Text>
 
         <Text style={styles.notFoundText}>
           {errorMessage || t("plantDetail.thePlantRecordYouAreLookingForDoesNotExist")}
         </Text>
-
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backButtonText}>{t("common.goBack")}</Text>
-        </TouchableOpacity>
 
       </View>
     );
@@ -183,11 +227,7 @@ export default function PlantDetail({
   // LATEST APPROVED OBSERVATION
   // =====================================================
 
-  const latestApprovedObservation =
-    sortedObservations.find(
-      (observation) =>
-        observation.status === "Approved"
-    );
+  const latestApprovedObservation = selectLatestApprovedObservation(plant.observations || []);
 
 
   // =====================================================
@@ -218,13 +258,7 @@ export default function PlantDetail({
     <Text style={styles.refreshError}>{translateUIMessage(errorMessage)}</Text>
   )}
   <View style={styles.heroToolbar}>
-  <TouchableOpacity
-    style={styles.heroBackButton}
-    onPress={() => navigation.goBack()}
-    activeOpacity={0.8}
-  >
-    <Text style={styles.heroBackText}>{t("plant.back")}</Text>
-  </TouchableOpacity>
+  <BackButton label={t("plant.back")} variant="glass" onPress={() => navigation.goBack()} />
   <RefreshButton
     onPress={() => { void loadPlant(true); void favourites.refresh(true); }}
     loading={loading || refreshing || favourites.refreshing}
@@ -256,7 +290,11 @@ export default function PlantDetail({
         ) : (
           <View style={styles.imagePlaceholder}>
             <Text style={styles.placeholderIcon}>🌿</Text>
-            <Text style={styles.placeholderText}>{t("plantDetail.fieldPhotographComingSoon")}</Text>
+            <Text style={styles.placeholderText}>
+              {plant.photoLoadError || (plantPhotos.length > 0 && displayablePhotos.length === 0)
+                ? t("plantDetail.photoUnavailable")
+                : t("plantDetail.fieldPhotographComingSoon")}
+            </Text>
           </View>
         )}
       </View>
@@ -318,7 +356,7 @@ export default function PlantDetail({
 
         {isBotanist && (
           <Text style={styles.heroBadge}>
-            {locationDisplay.zone || (locationDisplay.status === "restricted" ? t("map.locationRestricted") : plant.currentStatus === "Approved" ? t("plant.notRecorded") : t("plantDetail.locationUnavailableUntilApproved"))}
+            {locationZoneValue}
           </Text>
         )}
       </View>
@@ -398,7 +436,7 @@ export default function PlantDetail({
           {isBotanist && (
             <InfoRow
               label={t("plantDetail.locationZone")}
-              value={locationDisplay.zone || (plant.currentStatus === "Approved" ? t("plant.notRecorded") : t("plantDetail.locationUnavailableUntilApproved"))}
+              value={locationZoneValue}
             />
           )}
 
@@ -416,23 +454,6 @@ export default function PlantDetail({
         </View>
 
       </View>
-
-      {isBotanist && (
-        <View style={styles.addObservationSection}>
-          <TouchableOpacity
-            style={styles.addObservationButton}
-            activeOpacity={0.8}
-            onPress={() =>
-              navigation.navigate("AddObservation", {
-                plantId: plant.plantId,
-              })
-            }
-          >
-            <Text style={styles.addObservationButtonText}>{t("plantDetail.addNewObservation")}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
 
       {/* =================================================
           STAFF RECORD
@@ -523,7 +544,7 @@ export default function PlantDetail({
 
           <InfoRow
             label={t("plantDetail.registeredBy")}
-            value={plant.registeredBy ?? t("plant.notRecorded")}
+            value={getPlantRegisteredByDisplayName(plant, user, t("plantDetail.unknownBotanist"))}
           />
 
           <InfoRow
@@ -538,32 +559,44 @@ export default function PlantDetail({
       </View>
       )}
 
+      {isBotanist && plant.currentStatus === "Approved" && (
+        <View style={styles.addObservationSection}>
+          <TouchableOpacity
+            style={[styles.addObservationButton, !canAddObservation && styles.addObservationButtonDisabled]}
+            disabled={!canAddObservation}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canAddObservation }}
+            activeOpacity={0.8}
+            onPress={() =>
+              navigation.navigate("AddObservation", {
+                plantId: plant.plantId,
+              })
+            }
+          >
+            <Text style={styles.addObservationButtonText}>{t("plantDetail.addNewObservation")}</Text>
+          </TouchableOpacity>
+          {!canAddObservation && <Text style={styles.addObservationUnavailableText}>{t(observationBlockedMessageKey)}</Text>}
+        </View>
+      )}
 
       {/* =================================================
           LATEST VERIFIED OBSERVATION
       ================================================= */}
 
-      {isBotanist && latestApprovedObservation && (
+      {showObservationHistory && (
         <View style={styles.observesection}>
 
           <Text style={styles.sectionLabel}>{t("plantDetail.latestVerifiedObservation")}</Text>
 
           <Text style={styles.sectionTitle}>{t("plantDetail.observationDetails")}</Text>
 
-
+          {latestApprovedObservation ? (
           <View style={styles.observationCard}>
-
-            <InfoRow
-              label={t("plantDetail.observationId")}
-              value={
-                latestApprovedObservation.observationId
-              }
-            />
 
             <InfoRow
               label={t("plantDetail.recordedBy")}
               value={
-                latestApprovedObservation.recordedBy
+                getObservationRecorderDisplayName(latestApprovedObservation, user, t("plantDetail.unknownBotanist"))
               }
             />
 
@@ -607,7 +640,18 @@ export default function PlantDetail({
               }
             />
 
+            {latestApprovedObservation.taxonomy ? (
+              <InfoRow label={t("recordEdits.taxonomy")} value={latestApprovedObservation.taxonomy} />
+            ) : null}
+
+            <ObservationPhotos photos={latestApprovedObservation.photos} />
+
           </View>
+          ) : (
+            <View style={styles.emptyHistory}>
+              <Text style={styles.emptyText}>{t("plantDetail.noVerifiedObservationAvailable")}</Text>
+            </View>
+          )}
 
         </View>
       )}
@@ -617,7 +661,7 @@ export default function PlantDetail({
           OBSERVATION HISTORY
       ================================================= */}
 
-      {isBotanist && (
+      {showObservationHistory && (
       <View style={styles.historySection}>
 
         <Text style={styles.sectionLabel}>{t("plantDetail.observationHistory")}</Text>
@@ -640,6 +684,8 @@ export default function PlantDetail({
               <ObservationCard
                 key={observation.observationId}
                 observation={observation}
+                user={user}
+                initiallyOpen={String(observation.observationId) === String(focusObservationId)}
               />
             )
           )
@@ -722,9 +768,9 @@ function InfoRow({
 // OBSERVATION CARD
 // =====================================================
 
-function ObservationCard({ observation }) {
+function ObservationCard({ observation, user, initiallyOpen = false }) {
   useAppTranslation();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(initiallyOpen);
 
   return (
     <View style={styles.historyCard}>
@@ -738,7 +784,7 @@ function ObservationCard({ observation }) {
             {formatDate(observation.date)}
           </Text>
 
-          <Text style={styles.recordedBy}>{t("plantDetail.recordedBy2")}{observation.recordedBy}
+          <Text style={styles.recordedBy}>{t("plantDetail.recordedBy2")}{getObservationRecorderDisplayName(observation, user, t("plantDetail.unknownBotanist"))}
           </Text>
         </View>
 
@@ -774,7 +820,7 @@ function ObservationCard({ observation }) {
           <View style={styles.divider} />
 
           <Text style={styles.observationId}>
-            {observation.observationId}
+            {t("plantDetail.fieldObservation")}
           </Text>
 
           <Text style={styles.observationSummary}>
@@ -800,8 +846,37 @@ function ObservationCard({ observation }) {
               </Text>
             </>
           )}
+
+          {observation.taxonomy ? (
+            <>
+              <Text style={styles.historyLabel}>{t("recordEdits.taxonomy")}</Text>
+              <Text style={styles.historyValue}>{observation.taxonomy}</Text>
+            </>
+          ) : null}
+
+          <ObservationPhotos photos={observation.photos} />
         </View>
       )}
+    </View>
+  );
+}
+
+function ObservationPhotos({ photos }) {
+  if (!photos?.length) return null;
+  return (
+    <View style={styles.observationPhotosSection}>
+      <Text style={styles.historyLabel}>{t("plantDetail.observationPhotos")}</Text>
+      <View style={styles.observationPhotosRow}>
+        {photos.map((photo, index) => (
+          <Image
+            key={photo.id}
+            source={{ uri: photo.uri, ...(photo.headers ? { headers: photo.headers } : {}) }}
+            style={styles.observationPhoto}
+            resizeMode="cover"
+            accessibilityLabel={t("plantDetail.photoNumber", { value0: index + 1 })}
+          />
+        ))}
+      </View>
     </View>
   );
 }
@@ -891,20 +966,6 @@ refreshError: {
 },
 
 heroToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
-
-heroBackButton: {
-  alignSelf: "flex-start",
-  paddingHorizontal: 14,
-  paddingVertical: 9,
-  borderRadius: 999,
-  backgroundColor: "#FFFFFFAA",
-},
-
-heroBackText: {
-  color: "#468585",
-  fontSize: 12,
-  fontWeight: "700",
-},
 
 heroGrid: {
   flexDirection: "column",
@@ -1058,6 +1119,8 @@ heroBadge: {
     borderRadius: 14,
     backgroundColor: "#468585",
   },
+  addObservationButtonDisabled: { opacity: 0.52 },
+  addObservationUnavailableText: { marginTop: 8, color: "#77501D", fontSize: 13, lineHeight: 19 },
 
   addObservationButtonText: {
     color: "#FFFFFF",
@@ -1287,6 +1350,23 @@ observationArrow: {
     lineHeight: 17,
   },
 
+  observationPhotosSection: {
+    marginTop: 4,
+  },
+
+  observationPhotosRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+
+  observationPhoto: {
+    width: 82,
+    height: 82,
+    borderRadius: 10,
+    backgroundColor: "#E8EDDA",
+  },
+
   notes: {
     color: "#6C7973",
     fontSize: 11,
@@ -1336,20 +1416,6 @@ observationArrow: {
     color: "#6D7F75",
     fontSize: 12,
     textAlign: "center",
-  },
-
-  backButton: {
-    marginTop: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: "#468585",
-  },
-
-  backButtonText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "700",
   },
 
 });

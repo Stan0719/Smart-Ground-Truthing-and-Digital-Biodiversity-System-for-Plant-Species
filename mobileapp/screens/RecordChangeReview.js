@@ -5,6 +5,7 @@ import { plantApi } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
 import { mobileApiUrl } from "../utils/apiConfiguration";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
+import BackButton from "../components/BackButton";
 
 function flattened(snapshot) {
   const result = {};
@@ -96,7 +97,7 @@ export default function RecordChangeReview() {
       <Text style={styles.muted}>{change.status} · {new Date(change.created_at).toLocaleString()}</Text>
     </TouchableOpacity>)}
     {selected && <>
-      <TouchableOpacity style={styles.secondary} onPress={() => select(null)}><Text style={styles.secondaryText}>{t("recordEdits.backToQueue")}</Text></TouchableOpacity>
+      <BackButton label={t("recordEdits.backToQueue")} onPress={() => select(null)} style={styles.secondary} />
       <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.compareTitle")}</Text>
         {labels.map((field) => <View key={field} style={[styles.compare, original[field] !== proposed[field] && styles.changed]}>
           <Text style={styles.label}>{t(`recordEdits.${field}`)}</Text>
