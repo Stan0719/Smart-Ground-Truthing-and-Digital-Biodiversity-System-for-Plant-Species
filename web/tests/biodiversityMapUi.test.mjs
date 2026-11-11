@@ -176,7 +176,7 @@ test('loading, empty and error states stay truthful and no writes are introduced
   } finally { failed.stop(); empty.stop() }
 })
 
-test('map cards/table use balanced responsive tracks, matching status palettes, centered values and bounded scrolling', () => {
+test('map cards/table preserve their palette and layout independently of shared Review Submissions badges', () => {
   const css = descriptor.styles[0].content
   assert.match(css, /\.map-summary\s*\{[^}]*display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); align-items: stretch/)
   assert.match(css, /\.map-summary article\s*\{ display: grid; grid-template-columns: 1.25rem minmax\(0, 1fr\); grid-template-rows: 1fr auto; align-items: center; gap: 6px/)
@@ -190,10 +190,12 @@ test('map cards/table use balanced responsive tracks, matching status palettes, 
   assert.match(css, /\.mapped-records-table \.action-group\s*\{ display: flex; flex-wrap: nowrap; align-items: center/)
   assert.match(css, /\.mapped-records-scroll\s*\{ min-width: 0; max-width: 100%; overflow-x: auto/)
   const review = read('views/conservation/ReviewSubmissionsView.vue')
-  for (const status of ['pending-review', 'flagged']) {
-    const extract = source => new RegExp(`\\.badge\\.${status}\\s*\\{([^}]+)\\}`).exec(source)[1]
-    assert.equal(extract(css), extract(review))
-  }
+  // Map retains its existing palette; Review Submissions intentionally uses the
+  // shared workflow mapping, whose colors and fallbacks have dedicated tests.
+  assert.match(css, /\.badge\.pending-review\s*\{\s*background: #e8eff2; color: #53727c;\s*\}/)
+  assert.match(css, /\.badge\.flagged\s*\{\s*background: #f0eaf8; color: #69459a;\s*\}/)
+  assert.match(review, /import\s*\{\s*workflowBadgeStyle\s*\}\s*from ['"]\.\.\/\.\.\/utils\/workflowBadge['"]/)
+  assert.ok(review.includes(':style="workflowBadgeStyle(observation.status)"'))
   assert.match(css, /\.fit-map-button:focus-visible/)
   assert.equal(compileStyle({ source: css, id: 'data-v-map-ui', scoped: true }).errors.length, 0)
 })
