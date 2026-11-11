@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import VisibilitySelector from '../../components/conservation/VisibilitySelector.vue'
 import { computed, nextTick, onMounted, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import SpeciesPhotoManager from '../../components/conservation/SpeciesPhotoManager.vue'
+import { conservationBadgeStyle } from '../../utils/conservationBadge'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import {
   mapManagedSpecies,
@@ -324,7 +326,7 @@ onMounted(async () => {
     <label class="field"><span>{{ st('family') }}</span><select v-model="familyFilter"><option value="">{{ st('allFamilies') }}</option><option v-for="item in families" :key="item" :value="item">{{ item }}</option></select></label>
     <label class="field"><span>{{ st('conservationStatus') }}</span><select v-model="statusFilter"><option value="">{{ st('allStatuses') }}</option><option v-for="item in knownStatuses" :key="item" :value="item">{{ item }}</option></select></label>
     <label class="field"><span>{{ st('visibility') }}</span><select v-model="visibilityFilter"><option value="">{{ st('allVisibility') }}</option><option v-for="item in visibilities" :key="item" :value="item">{{ visibilityLabel(item) }}</option></select></label>
-    <button class="primary-button" type="button" @click="openCreate">+ {{ st('createSpecies') }}</button>
+    <button class="primary-button create-species-button" type="button" @click="openCreate">+ {{ st('createSpecies') }}</button>
   </div>
 
   <section class="panel">
@@ -344,7 +346,7 @@ onMounted(async () => {
             <td class="name-cell">{{ item.commonName || st('unavailable') }}</td>
             <td class="name-cell">{{ item.genus || st('unavailable') }}</td>
             <td class="name-cell">{{ item.family || st('unavailable') }}</td>
-            <td class="status-cell">{{ item.conservationStatus || st('unavailable') }}</td>
+            <td class="status-cell"><span class="badge conservation-status" :style="conservationBadgeStyle(item.conservationStatus)">{{ item.conservationStatus || st('unavailable') }}</span></td>
             <td><span class="badge">{{ visibilityLabel(item.visibility) }}</span></td>
             <td class="actions-cell"><div class="action-group"><button class="action-button" @click="view(item)">{{ st('view') }}</button><button class="action-button" @click="openEdit(item)">{{ st('editSpecies') }}</button><button class="action-button danger" @click="confirmDelete(item)">{{ st('deleteSpecies') }}</button></div></td>
           </tr>
@@ -368,7 +370,8 @@ onMounted(async () => {
       <div class="form-field" data-validation-group><label for="species-genus-input"><span>{{ st('genus') }}</span></label><select id="species-genus-input" v-model="form.genusId" :title="st('placeholders.genus')" :aria-description="st('placeholders.genus')" data-validation-field="genusId" :aria-invalid="Boolean(formErrors.genusId)" :aria-describedby="formErrors.genusId ? 'species-genusId-error' : undefined" :disabled="detailLoading || Boolean(mutation) || Boolean(taxonomyError)"><option value="">{{ st('noGenus') }}</option><option v-for="item in taxonomy" :key="item.id" :value="item.id">{{ item.name }}</option></select><button v-if="taxonomyError" type="button" class="secondary-button taxonomy-retry" :disabled="detailLoading || Boolean(mutation)" :aria-describedby="formErrors.genusId ? 'species-genusId-error' : undefined" data-validation-focus @click="loadTaxonomy">{{ st('retry') }}</button><small id="species-genusId-error" v-if="formErrors.genusId" class="field-error">{{ formErrors.genusId }}</small></div>
       <label class="form-field"><span>{{ st('familyDerived') }}</span><input :value="selectedGenus?.family || ''" :placeholder="st('placeholders.family')" readonly class="readonly-field" /></label>
       <label class="form-field"><span>{{ st('conservationStatus') }}</span><select v-model="form.conservationStatus" :title="st('placeholders.conservationStatus')" :aria-description="st('placeholders.conservationStatus')" data-validation-field="conservationStatus" :aria-invalid="Boolean(formErrors.conservationStatus)" :aria-describedby="formErrors.conservationStatus ? 'species-conservationStatus-error' : undefined" :disabled="detailLoading || Boolean(mutation)"><option value="">{{ st('noConservationStatus') }}</option><option v-for="item in knownStatuses" :key="item" :value="item">{{ item }}</option></select><small id="species-conservationStatus-error" v-if="formErrors.conservationStatus" class="field-error">{{ formErrors.conservationStatus }}</small></label>
-      <label class="form-field"><span>{{ st('visibility') }} *</span><select v-model="form.visibility" :title="st('placeholders.visibility')" :aria-description="st('placeholders.visibility')" data-validation-field="visibility" aria-required="true" :aria-invalid="Boolean(formErrors.visibility)" :aria-describedby="formErrors.visibility ? 'species-visibility-error' : undefined" :disabled="detailLoading || Boolean(mutation)"><option value="" disabled>{{ st('placeholders.visibility') }}</option><option v-for="item in visibilities" :key="item" :value="item">{{ visibilityLabel(item) }}</option></select><small id="species-visibility-error" v-if="formErrors.visibility" class="field-error">{{ formErrors.visibility }}</small></label>
+      <label v-if="editing" class="form-field"><span>{{ st('visibility') }} *</span><select v-model="form.visibility" :title="st('placeholders.visibility')" :aria-description="st('placeholders.visibility')" data-validation-field="visibility" aria-required="true" :aria-invalid="Boolean(formErrors.visibility)" :aria-describedby="formErrors.visibility ? 'species-visibility-error' : undefined" :disabled="detailLoading || Boolean(mutation)"><option value="" disabled>{{ st('placeholders.visibility') }}</option><option v-for="item in visibilities" :key="item" :value="item">{{ visibilityLabel(item) }}</option></select><small id="species-visibility-error" v-if="formErrors.visibility" class="field-error">{{ formErrors.visibility }}</small></label>
+      <VisibilitySelector v-else id="species-visibility" class="create-species-visibility" v-model="form.visibility" validation-field="visibility" horizontal required :invalid="Boolean(formErrors.visibility)" :error="formErrors.visibility" :disabled="detailLoading || Boolean(mutation)" />
       <label class="form-field full"><span>{{ st('description') }} *</span><textarea v-model="form.description" :placeholder="st('placeholders.description')" data-validation-field="description" aria-required="true" :aria-invalid="Boolean(formErrors.description)" :aria-describedby="formErrors.description ? 'species-description-error' : undefined" :disabled="detailLoading || Boolean(mutation)"></textarea><small id="species-description-error" v-if="formErrors.description" class="field-error">{{ formErrors.description }}</small></label>
       <label class="form-field full"><span>{{ st('habitat') }}</span><textarea v-model="form.habitat" :placeholder="st('placeholders.habitat')" data-validation-field="habitat" :aria-invalid="Boolean(formErrors.habitat)" :aria-describedby="formErrors.habitat ? 'species-habitat-error' : undefined" maxlength="4000" :disabled="detailLoading || Boolean(mutation)"></textarea><small id="species-habitat-error" v-if="formErrors.habitat" class="field-error">{{ formErrors.habitat }}</small></label>
       <SpeciesPhotoManager v-if="canManagePhotos && !detailLoading" ref="photoEditor" class="form-field full" embedded :species="editing ? selected : null" :busy="Boolean(mutation)" @retry="save" />
@@ -379,7 +382,7 @@ onMounted(async () => {
 
   <AppModal v-if="modal === 'view' && selected" :title="selected.scientificName" :subtitle="selected.commonName" @close="modal = null">
     <p v-if="detailLoading" class="state-note">{{ st('loadingDetail') }}</p><p v-if="mutationError" class="state-note error">{{ mutationError }}</p>
-    <dl class="detail-list"><div><dt>{{ st('speciesId') }}</dt><dd>{{ selected.id }}</dd></div><div><dt>{{ st('genus') }}</dt><dd>{{ selected.genus || st('unavailable') }}</dd></div><div><dt>{{ st('family') }}</dt><dd>{{ selected.family || st('unavailable') }}</dd></div><div><dt>{{ st('conservationStatus') }}</dt><dd>{{ selected.conservationStatus || st('unavailable') }}</dd></div><div><dt>{{ st('visibility') }}</dt><dd>{{ visibilityLabel(selected.visibility) }}</dd></div><div><dt>{{ st('habitat') }}</dt><dd>{{ selected.habitat || st('unavailable') }}</dd></div><div><dt>{{ st('culturalSignificance') }}</dt><dd>{{ selected.culturalSignificance || st('unavailable') }}</dd></div><div><dt>{{ st('description') }}</dt><dd>{{ selected.description || st('unavailable') }}</dd></div></dl>
+    <dl class="detail-list"><div><dt>{{ st('speciesId') }}</dt><dd>{{ selected.id }}</dd></div><div><dt>{{ st('genus') }}</dt><dd>{{ selected.genus || st('unavailable') }}</dd></div><div><dt>{{ st('family') }}</dt><dd>{{ selected.family || st('unavailable') }}</dd></div><div><dt>{{ st('conservationStatus') }}</dt><dd><span class="badge conservation-status" :style="conservationBadgeStyle(selected.conservationStatus)">{{ selected.conservationStatus || st('unavailable') }}</span></dd></div><div><dt>{{ st('visibility') }}</dt><dd>{{ visibilityLabel(selected.visibility) }}</dd></div><div><dt>{{ st('habitat') }}</dt><dd>{{ selected.habitat || st('unavailable') }}</dd></div><div><dt>{{ st('culturalSignificance') }}</dt><dd>{{ selected.culturalSignificance || st('unavailable') }}</dd></div><div><dt>{{ st('description') }}</dt><dd>{{ selected.description || st('unavailable') }}</dd></div></dl>
   </AppModal>
 
   <AppModal v-if="modal === 'delete' && selected" :title="st('deleteConfirmTitle')" :subtitle="`${selected.id} — ${selected.scientificName}`" :close-on-backdrop="false" danger-backdrop hide-close compact @close="!mutation && (modal = null)">
@@ -388,6 +391,18 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.officer-layout .control-bar > .create-species-button {
+  align-self: flex-end;
+  flex: 0 0 auto;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  height: auto;
+  min-height: 2.75rem;
+  padding: 0 15px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 /* Include the Officer boundary to outrank shared table defaults only in this table. */
 .officer-layout .species-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
 .species-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }

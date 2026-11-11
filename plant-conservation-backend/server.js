@@ -11,6 +11,7 @@ const { mountDomain } = require("./domain.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
 const { mountUploads } = require("./uploads.cjs");
 const { mountPlantGallery } = require("./plant-gallery.cjs");
+const { mountPlantDetail } = require("./plant-detail.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
@@ -66,6 +67,7 @@ function createPlantApp({
   mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
   mountSpeciesPhotoLibrary(app, { pool, allow, writesEnabled: speciesPhotoWritesEnabled });
   mountPlantGallery(app, { pool, allow });
+  mountPlantDetail(app, { pool, allow, auth });
   mountIoT(app, { pool, allow });
   mountPlantSimilarity(app, { pool, allow, search: similaritySearch });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {

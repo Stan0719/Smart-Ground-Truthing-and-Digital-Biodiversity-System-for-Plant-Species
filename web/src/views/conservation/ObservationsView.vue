@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { workflowBadgeStyle } from '../../utils/workflowBadge'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -51,6 +52,13 @@ const queueOrigin = ref<ObservationQueue>('subsequent_observation')
 const hasMore = ref(false)
 const nextCursor = ref<string | null>(null)
 let listRequest = 0
+let listAbort: AbortController | null = null
+const seenCursors = new Set<string>()
+// Inclusive of the first request: at most 5 sequential 100-row scans per action.
+// Stop on new queue matches, not on local search/species/owner/date matches.
+const AUTO_SCAN_PAGE_LIMIT = 5
+const autoScanLimited = ref(false)
+const scannedPages = ref(0)
 const isLoading = ref(true)
 const loadError = ref('')
 const skippedRecords = ref(0)
@@ -90,7 +98,7 @@ const unsubscribeSession = subscribeSession((user, pending) => {
   const previousId = session.value.user?.id
   session.value = { user, pending }
   if (!authorizedOfficer.value || previousId !== user?.id) {
-    clearCopyState(); closeModal(true); listRequest++; observations.value = []; hasMore.value = false; nextCursor.value = null; isLoading.value = false
+    clearCopyState(); closeModal(true); invalidateList(); observations.value = []
   }
 })
 const reviewDecisions = computed(() => selected.value ? reviewTransitions[selected.value.status] || [] : [])
@@ -208,10 +216,11 @@ const mapObservation = (value: unknown): ObservationView | null => {
 class ObservationApiError extends Error {
   constructor(message: string, readonly status = 0) { super(message) }
 }
-async function request(url: string): Promise<Record<string, unknown>> {
+async function request(url: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
   let response: Response
   try {
-    response = await fetch(url, { credentials: 'same-origin', signal: AbortSignal.timeout(15000) })
+    const timeout = AbortSignal.timeout(15000)
+    response = await fetch(url, { credentials: 'same-origin', signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
   } catch {
     throw new ObservationApiError(t('conservationPages.observations.errors.network'))
   }
@@ -239,28 +248,55 @@ function changeQueue() {
   closeModal()
   void loadObservations()
 }
+function invalidateList() {
+  listRequest++; listAbort?.abort(); listAbort = null
+  hasMore.value = false; nextCursor.value = null; seenCursors.clear()
+  isLoading.value = false; autoScanLimited.value = false; scannedPages.value = 0
+}
+// Invalidate immediately, including changes made while an empty page is scanning.
+watch([queueOrigin, status], invalidateList, { flush: 'sync' })
 async function loadObservations(append = false) {
+  if (disposed || !authorizedOfficer.value) return
   if (append && (isLoading.value || !hasMore.value)) return
+  listAbort?.abort()
   const token = ++listRequest
-  const cursor = append ? nextCursor.value : null
-  if (!append) { clearCopyState(); observations.value = []; nextCursor.value = null; hasMore.value = false; skippedRecords.value = 0 }
+  const controller = new AbortController(); listAbort = controller
+  const origin = queueOrigin.value, selectedStatus = status.value
+  const current = () => !disposed && token === listRequest && !controller.signal.aborted && authorizedOfficer.value
+  let cursor = append ? nextCursor.value : null
+  if (!append) { clearCopyState(); observations.value = []; nextCursor.value = null; hasMore.value = false; skippedRecords.value = 0; seenCursors.clear() }
   isLoading.value = true
-  loadError.value = ''
+  loadError.value = ''; autoScanLimited.value = false; scannedPages.value = 0
   try {
-    const result = await request(observationQueueUrl(queueOrigin.value, status.value, cursor))
-    if (disposed || token !== listRequest) return
-    const page = readQueuePage(result.page)
-    if (!Array.isArray(result.observations) || !page || (page.cursor !== null && page.cursor === cursor)) throw new ObservationApiError(t('conservationPages.observations.errors.invalidResponse'))
-    const mapped = result.observations.map(mapObservation)
-    skippedRecords.value += mapped.filter((item) => item === null).length
-    observations.value = [...new Map([...(append ? observations.value : []), ...mapped.filter((item): item is ObservationView => item !== null)].map(item => [item.id, item])).values()]
-      .sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt))
-    hasMore.value = page.hasMore; nextCursor.value = page.cursor
+    for (let attempt = 0; attempt < AUTO_SCAN_PAGE_LIMIT; attempt++) {
+      const result = await request(observationQueueUrl(origin, selectedStatus, cursor), controller.signal)
+      if (!current()) return
+      const page = readQueuePage(result.page)
+      if (!Array.isArray(result.observations) || !page) throw new ObservationApiError(t('conservationPages.observations.errors.invalidResponse'))
+      if (page.cursor !== null && (page.cursor === cursor || seenCursors.has(page.cursor))) {
+        // A broken continuation must restart explicitly, never loop on Load more.
+        hasMore.value = false; nextCursor.value = null
+        throw new ObservationApiError(t('conservationPages.observations.paginationInvalid'))
+      }
+      const mapped = result.observations.map(mapObservation)
+      const rows = mapped.filter((item): item is ObservationView => item !== null)
+      const previousIds = new Set(observations.value.map(item => item.id))
+      const found = rows.some(item => !previousIds.has(item.id) && (origin === 'all' || item.origin === origin) && (!selectedStatus || item.status === selectedStatus))
+      skippedRecords.value += mapped.length - rows.length
+      observations.value = [...new Map([...observations.value, ...rows].map(item => [item.id, item])).values()]
+        .sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt))
+      hasMore.value = page.hasMore; nextCursor.value = page.cursor
+      if (page.cursor !== null) seenCursors.add(page.cursor)
+      scannedPages.value++
+      if (found || !page.hasMore) return
+      cursor = page.cursor
+    }
+    autoScanLimited.value = hasMore.value
   } catch (error) {
-    if (disposed || token !== listRequest) return
-    if (!append) observations.value = []
+    if (!current()) return
+    // Keep successful pages and their continuation when a later request fails.
     loadError.value = error instanceof Error ? error.message : t('conservationPages.observations.errors.invalidResponse')
-  } finally { if (!disposed && token === listRequest) isLoading.value = false }
+  } finally { if (current()) { isLoading.value = false; listAbort = null } }
 }
 
 async function open(item: ObservationView, reviewing = false, expectedOrigin?: ObservationOrigin) {
@@ -443,6 +479,7 @@ const filtered = computed(() => {
       (!date.value || dateKey(item.createdAt) === date.value)
   })
 })
+const filtersHideLoaded = computed(() => filtered.value.length < observations.value.filter(item => queueOrigin.value === 'all' || item.origin === queueOrigin.value).length)
 const history = computed(() => selected.value
   ? observations.value.filter((item) => item.plantRawId === selected.value?.plantRawId) : [])
 const speciesOptions = computed(() => {
@@ -483,7 +520,7 @@ async function resolveObservationQuery() {
 watch(() => [route.query.observation, authorizedOfficer.value, session.value.user?.id], resolveObservationQuery, { immediate: true })
 
 onMounted(loadObservations)
-onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); detailRequest++; listRequest++; unsubscribeSession() })
+onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); detailRequest++; invalidateList(); unsubscribeSession() })
 </script>
 
 <template>
@@ -528,6 +565,8 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
   </div>
 
   <section class="panel">
+    <p v-if="!isLoading && filtersHideLoaded" class="dataset-note" role="status">{{ t(hasMore ? 'conservationPages.observations.filteredMore' : 'conservationPages.observations.filteredLoaded') }}</p>
+    <p v-if="!isLoading && hasMore && !loadError" class="dataset-note" role="status">{{ t(autoScanLimited ? 'conservationPages.observations.paginationPaused' : 'conservationPages.observations.paginationMore') }}</p>
     <p v-if="skippedRecords" class="dataset-note" role="status">{{ t('conservationPages.observations.skipped', { count: skippedRecords }) }}</p>
     <p class="copy-feedback" :class="{ warning: copyFailed }" role="status" aria-live="polite" aria-atomic="true">{{ copyFeedback }}</p>
     <div class="table-scroll observations-scroll" role="region" :aria-label="t('conservationPages.observations.title')" tabindex="0"><table class="observations-table">
@@ -537,7 +576,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
         <tr v-for="item in filtered" :key="item.id">
           <td class="identity-cell"><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation')"><svg v-if="copiedKey !== `observation:${item.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></div><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></td><td>{{ item.plantDisplayId }}</td>
           <td><em>{{ speciesName(item) }}</em><small v-if="item.commonName && item.scientificName">{{ item.commonName }}</small><small v-if="item.hasSpeciesRequest">{{ t('conservationPages.observations.newSpeciesRequest') }}</small></td>
-          <td class="identity-cell"><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject')"><svg v-if="copiedKey !== `subject:${item.ownerSubject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></div></td><td class="status-cell"><span class="review-status-group"><span class="badge" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td><td>{{ formatDate(item.createdAt) }}</td>
+          <td class="identity-cell"><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject')"><svg v-if="copiedKey !== `subject:${item.ownerSubject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></div></td><td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(item.status)" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td><td>{{ formatDate(item.createdAt) }}</td>
           <td class="actions-cell"><div class="action-group">
             <button v-if="canReviewField(item)" class="action-button" :disabled="reviewSaving" @click="open(item, true)">{{ t('conservationPages.observations.review') }}</button>
             <button v-else class="action-button" @click="open(item)">{{ t('common.viewDetails') }}</button>
@@ -547,9 +586,9 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
             <RouterLink v-if="authorizedOfficer && item.origin !== 'subsequent_observation' && (item.status === 'Pending Review' || item.status === 'Flagged')" class="action-button" :to="{ name: 'conservation-reviews', query: { review: item.id } }">{{ rt('queues.registrationReview') }}</RouterLink>
           </div></td>
         </tr>
-        <tr v-if="isLoading"><td colspan="7" class="state-cell">{{ t('conservationPages.observations.loading') }}</td></tr>
-        <tr v-else-if="loadError"><td colspan="7" class="state-cell error-state"><strong>{{ t('conservationPages.observations.loadFailed') }}</strong><span>{{ loadError }}</span><button class="action-button" @click="loadObservations()">{{ t('conservationPages.observations.retry') }}</button></td></tr>
-        <tr v-else-if="!filtered.length"><td colspan="7" class="state-cell">{{ rt(queueOrigin === 'subsequent_observation' ? 'queues.noFieldObservations' : 'queues.noRecords') }}</td></tr>
+        <tr v-if="isLoading"><td colspan="7" class="state-cell">{{ t(scannedPages > 0 ? 'conservationPages.observations.scanning' : 'conservationPages.observations.loading') }}</td></tr>
+        <tr v-else-if="loadError"><td colspan="7" class="state-cell error-state"><strong>{{ t('conservationPages.observations.loadFailed') }}</strong><span>{{ loadError }}</span><button class="action-button" @click="loadObservations(Boolean(nextCursor))">{{ t('conservationPages.observations.retry') }}</button></td></tr>
+        <tr v-else-if="!filtered.length"><td colspan="7" class="state-cell">{{ hasMore ? t('conservationPages.observations.emptyMore') : filtersHideLoaded ? t('conservationPages.observations.filteredLoaded') : rt(queueOrigin === 'subsequent_observation' ? 'queues.noFieldObservations' : 'queues.noRecords') }}</td></tr>
       </tbody>
     </table></div>
     <button v-if="hasMore || loadError" class="action-button" :disabled="isLoading" @click="loadObservations(Boolean(nextCursor))">{{ rt('queues.loadMore') }}</button>

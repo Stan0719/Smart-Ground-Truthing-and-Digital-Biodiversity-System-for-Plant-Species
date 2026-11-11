@@ -1,6 +1,9 @@
 "use strict";
 const roles = ["Visitor", "Botanist", "Conservation Officer", "Administrator"];
 const grants = Object.freeze({
+  // Page-scoped reads only; Administrator does not gain scientific or write APIs.
+  "plants.detail.public.read": ["Guest", "Visitor", "Botanist", "Conservation Officer", "Administrator"],
+  "plants.detail.read": ["Conservation Officer", "Administrator"],
   "accounts.manage": ["Administrator"],
   "permissions.manage": ["Administrator"],
   "audit.read": ["Administrator"],

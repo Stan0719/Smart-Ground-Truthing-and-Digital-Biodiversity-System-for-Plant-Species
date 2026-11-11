@@ -3,6 +3,13 @@ import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import postcss from 'postcss'
+import vm from 'node:vm'
+import ts from 'typescript'
+import * as vue from 'vue'
+import { threatAlertBadgeStyle } from '../src/utils/workflowBadge.ts'
+import { prototypeCameraEvents } from '../src/data/cameraMonitoringPrototype.ts'
+import { monitoringDate, monitoringLabels } from '../src/utils/officerMonitoringDisplay.ts'
+import * as alertService from '../src/services/threatAlerts.ts'
 import {
   alertResponsePath,
   loadCanonicalAlerts,
@@ -148,4 +155,104 @@ test('Threat Alerts heading and scroll label use existing localization; updated 
   assert.match(page, /:aria-label="ct\('Threat Alerts'\)"/)
   const { descriptor } = parse(page), script = compileScript(descriptor, { id: 'threat-summary' })
   assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename: 'ThreatAlertsView.vue', id: 'threat-summary', compilerOptions: { bindingMetadata: script.bindings } }).errors, [])
+})
+
+function pageHarness() {
+  const { descriptor } = parse(page)
+  const script = compileScript(descriptor, { id: 'threat-badges' })
+  const template = compileTemplate({ source: descriptor.template.content, filename: 'ThreatAlertsView.vue', id: 'threat-badges', compilerOptions: { bindingMetadata: script.bindings } })
+  const js = value => ts.transpileModule(value, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const scope = vue.effectScope(), exports = {}, events = prototypeCameraEvents.map(item => ({ ...item }))
+  const route = vue.reactive({ query: {} })
+  const context = { exports, Error, URL, require(name) {
+    if (name === 'vue') return { ...vue, onMounted() {}, withDirectives: n => n, resolveComponent: name => ({ name }) }
+    if (name === 'vue-router') return { useRoute: () => route }
+    if (name.endsWith('workflowBadge')) return { threatAlertBadgeStyle }
+    if (name.endsWith('cameraMonitoringPrototype')) return { prototypeCameraEvents: events }
+    if (name.endsWith('officerMonitoringDisplay')) return { monitoringDate, monitoringLabels }
+    if (name.endsWith('threatAlerts')) return alertService
+    if (name.includes('useConservationText')) return { useConservationText: () => ({ ct: x => x, locale: vue.ref('en') }) }
+    if (name.endsWith('.vue')) return { name: name.split('/').at(-1) }
+    throw Error(name)
+  } }
+  vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
+  const state = scope.run(() => exports.default.setup({}, { expose() {} }))
+  vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
+  return { state, events, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => scope.stop() }
+}
+function nodes(root) {
+  const result = []
+  const walk = n => {
+    if (Array.isArray(n)) return n.forEach(walk)
+    if (!n || typeof n !== 'object') return
+    result.push(n)
+    if (Array.isArray(n.children)) walk(n.children)
+    else if (n.children?.default) walk(n.children.default())
+  }
+  walk(root); return result
+}
+const canonicalRow = status => ({ id: 'canonical-real', deviceId: 'sensor-real', readingId: null, cameraId: null, metric: 'temperature', value: 31.5, status, detectedAt: alert().detected_at, createdAt: alert().created_at, videoPath: null, responses: [] })
+
+test('both tables render the exact same alert palette, visible labels and neutral unknown/null fallback', () => {
+  const h = pageHarness()
+  try {
+    h.state.isLoading.value = false
+    for (const status of ['New', 'Reviewing', 'Resolved', 'Unexpected', null]) {
+      h.events[0].status = status
+      // Canonical API validation rejects null statuses; test missing-status styling
+      // on the prototype side without bypassing that existing data contract.
+      const canonicalStatus = status ?? 'Unexpected'
+      h.state.alerts.value = [canonicalRow(canonicalStatus)]
+      const rendered = nodes(h.render())
+      for (const table of ['camera-event-table', 'threat-alert-table']) {
+        const tableNode = rendered.find(n => n.type === 'table' && n.props?.class.includes(table))
+        const badge = nodes(tableNode).find(n => n.type === 'span' && n.props?.class.includes('badge') && n.props?.style)
+        assert.deepEqual(badge.props.style, threatAlertBadgeStyle(status))
+        assert.equal(badge.children.trim(), table === 'camera-event-table' ? status ?? '' : canonicalStatus)
+      }
+    }
+  } finally { h.stop() }
+})
+
+test('demonstration label, fixture View action and read-only details stay separate from canonical responses', () => {
+  const original = globalThis.fetch, h = pageHarness()
+  globalThis.fetch = () => { throw Error('Prototype actions must not send requests') }
+  try {
+    h.state.isLoading.value = false
+    let rendered = nodes(h.render())
+    assert.ok(rendered.some(n => n.children === 'Demonstration camera events'))
+    const table = rendered.find(n => n.type === 'table' && n.props?.class.includes('camera-event-table'))
+    const actions = nodes(table).filter(n => n.type === 'button')
+    assert.equal(actions.length, 3)
+    assert.ok(actions.every(n => n.children.trim() === 'View'))
+    actions[0].props.onClick()
+    assert.equal(h.state.selectedCameraEvent.value.eventId, 'CAM-EVT-001')
+    rendered = nodes(h.render())
+    assert.ok(rendered.some(n => n.props?.to === '/plant/PL001'))
+    assert.ok(!rendered.some(n => ['Save Response', 'Start Review', 'Mark Resolved', 'Reopen', 'Delete', 'Edit'].includes(typeof n.children === 'string' ? n.children.trim() : '')))
+    assert.deepEqual(h.events, prototypeCameraEvents)
+  } finally { h.stop(); globalThis.fetch = original }
+})
+
+test('canonical response UI still allows direct New to Resolved and retains resolved restrictions', async () => {
+  const original = globalThis.fetch, h = pageHarness(), calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options })
+    if (options?.method === 'POST') return Response.json({ updated: true })
+    return Response.json({ alerts: [alert({ id: 'canonical-real', status: 'Resolved' })], responses: [] })
+  }
+  try {
+    h.state.openAlert(canonicalRow('New'))
+    h.state.responseStatus.value = 'Resolved'
+    await h.state.submitResponse()
+    assert.equal(calls.length, 0)
+    assert.match(h.state.responseError.value, /note is required/)
+    h.state.responseNote.value = 'Investigated and resolved'
+    await h.state.submitResponse()
+    assert.deepEqual(JSON.parse(calls[0].options.body), { status: 'Resolved', note: 'Investigated and resolved' })
+    assert.equal(calls[0].url, '/api/data/alerts/canonical-real/responses')
+    assert.equal(h.state.selectedAlert.value.status, 'Resolved')
+    const button = nodes(h.render()).find(n => n.type === 'button' && typeof n.children === 'string' && n.children.trim() === 'Save Response')
+    assert.equal(button.props.disabled, true)
+  } finally { h.stop(); globalThis.fetch = original }
 })

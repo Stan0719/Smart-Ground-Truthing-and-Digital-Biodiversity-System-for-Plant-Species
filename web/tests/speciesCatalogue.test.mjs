@@ -1,3 +1,4 @@
+import { conservationBadgeStyle, conservationBadgePalette } from '../src/utils/conservationBadge.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -16,6 +17,7 @@ function harness() {
   const scope = vue.effectScope(), exports = {}, loaded = [], route = vue.reactive({ query: {} })
   const loggedIn = vue.ref(false), role = vue.ref(null)
   const context = { exports, require(name) {
+    if (name.endsWith('/conservationBadge')) return { conservationBadgeStyle }
     if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount() {}, resolveComponent: x => x, withDirectives: x => x }
     if (name.endsWith('.vue')) return {}
     if (name === 'vue-router') return { useRoute: () => route }
@@ -99,4 +101,42 @@ test('layout declares 4/3/2 columns, wrapping long text and original mobile acti
   assert.match(css, /\.family-filters button:focus-visible/)
   assert.match(css, /\.card-badges\s*\{[^}]*justify-content: flex-end/)
   assert.doesNotMatch(source, /activeCategory|category-badge|item\.category|const categories/)
+})
+
+ test('species cards use the shared conservation palette and preserve visitor visibility', () => {
+  const h = harness()
+  try {
+    h.state.isLoading.value = false
+    for (const status of [...Object.keys(conservationBadgePalette), 'Unknown', null]) {
+      h.state.species.value = [{ ...fixture('test', 'Family'), conservationStatus: status }]
+      h.loggedIn.value = true; h.role.value = 'conservation-officer'
+      const badge = flat(h.render()).find(n => n.props?.class === 'status-badge')
+      if (status) { assert.deepEqual(badge.props.style, conservationBadgeStyle(status)); assert.equal(badge.children, status) }
+      else assert.equal(badge, undefined)
+      h.loggedIn.value = false; h.role.value = null
+      assert.ok(!flat(h.render()).some(n => n.props?.class === 'status-badge'))
+    }
+  } finally { h.stop() }
+})
+
+ test('species previews omit descriptions but retain both actions and searchable descriptions', () => {
+  const h = harness()
+  try {
+    h.state.isLoading.value = false
+    h.state.species.value = [{ ...fixture('preview', 'Family'), description: 'Unique description retained in data' }]
+    const nodes = flat(h.render())
+    assert.ok(!nodes.some(n => n.props?.class === 'plant-description' || n.children === 'Unique description retained in data'))
+    const actions = nodes.find(n => n.props?.class === 'card-actions')
+    assert.deepEqual(flat(actions).filter(n => n.props?.to).map(n => n.props.to), ['/species/preview', '/species/preview/plants'])
+    h.state.searchQuery.value = 'Unique description'
+    assert.equal(h.state.filteredSpecies.value.length, 1)
+  } finally { h.stop() }
+})
+
+test('card actions use equal flexible columns, bottom alignment and contained wrapping labels', () => {
+  const css = descriptor.styles[0].content
+  assert.match(css, /\.plant-card-content\s*\{[^}]*display: flex;[^}]*flex-direction: column;[^}]*flex: 1/)
+  assert.match(css, /\.card-actions\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*margin-top: auto/)
+  assert.match(css, /\.card-action-link\s*\{[^}]*box-sizing: border-box;[^}]*width: 100%;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;[^}]*min-width: 0;[^}]*min-height: 44px/)
+  assert.doesNotMatch(css, /\.plant-description/)
 })

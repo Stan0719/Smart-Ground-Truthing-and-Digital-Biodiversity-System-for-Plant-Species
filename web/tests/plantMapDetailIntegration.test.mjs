@@ -123,14 +123,14 @@ test('plant detail maps current contract, registration, latest approved content 
   assert.deepEqual({ ...plant.latestApproved.taxonomy }, { genus: 'Shorea' })
 })
 
-test('plant detail enriches real species fields, connects gallery metadata and retains truthful history scope', () => {
+test('plant detail uses page-scoped information, registration gallery and paginated history', () => {
   const source = readFileSync(new URL('../src/views/PlantDetailView.vue', import.meta.url), 'utf8')
-  assert.match(source, /\/api\/species\/\$\{encodeURIComponent\(mapped\.speciesId\)\}/)
+  assert.match(source, /readPlantDetail\(rawId/)
   assert.match(source, /<PlantPhotoGallery/)
-  assert.match(source, /gallery\.load\(plant\.value\.id/)
-  assert.doesNotMatch(source, /does not include observation asset IDs/)
-  assert.match(source, /Complete observation history is not included/)
-  assert.doesNotMatch(source, /registered_by|current_status|location_recorded_at|last_verified_at/)
+  assert.match(source, /registration-only/)
+  assert.match(source, /<PlantObservationHistory/)
+  assert.match(source, /history\.state\.hasMore/)
+  assert.doesNotMatch(source, /Species representative image|Complete observation history is not included/)
   assert.doesNotMatch(source, /formatObservationId|OBS001/)
 })
 

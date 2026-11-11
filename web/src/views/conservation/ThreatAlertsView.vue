@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
 import { monitoringDate, monitoringLabels } from '../../utils/officerMonitoringDisplay'
+import { threatAlertBadgeStyle } from '../../utils/workflowBadge'
 import AppModal from '../../components/conservation/AppModal.vue'
 import { useConservationText } from '../../composables/useConservationText'
 import { prototypeCameraEvents } from '../../data/cameraMonitoringPrototype'
@@ -220,6 +221,7 @@ const submitResponse = async () => {
     <header class="panel-header">
       <div>
         <h2>{{ ct('Suspicious Camera Events') }}</h2>
+        <span class="panel-description">{{ ct('Demonstration camera events') }}</span>
       </div>
     </header>
     <div class="table-scroll officer-table-scroll" role="region" :aria-label="ct('Suspicious Camera Events')" tabindex="0">
@@ -247,7 +249,7 @@ const submitResponse = async () => {
             <td>{{ event.cameraId }}</td>
             <td>{{ formatConfidence(event.confidence) }}</td>
             <td>
-              <span class="badge" :class="event.status.toLowerCase()">{{ event.status }}</span>
+              <span class="badge" :style="threatAlertBadgeStyle(event.status)" :class="event.status?.toLowerCase()">{{ event.status }}</span>
             </td>
             <td>{{ dt(event.detectedAt) }}</td>
             <td>{{ isWebVideoUrl(event.videoUrl) ? ct('Available') : ct('Unavailable') }}</td>
@@ -306,7 +308,7 @@ const submitResponse = async () => {
               <span class="badge unavailable">Not available</span>
             </td>
             <td>
-              <span class="badge" :class="alert.status.toLowerCase()">{{ alert.status }}</span>
+              <span class="badge" :style="threatAlertBadgeStyle(alert.status)" :class="alert.status?.toLowerCase()">{{ alert.status }}</span>
             </td>
             <td>{{ dt(alert.detectedAt) }}</td>
             <td>

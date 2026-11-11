@@ -1,3 +1,4 @@
+import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
@@ -48,6 +49,7 @@ test('actual Vite configuration routes asset paths to Plant API while preserving
   const exports = {}
   const source = load('../vite.config.ts').replaceAll('import.meta.url', JSON.stringify(new URL('../vite.config.ts', import.meta.url).href))
   vm.runInNewContext(js(source), { exports, require(name) {
+    if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'node:url') return { URL, fileURLToPath: value => new URL(value).pathname }
     if (name === 'vite') return { defineConfig: value => value }
     return () => ({})
@@ -70,6 +72,7 @@ test('actual Vite configuration routes asset paths to Plant API while preserving
 test('knowledge refresh retains plant thumbnails and separates preview fallback from reference galleries', async () => {
   const plants = vue.reactive([]), records = vue.reactive([]), calls = [], exports = {}
   vm.runInNewContext(js(load('../src/services/knowledge.ts')), { exports, require(name) {
+    if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return vue
     if (name.endsWith('/assetImages')) return images
     if (name.endsWith('/plantCardMapping')) return cardMapping
@@ -118,8 +121,9 @@ test('plant card replaces missing/broken images with a placeholder and accepts a
   const template = compileTemplate({ source: descriptor.template.content, filename: 'PlantRecordCard.vue', id: 'image-card', compilerOptions: { bindingMetadata: script.bindings } })
   const scope = vue.effectScope(), exports = {}
   const loggedIn = vue.ref(false), role = vue.ref(null)
-  const props = vue.reactive({ compact: false, plant: { plantId: '1', speciesSlug: '1', images: [], location: {}, latestApproved: {}, qr: {} } })
+  const props = vue.reactive({ compact: false, plant: { plantId: '1', speciesSlug: '1', description: 'Private preview description fixture', images: [], location: {}, latestApproved: {}, qr: {} } })
   const context = { exports, require(name) {
+    if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return { ...vue, resolveComponent: value => value }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x, te: () => false, locale: vue.ref('en') }) }
     if (name.endsWith('/assetImages')) return images
@@ -136,10 +140,16 @@ test('plant card replaces missing/broken images with a placeholder and accepts a
     assert.equal(render().filter(n => n.type === 'h3' && n.children === '1').length, 1)
     assert.ok(!render().some(n => n.type === 'span' && n.children === '1'))
     assert.equal(render().find(n => n.props?.class === 'learn-more').props.to, '/plant/1')
+    assert.equal(render().filter(n => n.props?.class === 'learn-more').length, 1)
+    assert.match(descriptor.styles[0].content, /\.learn-more \.button-text\s*\{[^}]*position: relative;[^}]*display: block;[^}]*overflow-wrap: anywhere/)
+    assert.ok(!render().some(n => n.children === 'Private preview description fixture'))
+    assert.match(descriptor.styles[0].content, /\.record-copy\s*\{[^}]*display: flex;[^}]*flex-direction: column;[^}]*flex: 1/)
+    assert.match(descriptor.styles[0].content, /\.learn-more\s*\{[^}]*max-width: 100%;[^}]*flex-shrink: 0;[^}]*margin: auto auto 0/)
+
     assert.ok(!render().some(n => n.type === 'span' && String(n.props?.class).includes('review-status')))
     for (const status of cardMapping.plantReviewStatuses) {
       props.plant.reviewStatus = status; await vue.nextTick()
-      assert.ok(render().some(n => n.type === 'span' && n.children === status))
+      assert.deepEqual(render().find(n => n.type === 'span' && n.children === status).props.style, workflowBadgeStyle(status))
       const image = render().find(n => n.props?.class === 'record-image')
       assert.ok(nodes(image).some(n => n.type === 'span' && n.children === status))
       const heading = render().find(n => n.props?.class === 'record-heading')
@@ -187,6 +197,7 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
       { plant_id: '2', species_id: '1', rbac_status: 'Pending Review', registered_at: '2026-11-05', latitude: null, latest_submission: { heightCm: 99, lifeStage: 'Young', zone: 'Pending zone' } },
     ] })
   }, require(name) {
+    if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return vue
     if (name === 'vue-router') return { useRoute: () => vue.reactive({ params: { slug: '1' } }) }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x, te: () => false }) }

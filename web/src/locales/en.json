@@ -1166,6 +1166,13 @@
   },
   "conservationPages": {
     "observations": {
+      "scanning": "Checking additional pages for observations…",
+      "paginationMore": "More pages remain. Counts describe loaded records only.",
+      "paginationPaused": "Automatic scanning paused. More pages remain; use Load more to continue.",
+      "emptyMore": "No matching observations have been loaded yet. More pages remain.",
+      "filteredLoaded": "Current filters hide some loaded observations. Change the filters to see them.",
+      "filteredMore": "Current filters hide some loaded observations. More pages may contain matching records.",
+      "paginationInvalid": "Observation pagination did not advance. Reload the queue to continue.",
       "resubmitted": "Resubmitted",
       "summaryTitle": "Observation review status",
       "summaryScope": "Based on loaded observations.",
@@ -1694,7 +1701,7 @@
           "saving": "Saving the species decision and verifying the resulting submission. Plant review remains locked."
         },
         "commentHelp": "A comment is required for rejection or correction. Maximum 4,000 characters.",
-        "commentRequired": "Enter a species review comment for rejection or correction.",
+        "commentRequired": "Enter a review comment for rejection or correction.",
         "commentTooLong": "The species review comment must be 4,000 characters or fewer.",
         "saved": "The species decision was saved. The submission has been refreshed.",
         "conflict": "This species request changed while you were reviewing it. The latest state has been reloaded.",

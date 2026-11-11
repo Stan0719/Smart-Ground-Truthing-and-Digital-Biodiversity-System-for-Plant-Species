@@ -50,13 +50,17 @@ test('plant-scoped gallery metadata retains existing image authorization and aut
     assert.equal(Boolean(cursor),r.data.page.has_more);assert.ok(++pages<30);
   }while(cursor);return assets;}
   await t.test('public approved photos retain numeric and deterministic fallback order without private counts or context',async()=>{
-    const assets=await all(1);
+    // Ordinary byte reads expose only the current approved observation. Verify
+    // historical ordering separately through the authorized Officer view.
+    const assets=await all(1,'officer');
     assert.deepEqual(assets.filter(a=>a.observation_id==='101').map(a=>a.asset_id),['i0','i2','i10']);
     assert.deepEqual(assets.filter(a=>a.observation_id==='102').map(a=>a.asset_id),['field0','fallback-a','fallback-b']);
     assert.deepEqual(assets.filter(a=>a.observation_id==='101').map(a=>a.photo_order),['0','2','10']);
-    assert.ok(assets.every(a=>a.observation_date===null&&a.observation_status===null&&a.observation_revision===null));
-    assert.equal(assets.length,8);assert.equal(new Set(assets.map(a=>a.asset_id)).size,assets.length);
-    assert.ok(!JSON.stringify(assets).includes('staff:'));assert.ok(!assets.some(a=>['draft','foreign','bad-link','private-unlinked'].includes(a.asset_id)));
+    const publicAssets=await all(1);
+    assert.ok(publicAssets.every(a=>a.observation_date===null&&a.observation_status===null&&a.observation_revision===null));
+    assert.deepEqual(publicAssets.map(a=>a.asset_id),['unlinked','legacy']);
+    assert.equal(new Set(assets.map(a=>a.asset_id)).size,assets.length);
+    assert.ok(!JSON.stringify(publicAssets).includes('staff:'));assert.ok(!publicAssets.some(a=>['draft','foreign','bad-link','private-unlinked'].includes(a.asset_id)));
     assert.equal(assets.find(a=>a.asset_id==='i0').effective_origin,'initial_registration');
     assert.equal(assets.find(a=>a.asset_id==='field0').effective_origin,'subsequent_observation');
     assert.equal(assets.find(a=>a.asset_id==='legacy').effective_origin,'unknown');
@@ -87,8 +91,8 @@ test('plant-scoped gallery metadata retains existing image authorization and aut
     for(const role of [undefined,'visitor','bot','other'])assert.equal((await call('/plants/3/gallery',role)).status,404);
     assert.equal((await all(3,'officer')).length,1);
     const ownProtected=await call('/plants/3/gallery?scope=mine','bot');
-    assert.equal(ownProtected.status,200);assert.equal(ownProtected.data.assets.length,1);
-    assert.equal((await call('/assets/protected?scope=mine','bot')).status,200);
+    assert.equal(ownProtected.status,200);assert.equal(ownProtected.data.assets.length,0);
+    assert.equal((await call('/assets/protected?scope=mine','bot')).status,404);
     for(const role of [undefined,'visitor','other'])assert.equal((await call('/plants/5/gallery',role)).status,404);
     assert.equal((await all(5,'bot')).length,1);assert.equal((await all(5,'officer')).length,1);
     assert.equal((await call('/plants/5/gallery?scope=mine','bot')).status,200);

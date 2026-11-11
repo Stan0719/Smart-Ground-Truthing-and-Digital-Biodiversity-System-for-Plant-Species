@@ -1,3 +1,4 @@
+import { conservationBadgeStyle, conservationBadgePalette } from '../src/utils/conservationBadge.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
@@ -37,6 +38,22 @@ const speciesFixture = (overrides = {}) => ({
   ...overrides,
 })
 const taxonomyFixture = [{ genus_id: 7, genus_name: 'Shorea', family_name: 'Dipterocarpaceae' }]
+
+test('Species Management table and details use shared conservation colors without changing canonical values', async () => {
+  for (const status of [...Object.keys(conservationBadgePalette), 'Unknown', null]) {
+    const h = harness(async url => Response.json(url.includes('/species/') ? { species: speciesFixture({ conservation_status: status }) } : { species: [speciesFixture({ conservation_status: status })] }))
+    try {
+      await h.state.loadSpecies()
+      const item = h.state.species.value[0]
+      const badge = nodes(h.render()).find(n => n.props?.class === 'badge conservation-status')
+      assert.deepEqual(badge.props.style, conservationBadgeStyle(status)); if (status) assert.equal(badge.children, status)
+      await h.state.view(item)
+      const badges = nodes(h.render()).filter(n => n.props?.class === 'badge conservation-status')
+      assert.equal(badges.length, 2)
+      assert.ok(badges.every(n => n.props.style.backgroundColor === conservationBadgeStyle(status).backgroundColor && n.props.style.color === conservationBadgeStyle(status).color))
+    } finally { h.stop() }
+  }
+})
 const flush = async () => {
   for (let i = 0; i < 4; i++) {
     await vue.nextTick()
@@ -109,7 +126,8 @@ function harness(fetchHandler, query = {}, authUser = { id: 'officer', role: 'Co
           return result
         },
       }
-      if (name.endsWith('.vue')) return { name }
+      if (name.endsWith('conservationBadge')) return { conservationBadgeStyle }
+    if (name.endsWith('.vue')) return { name }
       throw Error(`Unexpected import: ${name}`)
     },
   }
@@ -132,6 +150,37 @@ function nodes(root) {
   walk(root)
   return result
 }
+
+test('Create Species uses compact bottom-aligned sizing and keeps its existing workflow', () => {
+  const css = descriptor.styles[0].content
+  const local = /\.officer-layout \.control-bar > \.create-species-button\s*\{([^}]+)\}/.exec(css)[1]
+  assert.match(local, /align-self: flex-end/)
+  assert.match(local, /flex: 0 0 auto/)
+  assert.match(local, /width: fit-content/)
+  assert.match(local, /max-width: 100%/)
+  assert.match(local, /min-height: 2.75rem/)
+  assert.match(local, /height: auto/)
+  assert.match(local, /padding: 0 15px/)
+  assert.match(local, /white-space: normal/)
+  assert.match(local, /overflow-wrap: anywhere/)
+  assert.doesNotMatch(local, /background|color|border-radius|font|hover|focus/)
+  const typography = readFileSync(new URL('../src/styles/officer-typography.css', import.meta.url), 'utf8')
+  assert.match(typography, /:is\(\.field, \.form-field, \.settings-field\)[^{]+\{[^}]*min-height: 2.75rem/)
+  const shared = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
+  assert.match(shared, /\.control-bar\s*\{[^}]*flex-wrap: wrap/)
+  assert.match(shared, /\.control-bar\s*\{[^}]*flex-direction: column/)
+  const compiled = compileStyle({ source: css, id: 'data-v-species-management', scoped: true })
+  assert.deepEqual(compiled.errors, [])
+  const h = harness(() => { throw Error('Opening the form must not send a request') })
+  try {
+    const button = nodes(h.render()).find(node => node.type === 'button' && node.props?.class === 'primary-button create-species-button')
+    assert.equal(button.children, '+ Create Species')
+    button.props.onClick()
+    assert.equal(h.state.modal.value, 'form')
+    assert.equal(h.state.editing.value, false)
+    assert.equal(h.calls.length, 0)
+  } finally { h.stop() }
+})
 
 test('real list and taxonomy render current fields, mappings, filters and stable sorting', async () => {
   const h = harness(async (url) => Response.json(url === '/api/taxonomy'
@@ -610,12 +659,18 @@ test('localized placeholders appear in shared Create/Edit fields without becomin
         if (mode === 'create') assert.equal(h.state.form[key], '')
       }
       for (const key of ['scientificName', 'commonName', 'description', 'visibility']) {
+        if (key === 'visibility' && mode === 'create') {
+          const selector = rendered.find(node => node.type?.name?.endsWith('VisibilitySelector.vue'))
+          assert.ok(Object.hasOwn(selector.props, 'required'))
+          continue
+        }
         const field = rendered.find(node => node.props?.['data-validation-field'] === key)
         assert.equal(field.props['aria-required'], 'true')
       }
       const labels = rendered.filter(node => node.type === 'span').map(node => node.children)
       assert.ok(labels.includes('Scientific Name *')); assert.ok(labels.includes('Common Name *'))
-      assert.ok(labels.includes('Description *')); assert.ok(labels.includes('Visibility *'))
+      assert.ok(labels.includes('Description *'))
+      if (mode === 'edit') assert.ok(labels.includes('Visibility *'))
       const family = rendered.find(node => node.props?.class === 'readonly-field')
       assert.equal(family.props.placeholder, expected.family)
       assert.ok(Object.hasOwn(family.props, 'readonly'))
@@ -652,12 +707,16 @@ test('dropdown hints preserve optional unassigned selections, visibility default
       assert.equal(empty.props.disabled, undefined, 'unassigned remains a valid selectable value')
       assert.equal(h.state.form[key], '')
     }
-    const visibility = control('visibility')
-    const placeholder = nodes(visibility).find(node => node.type === 'option' && node.props?.value === '')
-    assert.equal(placeholder.children, messages.conservationPages.species.placeholders.visibility)
-    assert.ok(Object.hasOwn(placeholder.props, 'disabled'))
+    const visibility = nodes(h.render()).find(node => node.type?.name?.endsWith('VisibilitySelector.vue'))
+    assert.ok(visibility)
+    assert.equal(visibility.props['validation-field'], 'visibility')
+    assert.equal(visibility.props.horizontal, '')
     assert.equal(h.state.form.visibility, 'protected')
-    assert.deepEqual(nodes(visibility).filter(node => node.type === 'option' && node.props?.value).map(node => node.props.value), ['public', 'internal', 'protected'])
+    for (const value of ['public', 'internal', 'protected']) {
+      visibility.props['onUpdate:modelValue'](value)
+      assert.equal(h.state.form.visibility, value)
+      assert.equal(integration.speciesPayload(h.state.form).visibility, value)
+    }
     control('genusId').props['onUpdate:modelValue']('7'); await flush()
     assert.equal(nodes(h.render()).find(node => node.props?.class === 'readonly-field').props.value, 'Dipterocarpaceae')
     control('genusId').props['onUpdate:modelValue'](''); await flush()

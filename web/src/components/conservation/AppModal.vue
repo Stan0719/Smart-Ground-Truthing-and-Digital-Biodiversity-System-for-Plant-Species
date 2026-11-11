@@ -21,8 +21,9 @@ function keyboard(event: KeyboardEvent) {
 onMounted(async () => {
   if (!props.accessible) return
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  previousOverflow = document.body.style.overflow
-  document.body.style.overflow = 'hidden'
+  // Lock the root scroller; locking body changes sticky dashboard ancestors.
+  previousOverflow = document.documentElement.style.overflow
+  document.documentElement.style.overflow = 'hidden'
   let current = backdrop.value
   while (current?.parentElement) {
     for (const sibling of current.parentElement.children) if (sibling !== current && sibling instanceof HTMLElement) {
@@ -31,13 +32,13 @@ onMounted(async () => {
     current = current.parentElement
     if (current === document.body) break
   }
-  await nextTick(); focusables()[0]?.focus()
+  await nextTick(); focusables()[0]?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
   if (!props.accessible) return
   for (const [node, inert] of inertNodes) node.inert = inert
-  document.body.style.overflow = previousOverflow
-  if (opener?.isConnected) opener.focus()
+  document.documentElement.style.overflow = previousOverflow
+  if (opener?.isConnected) opener.focus({ preventScroll: true })
 })
 </script>
 <template>
@@ -51,8 +52,8 @@ onBeforeUnmount(() => {
       :aria-label="title"
     >
       <header class="modal-header">
-        <div>
-          <h2>{{ title }}</h2>
+        <div :class="{ 'custom-modal-title': $slots.title }">
+          <h2><slot name="title">{{ title }}</slot></h2>
           <p v-if="subtitle">{{ subtitle }}</p>
         </div>
         <button
@@ -68,3 +69,7 @@ onBeforeUnmount(() => {
     </section>
   </div>
 </template>
+
+<style scoped>
+.custom-modal-title { flex: 1; min-width: 0; }
+</style>

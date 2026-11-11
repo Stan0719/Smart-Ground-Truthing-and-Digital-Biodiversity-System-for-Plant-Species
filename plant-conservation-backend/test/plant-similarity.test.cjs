@@ -30,6 +30,8 @@ test("stored-photo BioCLIP comparison preserves permissions, plant identity and 
   await pool.query("INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES($1,1,'staff:test','Approved','{}','old-query')", [obs(11)]);
   await pool.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES('self-photo',1,'staff:test','self:photo:0',$1,TRUE,'image/jpeg',$2)", [obs(11), image]);
   await pool.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES('alternate-photo',2,'staff:test','plant-2:photo:1',$1,TRUE,'image/jpeg',$2)", [obs(2), image]);
+  const alternate = await sharp({ create: { width: 20, height: 20, channels: 3, background: '#ff0000' } }).png().toBuffer();
+  await pool.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES('source-alternate',1,'staff:test','source:photo:1',$1,FALSE,'image/png',$2)", [obs(1), alternate]);
   await pool.query("INSERT INTO plant_location(plant_id,latitude,longitude) VALUES(4,1,1)");
   const roles = ["Conservation Officer", "Botanist", "Administrator", "Visitor"];
   const tokens = roles.map((_, i) => String(i + 1).repeat(64));
@@ -64,10 +66,18 @@ test("stored-photo BioCLIP comparison preserves permissions, plant identity and 
     assert.equal(calls, 0);
   });
   await t.test("real SQL selects other approved plants once, not mock IDs or private pending uploads", async () => {
-    const result = await get();
+    const statements = [], originalQuery = pool.query.bind(pool);
+    pool.query = (...args) => { statements.push(args[0]); return originalQuery(...args); };
+    let result;
+    try { result = await get(); } finally { pool.query = originalQuery; }
+    assert.ok(statements.length > 0);
+    assert.ok(statements.every(sql => /^\s*SELECT\b/i.test(sql)), 'comparison only reads the database');
     assert.equal(result.status, 200, JSON.stringify(result.body));
     assert.equal(result.body.observationId, obs(1));
     assert.equal(result.body.plantId, "PL001");
+    assert.equal(result.body.sourceAssetId, 'asset-1');
+    const expectedQuery = (await sharp(image).rotate().resize({ width: 384, height: 384, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 75 }).toBuffer()).toString('base64');
+    assert.equal(lastPayload.query, expectedQuery, 'source ID identifies the exact processed source photo');
     assert.deepEqual(lastPayload.references.map(item => item.id), [2, 3, 4, 5, 6, 7].map(n => `asset-${n}`));
     const photo = await sharp(Buffer.from(lastPayload.query, "base64")).metadata();
     assert.equal(photo.format, "jpeg");
@@ -75,6 +85,16 @@ test("stored-photo BioCLIP comparison preserves permissions, plant identity and 
     assert.deepEqual(result.body.candidates.map(item => item.rank), [1, 2, 3, 4, 5]);
     assert.equal(result.body.candidates[0].plantId, "PL002");
     assert.equal(result.body.highestSimilarity, 1);
+    assert.deepEqual(result.body.candidates.map(item => item.assetId), lastPayload.references.slice(0, 5).map(item => item.id));
+    assert.deepEqual(result.body.candidates.map(item => item.similarity), [1, .95, .9, .85, .8]);
+    for (const candidate of result.body.candidates) {
+      const compared = lastPayload.references.find(item => item.id === candidate.assetId);
+      assert.ok(compared);
+      assert.equal(compared.image, expectedQuery);
+      assert.equal(candidate.observationId, obs(Number(candidate.assetId.replace('asset-', ''))));
+      assert.equal(candidate.scientificName, 'Synthetic plant');
+      assert.equal(candidate.commonName, 'Test plant');
+    }
     assert.ok(Math.abs(result.body.candidates[0].distanceMeters - 1111.9508) < 0.1);
     assert.equal(Object.hasOwn(result.body.candidates[1], "distanceMeters"), false);
     assert.ok(result.body.candidates[2].distanceMeters > 100000);

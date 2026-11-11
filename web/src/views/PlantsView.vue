@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { conservationBadgeStyle } from '../utils/conservationBadge'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -85,8 +86,6 @@ const displayName = (item: Plant) => translatedOr(`plantNames.${item.slug}`, ite
 const displayScientificName = (item: Plant) =>
   translatedOr(`scientificNames.${item.slug}`, item.scientificName)
 const displayFamily = (item: Plant) => translatedOr(`familyNames.${item.slug}`, item.family || '')
-const displayDescription = (item: Plant) =>
-  translatedOr(`plantDescriptions.${item.slug}`, item.description)
 
 const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
   if (
@@ -297,6 +296,7 @@ const filteredSpecies = computed(() => {
                 <span
                   v-if="canViewConservationStatus && item.conservationStatus"
                   class="status-badge"
+                  :style="conservationBadgeStyle(item.conservationStatus)"
                   >{{ item.conservationStatus }}</span
                 >
               </div>
@@ -308,7 +308,6 @@ const filteredSpecies = computed(() => {
               <p v-if="item.family" class="plant-family">
                 <span>{{ t('common.family') }}:</span> {{ displayFamily(item) }}
               </p>
-              <p class="plant-description">{{ displayDescription(item) }}</p>
 
               <div class="card-actions">
                 <RouterLink
@@ -619,6 +618,8 @@ const filteredSpecies = computed(() => {
 }
 
 .plant-card {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid rgba(49, 91, 70, 0.1);
   border-radius: 18px;
@@ -635,6 +636,7 @@ const filteredSpecies = computed(() => {
 }
 
 .plant-image-wrapper {
+  flex-shrink: 0;
   position: relative;
   aspect-ratio: 4 / 3;
   overflow: hidden;
@@ -706,6 +708,9 @@ const filteredSpecies = computed(() => {
 }
 
 .plant-card-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
   padding: 12px 16px;
@@ -735,12 +740,6 @@ const filteredSpecies = computed(() => {
   font-weight: 700;
 }
 
-.plant-description {
-  margin: 0 0 12px;
-  color: #617068;
-  font-size: 13px;
-  line-height: 1.65;
-}
 
 .learn-more {
   position: relative;
@@ -765,12 +764,17 @@ const filteredSpecies = computed(() => {
 
 .card-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 4px;
 }
 
 .card-action-link {
+  box-sizing: border-box;
+  width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   min-width: 0;
   text-align: center;
   min-height: 44px;
@@ -1207,14 +1211,6 @@ const filteredSpecies = computed(() => {
     line-height: 1.3;
   }
 
-  .plant-description {
-    min-height: 0;
-    margin-bottom: 6px;
-    display: block;
-    overflow-wrap: anywhere;
-    font-size: 10px;
-    line-height: 1.45;
-  }
 
   .card-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));

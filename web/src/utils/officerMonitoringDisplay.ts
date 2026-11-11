@@ -16,6 +16,17 @@ export function monitoringDate(value: string | null | undefined, locale = 'en') 
   }).format(date)
 }
 
+// Review-modal presentation: keep the shared date contract, with day-first English labels.
+export function reviewDateTime(value: string | null | undefined): string {
+  if (!value || monitoringDate(value) === '\u2014') return '\u2014'
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value)
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: dateOnly ? 'UTC' : 'Asia/Kuching', day: 'numeric', month: 'short', year: 'numeric',
+    ...(dateOnly ? {} : { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' as const }),
+  }).formatToParts(new Date(dateOnly ? `${value}T00:00:00Z` : value.replace(' ', 'T'))).map(part => [part.type, part.value]))
+  return `${parts.day} ${parts.month} ${parts.year}${dateOnly ? '' : `, ${parts.hour}:${parts.minute}`}`
+}
+
 export function monitoringLabels(values: (string | number | null | undefined)[]) {
   const ids = [...new Set(values.filter(value => value !== null && value !== undefined && value !== '').map(String))]
   const entries = ids.map(id => ({ id, token: /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(id) ? id.replaceAll('-', '').toUpperCase() : id,
@@ -33,4 +44,18 @@ export function monitoringLabels(values: (string | number | null | undefined)[])
   for (const label of labels.values()) counts.set(label, (counts.get(label) || 0) + 1)
   for (const [id, label] of labels) if ((counts.get(label) || 0) > 1) labels.set(id, id)
   return labels
+}
+
+export function submitterIdentifierLabels(values: (string | null | undefined)[]) {
+  const subjects = [...new Set(values.filter((value): value is string => Boolean(value)))]
+  const prefixOf = (value: string) => /^(staff|visitor):/.exec(value)?.[0] || ''
+  const identifiers = subjects.map(subject => subject.slice(prefixOf(subject).length))
+  const labels = monitoringLabels(identifiers)
+  return new Map(subjects.map((subject, index) => {
+    const identifier = identifiers[index]!
+    let label = labels.get(identifier) || identifier
+    if (label.endsWith('\u2026') && /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(identifier))
+      label = identifier.replaceAll('-', '').slice(0, label.length - 1) + '\u2026'
+    return [subject, prefixOf(subject) + label]
+  }))
 }

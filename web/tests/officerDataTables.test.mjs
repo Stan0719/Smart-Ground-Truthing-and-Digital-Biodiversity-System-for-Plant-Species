@@ -99,7 +99,7 @@ test('header styling is isolated from cards/charts/other roles and leaves status
   }
   const alerts = read('views/conservation/ThreatAlertsView.vue')
   assert.match(alerts, /class="badge unavailable"/)
-  assert.match(alerts, /:class="alert.status.toLowerCase\(\)"/)
+  assert.match(alerts, /:class="alert.status\?\.toLowerCase\(\)"/)
   assert.match(alerts, /@click="openAlert\(alert\)"/)
   const iot = read('views/conservation/IoTMonitoringView.vue')
   assert.match(iot, /motion_detected \? 'high' : 'approved'/)

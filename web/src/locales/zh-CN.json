@@ -1283,6 +1283,13 @@
   },
   "conservationPages": {
     "observations": {
+      "scanning": "正在检查更多页面中的观察记录…",
+      "paginationMore": "仍有更多页面。计数仅包含已加载的记录。",
+      "paginationPaused": "自动查找已暂停。仍有更多页面；请选择加载更多以继续。",
+      "emptyMore": "尚未加载到匹配的观察记录。仍有更多页面。",
+      "filteredLoaded": "当前筛选条件隐藏了部分已加载的观察记录。更改筛选条件即可查看。",
+      "filteredMore": "当前筛选条件隐藏了部分已加载的观察记录。后续页面可能包含匹配记录。",
+      "paginationInvalid": "观察记录分页未向前推进。请重新加载列表以继续。",
       "resubmitted": "已重新提交",
       "summaryTitle": "观察审核状态",
       "summaryScope": "基于已加载的观察记录。",

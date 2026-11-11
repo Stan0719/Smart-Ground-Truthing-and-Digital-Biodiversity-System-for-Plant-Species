@@ -1292,6 +1292,13 @@
   },
   "conservationPages": {
     "observations": {
+      "scanning": "Menyemak halaman tambahan untuk pemerhatian…",
+      "paginationMore": "Masih ada halaman lain. Kiraan hanya merangkumi rekod yang dimuatkan.",
+      "paginationPaused": "Carian automatik dijeda. Masih ada halaman lain; pilih Muatkan lagi untuk meneruskan.",
+      "emptyMore": "Belum ada pemerhatian sepadan yang dimuatkan. Masih ada halaman lain.",
+      "filteredLoaded": "Penapis semasa menyembunyikan sebahagian pemerhatian yang dimuatkan. Ubah penapis untuk melihatnya.",
+      "filteredMore": "Penapis semasa menyembunyikan sebahagian pemerhatian yang dimuatkan. Halaman lain mungkin mengandungi rekod sepadan.",
+      "paginationInvalid": "Penomboran halaman pemerhatian tidak bergerak ke hadapan. Muat semula senarai untuk meneruskan.",
       "resubmitted": "Dihantar Semula",
       "summaryTitle": "Status semakan pemerhatian",
       "summaryScope": "Berdasarkan pemerhatian yang dimuatkan.",

@@ -1,3 +1,4 @@
+import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
@@ -154,6 +155,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
     exports,
     Error,
     AbortSignal,
+    AbortController,
     console,
     navigator: { clipboard: options.clipboard },
     fetch: async (url, options) => {
@@ -168,6 +170,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
       return fetchHandler(url, options)
     },
     require(name) {
+    if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
       if (name === 'vue') return {
         ...vue,
         onMounted() {},
@@ -514,6 +517,174 @@ test('pagination reaches older field records, survives a failed next page and re
     assert.equal(h.state.observations.value.length, 2); assert.equal(h.state.hasMore.value, false)
     assert.equal(h.state.observations.value[1].id, '99')
   } finally { h.stop() }
+})
+
+const queueResponse = (observations = [], cursor = null) => Response.json({ observations, page: { has_more: cursor !== null, next_cursor: cursor } })
+const queueCalls = h => h.calls.filter(call => call.url.startsWith('/api/observations?'))
+
+test('bounded scanning advances through empty/nonmatching pages and stops on real subsequent records without changing filters or review', async () => {
+  const pages = [queueResponse([], 'a'), queueResponse([fixture({ id: 'initial', origin_type: 'initial_registration' }), fixture({ id: 'legacy', origin_type: 'unknown' })], 'b'),
+    queueResponse([fixture(), fixture({ id: 'rejected', status: 'Rejected' })], 'c')]
+  const h = harness(async () => Response.json({}), officer, false, async () => pages.shift())
+  try {
+    h.state.search.value = 'PL007'; h.state.species.value = '3'; h.state.owner.value = 'staff:real-botanist-subject'; h.state.date.value = h.state.dateKey(fixture().created_at)
+    await h.state.loadObservations()
+    assert.equal(queueCalls(h).length, 3)
+    assert.ok(queueCalls(h).every(call => new URL(call.url, 'https://fixture.invalid').searchParams.get('origin_type') === 'subsequent_observation'))
+    assert.ok(queueCalls(h)[1].url.includes('cursor=a')); assert.ok(queueCalls(h)[2].url.includes('cursor=b'))
+    assert.deepEqual(Array.from(h.state.filtered.value, item => item.id), [uuid, 'rejected'])
+    assert.equal(h.state.canReviewField(h.state.filtered.value[0]), true); assert.equal(h.state.canReviewField(h.state.filtered.value[1]), false)
+    assert.deepEqual(Array.from(h.state.summaryCounts.value, item => item.count), [1, 0, 0, 1, 0])
+    assert.equal(h.state.hasMore.value, true); assert.equal(h.state.nextCursor.value, 'c'); assert.equal(h.state.autoScanLimited.value, false)
+    assert.equal(h.state.search.value, 'PL007'); assert.equal(h.state.species.value, '3'); assert.equal(h.state.owner.value, 'staff:real-botanist-subject')
+  } finally { h.stop() }
+})
+
+test('automatic scans stop on exhaustion, matching non-reviewable statuses, or the five-request cap with a working continuation', async () => {
+  for (const rows of [[], [fixture({ status: 'Correction Required' })], [fixture({ status: 'Rejected' })]]) {
+    const pages = [queueResponse([], 'a'), queueResponse(rows)]
+    const h = harness(async () => Response.json({}), officer, false, async () => pages.shift())
+    try { await h.state.loadObservations(); assert.equal(queueCalls(h).length, 2); assert.equal(h.state.hasMore.value, false); assert.equal(h.state.nextCursor.value, null); assert.equal(h.state.autoScanLimited.value, false) } finally { h.stop() }
+  }
+  let count = 0
+  const h = harness(async () => Response.json({}), officer, false, async () => ++count <= 5 ? queueResponse([], 'page-' + count) : queueResponse([fixture()]))
+  try {
+    await h.state.loadObservations(); assert.equal(queueCalls(h).length, 5); assert.equal(h.state.AUTO_SCAN_PAGE_LIMIT, 5)
+    assert.equal(h.state.autoScanLimited.value, true); assert.equal(h.state.nextCursor.value, 'page-5'); assert.equal(h.state.hasMore.value, true)
+    const tree = nodes(h.render())
+    assert.ok(tree.some(n => n.children === messages.conservationPages.observations.paginationPaused))
+    assert.ok(tree.some(n => n.children === messages.conservationPages.observations.emptyMore))
+    assert.ok(!tree.some(n => n.children === messages.conservationPages.reviews.queues.noFieldObservations))
+    const more = tree.find(n => n.type === 'button' && n.children === messages.conservationPages.reviews.queues.loadMore)
+    assert.ok(more); assert.equal(more.props.disabled, false)
+    more.props.onClick(); await flush()
+    assert.equal(queueCalls(h).length, 6); assert.ok(queueCalls(h)[5].url.includes('cursor=page-5'))
+    assert.equal(h.state.filtered.value[0].id, uuid); assert.equal(h.state.hasMore.value, false)
+  } finally { h.stop() }
+})
+
+test('repeated and cyclic cursors terminate scanning, retain loaded rows and require a fresh queue', async () => {
+  for (const cursors of [['a', 'a'], ['a', 'b', 'a']]) {
+    const h = harness(async () => Response.json({}), officer, false, async () => queueResponse([], cursors.shift()))
+    try {
+      await h.state.loadObservations(); assert.ok(queueCalls(h).length <= 3)
+      assert.equal(h.state.loadError.value, messages.conservationPages.observations.paginationInvalid)
+      assert.equal(h.state.nextCursor.value, null); assert.equal(h.state.hasMore.value, false)
+      const requests = queueCalls(h).length; await h.state.loadObservations(true); assert.equal(queueCalls(h).length, requests)
+    } finally { h.stop() }
+  }
+  const pages = [queueResponse([fixture()], 'a'), queueResponse([], 'b'), queueResponse([], 'a')]
+  const h = harness(async () => Response.json({}), officer, false, async () => pages.shift())
+  try {
+    await h.state.loadObservations(); await h.state.loadObservations(true)
+    assert.equal(h.state.observations.value.length, 1); assert.ok(h.state.loadError.value); assert.equal(queueCalls(h).length, 3)
+  } finally { h.stop() }
+})
+
+test('later-page errors preserve loaded records and the latest successful cursor; Retry resumes there', async () => {
+  const pages = [queueResponse([fixture()], 'a'), queueResponse([], 'b'), Response.json({ error: 'Temporary queue failure' }, { status: 503 }),
+    queueResponse([fixture(), fixture({ id: 'older', status: 'Rejected' })])]
+  const h = harness(async () => Response.json({}), officer, false, async () => pages.shift())
+  try {
+    await h.state.loadObservations(); await h.state.loadObservations(true)
+    assert.equal(h.state.filtered.value.length, 1); assert.equal(h.state.nextCursor.value, 'b'); assert.equal(h.state.hasMore.value, true)
+    assert.equal(h.state.loadError.value, 'Temporary queue failure')
+    nodes(h.render()).find(n => n.type === 'button' && n.children === messages.conservationPages.observations.retry).props.onClick(); await flush()
+    assert.ok(queueCalls(h)[3].url.includes('cursor=b')); assert.equal(h.state.filtered.value.length, 2)
+    assert.equal(h.state.observations.value.filter(item => item.id === uuid).length, 1); assert.equal(h.state.loadError.value, '')
+  } finally { h.stop() }
+})
+
+test('duplicate-only pages do not stop discovery or duplicate records', async () => {
+  const pages = [queueResponse([fixture()], 'a'), queueResponse([fixture()], 'b'), queueResponse([fixture({ id: 'new' })])]
+  const h = harness(async () => Response.json({}), officer, false, async () => pages.shift())
+  try {
+    await h.state.loadObservations(); await h.state.loadObservations(true)
+    assert.equal(queueCalls(h).length, 3); assert.deepEqual(Array.from(h.state.filtered.value, item => item.id), [uuid, 'new'])
+  } finally { h.stop() }
+})
+
+test('automatic scanning stays sequential, preserves the server status filter and reports loading until a match arrives', async () => {
+  let release
+  const h = harness(async () => Response.json({}), officer, false, async url => {
+    if (url.includes('cursor=')) return new Promise(resolve => { release = resolve })
+    return queueResponse([], 'next')
+  })
+  try {
+    h.state.status.value = 'Rejected'
+    const work = h.state.loadObservations(); await flush()
+    assert.equal(h.state.isLoading.value, true); assert.equal(queueCalls(h).length, 2)
+    assert.ok(nodes(h.render()).some(n => n.children === messages.conservationPages.observations.scanning))
+    assert.ok(h.state.summaryCounts.value.every(item => item.count === null))
+    await h.state.loadObservations(true); assert.equal(queueCalls(h).length, 2)
+    release(queueResponse([fixture({ status: 'Rejected' })], 'later')); await work
+    assert.ok(queueCalls(h).every(call => new URL(call.url, 'https://fixture.invalid').searchParams.get('status') === 'Rejected'))
+    assert.equal(h.state.filtered.value[0].status, 'Rejected'); assert.equal(h.state.canReviewField(h.state.filtered.value[0]), false)
+    assert.equal(h.state.isLoading.value, false); assert.equal(queueCalls(h).length, 2)
+  } finally { h.stop() }
+})
+
+test('queue/status changes abort an automatic scan immediately and late pages cannot replace the new queue', async () => {
+  for (const change of ['origin', 'status']) {
+    let release, oldSignal
+    const h = harness(async () => Response.json({}), officer, false, async (url, options) => {
+      const query = new URL(url, 'https://fixture.invalid').searchParams
+      if (query.get('cursor') === 'old') { oldSignal = options.signal; return new Promise(resolve => { release = resolve }) }
+      if (query.get('origin_type') === 'unknown' || query.get('status') === 'Rejected') return queueResponse([fixture({ id: 'current', origin_type: change === 'origin' ? 'unknown' : 'subsequent_observation', status: 'Rejected' })])
+      return queueResponse([], 'old')
+    })
+    try {
+      const old = h.state.loadObservations(); await flush(); assert.equal(h.state.isLoading.value, true)
+      if (change === 'origin') h.state.queueOrigin.value = 'unknown'; else h.state.status.value = 'Rejected'
+      assert.equal(oldSignal.aborted, true)
+      await h.state.loadObservations(); release(queueResponse([fixture()], 'stale')); await old
+      assert.deepEqual(Array.from(h.state.filtered.value, item => item.id), ['current'])
+      assert.equal(h.state.hasMore.value, false); assert.equal(h.state.nextCursor.value, null); assert.equal(queueCalls(h).length, 3)
+    } finally { h.stop() }
+  }
+})
+
+test('logout, account switching and unmount abort scans without errors or late private rows', async () => {
+  for (const change of ['logout', 'account', 'unmount']) {
+    let release, signal, count = 0
+    const h = harness(async () => Response.json({}), officer, false, async (url, options) => {
+      if (++count === 1) return queueResponse([], 'next')
+      signal = options.signal; return new Promise(resolve => { release = resolve })
+    })
+    let stopped = false
+    try {
+      const old = h.state.loadObservations(); await flush()
+      if (change === 'unmount') { h.stop(); stopped = true }
+      else h.changeSession(change === 'logout' ? null : { ...officer, id: 'another-officer' })
+      assert.equal(signal.aborted, true)
+      release(queueResponse([fixture()], 'stale')); await old
+      assert.equal(h.state.observations.value.length, 0); assert.equal(h.state.loadError.value, ''); assert.equal(h.state.hasMore.value, false); assert.equal(count, 2)
+    } finally { if (!stopped) h.stop() }
+  }
+})
+
+test('local filters explain hidden loaded rows without triggering scans or changing loaded summary counts', async () => {
+  for (const more of [true, false]) {
+    const h = harness(async () => Response.json({}), officer, false, async () => queueResponse([fixture()], more ? 'next' : null))
+    try {
+      h.state.search.value = 'not matching'; await h.state.loadObservations()
+      assert.equal(queueCalls(h).length, 1); assert.equal(h.state.filtered.value.length, 0); assert.equal(h.state.filtersHideLoaded.value, true)
+      assert.equal(h.state.summaryCounts.value.find(item => item.status === 'Pending Review').count, 1)
+      assert.ok(nodes(h.render()).some(n => n.children === messages.conservationPages.observations[more ? 'filteredMore' : 'filteredLoaded']))
+      h.state.search.value = ''; assert.equal(h.state.filtered.value.length, 1); assert.equal(queueCalls(h).length, 1)
+    } finally { h.stop() }
+  }
+})
+
+test('scanning and continuation guidance is translated in every supported locale', async () => {
+  const keys = ['scanning', 'paginationMore', 'paginationPaused', 'emptyMore', 'filteredLoaded', 'filteredMore', 'paginationInvalid']
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const localized = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
+    assert.ok(keys.every(key => typeof localized.conservationPages.observations[key] === 'string' && localized.conservationPages.observations[key].length > 0))
+    let page = 0
+    const h = harness(async () => Response.json({}), officer, false, async () => queueResponse([], 'next-' + ++page), language)
+    try { await h.state.loadObservations(); assert.ok(nodes(h.render()).some(n => n.children === localized.conservationPages.observations.paginationPaused)) } finally { h.stop() }
+  }
 })
 
 test('fresh field-origin changes before POST disable the field decision and retain view access', async () => {

@@ -9,6 +9,7 @@ import { assetUrlFromId, plantThumbnailImages, webAssetUrl } from '../services/a
 import { mapPlantCardMetadata } from '../services/plantCardMapping'
 import { requestPlantApi } from '../services/plantIntegration'
 import { formatPlantId } from '../utils/plantId'
+import { conservationBadgeStyle } from '../utils/conservationBadge'
 import { currentUser, sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
 
 interface SpeciesProfile {
@@ -239,7 +240,7 @@ onBeforeUnmount(() => {
           <div class="hero-copy">
             <div class="profile-heading-line">
               <p class="section-label">{{ t('species.detail.profileEyebrow') }}</p>
-              <span v-if="scientific && selectedSpecies.conservationStatus" class="conservation-status">{{ selectedSpecies.conservationStatus }}</span>
+              <span v-if="scientific && selectedSpecies.conservationStatus" class="conservation-status" :style="conservationBadgeStyle(selectedSpecies.conservationStatus)">{{ selectedSpecies.conservationStatus }}</span>
             </div>
             <h1>{{ displayName }}</h1>
             <p v-if="selectedSpecies.commonName && selectedSpecies.commonName !== selectedSpecies.scientificName" class="scientific-name">{{ selectedSpecies.scientificName }}</p>
@@ -404,17 +405,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   padding: 7px 13px;
   border-radius: 999px;
-  background: #d4e4cf;
-  color: #35652f;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
   text-transform: uppercase;
-}
-
-.conservation-status {
-  background: #fff0d9;
-  color: #8a651f;
 }
 
 .hero-copy h1 {

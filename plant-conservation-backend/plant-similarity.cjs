@@ -120,13 +120,13 @@ function mountPlantSimilarity(app, { pool, allow, search = searchBioCLIP }) {
     const candidates = [...matches].sort((a, b) => b.similarity - a.similarity).slice(0, 5)
       .map((match, index) => {
         const row = byAsset.get(match.id);
-        return { rank: index + 1, plantId: plantLabel(row.plant_id),
+        return { rank: index + 1, plantId: plantLabel(row.plant_id), assetId: row.asset_id,
           observationId: row.observation_id, scientificName: row.scientific_name,
           commonName: row.common_name, similarity: match.similarity,
           distanceMeters: distanceMeters(origin, coordinates(row.content, row)) };
       });
     res.json({ observationId: query.id, plantId: plantLabel(query.plant_id), status: "available",
-      highestSimilarity: candidates[0].similarity, candidates });
+      highestSimilarity: candidates[0].similarity, candidates, sourceAssetId: query.asset_id });
   });
 }
 

@@ -1,3 +1,4 @@
+import { conservationBadgeStyle, conservationBadgePalette } from '../src/utils/conservationBadge.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -34,6 +35,7 @@ function harness({ slug = '201', initial = null, handler, locale = 'en' } = {}) 
     if (name.endsWith('/plantCardMapping')) return cards
     if (name.endsWith('/plantId')) return { formatPlantId }
     if (name.endsWith('/plantIntegration')) return { requestPlantApi: async path => { calls.push(path); if (handler) return handler(path); if (path.includes('/species/')) return { species }; if (path.endsWith('/species')) return { species: [species] }; if (path.includes('/plants')) return { plants: [{ plant_id: 1, species_id: 201 }, { plant_id: 2, species_id: 202 }, { plant_id: 3, species_id: 201, rbac_status: 'Pending Review' }] }; return { assets: [{ id: 'gallery', content_type: 'image/jpeg' }] } } }
+    if (name.endsWith('conservationBadge')) return { conservationBadgeStyle }
     if (name.endsWith('.vue')) return { name }
     throw Error(name)
   } }
@@ -43,6 +45,19 @@ function harness({ slug = '201', initial = null, handler, locale = 'en' } = {}) 
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
   return { state, calls, route, body, t, change(next, checking = false) { user = next; pending = checking; for (const fn of listeners) fn(user, pending) }, render: () => nodes(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})), stop() { for (const fn of unmount) fn(); scope.stop() } }
 }
+
+test('Species Detail conservation badges use the shared palette and retain existing role visibility', async () => {
+  for (const status of [...Object.keys(conservationBadgePalette), 'Unknown', null]) {
+    const h = harness({ initial: officer, handler: async path => path.includes('/species/') ? { species: { ...species, conservation_status: status } } : path.includes('/plants') ? { plants: [] } : { assets: [] } })
+    try {
+      await flush(); const badge = h.render().find(n => n.props?.class === 'conservation-status')
+      if (status) { assert.deepEqual(badge.props.style, conservationBadgeStyle(status)); assert.equal(badge.children, status) }
+      else assert.equal(badge, undefined)
+    } finally { h.stop() }
+  }
+  const h = harness()
+  try { await flush(); assert.ok(!h.render().some(n => n.props?.class === 'conservation-status')) } finally { h.stop() }
+})
 
 test('numeric IDs bypass capped catalogue; real fields render once without prototype or restricted facts', async () => {
   const h = harness(); try { await flush()

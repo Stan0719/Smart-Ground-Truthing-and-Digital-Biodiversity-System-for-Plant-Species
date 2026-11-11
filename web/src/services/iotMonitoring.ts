@@ -127,13 +127,13 @@ const errorMessage = (status: number, backendMessage = '') =>
       ? 'You do not have permission to view IoT data.'
       : `Unable to retrieve IoT data (${status}).`)
 
-async function request(path: string): Promise<unknown> {
+async function request(path: string, signal?: AbortSignal): Promise<unknown> {
   let response: Response
   try {
     response = await fetch(path, {
       credentials: 'same-origin',
       cache: 'no-store',
-      signal: AbortSignal.timeout(15000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
     })
   } catch {
     throw new IoTApiError('The IoT service could not be reached. Please try again.', 0, 'network')
@@ -154,8 +154,8 @@ async function request(path: string): Promise<unknown> {
   return result
 }
 
-export async function loadCanonicalDevices(): Promise<IoTDevice[]> {
-  const result = record(await request(IOT_DEVICES_PATH))
+export async function loadCanonicalDevices(signal?: AbortSignal): Promise<IoTDevice[]> {
+  const result = record(await request(IOT_DEVICES_PATH, signal))
   if (!result || !Array.isArray(result.devices))
     throw new IoTApiError('The IoT service returned an invalid device response.', 200, 'invalid')
   const devices = result.devices.map(mapCanonicalDevice)
@@ -174,5 +174,26 @@ export async function loadCanonicalHistory(device: IoTDevice): Promise<IoTHistor
   )
   if (!result)
     throw new IoTApiError('The IoT service returned an invalid reading response.', 200, 'invalid')
+  return result
+}
+
+// Reuse the authorized history endpoint; fetch one latest stored row per known device.
+// Four workers bound concurrent traffic. Inventory and camera state are never updated.
+export async function loadLatestReadings(devices: IoTDevice[], signal: AbortSignal): Promise<IoTDevice[]> {
+  const result: IoTDevice[] = new Array(devices.length)
+  let next = 0
+  const worker = async () => {
+    while (next < devices.length) {
+      signal.throwIfAborted()
+      const index = next++, device = devices[index]!
+      const history = mapCanonicalHistory(await request(
+        `/api/data/devices/${encodeURIComponent(device.sensor_id)}/readings?page=1&limit=1`, signal,
+      ), device.plant_id)
+      if (!history || history.readings.length > 1)
+        throw new IoTApiError('The IoT service returned an invalid reading response.', 200, 'invalid')
+      result[index] = { ...device, latest_reading: history.readings[0] ?? null }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, devices.length) }, worker))
   return result
 }

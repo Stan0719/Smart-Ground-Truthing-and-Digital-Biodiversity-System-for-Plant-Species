@@ -5,7 +5,7 @@ import vm from 'node:vm'
 import * as Vue from 'vue'
 import ts from 'typescript'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
-import { monitoringDate, monitoringLabels } from '../src/utils/officerMonitoringDisplay.ts'
+import { monitoringDate, monitoringLabels, reviewDateTime, submitterIdentifierLabels } from '../src/utils/officerMonitoringDisplay.ts'
 
 const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'utf8')
 const first = '12345678-1111-4111-8111-111111111111'
@@ -18,6 +18,28 @@ test('timestamps use localized Malaysia time without discarding the original off
   assert.equal(monitoringDate('2026-11-05T00:44:00Z'), monitoringDate('2026-11-05T08:44:00+08:00'))
   assert.equal(monitoringDate('2026-11-04T20:44:00Z'), 'Nov 5, 2026, 04:44')
   for (const locale of ['ms', 'zh-CN']) assert.equal(monitoringDate('2026-11-05T03:44:00Z', locale), new Intl.DateTimeFormat(locale === 'ms' ? 'ms-MY' : locale, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kuala_Lumpur' }).format(new Date('2026-11-05T03:44:00Z')))
+})
+
+test('review modal dates use numeric day-first Kuching time and the existing safe date contract', () => {
+  for (const [value, expected] of [
+    ['2026-11-04T13:28:00Z', '4 Nov 2026, 21:28'],
+    ['2026-11-04T17:18:00Z', '5 Nov 2026, 01:18'],
+    ['2026-11-05T01:18:00+08:00', '5 Nov 2026, 01:18'],
+    ['2026-12-31T16:00:00Z', '1 Jan 2027, 00:00'],
+    ['2026-11-04', '4 Nov 2026'],
+  ]) assert.equal(reviewDateTime(value), expected)
+  for (const value of [null, undefined, '', 'invalid', '2026-02-30T00:00:00Z', '2026-11-05T25:00:00Z', '2026-11-05T01:18:00']) assert.equal(reviewDateTime(value), '—')
+})
+
+test('submitter labels preserve prefixes and UUID case, distinguish collisions and handle missing/unknown IDs', () => {
+  const id = 'staff:2ace382f-1737-463a-aff1-8e4b88308d04'
+  assert.equal(submitterIdentifierLabels([id]).get(id), 'staff:2ace382f…')
+  const other = 'staff:2ace382f-2222-463a-aff1-8e4b88308d04'
+  const labels = submitterIdentifierLabels([id, other, 'unknown', '', null, undefined])
+  assert.notEqual(labels.get(id), labels.get(other))
+  assert.ok(labels.get(id).startsWith('staff:2ace382f'))
+  assert.equal(labels.get('unknown'), 'unknown')
+  assert.equal(labels.has(''), false)
 })
 
 test('date-only stays date-only; missing, invalid and ambiguous timestamps are unavailable', () => {
@@ -45,8 +67,10 @@ function identifierHarness({ clipboard, authorized = true } = {}) {
   const script = compileScript(descriptor, { id: 'monitoring-id' })
   const code = ts.transpileModule(script.content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   let listener, cleanup
+  let timerId = 0
+  const timers = new Map()
   let session = { pending: false, user: { id: 'officer', role: authorized ? 'Conservation Officer' : 'Botanist', status: 'Active', mustChangePassword: false } }
-  const context = { exports: {}, navigator: { clipboard }, Error, require(name) {
+  const context = { exports: {}, navigator: { clipboard }, Error, setTimeout: (callback, delay) => { const id = ++timerId; timers.set(id, { callback: () => { timers.delete(id); callback() }, delay }); return id }, clearTimeout: id => timers.delete(id), require(name) {
     if (name === 'vue') return { ...Vue, watch: (...args) => Vue.watch(...args), onBeforeUnmount: fn => { cleanup = fn } }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
     if (name.includes('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { listener = fn; return () => {} } }
@@ -55,8 +79,40 @@ function identifierHarness({ clipboard, authorized = true } = {}) {
   vm.runInNewContext(code, context)
   const props = Vue.reactive({ value: first, labels: monitoringLabels([first, second]) })
   const state = context.exports.default.setup(props, { expose() {} })
-  return { state, props, cleanup: () => cleanup(), logout: () => { session = { pending: false, user: null }; listener() } }
+  return { state, props, timers, cleanup: () => cleanup(), logout: () => { session = { pending: false, user: null }; listener() } }
 }
+
+test('reading title success feedback expires after three seconds and timers reset on recopy, logout and close', async () => {
+  const h = identifierHarness({ clipboard: { writeText: async () => {} } })
+  h.props.feedbackDuration = 3000
+  try {
+    await h.state.copy()
+    assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
+    assert.equal(h.timers.size, 1)
+    const [firstId, firstTimer] = [...h.timers][0]
+    assert.equal(firstTimer.delay, 3000)
+    await h.state.copy()
+    assert.equal(h.timers.has(firstId), false)
+    firstTimer.callback()
+    assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
+    const timer = [...h.timers.values()][0]
+    timer.callback()
+    assert.equal(h.state.feedback.value, '')
+    await h.state.copy(); h.logout()
+    assert.equal(h.timers.size, 0)
+    assert.equal(h.state.feedback.value, '')
+  } finally { h.cleanup() }
+  const closing = identifierHarness({ clipboard: { writeText: async () => {} } })
+  closing.props.feedbackDuration = 3000
+  await closing.state.copy(); closing.cleanup()
+  assert.equal(closing.timers.size, 0)
+  const failed = identifierHarness()
+  failed.props.feedbackDuration = 3000
+  await failed.state.copy()
+  assert.equal(failed.timers.size, 0)
+  assert.equal(failed.state.feedback.value, 'monitoringDisplay.copyUnavailable')
+  failed.cleanup()
+})
 
 test('copy writes the exact full ID and supplies copied feedback, not the label', async () => {
   const copied = []
@@ -66,6 +122,63 @@ test('copy writes the exact full ID and supplies copied feedback, not the label'
   assert.deepEqual(copied, [first])
   assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
   h.cleanup()
+})
+
+test('submitter copy preserves the complete staff prefix and only reports success after clipboard completion', async () => {
+  const id = 'staff:2ace382f-1737-463a-aff1-8e4b88308d04', copied = []
+  let resolve
+  const h = identifierHarness({ clipboard: { writeText: value => { copied.push(value); return new Promise(done => { resolve = done }) } } })
+  h.props.value = id; h.props.labels = submitterIdentifierLabels([id]); await Vue.nextTick()
+  try {
+    assert.equal(h.state.label.value, 'staff:2ace382f…')
+    const work = h.state.copy()
+    assert.equal(h.state.feedback.value, '')
+    assert.deepEqual(copied, [id])
+    resolve(); await work
+    assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
+  } finally { h.cleanup() }
+  const failed = identifierHarness({ clipboard: { writeText: async () => { throw Error('denied') } } })
+  failed.props.value = id; failed.props.labels = submitterIdentifierLabels([id]); await Vue.nextTick()
+  try {
+    await failed.state.copy()
+    assert.equal(failed.state.raw.value, id)
+    assert.equal(failed.state.failed.value, true)
+    assert.equal(failed.state.feedback.value, 'monitoringDisplay.copyUnavailable')
+  } finally { failed.cleanup() }
+})
+
+test('reading-title copy retains full-ID behavior, pending feedback and accessible keyboard button', async () => {
+  let resolve
+  const copied = []
+  const h = identifierHarness({ clipboard: { writeText: value => { copied.push(value); return new Promise(done => { resolve = done }) } } })
+  const source = read('components/conservation/MonitoringIdentifier.vue')
+  const { descriptor } = parse(source)
+  const script = compileScript(descriptor, { id: 'reading-title-copy' })
+  const template = compileTemplate({ source: descriptor.template.content, filename: 'MonitoringIdentifier.vue', id: 'reading-title-copy', compilerOptions: { bindingMetadata: script.bindings } })
+  const context = { exports: {}, require: name => { if (name === 'vue') return Vue; throw Error(name) } }
+  const compiled = ts.transpileModule(template.code, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  vm.runInNewContext(compiled, context)
+  h.props.copyLabel = 'Copy full Reading ID'
+  const flatten = root => {
+    const out = []
+    const walk = n => { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; out.push(n); if (Array.isArray(n.children)) walk(n.children) }
+    walk(root); return out
+  }
+  const render = () => flatten(context.exports.render({}, [], h.props, Vue.proxyRefs(h.state), {}, {}))
+  try {
+    const button = render().find(n => n.type === 'button')
+    assert.equal(button.props.type, 'button')
+    assert.equal(button.props['aria-label'], 'Copy full Reading ID')
+    assert.equal(button.props.disabled, false)
+    const work = button.props.onClick({ stopPropagation() {} })
+    assert.equal(h.state.feedback.value, '')
+    assert.deepEqual(copied, [first])
+    assert.notEqual(copied[0], h.state.label.value)
+    resolve(); await work
+    assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
+    assert.ok(render().some(n => n.props?.role === 'status' && n.children === 'monitoringDisplay.copied'))
+    assert.match(descriptor.styles[0].content, /\.monitoring-id-copy:focus-visible/)
+  } finally { h.cleanup() }
 })
 
 test('clipboard failure reveals selectable full ID; short IDs and unauthorized roles do not copy', async () => {
@@ -104,7 +217,8 @@ test('pages wire display-only labels and dates while actions, keys and filters r
   const iot = read('views/conservation/IoTMonitoringView.vue')
   const alerts = read('views/conservation/ThreatAlertsView.vue')
   for (const source of [iot, alerts]) {
-    assert.match(source, /monitoringDate\(value, locale.value\)/)
+    if (source === iot) assert.match(source, /const dt = iotDate/)
+    else assert.match(source, /monitoringDate\(value, locale.value\)/)
     assert.match(source, /<MonitoringIdentifier/)
     const { descriptor } = parse(source)
     assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename: 'monitoring.vue', id: 'monitoring' }).errors, [])
@@ -122,7 +236,7 @@ test('pages wire display-only labels and dates while actions, keys and filters r
 
 test('copy control keeps accessible labels, focus ring, inline spacing and responsive full-ID fallback', () => {
   const source = read('components/conservation/MonitoringIdentifier.vue')
-  assert.match(source, /:aria-label="t\('monitoringDisplay.copy'/)
+  assert.match(source, /:aria-label="copyLabel \|\| t\('monitoringDisplay.copy'/)
   assert.match(source, /role="status"/)
   assert.match(source, /gap: 7px/)
   assert.match(source, /align-items: center; justify-content: flex-start/)
