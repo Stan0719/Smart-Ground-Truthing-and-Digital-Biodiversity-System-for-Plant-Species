@@ -7,18 +7,32 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
+  useWindowDimensions,
+  Dimensions,
+  Platform,
 } from "react-native";
 
 import { getPlantDisplayObservation } from "../utils/plantApi";
 import { getPlantCardZoneLabel } from "../utils/plantCardDisplay";
+
+const CARD_CONTENT_PADDING = 13;
 
 
 export default function PlantCard({
   plant,
   navigation,
   user,
+  speciesDetailCard = false,
 }) {
   useAppTranslation();
+  const { width: windowWidth } = useWindowDimensions();
+  const screenSize = Dimensions.get("screen");
+  const isTabletDevice = Platform.isPad || (
+    Platform.OS === "android" && Math.min(screenSize.width, screenSize.height) >= 600
+  );
+  const isTabletLayout = speciesDetailCard && isTabletDevice;
+  const tabletImageWidth = Math.min(Math.round(windowWidth * 0.3), 280);
+  const [measuredCardHeight, setMeasuredCardHeight] = useState(0);
   const [failedImageUri, setFailedImageUri] = useState(null);
   const imageSource = plant.plantImage || null;
   const imageUri = typeof imageSource === "number" ? `local:${imageSource}` : imageSource?.uri || null;
@@ -30,10 +44,14 @@ export default function PlantCard({
     restricted: t("map.locationRestricted"),
     missing: t("plant.notRecorded"),
   });
+  const handleContentLayout = (event) => {
+    const nextHeight = Math.round(event.nativeEvent.layout.height + CARD_CONTENT_PADDING * 2);
+    setMeasuredCardHeight((currentHeight) => currentHeight === nextHeight ? currentHeight : nextHeight);
+  };
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, speciesDetailCard && styles.speciesDetailCard]}
       onPress={() =>
         navigation.navigate("PlantDetails", {
           plantId: plant.plantId,
@@ -42,12 +60,21 @@ export default function PlantCard({
     >
 
       {/* IMAGE */}
-      <View style={styles.imageContainer}>
+      <View style={[
+        styles.imageContainer,
+        !speciesDetailCard && styles.phoneImageContainer,
+        speciesDetailCard && {
+          width: isTabletLayout ? tabletImageWidth : 110,
+          height: measuredCardHeight || undefined,
+          alignSelf: "stretch",
+          overflow: "hidden",
+        },
+      ]}>
 
         {imageSource && !imageFailed ? (
           <Image
             source={imageSource}
-            style={styles.image}
+            style={speciesDetailCard ? [styles.speciesDetailImage, measuredCardHeight > 0 && { height: measuredCardHeight }] : styles.image}
             onError={() => setFailedImageUri(imageUri)}
           />
         ) : (
@@ -58,20 +85,28 @@ export default function PlantCard({
           </View>
         )}
 
-        <View pointerEvents="none" style={styles.imageBadges}>
+        {!speciesDetailCard && <View pointerEvents="none" style={styles.imageBadges}>
           <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, statusStyle(plant.currentStatus)]}>
             {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
           <Text numberOfLines={2} style={[styles.imageBadge, styles.zoneBadge]}>
             {zoneBadge}
           </Text>
-        </View>
+        </View>}
 
       </View>
 
 
       {/* CONTENT */}
       <View style={styles.content}>
+        <View onLayout={speciesDetailCard ? handleContentLayout : undefined}>
+
+        {speciesDetailCard && <View style={styles.speciesDetailBadges}>
+          <Text style={[styles.speciesDetailBadge, isTabletLayout && styles.tabletBadge, styles.statusBadge, statusStyle(plant.currentStatus)]}>
+            {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
+          </Text>
+          <Text style={[styles.speciesDetailBadge, isTabletLayout && styles.tabletBadge, styles.zoneBadge]}>{zoneBadge}</Text>
+        </View>}
 
         <Text style={styles.plantName}>
           {plant.plantScientificName || t("plant.unnamedPlant")}
@@ -119,9 +154,13 @@ export default function PlantCard({
         {isBotanist && plant.latestSubmission?.status ? (
           <Text style={styles.observationStatus}>{t("botanistRecords.observationStatus")}{translateLabel(plant.latestSubmission.status)}</Text>
         ) : null}
+        {isBotanist && plant.currentStatus === "Pending Review" ? (
+          <Text style={styles.pendingApprovalHint}>{t("plant.awaitingOfficerApproval")}</Text>
+        ) : null}
 
         <Text style={styles.plantView}>{t("plantCard.viewRecord")}</Text>
 
+        </View>
       </View>
 
     </TouchableOpacity>
@@ -173,14 +212,23 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 6,
   },
+  speciesDetailCard: { alignItems: "stretch" },
 
   imageContainer: {
     width: 110,
-    height: 130,
     backgroundColor: "#DCE8D6",
+  },
+  phoneImageContainer: { height: 130 },
+  speciesDetailImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
   },
 
   imageBadges: { position: "absolute", top: 5, left: 5, right: 5, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 3 },
+  speciesDetailBadges: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 5, marginBottom: 8 },
+  speciesDetailBadge: { flexShrink: 1, paddingHorizontal: 5, paddingVertical: 4, borderRadius: 8, color: "#FFFFFF", fontSize: 8, lineHeight: 11, fontWeight: "700" },
+  tabletBadge: { paddingHorizontal: 9, paddingVertical: 6, fontSize: 11, lineHeight: 15 },
   imageBadge: { maxWidth: "48%", overflow: "hidden", paddingHorizontal: 4, paddingVertical: 4, borderRadius: 8, color: "#FFFFFF", fontSize: 8, lineHeight: 10, fontWeight: "700", textAlign: "center" },
   statusBadge: { backgroundColor: "#315B49" },
   statusApproved: { backgroundColor: "#23734D" },
@@ -209,7 +257,7 @@ const styles = StyleSheet.create({
 
   content: {
     flex: 1,
-    padding: 13,
+    padding: CARD_CONTENT_PADDING,
   },
 
   plantId: {
@@ -276,4 +324,5 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "600",
   },
+  pendingApprovalHint: { marginTop: 5, color: "#805B16", fontSize: 11, lineHeight: 15, fontWeight: "600" },
 });

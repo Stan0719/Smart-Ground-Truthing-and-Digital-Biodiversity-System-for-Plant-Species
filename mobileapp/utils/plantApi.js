@@ -26,12 +26,14 @@ export async function plantApi(path,{method='GET',body,expectedAccountId,account
  return result;
  });}catch(error){logPlantRequest({phase:'request_failed',endpoint,method,code:error.code||'PLANT_API_ERROR',...(error.status?{status:error.status}:{}),...(error.code==='SESSION_REQUIRED'?{credentialsIncluded:false}: {})});throw error;}
 }
-async function getJson(path, { accountId } = {}) {
+async function getJson(path, { accountId, publicOnly = false } = {}) {
   const API_URL = mobileApiUrl("plant");
-  if(accountId || faceSession.hasSession())return plantApi(path.replace(/^\/api/,''), { expectedAccountId: accountId });
+  if (publicOnly && !/^\/api\/(?:species(?:\/[1-9][0-9]*)?|plants)$/.test(path))
+    throw new Error("Public catalogue access is limited to visible species and plant lists.");
+  if(!publicOnly && (accountId || faceSession.hasSession()))return plantApi(path.replace(/^\/api/,''), { expectedAccountId: accountId });
   let response;
   try {
-    response = await fetch(`${API_URL}${path}`);
+    response = await fetch(`${API_URL}${path}`, { credentials: "omit", redirect: "error", headers: { Accept: "application/json" } });
   } catch {
     throw new Error("Unable to reach the plant backend. Check its URL and that the server is running.");
   }
@@ -87,7 +89,8 @@ export async function fetchSpeciesCatalog(options = {}) {
   return speciesImageSources(unwrapList(payload, ["species", "data", "results"]).map(mapBackendSpecies), options);
 }
 
-async function speciesImageSources(species, { accountId } = {}) {
+async function speciesImageSources(species, { accountId, publicOnly = false } = {}) {
+  if (publicOnly) return species;
   if (!species.some((row) => row.image) || (!accountId && !faceSession.hasSession())) return species;
   return faceSession.withToken(async (token, user) => {
     if (accountId && String(user.id) !== String(accountId)) throw Object.assign(Error("Sign in with the correct account."), { code: "ACCOUNT_MISMATCH", status: 403 });
@@ -119,6 +122,7 @@ function mapBackendObservation(record) {
     observationId: String(record.observation_id ?? record.observationId ?? ""),
     plantId: String(record.plant_id ?? record.plantId ?? ""),
     recordedBy: record.recorded_by ?? record.recordedBy ?? "Not recorded",
+    recordedByName: record.recorded_by_name ?? record.recordedByName ?? record.recorder_name ?? null,
     date: record.observed_at ?? record.date ?? null,
     observedAt: record.observed_at ?? record.observedAt ?? null,
     updatedAt: record.updated_at ?? record.updatedAt ?? null,
@@ -127,10 +131,41 @@ function mapBackendObservation(record) {
     healthStatus: record.health_status ?? record.healthStatus ?? "Not recorded",
     lifeStage: record.life_stage ?? record.lifeStage ?? "Not recorded",
     morphology: record.morphology ?? "Not recorded",
+    taxonomy: record.taxonomy ?? "",
     notes: record.notes ?? "",
+    photos: Array.isArray(record.assets)
+      ? record.assets
+        .filter((asset) => asset?.id && ["image/jpeg", "image/png"].includes(String(asset.content_type ?? asset.contentType ?? "").toLowerCase()))
+        .map((asset) => ({ id: String(asset.id), contentType: asset.content_type ?? asset.contentType }))
+      : [],
     verificationStatus: verificationStatus ?? null,
     verifiedAt: record.verified_at ?? record.verifiedAt ?? null,
   };
+}
+
+export function getObservationRecorderDisplayName(observation, user, unknownName) {
+  const apiName = observation?.recordedByName ?? observation?.recorded_by_name ?? observation?.recorder_name;
+  if (typeof apiName === "string" && apiName.trim()) return apiName.trim();
+
+  const currentSubject = user?.id ? `staff:${user.id}` : null;
+  const confirmedCreator = currentSubject && observation?.recordedBy === currentSubject;
+  if (confirmedCreator) {
+    const profileName = user?.name ?? user?.displayName ?? user?.fullName ?? user?.full_name;
+    if (typeof profileName === "string" && profileName.trim()) return profileName.trim();
+  }
+  return unknownName;
+}
+
+export function getPlantRegisteredByDisplayName(plant, user, unknownName) {
+  const apiName = plant?.registeredByName ?? plant?.registered_by_name;
+  if (typeof apiName === "string" && apiName.trim()) return apiName.trim();
+
+  const currentSubject = user?.id ? `staff:${user.id}` : null;
+  if (currentSubject && plant?.registeredBy === currentSubject) {
+    const profileName = user?.name ?? user?.displayName ?? user?.fullName ?? user?.full_name;
+    if (typeof profileName === "string" && profileName.trim()) return profileName.trim();
+  }
+  return unknownName;
 }
 
 export function selectLatestApprovedObservation(observations) {
@@ -150,15 +185,13 @@ export function mapBackendPlant(record, speciesById = new Map()) {
       : record.latest_submission)
     : null;
   const observationName = plantStatus === "Approved" ? approvedContent : submittedContent;
-  const plantScientificName = record.scientific_name || record.scientificName ||
-    observationName?.scientific_name || observationName?.scientificName || "";
   const projectedLocation = Object.fromEntries(
     ["latitude", "longitude", "accuracy_m", "altitude_m", "zone"]
       .filter((field) => Object.prototype.hasOwnProperty.call(record, field))
       .map((field) => [field, record[field]]),
   );
   const hasProjectedField = (field) => Object.prototype.hasOwnProperty.call(projectedLocation, field);
-  record = { ...record, ...record.latest_approved };
+  record = { ...record, ...approvedContent };
   // The backend's top-level location fields are the authorized, approved
   // location projection. Do not let a different latest-observation payload
   // overwrite them during the general observation-field merge.
@@ -167,6 +200,8 @@ export function mapBackendPlant(record, speciesById = new Map()) {
   const species = speciesById.get(speciesId) || (record.species_details ? {
     ...mapBackendSpecies(record.species_details), habitat: record.species_details.habitat || "",
   } : undefined);
+  const plantScientificName = record.scientific_name || record.scientificName ||
+    observationName?.scientific_name || observationName?.scientificName || species?.scientificName || "";
   const registeredAt = record.registered_at ?? record.registeredAt ?? null;
   const plantId = String(record.plant_id ?? record.plantId ?? record.id ?? "");
   const plant = {
@@ -235,6 +270,54 @@ export function getPlantDisplayObservation(plant) {
     : plant?.latestSubmission || plant?.latestApproved;
 }
 
+export function isOwnedPendingPlant(plant, accountId) {
+  return accountId != null && plant?.currentStatus === "Pending Review" &&
+    String(plant.registeredBy) === `staff:${accountId}`;
+}
+
+// The public/role catalogue projects approved location only. Reuse the
+// owner-scoped list projection solely for the submitting Botanist's initial
+// pending records; never replace data on approved or other-owned plants.
+export function mergeOwnedPendingPlantZones(records, ownerRecords, accountId) {
+  const zonesByPlantId = new Map((Array.isArray(ownerRecords) ? ownerRecords : [])
+    .filter((plant) => isOwnedPendingPlant(plant, accountId))
+    .map((plant) => [String(plant.id ?? plant.plantId), plant]));
+
+  return (Array.isArray(records) ? records : []).map((plant) => {
+    if (!isOwnedPendingPlant(plant, accountId)) return plant;
+    const ownerRecord = zonesByPlantId.get(String(plant.id ?? plant.plantId));
+    if (!ownerRecord) return plant;
+    const zone = ownerRecord.location?.zone;
+    const savedZone = typeof zone === "string" && zone.trim() && zone !== "Not recorded"
+      ? zone
+      : "Not recorded";
+    return {
+      ...plant,
+      location: {
+        ...plant.location,
+        restricted: ownerRecord.location?.restricted === true,
+        zone: savedZone,
+      },
+    };
+  });
+}
+
+export function isPlantVisibleInRoleCatalog(plant, role, accountId) {
+  const normalizedRole = String(role || "").toLowerCase();
+  if (normalizedRole === "visitor") return plant?.currentStatus === "Approved";
+  if (normalizedRole === "botanist") return plant?.currentStatus === "Approved" || isOwnedPendingPlant(plant, accountId);
+  return true;
+}
+
+// Public catalogue endpoints already enforce approval and species visibility
+// server-side. Their response intentionally redacts rbac_status, so do not
+// re-check that field on the client for Guest/Visitor catalogue results.
+export function filterPlantRecordsForRole(records, role, accountId, { publicOnly = false } = {}) {
+  const rows = Array.isArray(records) ? records : [];
+  if (publicOnly) return rows;
+  return rows.filter((plant) => isPlantVisibleInRoleCatalog(plant, role, accountId));
+}
+
 export async function plantAssetSources(assets, accountId, { ownSubmission = false } = {}) {
   return faceSession.withToken(async (token, user) => {
     if (accountId != null && String(user.id) !== String(accountId)) throw Error("Sign in with the correct account.");
@@ -251,20 +334,20 @@ export async function speciesRequestPhotoSources(requests, accountId) {
   });
 }
 
-export async function fetchPlantRecords(speciesCatalog = [], { scopeMine = false, ...options } = {}) {
-  const payload = await getJson(`/api/plants${scopeMine ? "?scope=mine" : ""}`, options);
+export async function fetchPlantRecords(speciesCatalog = [], { scopeMine = false, publicOnly = false, ...options } = {}) {
+  const payload = await getJson(`/api/plants${scopeMine ? "?scope=mine" : ""}`, { ...options, publicOnly });
+  const rawRecords = unwrapList(payload, ["plants", "data", "results"]);
   const speciesById = new Map(speciesCatalog.map((species) => [String(species.id), species]));
-  const plants = unwrapList(payload, ["plants", "data", "results"]).map((record) =>
+  const plants = rawRecords.map((record) =>
     mapBackendPlant(record, speciesById)
   );
   const withPhotos = plants.filter((plant) => plant.plantImageAssetId);
   if (!withPhotos.length) return plants;
-  const assets = withPhotos.map((plant) => ({ id: plant.plantImageAssetId }));
   const sourceByPlantId = new Map();
   for (const plant of withPhotos) {
     const ownPendingPreview = plant.currentStatus !== "Approved" &&
       String(plant.registeredBy) === `staff:${options.accountId}`;
-    const source = faceSession.hasSession()
+    const source = faceSession.hasSession() && !publicOnly
       ? (await plantAssetSources([{ id: plant.plantImageAssetId }], options.accountId, { ownSubmission: ownPendingPreview }))[0]
       : { uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(plant.plantImageAssetId) };
     sourceByPlantId.set(plant.id, source);
@@ -312,14 +395,53 @@ export async function fetchPlantDetail(plantId, { includeObservations = false, s
   } catch {
     // Plant detail remains usable if an older backend does not expose photo listing.
     plant.photos = [];
+    plant.photoLoadError = true;
   }
 
   if (includeObservations) {
-    const observationsPayload = await getJson("/api/observations", { accountId });
-    const observations = unwrapList(observationsPayload, ["observations", "data", "results"])
+    const observationRows = [];
+    const observationCursors = new Set();
+    let observationCursor = null;
+    do {
+      const observationPath = observationCursor
+        ? `/api/observations?limit=200&cursor=${encodeURIComponent(observationCursor)}`
+        : "/api/observations?limit=200";
+      const observationsPayload = await getJson(observationPath, { accountId });
+      observationRows.push(...unwrapList(observationsPayload, ["observations", "data", "results"]));
+      const nextCursor = observationsPayload?.page?.next_cursor;
+      if (!nextCursor || observationCursors.has(nextCursor)) break;
+      observationCursors.add(nextCursor);
+      observationCursor = nextCursor;
+    } while (true);
+    let observations = observationRows
       .filter((observation) => String(observation.plant_id ?? observation.plantId) === id)
       .map(mapBackendObservation)
       .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+    const latestApprovedId = selectLatestApprovedObservation(observations)?.observationId;
+    const canReadObservationPhotos = (observation) => observation.status === "Approved"
+      ? observation.observationId === latestApprovedId
+      : accountId != null && observation.recordedBy === `staff:${accountId}`
+        && ["Draft", "Pending Review", "Correction Required"].includes(observation.status);
+    const observationPhotos = [...new Map(observations
+      .filter(canReadObservationPhotos)
+      .flatMap((observation) => observation.photos)
+      .map((photo) => [photo.id, photo])).values()];
+    let sourceById = new Map();
+    if (observationPhotos.length) {
+      try {
+        const sources = await plantAssetSources(observationPhotos, accountId);
+        sourceById = new Map(observationPhotos.map((photo, index) => [photo.id, sources[index]]));
+      } catch {
+        // Keep observation content available if an authorized photo source cannot be resolved.
+      }
+    }
+    observations = observations.map((observation) => ({
+      ...observation,
+      photos: canReadObservationPhotos(observation)
+        ? observation.photos.filter((photo) => sourceById.has(photo.id))
+          .map((photo) => ({ ...photo, ...sourceById.get(photo.id) }))
+        : [],
+    }));
     const latestApproved = selectLatestApprovedObservation(observations);
     plant.observations = observations;
     // /api/plants selects the authoritative approved observation by updated_at.

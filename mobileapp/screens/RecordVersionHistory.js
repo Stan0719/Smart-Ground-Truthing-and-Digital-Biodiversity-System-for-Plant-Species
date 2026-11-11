@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import BackButton from "../components/BackButton";
 import { plantApi } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
 import { mobileApiUrl } from "../utils/apiConfiguration";
@@ -30,37 +31,61 @@ function photoDifference(before, after) {
 export default function RecordVersionHistory({ route, navigation }) {
   useAppTranslation();
   const kind = route.params?.kind, targetId = String(route.params?.targetId || ""), accountId = route.params?.botanist?.id;
+  const requestedVersionId = route.params?.versionId, requestedPriorChangeId = route.params?.priorChangeId;
+  const requestedPriorBase = route.params?.priorChangeVersion === "original";
+  const requestedVersionBase = route.params?.versionSnapshot === "previous";
+  const submissionVersionDetail = route.params?.submissionVersionDetail === true;
   const [state, setState] = useState({ loading: true, error: "", available: false, versions: [], prior: [] });
   const [selected, setSelected] = useState(null), [detailError, setDetailError] = useState("");
   const [photos, setPhotos] = useState([]), [removedImages, setRemovedImages] = useState([]), [addedImages, setAddedImages] = useState([]);
-  const load = useCallback(async (active) => {
-    try {
-      const response = await plantApi(`/record-versions?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(targetId)}`,
-        { expectedAccountId: accountId });
-      if (active.current) setState({ loading: false, error: "", available: response.history_available,
-        versions: response.versions || [], prior: response.prior_changes || [] });
-    } catch (error) { if (active.current) setState((old) => ({ ...old, loading: false, error: error.message })); }
-  }, [kind, targetId, accountId]);
-  useFocusEffect(useCallback(() => { const active = { current: true }; void load(active);
-    return () => { active.current = false; }; }, [load]));
-  async function openVersion(versionId) {
+  const openVersion = useCallback(async (versionId) => {
     setDetailError("");
-    try { const response = await plantApi(`/record-versions/${encodeURIComponent(versionId)}`, { expectedAccountId: accountId }); setSelected(response.version); }
+    try {
+      const response = await plantApi(`/record-versions/${encodeURIComponent(versionId)}`, { expectedAccountId: accountId });
+      if (requestedVersionBase) {
+        const original = response.version.previous_snapshot || {};
+        const snapshot = kind === "plant" ? { ...original, photo_refs: (original.photo_ids || []).map((asset_id) => ({ asset_id })) } : original;
+        setSelected({ ...response.version, originalSnapshot: true, status: route.params?.originalStatus,
+          created_at: route.params?.originalCreatedAt, snapshot, previous_snapshot: null,
+          has_species_photo: kind === "species" });
+      } else setSelected(response.version);
+    }
     catch (error) { setDetailError(error.message); }
-  }
-  function openPrior(change) {
+  }, [accountId, requestedVersionBase, kind, route.params?.originalStatus, route.params?.originalCreatedAt]);
+  const openPrior = useCallback((change, original = false) => {
     const base = change.base_snapshot || {}, proposed = change.proposed_snapshot || {};
     const kept = proposed.photo_ids ?? (Number(change.proposal_photo_count) ? [] : base.photo_ids || []);
     const snapshot = kind === "plant" ? { ...base, ...proposed, content: { ...base.content, ...proposed.content },
       photo_refs: [...kept.map((asset_id) => ({ asset_id })),
         ...Array.from({ length: Number(change.proposal_photo_count) || 0 }, (_, change_photo_index) =>
           ({ change_id: change.id, change_photo_index }))] } : { ...base, ...proposed };
+    const originalSnapshot = kind === "plant"
+      ? { ...base, content: { ...(base.content || {}) }, photo_refs: (base.photo_ids || []).map((asset_id) => ({ asset_id })) }
+      : base;
     setDetailError("");
     setSelected({ ...change, record_type: kind, edited_by: change.owner_subject,
-      legacy: true, snapshot, previous_snapshot: kind === "plant"
+      legacy: !original, originalSnapshot: original, status: original ? route.params?.originalStatus : change.status,
+      created_at: original ? route.params?.originalCreatedAt : change.created_at,
+      originalDetailsLimited: original,
+      snapshot: original ? originalSnapshot : snapshot, previous_snapshot: original ? null : kind === "plant"
         ? { ...base, photo_refs: (base.photo_ids || []).map((asset_id) => ({ asset_id })) } : base,
-      has_species_photo: Number(change.proposal_photo_count) > 0 });
-  }
+      has_species_photo: original ? kind === "species" : Number(change.proposal_photo_count) > 0 });
+  }, [kind, route.params?.originalStatus, route.params?.originalCreatedAt]);
+  const load = useCallback(async (active) => {
+    try {
+      const response = await plantApi(`/record-versions?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(targetId)}`,
+        { expectedAccountId: accountId });
+      if (active.current) setState({ loading: false, error: "", available: response.history_available,
+        versions: response.versions || [], prior: response.prior_changes || [] });
+      if (active.current && requestedVersionId) await openVersion(requestedVersionId);
+      else if (active.current && requestedPriorChangeId) {
+        const prior = (response.prior_changes || []).find((change) => String(change.id) === String(requestedPriorChangeId));
+        if (prior) openPrior(prior, requestedPriorBase);
+      }
+    } catch (error) { if (active.current) setState((old) => ({ ...old, loading: false, error: error.message })); }
+  }, [kind, targetId, accountId, requestedVersionId, requestedPriorChangeId, requestedPriorBase, openVersion, openPrior]);
+  useFocusEffect(useCallback(() => { const active = { current: true }; void load(active);
+    return () => { active.current = false; }; }, [load]));
   useEffect(() => {
     let active = true;
     setPhotos([]); setRemovedImages([]); setAddedImages([]);
@@ -71,21 +96,54 @@ export default function RecordVersionHistory({ route, navigation }) {
         ? source(`/assets/${encodeURIComponent(ref.asset_id)}?scope=mine`)
         : source(`/record-changes/${encodeURIComponent(ref.change_id)}/photos/${ref.change_photo_index}`);
       const images = selected.record_type === "species"
-        ? selected.has_species_photo ? [source(selected.legacy
-          ? `/record-changes/${encodeURIComponent(selected.id)}/photos/0`
+        ? selected.has_species_photo ? [source(selected.originalSnapshot
+          ? `/species-requests/${encodeURIComponent(selected.snapshot.request_id || targetId)}/photo`
+          : selected.legacy ? `/record-changes/${encodeURIComponent(selected.id)}/photos/0`
           : `/record-versions/${encodeURIComponent(selected.id)}/photo`)] : []
         : (selected.snapshot?.photo_refs || []).map(fromRef);
       const difference = photoDifference(selected.previous_snapshot, selected.snapshot);
       if (active) { setPhotos(images); setRemovedImages(difference.removed.map(fromRef)); setAddedImages(difference.added.map(fromRef)); }
     }).catch(() => { if (active) setDetailError(t("recordEdits.photoLoadFailed")); });
     return () => { active = false; };
-  }, [selected]);
+  }, [selected, targetId]);
   const diff = selected ? changed(selected.previous_snapshot, selected.snapshot) : [];
   const photoDiff = selected ? photoDifference(selected.previous_snapshot, selected.snapshot) : { added: [], removed: [] };
   const activeVersion = state.versions.find((version) => version.status === "Approved")?.version_number;
+  if (submissionVersionDetail) {
+    const title = selected?.originalSnapshot
+      ? t(kind === "plant" ? "recordEdits.originalPlantRecord" : "recordEdits.originalSpeciesRequest")
+      : `${route.params?.submissionVersionLabel || t("recordEdits.version")} · ${selected?.status ? statusLabel(selected.status) : ""}`;
+    const availableValues = selected ? Object.entries(values(selected.snapshot)) : [];
+    return <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+      <BackButton label={t("common.goBack")} onPress={() => navigation.goBack()} style={styles.back} />
+      <Text style={styles.title}>{title}</Text>
+      {(kind === "plant" ? t("submissions.plantId") : t("submissions.requestId")) && <Text style={styles.muted}>
+        {kind === "plant" ? t("submissions.plantId") : t("submissions.requestId")} {targetId}</Text>}
+      {state.loading && <ActivityIndicator color="#468585" />}
+      {!!state.error && <View style={styles.card}><Text style={styles.error}>{translateUIMessage(state.error)}</Text></View>}
+      {!!detailError && <View style={styles.card}><Text style={styles.error}>{translateUIMessage(detailError)}</Text></View>}
+      {!selected && !state.loading && !state.error && <View style={styles.card}><Text style={styles.muted}>{t("recordEdits.originalSnapshotUnavailable")}</Text></View>}
+      {selected && <>
+        <View style={styles.card}>
+          {!!selected.status && <Text style={styles.badge}>{statusLabel(selected.status)}</Text>}
+          {!!selected.created_at && <Text style={styles.muted}>{new Date(selected.created_at).toLocaleString()}</Text>}
+          {!!selected.review_comment && <><Text style={styles.label}>{t("recordEdits.reviewComments")}</Text><Text style={styles.error}>{selected.review_comment}</Text></>}
+          {!!selected.originalDetailsLimited && <Text style={styles.muted}>{t("recordEdits.priorProposalLimit")}</Text>}
+        </View>
+        <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.versionSnapshot")}</Text>
+          {availableValues.length ? availableValues.map(([field, value]) => <View key={field} style={styles.valueRow}>
+            <Text style={styles.label}>{t(`recordEdits.${field}`)}</Text><Text style={styles.value}>{display(value)}</Text></View>)
+            : <Text style={styles.muted}>{t("recordEdits.originalSnapshotUnavailable")}</Text>}
+        </View>
+        <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.versionPhotos")}</Text>
+          {photos.length ? <View style={styles.photoRow}>{photos.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View>
+            : <Text style={styles.muted}>{t("recordEdits.noPhotos")}</Text>}
+        </View>
+      </>}
+    </ScrollView>;
+  }
   return <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-    <TouchableOpacity style={styles.back} onPress={() => selected ? setSelected(null) : navigation.goBack()} accessibilityRole="button">
-      <Text style={styles.backText}>‹ {t("recordEdits.backToRecord")}</Text></TouchableOpacity>
+    <BackButton label={t("recordEdits.backToRecord")} onPress={() => selected ? setSelected(null) : navigation.goBack()} style={styles.back} />
     <Text style={styles.title}>{t("recordEdits.versionHistory")}</Text>
     {state.loading && <ActivityIndicator color="#468585" />}
     {!!state.error && <View style={styles.card}><Text style={styles.error}>{translateUIMessage(state.error)}</Text>
@@ -110,10 +168,10 @@ export default function RecordVersionHistory({ route, navigation }) {
       {!!change.review_comment && <Text style={styles.error}>{change.review_comment}</Text>}
     </TouchableOpacity>)}
     {selected && <>
-      <View style={styles.card}><Text style={styles.heading}>{selected.legacy ? t("recordEdits.priorProposal") : `${t("recordEdits.version")} ${selected.version_number}`} · {statusLabel(selected.status)}</Text>
-        {selected.legacy && <Text style={styles.muted}>{t("recordEdits.priorProposalLimit")}</Text>}
-        <Text style={styles.muted}>{t("recordEdits.editedBy")}: {selected.edited_by}</Text>
-        <Text style={styles.muted}>{new Date(selected.created_at).toLocaleString()}</Text>
+      <View style={styles.card}><Text style={styles.heading}>{selected.originalSnapshot ? t("recordEdits.originalLabel") : selected.legacy ? t("recordEdits.priorProposal") : `${t("recordEdits.version")} ${selected.version_number}`}{selected.status ? ` · ${statusLabel(selected.status)}` : ""}</Text>
+        {selected.legacy && !selected.originalSnapshot && <Text style={styles.muted}>{t("recordEdits.priorProposalLimit")}</Text>}
+        {!selected.originalSnapshot && <Text style={styles.muted}>{t("recordEdits.editedBy")}: {selected.edited_by}</Text>}
+        {!!selected.created_at && <Text style={styles.muted}>{new Date(selected.created_at).toLocaleString()}</Text>}
         {selected.reviewed_by && <Text style={styles.muted}>{t("recordEdits.reviewedBy")}: {selected.reviewed_by}</Text>}
         {selected.reviewed_at && <Text style={styles.muted}>{t("recordEdits.reviewedAt")}: {new Date(selected.reviewed_at).toLocaleString()}</Text>}
         {selected.review_comment && <Text style={styles.error}>{selected.review_comment}</Text>}
@@ -139,7 +197,7 @@ export default function RecordVersionHistory({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({ page: { flex: 1, backgroundColor: "#F7FBF4" }, content: { width: "100%", maxWidth: 820, alignSelf: "center", padding: 20, paddingBottom: 50, gap: 14 },
-  back: { minHeight: 44, justifyContent: "center" }, backText: { color: "#28665E", fontWeight: "700" }, title: { fontSize: 26, fontWeight: "800", color: "#234B3A" },
+  back: { alignSelf: "flex-start" }, backText: { color: "#28665E", fontWeight: "700" }, title: { fontSize: 26, fontWeight: "800", color: "#234B3A" },
   card: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E2EDE0", borderRadius: 18, padding: 18, gap: 10 }, heading: { fontSize: 17, fontWeight: "700", color: "#234B3A" },
   muted: { color: "#718078", lineHeight: 20 }, value: { color: "#234B3A", lineHeight: 21 }, label: { color: "#52665A", fontWeight: "700" },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, chevron: { fontSize: 25, color: "#468585" },

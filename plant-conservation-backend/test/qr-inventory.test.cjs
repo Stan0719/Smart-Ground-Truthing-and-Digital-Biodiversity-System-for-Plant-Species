@@ -5,7 +5,7 @@ const { once } = require("node:events");
 const { createPlantDatabase } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 
-test("QR inventory deletion and assignment remain globally unique and authorized", async (t) => {
+test("QR inventory retirement and assignment remain globally unique and authorized", async (t) => {
   const pool = await createPlantDatabase();
   t.after(() => pool.end());
   await pool.query(`CREATE TABLE public.qr_code(
@@ -26,6 +26,7 @@ test("QR inventory deletion and assignment remain globally unique and authorized
     "INSERT INTO public.qr_code(qr_id,plant_id,qr_code,status) VALUES(1,NULL,'delete-token','generated'),(2,$1,'assigned-token','assigned'),(3,NULL,'retired-token','retired'),(4,NULL,'sequential-token','generated'),(5,NULL,'concurrent-token','generated')",
     [assignedPlant],
   );
+  await pool.query("SELECT setval(pg_get_serial_sequence('public.qr_code','qr_id'),(SELECT max(qr_id) FROM public.qr_code))");
 
   const roles = { botA: "Botanist", botB: "Botanist", visitor: "Visitor" };
   const tokens = Object.fromEntries(Object.keys(roles).map((key, index) => [key, String(index + 1).repeat(64)]));
@@ -55,7 +56,7 @@ test("QR inventory deletion and assignment remain globally unique and authorized
     return { status: response.status, data: await response.json() };
   }
 
-  await t.test("unused QR is globally available, deletable, and absent after inventory refresh", async () => {
+  await t.test("unused QR retirement preserves its identifier and moves it to retired inventory", async () => {
     const firstAccount = await call("/qr-codes", "botA");
     const secondAccount = await call("/qr-codes", "botB");
     assert.equal(firstAccount.status, 200);
@@ -65,16 +66,26 @@ test("QR inventory deletion and assignment remain globally unique and authorized
 
     assert.deepEqual(await call("/qr-codes/1", "botA", "DELETE"), {
       status: 200,
-      data: { deleted: true, qr_id: "1" },
+      data: { deleted: true, qr_id: "1", retired: true, status: "retired" },
     });
     const refreshedA = await call("/qr-codes", "botA");
     const refreshedB = await call("/qr-codes", "botB");
-    assert.ok(refreshedA.data.qr_codes.every((qr) => String(qr.qr_id) !== "1"));
+    const retired = refreshedA.data.qr_codes.find((qr) => String(qr.qr_id) === "1");
+    assert.equal(retired.status, "retired");
+    assert.equal(retired.qr_code, "delete-token");
+    assert.ok(retired.retired_at);
     assert.deepEqual(refreshedA.data.qr_codes, refreshedB.data.qr_codes);
-    assert.equal((await pool.query("SELECT count(*)::int AS count FROM public.qr_code WHERE qr_id=1")).rows[0].count, 0);
+    const counts = (await pool.query("SELECT count(*)::int AS total,count(*) FILTER (WHERE status='generated' AND plant_id IS NULL)::int AS unused,count(*) FILTER (WHERE plant_id IS NOT NULL OR status IN ('assigned','active'))::int AS assigned,count(*) FILTER (WHERE status='retired')::int AS retired FROM public.qr_code")).rows[0];
+    assert.deepEqual(counts, { total: 5, unused: 2, assigned: 1, retired: 2 });
+
+    const generated = await call("/qr-codes", "botA", "POST", { count: 1 });
+    assert.equal(generated.status, 201);
+    assert.equal(String(generated.data.qr_codes[0].qr_id), "6");
+    assert.notEqual(generated.data.qr_codes[0].qr_code, "delete-token");
+    assert.equal((await pool.query("SELECT count(*)::int AS count FROM public.qr_code WHERE qr_code='delete-token'")).rows[0].count, 1);
   });
 
-  await t.test("assigned and retired QR records cannot be deleted", async () => {
+  await t.test("assigned codes cannot be retired and retired codes cannot be retired again", async () => {
     assert.equal((await call("/qr-codes/2", "botA", "DELETE")).status, 409);
     assert.equal((await call("/qr-codes/3", "botA", "DELETE")).status, 409);
     assert.equal((await pool.query("SELECT count(*)::int AS count FROM public.qr_code WHERE qr_id IN (2,3)")).rows[0].count, 2);
@@ -108,6 +119,26 @@ test("QR inventory deletion and assignment remain globally unique and authorized
     assert.ok(qrRows.every((qr) => qr.plant_id != null && qr.status === "assigned"));
     assert.equal((await pool.query("SELECT count(*)::int AS count FROM plant_record WHERE qr_token IN ('sequential-token','concurrent-token')")).rows[0].count, 2);
     assert.equal((await call("/qr-codes/4", "botA", "DELETE")).status, 409);
+    const retiredAssignment = await call("/plants", "botA", "POST", plantRequest(1, "retired-qr-attempt", "Plant cannot use retired code"));
+    assert.equal(retiredAssignment.status, 409);
+    const retired = (await pool.query("SELECT plant_id,status FROM public.qr_code WHERE qr_id=1")).rows[0];
+    assert.equal(retired.plant_id, null);
+    assert.equal(retired.status, "retired");
+  });
+
+  await t.test("retired QR codes remain visible when older than the 500 newest inventory records", async () => {
+    await pool.query(`INSERT INTO public.qr_code(qr_id,qr_code,status)
+      SELECT qr_id, CASE WHEN qr_id=7 THEN 'old-inventory-token' ELSE 'bulk-token-'||qr_id END, 'generated'
+      FROM generate_series(7,507) AS qr_id`);
+    assert.equal((await call("/qr-codes/7", "botA", "DELETE")).status, 200);
+
+    const inventory = await call("/qr-codes", "botA");
+    const deleted = inventory.data.qr_codes.find((qr) => String(qr.qr_id) === "7");
+    assert.ok(deleted, "retired QR is included even though it is outside the newest 500 IDs");
+    assert.equal(deleted.status, "retired");
+    assert.equal(deleted.qr_code, "old-inventory-token");
+    assert.ok(deleted.retired_at);
+    assert.equal(inventory.data.qr_codes.length, 503);
   });
 
   await t.test("inventory and delete enforce Botanist authentication and role", async () => {

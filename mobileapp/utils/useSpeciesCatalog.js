@@ -6,11 +6,11 @@ import { fetchPlantRecords, fetchSpeciesCatalog } from "./plantApi";
 const empty = () => ({ species: [], counts: {}, loading: true, error: "" });
 const denied = (error) => [401, 403].includes(error?.status) || ["SESSION_REQUIRED", "SESSION_CHANGED", "ACCOUNT_MISMATCH"].includes(error?.code);
 
-export function useSpeciesCatalog(accountId) {
-  const [state, setState] = useState({ accountId, ...empty() });
+export function useSpeciesCatalog(accountId, { publicOnly = false } = {}) {
+  const [state, setState] = useState({ accountId, publicOnly, ...empty() });
   const loader = useMemo(() => {
     let current = empty(), pending = null, visit = 0;
-    const publish = (next) => { current = next; setState({ accountId, ...next }); };
+    const publish = (next) => { current = next; setState({ accountId, publicOnly, ...next }); };
     return {
       cancel() { visit += 1; pending = null; },
       refresh() {
@@ -19,11 +19,11 @@ export function useSpeciesCatalog(accountId) {
         publish({ ...current, loading: true, error: "" });
         const task = (async () => {
           try {
-            const species = await fetchSpeciesCatalog({ accountId });
+            const species = await fetchSpeciesCatalog({ accountId, publicOnly });
             if (generation !== visit) return;
             publish({ ...current, species, loading: true });
             try {
-              const records = await fetchPlantRecords(species, { accountId });
+              const records = await fetchPlantRecords(species, { accountId, publicOnly });
               const counts = {};
               records.filter((record) => record.currentStatus === "Approved").forEach((record) => {
                 counts[record.speciesId] = (counts[record.speciesId] || 0) + 1;
@@ -41,11 +41,11 @@ export function useSpeciesCatalog(accountId) {
         return task;
       },
     };
-  }, [accountId]);
+  }, [accountId, publicOnly]);
   useFocusEffect(useCallback(() => {
     void loader.refresh();
     const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void loader.refresh(); });
     return () => { subscription.remove(); loader.cancel(); };
   }, [loader]));
-  return { ...(state.accountId === accountId ? state : empty()), refresh: loader.refresh };
+  return { ...(state.accountId === accountId && state.publicOnly === publicOnly ? state : empty()), refresh: loader.refresh };
 }

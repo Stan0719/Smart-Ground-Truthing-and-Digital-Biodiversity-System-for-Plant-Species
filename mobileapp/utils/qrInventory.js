@@ -87,15 +87,21 @@ export function createQRInventoryLoader(fetchCodes, onChange) {
       update({ records: [...combined.values()].sort((a, b) => b.id.length - a.id.length || b.id.localeCompare(a.id)), hasLoaded: true, loading: false, error: "" });
       return generated.length;
     },
-    removeDeleted(id) {
+    retire(id) {
+      const key = String(id);
+      const qr = state.records.find((record) => record.id === key);
+      if (!qr || qr.plantId != null || qr.status !== "generated") return false;
       version += 1;
       pending = null;
       update({
-        records: state.records.filter((qr) => qr.id !== String(id)),
+        records: state.records.map((record) => record.id === key
+          ? { ...record, status: "retired" }
+          : record),
         hasLoaded: true,
         loading: false,
         error: "",
       });
+      return true;
     },
   };
 }

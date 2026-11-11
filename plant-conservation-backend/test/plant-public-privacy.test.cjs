@@ -1,6 +1,7 @@
 "use strict";
 const test=require('node:test'),assert=require('node:assert/strict');
 const {once}=require('node:events');
+const {Buffer}=require('node:buffer');
 const {createPlantDatabase}=require('./postgres-fixture.cjs');
 const {createPlantApp}=require('../server.js');
 
@@ -18,11 +19,11 @@ test('public plant, species, QR and assets use safe projections while staff/owne
  (2,'staff:bot','Approved','internal-qr'),(3,'staff:bot','Approved','protected-qr'),(4,'staff:bot','Approved','inconsistent-qr');
  INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES(1,1,2,3);
  INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key)
- VALUES('approved',1,'staff:bot','Approved','{"latitude":1,"longitude":2,"heightCm":10}','approved'),
- ('private',1,'staff:bot','Draft','{"heightCm":11}','private'),
+  VALUES('approved',1,'staff:bot','Approved','{"latitude":1,"longitude":2,"heightCm":10,"healthStatus":"Healthy","lifeStage":"Mature","morphology":"Broad leaves","notes":"Private field note","taxonomy":"Private taxonomy"}','approved'),
+ ('pending',1,'staff:bot','Pending Review','{"heightCm":11,"healthStatus":"Poor","lifeStage":"Seedling","morphology":"Unreviewed"}','pending'),
  ('inconsistent',5,'staff:bot','Approved','{}','inconsistent');
  INSERT INTO public.qr_code(qr_id,plant_id,qr_code,status) SELECT plant_id,plant_id,qr_token,'active' FROM plant_record;`);
- for(const [id,species,plant,approved,observation]of [['public-image',1,null,true,null],['pending-image',1,null,false,null],['pending-species-image',4,null,true,null],['private-photo',null,1,false,'private'],['unapproved-species-plant-photo',null,5,true,'inconsistent']])
+ for(const [id,species,plant,approved,observation]of [['public-image',1,null,true,null],['pending-image',1,null,false,null],['pending-species-image',4,null,true,null],['private-photo',null,1,false,'pending'],['unapproved-species-plant-photo',null,5,true,'inconsistent']])
   await pool.query("INSERT INTO plant_asset(id,species_id,plant_id,owner_subject,client_key,approved,content_type,content,observation_id) VALUES($1,$2,$3,'staff:bot',$1,$4,'image/jpeg',$5,$6)",[id,species,plant,approved,Buffer.from('test fixture'),observation]);
  const roles={officer:'Conservation Officer',bot:'Botanist',admin:'Administrator',visitor:'Visitor',other:'Botanist'};
  const tokens=Object.fromEntries(Object.keys(roles).map((key,i)=>[key,String(i+1).repeat(64)]));
@@ -31,7 +32,14 @@ test('public plant, species, QR and assets use safe projections while staff/owne
  t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve)}));
  const call=async(path,role)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api${path}`,{headers:role?{Authorization:`Bearer ${tokens[role]}`}:{}});return {status:r.status,data:r.headers.get('content-type')?.includes('json')?await r.json():null}};
  for(const role of [undefined,'visitor']) {
-  const r=await call('/plants/1',role);assert.equal(r.status,200);assert.deepEqual(Object.keys(r.data.plant).sort(),['plant_id','species_id']);
+  const r=await call('/plants/1',role);assert.equal(r.status,200);
+  assert.deepEqual(Object.keys(r.data.plant).sort(),['common_name','latest_approved','observed_at','plant_id','rbac_status','scientific_name','species_id']);
+  assert.equal(r.data.plant.rbac_status,'Approved');
+  assert.equal(r.data.plant.common_name,'Public common');
+  assert.deepEqual(r.data.plant.latest_approved,{heightCm:10,healthStatus:'Healthy',lifeStage:'Mature',morphology:'Broad leaves'});
+  assert.equal(r.data.plant.latest_approved.notes,undefined);
+  assert.equal(r.data.plant.latest_approved.taxonomy,undefined);
+  for(const field of ['registered_subject','registered_at','qr_token','latitude','longitude','zone'])assert.equal(field in r.data.plant,false);
   const list=await call('/plants',role);assert.equal(list.data.plants.length,1);assert.deepEqual(list.data.plants[0],r.data.plant);
   const species=(await call('/species/1',role)).data.species;
   assert.deepEqual(Object.keys(species).sort(),['common_name','description','family_name','genus_name','image_asset_id','image_url','scientific_name','species_id']);
