@@ -293,7 +293,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       </header>
       <p v-if="!latestReadings.length" class="state-message">No sensor readings available.</p>
       <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="t('conservationPages.iot.recentReadings')" tabindex="0">
-        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
+        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-metric" /><col class="column-status" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
           <thead>
             <tr>
               <th scope="col">Reading ID</th>
@@ -301,8 +301,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <th scope="col">Plant ID</th>
               <th scope="col">Temperature</th>
               <th scope="col">Humidity</th>
-              <th scope="col">Soil Moisture</th>
-              <th scope="col">Rainfall</th>
+              <th scope="col">Soil Raw (ADC)</th>
+              <th scope="col">Soil Condition</th>
+              <th scope="col">Rain Raw (ADC)</th>
+              <th scope="col">Surface Condition</th>
               <th scope="col">Motion</th>
               <th scope="col">GPS</th>
               <th scope="col">Recorded At</th>
@@ -318,8 +320,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <td>{{ plantDisplayId(item.reading) }}</td>
               <td>{{ valueOrDash(item.reading.temperature_c, ' °C') }}</td>
               <td>{{ valueOrDash(item.reading.humidity, '%') }}</td>
-              <td>{{ valueOrDash(item.reading.soil_moisture, '%') }}</td>
-              <td>{{ valueOrDash(item.reading.rainfall_mm, ' mm') }}</td>
+              <td>{{ valueOrDash(item.reading.soil_moisture) }}</td>
+              <td>{{ valueOrDash(item.reading.soil_condition) }}</td>
+              <td>{{ valueOrDash(item.reading.rainfall_mm) }}</td>
+              <td>{{ valueOrDash(item.reading.rain_condition) }}</td>
               <td>
                 <span class="badge" :class="item.reading.motion_detected ? 'high' : 'approved'">{{
                   motionValue(item.reading)
@@ -439,21 +443,21 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
           :points="humidityChartPoints"
         />
         <SensorHistoryChart
-          title="Soil moisture over time"
-          unit="%"
-          empty-message="No soil moisture history available."
+          title="Soil raw reading over time"
+          unit="ADC"
+          empty-message="No soil reading history available."
           :points="soilMoistureChartPoints"
         />
         <SensorHistoryChart
-          title="Rainfall over time"
-          unit="mm"
+          title="Rain raw reading over time"
+          unit="ADC"
           type="bar"
-          empty-message="No rainfall history available."
+          empty-message="No rain sensor history available."
           :points="rainfallChartPoints"
         />
       </section>
       <div class="table-scroll officer-table-scroll history-table" role="region" :aria-label="`Reading History · ${historyDevice.device_name}`" tabindex="0">
-        <table class="officer-data-table iot-history-table"><colgroup><col class="column-id" /><col class="column-time" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-coordinates" /></colgroup>
+        <table class="officer-data-table iot-history-table"><colgroup><col class="column-id" /><col class="column-time" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-metric" /><col class="column-status" /><col class="column-status" /><col class="column-coordinates" /></colgroup>
           <thead>
             <tr>
               <th scope="col">Reading ID</th>
@@ -461,8 +465,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <th scope="col">Related Plant</th>
               <th scope="col">Temperature</th>
               <th scope="col">Humidity</th>
-              <th scope="col">Soil Moisture</th>
-              <th scope="col">Rainfall</th>
+              <th scope="col">Soil Raw (ADC)</th>
+              <th scope="col">Soil Condition</th>
+              <th scope="col">Rain Raw (ADC)</th>
+              <th scope="col">Surface Condition</th>
               <th scope="col">Motion</th>
               <th scope="col">GPS</th>
             </tr>
@@ -476,8 +482,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <td>{{ plantDisplayId(reading) }}</td>
               <td>{{ valueOrDash(reading.temperature_c, ' °C') }}</td>
               <td>{{ valueOrDash(reading.humidity, '%') }}</td>
-              <td>{{ valueOrDash(reading.soil_moisture, '%') }}</td>
-              <td>{{ valueOrDash(reading.rainfall_mm, ' mm') }}</td>
+              <td>{{ valueOrDash(reading.soil_moisture) }}</td>
+              <td>{{ valueOrDash(reading.soil_condition) }}</td>
+              <td>{{ valueOrDash(reading.rainfall_mm) }}</td>
+              <td>{{ valueOrDash(reading.rain_condition) }}</td>
               <td>{{ motionValue(reading) }}</td>
               <td>{{ gpsValue(reading) }}</td>
             </tr>
@@ -504,12 +512,20 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         <dd>{{ valueOrDash(selectedReading.humidity, '%') }}</dd>
       </div>
       <div>
-        <dt>Soil Moisture</dt>
-        <dd>{{ valueOrDash(selectedReading.soil_moisture, '%') }}</dd>
+        <dt>Soil Raw Reading (ADC)</dt>
+        <dd>{{ valueOrDash(selectedReading.soil_moisture) }}</dd>
       </div>
       <div>
-        <dt>Rainfall</dt>
-        <dd>{{ valueOrDash(selectedReading.rainfall_mm, ' mm') }}</dd>
+        <dt>Soil Condition</dt>
+        <dd>{{ valueOrDash(selectedReading.soil_condition) }}</dd>
+      </div>
+      <div>
+        <dt>Rain Raw Reading (ADC)</dt>
+        <dd>{{ valueOrDash(selectedReading.rainfall_mm) }}</dd>
+      </div>
+      <div>
+        <dt>Surface Condition</dt>
+        <dd>{{ valueOrDash(selectedReading.rain_condition) }}</dd>
       </div>
       <div>
         <dt>Motion</dt>

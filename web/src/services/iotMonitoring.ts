@@ -7,7 +7,9 @@ export interface IoTReading {
   temperature_c: number | null
   humidity: number | null
   soil_moisture: number | null
+  soil_condition: string | null
   rainfall_mm: number | null
+  rain_condition: string | null
   motion_detected: boolean | null
   gps_latitude: number | null
   gps_longitude: number | null
@@ -53,6 +55,25 @@ const metric = (values: ApiRecord, key: string) => {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+const condition = (values: ApiRecord, key: string) =>
+  typeof values[key] === 'string' && values[key].trim() ? values[key] as string : null
+
+const soilCondition = (values: ApiRecord) => {
+  const reported = condition(values, 'soilCondition')
+  if (reported) return reported
+  const raw = metric(values, 'soilMoisture')
+  if (raw === null) return null
+  return raw > 2700 ? 'Dry' : raw < 2300 ? 'Wet' : 'Slightly moist'
+}
+
+const rainCondition = (values: ApiRecord) => {
+  const reported = condition(values, 'rainCondition')
+  if (reported) return reported
+  const raw = metric(values, 'rainfall')
+  if (raw === null) return null
+  return raw > 3000 ? 'Dry' : raw < 2200 ? 'Wet surface' : 'Water present'
+}
+
 const mapReading = (value: unknown, plantId: unknown): IoTReading | null => {
   const item = record(value)
   const values = record(item?.values)
@@ -66,7 +87,9 @@ const mapReading = (value: unknown, plantId: unknown): IoTReading | null => {
     temperature_c: metric(values, 'temperature'),
     humidity: metric(values, 'humidity'),
     soil_moisture: metric(values, 'soilMoisture'),
+    soil_condition: soilCondition(values),
     rainfall_mm: metric(values, 'rainfall'),
+    rain_condition: rainCondition(values),
     motion_detected: movement === null ? null : movement === 1,
     gps_latitude: null,
     gps_longitude: null,

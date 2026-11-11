@@ -17,6 +17,10 @@ const metrics = [
   "rainfall",
   "sound",
 ];
+const conditionValues = {
+  soilCondition: ["Dry", "Wet", "Slightly moist"],
+  rainCondition: ["Dry", "Wet surface", "Water present"],
+};
 function thresholds(value) {
   if (
     !value ||
@@ -81,7 +85,16 @@ function mountDeviceIngestion(app, { pool }) {
     );
     if (!match) fail(401, "Device authentication required.");
     const b = req.body;
-    thresholds(b.values);
+    if (!b.values || typeof b.values !== "object" || Array.isArray(b.values) ||
+        Object.keys(b.values).some((key) => !metrics.includes(key) && !Object.hasOwn(conditionValues, key)))
+      fail(400, "Invalid sensor readings.");
+    for (const [key, value] of Object.entries(b.values)) {
+      if (Object.hasOwn(conditionValues, key)) {
+        if (!conditionValues[key].includes(value)) fail(400, "Invalid sensor condition.");
+      } else if (typeof value !== "number" || !Number.isFinite(value)) {
+        fail(400, "Sensor readings must be finite numbers.");
+      }
+    }
     let capture;
     if (b.capture !== undefined) {
       const c = b.capture;
@@ -128,7 +141,7 @@ function mountDeviceIngestion(app, { pool }) {
         ).rows[0];
         if (previous) {
           if (
-            metrics.some(
+            [...metrics, ...Object.keys(conditionValues)].some(
               (metric) => previous.values[metric] !== b.values[metric],
             )
           )

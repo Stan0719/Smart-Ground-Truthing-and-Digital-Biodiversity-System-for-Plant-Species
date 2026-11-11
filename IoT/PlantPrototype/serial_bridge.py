@@ -119,6 +119,9 @@ def frames(lines, *, include_metadata=False):
                     continue
                 if math.isfinite(value):
                     values[LABELS[match[1]]] = value
+            condition = re.match(r'^(Soil Condition|Surface Condition)\s*:\s*(.+?)\s*$', line)
+            if dashboard and condition:
+                values['soilCondition' if condition[1] == 'Soil Condition' else 'rainCondition'] = condition[2]
             elif dashboard and section in ('SOIL MOISTURE', 'RAINDROP SENSOR'):
                 match = re.match(r'^Reading\s*:\s*(-?[\d.]+)', line)
                 if match:
