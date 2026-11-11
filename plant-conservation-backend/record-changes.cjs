@@ -4,6 +4,8 @@ const sharp = require("sharp");
 const { permitted, visibilityFor } = require("../shared/rbac.cjs");
 const { transaction, audit, subject, fail, text, id, fieldContent, speciesRow } = require("./domain.cjs");
 const { historyAvailable, appendVersion, plantPhotoRefs, plantProposedSnapshot } = require("./record-version-history.cjs");
+const { replaceRequestPhoto } = require("./species-photo-provenance.cjs");
+const { assertSpeciesReassignment } = require("./species-requests.cjs");
 
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -178,7 +180,7 @@ async function uniqueName(c, name, speciesId) {
     [name, speciesId])).rows.length) fail(409, "This scientific name belongs to another species.");
 }
 
-function mountRecordChanges(app, { pool, allow }) {
+function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
   // Pending records are private. The same record and observation IDs are retained.
   app.patch("/api/my-plants/:id", allow("plants.create"), async (req, res) => {
     const { expected_revision: expectedRevision, ...edit } = req.body || {};
@@ -196,7 +198,10 @@ function mountRecordChanges(app, { pool, allow }) {
       const before = await pendingPlantSnapshot(c, plant, observation);
       if ((plant.species_data?.approvalStatus || "Approved") !== "Approved" && proposal.species_id !== String(plant.species_id))
         fail(409, "Finish the linked species request before changing this plant's species.");
-      if (proposal.species_id !== String(plant.species_id)) await speciesRow(c, proposal.species_id, req.user);
+      if (proposal.species_id !== String(plant.species_id)) {
+        await assertSpeciesReassignment(c, plant.plant_id, plant, fail);
+        await speciesRow(c, proposal.species_id, req.user);
+      }
       await applyQrChange(c, plant, proposal.qr_id);
       await c.query("UPDATE plant_record SET species_id=$1,scientific_name=$2,rbac_status='Pending Review' WHERE plant_id=$3",
         [proposal.species_id, proposal.scientific_name, plant.plant_id]);
@@ -213,6 +218,7 @@ function mountRecordChanges(app, { pool, allow }) {
         base: before, baseStatus: observation.status, proposed: after, baselineAt: observation.created_at,
         baselineReview: await plantReview(c, observation.id) });
       await audit(c, req.user, "pending_plant_updated", plant.plant_id);
+      if (officerNotifications) await officerNotifications.enqueueCorrection(c, observation.id, observation.status, observation.revision);
       return { plant_id: plant.plant_id, observation_id: observation.id, status: "Pending Review" };
     });
     res.json(result);
@@ -234,8 +240,7 @@ function mountRecordChanges(app, { pool, allow }) {
         await c.query("UPDATE species SET scientific_name=$1,common_name=$2,genus_id=$3,status_id=$4,description=$5,rbac_data=rbac_data || $6::jsonb WHERE species_id=$7",
           [proposal.scientific_name, proposal.common_name, refs.genusId, refs.statusId, proposal.description,
             { habitat: proposal.habitat, approvalStatus: "Pending Review" }, row.proposed_species_id]);
-        if (proposal.photo) await c.query("UPDATE plant_asset SET content=$1 WHERE species_id=$2 AND owner_subject=$3 AND approved=FALSE",
-          [Buffer.from(proposal.photo.base64, "base64"), row.proposed_species_id, subject(req.user)]);
+        if (proposal.photo) await replaceRequestPhoto(c,row,row.proposed_species_id,Buffer.from(proposal.photo.base64,"base64"),false,subject(req.user));
       } else {
         await c.query("SELECT pg_advisory_xact_lock(hashtext(lower(btrim($1))))", [proposal.scientific_name]);
         if ((await c.query("SELECT species_id FROM species WHERE lower(btrim(scientific_name))=lower(btrim($1)) LIMIT 1", [proposal.scientific_name])).rows.length)
@@ -385,6 +390,7 @@ function mountRecordChanges(app, { pool, allow }) {
           await applyPlantPhotos(c, { plantId: plant.plant_id, observationId: base.observation_id, owner: change.owner_subject,
             approved: true, proposal, keyPrefix: `approved-edit:${change.id}` });
         } else {
+          await c.query("SELECT species_id FROM species WHERE species_id=$1 FOR UPDATE",[change.species_id]);
           const request = (await c.query("SELECT * FROM species_request_submission WHERE approved_species_id=$1 AND owner_subject=$2 AND request_status='Approved' FOR UPDATE",
             [change.species_id, change.owner_subject])).rows[0];
           if (!request || digest({ request_id: request.request_id, species_id: change.species_id, ...speciesSnapshot(request),
@@ -400,9 +406,7 @@ function mountRecordChanges(app, { pool, allow }) {
           await c.query(`UPDATE species_request_submission SET ${speciesFields.map((field, index) => `${field}=$${index + 1}`).join(",")},photo=COALESCE($8,photo) WHERE request_id=$9`,
             [...values, proposal.photo ? Buffer.from(proposal.photo.base64, "base64") : null, request.request_id]);
           if (proposal.photo) {
-            await c.query("UPDATE plant_asset SET approved=FALSE WHERE species_id=$1", [change.species_id]);
-            await c.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,TRUE,'image/jpeg',$5)",
-              [randomUUID(), change.species_id, change.owner_subject, `approved-edit:${change.id}:species-photo`, Buffer.from(proposal.photo.base64, "base64")]);
+            await replaceRequestPhoto(c,request,change.species_id,Buffer.from(proposal.photo.base64,"base64"),true,subject(req.user));
           }
         }
       }

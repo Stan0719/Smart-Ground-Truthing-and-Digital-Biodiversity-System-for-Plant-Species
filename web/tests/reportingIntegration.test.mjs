@@ -5,10 +5,35 @@ import vm from 'node:vm'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import postcss from 'postcss'
 import * as integration from '../src/services/reporting.ts'
 
 const filename = new URL('../src/views/conservation/ReportsView.vue', import.meta.url)
 const source = readFileSync(filename, 'utf8')
+
+test('only Reports Apply/Reset/Refresh opt into compact, aligned toolbar buttons', () => {
+  const buttons = [...source.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)]
+    .filter(([, attrs]) => attrs.includes('report-toolbar-button'))
+  assert.equal(buttons.length, 3)
+  assert.deepEqual(buttons.map(([, , text]) => text.trim()), ["{{ rt('apply') }}", "{{ rt('reset') }}", "{{ rt('refresh') }}"])
+  assert.match(buttons[0][1], /type="submit" :disabled="isLoading \|\| operationalBusy"/)
+  assert.match(buttons[1][1], /@click="resetFilters"/)
+  assert.match(buttons[2][1], /:disabled="isLoading" @click="loadReport\(\)"/)
+  assert.match(source, /@submit.prevent="applyFilters"/)
+  const { descriptor } = parse(source)
+  const sheet = postcss.parse(descriptor.styles.find(style => !style.src).content)
+  const rules = []; sheet.walkRules(rule => rules.push(rule))
+  const selector = '.officer-layout.officer-layout.officer-layout .reports-panel .control-bar .report-toolbar-button'
+  const rule = rules.find(rule => rule.selector === selector && rule.parent.type === 'root')
+  const declarations = Object.fromEntries(rule.nodes.map(node => [node.prop, node.value]))
+  for (const [key, value] of Object.entries({ height: '40px', 'min-height': '40px', padding: '0 15px', 'border-radius': '9px', 'font-size': '14px', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center', 'align-self': 'flex-end', flex: '0 0 auto', width: 'auto', 'white-space': 'nowrap' })) assert.equal(declarations[key], value, key)
+  assert.equal(declarations.background, undefined)
+  assert.equal(declarations.color, undefined)
+  assert.ok(rules.some(rule => rule.selector === '.filter-actions' && rule.nodes.some(node => node.prop === 'gap' && node.value === '8px')))
+  assert.ok(rules.some(rule => rule.selector.endsWith('.report-toolbar-button::after') && rule.nodes.some(node => node.prop === 'inset' && node.value === '-2px 0')))
+  assert.ok(rules.some(rule => rule.selector === selector && rule.parent.params === '(max-width: 620px)' && rule.nodes.some(node => node.prop === 'align-self' && node.value === 'flex-start')))
+  assert.doesNotMatch(rule.toString(), /:hover|:disabled|outline:/)
+})
 const viteSource = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
 const script = compileScript(descriptor, { id: 'reporting-integration' })
@@ -35,6 +60,9 @@ function harness(fetchHandler) {
   const calls = []
   const pdfs = []
   const tables = []
+  const drawn = []
+  const blobs = []
+  const locale = vue.ref('en')
   const t = (key, params = {}) => {
     const found = key.split('.').reduce((entry, part) => entry?.[part], messages)
     const value = typeof found === 'string' ? found : key
@@ -49,31 +77,39 @@ function harness(fetchHandler) {
     }
     setTextColor() {}
     setFontSize() {}
-    text() {}
+    text(value) { drawn.push(value) }
+    addPage() {}
     addImage() {}
     save(name) { this.saved = name }
   }
   const exports = {}
+  let exportUtilities
   const context = {
     exports,
     AbortSignal,
     Blob,
+    Image: class { naturalWidth = 1000; naturalHeight = 400; async decode() {} },
     console,
-    document: { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } },
+    document: { createElement: () => ({ click() {}, remove() {}, toDataURL: () => 'data:chart', getContext: () => ({fillRect() {}, beginPath() {}, roundRect() {}, fill() {}, stroke() {}, strokeRect() {}, drawImage() {}, measureText: value => ({width: Array.from(String(value)).length * 12}), fillText: value => drawn.push(value)}) }), body: { appendChild() {} } },
     window: { setTimeout },
-    URL: { createObjectURL: () => 'blob:test', revokeObjectURL() {} },
+    URL: { createObjectURL: blob => { blobs.push(blob); return 'blob:test' }, revokeObjectURL() {} },
     fetch: async (url, options) => {
       calls.push({ url, options })
       return fetchHandler(url, options)
     },
     require(name) {
+      if (name.includes('reportExport')) {
+        if (!exportUtilities) { const helper = { ...context, exports: {} }; vm.runInNewContext(transpile(readFileSync(new URL('../src/utils/reportExport.ts', import.meta.url), 'utf8')), helper); exportUtilities = helper.exports }
+        return { ...exportUtilities, renderReportPdf: (model, ...args) => { tables.push({ options: { body: model.rows }, model }); return exportUtilities.renderReportPdf(model, ...args) } }
+      }
       if (name === 'vue') return {
         ...vue,
         onMounted() {},
+        onBeforeUnmount() {},
         resolveComponent: (component) => component,
         withDirectives: (node) => node,
       }
-      if (name === 'vue-i18n') return { useI18n: () => ({ t, locale: vue.ref('en') }) }
+      if (name === 'vue-i18n') return { useI18n: () => ({ t, locale }) }
       if (name === 'jspdf') return { jsPDF: PdfMock }
       if (name === 'jspdf-autotable') return {
         __esModule: true,
@@ -81,8 +117,8 @@ function harness(fetchHandler) {
       }
       if (name.endsWith('reporting')) return {
         ...integration,
-        requestReport: async () => {
-          const response = await context.fetch(integration.REPORT_API_PATH, { credentials: 'same-origin' })
+        requestReport: async (filters) => {
+          const response = await context.fetch(integration.reportRequestUrl(filters), { credentials: 'same-origin' })
           let value
           try { value = await response.json() }
           catch { throw Error('The reporting service returned an invalid response.') }
@@ -99,8 +135,9 @@ function harness(fetchHandler) {
   }
   vm.runInNewContext(`(function () { ${transpile(script.content)} })()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
+  state.reportChart.value = { toPrintDataUrl: async () => 'data:image/png;base64,offline' }
   vm.runInNewContext(`(function () { ${transpile(template.code)} })()`, context)
-  return { state, calls, pdfs, tables, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => scope.stop() }
+  return { state, calls, pdfs, tables, drawn, blobs, locale, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => scope.stop() }
 }
 function nodes(root) {
   const result = []
@@ -171,17 +208,47 @@ test('network failures are distinguished by the real report API helper', async (
   } finally { globalThis.fetch = originalFetch }
 })
 
-test('unsupported report types are blocked without generating or fetching prototype data', async () => {
+test('category selector exposes all four implemented reports with explicit filter actions', async () => {
   const h = harness(async () => Response.json(reportFixture()))
   try {
     await h.state.loadReport()
-    const callCount = h.calls.length
-    h.state.reportType.value = 'observations'
-    h.state.chooseReportType()
-    assert.equal(h.calls.length, callCount)
-    assert.equal(h.state.unsupportedMessage.value, 'Backend integration not available yet')
-    const unsupported = h.state.reportTypes.filter((item) => !item.supported)
-    assert.deepEqual(Array.from(unsupported, (item) => item.id), ['observations', 'threats', 'iot', 'camera', 'custom-date'])
+    const tree = nodes(h.render())
+    const category = tree.find(n => n.type === 'select' && n.props.id === 'report-category')
+    assert.ok(category)
+    assert.deepEqual(nodes(category).filter(n => n.type === 'option').map(n => n.props.value), ['species-approved', 'observations', 'threats', 'iot'])
+    assert.ok(!tree.some(n => n.props?.type === 'radio'))
+    assert.ok(tree.some(n => n.type === 'label' && n.props.for === 'report-category'))
+    assert.ok(tree.some(n => n.type === 'button' && n.props.type === 'submit' && n.children === 'Apply'))
+    assert.ok(!tree.some(n => n.props?.id === 'report-start'))
+    h.state.pendingPeriod.value = 'custom'
+    const custom = nodes(h.render())
+    for (const id of ['report-start', 'report-end']) {
+      assert.ok(custom.some(n => n.props?.id === id && n.props.type === 'date'))
+      assert.ok(custom.some(n => n.type === 'label' && n.props.for === id))
+    }
+    assert.equal(h.calls.length, 1)
+  } finally { h.stop() }
+})
+
+test('new categories use their own report component and shared applied dates; resetting returns once to the original report', async () => {
+  const h = harness(async () => Response.json(reportFixture()))
+  try {
+    await h.state.loadReport()
+    for (const category of ['observations','threats','iot']) {
+      h.state.reportType.value = category; await vue.nextTick()
+      const child = nodes(h.render()).find(node => node.props?.category === category)
+      assert.ok(child)
+      assert.ok(!nodes(h.render()).some(node => node.props?.class === 'report-preview'))
+      h.state.pendingPeriod.value = 'custom'; h.state.pendingStart.value = '2026-11-01'; h.state.pendingEnd.value = '2026-11-05'
+      await h.state.applyFilters()
+      assert.equal(h.state.operationalFilters.value.period, 'custom')
+      assert.equal(h.state.operationalFilters.value.start, '2026-11-01')
+    }
+    const before = h.calls.length
+    await h.state.resetFilters(); await new Promise(resolve => setImmediate(resolve))
+    assert.equal(h.calls.length, before + 1)
+    assert.equal(h.calls.at(-1).url, '/api/data/reports')
+    assert.equal(h.state.reportType.value, 'species-approved')
   } finally { h.stop() }
 })
 
@@ -197,22 +264,193 @@ test('CSV and PDF export receive only real report rows and backend generation ti
   const report = integration.mapApprovedPlantReport(reportFixture())
   assert.ok(report)
   const csv = integration.buildReportCsv(report, report.rows)
-  assert.match(csv, /2026-11-03T12:00:00.000Z/)
+  assert.ok(csv.startsWith('\uFEFFScientific Name,Common Name,Approved Plants\r\n'));assert.doesNotMatch(csv, /2026-11-03T12:00:00.000Z/)
   assert.match(csv, /Shorea alpha,Alpha meranti,3/)
   assert.doesNotMatch(csv, /Observation ID|Alert ID|September/)
   const h = harness(async () => Response.json(reportFixture()))
   try {
     await h.state.loadReport()
-    h.state.exportPdf()
+    await h.state.exportPdf()
     assert.equal(h.tables.length, 1)
     assert.deepEqual(Array.from(h.tables[0].options.body[0]), ['Hopea beta', 'Beta hopea', 1])
-    assert.ok(h.pdfs[0].saved.startsWith('niah-species-approved-plants-2026-11-03'))
+    assert.ok(h.pdfs[0].saved.startsWith('niah-species-approved-'))
   } finally { h.stop() }
+})
+
+test('species PDF cancels when search changes during print rendering and retains full export scope beyond chart limits', async () => {
+  const result=reportFixture({rows:Array.from({length:20},(_,index)=>({scientific_name:`Species ${index}`,common_name:`Name ${index}`,approved_plants:index}))})
+  const h=harness(async()=>Response.json(result));let resolve
+  try{
+    await h.state.loadReport()
+    assert.equal(h.state.exportDocument().rows.length,20);assert.equal(h.state.exportDocument().chart.length,12)
+    h.state.reportChart.value={toPrintDataUrl:()=>new Promise(done=>{resolve=done})}
+    const pending=h.state.exportPdf();await new Promise(done=>setImmediate(done));assert.equal(typeof resolve,'function')
+    h.state.search.value='Species 1';resolve('data:image/png;base64,old');await pending
+    assert.equal(h.pdfs.length,0);assert.equal(h.blobs.length,0)
+  }finally{h.stop()}
 })
 
 test('production report source has no conservationStore, fake dates, or persistence claims', () => {
   assert.doesNotMatch(source, /conservationStore|speciesForPlant|2026-09-01|2026-10-03/)
-  assert.match(source, /requestReport\(\)/)
+  assert.match(source, /requestReport\(snapshot\)/)
   assert.match(source, /rt\('downloadOnly'\)/)
   assert.doesNotMatch(source, /Saved Report|report history/i)
+})
+
+
+test('period inputs stay pending; apply, refresh and reset use the right snapshot', async () => {
+  const h = harness(async () => Response.json(reportFixture()))
+  try {
+    await h.state.loadReport()
+    h.state.pendingPeriod.value = 'custom'
+    h.state.pendingStart.value = '2026-11-01'; h.state.pendingEnd.value = '2026-11-03'
+    assert.equal(h.calls.length, 1)
+    assert.match(h.state.appliedScope.value, /All time/)
+    await h.state.applyFilters()
+    assert.equal(h.calls.at(-1).url, '/api/data/reports?period=custom&start=2026-11-01&end=2026-11-03')
+    h.state.pendingPeriod.value = 'last-month'
+    await h.state.loadReport()
+    assert.match(h.calls.at(-1).url, /period=custom/)
+    h.state.search.value = 'alpha'; h.state.sort.value = 'approved-desc'
+    await h.state.resetFilters()
+    assert.equal(h.calls.at(-1).url, '/api/data/reports')
+    assert.equal(h.state.pendingPeriod.value, 'all-time')
+    assert.equal(h.state.search.value, ''); assert.equal(h.state.sort.value, 'scientific-asc')
+    for (const [start,end] of [['2026-02-30','2026-03-01'],['2026-12-01','2026-11-01'],['','2026-11-01']]) {
+      h.state.pendingPeriod.value = 'custom';h.state.pendingStart.value=start;h.state.pendingEnd.value=end
+      const count=h.calls.length;await h.state.applyFilters();assert.equal(h.calls.length,count);assert.ok(h.state.filterError.value)
+    }
+    for(const period of ['this-month','last-month']) {
+      h.state.pendingPeriod.value=period;await h.state.applyFilters();assert.equal(h.calls.at(-1).url, '/api/data/reports?period='+period)
+    }
+  } finally { h.stop() }
+})
+
+test('stale successes and errors cannot overwrite a later snapshot; loading blocks exports', async () => {
+  const waiting=[]
+  const h=harness(()=>new Promise((resolve,reject)=>waiting.push({resolve,reject})))
+  try {
+    const first=h.state.loadReport();const second=h.state.loadReport()
+    h.state.exportCsv();await h.state.exportPdf();assert.equal(h.blobs.length,0);assert.equal(h.pdfs.length,0)
+    waiting[1].resolve(Response.json(reportFixture({rows:[{scientific_name:'Newest',common_name:'',approved_plants:7}]})))
+    await second;assert.equal(h.state.isLoading.value,false)
+    waiting[0].reject(Error('Stale failure'));await first
+    assert.equal(h.state.report.value.rows[0].scientificName,'Newest');assert.equal(h.state.loadError.value,'')
+    const third=h.state.loadReport();const fourth=h.state.loadReport()
+    waiting[3].resolve(Response.json(reportFixture()));await fourth
+    waiting[2].resolve(Response.json(reportFixture({rows:[]})));await third
+    assert.equal(h.state.report.value.rows.length,2)
+  } finally {h.stop()}
+})
+
+test('search drives metrics, top chart, CSV and both PDF paths from matching rows', async () => {
+  const h=harness(async()=>Response.json(reportFixture()))
+  try {
+    await h.state.loadReport();h.state.search.value='beta'
+    assert.equal(h.state.totalSpecies.value,2)
+    assert.equal(h.state.filteredRows.value.length,1);assert.equal(h.state.totalApprovedPlants.value,1)
+    assert.deepEqual(Array.from(h.state.chartRows.value,r=>r.scientificName),['Hopea beta'])
+    h.state.exportCsv();const csv=await h.blobs[0].text()
+    assert.equal(h.state.exportDocument().statistics[0].value,2);assert.equal(h.state.exportDocument().statistics[2].value,1)
+    assert.equal(h.state.exportDocument().statistics[1].value,1);assert.doesNotMatch(csv,/Shorea alpha/)
+    assert.doesNotMatch(csv,/Malaysia Time|Search Species/);assert.equal(csv.split('\r\n').length,2);assert.match(csv,/"Hopea beta","Beta hopea","1"/)
+    await h.state.exportPdf();assert.equal(h.tables[0].options.body.length,1)
+    h.locale.value='zh-CN';await h.state.exportPdf()
+    assert.equal(h.pdfs.length,2);assert.ok(h.pdfs[1].saved.endsWith('.pdf'))
+    assert.ok(h.drawn.some(text=>String(text).includes('Hopea beta')))
+    h.state.search.value='no match';h.state.exportCsv();await h.state.exportPdf()
+    assert.equal(h.blobs.length,1);assert.equal(h.pdfs.length,2);assert.equal(h.state.totalApprovedPlants.value,0)
+  } finally {h.stop()}
+})
+
+test('CSV keeps BOM, quotes and formula protection without adding period metadata', () => {
+  const report={generatedAt:'2026-11-04T00:00:00Z',scope:{period:'custom',timezone:'Asia/Kuala_Lumpur',startDate:'2026-11-01',endDate:'2026-11-03'},rows:[{scientificName:'=SUM(A1)',commonName:'A,"B"',approvedPlants:2}]}
+  const csv=integration.buildReportCsv(report,report.rows)
+  assert.equal(csv.charCodeAt(0),0xfeff);assert.match(csv,/'=SUM/);assert.match(csv,/"A,""B"""/)
+  assert.doesNotMatch(csv,/2026-11-01 to 2026-11-03/);assert.equal(csv.split('\r\n').length,2)
+})
+
+
+test('real adapter sends period parameters and rejects missing/mismatched period metadata', async () => {
+  const original=globalThis.fetch
+  const scope={period:'custom',timezone:'Asia/Kuala_Lumpur',startDate:'2026-11-01',endDate:'2026-11-03',startInclusive:'2026-10-31T16:00:00Z',endExclusive:'2026-11-03T16:00:00Z'}
+  const filters={period:'custom',start:'2026-11-01',end:'2026-11-03'}
+  try {
+    globalThis.fetch=async (url,opts)=>{
+      assert.equal(url,'/api/data/reports?period=custom&start=2026-11-01&end=2026-11-03')
+      assert.equal(opts.credentials,'same-origin');return Response.json(reportFixture({scope}))
+    }
+    assert.equal((await integration.requestReport(filters)).scope.startInclusive,scope.startInclusive)
+    for(const result of [reportFixture(),reportFixture({scope:{...scope,period:'all-time'}}),reportFixture({scope:{...scope,startDate:'2026-11-02'}})]) {
+      globalThis.fetch=async()=>Response.json(result)
+      await assert.rejects(integration.requestReport(filters),{kind:'invalid'})
+    }
+    let fetched=false;globalThis.fetch=async()=>{fetched=true;return Response.json(reportFixture())}
+    await assert.rejects(integration.requestReport({...filters,start:'2026-02-30'}));assert.equal(fetched,false)
+  } finally {globalThis.fetch=original}
+})
+
+test('applied period labels come from response metadata and zero-count periods remain truthful', async () => {
+  const scope={period:'custom',timezone:'Asia/Kuala_Lumpur',startDate:'2026-11-01',endDate:'2026-11-03',startInclusive:'2026-10-31T16:00:00Z',endExclusive:'2026-11-03T16:00:00Z'}
+  let fail=false
+  const h=harness(async()=>fail ? Response.json({error:'Reporting unavailable'},{status:503}) : Response.json(reportFixture({scope,rows:[{scientific_name:'Zero species',common_name:'',approved_plants:0}]})))
+  try {
+    h.state.pendingPeriod.value='custom';h.state.pendingStart.value='2026-11-01';h.state.pendingEnd.value='2026-11-03'
+    await h.state.applyFilters()
+    assert.match(h.state.appliedScope.value,/2026-11-01 to 2026-11-03/)
+    assert.equal(h.state.totalSpecies.value,1);assert.equal(h.state.totalApprovedPlants.value,0)
+    assert.ok(nodes(h.render()).some(n=>n.children===messages.conservationPages.reports.noPlantsInPeriod))
+    h.state.pendingStart.value='2026-11-02';assert.match(h.state.appliedScope.value,/2026-11-01/)
+    fail=true;await h.state.loadReport();assert.equal(h.state.report.value,null)
+    assert.match(h.state.loadError.value,/Reporting unavailable/)
+    h.state.exportCsv();await h.state.exportPdf();assert.equal(h.pdfs.length,0)
+  } finally {h.stop()}
+})
+
+
+test('chart stays capped at twelve matching species and form submit supports keyboard apply', async () => {
+  const rows=Array.from({length:15},(_,i)=>({species_id:i+1,scientific_name:'Species '+String(i).padStart(2,'0'),common_name:'',approved_plants:i}))
+  const h=harness(async()=>Response.json(reportFixture({rows})))
+  try {
+    await h.state.loadReport()
+    assert.equal(h.state.chartRows.value.length,12)
+    assert.equal(h.state.chartRows.value[0].approvedPlants,14)
+    h.state.search.value='Species 0'
+    assert.equal(h.state.filteredRows.value.length,10);assert.equal(h.state.chartRows.value.length,10)
+    assert.equal(h.state.totalApprovedPlants.value,45)
+    const form=nodes(h.render()).find(n=>n.type==='form')
+    let prevented=false
+    await form.props.onSubmit({preventDefault(){prevented=true}})
+    assert.equal(prevented,true);assert.equal(h.calls.length,2)
+  } finally {h.stop()}
+})
+
+
+test('page shows one localized applied-period label without technical labels; exports retain scope', async () => {
+  let scope={period:'all-time',timezone:'Asia/Kuala_Lumpur',startDate:null,endDate:null,startInclusive:null,endExclusive:null}
+  const h=harness(async()=>Response.json(reportFixture({scope})))
+  try {
+    await h.state.loadReport()
+    assert.equal(h.state.appliedPeriodLabel.value,'Reporting Period: All time')
+    h.state.pendingPeriod.value='last-month'
+    assert.equal(h.state.appliedPeriodLabel.value,'Reporting Period: All time')
+    for(const [period,label] of [['this-month','This month'],['last-month','Last month']]) {
+      scope={...scope,period,startDate:'2026-11-01',endDate:'2026-11-30',startInclusive:'2026-10-31T16:00:00Z',endExclusive:'2026-11-30T16:00:00Z'}
+      await h.state.loadReport()
+      assert.equal(h.state.appliedPeriodLabel.value,`Reporting Period: ${label}`)
+    }
+    scope={...scope,period:'custom',startDate:'2026-11-01',endDate:'2026-11-04'}
+    await h.state.loadReport()
+    assert.match(h.state.appliedPeriodLabel.value,/1.*4 Nov 2026/)
+    assert.doesNotMatch(h.state.appliedPeriodLabel.value,/Asia|Kuala|All time/)
+    const tree=nodes(h.render())
+    assert.ok(tree.some(n=>n.props?.class==='applied-scope' && n.children===h.state.appliedPeriodLabel.value))
+    assert.ok(!tree.some(n=>n.props?.class==='section-kicker'))
+    assert.match(h.state.appliedScope.value,/Asia\/Kuala_Lumpur/)
+    for(const language of ['en','ms','zh-CN']) {
+      const translations=JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`,import.meta.url),'utf8')).conservationPages.reports
+      assert.ok(translations.appliedPeriod.includes('{period}'))
+      assert.equal('realBackendReport' in translations,false)
+    }
+  } finally {h.stop()}
 })

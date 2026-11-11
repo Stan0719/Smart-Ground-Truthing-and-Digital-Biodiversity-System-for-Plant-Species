@@ -1,7 +1,7 @@
 import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/PlantDetail.js
 
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   View,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   Image,
   RefreshControl,
+  Modal,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 
@@ -18,9 +19,12 @@ import {
   getPlantById,
   getSpeciesBySlug,
 } from "../data/mockData";
-import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantDetail } from "../utils/plantApi";
+import { fetchPlantDetail, getPlantDisplayObservation } from "../utils/plantApi";
 import RefreshButton from "../components/RefreshButton";
+import FavouriteHeart from "../components/FavouriteHeart";
+import useVisitorFavourites from "../hooks/useVisitorFavourites";
+import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
+import { stepPhotoIndex, uniquePlantPhotos } from "../utils/plantPhotoGallery";
 
 
 export default function PlantDetail({
@@ -31,11 +35,27 @@ export default function PlantDetail({
   useAppTranslation();
   const { plantId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const isVisitor = user?.role?.toLowerCase() === "visitor";
+  const favourites = useVisitorFavourites(user);
   const [plant, setPlant] = useState(null);
+  const [failedPhotoUris, setFailedPhotoUris] = useState([]);
+  const [selectedPhotoUri, setSelectedPhotoUri] = useState(null);
+  const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const locationDisplay = getPlantLocationDisplay(plant?.location, user?.role);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const requestRef = useRef(null);
+  const activePlantIdRef = useRef(plantId);
+
+  useEffect(() => {
+    activePlantIdRef.current = plantId;
+    requestRef.current = null;
+    setSelectedPhotoUri(null);
+    setFailedPhotoUris([]);
+    setImageViewerVisible(false);
+    setPlant(null);
+  }, [plantId]);
 
   const loadPlant = useCallback((isRefresh = false) => {
     if (requestRef.current) return requestRef.current;
@@ -52,17 +72,28 @@ export default function PlantDetail({
 
     const request = (async () => {
       try {
-        const backendPlant = await fetchPlantDetail(plantId, {
-          includeObservations: isBotanist,
-          accountId: user?.id,
-        });
-        setPlant(backendPlant);
+        const options = { includeObservations: isBotanist, accountId: user?.id };
+        let backendPlant;
+        if (isBotanist) {
+          try {
+            backendPlant = await fetchPlantDetail(plantId, { ...options, scopeMine: true });
+          } catch (error) {
+            if (error?.status !== 404) throw error;
+            backendPlant = await fetchPlantDetail(plantId, options);
+          }
+        } else {
+          backendPlant = await fetchPlantDetail(plantId, options);
+        }
+        if (String(activePlantIdRef.current) === String(plantId)) setPlant(backendPlant);
       } catch (error) {
-        setErrorMessage(error.message || "Unable to load this plant record.");
+        if (String(activePlantIdRef.current) === String(plantId))
+          setErrorMessage(error.message || "Unable to load this plant record.");
       } finally {
-        if (requestRef.current === request) requestRef.current = null;
-        setLoading(false);
-        setRefreshing(false);
+        if (String(activePlantIdRef.current) === String(plantId)) {
+          if (requestRef.current === request) requestRef.current = null;
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
     requestRef.current = request;
@@ -120,7 +151,18 @@ export default function PlantDetail({
     scientificName: plant.scientificName,
     genus: plant.genus,
   };
-  const speciesImageSource = getSpeciesImageSource(selectedSpecies);
+  const displayedObservation = getPlantDisplayObservation(plant);
+  const plantPhotos = uniquePlantPhotos(plant.photos);
+  const displayablePhotos = plantPhotos.filter((photo) => !failedPhotoUris.includes(photo.uri));
+  const selectedPhoto = displayablePhotos.find((photo) => photo.uri === selectedPhotoUri) || displayablePhotos[0] || null;
+  const activePhotoIndex = selectedPhoto ? displayablePhotos.findIndex((photo) => photo.uri === selectedPhoto.uri) : 0;
+  const changePhoto = (direction) => setSelectedPhotoUri(displayablePhotos[stepPhotoIndex(activePhotoIndex, direction, displayablePhotos.length)]?.uri || null);
+  const failPhoto = (uri, ownerPlantId = plantId) => {
+    if (String(activePlantIdRef.current) !== String(ownerPlantId)) return;
+    const failed = new Set([...failedPhotoUris, uri]);
+    if (plantPhotos.every((photo) => failed.has(photo.uri))) setImageViewerVisible(false);
+    setFailedPhotoUris((current) => current.includes(uri) ? current : [...current, uri]);
+  };
 
 
   // =====================================================
@@ -153,15 +195,16 @@ export default function PlantDetail({
   // =====================================================
 
   return (
+    <View style={styles.viewerRoot}>
     <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => void loadPlant(true)}
-          tintColor="#315B49"
-          colors={["#315B49"]}
+          refreshing={refreshing || favourites.refreshing}
+          onRefresh={() => { void loadPlant(true); void favourites.refresh(true); }}
+          tintColor="#468585"
+          colors={["#468585"]}
         />
       }
     >
@@ -183,27 +226,67 @@ export default function PlantDetail({
     <Text style={styles.heroBackText}>{t("plant.back")}</Text>
   </TouchableOpacity>
   <RefreshButton
-    onPress={() => void loadPlant(true)}
-    loading={loading || refreshing}
+    onPress={() => { void loadPlant(true); void favourites.refresh(true); }}
+    loading={loading || refreshing || favourites.refreshing}
     label={t("common.refresh")}
     testID="plant-detail-refresh"
   />
+  {isVisitor && <FavouriteHeart
+    active={favourites.isFavourite("plant", plant.plantId)}
+    pending={favourites.isPending("plant", plant.plantId)}
+    disabled={favourites.loading}
+    onPress={() => void favourites.toggle("plant", plant.plantId)}
+  />}
   </View>
+  {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.refreshError}>{translateUIMessage(favourites.mutationError)}</Text>}
 
   <View style={styles.heroGrid}>
     {/* Plant image */}
-    <View style={styles.imageFrame}>
-      {speciesImageSource ? (
-        <Image
-          source={speciesImageSource}
-          style={styles.plantImage}
-          resizeMode="cover"
-        />
-      ) : (
-        <View style={styles.imagePlaceholder}>
-          <Text style={styles.placeholderIcon}>🌿</Text>
-          <Text style={styles.placeholderText}>{t("plantDetail.fieldPhotographComingSoon")}</Text>
-        </View>
+    <View style={styles.imageColumn}>
+      <View style={styles.imageFrame}>
+        {selectedPhoto ? (
+          <TouchableOpacity style={styles.mainImageTap} accessibilityRole="button" accessibilityLabel={`${t("plantDetail.photoNumber", { value0: activePhotoIndex + 1 })}, ${activePhotoIndex + 1} / ${displayablePhotos.length}`} activeOpacity={0.95} onPress={() => setImageViewerVisible(true)}>
+            <Image
+              source={{ uri: selectedPhoto.uri, ...(selectedPhoto.headers ? { headers: selectedPhoto.headers } : {}) }}
+              style={styles.plantImage}
+              resizeMode="cover"
+              onError={() => failPhoto(selectedPhoto.uri)}
+            />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.imagePlaceholder}>
+            <Text style={styles.placeholderIcon}>🌿</Text>
+            <Text style={styles.placeholderText}>{t("plantDetail.fieldPhotographComingSoon")}</Text>
+          </View>
+        )}
+      </View>
+
+      {displayablePhotos.length > 1 && (
+        <>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnailList}>
+            {displayablePhotos.map((photo, index) => (
+              <TouchableOpacity
+                key={photo.uri}
+                accessibilityRole="button"
+                accessibilityLabel={`${t("plantDetail.photoNumber", { value0: index + 1 })}, ${index + 1} / ${displayablePhotos.length}`}
+                accessibilityState={{ selected: index === activePhotoIndex }}
+                onPress={() => setSelectedPhotoUri(photo.uri)}
+                style={[styles.thumbnailButton, index === activePhotoIndex && styles.thumbnailSelected]}
+              >
+                <Image source={{ uri: photo.uri, ...(photo.headers ? { headers: photo.headers } : {}) }} style={styles.thumbnailImage} resizeMode="cover" onError={() => failPhoto(photo.uri)} />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <View style={styles.photoNavigation}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.previousPhoto")} onPress={() => changePhoto(-1)} style={styles.photoNavButton}>
+              <Text style={styles.photoNavText}>‹</Text>
+            </TouchableOpacity>
+            <Text style={styles.photoCounter}>{activePhotoIndex + 1} / {displayablePhotos.length}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.nextPhoto")} onPress={() => changePhoto(1)} style={styles.photoNavButton}>
+              <Text style={styles.photoNavText}>›</Text>
+            </TouchableOpacity>
+          </View>
+        </>
       )}
     </View>
 
@@ -215,27 +298,27 @@ export default function PlantDetail({
       </Text>
 
       <Text style={styles.speciesName}>
-        {selectedSpecies?.name || plant.speciesSlug}
+        {plant.plantScientificName || t("plant.notRecorded")}
       </Text>
 
       <Text style={styles.scientificName}>
-        {selectedSpecies?.scientificName || ""}
+        {selectedSpecies?.name ? `${t("plantDetail.species")}: ${selectedSpecies.name}` : ""}
       </Text>
 
       <View style={styles.heroBadges}>
         {isBotanist && (
           <Text style={styles.heroBadge}>
-            {translateLabel(plant.latestApproved?.healthStatus || t("plant.notRecorded"))}
+            {translateLabel(displayedObservation?.healthStatus || t("plant.notRecorded"))}
           </Text>
         )}
 
         <Text style={styles.heroBadge}>
-          {translateLabel(plant.latestApproved?.lifeStage || t("plant.notRecorded"))}
+          {translateLabel(displayedObservation?.lifeStage || t("plant.notRecorded"))}
         </Text>
 
         {isBotanist && (
           <Text style={styles.heroBadge}>
-            {plant.location?.zone || t("plant.notRecorded")}
+            {locationDisplay.zone || (locationDisplay.status === "restricted" ? t("map.locationRestricted") : plant.currentStatus === "Approved" ? t("plant.notRecorded") : t("plantDetail.locationUnavailableUntilApproved"))}
           </Text>
         )}
       </View>
@@ -243,14 +326,13 @@ export default function PlantDetail({
   </View>
 </View>
 
-
       {/* =================================================
           CURRENT PLANT RECORD
       ================================================= */}
 
       <View style={styles.section}>
 
-        <Text style={styles.sectionLabel}>{t("plantDetail.currentVerifiedRecord")}</Text>
+        <Text style={styles.sectionLabel}>{plant.currentStatus === "Approved" ? t("plantDetail.currentVerifiedRecord") : t("plantDetail.submittedPlantInformation")}</Text>
 
         <Text style={styles.sectionTitle}>{t("plantDetail.plantInformation")}</Text>
 
@@ -261,6 +343,13 @@ export default function PlantDetail({
             label={t("plantDetail.plantId")}
             value={plant.plantId}
           />
+
+          {isBotanist && plant.latestSubmission?.status ? (
+            <InfoRow
+              label={t("botanistRecords.observationStatus")}
+              value={translateLabel(plant.latestSubmission.status)}
+            />
+          ) : null}
 
           <InfoRow
             label={t("plantDetail.species")}
@@ -273,30 +362,26 @@ export default function PlantDetail({
 
           <InfoRow
             label={t("plantDetail.scientificName")}
-            value={
-              selectedSpecies
-                ? selectedSpecies.scientificName
-                : "-"
-            }
+            value={plant.plantScientificName || t("plant.notRecorded")}
             italic
           />
 
           <InfoRow
             label={t("plant.height")}
-            value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
+            value={displayedObservation?.heightCm != null ? `${displayedObservation.heightCm} cm` : t("plant.notRecorded")}
           />
 
           {isBotanist && (
             <InfoRow
               label={t("plantDetail.healthStatus")}
-              value={plant.latestApproved?.healthStatus || t("plant.notRecorded")}
+              value={displayedObservation?.healthStatus || t("plant.notRecorded")}
             />
           )}
 
           <InfoRow
             label={t("plant.lifeStage")}
             value={
-              plant.latestApproved?.lifeStage || t("plant.notRecorded")
+              displayedObservation?.lifeStage || t("plant.notRecorded")
             }
           />
 
@@ -313,16 +398,20 @@ export default function PlantDetail({
           {isBotanist && (
             <InfoRow
               label={t("plantDetail.locationZone")}
-              value={plant.location?.zone || t("plant.notRecorded")}
+              value={locationDisplay.zone || (plant.currentStatus === "Approved" ? t("plant.notRecorded") : t("plantDetail.locationUnavailableUntilApproved"))}
             />
           )}
 
           <InfoRow
             label={t("botanistPlantDetail.morphology")}
             value={
-              plant.latestApproved?.morphology || t("plant.notRecorded")
+              displayedObservation?.morphology || t("plant.notRecorded")
             }
           />
+
+          {plant.currentStatus !== "Approved" && displayedObservation?.notes ? (
+            <InfoRow label={t("plantDetail.notes")} value={displayedObservation.notes} />
+          ) : null}
 
         </View>
 
@@ -362,24 +451,26 @@ export default function PlantDetail({
           <Text style={styles.subSectionTitle}>{t("plantDetail.gpsInformation")}</Text>
 
 
-          <InfoRow
-            label={t("botanistPlantDetail.latitude")}
-            value={formatCoordinate(plant.location?.latitude)}
-          />
-
-          <InfoRow
-            label={t("botanistPlantDetail.longitude")}
-            value={formatCoordinate(plant.location?.longitude)}
-          />
+          {locationDisplay.status === "available" ? (
+            <>
+              <InfoRow label={t("botanistPlantDetail.latitude")} value={formatCoordinate(locationDisplay.latitude)} />
+              <InfoRow label={t("botanistPlantDetail.longitude")} value={formatCoordinate(locationDisplay.longitude)} />
+            </>
+          ) : (
+            <InfoRow
+              label={t("map.location")}
+              value={locationDisplay.status === "restricted" ? t("map.locationRestricted") : plant.currentStatus === "Approved" ? t("map.locationNotRecorded") : t("plantDetail.locationUnavailableUntilApproved")}
+            />
+          )}
 
           <InfoRow
             label={t("plantDetail.altitude")}
-            value={plant.location?.altitudeM != null ? `${plant.location.altitudeM} m` : t("plant.notRecorded")}
+            value={locationDisplay.status === "restricted" ? t("map.locationRestricted") : locationDisplay.altitudeM != null ? `${locationDisplay.altitudeM} m` : plant.currentStatus === "Approved" ? t("plant.notRecorded") : t("plantDetail.locationUnavailableUntilApproved")}
           />
 
           <InfoRow
             label={t("plantDetail.gpsAccuracy")}
-            value={plant.location?.accuracyM != null ? `± ${plant.location.accuracyM} m` : t("plant.notRecorded")}
+            value={locationDisplay.status === "restricted" ? t("map.locationRestricted") : locationDisplay.accuracyM != null ? `± ${locationDisplay.accuracyM} m` : plant.currentStatus === "Approved" ? t("plant.notRecorded") : t("plantDetail.locationUnavailableUntilApproved")}
           />
 
         </View>
@@ -559,6 +650,39 @@ export default function PlantDetail({
       )}
 
     </ScrollView>
+    <Modal visible={imageViewerVisible && Boolean(selectedPhoto)} animationType="fade" onRequestClose={() => setImageViewerVisible(false)}>
+      <View style={styles.imageViewer}>
+        <View style={styles.viewerTopBar}>
+          <View />
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.closeImageViewer")} onPress={() => setImageViewerVisible(false)} style={styles.viewerCloseButton}>
+            <Text style={styles.viewerCloseText}>×</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.viewerStage}>
+          {selectedPhoto ? (
+            <Image
+              key={selectedPhoto.uri}
+              source={{ uri: selectedPhoto.uri, ...(selectedPhoto.headers ? { headers: selectedPhoto.headers } : {}) }}
+              style={styles.viewerImage}
+              resizeMode="contain"
+              onError={() => failPhoto(selectedPhoto.uri)}
+            />
+          ) : <Text style={styles.viewerFallback}>{t("plantDetail.fieldPhotographComingSoon")}</Text>}
+          {displayablePhotos.length > 1 && (
+            <>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.previousPhoto")} onPress={() => changePhoto(-1)} style={[styles.viewerNavButton, styles.viewerNavPrevious]}>
+                <Text style={styles.viewerNavText}>‹</Text>
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.nextPhoto")} onPress={() => changePhoto(1)} style={[styles.viewerNavButton, styles.viewerNavNext]}>
+                <Text style={styles.viewerNavText}>›</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+        {displayablePhotos.length > 1 && <Text style={styles.viewerCounter}>{activePhotoIndex + 1} / {displayablePhotos.length}</Text>}
+      </View>
+    </Modal>
+    </View>
   );
 }
 
@@ -715,8 +839,32 @@ const styles = StyleSheet.create({
 
   container: {
     flex: 1,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
+
+  viewerRoot: { flex: 1 },
+  imageColumn: { width: "100%" },
+  mainImageTap: { width: "100%", height: "100%" },
+  thumbnailList: { gap: 9, paddingTop: 11, paddingHorizontal: 2 },
+  thumbnailButton: { width: 64, height: 64, overflow: "hidden", borderRadius: 10, borderWidth: 2, borderColor: "transparent", backgroundColor: "#DCE8D6" },
+  thumbnailSelected: { borderColor: "#468585" },
+  thumbnailImage: { width: "100%", height: "100%" },
+  photoNavigation: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18, paddingTop: 7 },
+  photoNavButton: { width: 38, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 17, backgroundColor: "#DCE8D6" },
+  photoNavText: { color: "#315B49", fontSize: 24, lineHeight: 28, fontWeight: "700" },
+  photoCounter: { minWidth: 42, color: "#405F56", textAlign: "center", fontSize: 13, fontWeight: "700" },
+  imageViewer: { flex: 1, paddingHorizontal: 12, paddingTop: 30, paddingBottom: 18, backgroundColor: "#101812" },
+  viewerTopBar: { height: 48, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  viewerCloseButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22, backgroundColor: "#FFFFFF20" },
+  viewerCloseText: { color: "#FFFFFF", fontSize: 30, lineHeight: 34 },
+  viewerStage: { flex: 1, alignItems: "center", justifyContent: "center" },
+  viewerImage: { width: "100%", height: "100%" },
+  viewerFallback: { color: "#FFFFFF", fontSize: 14 },
+  viewerNavButton: { position: "absolute", top: "45%", width: 46, height: 54, alignItems: "center", justifyContent: "center", borderRadius: 27, backgroundColor: "#FFFFFF35" },
+  viewerNavPrevious: { left: 4 },
+  viewerNavNext: { right: 4 },
+  viewerNavText: { color: "#FFFFFF", fontSize: 36, lineHeight: 40, fontWeight: "600" },
+  viewerCounter: { paddingVertical: 12, color: "#FFFFFF", textAlign: "center", fontSize: 14, fontWeight: "700" },
 
 
   // ===================================================
@@ -728,7 +876,7 @@ header: {
   paddingHorizontal: 20,
   paddingTop: 50,
   paddingBottom: 30,
-  backgroundColor: "#E8EFE3",
+  backgroundColor: "#E7F2E2",
 },
 
 refreshError: {
@@ -753,7 +901,7 @@ heroBackButton: {
 },
 
 heroBackText: {
-  color: "#315B49",
+  color: "#468585",
   fontSize: 12,
   fontWeight: "700",
 },
@@ -802,14 +950,14 @@ heroCopy: {
 headerLabel: {
   alignSelf: "flex-start",
   marginBottom: 10,
-  color: "#438565",
+  color: "#468585",
   fontSize: 10,
   fontWeight: "700",
   letterSpacing: 1.5,
 },
 
 plantId: {
-  color: "#234A3C",
+  color: "#234B3A",
   fontSize: 30,
   fontWeight: "700",
   letterSpacing: -0.6,
@@ -817,7 +965,7 @@ plantId: {
 
 speciesName: {
   marginTop: 8,
-  color: "#405F56",
+  color: "#6D7F75",
   fontSize: 19,
   fontWeight: "600",
   lineHeight: 26,
@@ -825,7 +973,7 @@ speciesName: {
 
 scientificName: {
   marginTop: 5,
-  color: "#7C6955",
+  color: "#6D7F75",
   fontSize: 14,
   fontStyle: "italic",
   lineHeight: 21,
@@ -844,7 +992,7 @@ heroBadge: {
   paddingVertical: 8,
   borderRadius: 20,
   backgroundColor: "#D2E4D0",
-  color: "#315B49",
+  color: "#468585",
   fontSize: 11,
   fontWeight: "600",
 },
@@ -863,12 +1011,12 @@ heroBadge: {
     paddingTop:30,
     paddingBottom: 50,
     marginBottom:20,
-    backgroundColor: "#E0EBDD",
+    backgroundColor: "#E9F7E4",
   }, 
 
   sectionLabel: {
     marginBottom: 8,
-    color: "#50A078",
+    color: "#468585",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 1.7,
@@ -876,7 +1024,7 @@ heroBadge: {
 
   sectionTitle: {
     marginBottom: 18,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 27,
     fontWeight: "600",
   },
@@ -908,7 +1056,7 @@ heroBadge: {
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 14,
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   addObservationButtonText: {
@@ -931,7 +1079,7 @@ heroBadge: {
   },
 
   infoValue: {
-    color: "#315447",
+    color: "#234B3A",
     fontSize: 13,
     fontWeight: "600",
     lineHeight: 19,
@@ -967,7 +1115,7 @@ heroBadge: {
 
   subSectionTitle: {
     marginBottom: 15,
-    color: "#315F4E",
+    color: "#234B3A",
     fontSize: 16,
     fontWeight: "700",
   },
@@ -1029,7 +1177,7 @@ heroBadge: {
 },
 
 observationArrow: {
-  color: "#315B49",
+  color: "#468585",
   fontSize: 10,
   fontWeight: "700",
 },
@@ -1065,7 +1213,7 @@ observationArrow: {
   },
 
   observationDate: {
-    color: "#315447",
+    color: "#234B3A",
     fontSize: 13,
     fontWeight: "700",
   },
@@ -1111,14 +1259,14 @@ observationArrow: {
   },
 
   observationId: {
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 12,
     fontWeight: "700",
   },
 
   observationSummary: {
     marginTop: 6,
-    color: "#50675D",
+    color: "#6D7F75",
     fontSize: 11,
     fontWeight: "600",
   },
@@ -1134,7 +1282,7 @@ observationArrow: {
   },
 
   historyValue: {
-    color: "#405F56",
+    color: "#6D7F75",
     fontSize: 11,
     lineHeight: 17,
   },
@@ -1151,12 +1299,12 @@ observationArrow: {
     alignItems: "center",
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#BDC8BD",
+    borderColor: "#E2EDE0",
     borderRadius: 15,
   },
 
   emptyText: {
-    color: "#6A7B73",
+    color: "#6D7F75",
     fontSize: 12,
   },
 
@@ -1169,7 +1317,7 @@ observationArrow: {
     alignItems: "center",
     justifyContent: "center",
     padding: 30,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
 
   notFoundIcon: {
@@ -1178,14 +1326,14 @@ observationArrow: {
 
   notFoundTitle: {
     marginTop: 15,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 24,
     fontWeight: "600",
   },
 
   notFoundText: {
     marginTop: 8,
-    color: "#63736A",
+    color: "#6D7F75",
     fontSize: 12,
     textAlign: "center",
   },
@@ -1195,7 +1343,7 @@ observationArrow: {
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   backButtonText: {

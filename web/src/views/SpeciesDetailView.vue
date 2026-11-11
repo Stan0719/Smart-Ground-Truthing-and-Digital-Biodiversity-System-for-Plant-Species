@@ -1,395 +1,308 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import PlantRecordCard from '../components/PlantRecordCard.vue'
-import {refreshKnowledge} from '../services/knowledge'
-import { plants as prototypeSpecies, type Plant } from '../data/plants'
-import { plantRecords } from '../data/plantRecords'
-import { usePrototypeSession } from '../composables/usePrototypeSession'
+import type { PlantRecord } from '../data/plantRecords'
+import { assetUrlFromId, plantThumbnailImages, webAssetUrl } from '../services/assetImages'
+import { mapPlantCardMetadata } from '../services/plantCardMapping'
+import { requestPlantApi } from '../services/plantIntegration'
+import { formatPlantId } from '../utils/plantId'
+import { currentUser, sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
 
+interface SpeciesProfile {
+  id: string; commonName: string; scientificName: string; genus: string; family: string
+  description: string; habitat: string; conservationStatus: string; image: string
+}
 const route = useRoute()
-const { t, te } = useI18n()
-const { isLoggedIn, userRole } = usePrototypeSession()
-const selectedSpecies = ref<Plant | null>(null)
+const { t } = useI18n()
+const selectedSpecies = ref<SpeciesProfile | null>(null)
+const linkedPlants = ref<Array<PlantRecord & { genus: string }>>([])
+const images = ref<string[]>([])
+const failedImages = ref<string[]>([])
 const isLoading = ref(true)
 const loadError = ref('')
-
-interface ApiSpecies {
-  species_id: string | number
-  scientific_name: string
-  common_name: string
-  genus_name?: string
-  family_name?: string
-  conservation_status?: string
-  description?: string
+const plantsError = ref('')
+const plantsLoading = ref(false)
+const imagesError = ref('')
+const user = ref<AuthUser | null>(null)
+const scientific = computed(() => Boolean(user.value && user.value.status === 'Active' && !user.value.mustChangePassword &&
+  ['Botanist', 'Conservation Officer'].includes(user.value.role)))
+const text = (v: unknown) => typeof v === 'string' ? v.trim() : ''
+const object = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
+const validId = (v: unknown) => /^(?:[1-9][0-9]*)$/.test(String(v ?? '')) && BigInt(String(v)) <= 2147483647n
+const generatedSlug = (v: Record<string, unknown>) => `${text(v.common_name) || text(v.scientific_name)}-${v.species_id}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+const displayName = computed(() => selectedSpecies.value?.commonName || selectedSpecies.value?.scientificName || t('species.notFound'))
+const selectedImage = ref('')
+// The portrait is first; direct references retain API order. This is not saved gallery order.
+const imageCandidates = computed(() => [...new Set([selectedSpecies.value?.image || '', ...images.value].filter(Boolean))])
+const galleryImages = computed(() => imageCandidates.value.filter(path => !failedImages.value.includes(path)))
+const primaryImage = computed(() => galleryImages.value.includes(selectedImage.value) ? selectedImage.value : galleryImages.value[0] || '')
+const canNavigate = computed(() => galleryImages.value.length > 1)
+const imagePosition = computed(() => ({ current: galleryImages.value.indexOf(primaryImage.value) + 1, total: galleryImages.value.length }))
+const previewPlants = computed(() => linkedPlants.value.slice(0, 3))
+let generation = 0, verification = 0, disposed = false
+const portraitTrigger = ref<HTMLButtonElement | null>(null)
+const dialog = ref<HTMLDialogElement | null>(null)
+const closeButton = ref<HTMLButtonElement | null>(null)
+const zoomImage = ref('')
+let previousOverflow: string | null = null
+function closeZoom() {
+  const wasOpen = Boolean(zoomImage.value)
+  zoomImage.value = ''
+  if (dialog.value?.open) dialog.value.close()
+  if (previousOverflow !== null) { document.body.style.overflow = previousOverflow; previousOverflow = null }
+  if (wasOpen && portraitTrigger.value?.isConnected) portraitTrigger.value.focus()
 }
-
-interface SpeciesListResponse {
-  species: ApiSpecies[]
+async function openZoom() {
+  if (!primaryImage.value) return
+  zoomImage.value = primaryImage.value
+  await nextTick()
+  if (!zoomImage.value || disposed || !dialog.value) return
+  if (!dialog.value.open) dialog.value.showModal()
+  if (previousOverflow === null) { previousOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden' }
+  closeButton.value?.focus()
 }
-
-interface SpeciesDetailResponse {
-  species: ApiSpecies
+function selectImage(path: string) {
+  if (!galleryImages.value.includes(path)) return
+  selectedImage.value = path
 }
-
-const generatedSlug = (item: ApiSpecies) => {
-  const name = item.common_name || item.scientific_name
-
-  return `${name}-${item.species_id}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
+function navigateImage(direction: -1 | 1) {
+  if (!canNavigate.value) return
+  const index = galleryImages.value.indexOf(primaryImage.value)
+  selectImage(galleryImages.value[(index + direction + galleryImages.value.length) % galleryImages.value.length]!)
 }
-
-const loadSpecies = async () => {
-  isLoading.value = true
-  loadError.value = ''
-  selectedSpecies.value = null
-
-  try {
-    await refreshKnowledge()
-    const slug = String(route.params.slug || '')
-    const prototypeForSlug = prototypeSpecies.find((item) => item.slug === slug)
-    const listResponse = await fetch('/api/species')
-
-    if (!listResponse.ok) throw new Error('Unable to load this species.')
-
-    const listResult: SpeciesListResponse = await listResponse.json()
-    const listSpecies = prototypeForSlug
-      ? listResult.species.find(
-          (item) =>
-            item.scientific_name.toLowerCase() === prototypeForSlug.scientificName.toLowerCase(),
-        )
-      : listResult.species.find((item) => String(item.species_id)===slug || generatedSlug(item) === slug)
-
-    if (!listSpecies) return
-
-    const detailResponse = await fetch(
-      `/api/species/${encodeURIComponent(String(listSpecies.species_id))}`,
-    )
-
-    if (!detailResponse.ok) {
-      if (detailResponse.status === 404) return
-      throw new Error('Unable to load this species.')
-    }
-
-    const detailResult: SpeciesDetailResponse = await detailResponse.json()
-    const item = detailResult.species
-    const prototype = prototypeSpecies.find(
-      (candidate) => candidate.scientificName.toLowerCase() === item.scientific_name.toLowerCase(),
-    )
-
-    selectedSpecies.value = {
-      ...(prototype || {}),
-      speciesId: String(item.species_id),
-      slug,
-      name: item.common_name || item.scientific_name,
-      scientificName: item.scientific_name || 'Unknown species',
-      genus: item.genus_name || '',
-      family: item.family_name || '',
-      conservationStatus: item.conservation_status || '',
-      description: item.description || 'No description available yet.',
-      category: prototype?.category || ('' as Plant['category']),
-      overview: prototype?.overview || '',
-      habitat: prototype?.habitat || '',
-      characteristics: prototype?.characteristics || [],
-      significance: prototype?.significance || '',
-    }
-  } catch (error) {
-    loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
-  } finally {
-    isLoading.value = false
+function zoomKeydown(event: KeyboardEvent) {
+  if (!zoomImage.value || event.altKey || event.ctrlKey || event.metaKey) return
+  if (event.key === 'Escape') { event.preventDefault(); closeZoom() }
+  else if (canNavigate.value && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    event.preventDefault(); event.stopPropagation()
+    navigateImage(event.key === 'ArrowLeft' ? -1 : 1)
   }
 }
-
-watch(() => route.params.slug, loadSpecies, { immediate: true })
-
-const canViewSensitiveFacts = computed(
-  () =>
-    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer'),
-)
-const primaryImage = computed(
-  () =>
-    selectedSpecies.value?.image ||
-    selectedSpecies.value?.images?.find((image) => image.path)?.path,
-)
-const speciesPlants = computed(() =>
-  plantRecords.filter((plant) => plant.speciesSlug === selectedSpecies.value?.slug),
-)
-const previewPlants = computed(() => speciesPlants.value.slice(0, 3))
-
-const speciesText = (field: string, fallback = '') => {
-  const key = `speciesContent.${selectedSpecies.value?.slug}.${field}`
-  return te(key) ? t(key) : fallback
+watch(primaryImage, path => {
+  if (!zoomImage.value) return
+  if (path) zoomImage.value = path
+  else closeZoom()
+}, { flush: 'sync' })
+watch(canNavigate, async available => {
+  if (available) return
+  const restoreFocus = Boolean(zoomImage.value) || document.activeElement?.classList?.contains('image-nav')
+  if (!restoreFocus) return
+  await nextTick()
+  if (zoomImage.value) closeButton.value?.focus({ preventScroll: true })
+  else if (primaryImage.value) portraitTrigger.value?.focus({ preventScroll: true })
+})
+function mainImageFailed(event: Event) {
+  const path = webAssetUrl((event.currentTarget as HTMLImageElement | null)?.getAttribute('src'))
+  if (path && imageCandidates.value.includes(path)) imageFailed(path)
 }
-
-const characteristicText = (index: number, fallback: string) =>
-  speciesText(`characteristics.${index}`, fallback)
-
-const galleryCaption = (index: number, fallback = '') => speciesText(`gallery.${index}`, fallback)
-const translatedOr = (key: string, fallback: string) => (te(key) ? t(key) : fallback)
-const displayName = computed(() =>
-  selectedSpecies.value
-    ? translatedOr(`plantNames.${selectedSpecies.value.slug}`, selectedSpecies.value.name)
-    : '',
-)
-const displayScientificName = computed(() =>
-  selectedSpecies.value
-    ? translatedOr(
-        `scientificNames.${selectedSpecies.value.slug}`,
-        selectedSpecies.value.scientificName,
-      )
-    : '',
-)
-const displayFamily = computed(() =>
-  selectedSpecies.value
-    ? translatedOr(`familyNames.${selectedSpecies.value.slug}`, selectedSpecies.value.family || '')
-    : '',
-)
-const displayDescription = computed(() =>
-  selectedSpecies.value
-    ? translatedOr(
-        `plantDescriptions.${selectedSpecies.value.slug}`,
-        selectedSpecies.value.description,
-      )
-    : '',
-)
+function imageFailed(path: string) {
+  if (failedImages.value.includes(path)) return
+  const available = galleryImages.value, index = available.indexOf(path)
+  if (path === primaryImage.value) selectedImage.value = available.length > 1 ? available[(index + 1) % available.length]! : ''
+  failedImages.value.push(path)
+}
+function clearPage() {
+  generation++
+  closeZoom()
+  selectedImage.value = ''; selectedSpecies.value = null; linkedPlants.value = []; images.value = []; failedImages.value = []
+  loadError.value = ''; plantsError.value = ''; imagesError.value = ''; plantsLoading.value = false
+}
+async function loadSpecies() {
+  clearPage()
+  const attempt = generation
+  const current = () => !disposed && generation === attempt
+  isLoading.value = true
+  if (sessionSnapshot().pending) { isLoading.value = false; loadError.value = t('species.detail.verifySession'); return }
+  try {
+    const slug = typeof route.params.slug === 'string' ? route.params.slug : ''
+    let id = validId(slug) ? slug : ''
+    // Generated legacy URLs carry an ID, but their full slug must match the returned record.
+    const suffix = /-([1-9][0-9]*)$/.exec(slug)?.[1]
+    if (!id && suffix && validId(suffix)) id = suffix
+    if (!id) {
+      const catalog = await requestPlantApi('/api/data/species')
+      if (!current()) return
+      if (!Array.isArray(catalog.species)) throw Error(t('species.detail.loadFailed'))
+      const matches = catalog.species.map(object).filter((row): row is Record<string, unknown> => Boolean(row && validId(row.species_id) && generatedSlug(row) === slug))
+      if (matches.length !== 1) throw Error(t('species.detail.unresolvedSlug'))
+      id = String(matches[0]!.species_id)
+    }
+    const result = await requestPlantApi(`/api/data/species/${encodeURIComponent(id)}`)
+    if (!current()) return
+    const item = object(result.species)
+    if (!item || String(item.species_id) !== id || !text(item.scientific_name) || (!validId(slug) && generatedSlug(item) !== slug))
+      throw Error(t('species.detail.unresolvedSlug'))
+    selectedSpecies.value = {
+      id, commonName: text(item.common_name), scientificName: text(item.scientific_name), genus: text(item.genus_name), family: text(item.family_name),
+      description: text(item.description), habitat: scientific.value ? text(item.habitat) : '',
+      conservationStatus: scientific.value ? text(item.conservation_status) : '',
+      image: webAssetUrl(item.image_url) || assetUrlFromId(item.image_asset_id),
+    }
+    isLoading.value = false
+    const profile = selectedSpecies.value
+    plantsLoading.value = true
+    // Independent failures must not hide an otherwise valid species profile.
+    await Promise.all([
+      (async () => {
+        try {
+          const result = await requestPlantApi('/api/data/plants')
+          if (!current()) return
+          if (!Array.isArray(result.plants)) throw Error()
+          linkedPlants.value = result.plants.flatMap(value => {
+            const row = object(value)
+            if (!row || String(row.species_id) !== id || (row.rbac_status !== undefined && row.rbac_status !== 'Approved')) return []
+            const plantId = validId(row.plant_id) ? formatPlantId(String(row.plant_id)) : null
+            if (!plantId) return []
+            return [{ plantId, speciesId: id, speciesSlug: id, speciesName: profile.scientificName,
+              commonName: profile.commonName || profile.scientificName, genus: profile.genus || '—', ...mapPlantCardMetadata(row),
+              qr: { code: '', status: '' }, registeredBy: '', registeredAt: '',
+              images: plantThumbnailImages(row), observations: [] }]
+          })
+        } catch { if (current()) plantsError.value = t('species.detail.plantsFailed') }
+        finally { if (current()) plantsLoading.value = false }
+      })(),
+      (async () => {
+        try {
+          const result = await requestPlantApi(`/api/data/assets?species_id=${id}`)
+          if (!current()) return
+          if (!Array.isArray(result.assets)) throw Error()
+          images.value = [...new Set(result.assets.flatMap(value => {
+            const a = object(value), path = a && assetUrlFromId(a.id)
+            return a && path && ['image/jpeg', 'image/png'].includes(String(a.content_type)) ? [path] : []
+          }))]
+        } catch { if (current()) imagesError.value = t('species.detail.imagesFailed') }
+      })(),
+    ])
+  } catch (error) { if (current()) loadError.value = error instanceof Error ? error.message : t('species.detail.loadFailed') }
+  finally { if (current()) isLoading.value = false }
+}
+const unsubscribe = subscribeSession((verifiedUser, pending) => {
+  verification++; user.value = pending ? null : verifiedUser
+  void loadSpecies()
+})
+async function verifySession() {
+  const attempt = ++verification
+  clearPage(); user.value = null; isLoading.value = true
+  await currentUser()
+  if (disposed || verification !== attempt) return
+  user.value = sessionSnapshot().user
+  await loadSpecies()
+}
+watch(() => route.params.slug, verifySession, { immediate: true, flush: 'sync' })
+const onVisible = () => { if (document.visibilityState === 'visible') void verifySession() }
+let timer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  window.addEventListener('focus', verifySession); document.addEventListener('visibilitychange', onVisible)
+  timer = setInterval(verifySession, 60000)
+})
+onBeforeUnmount(() => {
+  disposed = true; verification++; clearPage(); unsubscribe()
+  window.removeEventListener('focus', verifySession); document.removeEventListener('visibilitychange', onVisible)
+  if (timer) clearInterval(timer)
+})
 </script>
 
 <template>
   <NavigationBar />
-
-  <main v-if="isLoading" class="not-found">
-    <p>Loading species...</p>
-  </main>
-
+  <main v-if="isLoading" class="not-found" role="status"><p>{{ t('species.detail.loading') }}</p></main>
   <main v-else-if="selectedSpecies" class="detail-page">
     <section class="detail-hero">
       <div class="detail-container">
-        <RouterLink to="/species" class="back-link">
-          <span class="back-arrow" aria-hidden="true">←</span>
-          <span>{{ t('common.backToSpecies') }}</span>
-        </RouterLink>
-
+        <RouterLink to="/species" class="back-link"><svg class="back-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14" /></svg><span>{{ t('conservationText.back') }}</span></RouterLink>
         <div class="hero-grid">
-          <div v-if="primaryImage" class="species-image-card">
-            <img class="plant-image" :src="primaryImage" :alt="displayName" />
+          <div class="profile-images">
+            <div class="main-image-frame">
+              <button v-if="primaryImage" ref="portraitTrigger" type="button" class="species-image-card portrait-trigger" :aria-label="t('species.detail.enlargeImage')" @click="openZoom">
+                <img :key="primaryImage" class="plant-image" :src="primaryImage" :alt="t('species.detail.speciesPhoto', { number: galleryImages.indexOf(primaryImage) + 1, name: displayName })" @error="mainImageFailed" />
+              </button>
+              <div v-else class="plant-placeholder" role="img" :aria-label="t('species.detail.imageUnavailable')">
+                <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" /><path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" /></svg>
+                <span>{{ t('species.detail.imageUnavailable') }}</span>
+              </div>
+              <template v-if="canNavigate">
+                <button type="button" class="image-nav previous-photo" :aria-label="t('species.detail.previousPhoto')" @click.stop="navigateImage(-1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6" /></svg></button>
+                <button type="button" class="image-nav next-photo" :aria-label="t('species.detail.nextPhoto')" @click.stop="navigateImage(1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6" /></svg></button>
+                <span class="gallery-counter" role="status" :aria-live="zoomImage ? 'off' : 'polite'" aria-atomic="true"><span aria-hidden="true">{{ t('species.detail.photoPosition', imagePosition) }}</span><span class="visually-hidden">{{ t('species.detail.photoCounter', imagePosition) }}</span></span>
+              </template>
+            </div>
+            <div v-if="galleryImages.length > 1" class="species-thumbnails" role="group" :aria-label="t('species.detail.galleryEyebrow')">
+              <button v-for="(path, index) in galleryImages" :key="path" type="button" class="photo-thumbnail" :class="{ 'is-selected': primaryImage === path }" :aria-pressed="primaryImage === path" :aria-label="t('species.detail.viewPhoto', { number: index + 1 })" @click="selectImage(path)">
+                <img :src="path" alt="" @error="imageFailed(path)" />
+                <span v-if="primaryImage === path" class="visually-hidden">{{ t('species.detail.selectedPhoto') }}</span>
+              </button>
+            </div>
+            <p v-if="imagesError" class="profile-image-error" role="alert">{{ imagesError }}</p>
           </div>
-          <div
-            v-else
-            class="plant-placeholder"
-            role="img"
-            :aria-label="displayName + ' image placeholder'"
-          >
-            <svg viewBox="0 0 64 64" aria-hidden="true">
-              <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
-              <path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" />
-            </svg>
-            <span>{{ t('speciesLabels.plantImageSoon') }}</span>
-          </div>
-
           <div class="hero-copy">
-            <div class="hero-badges">
-              <span v-if="selectedSpecies.category" class="category">{{
-                t(`categories.${selectedSpecies.category.toLowerCase()}`)
-              }}</span>
-              <span
-                v-if="canViewSensitiveFacts && selectedSpecies.conservationStatus"
-                class="conservation-status"
-                >{{
-                  speciesText('conservationStatus', selectedSpecies.conservationStatus || '')
-                }}</span
-              >
+            <div class="profile-heading-line">
+              <p class="section-label">{{ t('species.detail.profileEyebrow') }}</p>
+              <span v-if="scientific && selectedSpecies.conservationStatus" class="conservation-status">{{ selectedSpecies.conservationStatus }}</span>
             </div>
             <h1>{{ displayName }}</h1>
-            <p class="scientific-name">{{ displayScientificName }}</p>
-            <p class="summary">{{ displayDescription }}</p>
+            <p v-if="selectedSpecies.commonName && selectedSpecies.commonName !== selectedSpecies.scientificName" class="scientific-name">{{ selectedSpecies.scientificName }}</p>
+            <dl v-if="selectedSpecies.family || selectedSpecies.genus" class="profile-taxonomy" :class="{ 'single-field': !selectedSpecies.family || !selectedSpecies.genus }">
+              <div v-if="selectedSpecies.family">
+                <dt><svg class="taxonomy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 4c-8-1-15 2-15 9a6 6 0 0 0 6 6c7 0 10-7 9-15Z" /><path d="M4 21 15 10" /></svg><span>{{ t('speciesLabels.family') }}</span></dt>
+                <dd>{{ selectedSpecies.family }}</dd>
+              </div>
+              <div v-if="selectedSpecies.genus">
+                <dt><svg class="taxonomy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 21v-9M12 15C5 15 3 11 3 6c6 0 9 3 9 9ZM12 11c0-6 3-9 9-9 0 6-3 9-9 9Z" /></svg><span>{{ t('speciesLabels.genus') }}</span></dt>
+                <dd>{{ selectedSpecies.genus }}</dd>
+              </div>
+            </dl>
+            <section v-if="scientific && selectedSpecies.habitat" class="profile-habitat" aria-labelledby="species-habitat-title">
+              <h2 id="species-habitat-title"><svg class="taxonomy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 22v-7M12 2l7 9h-4l6 6H3l6-6H5Z" /></svg><span>{{ t('speciesLabels.habitat') }}</span></h2>
+              <p>{{ selectedSpecies.habitat }}</p>
+            </section>
+            <hr v-if="scientific && selectedSpecies.habitat && selectedSpecies.description" class="profile-divider" />
+            <section v-if="selectedSpecies.description" class="profile-description" aria-labelledby="species-description-title">
+              <h2 id="species-description-title">{{ t('conservationText.description') }}</h2>
+              <p class="summary">{{ selectedSpecies.description }}</p>
+            </section>
           </div>
         </div>
       </div>
     </section>
-
-    <section class="plant-information">
-      <div class="detail-container information-grid">
-        <article class="main-description">
-          <p class="section-label">{{ t('species.detail.aboutEyebrow') }}</p>
-          <h2>
-            {{ t('species.detail.about', { name: displayName }) }}
-          </h2>
-          <p v-if="selectedSpecies.overview">
-            {{ speciesText('overview', selectedSpecies.overview) }}
-          </p>
-
-          <template v-if="selectedSpecies.habitat">
-            <h3>{{ t('speciesLabels.habitat') }}</h3>
-            <p>{{ speciesText('habitat', selectedSpecies.habitat) }}</p>
-          </template>
-
-          <template v-if="selectedSpecies.distribution">
-            <h3>{{ t('speciesLabels.distribution') }}</h3>
-            <p>{{ speciesText('distribution', selectedSpecies.distribution || '') }}</p>
-          </template>
-
-          <template v-if="selectedSpecies.ecologicalRole || selectedSpecies.significance">
-            <h3>{{ t('speciesLabels.ecology') }}</h3>
-            <p>
-              {{
-                speciesText(
-                  'ecology',
-                  selectedSpecies.ecologicalRole || selectedSpecies.significance,
-                )
-              }}
-            </p>
-          </template>
-
-          <template v-if="selectedSpecies.culturalSignificance">
-            <h3>{{ t('speciesLabels.culture') }}</h3>
-            <p>{{ speciesText('culture', selectedSpecies.culturalSignificance || '') }}</p>
-          </template>
-        </article>
-
-        <aside class="quick-facts">
-          <p class="section-label">{{ t('species.detail.referenceEyebrow') }}</p>
-          <h2>{{ t('species.detail.referenceTitle') }}</h2>
-          <h3 v-if="selectedSpecies.characteristics.length" class="characteristics-title">
-            {{ t('speciesLabels.characteristics') }}
-          </h3>
-          <ul v-if="selectedSpecies.characteristics.length">
-            <li
-              v-for="(characteristic, index) in selectedSpecies.characteristics"
-              :key="characteristic"
-            >
-              <span aria-hidden="true">✓</span>
-              {{ characteristicText(index, characteristic) }}
-            </li>
-          </ul>
-
-          <dl>
-            <div>
-              <dt>{{ t('speciesLabels.commonName') }}</dt>
-              <dd>{{ displayName }}</dd>
-            </div>
-            <div>
-              <dt>{{ t('speciesLabels.scientificName') }}</dt>
-              <dd>{{ displayScientificName }}</dd>
-            </div>
-            <div v-if="selectedSpecies.family">
-              <dt>{{ t('speciesLabels.family') }}</dt>
-              <dd>{{ displayFamily }}</dd>
-            </div>
-            <div v-if="selectedSpecies.genus">
-              <dt>{{ t('speciesLabels.genus') }}</dt>
-              <dd>{{ speciesText('genus', selectedSpecies.genus || '') }}</dd>
-            </div>
-            <div v-if="selectedSpecies.category">
-              <dt>{{ t('speciesLabels.plantGroup') }}</dt>
-              <dd>{{ t(`categories.${selectedSpecies.category.toLowerCase()}`) }}</dd>
-            </div>
-            <div v-if="selectedSpecies.localName">
-              <dt>{{ t('speciesLabels.localName') }}</dt>
-              <dd>{{ speciesText('localName', selectedSpecies.localName || '') }}</dd>
-            </div>
-            <template v-if="canViewSensitiveFacts">
-              <div v-if="selectedSpecies.conservationStatus">
-                <dt>{{ t('speciesLabels.conservation') }}</dt>
-                <dd>
-                  {{ speciesText('conservationStatus', selectedSpecies.conservationStatus || '') }}
-                </dd>
-              </div>
-              <div v-if="selectedSpecies.sensitivityLevel">
-                <dt>{{ t('speciesLabels.sensitivity') }}</dt>
-                <dd>
-                  {{ speciesText('sensitivityLevel', selectedSpecies.sensitivityLevel || '') }}
-                </dd>
-              </div>
-            </template>
-          </dl>
-        </aside>
-      </div>
-    </section>
-
     <section class="individual-plants" aria-labelledby="individual-plants-title">
       <div class="detail-container">
         <div class="section-heading">
           <p class="section-label">{{ t('species.detail.individualEyebrow') }}</p>
-          <h2 id="individual-plants-title">{{ t('species.detail.verifiedTitle') }}</h2>
-          <p>{{ t('species.detail.recordCount', { count: speciesPlants.length }) }}</p>
+          <div class="plants-heading-row">
+            <h2 id="individual-plants-title">{{ t('species.detail.linkedTitle') }}</h2>
+            <RouterLink v-if="linkedPlants.length" class="view-all-plants" :to="`/species/${selectedSpecies.id}/plants`"><span>{{ t('species.detail.viewAll') }}</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></RouterLink>
+          </div>
+          <p>{{ t('species.detail.linkedDescription') }}</p>
+          <p v-if="!plantsError && !plantsLoading && linkedPlants.length">{{ t('species.detail.loadedRecords', { count: linkedPlants.length }, linkedPlants.length) }}</p>
+          <p v-if="!plantsError && !plantsLoading && previewPlants.length < linkedPlants.length">{{ t('species.detail.previewRecords', { count: previewPlants.length, loaded: linkedPlants.length }) }}</p>
         </div>
-
-        <div v-if="speciesPlants.length" class="individual-plant-grid">
-          <PlantRecordCard
-            v-for="plant in previewPlants"
-            :key="plant.plantId"
-            :plant="plant"
-            compact
-          />
-        </div>
-        <p v-else class="no-records">{{ t('speciesLabels.noRecords') }}</p>
-        <div v-if="speciesPlants.length" class="view-all-row">
-          <RouterLink :to="`/species/${selectedSpecies.slug}/plants`"
-            >{{ t('species.detail.viewAll') }} →</RouterLink
-          >
-        </div>
+        <p v-if="plantsLoading" role="status">{{ t('species.detail.loadingRecords') }}</p>
+        <p v-else-if="plantsError" role="alert">{{ plantsError }}</p>
+        <div v-else-if="linkedPlants.length" class="individual-plant-grid"><PlantRecordCard v-for="plant in previewPlants" :key="plant.plantId" :plant="plant" compact /></div>
+        <p v-else class="no-records">{{ t('species.detail.noLoadedRecords') }}</p>
       </div>
     </section>
 
-    <section v-if="selectedSpecies.images?.length" class="botanical-gallery">
-      <div class="detail-container">
-        <div class="section-heading">
-          <p class="section-label">{{ t('species.detail.galleryEyebrow') }}</p>
-          <h2>{{ t('species.detail.galleryTitle') }}</h2>
-          <p>{{ t('species.detail.galleryDescription') }}</p>
-        </div>
-
-        <div class="gallery-grid">
-          <figure
-            v-for="(image, index) in selectedSpecies.images || []"
-            :key="`${image.caption}-${index}`"
-          >
-            <img
-              v-if="image.path"
-              :src="image.path"
-              :alt="galleryCaption(index, image.caption || '') || t('speciesLabels.botanicalPhoto')"
-            />
-            <div
-              v-else
-              class="gallery-placeholder"
-              role="img"
-              :aria-label="
-                t('speciesLabels.photoPlaceholder', {
-                  caption:
-                    galleryCaption(index, image.caption || '') || t('speciesLabels.botanicalPhoto'),
-                })
-              "
-            >
-              <svg viewBox="0 0 64 64" aria-hidden="true">
-                <path d="M51 9C32 10 18 19 15 36c10-8 20-12 30-15-12 6-21 14-27 25" />
-                <path d="M16 37C7 29 7 19 8 12c9 3 16 9 18 17" />
-              </svg>
-              <span>{{ t('speciesLabels.photoSoon') }}</span>
-            </div>
-            <figcaption v-if="image.caption">
-              {{ galleryCaption(index, image.caption || '') }}
-            </figcaption>
-          </figure>
-        </div>
-      </div>
-    </section>
-
-    <section class="explore-more">
-      <p>{{ t('species.detail.continue') }}</p>
-      <RouterLink to="/species">{{ t('common.exploreMoreSpecies') }} →</RouterLink>
-    </section>
   </main>
-
   <main v-else class="not-found">
-    <span aria-hidden="true">🌿</span>
-    <h1>{{ t('species.notFound') }}</h1>
-    <p>{{ loadError || t('species.notFoundDescription') }}</p>
+    <h1>{{ t('species.notFound') }}</h1><p>{{ loadError || t('species.notFoundDescription') }}</p>
     <RouterLink to="/species">{{ t('common.returnToSpecies') }}</RouterLink>
   </main>
+  <dialog ref="dialog" class="portrait-dialog" :aria-label="t('species.detail.enlargeImage')" @cancel.prevent="closeZoom" @close="closeZoom" @keydown="zoomKeydown" @click="($event.target === $event.currentTarget) && closeZoom()">
+    <div v-if="zoomImage" class="zoom-content" @click.self="closeZoom">
+      <div class="zoom-photo-frame" @click.stop>
+        <button ref="closeButton" type="button" class="zoom-close" :aria-label="t('common.close')" @click.stop="closeZoom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+        <img :key="zoomImage" :src="zoomImage" :alt="t('species.detail.speciesPhoto', { number: imagePosition.current, name: displayName })" @error="mainImageFailed" />
+        <template v-if="canNavigate">
+                <button type="button" class="image-nav previous-photo" :aria-label="t('species.detail.previousPhoto')" @click.stop="navigateImage(-1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m14 6-6 6 6 6" /></svg></button>
+                <button type="button" class="image-nav next-photo" :aria-label="t('species.detail.nextPhoto')" @click.stop="navigateImage(1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m10 6 6 6-6 6" /></svg></button>
+                <span class="gallery-counter" role="status" aria-live="polite" aria-atomic="true"><span aria-hidden="true">{{ t('species.detail.photoPosition', imagePosition) }}</span><span class="visually-hidden">{{ t('species.detail.photoCounter', imagePosition) }}</span></span>
+              </template>
+      </div>
+    </div>
+  </dialog>
 </template>
 
 <style scoped>
@@ -404,30 +317,31 @@ const displayDescription = computed(() =>
 }
 
 .detail-hero {
-  padding: 70px 0;
+  padding: 48px 0;
   background: linear-gradient(135deg, #e1eadb, #f7f3e8);
+}
+
+.detail-hero > .detail-container {
+  max-width: 1080px;
 }
 
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  align-items: center;
-  gap: 72px;
+  grid-template-columns: minmax(0, 0.44fr) minmax(0, 0.56fr);
+  align-items: start;
+  gap: 24px;
 }
 
 .plant-placeholder {
-  min-height: 500px;
+  width: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 16px;
-  border: 1px solid rgba(63, 104, 77, 0.15);
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 70% 28%, rgba(157, 217, 166, 0.48), transparent 35%),
-    linear-gradient(145deg, #dce8d6, #c8d8c2);
-  box-shadow: 0 22px 50px rgba(37, 75, 58, 0.12);
+  min-width: 0;
+  background: transparent;
   color: #4e7060;
 }
 
@@ -435,18 +349,38 @@ const displayDescription = computed(() =>
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  border-radius: 30px;
-  background: #e7eadf;
-  box-shadow:
-    20px 20px 38px rgba(88, 104, 92, 0.38),
-    -16px -16px 32px rgba(255, 255, 255, 0.95);
+  border-radius: 22px;
+  background: transparent;
 }
 
+.profile-images { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; align-self: start; }
+.main-image-frame { position: relative; min-width: 0; width: 100%; aspect-ratio: 4 / 3; flex: none; border-radius: 22px; overflow: hidden; }
+.main-image-frame > .species-image-card,
+.main-image-frame > .plant-placeholder { position: absolute; inset: 0; width: 100%; height: 100%; }
+.species-thumbnails { display: flex; flex: 0 0 auto; gap: 8px; padding: 4px; max-width: 100%; box-sizing: border-box; overflow-x: auto; overscroll-behavior-x: contain; background: transparent; }
+.photo-thumbnail { flex: 0 0 64px; width: 64px; height: 52px; padding: 3px; border: 2px solid transparent; border-radius: 8px; background: transparent; cursor: pointer; }
+.photo-thumbnail img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: 4px; }
+.photo-thumbnail.is-selected { border-color: #234a3c; }
+.image-nav { position: absolute; top: 50%; z-index: 1; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; transform: translateY(-50%); border: 1px solid rgb(255 255 255 / 45%); border-radius: 50%; background: rgb(23 63 52 / 84%); color: #fff; cursor: pointer; box-shadow: 0 2px 8px rgb(0 0 0 / 16%); transition: background-color 120ms ease; }
+.image-nav svg { display: block; width: 20px; height: 20px; pointer-events: none; }
+.previous-photo { left: 10px; }
+.next-photo { right: 10px; }
+.image-nav:hover { background: #173f34; }
+.image-nav:focus-visible { outline: 3px solid #fff; outline-offset: 2px; box-shadow: 0 0 0 5px #173f34; }
+.gallery-counter { position: absolute; right: 12px; bottom: 12px; z-index: 1; padding: 5px 9px; border-radius: 999px; background: rgb(23 63 52 / 84%); color: #fff; font-size: 12px; line-height: 1.4; pointer-events: none; }
+.plant-image, .zoom-photo-frame img { animation: photo-reveal 120ms ease-out; }
+@keyframes photo-reveal { from { opacity: .75; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .plant-image, .zoom-photo-frame img { animation: none; } .image-nav { transition: none; } }
+.photo-thumbnail:focus-visible { outline: 2px solid #234a3c; outline-offset: 2px; }
+.profile-image-error { margin: 0; padding: 12px; color: #735123; font-size: 13px; line-height: 1.5; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
 .plant-image {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 470px;
+  height: 100%;
   display: block;
-  border-radius: inherit;
   object-fit: cover;
 }
 
@@ -466,71 +400,6 @@ const displayDescription = computed(() =>
   text-transform: uppercase;
 }
 
-.back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-
-  margin-bottom: 36px;
-  padding: 10px 16px;
-
-  border: 1px solid rgba(71, 116, 98, 0.22);
-  border-radius: 999px;
-
-  background: rgba(255, 255, 255, 0.58);
-  color: #315b49;
-
-  box-shadow: 0 5px 14px rgba(37, 75, 58, 0.08);
-
-  font-size: 13px;
-  font-weight: 700;
-  text-decoration: none;
-
-  transition:
-    transform 0.2s ease,
-    background 0.2s ease,
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.back-arrow {
-  display: inline-block;
-  font-size: 16px;
-  line-height: 1;
-  transition: transform 0.2s ease;
-}
-
-.back-link:hover {
-  background: #ffffff;
-  border-color: rgba(71, 116, 98, 0.38);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 18px rgba(37, 75, 58, 0.12);
-}
-
-.back-link:hover .back-arrow {
-  transform: translateX(-3px);
-}
-
-.back-link:focus-visible {
-  outline: 3px solid rgba(80, 160, 120, 0.22);
-  outline-offset: 3px;
-}
-
-.back-link:focus-visible {
-  outline: 3px solid rgba(80, 160, 120, 0.25);
-  outline-offset: 4px;
-  border-radius: 4px;
-}
-
-.hero-badges {
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.category,
 .conservation-status {
   display: inline-flex;
   padding: 7px 13px;
@@ -551,15 +420,15 @@ const displayDescription = computed(() =>
 .hero-copy h1 {
   margin: 0;
   color: #234a3c;
-  font-size: clamp(46px, 5vw, 68px);
+  font-size: clamp(30px, 3.2vw, 48px);
   font-weight: 600;
-  line-height: 1.04;
+  line-height: 1.12;
 }
 
 .scientific-name {
-  margin: 14px 0 26px;
+  margin: 8px 0 18px;
   color: #7c6955;
-  font-size: 23px;
+  font-size: 18px;
   font-style: italic;
 }
 
@@ -570,17 +439,6 @@ const displayDescription = computed(() =>
   line-height: 1.8;
 }
 
-.plant-information {
-  padding: 90px 0;
-}
-
-.information-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(290px, 0.75fr);
-  align-items: start;
-  gap: 80px;
-}
-
 .section-label {
   margin: 0 0 12px;
   color: #50a078;
@@ -589,98 +447,8 @@ const displayDescription = computed(() =>
   letter-spacing: 2.5px;
 }
 
-.main-description h2,
-.quick-facts h2 {
-  margin: 0 0 24px;
-  color: #234a3c;
-  font-size: 36px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.main-description h3 {
-  margin: 38px 0 10px;
-  color: #315f4e;
-  font-size: 24px;
-}
-
-.main-description p:not(.section-label) {
-  margin: 0;
-  font-size: 16px;
-  line-height: 1.9;
-}
-
-.quick-facts {
-  padding: 30px;
-  border: 1px solid rgba(58, 96, 70, 0.12);
-  border-radius: 22px;
-  background: #fff;
-  box-shadow: 0 14px 40px rgba(37, 75, 58, 0.08);
-}
-
-.quick-facts h2 {
-  font-size: 28px;
-}
-
-.characteristics-title {
-  margin: 0 0 16px;
-  color: #315f4e;
-  font-size: 15px;
-}
-
-.quick-facts ul {
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 13px;
-  list-style: none;
-}
-
-.quick-facts li {
-  display: flex;
-  gap: 11px;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.quick-facts li span {
-  color: #50a078;
-  font-weight: 800;
-}
-
-.quick-facts dl {
-  margin: 28px 0 0;
-  padding-top: 24px;
-  border-top: 1px solid #e7e8e1;
-}
-
-.quick-facts dl div + div {
-  margin-top: 17px;
-}
-
-.quick-facts dt {
-  margin-bottom: 4px;
-  color: #7c8982;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-}
-
-.quick-facts dd {
-  margin: 0;
-  color: #315447;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.botanical-gallery {
-  padding: 90px 0;
-  background: #e8efe3;
-}
-
 .section-heading {
-  max-width: 720px;
+  max-width: none;
   margin-bottom: 34px;
 }
 
@@ -696,67 +464,6 @@ const displayDescription = computed(() =>
   color: #63776d;
   font-size: 14px;
   line-height: 1.75;
-}
-
-.gallery-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.gallery-grid figure {
-  margin: 0;
-  overflow: hidden;
-  border: 1px solid rgba(58, 96, 70, 0.12);
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 10px 25px rgba(37, 75, 58, 0.07);
-}
-
-.gallery-grid img,
-.gallery-placeholder {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-}
-
-.gallery-grid img {
-  display: block;
-  object-fit: cover;
-}
-
-.gallery-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 11px;
-  background:
-    radial-gradient(circle at 70% 25%, rgba(157, 217, 166, 0.42), transparent 34%),
-    linear-gradient(145deg, #e1eadb, #cbdac6);
-  color: #577265;
-}
-
-.gallery-placeholder svg {
-  width: 54px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.2;
-}
-
-.gallery-placeholder span {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-
-.gallery-grid figcaption {
-  padding: 14px 16px;
-  color: #405f56;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .individual-plants {
@@ -776,45 +483,17 @@ const displayDescription = computed(() =>
   border-radius: 16px;
   text-align: center;
 }
-.view-all-row {
-  margin-top: 30px;
-  text-align: center;
-}
-.view-all-row a {
-  display: inline-flex;
-  padding: 12px 22px;
-  border-radius: 999px;
-  background: #315b49;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  text-decoration: none;
-  transition:
-    background 0.2s ease,
-    transform 0.2s ease;
-}
-.view-all-row a:hover {
-  background: #234a3c;
-  transform: translateY(-2px);
-}
+.plants-heading-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px 24px; }
+.plants-heading-row h2 { min-width: 0; overflow-wrap: anywhere; }
+.section-heading > p { max-width: 720px; }
+.view-all-plants { display: inline-flex; align-items: center; justify-content: center; gap: 9px; flex: 0 1 auto; max-width: 100%; min-height: 44px; box-sizing: border-box; padding: 12px 18px; border: 1px solid #a7c4b0; border-radius: 12px; background: #f8faf5; color: #315b49; font-size: 14px; font-weight: 600; line-height: 1.25; text-decoration: none; transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease; }
+.view-all-plants span { min-width: 0; overflow-wrap: anywhere; }
+.view-all-plants svg { width: 18px; height: 18px; flex: 0 0 18px; }
+.view-all-plants:hover { border-color: #315b49; background: #315b49; color: #fff; }
+.view-all-plants:active { background: #234a3c; transform: translateY(1px); }
+.view-all-plants:focus-visible { outline: 3px solid #315b49; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .view-all-plants { transition: none; } .view-all-plants:active { transform: none; } }
 
-.explore-more {
-  padding: 54px 6%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 30px;
-  background: #214638;
-  color: #fff;
-  text-align: center;
-}
-
-.explore-more p {
-  margin: 0;
-  font-size: 23px;
-}
-
-.explore-more a,
 .not-found a {
   padding: 12px 20px;
   border-radius: 999px;
@@ -850,32 +529,14 @@ const displayDescription = computed(() =>
   margin: 0 0 24px;
 }
 
-@media (max-width: 850px) {
-  .hero-grid,
-  .information-grid {
+@media (max-width: 899px) {
+  .hero-grid {
     grid-template-columns: 1fr;
-    gap: 48px;
   }
 
-  .plant-placeholder {
-    min-height: 380px;
-  }
+}
 
-  .species-image-card {
-    border-radius: 24px;
-  }
-
-  .plant-image {
-    height: 380px;
-  }
-
-  .back-link {
-    margin-bottom: 24px;
-  }
-
-  .gallery-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+@media (max-width: 850px) {
 
   .individual-plant-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -888,39 +549,11 @@ const displayDescription = computed(() =>
   }
 
   .detail-hero,
-  .plant-information,
-  .individual-plants,
-  .botanical-gallery {
+  .individual-plants {
     padding: 38px 0;
   }
 
-  .plant-placeholder {
-    min-height: 220px;
-  }
-
-  .species-image-card {
-    border-radius: 16px;
-  }
-
-  .plant-image {
-    min-height: 0;
-    height: 220px;
-  }
-
-  .hero-copy h1 {
-    font-size: 36px;
-  }
-
-  .hero-grid {
-    gap: 24px;
-  }
-
-  .hero-badges {
-    margin-bottom: 10px;
-  }
-
-  .category,
-  .conservation-status {
+.conservation-status {
     padding: 5px 9px;
     font-size: 9px;
   }
@@ -931,72 +564,11 @@ const displayDescription = computed(() =>
   }
 
   .summary {
-    font-size: 13px;
+    font-size: 15px;
     line-height: 1.6;
   }
 
-  .information-grid {
-    gap: 30px;
-  }
-
-  .main-description h2 {
-    font-size: 28px;
-  }
-
-  .main-description h3 {
-    margin-top: 28px;
-    font-size: 20px;
-  }
-
-  .main-description p:not(.section-label) {
-    font-size: 13px;
-    line-height: 1.7;
-  }
-
-  .quick-facts {
-    padding: 14px;
-    border-radius: 16px;
-  }
-
-  .quick-facts h2 {
-    margin-bottom: 12px;
-    font-size: 20px;
-  }
-
-  .characteristics-title {
-    margin-bottom: 10px;
-    font-size: 13px;
-  }
-
-  .quick-facts ul {
-    gap: 8px;
-  }
-
-  .quick-facts li {
-    gap: 8px;
-    font-size: 12px;
-    line-height: 1.35;
-  }
-
-  .quick-facts dl {
-    margin-top: 16px;
-    padding-top: 14px;
-  }
-
-  .quick-facts dl div + div {
-    margin-top: 10px;
-  }
-
-  .quick-facts dt {
-    margin-bottom: 2px;
-    font-size: 9px;
-  }
-
-  .quick-facts dd {
-    font-size: 12px;
-  }
-
-  .section-heading {
+.section-heading {
     margin-bottom: 22px;
   }
 
@@ -1015,48 +587,10 @@ const displayDescription = computed(() =>
     gap: 10px;
   }
 
-  .view-all-row {
-    margin-top: 20px;
-  }
+  .plants-heading-row { flex-direction: column; align-items: flex-start; }
+  .view-all-plants { align-self: flex-start; }
 
-  .view-all-row a {
-    padding: 9.5px 15.5px;
-    font-size: 10px;
-  }
-
-  .gallery-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .gallery-grid img,
-  .gallery-placeholder {
-    height: clamp(120px, 28vw, 170px);
-    aspect-ratio: auto;
-  }
-
-  .gallery-grid figcaption {
-    padding: 10px;
-    font-size: 10px;
-  }
-
-  .explore-more {
-    flex-direction: column;
-    gap: 18px;
-    padding: 38px 6%;
-  }
-
-  .explore-more p {
-    font-size: 19px;
-  }
-
-  .back-link {
-    margin-bottom: 20px;
-    padding: 8px 13px;
-    font-size: 11px;
-  }
-
-  .back-arrow {
+.back-arrow {
     font-size: 14px;
   }
 
@@ -1183,4 +717,56 @@ const displayDescription = computed(() =>
     font-size: 8px;
   }
 }
+
+.back-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; box-sizing: border-box; margin-bottom: 20px; border: 1px solid #a8bfae; border-radius: 12px; background: #ffffff80; color: #315f4e; font-weight: 700; line-height: 1.25; text-decoration: none; }
+.back-link:hover { background: #468585; border-color: #468585; color: #fff; }
+.back-link:active { background: #356f70; border-color: #356f70; color: #fff; }
+.back-icon { width: 20px; height: 20px; flex: none; }
+.back-link:focus-visible { outline: 3px solid #315f4e; outline-offset: 4px; }
+
+.hero-copy {
+  min-width: 0;
+  align-self: start;
+  padding: clamp(22px, 2.8vw, 36px);
+  border: 1px solid rgba(58, 96, 70, 0.12);
+  border-radius: 26px;
+  background: #fff;
+  box-shadow: 0 12px 36px rgba(37, 75, 58, 0.09);
+  overflow-wrap: anywhere;
+}
+.portrait-trigger { position: relative; padding: 0; border: 0; cursor: zoom-in; display: block; }
+.portrait-trigger:focus-visible, .zoom-close:focus-visible { outline: 3px solid #315f4e; outline-offset: 4px; }
+.portrait-trigger:focus-visible { outline-offset: -4px; }
+.profile-heading-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 14px; }
+.profile-heading-line .section-label { margin: 0; padding: 6px 10px; border-radius: 999px; background: #234a3c; color: #fff; font-size: 10px; line-height: 1.4; letter-spacing: 1.2px; text-transform: uppercase; }
+.profile-heading-line .conservation-status { padding: 5px 9px; font-size: 10px; letter-spacing: 0.5px; }
+.profile-taxonomy { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 0 0 20px; }
+.profile-taxonomy.single-field { grid-template-columns: minmax(0, 1fr); }
+.profile-taxonomy > div { min-width: 0; padding: 16px 18px; border-radius: 12px; background: #f4f6f1; }
+.profile-taxonomy dt { display: flex; align-items: center; gap: 8px; color: #63776d; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+.profile-taxonomy dd { margin: 6px 0 0; color: #315447; font-size: 16px; font-weight: 600; }
+.taxonomy-icon { width: 18px; height: 18px; flex: 0 0 18px; color: #64816c; }
+.profile-habitat { min-width: 0; margin-top: 20px; padding: 16px 18px; border-radius: 12px; background: #f4f6f1; }
+.profile-habitat h2 { display: flex; align-items: center; gap: 8px; margin: 0; color: #63776d; font-size: 12px; font-weight: 500; line-height: 1.5; text-transform: uppercase; letter-spacing: 1px; }
+.profile-habitat p { margin: 6px 0 0; color: #315447; font-size: 16px; line-height: 1.7; }
+.profile-divider { margin: 20px 0; border: 0; border-top: 1px solid #dfe7df; }
+.profile-description { margin-top: 20px; }
+.profile-description h2 { margin: 0 0 8px; color: #315447; font-size: 14px; font-weight: 600; line-height: 1.5; }
+@media (max-width: 420px) {
+  .profile-taxonomy { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .profile-taxonomy > div, .profile-habitat { padding: 14px 16px; }
+}
+.portrait-dialog { position: fixed; inset: 0; margin: 0; padding: 0; border: 0; border-radius: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; box-sizing: border-box; background: transparent; box-shadow: none; overflow: hidden; }
+.portrait-dialog::backdrop { background: rgb(8 24 17 / 85%); }
+.zoom-content { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.zoom-photo-frame { position: relative; flex: 0 0 auto; width: fit-content; line-height: 0; }
+/* Natural image dimensions determine the frame. Reserve space for controls on every side. */
+.zoom-content img { display: block; max-width: calc(100vw - 128px); max-height: calc(100dvh - 128px); width: auto; height: auto; object-fit: contain; border-radius: 10px; }
+.zoom-close { position: absolute; top: -12px; right: -12px; z-index: 2; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid rgb(255 255 255 / 45%); border-radius: 50%; background: rgb(23 63 52 / 84%); color: #fff; cursor: pointer; }
+.zoom-close svg { display: block; width: 22px; height: 22px; pointer-events: none; }
+.zoom-close:hover { background: #173f34; }
+.zoom-close:focus-visible { outline: 3px solid #fff; outline-offset: 2px; box-shadow: 0 0 0 5px #173f34; }
+.zoom-photo-frame .previous-photo { left: -52px; }
+.zoom-photo-frame .next-photo { right: -52px; }
+.zoom-photo-frame .gallery-counter { top: calc(100% + 12px); bottom: auto; right: auto; left: 50%; transform: translateX(-50%); padding: 0; background: transparent; white-space: nowrap; }
 </style>

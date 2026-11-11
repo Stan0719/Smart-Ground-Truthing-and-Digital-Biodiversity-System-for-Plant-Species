@@ -44,7 +44,6 @@ import SpeciesScreen from "./screens/Species";
 import SpeciesDetailScreen from "./screens/SpeciesDetail";
 import BotanistPlantDetailScreen from "./screens/BotanistPlantDetail";
 import BotanistSpeciesRequestDetailScreen from "./screens/BotanistSpeciesRequestDetail";
-import AddObservationScreen from "./screens/AddObservation";
 import FieldCollectionScreen from "./screens/FieldCollection";
 import PersistentKnowledgeScreen from "./screens/PersistentKnowledge";
 
@@ -170,11 +169,12 @@ function ScanStack({ user }) {
 
       <Stack.Screen
         name="Scan"
-        component={ScanScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <ScanScreen {...props} user={user} />}
+      </Stack.Screen>
 
       <Stack.Screen
         name="PlantDetails"
@@ -213,11 +213,12 @@ function MapStack({ user }) {
 
       <Stack.Screen
         name="Map"
-        component={MapScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <MapScreen {...props} user={user} />}
+      </Stack.Screen>
 
       <Stack.Screen
         name="PlantDetails"
@@ -269,7 +270,6 @@ function AccountStack({
 
       <Stack.Screen
         name="FavouritePlants"
-        component={FavouritePlantsScreen}
         options={{
           title: t("navigation.favouritePlants"),
           headerTintColor: theme.dark,
@@ -277,7 +277,9 @@ function AccountStack({
             backgroundColor: theme.light,
           },
         }}
-      />
+      >
+        {(props) => <FavouritePlantsScreen {...props} user={user} />}
+      </Stack.Screen>
 
       {/* Plant Details */}
       <Stack.Screen
@@ -301,11 +303,20 @@ function AccountStack({
 
       <Stack.Screen
         name="ScanHistory"
-        component={ScanHistoryScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <ScanHistoryScreen {...props} user={user} />}
+      </Stack.Screen>
+
+      <Stack.Screen name="SpeciesDetail" options={{ headerShown: false }}>
+        {(props) => <SpeciesDetailScreen {...props} user={user} />}
+      </Stack.Screen>
+
+      <Stack.Screen name="Species" options={{ headerShown: false }}>
+        {(props) => <PlantsScreen {...props} user={user} />}
+      </Stack.Screen>
 
     </Stack.Navigator>
   );
@@ -329,9 +340,9 @@ function MainTabs({
 
         headerShown: false,
 
-        tabBarActiveTintColor: theme.primary,
+        tabBarActiveTintColor: theme.dark,
 
-        tabBarInactiveTintColor: "#7A8A80",
+        tabBarInactiveTintColor: "#6D7F75",
 
         tabBarStyle: {
           height: 65,
@@ -339,11 +350,12 @@ function MainTabs({
           paddingBottom: 8,
           paddingTop: 5,
 
-          backgroundColor: "#FFFFFF",
+          backgroundColor: "#F7FBF4",
 
-          borderTopWidth: 0,
+          borderTopWidth: 1,
+          borderTopColor: "#E2EDE0",
 
-          elevation: 10,
+          elevation: 4,
         },
 
         tabBarLabelStyle: {
@@ -541,11 +553,13 @@ export default function App({ homeRequest }) {
   }, [homeRequest, navigationRef]);
 
   const [user, setUser] = useState(null);
+  const userRef = useRef(null);
   const [restoringSession, setRestoringSession] = useState(true);
   const authGeneration = useRef(0);
   const faceNavigationReference = useRef(null);
   const restoredUser = useRef(null);
   const applyServerUser = (verifiedUser) => {
+    userRef.current = verifiedUser;
     setUser(verifiedUser);
     if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "MainTabs", params: { screen: verifiedUser.role === "botanist" ? "AccountTab" : "HomeTab" } }] });
     else restoredUser.current = verifiedUser;
@@ -565,26 +579,37 @@ export default function App({ homeRequest }) {
       try {
         const verifiedUser = await faceSession.restore();
         if (active && generation === authGeneration.current) {
-          setUser(verifiedUser || null);
-          if (!verifiedUser && navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+          if (verifiedUser) {
+            userRef.current = verifiedUser;
+            setUser(verifiedUser);
+          } else if (userRef.current) {
+            userRef.current = null;
+            setUser(null);
+            if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+              navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+          }
         }
       } catch (error) {
         if (error.transient === true || [502, 503, 504].includes(error.status)) return;
         if (active && generation === authGeneration.current) {
+          const hadAuthenticatedUser = Boolean(userRef.current);
+          userRef.current = null;
           setUser(null);
-          if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+          if (hadAuthenticatedUser && navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+            navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
         }
       }
     }
     const listener = AppState.addEventListener("change", (state) => { if (state === "active") revalidate(); });
     const unsubscribe = faceSession.subscribe?.(({ authenticated }) => {
       if (!active || authenticated) return;
+      const hadAuthenticatedUser = Boolean(userRef.current);
       authGeneration.current += 1;
+      userRef.current = null;
       setUser(null);
-      if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+      if (hadAuthenticatedUser && navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
         navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
     });
-    void revalidate();
     const timer = setInterval(revalidate, 60000);
     return () => { active = false; listener.remove(); unsubscribe?.(); clearInterval(timer); };
   }, [navigationRef, faceSession]);
@@ -597,6 +622,7 @@ export default function App({ homeRequest }) {
   function handleLogin(loggedInUser, metadata) {
     faceNavigationReference.current = metadata?.reference || null;
     authGeneration.current += 1;
+    userRef.current = loggedInUser;
     setUser(loggedInUser);
     if (metadata?.reference) faceDiagnostic("auth_context_updated", metadata.reference);
   }
@@ -604,6 +630,7 @@ export default function App({ homeRequest }) {
   async function handleLogout() {
     authGeneration.current += 1;
     restoredUser.current = null;
+    userRef.current = null;
     setUser(null);
     if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
     try { await faceSession.logout(); }
@@ -761,22 +788,9 @@ export default function App({ homeRequest }) {
 
         <RootStack.Screen
           name="AddObservation"
-          options={{
-            headerShown: true,
-            title: t("navigation.addNewObservation"),
-            headerTintColor: theme.dark,
-            headerStyle: {
-              backgroundColor: theme.light,
-            },
-          }}
-        >
-          {(props) => (
-            <AddObservationScreen
-              {...props}
-              user={user}
-            />
-          )}
-        </RootStack.Screen>
+          component={FieldCollectionScreen}
+          options={{ headerShown: true, title: t("navigation.addNewObservation"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
+        />
 
 
 

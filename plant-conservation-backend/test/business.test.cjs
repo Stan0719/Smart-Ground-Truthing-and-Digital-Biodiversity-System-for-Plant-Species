@@ -5,11 +5,11 @@ const test = require("node:test"),
   { resolve } = require("node:path"),
   { pathToFileURL } = require("node:url"),
   { once } = require("node:events");
-const { createPlantDatabase } = require("./postgres-fixture.cjs"),
+const { createReadySpeciesPhotoDatabase } = require("./species-photo-bigint-fixture.cjs"),
   sharp = require("sharp"),
   { createPlantApp } = require("../server.js");
 test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async (t) => {
-  const pool = await createPlantDatabase(),
+  const pool = await createReadySpeciesPhotoDatabase(),
     pg = pool;
   t.after(() => pool.end());
   // Isolated QR inventory matches the existing Add Plant test contract.
@@ -57,6 +57,7 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   const app = createPlantApp({
       pool,
       auth,
+      speciesPhotoWritesEnabled: true,
       origins: new Set(["http://localhost:5173"]),
     }),
     server = app.listen(0, "127.0.0.1");
@@ -586,6 +587,7 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
     "INSERT INTO plant_record(species_id,registered_subject,rbac_status,qr_token) VALUES(3,$1,'Approved','protected-test-qr')",
     ["staff:" + users.bot.id],
   );
+  await pool.query("INSERT INTO public.qr_code(plant_id,qr_code,status) SELECT plant_id,qr_token,'active' FROM plant_record WHERE qr_token='protected-test-qr'");
   for (const role of [undefined, "visitor", "bot", "other", "admin"]) {
     const expected = role === "admin" ? 403 : 404;
     for (const path of [

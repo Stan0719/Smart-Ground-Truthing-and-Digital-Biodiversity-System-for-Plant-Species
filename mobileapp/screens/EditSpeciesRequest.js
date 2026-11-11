@@ -6,6 +6,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { fetchBotanistSpeciesRequest } from "../utils/botanistRecords";
 import { plantApi } from "../utils/plantApi";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
+import OriginalUpdatedField from "../components/OriginalUpdatedField";
 
 const fields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const makeKey = () => `species-edit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -68,13 +69,17 @@ export default function EditSpeciesRequest({ route, navigation }) {
     <Text style={styles.title}>{t("recordEdits.editSpecies")}</Text>
     <Text style={styles.note}>{state.request.request_status === "Approved" ? t("recordEdits.approvedNotice") : t("recordEdits.pendingNotice")}</Text>
     {state.request.request_status === "Approved" && !state.available && <Text style={styles.error}>{t("recordEdits.migrationRequired")}</Text>}
-    <View style={styles.card}>{fields.map((field) => <View key={field}><Text style={styles.label}>{t(`recordEdits.${field}`)}</Text>
+    <View style={styles.card}>{fields.map((field) => <OriginalUpdatedField key={field} label={t(`recordEdits.${field}`)} originalValue={state.request[field]}>
       <TextInput style={[styles.input, ["description", "habitat"].includes(field) && styles.multiline]} value={form[field]}
-        onChangeText={(next) => setForm((old) => ({ ...old, [field]: next }))} multiline={["description", "habitat"].includes(field)} /></View>)}
-      <Text style={styles.label}>{t("recordEdits.speciesPhoto")}</Text>
-      {(photo || state.request.photo) && <Image source={photo ? { uri: photo } : state.request.photo} style={styles.photo} />}
-      <TouchableOpacity style={styles.secondary} onPress={pickPhoto}><Text style={styles.secondaryText}>{t("recordEdits.replacePhoto")}</Text></TouchableOpacity>
-      {!!photo && <TouchableOpacity onPress={() => setPhoto(null)}><Text style={styles.secondaryText}>{t("recordEdits.keepExistingPhotos")}</Text></TouchableOpacity>}
+        onChangeText={(next) => setForm((old) => ({ ...old, [field]: next }))} multiline={["description", "habitat"].includes(field)} />
+    </OriginalUpdatedField>)}
+      <OriginalUpdatedField label={t("recordEdits.speciesPhoto")}
+        originalContent={state.request.photo ? <Image source={state.request.photo} style={styles.photo} resizeMode="cover" /> : null}>
+        {photo ? <Image source={{ uri: photo }} style={styles.photo} resizeMode="cover" />
+          : <Text style={styles.secondaryText}>{t("recordEdits.keepExistingPhotos")}</Text>}
+        <TouchableOpacity style={styles.secondary} onPress={pickPhoto}><Text style={styles.secondaryText}>{t("recordEdits.replacePhoto")}</Text></TouchableOpacity>
+        {!!photo && <TouchableOpacity onPress={() => setPhoto(null)}><Text style={styles.secondaryText}>{t("recordEdits.keepExistingPhotos")}</Text></TouchableOpacity>}
+      </OriginalUpdatedField>
     </View>
     <TouchableOpacity style={[styles.primary, saving && styles.disabled]} onPress={submit} disabled={saving}><Text style={styles.primaryText}>{saving ? t("recordEdits.saving") : t("recordEdits.submitChanges")}</Text></TouchableOpacity>
     <TouchableOpacity style={styles.secondary} onPress={() => navigation.goBack()} disabled={saving}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity>

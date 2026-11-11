@@ -16,6 +16,7 @@ export function normalizeQRCodes(payload) {
       id,
       label: `QR-${id.padStart(4, "0")}`,
       plantId: code.plant_id == null ? null : String(code.plant_id),
+      plantName: typeof code.plant_name === "string" && code.plant_name.trim() ? code.plant_name.trim() : "",
       value: code.qr_code,
       status: code.status,
     };
@@ -85,6 +86,16 @@ export function createQRInventoryLoader(fetchCodes, onChange) {
       for (const qr of generated) combined.set(qr.id, qr);
       update({ records: [...combined.values()].sort((a, b) => b.id.length - a.id.length || b.id.localeCompare(a.id)), hasLoaded: true, loading: false, error: "" });
       return generated.length;
+    },
+    removeDeleted(id) {
+      version += 1;
+      pending = null;
+      update({
+        records: state.records.filter((qr) => qr.id !== String(id)),
+        hasLoaded: true,
+        loading: false,
+        error: "",
+      });
     },
   };
 }

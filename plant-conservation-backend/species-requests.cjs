@@ -1,12 +1,14 @@
 "use strict";
 const { createHash, randomUUID } = require("node:crypto");
 const sharp = require("sharp");
+const {proposedPhoto}=require("./species-photo-library.cjs");
+const {approveRequestPhoto,setPointer}=require("./species-photo-provenance.cjs");
 const { permitted } = require("../shared/rbac.cjs");
 
 const fields = ["scientific_name", "common_name", "genus_name", "family_name",
   "conservation_status", "description", "habitat"];
 const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id";
-const project = (row) => ({ ...row, photo_url: `/api/species-requests/${row.request_id}/photo` });
+const project = (row) => ({ ...row, photo_url: `/api/species-requests/${row.request_id}/photo`, proposed_photo_url: `/api/species-requests/${row.request_id}/proposed-photo` });
 
 // The deployed table predates this API. Older installations without it retain
 // ordinary observation behavior; no runtime DDL or migrations are performed.
@@ -36,47 +38,106 @@ function projection(alias) {
       ELSE '[]'::jsonb END)`;
 }
 
-function observationRequestSql(available) {
-  if (!available) return {
-    select: "NULL::text AS species_request_id,NULL::jsonb AS species_request",
-    join: "",
-  };
+async function provenanceAvailable(pool) {
+  return Boolean((await pool.query("SELECT to_regclass('plant_submission_receipt') IS NOT NULL AS available")).rows[0]?.available);
+}
+function observationRequestSql(available, hasProvenance = false) {
+  const empty = { select: "NULL::text AS species_request_id,NULL::jsonb AS species_request", join: "" };
+  if (!available || !hasProvenance) return empty;
+  const result = "origin.receipt->'result'";
+  const requestId = result + "->>'species_request_id'";
+  const linked = "origin.receipt_count=1 AND origin.receipt->>'valid'='true' AND " + result + "->>'id'=o.id AND " + requestId + " IS NOT NULL";
   return {
-    select: `CASE WHEN sr.count=1 THEN sr.data->>'request_id' ELSE NULL END AS species_request_id,
-      CASE WHEN sr.count>1 THEN jsonb_build_object('request_status','Ambiguous')
-        WHEN sr.data->>'proposed_species_id' IS NOT NULL
-          AND sr.data->>'proposed_species_id' <> p.species_id::text
-        THEN sr.data || jsonb_build_object('request_status','Inconsistent')
-        ELSE sr.data END AS species_request`,
-    // Both species references are authoritative FKs. Standalone requests only
-    // acquire a species link on approval. Multiple matches are never guessed.
+    select: `CASE WHEN ${linked} THEN ${requestId} ELSE NULL END AS species_request_id,
+      CASE WHEN ${linked} THEN CASE
+        WHEN origin_request.request_id IS NULL THEN jsonb_build_object('request_id',${requestId},'request_status','Unavailable')
+        WHEN origin_request.owner_subject<>origin.receipt->>'owner' OR origin_request.client_key<>origin.receipt->>'client_key'
+          OR ${result}->>'species_id'<>p.species_id::text
+          OR (origin_request.proposed_species_id IS NOT NULL AND origin_request.proposed_species_id<>p.species_id)
+          OR (origin_request.request_status='Approved' AND origin_request.approved_species_id IS DISTINCT FROM p.species_id)
+        THEN ${projection('origin_request')} || jsonb_build_object('request_status','Inconsistent')
+        ELSE ${projection('origin_request')} END ELSE NULL END AS species_request`,
+    // Receipt IDs establish origin. Owner/client-key comparisons validate that binding;
+    // they never discover a relationship by matching people, dates or names.
     join: `LEFT JOIN LATERAL (
-      SELECT count(*) AS count,(jsonb_agg(${projection("r")} ORDER BY r.request_id)->0) AS data
-      FROM species_request_submission r WHERE (r.proposed_species_id=p.species_id OR r.approved_species_id=p.species_id)
-    ) sr ON true`,
+      SELECT count(*) AS receipt_count,(jsonb_agg(jsonb_build_object(
+        'result',receipt.result,'owner',receipt.owner_subject,'client_key',receipt.client_key,
+        'valid',receipt.owner_subject=p.registered_subject AND receipt.result ? 'species_request_id' AND receipt.result ? 'species_id' AND EXISTS (
+          SELECT 1 FROM plant_observation initial WHERE initial.id=receipt.result->>'id'
+            AND initial.plant_id=p.plant_id AND initial.owner_subject=receipt.owner_subject AND initial.client_key=receipt.client_key
+        ))) -> 0) AS receipt
+      FROM plant_submission_receipt receipt WHERE receipt.result->>'plant_id'=p.plant_id::text
+    ) origin ON true
+    LEFT JOIN species_request_submission origin_request ON ${linked} AND origin_request.request_id::text=${requestId}`,
   };
 }
-
-async function assertSpeciesResolved(c, plantId, fail) {
-  if (!(await requestsAvailable(c))) return;
-  const plant = (await c.query(
-    "SELECT p.species_id,s.scientific_name FROM plant_record p JOIN species s ON s.species_id=p.species_id WHERE p.plant_id=$1 FOR SHARE OF p,s",
-    [plantId],
-  )).rows[0];
-  if (!plant) fail(404, "Plant not found.");
-  const requests = (await c.query(
-    "SELECT request_status,proposed_species_id,approved_species_id FROM species_request_submission WHERE proposed_species_id=$1 OR approved_species_id=$1 ORDER BY request_id FOR UPDATE",
-    [plant.species_id],
-  )).rows;
-  if (!requests.length) return;
-  if (requests.length !== 1 || requests[0].request_status !== "Approved" ||
-      String(requests[0].approved_species_id || "") !== String(plant.species_id) ||
-      (requests[0].proposed_species_id != null && String(requests[0].proposed_species_id) !== String(plant.species_id)) ||
-      !plant.scientific_name?.trim())
-    fail(409, "Resolve the linked species request before reviewing this plant submission.");
+// A receipt describes the immutable registration, not its mutable catalogue selection.
+// Validate explicit origin before using either its null dependency or request ID.
+async function registrationReceipt(c, plantId, plant, fail) {
+  if (await provenanceAvailable(c)) {
+    const receipts = (await c.query("SELECT owner_subject,client_key,result FROM plant_submission_receipt WHERE result->>'plant_id'=$1 FOR SHARE", [String(plantId)])).rows;
+    if (receipts.length > 1) fail(409, "Submission provenance is ambiguous. Verify the originating submission before review.");
+    if (receipts.length === 1) {
+      const receipt = receipts[0], result = receipt.result;
+      const initial = result && typeof result.id === 'string' ? (await c.query("SELECT plant_id,owner_subject,client_key FROM plant_observation WHERE id=$1", [result.id])).rows[0] : null;
+      if (!initial || String(initial.plant_id)!==String(plantId) || receipt.owner_subject!==plant.registered_subject ||
+          initial.owner_subject!==receipt.owner_subject || initial.client_key!==receipt.client_key || !Object.hasOwn(result,'species_request_id') ||
+          !/^[1-9][0-9]*$/.test(String(result.species_id)) ||
+          (result.species_request_id !== null && !/^[1-9][0-9]*$/.test(String(result.species_request_id))))
+        fail(409, "Submission provenance is inconsistent. Verify the originating submission before review.");
+      if (!(await c.query("SELECT species_id FROM species WHERE species_id::text=$1 FOR SHARE", [String(result.species_id)])).rows.length)
+        fail(409, "The registration receipt references an unavailable original species. Ask an officer to reconcile the submission provenance.");
+      return receipt;
+    }
+  }
+  return null;
 }
 
-function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, assertNewSpecies }) {
+async function assertSpeciesReassignment(c, plantId, plant, fail) {
+  const receipt = await registrationReceipt(c, plantId, plant, fail);
+  if (!receipt)
+    fail(409, "Species reassignment requires verified registration provenance. Ask an officer to reconcile the original submission.");
+  if (receipt.result.species_request_id !== null)
+    fail(409, "This registration originated a species request. Keep its proposed species; reassignment requires a separately supported review workflow.");
+}
+
+async function assertSpeciesResolved(c, plantId, fail, observationId) {
+  if (!(await requestsAvailable(c))) return;
+  const plant = (await c.query("SELECT p.species_id,p.registered_subject,s.scientific_name,s.rbac_data FROM plant_record p JOIN species s ON s.species_id=p.species_id WHERE p.plant_id=$1 FOR SHARE OF p,s", [plantId])).rows[0];
+  if (!plant) fail(404, "Plant not found.");
+  const receipt = await registrationReceipt(c, plantId, plant, fail);
+  if (receipt) {
+      const result = receipt.result;
+      if (result.species_request_id === null) {
+        // Owner-only corrections validate accessibility with speciesRow. Recheck the
+        // current selection under the review lock; never rewrite the replay result.
+        if ((plant.rbac_data?.approvalStatus || "Approved") !== "Approved" || !plant.scientific_name?.trim())
+          fail(409, "The current species is not approved or is incomplete. Correct the registration to an accessible approved species before review.");
+        return;
+      }
+      if (String(result.species_id)!==String(plant.species_id))
+        fail(409, "The originating species request does not match the current plant species. Reconcile the registration before review.");
+      // Other observations do not inherit the registration's request. Approval still
+      // independently requires an approved species in the observation-review route.
+      if (typeof observationId === 'string' && result.id !== observationId) return;
+      const requests = (await c.query("SELECT request_status,proposed_species_id,approved_species_id,owner_subject,client_key FROM species_request_submission WHERE request_id::text=$1 FOR UPDATE", [String(result.species_request_id)])).rows;
+      if (String(result.species_id)!==String(plant.species_id) || requests.length!==1 ||
+          requests[0].owner_subject!==receipt.owner_subject || requests[0].client_key!==receipt.client_key ||
+          requests[0].request_status!=='Approved' || String(requests[0].approved_species_id || '')!==String(plant.species_id) ||
+          (requests[0].proposed_species_id!=null && String(requests[0].proposed_species_id)!==String(plant.species_id)) || !plant.scientific_name?.trim())
+        fail(409, "Resolve the linked species request before reviewing this plant submission.");
+      return;
+  }
+  // Unknown/legacy provenance: expose no invented request, but retain the original
+  // conservative species-wide guard until an authoritative relationship is available.
+  const requests = (await c.query("SELECT request_status,proposed_species_id,approved_species_id FROM species_request_submission WHERE proposed_species_id=$1 OR approved_species_id=$1 ORDER BY request_id FOR UPDATE", [plant.species_id])).rows;
+  if (!requests.length) return;
+  if (requests.length!==1 || requests[0].request_status!=='Approved' || String(requests[0].approved_species_id || '')!==String(plant.species_id) ||
+      (requests[0].proposed_species_id!=null && String(requests[0].proposed_species_id)!==String(plant.species_id)) || !plant.scientific_name?.trim())
+    fail(409, "Species request provenance cannot be verified. Resolve the legacy dependency before review.");
+}
+
+function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, assertNewSpecies, officerNotifications = null }) {
   const requestId = (value) => {
     if (typeof value !== "string" || !/^[1-9][0-9]{0,9}$/.test(value) || BigInt(value) > 2147483647n)
       fail(400, "Invalid species request identifier.");
@@ -106,7 +167,13 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
   app.get("/api/assets/species-request-:id", allow("species.manage"), async (req, res) => {
     const row = (await pool.query("SELECT photo FROM species_request_submission WHERE request_id=$1", [requestId(req.params.id)])).rows[0];
     if (!row) fail(404, "Species request unavailable.");
-    await servePhoto(res, row.photo);
+    await servePhoto(res, await proposedPhoto(pool,requestId(req.params.id),req.user) || row.photo);
+  });
+  app.get("/api/species-requests/:id/proposed-photo",read,async(req,res)=>{
+    const key=requestId(req.params.id);
+    const row=(await pool.query("SELECT photo FROM species_request_submission WHERE request_id=$1 AND ($2 OR owner_subject=$3)",[key,permitted(req.user,"species.manage"),subject(req.user)])).rows[0];
+    if(!row)fail(404,"Species request unavailable.");
+    await servePhoto(res,await proposedPhoto(pool,key,req.user) || row.photo);
   });
   app.post("/api/species-requests", allow("plants.create"), async (req, res) => {
     const b = req.body;
@@ -146,6 +213,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${columns}`,
         [subject(req.user), clientKey, payloadHash, ...fields.map((key) => data[key]), bytes])).rows[0];
       await audit(c, req.user, "species_requested", row.request_id);
+      if (officerNotifications) await officerNotifications.enqueueSpeciesRequest(c,row.request_id);
       return row;
     });
     res.status(201).json({ species_request: project(result) });
@@ -198,7 +266,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
             fail(409, "This scientific name already exists. Resolve the duplicate before approval.");
           speciesId = row.proposed_species_id;
           await c.query("INSERT INTO rbac_species_visibility(species_id,visibility) VALUES($1,$2) ON CONFLICT(species_id) DO UPDATE SET visibility=EXCLUDED.visibility", [speciesId, b.visibility]);
-          await c.query("UPDATE plant_asset SET approved=TRUE WHERE species_id=$1", [speciesId]);
+          await approveRequestPhoto(c,row,speciesId,subject(req.user));
         }
         await c.query("UPDATE species SET rbac_data=rbac_data || $1::jsonb WHERE species_id=$2", [{ approvalStatus: b.decision }, row.proposed_species_id]);
       } else if (b.decision === "Approved") {
@@ -212,8 +280,10 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
         speciesId = (await c.query("INSERT INTO species(scientific_name,common_name,genus_id,status_id,description,rbac_data) VALUES($1,$2,$3,$4,$5,$6) RETURNING species_id",
           [row.scientific_name, row.common_name, genus.genus_id, status.status_id, row.description, { habitat: row.habitat }])).rows[0].species_id;
         await c.query("INSERT INTO rbac_species_visibility(species_id,visibility) VALUES($1,$2)", [speciesId, b.visibility]);
+        const photoId=randomUUID();
         await c.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,TRUE,'image/jpeg',$5)",
-          [randomUUID(), speciesId, row.owner_subject, `species-request:${row.request_id}`, row.photo]);
+          [photoId, speciesId, row.owner_subject, `species-request:${row.request_id}`, row.photo]);
+        await setPointer(c,row.request_id,photoId);
       }
       const reviewed = (await c.query(`UPDATE species_request_submission SET request_status=$1,review_comment=$2,reviewed_by=$3,reviewed_at=CURRENT_TIMESTAMP,approved_species_id=$4 WHERE request_id=$5 RETURNING ${columns}`,
         [b.decision, comment, subject(req.user), speciesId, row.request_id])).rows[0];
@@ -227,4 +297,4 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
     res.json({ reviewed: true, species_request: project(result) });
   });
 }
-module.exports = { requestsAvailable, observationRequestSql, assertSpeciesResolved, mountSpeciesRequests };
+module.exports = { provenanceAvailable, requestsAvailable, observationRequestSql, assertSpeciesResolved, assertSpeciesReassignment, mountSpeciesRequests };

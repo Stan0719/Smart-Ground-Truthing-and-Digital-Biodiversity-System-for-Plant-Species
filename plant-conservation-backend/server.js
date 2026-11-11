@@ -10,10 +10,24 @@ const {
 const { mountDomain } = require("./domain.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
 const { mountUploads } = require("./uploads.cjs");
+const { mountPlantGallery } = require("./plant-gallery.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
-function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
+const { mountPlantSimilarity } = require("./plant-similarity.cjs");
+const { mountStaffNotifications } = require("./staff-notifications.cjs");
+const { createOfficerNotificationDelivery } = require("./officer-notification-delivery.cjs");
+const { mountSpeciesPhotoLibrary } = require("./species-photo-library.cjs");
+const { speciesPhotoWritesRequested } = require("./species-photo-activation.cjs");
+
+function createPlantApp({
+  auth,
+  pool,
+  origins = configuredOrigins(),
+  similaritySearch,
+  officerNotifications = null,
+  speciesPhotoWritesEnabled = false,
+}) {
   const app = express();
   app.disable("x-powered-by");
   // Do not generate ETags for uncached, authenticated JSON reads.
@@ -43,12 +57,17 @@ function createPlantApp({ auth, pool, origins = configuredOrigins() }) {
   mountDeviceIngestion(app, { pool });
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
-  mountDomain(app, { auth, pool, allow });
-  mountPlantSubmissions(app, { pool, allow });
-  mountRecordChanges(app, { pool, allow });
+  mountStaffNotifications(app, { pool });
+  mountDomain(app, { auth, pool, allow, officerNotifications });
+  require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
+  mountPlantSubmissions(app, { pool, allow, officerNotifications });
+  mountRecordChanges(app, { pool, allow, officerNotifications });
   mountRecordVersionHistory(app, { pool, allow });
-  mountUploads(app, { pool, allow });
+  mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
+  mountSpeciesPhotoLibrary(app, { pool, allow, writesEnabled: speciesPhotoWritesEnabled });
+  mountPlantGallery(app, { pool, allow });
   mountIoT(app, { pool, allow });
+  mountPlantSimilarity(app, { pool, allow, search: similaritySearch });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {
     await pool.query("SELECT 1");
     res.json({ connected: true, database: "postgresql" });
@@ -112,7 +131,14 @@ async function start() {
   const { poolFromEnvironment } = require("./database.cjs");
   const auth = await createAuth(),
     pool = poolFromEnvironment();
+  const speciesPhotoWritesEnabled = speciesPhotoWritesRequested();
   try {
+    if (process.argv.includes("--verify-species-photo-startup")) {
+      const { verifySpeciesPhotoStartup } = require("./species-photo-startup.cjs");
+      await verifySpeciesPhotoStartup({
+        enabled: true, pool, writesEnabled: speciesPhotoWritesEnabled,
+      });
+    }
     await pool.query(
       "SELECT plant_id,registered_subject,rbac_status,qr_token FROM plant_record LIMIT 0",
     );
@@ -125,10 +151,14 @@ async function start() {
     await Promise.allSettled([auth.db.close(), pool.end()]);
     throw error;
   }
-  const app = createPlantApp({ auth, pool });
+  const officerNotifications = createOfficerNotificationDelivery({ pool, auth });
+  const app = createPlantApp({ auth, pool, officerNotifications, speciesPhotoWritesEnabled });
   const server = createServer(app);
   const port = Number(process.env.PORT || 3000);
-  server.once("listening", () => console.log("Plant API listening on port " + server.address().port));
+  server.once("listening", () => {
+    console.log("Plant API listening on port " + server.address().port);
+    officerNotifications.start();
+  });
   server.on("error", async (error) => {
     console.error(
       "Plant API startup failed:",
@@ -142,6 +172,7 @@ async function start() {
   for (const signal of ["SIGINT", "SIGTERM"])
     process.once(signal, () =>
       server.close(async () => {
+        await officerNotifications.stop();
         await Promise.allSettled([auth.db.close(), pool.end()]);
         process.exit(0);
       }),

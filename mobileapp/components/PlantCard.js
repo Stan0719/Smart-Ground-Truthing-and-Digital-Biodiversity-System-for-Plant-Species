@@ -1,5 +1,5 @@
 import { t, translateLabel, dateLocale, useAppTranslation, translateFieldValue } from "../translations/i18n";
-import React from "react";
+import React, { useState } from "react";
 
 import {
   View,
@@ -9,8 +9,8 @@ import {
   Image,
 } from "react-native";
 
-import { getSpeciesBySlug } from "../data/mockData";
-import { getSpeciesImageSource } from "../data/speciesImages";
+import { getPlantDisplayObservation } from "../utils/plantApi";
+import { getPlantCardZoneLabel } from "../utils/plantCardDisplay";
 
 
 export default function PlantCard({
@@ -19,13 +19,17 @@ export default function PlantCard({
   user,
 }) {
   useAppTranslation();
-  const species = getSpeciesBySlug(plant.speciesSlug) || {
-    name: plant.commonName,
-    genus: plant.genus,
-  };
-  const imageSource = getSpeciesImageSource(species);
+  const [failedImageUri, setFailedImageUri] = useState(null);
+  const imageSource = plant.plantImage || null;
+  const imageUri = typeof imageSource === "number" ? `local:${imageSource}` : imageSource?.uri || null;
+  const imageFailed = imageUri === failedImageUri;
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const observation = getPlantDisplayObservation(plant);
   const lastVerified = formatDate(plant.latestApproved?.date);
+  const zoneBadge = getPlantCardZoneLabel(plant, user?.role, {
+    restricted: t("map.locationRestricted"),
+    missing: t("plant.notRecorded"),
+  });
 
   return (
     <TouchableOpacity
@@ -40,10 +44,11 @@ export default function PlantCard({
       {/* IMAGE */}
       <View style={styles.imageContainer}>
 
-        {imageSource ? (
+        {imageSource && !imageFailed ? (
           <Image
             source={imageSource}
             style={styles.image}
+            onError={() => setFailedImageUri(imageUri)}
           />
         ) : (
           <View style={styles.placeholder}>
@@ -53,50 +58,67 @@ export default function PlantCard({
           </View>
         )}
 
+        <View pointerEvents="none" style={styles.imageBadges}>
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, statusStyle(plant.currentStatus)]}>
+            {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
+          </Text>
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.zoneBadge]}>
+            {zoneBadge}
+          </Text>
+        </View>
+
       </View>
 
 
       {/* CONTENT */}
       <View style={styles.content}>
 
-        <Text style={styles.plantId}>
-          {plant.plantId}
-        </Text>
-
         <Text style={styles.plantName}>
-          {plant.commonName}
+          {plant.plantScientificName || t("plant.unnamedPlant")}
         </Text>
+        <Text style={styles.plantId}>{t("plantDetail.plantId")}: {plant.plantId}</Text>
+        {!!plant.plantCommonName && <Text style={styles.plantCommonName}>{plant.plantCommonName}</Text>}
 
         {isBotanist ? (
           <>
-            <Text style={styles.plantZone}>
-              {plant.location?.zone || t("plant.notRecorded")}
-            </Text>
-
-            <Text style={styles.plantHealth}>
-              {translateLabel(plant.latestApproved?.healthStatus || t("plant.notRecorded"))}
-            </Text>
+            <View style={styles.infoGrid}>
+              <PublicFact label={t("plant.height")} value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")} />
+              <PublicFact label={t("plant.lifeStage2")} value={observation?.lifeStage || t("plant.notRecorded")} />
+              <PublicFact label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
+              <PublicFact label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
+              <PublicFact label={t("plant.locationZone")} value={zoneBadge} />
+              <PublicFact label={t("plant.qrStatus2")} value={plant.qr?.status || t("plant.notRecorded")} />
+            </View>
           </>
         ) : (
           <View style={styles.infoGrid}>
             <PublicFact
               label={t("plant.height")}
-              value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
+              value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
             />
             <PublicFact
               label={t("plant.lifeStage")}
-              value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
+              value={observation?.lifeStage || t("plant.notRecorded")}
             />
             <PublicFact
-              label={t("plant.genus")}
-              value={species?.genus}
+              label={t("plant.health")}
+              value={observation?.healthStatus || t("plant.notRecorded")}
             />
             <PublicFact
-              label={t("plantCard.registered")}
+              label={t("plant.morphology")}
+              value={observation?.morphology || t("plant.notRecorded")}
+            />
+            <PublicFact label={t("plant.locationZone")} value={zoneBadge} />
+            <PublicFact
+              label={t("plant.lastVerified")}
               value={lastVerified}
             />
           </View>
         )}
+
+        {isBotanist && plant.latestSubmission?.status ? (
+          <Text style={styles.observationStatus}>{t("botanistRecords.observationStatus")}{translateLabel(plant.latestSubmission.status)}</Text>
+        ) : null}
 
         <Text style={styles.plantView}>{t("plantCard.viewRecord")}</Text>
 
@@ -104,6 +126,16 @@ export default function PlantCard({
 
     </TouchableOpacity>
   );
+}
+
+function statusStyle(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "approved": return styles.statusApproved;
+    case "pending review": return styles.statusPending;
+    case "rejected": return styles.statusRejected;
+    case "correction required": return styles.statusCorrection;
+    default: return styles.statusOther;
+  }
 }
 
 function PublicFact({ label, value }) {
@@ -148,6 +180,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#DCE8D6",
   },
 
+  imageBadges: { position: "absolute", top: 5, left: 5, right: 5, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 3 },
+  imageBadge: { maxWidth: "48%", overflow: "hidden", paddingHorizontal: 4, paddingVertical: 4, borderRadius: 8, color: "#FFFFFF", fontSize: 8, lineHeight: 10, fontWeight: "700", textAlign: "center" },
+  statusBadge: { backgroundColor: "#315B49" },
+  statusApproved: { backgroundColor: "#23734D" },
+  statusPending: { backgroundColor: "#A76512" },
+  statusRejected: { backgroundColor: "#A53A35" },
+  statusCorrection: { backgroundColor: "#8C5D20" },
+  statusOther: { backgroundColor: "#52645A" },
+  zoneBadge: { backgroundColor: "#143625DD" },
+
   image: {
     width: "100%",
     height: "100%",
@@ -171,19 +213,20 @@ const styles = StyleSheet.create({
   },
 
   plantId: {
-    color: "#234A3C",
-    fontSize: 14,
-    fontWeight: "700",
+    marginTop: 3,
+    color: "#7C8982",
+    fontSize: 10,
+    fontWeight: "600",
   },
 
   plantName: {
-    marginTop: 3,
-    color: "#50675D",
-    fontSize: 11,
+    color: "#234A3C",
+    fontSize: 15,
+    fontWeight: "700",
+    flexShrink: 1,
   },
-
-  plantZone: {
-    marginTop: 7,
+  plantCommonName: {
+    marginTop: 2,
     color: "#75867E",
     fontSize: 10,
   },
@@ -226,5 +269,11 @@ const styles = StyleSheet.create({
     color: "#315B49",
     fontSize: 10,
     fontWeight: "700",
+  },
+  observationStatus: {
+    marginTop: 5,
+    color: "#75867E",
+    fontSize: 9,
+    fontWeight: "600",
   },
 });

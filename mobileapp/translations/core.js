@@ -1,7 +1,7 @@
 import { createInstance } from "i18next";
 
 export const LANGUAGE_STORAGE_KEY = "niah.ui-language.v1";
-export const supportedLanguages = ["en", "ms"];
+export const supportedLanguages = ["en", "ms", "zh"];
 
 // No language detector or network backend: English is the first-launch default.
 export function createLocalization({ storage, resources, plugins = [] }) {
@@ -80,15 +80,17 @@ export function createDisplayTranslator(i18n, english) {
   };
 }
 
-export function createFieldValueTranslator(label, english, malay) {
+export function createFieldValueTranslator(label, english, ...catalogues) {
   const controlled = new Set([
     "health", "healthstatus", "growthstage", "lifestage", "category", "plantgroup",
     "status", "syncstatus", "qrstatus", "conservationstatus", "sensitivitylevel",
   ]);
   const normalize = (field) => String(field).replace(/[\s_]/g, "").toLowerCase();
-  const malayLabels = new Map(flattenTranslations(malay));
+  const localizedLabels = catalogues.map((catalogue) => new Map(flattenTranslations(catalogue)));
   for (const [key, value] of flattenTranslations(english)) {
-    if (controlled.has(normalize(value))) controlled.add(normalize(malayLabels.get(key) || value));
+    if (controlled.has(normalize(value))) {
+      for (const catalogue of localizedLabels) controlled.add(normalize(catalogue.get(key) || value));
+    }
   }
   // Notes, names, descriptions and comments are deliberately excluded.
   return (field, value) => controlled.has(normalize(field)) ? label(value) : value;

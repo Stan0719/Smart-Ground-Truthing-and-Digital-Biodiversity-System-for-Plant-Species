@@ -34,6 +34,7 @@ test("reconciled species requests: authoritative linkage and dependency guards",
     proposed_species_id bigint REFERENCES species(species_id),
     UNIQUE(owner_subject,client_key),CHECK((request_status='Approved')=(approved_species_id IS NOT NULL))
   )`);
+  await pool.query("CREATE TABLE plant_submission_receipt(owner_subject text NOT NULL,client_key text NOT NULL,payload_hash text NOT NULL,result jsonb NOT NULL,PRIMARY KEY(owner_subject,client_key))");
   const roles = { officer: "Conservation Officer", second: "Conservation Officer", bot: "Botanist", admin: "Administrator" };
   const tokens = Object.fromEntries(Object.keys(roles).map((key, i) => [key, String(i + 1).repeat(64)]));
   const auth = {
@@ -56,17 +57,21 @@ test("reconciled species requests: authoritative linkage and dependency guards",
   };
   const photo = await sharp({ create: { width: 2, height: 2, channels: 3, background: "green" } }).jpeg().toBuffer();
   let serial = 0;
-  async function fixture({ status = "Pending Review", owner = "bot", request = true } = {}) {
+  async function fixture({ status = "Pending Review", owner = "bot", request = true, provenance = true } = {}) {
     const n = ++serial;
     const species = (await pool.query(`INSERT INTO species(scientific_name,common_name,rbac_data) VALUES($1,'Common','{"approvalStatus":"Pending Review"}') RETURNING species_id`, [`Species ${n}`])).rows[0].species_id;
     if (!request || status === "Approved") await pool.query("UPDATE species SET rbac_data='{}' WHERE species_id=$1", [species]);
     const plant = (await pool.query("INSERT INTO plant_record(species_id,registered_subject,qr_token) VALUES($1,$2,$3) RETURNING plant_id", [species, `staff:${owner}`, randomUUID()])).rows[0].plant_id;
-    const observation = randomUUID();
-    await pool.query("INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES($1,$2,$3,'Pending Review',$4,$5)", [observation, plant, `staff:${owner}`, { heightCm: 5, latitude: 0, longitude: 0 }, randomUUID()]);
+    const observation = randomUUID(), clientKey = randomUUID();
+    await pool.query("INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES($1,$2,$3,'Pending Review',$4,$5)", [observation, plant, `staff:${owner}`, { heightCm: 5, latitude: 0, longitude: 0 }, clientKey]);
     if (request) await pool.query(`INSERT INTO species_request_submission
       (request_id,owner_subject,client_key,payload_hash,scientific_name,common_name,genus_name,family_name,conservation_status,description,habitat,photo,request_status,proposed_species_id,approved_species_id)
       VALUES($1,$2,$3,'hash','Proposed','Common','Genus','Family','Least Concern','Description','Habitat',$4,$5,$6,$7)`,
-      [n, `staff:${owner}`, randomUUID(), photo, status, species, status === "Approved" ? species : null]);
+      [n, `staff:${owner}`, clientKey, photo, status, species, status === "Approved" ? species : null]);
+    // Match the atomic submission pipeline: the request has its own image asset.
+    if (request) await pool.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,$5,'image/jpeg',$6)",
+      [randomUUID(),species,`staff:${owner}`,`${clientKey}:species-photo`,status === 'Approved',photo]);
+    if (provenance) await pool.query("INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES($1,$2,'hash',$3)", [`staff:${owner}`, clientKey, { id: observation, plant_id: plant, species_id: species, species_request_id: request ? n : null }]);
     return { request: n, species: String(species), plant, observation };
   }
   const observation = async f => (await call(`/observations/${f.observation}`)).data.observation;
@@ -109,17 +114,20 @@ test("reconciled species requests: authoritative linkage and dependency guards",
   });
   await t.test("mismatched approval and ambiguous foreign keys fail closed", async () => {
     const f = await fixture({status: "Approved"});
-    const other = await fixture({request: false});
+    const other = await fixture({request: false, provenance: false});
     await pool.query("UPDATE species_request_submission SET approved_species_id=$1 WHERE request_id=$2", [other.species, f.request]);
     assert.equal((await plantDecision(f)).status, 409);
     assert.equal((await plantDecision(other)).status, 409);
-    assert.equal((await observation(other)).species_request.request_status, "Inconsistent");
+    assert.equal((await observation(other)).species_request, null);
     const pending = await fixture();
     await pool.query(`INSERT INTO species_request_submission
       (request_id,owner_subject,client_key,payload_hash,scientific_name,common_name,genus_name,family_name,conservation_status,description,habitat,photo,proposed_species_id)
       SELECT $1,owner_subject,$2,payload_hash,'Different',common_name,genus_name,family_name,conservation_status,description,habitat,photo,proposed_species_id
       FROM species_request_submission WHERE request_id=$3`, [++serial, randomUUID(), pending.request]);
-    assert.deepEqual((await observation(pending)).species_request, {request_status: "Ambiguous"});
+    assert.equal((await observation(pending)).species_request.request_status, "Pending Review");
+    // A second species FK is not proof of origin; conflicting receipts are truly ambiguous.
+    await pool.query("INSERT INTO plant_submission_receipt SELECT owner_subject,client_key||'-ambiguous',payload_hash,result FROM plant_submission_receipt WHERE result->>'id'=$1", [pending.observation]);
+    assert.equal((await observation(pending)).species_request, null);
     assert.equal((await plantDecision(pending)).status, 409);
     assert.equal((await decision(pending, "Approved")).status, 409);
   });
@@ -131,6 +139,24 @@ test("reconciled species requests: authoritative linkage and dependency guards",
     await pool.query("UPDATE species_request_submission SET proposed_species_id=NULL WHERE request_id=$1", [approved.request]);
     assert.equal((await observation(approved)).species_request_id, String(approved.request));
     assert.equal((await plantDecision(approved)).status, 200);
+  });
+  await t.test("missing request rows and invalid receipt bindings cannot unlock review", async () => {
+    const missing = await fixture();
+    await pool.query("UPDATE plant_submission_receipt SET result=jsonb_set(result,'{species_request_id}','999999') WHERE result->>'id'=$1", [missing.observation]);
+    assert.equal((await observation(missing)).species_request.request_status, "Unavailable");
+    assert.equal((await plantDecision(missing)).status, 409);
+    const invalid = await fixture({ request: false });
+    await pool.query("UPDATE plant_submission_receipt SET result=jsonb_set(result,'{species_id}','999999') WHERE result->>'id'=$1", [invalid.observation]);
+    assert.equal((await observation(invalid)).species_request, null);
+    assert.equal((await plantDecision(invalid)).status, 409);
+  });
+  await t.test("legacy records never acquire a fabricated request, while unresolved guards remain closed", async () => {
+    const legacy = await fixture({ provenance: false });
+    assert.equal((await observation(legacy)).species_request, null);
+    assert.equal((await plantDecision(legacy)).status, 409);
+    const ordinary = await fixture({ request: false, provenance: false });
+    assert.equal((await observation(ordinary)).species_request, null);
+    assert.equal((await plantDecision(ordinary)).status, 200);
   });
   await t.test("duplicate names prevent proposed approval; audit failures roll back", async () => {
     const f = await fixture();

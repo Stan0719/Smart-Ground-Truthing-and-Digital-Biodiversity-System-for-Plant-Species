@@ -19,9 +19,11 @@ import {
   getSpeciesBySlug,
 } from "../data/mockData";
 import { useFocusEffect } from "@react-navigation/native";
-import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantRecords, fetchSpeciesCatalog } from "../utils/plantApi";
+import { fetchPlantRecords, fetchSpeciesCatalog, getPlantDisplayObservation } from "../utils/plantApi";
+import { getPlantCardZoneLabel } from "../utils/plantCardDisplay";
 import RefreshButton from "../components/RefreshButton";
+import FavouriteHeart from "../components/FavouriteHeart";
+import useVisitorFavourites from "../hooks/useVisitorFavourites";
 
 
 const healthOptions = [
@@ -71,6 +73,8 @@ export default function Species({
 
   const { slug, speciesId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const isVisitor = user?.role?.toLowerCase() === "visitor";
+  const favourites = useVisitorFavourites(user);
 
   const [selectedSpecies, setSelectedSpecies] = useState(
     route.params?.species || getSpeciesBySlug(slug) || null
@@ -153,6 +157,7 @@ export default function Species({
 
     const filtered = speciesPlants.filter(
       (plant) => {
+        const observation = getPlantDisplayObservation(plant);
 
         const matchesSearch =
           !query ||
@@ -164,13 +169,13 @@ export default function Species({
         const matchesHealth =
           !isBotanist ||
           healthFilter === "All" ||
-          plant.latestApproved?.healthStatus ===
+          (observation?.healthStatus || "Not recorded") ===
             healthFilter;
 
 
         const matchesLifeStage =
           lifeStageFilter === "All" ||
-          plant.latestApproved?.lifeStage ===
+          (observation?.lifeStage || "Not recorded") ===
             lifeStageFilter;
 
 
@@ -300,10 +305,10 @@ export default function Species({
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => void loadSpeciesPlants(true)}
-          tintColor="#315B49"
-          colors={["#315B49"]}
+          refreshing={refreshing || favourites.refreshing}
+          onRefresh={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
+          tintColor="#468585"
+          colors={["#468585"]}
         />
       }
     >
@@ -329,8 +334,8 @@ export default function Species({
         <View style={styles.headingRow}>
           <Text style={styles.heading}>{t("plant.allVerifiedPlants")}</Text>
           <RefreshButton
-            onPress={() => void loadSpeciesPlants(true)}
-            loading={loading || refreshing}
+            onPress={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
+            loading={loading || refreshing || favourites.refreshing}
             label={t("common.refresh")}
             testID="plant-list-refresh"
           />
@@ -348,6 +353,8 @@ export default function Species({
 
         {loading && <Text style={{ marginTop: 8, color: "#52665C" }}>{t("plant.loadingPlantRecords")}</Text>}
         {!!errorMessage && <Text style={{ marginTop: 8, color: "#B42318" }}>{translateUIMessage(errorMessage)}</Text>}
+        {!!favourites.mutationError && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(favourites.mutationError)}</Text>}
+        {!!favourites.error && !favourites.loading && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(favourites.error)}</Text>}
 
       </View>
 
@@ -500,6 +507,8 @@ export default function Species({
               plant={plant}
               navigation={navigation}
               user={user}
+              isVisitor={isVisitor}
+              favourites={favourites}
             />
           ))
 
@@ -624,28 +633,27 @@ function PlantCard({
   plant,
   navigation,
   user,
+  isVisitor,
+  favourites,
 }) {
   useAppTranslation();
+  const [failedImageKey, setFailedImageKey] = useState(null);
 
-  const species = plant.species || getSpeciesBySlug(plant.speciesSlug) || {
-    name: plant.commonName,
-    genus: plant.genus,
-  };
-  const imageSource = getSpeciesImageSource(species);
+  const sourceKey = (source) => typeof source === "number" ? `local:${source}` : source?.uri || null;
+  const imageSource = plant.plantImage && sourceKey(plant.plantImage) !== failedImageKey ? plant.plantImage : null;
+  const observation = getPlantDisplayObservation(plant);
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const zoneLabel = getPlantCardZoneLabel(plant, user?.role, {
+    restricted: t("map.locationRestricted"),
+    missing: t("plant.notRecorded"),
+  });
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() =>
-        navigation.navigate(
-          "PlantDetails",
-          {
-            plantId: plant.plantId,
-          }
-        )
-      }
-    >
+    <View style={styles.card}>
+      <TouchableOpacity
+        activeOpacity={0.82}
+        onPress={() => navigation.navigate("PlantDetails", { plantId: plant.plantId })}
+      >
 
       {/* IMAGE */}
       <View style={styles.cardImage}>
@@ -655,12 +663,7 @@ function PlantCard({
             source={imageSource}
             style={styles.plantImage}
             resizeMode="cover"
-            onError={(error) => {
-              console.log(
-                "Plant image error:",
-                error.nativeEvent
-              );
-            }}
+            onError={() => setFailedImageKey(sourceKey(imageSource))}
           />
         ) : (
           <Text style={styles.plantIcon}>
@@ -668,11 +671,12 @@ function PlantCard({
           </Text>
         )}
 
-        {isBotanist && (
-          <Text style={styles.zoneBadge}>
-            {plant.location?.zone || t("plant.notRecorded")}
+        <View pointerEvents="none" style={styles.imageBadges}>
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, plantStatusStyle(plant.currentStatus)]}>
+            {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
-        )}
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.zoneBadge]}>{zoneLabel}</Text>
+        </View>
 
       </View>
 
@@ -680,13 +684,11 @@ function PlantCard({
       {/* CONTENT */}
       <View style={styles.cardContent}>
 
-        <Text style={styles.plantId}>
-          {plant.plantId}
-        </Text>
-
         <Text style={styles.species}>
-          {species?.name || t("plant.plantRecord")}
+          {plant.plantScientificName || t("plant.unnamedPlant")}
         </Text>
+        <Text style={styles.plantId}>{t("plantDetail.plantId")}: {plant.plantId}</Text>
+        {!!plant.plantCommonName && <Text style={styles.infoValue}>{plant.plantCommonName}</Text>}
 
 
         <View style={styles.infoGrid}>
@@ -695,12 +697,12 @@ function PlantCard({
             <>
               <Info
                 label={t("plant.health")}
-                value={plant.latestApproved?.healthStatus || t("plant.notRecorded")}
+                value={observation?.healthStatus || t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lifeStage2")}
-                value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
+                value={observation?.lifeStage || t("plant.notRecorded")}
               />
 
               <Info
@@ -710,35 +712,38 @@ function PlantCard({
 
               <Info
                 label={t("plant.height")}
-                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
+                value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
               />
+              <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
+              <Info label={t("plant.locationZone")} value={zoneLabel} />
             </>
           ) : (
             <>
               <Info
                 label={t("plant.height")}
-                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
+                value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lifeStage2")}
-                value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
-              />
-
-              <Info
-                label={t("plant.genus")}
-                value={species?.genus || "-"}
+                value={observation?.lifeStage || t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lastVerified")}
                 value={formatDate(plant.latestApproved?.date)}
               />
+              <Info label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
+              <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
+              <Info label={t("plant.locationZone")} value={zoneLabel} />
             </>
           )}
 
         </View>
 
+        {isBotanist && plant.latestSubmission?.status ? (
+          <Text style={styles.infoValue}>{t("botanistRecords.observationStatus")}{translateLabel(plant.latestSubmission.status)}</Text>
+        ) : null}
 
         <View style={styles.viewRecord}>
 
@@ -748,8 +753,26 @@ function PlantCard({
 
       </View>
 
-    </TouchableOpacity>
+      </TouchableOpacity>
+      {isVisitor && <FavouriteHeart
+        active={favourites.isFavourite("plant", plant.plantId)}
+        pending={favourites.isPending("plant", plant.plantId)}
+        disabled={favourites.loading}
+        onPress={() => void favourites.toggle("plant", plant.plantId)}
+        style={styles.plantHeart}
+      />}
+    </View>
   );
+}
+
+function plantStatusStyle(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "approved": return styles.statusApproved;
+    case "pending review": return styles.statusPending;
+    case "rejected": return styles.statusRejected;
+    case "correction required": return styles.statusCorrection;
+    default: return styles.statusOther;
+  }
 }
 
 
@@ -792,13 +815,13 @@ const styles = StyleSheet.create({
 
   page: {
     flex: 1,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
 
   header: {
     padding: 22,
     paddingTop: 50,
-    backgroundColor: "#E8EFE3",
+    backgroundColor: "#E7F2E2",
   },
 
   headerToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
@@ -816,7 +839,7 @@ const styles = StyleSheet.create({
   },
 
   heroBackText: {
-    color: "#315B49",
+    color: "#468585",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -827,7 +850,7 @@ const styles = StyleSheet.create({
     },
 
   label: {
-    color: "#50A078",
+    color: "#468585",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 1.8,
@@ -836,21 +859,21 @@ const styles = StyleSheet.create({
   heading: {
     flexShrink: 1,
     marginTop: 7,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 30,
     fontWeight: "600",
   },
 
   speciesName: {
     marginTop: 7,
-    color: "#7C6955",
+    color: "#6D7F75",
     fontSize: 15,
     fontStyle: "italic",
   },
 
   count: {
     marginTop: 10,
-    color: "#6A7B73",
+    color: "#6D7F75",
     fontSize: 11,
   },
 
@@ -869,11 +892,11 @@ search: {
   paddingHorizontal: 12,
   paddingVertical: 11,
   borderWidth: 1,
-  borderColor: "#D9D9CF",
-  borderRadius: 11,
+  borderColor: "#E2EDE0",
+  borderRadius: 12,
   backgroundColor: "#FFFFFF",
-  color: "#254B42",
-  fontSize: 13,
+  color: "#234B3A",
+  fontSize: 14,
 },
 
 filterToggle: {
@@ -883,17 +906,17 @@ filterToggle: {
   paddingHorizontal: 14,
   paddingVertical: 10,
   borderWidth: 1,
-  borderColor: "#315B49",
-  borderRadius: 11,
+  borderColor: "#468585",
+  borderRadius: 12,
   backgroundColor: "#FFFFFF",
 },
 
   filterToggleActive: {
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   filterText: {
-    color: "#315B49",
+    color: "#468585",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -908,6 +931,8 @@ filterToggle: {
     padding: 15,
     borderRadius: 15,
     backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2EDE0",
   },
 
   filterGroup: {
@@ -916,7 +941,7 @@ filterToggle: {
 
   filterLabel: {
     marginBottom: 5,
-    color: "#63736A",
+    color: "#6D7F75",
     fontSize: 10,
     fontWeight: "700",
   },
@@ -928,7 +953,7 @@ filterToggle: {
     paddingHorizontal: 12,
     paddingVertical: 11,
     borderWidth: 1,
-    borderColor: "#D9D9CF",
+    borderColor: "#E2EDE0",
     borderRadius: 9,
   },
 
@@ -949,7 +974,7 @@ filterToggle: {
   },
 
   optionSelected: {
-    backgroundColor: "#DFE8DA",
+    backgroundColor: "#E1F0EA",
   },
 
   optionText: {
@@ -958,7 +983,7 @@ filterToggle: {
   },
 
   optionTextSelected: {
-    color: "#254B42",
+    color: "#234B3A",
     fontWeight: "700",
   },
 
@@ -968,7 +993,7 @@ filterToggle: {
     paddingHorizontal: 15,
     paddingVertical: 9,
     borderRadius: 999,
-    backgroundColor: "#35652F",
+    backgroundColor: "#468585",
   },
 
   clearText: {
@@ -983,14 +1008,20 @@ filterToggle: {
   },
 
   card: {
+    position: "relative",
     marginBottom: 14,
     overflow: "hidden",
     borderRadius: 16,
     backgroundColor: "#FFFFFF",
-    elevation: 3,
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2EDE0",
+    elevation: 1,
+    shadowColor: "#234B3A",
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
   },
+
+  plantHeart: { position: "absolute", top: 8, right: 8, backgroundColor: "#FFFFFFE8" },
 
   cardImage: {
     height: 135,
@@ -1000,37 +1031,37 @@ filterToggle: {
     backgroundColor: "#DCE8D6",
     },
 
+  imageBadges: { position: "absolute", top: 9, left: 10, right: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 6 },
+  imageBadge: { maxWidth: "48%", overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, color: "#FFFFFF", fontSize: 9, lineHeight: 12, fontWeight: "700", textAlign: "center" },
+  statusBadge: { backgroundColor: "#315B49" },
+  statusApproved: { backgroundColor: "#23734D" },
+  statusPending: { backgroundColor: "#A76512" },
+  statusRejected: { backgroundColor: "#A53A35" },
+  statusCorrection: { backgroundColor: "#8C5D20" },
+  statusOther: { backgroundColor: "#52645A" },
+
     plantIcon: {
     fontSize: 45,
     },
 
-  zoneBadge: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: "#143625DD",
-    color: "#FFFFFF",
-    fontSize: 9,
-    fontWeight: "700",
-  },
+  zoneBadge: { backgroundColor: "#143625DD" },
 
   cardContent: {
     padding: 14,
   },
 
   plantId: {
-    color: "#234A3C",
-    fontSize: 16,
-    fontWeight: "700",
+    marginTop: 4,
+    color: "#7C8982",
+    fontSize: 11,
+    fontWeight: "600",
   },
 
   species: {
-    marginTop: 3,
-    color: "#7C8982",
-    fontSize: 10,
+    color: "#234B3A",
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: "700",
   },
 
   infoGrid: {
@@ -1053,7 +1084,7 @@ filterToggle: {
 
   infoValue: {
     marginTop: 2,
-    color: "#315447",
+    color: "#234B3A",
     fontSize: 10,
     fontWeight: "600",
   },
@@ -1066,7 +1097,7 @@ filterToggle: {
   },
 
   viewRecordText: {
-    color: "#315B49",
+    color: "#468585",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -1076,7 +1107,7 @@ filterToggle: {
     alignItems: "center",
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#BDC8BD",
+    borderColor: "#E2EDE0",
     borderRadius: 15,
   },
 
@@ -1086,7 +1117,7 @@ filterToggle: {
 
   emptyTitle: {
     marginTop: 10,
-    color: "#254B42",
+    color: "#234B3A",
     fontSize: 15,
     fontWeight: "600",
     textAlign: "center",
@@ -1096,7 +1127,7 @@ filterToggle: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
 
   icon: {
@@ -1105,22 +1136,25 @@ filterToggle: {
 
   title: {
     marginTop: 12,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 24,
     fontWeight: "600",
   },
 
   button: {
+    minHeight: 44,
     marginTop: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: "#315B49",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "#468585",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   buttonText: {
     color: "#FFFFFF",
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: "700",
   },
 

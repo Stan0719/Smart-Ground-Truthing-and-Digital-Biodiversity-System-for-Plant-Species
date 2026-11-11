@@ -5,6 +5,7 @@ import App from './App.vue'
 import { i18n } from './i18n'
 import router from './router'
 import './style.css'
+import './styles/dashboard-buttons.css'
 
 
 const app = createApp(App)

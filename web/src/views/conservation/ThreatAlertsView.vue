@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
+import { monitoringDate, monitoringLabels } from '../../utils/officerMonitoringDisplay'
 import AppModal from '../../components/conservation/AppModal.vue'
 import { useConservationText } from '../../composables/useConservationText'
 import { prototypeCameraEvents } from '../../data/cameraMonitoringPrototype'
 import type { CameraEvent } from '../../types/cameraMonitoring'
 import {
-  CANONICAL_ALERT_CAP,
   loadCanonicalAlerts,
   saveAlertResponse,
   ThreatAlertApiError,
@@ -14,7 +15,8 @@ import {
   type CanonicalThreatAlert,
 } from '../../services/threatAlerts'
 
-const { ct, dt } = useConservationText()
+const { ct, locale } = useConservationText()
+const dt = (value?: string | null) => monitoringDate(value, locale.value)
 const route = useRoute()
 const alerts = ref<CanonicalThreatAlert[]>([])
 const selectedAlert = ref<CanonicalThreatAlert | null>(null)
@@ -31,7 +33,13 @@ const responseError = ref('')
 const responseFeedback = ref('')
 const isSavingResponse = ref(false)
 
-const formatAlertId = (id: string) => id
+const loadedAlerts = computed(() => [...alerts.value, ...(selectedAlert.value ? [selectedAlert.value] : [])])
+const alertLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.id)))
+const deviceLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.deviceId)))
+const readingLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.readingId)))
+const cameraLabels = computed(() => monitoringLabels([...loadedAlerts.value.map(item => item.cameraId), ...prototypeCameraEvents.map(item => item.cameraId)]))
+const subjectLabels = computed(() => monitoringLabels(loadedAlerts.value.flatMap(item => item.responses.map(response => response.officerSubject))))
+const formatAlertId = (id: string) => alertLabels.value.get(id) || id
 const formatConfidence = (value: string | number | null) => {
   if (value === null || value === '') return 'Not available'
   const confidence = Number(value)
@@ -177,10 +185,9 @@ const submitResponse = async () => {
   </section>
 
   <section class="summary-grid">
-    <article v-for="card in cards" :key="String(card[0])" class="summary-card">
+    <article v-for="card in cards" :key="String(card[0])" class="summary-card alert-summary-card" :data-status="String(card[0])">
       <p>{{ ct(String(card[0])) }}</p>
       <strong>{{ card[1] }}</strong>
-      <small>{{ ct('PostgreSQL alert register') }}</small>
     </article>
   </section>
 
@@ -213,24 +220,21 @@ const submitResponse = async () => {
     <header class="panel-header">
       <div>
         <h2>{{ ct('Suspicious Camera Events') }}</h2>
-        <span class="panel-description">{{
-          ct('Frontend prototype events · not persisted or connected to the AI module')
-        }}</span>
       </div>
     </header>
-    <div class="table-scroll">
-      <table>
+    <div class="table-scroll officer-table-scroll" role="region" :aria-label="ct('Suspicious Camera Events')" tabindex="0">
+        <table class="officer-data-table camera-event-table"><colgroup><col class="column-identifier" /><col class="column-description" /><col class="column-plant" /><col class="column-identifier" /><col class="column-metric" /><col class="column-status" /><col class="column-time" /><col class="column-status" /><col class="column-actions" /></colgroup>
         <thead>
           <tr>
-            <th>{{ ct('Event ID') }}</th>
-            <th>{{ ct('Event Type') }}</th>
-            <th>{{ ct('Plant ID') }}</th>
-            <th>{{ ct('Camera ID') }}</th>
-            <th>{{ ct('Detection Confidence') }}</th>
-            <th>{{ ct('Status') }}</th>
-            <th>{{ ct('Detected At') }}</th>
-            <th>{{ ct('Recording') }}</th>
-            <th>{{ ct('Actions') }}</th>
+            <th scope="col">{{ ct('Event ID') }}</th>
+            <th scope="col">{{ ct('Event Type') }}</th>
+            <th scope="col">{{ ct('Plant ID') }}</th>
+            <th scope="col">{{ ct('Camera ID') }}</th>
+            <th scope="col">{{ ct('Detection Confidence') }}</th>
+            <th scope="col">{{ ct('Status') }}</th>
+            <th scope="col">{{ ct('Detected At') }}</th>
+            <th scope="col">{{ ct('Recording') }}</th>
+            <th scope="col">{{ ct('Actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -266,40 +270,37 @@ const submitResponse = async () => {
   <section v-else class="panel">
     <header class="panel-header">
       <div>
-        <h2>{{ ct('PostgreSQL Threat Alerts') }}</h2>
-        <span class="panel-description"
-          >Canonical alerts and response records · up to {{ CANONICAL_ALERT_CAP }} each.</span
-        >
+        <h2>{{ ct('Threat Alerts') }}</h2>
       </div>
     </header>
     <p v-if="!filteredAlerts.length" class="state-message">No threat alerts found.</p>
-    <div v-else class="table-scroll">
-      <table>
+    <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="ct('Threat Alerts')" tabindex="0">
+        <table class="officer-data-table threat-alert-table"><colgroup><col class="column-id" /><col class="column-type" /><col class="column-plant" /><col class="column-name" /><col class="column-identifier" /><col class="column-identifier" /><col class="column-metric" /><col class="column-status" /><col class="column-status" /><col class="column-time" /><col class="column-actions" /></colgroup>
         <thead>
           <tr>
-            <th>{{ ct('Alert ID') }}</th>
-            <th>{{ ct('Alert Type') }}</th>
-            <th>{{ ct('Plant ID') }}</th>
-            <th>{{ ct('Species') }}</th>
-            <th>{{ ct('Reading Reference') }}</th>
-            <th>{{ ct('Device') }}</th>
-            <th>{{ ct('Detection Confidence') }}</th>
-            <th>{{ ct('Severity') }}</th>
-            <th>{{ ct('Status') }}</th>
-            <th>{{ ct('Detected At') }}</th>
-            <th>{{ ct('Actions') }}</th>
+            <th scope="col">{{ ct('Alert ID') }}</th>
+            <th scope="col">{{ ct('Alert Type') }}</th>
+            <th scope="col">{{ ct('Plant ID') }}</th>
+            <th scope="col">{{ ct('Species') }}</th>
+            <th scope="col">{{ ct('Reading Reference') }}</th>
+            <th scope="col">{{ ct('Device') }}</th>
+            <th scope="col">{{ ct('Detection Confidence') }}</th>
+            <th scope="col">{{ ct('Severity') }}</th>
+            <th scope="col">{{ ct('Status') }}</th>
+            <th scope="col">{{ ct('Detected At') }}</th>
+            <th scope="col">{{ ct('Actions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="alert in filteredAlerts" :key="alert.id">
             <td>
-              <strong>{{ formatAlertId(alert.id) }}</strong>
+              <strong><MonitoringIdentifier :value="alert.id" :labels="alertLabels" /></strong>
             </td>
             <td>{{ alert.metric }}</td>
             <td>—</td>
             <td><em>Not available</em></td>
-            <td>{{ alert.readingId ?? '—' }}</td>
-            <td>{{ alert.deviceId }}</td>
+            <td><MonitoringIdentifier :value="alert.readingId" :labels="readingLabels" /></td>
+            <td><MonitoringIdentifier :value="alert.deviceId" :labels="deviceLabels" /></td>
             <td>Not available</td>
             <td>
               <span class="badge unavailable">Not available</span>
@@ -387,18 +388,19 @@ const submitResponse = async () => {
   <AppModal
     v-if="selectedAlert"
     :title="`${formatAlertId(selectedAlert.id)} · ${selectedAlert.metric}`"
-    :subtitle="`${selectedAlert.deviceId} · canonical alert`"
+    :subtitle="`${deviceLabels.get(selectedAlert.deviceId) || selectedAlert.deviceId} · canonical alert`"
     wide
     @close="selectedAlert = null"
   >
+    <MonitoringIdentifier :value="selectedAlert.id" :labels="alertLabels" />
     <dl class="detail-list real-alert-details">
       <div>
         <dt>{{ ct('Reading Reference') }}</dt>
-        <dd>{{ selectedAlert.readingId ?? '—' }}</dd>
+        <dd><MonitoringIdentifier :value="selectedAlert.readingId" :labels="readingLabels" /></dd>
       </div>
       <div>
         <dt>{{ ct('Device') }}</dt>
-        <dd>{{ selectedAlert.deviceId }}</dd>
+        <dd><MonitoringIdentifier :value="selectedAlert.deviceId" :labels="deviceLabels" /></dd>
       </div>
       <div>
         <dt>{{ ct('Detection Confidence') }}</dt>
@@ -426,7 +428,7 @@ const submitResponse = async () => {
       </div>
       <div class="wide">
         <dt>{{ ct('Camera Reference') }}</dt>
-        <dd>{{ selectedAlert.cameraId ?? '—' }}</dd>
+        <dd><MonitoringIdentifier :value="selectedAlert.cameraId" :labels="cameraLabels" /></dd>
       </div>
     </dl>
     <h3>{{ ct('Response History') }}</h3>
@@ -437,7 +439,7 @@ const submitResponse = async () => {
     <dl v-else class="detail-list real-alert-details">
       <div v-for="response in selectedAlert.responses" :key="response.id" class="wide">
         <dt>{{ response.status }} · {{ dt(response.createdAt) }}</dt>
-        <dd>{{ response.note }} · {{ response.officerSubject }}</dd>
+        <dd>{{ response.note }} · <MonitoringIdentifier :value="response.officerSubject" :labels="subjectLabels" /></dd>
       </div>
     </dl>
     <label class="field">
@@ -466,6 +468,12 @@ const submitResponse = async () => {
 </template>
 
 <style scoped>
+.alert-summary-card { --alert-card-background: #e8f0f5; --alert-card-ink: #315d78; padding: 16px; border: 1px solid var(--alert-card-ink); background: var(--alert-card-background); color: var(--alert-card-ink); }
+.alert-summary-card[data-status="Active Alerts"] { --alert-card-background: #fbe8e5; --alert-card-ink: #a33f35; }
+.alert-summary-card[data-status="New Alerts"] { --alert-card-background: #e8f0f5; --alert-card-ink: #315d78; }
+.alert-summary-card[data-status="Under Review"] { --alert-card-background: #fff1db; --alert-card-ink: #926119; }
+.alert-summary-card[data-status="Resolved"] { --alert-card-background: #e7f3e9; --alert-card-ink: #287347; }
+.officer-layout.officer-layout.officer-layout .alert-summary-card :is(p, strong) { color: inherit; }
 .camera-alert-panel {
   margin-bottom: 18px;
 }
@@ -521,3 +529,5 @@ a.action-button {
   margin-top: 0;
 }
 </style>
+
+<style src="../../styles/officer-data-tables.css"></style>

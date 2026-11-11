@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { createQRInventoryLoader, normalizeQRCodes } from "../utils/qrInventory.js";
-import { buildQRPrintHtml, qrImageData } from "../utils/qrPrint.js";
+import { A4_PRINT_OPTIONS, buildQRPrintHtml, buildQRSvg } from "../utils/qrPrint.js";
 
 const row = (id, extra = {}) => ({ qr_id: id, qr_code: `token-${id}`, plant_id: null, status: "generated", ...extra });
 const payload = (...records) => ({ qr_codes: records });
+const qrcodeCore = createRequire(import.meta.url)("qrcode/lib/core/qrcode");
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -123,10 +125,11 @@ test("an older empty response cannot overwrite an already completed newer visit"
 
 test("normalization keeps assigned records, deduplicates and sorts bigint identifiers stably", () => {
   const result = normalizeQRCodes(payload(
-    row("9007199254740993"), row("9007199254740992"), row(9), row(9),
+    row("9007199254740993"), row("9007199254740992"), row(9), row(9), row(12, { status: "retired" }),
     row(10, { plant_id: 4, status: "assigned" }), row(11, { plant_id: 5, status: "active" }),
   ));
-  assert.deepEqual(result.map((qr) => qr.id), ["9007199254740993", "9007199254740992", "11", "10", "9"]);
+  assert.deepEqual(result.map((qr) => qr.id), ["9007199254740993", "9007199254740992", "12", "11", "10", "9"]);
+  assert.equal(result.find((qr) => qr.id === "12").status, "retired");
   assert.equal(result.find((qr) => qr.id === "10").plantId, "4");
   assert.equal(result.find((qr) => qr.id === "9").label, "QR-0009");
   assert.throws(() => normalizeQRCodes(payload(row(1), row(1, { qr_code: "different" }))), /conflicting/);
@@ -154,32 +157,60 @@ test("confirmed generation survives a failed read and invalidates older response
   assert.throws(() => loader.addGenerated(payload()), /did not return/);
 });
 
-test("print exports the selected SVG as an embedded high-resolution image", async () => {
-  const svg = { toDataURL(callback, options) {
-    assert.deepEqual(options, { width: 1024, height: 1024 });
-    callback("c2VsZWN0ZWQ=");
-  } };
-  const image = await qrImageData(svg);
-  const qr = normalizeQRCodes(payload(row(17, { plant_id: 8, status: "active" })))[0];
-  const html = buildQRPrintHtml([{ qr, image }]);
+test("confirmed deletion removes the item immediately and keeps it absent after refresh", async () => {
+  let serverRows = payload(row(1), row(2));
+  const loader = createQRInventoryLoader(() => serverRows, () => {});
+  await loader.refresh();
+  loader.removeDeleted("1");
+  assert.deepEqual(loader.getState().records.map((qr) => qr.id), ["2"]);
+  assert.equal(loader.getState().hasLoaded, true);
+  serverRows = payload(row(2));
+  assert.equal(await loader.refresh(), true);
+  assert.deepEqual(loader.getState().records.map((qr) => qr.id), ["2"]);
+});
+
+test("print builds a vector QR from the unchanged payload with A4 geometry", async () => {
+  const qrPayload = "original-payload-for-this-code";
+  const qr = normalizeQRCodes(payload(row(17, { qr_code: qrPayload, plant_id: 8, status: "active" })))[0];
+  const html = buildQRPrintHtml([{ qr }]);
   assert.match(html, /QR-0017/);
   assert.match(html, /Plant 8/);
-  assert.ok(html.includes('src="data:image/png;base64,c2VsZWN0ZWQ="'));
-  assert.equal(html.includes("http"), false);
-  assert.match(html, /section:last-child\{page-break-after:auto\}/);
+  assert.match(html, /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" class="qr-svg"/);
+  assert.match(html, /viewBox="0 0 \d+ \d+"/);
+  assert.match(html, /width="227" height="227"/);
+  assert.match(html, /fill="#fff"/);
+  assert.match(html, /fill="#000"/);
+  assert.doesNotMatch(html, /<img|data:image/);
+  assert.match(html, /size:A4 portrait;margin:10mm/);
+  assert.match(html, /\.qr-svg\{[^}]*width:60mm;height:60mm/);
+  assert.equal((html.match(/class="page"/g) || []).length, 1);
+  assert.doesNotMatch(html, /page-break-after\s*:\s*always|break-after\s*:\s*page/);
+  assert.equal(qr.value, qrPayload);
+  const expected = qrcodeCore.create(qrPayload, { errorCorrectionLevel: "M" }).modules;
+  const expectedPath = [];
+  for (let row = 0; row < expected.size; row++) {
+    for (let column = 0; column < expected.size; column++) {
+      if (expected.get(row, column)) expectedPath.push(`M${column + 4},${row + 4}h1v1h-1z`);
+    }
+  }
+  assert.ok(html.includes(`<path d="${expectedPath.join("")}" fill="#000"/>`));
+  assert.match(html, /font-size:24pt/);
+  assert.match(html, /font-size:14pt/);
+  assert.ok(Math.abs(A4_PRINT_OPTIONS.width - 595.28) < 0.02);
+  assert.ok(Math.abs(A4_PRINT_OPTIONS.height - 841.89) < 0.02);
 });
 
 test("print reports missing/invalid image exports, escapes labels and produces one page per tag", async () => {
-  await assert.rejects(qrImageData(null), /not ready/);
-  await assert.rejects(qrImageData({ toDataURL: (callback) => callback("") }), /Could not prepare/);
-  await assert.rejects(qrImageData({ toDataURL: () => { throw Error("Native export failed"); } }), /Native export failed/);
   assert.throws(() => buildQRPrintHtml([]), /Choose at least/);
-  assert.throws(() => buildQRPrintHtml([{ qr: {}, image: "https://outside.invalid/image" }]), /Invalid/);
+  assert.throws(() => buildQRSvg(""), /Invalid QR payload/);
   const html = buildQRPrintHtml([
-    { qr: { label: '<tag "one">', plantId: null }, image: "data:image/png;base64,YQ==" },
-    { qr: { label: "QR-0002", plantId: null }, image: "data:image/png;base64,Yg==" },
+    { qr: { label: '<tag "one">', value: "first-payload", plantId: null } },
+    { qr: { label: "QR-0002", value: "second-payload", plantId: null } },
   ]);
-  assert.equal((html.match(/<section>/g) || []).length, 2);
+  assert.equal((html.match(/class="page"/g) || []).length, 2);
+  assert.equal((html.match(/class="page" style="break-before:page;page-break-before:always"/g) || []).length, 1);
+  assert.doesNotMatch(html, /page-break-after\s*:\s*always|break-after\s*:\s*page/);
+  assert.equal((html.match(/class="qr-svg"/g) || []).length, 2);
   assert.ok(html.includes("&lt;tag &quot;one&quot;&gt;"));
   assert.equal(html.includes('<tag "one">'), false);
 });

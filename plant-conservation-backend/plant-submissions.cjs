@@ -1,6 +1,9 @@
 "use strict";
+const {rolesAvailable,validateRoles,recordRole}=require("./species-photo-library.cjs");
+const {setPointer}=require("./species-photo-provenance.cjs");
 const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
+const { originColumnAvailable } = require("./observation-origin.cjs");
 const { transaction, audit, subject, fail, text, id, fieldContent, assertNewSpecies, speciesRow } = require("./domain.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const canonical = (value) => Array.isArray(value) ? value.map(canonical)
@@ -12,7 +15,10 @@ async function preparePhoto(photo) {
   const bytes = Buffer.from(photo.base64, "base64");
   if (!bytes.length || bytes.length > 4194304) fail(413, "One of the photos exceeds 4 MB.");
   try {
-    return await sharp(bytes, { limitInputPixels: 24000000, failOn: "warning" }).rotate()
+    const image=sharp(bytes, { limitInputPixels: 24000000, failOn: "warning" });
+    const metadata=await image.metadata();
+    if(!['jpeg','png'].includes(metadata.format)||(metadata.pages||1)>1)throw Error('Unsupported image');
+    return await image.rotate()
       .resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
   } catch { fail(400, "Invalid or oversized photo. Choose a different image and retry."); }
 }
@@ -33,7 +39,8 @@ async function createSpecies(c, data, user) {
   await c.query("INSERT INTO rbac_species_visibility(species_id,visibility) VALUES($1,'protected')", [row.species_id]);
   return row.species_id;
 }
-function mountPlantSubmissions(app, { pool, allow }) {
+function mountPlantSubmissions(app, { pool, allow, officerNotifications = null }) {
+  app.get("/api/plant-submissions/capabilities",allow("plants.create"),async(_req,res)=>res.json({semantic_photo_roles_available:await rolesAvailable(pool),photo_roles:["whole_plant","leaf_close_up","stem_bark","flower_fruit","additional"]}));
   app.post("/api/plant-submissions", allow("plants.create"), async (req, res) => {
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b) || Object.keys(b).some((key) =>
@@ -53,6 +60,7 @@ function mountPlantSubmissions(app, { pool, allow }) {
       speciesData = Object.fromEntries(speciesFields.map((key) => [key, text(b.new_species[key], ["description", "habitat"].includes(key) ? 4000 : 200)]));
     } else id(String(b.species_id));
     const payloadHash = createHash("sha256").update(JSON.stringify(canonical(b))).digest("hex");
+    const semanticRoles = validateRoles(b.photos);
     const photos = [];
     for (const photo of b.photos) photos.push(await preparePhoto(photo));
     const speciesPhoto = speciesData ? await preparePhoto(b.new_species.photo) : null;
@@ -63,6 +71,7 @@ function mountPlantSubmissions(app, { pool, allow }) {
         if (previous.payload_hash !== payloadHash) fail(409, "This submission was already saved with different information. Reload the form before creating another plant.");
         return previous.result;
       }
+      if (semanticRoles.some(Boolean) && !await rolesAvailable(c)) fail(503,"Semantic photo roles require migration 015.");
       let speciesId;
       if (speciesData) speciesId = await createSpecies(c, speciesData, req.user);
       else { await speciesRow(c, b.species_id, req.user); speciesId = b.species_id; }
@@ -73,21 +82,31 @@ function mountPlantSubmissions(app, { pool, allow }) {
       await c.query("UPDATE public.qr_code SET plant_id=$1,status='assigned',assigned_at=CURRENT_TIMESTAMP WHERE qr_id=$2 AND plant_id IS NULL", [plant.plant_id, qr.qr_id]);
       await c.query("INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES($1,$2,$3,$4)", [plant.plant_id, b.latitude, b.longitude, b.accuracy_m ?? null]);
       const observationId = randomUUID();
-      await c.query("INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES($1,$2,$3,'Pending Review',$4,$5)", [observationId, plant.plant_id, subject(req.user), content, clientKey]);
-      for (const [index, bytes] of photos.entries())
-        await c.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES($1,$2,$3,$4,$5,FALSE,'image/jpeg',$6)", [randomUUID(), plant.plant_id, subject(req.user), `${clientKey}:photo:${index}`, observationId, bytes]);
+      const withOrigin = await originColumnAvailable(c);
+      await c.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key${withOrigin ? ",origin_type" : ""}) VALUES($1,$2,$3,'Pending Review',$4,$5${withOrigin ? ",'initial_registration'" : ""})`, [observationId, plant.plant_id, subject(req.user), content, clientKey]);
+      let wholePlantAsset = null;
+      for (const [index, bytes] of photos.entries()) {
+        const assetId=randomUUID();
+        await c.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES($1,$2,$3,$4,$5,FALSE,'image/jpeg',$6)", [assetId, plant.plant_id, subject(req.user), `${clientKey}:photo:${index}`, observationId, bytes]);
+        await recordRole(c,{assetId,plantId:plant.plant_id,observationId,role:semanticRoles[index],owner:subject(req.user)});
+        if(semanticRoles[index]==='whole_plant')wholePlantAsset=assetId;
+      }
       let requestId = null;
       if (speciesData) {
         const request = (await c.query(`INSERT INTO species_request_submission(owner_subject,client_key,payload_hash,${speciesFields.join(",")},photo,proposed_species_id)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING request_id`, [subject(req.user), clientKey, payloadHash, ...speciesFields.map((key) => speciesData[key]), speciesPhoto, speciesId])).rows[0];
         requestId = request.request_id;
-        await c.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,FALSE,'image/jpeg',$5)", [randomUUID(), speciesId, subject(req.user), `${clientKey}:species-photo`, speciesPhoto]);
+        const photoId=randomUUID();
+        await c.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,FALSE,'image/jpeg',$5)", [photoId, speciesId, subject(req.user), `${clientKey}:species-photo`, speciesPhoto]);
+        await setPointer(c,requestId,photoId);
+        if(wholePlantAsset)await c.query("INSERT INTO species_request_proposed_image(request_id,asset_id) VALUES($1,$2)",[requestId,wholePlantAsset]);
         await audit(c, req.user, "species_requested", requestId);
       }
       await audit(c, req.user, "plant_submitted", plant.plant_id);
       const response = { plant_id: plant.plant_id, id: observationId, species_id: speciesId, qr_token: qr.qr_code,
         status: "Pending Review", species_request_id: requestId };
       await c.query("INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES($1,$2,$3,$4)", [subject(req.user), clientKey, payloadHash, response]);
+      if (officerNotifications) await officerNotifications.enqueue(c, observationId, requestId !== null);
       return response;
     });
     res.status(201).json(result);

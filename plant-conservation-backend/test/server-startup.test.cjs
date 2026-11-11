@@ -23,17 +23,21 @@ test("actual startup code handles an occupied port without dereferencing a null 
   const occupied = createServer().listen(0, "127.0.0.1"); await once(occupied, "listening");
   t.after(() => new Promise((r) => occupied.close(r)));
   const source = readFileSync(join(__dirname, "../server.js"), "utf8");
-  const begin = source.indexOf("  const app = createPlantApp({ auth, pool });", source.indexOf("async function start()"));
+  const begin = source.indexOf("  const officerNotifications = createOfficerNotificationDelivery", source.indexOf("async function start()"));
+  assert.ok(begin >= 0, 'production notification/bootstrap wiring must be present');
   const code = source.slice(begin, source.indexOf("  for (const signal", begin));
-  const logs = []; let authClosed = false, poolClosed = false;
+  const logs = []; let authClosed = false, poolClosed = false, workerStarted = false;
   const processState = { env: { PORT: String(occupied.address().port), HOST: "127.0.0.1" }, exitCode: 0 };
-  const server = new Function("createPlantApp", "auth", "pool", "process", "createServer", "console", code + "\nreturn server;")(
+  const server = new Function("createPlantApp", "auth", "pool", "process", "createServer", "console", "createOfficerNotificationDelivery", "speciesPhotoWritesEnabled", code + "\nreturn server;")(
     () => (_req, res) => res.end("ok"), { db: { close: async () => { authClosed = true; } } },
     { end: async () => { poolClosed = true; } }, processState, createServer, { log: (...args) => logs.push(args), error: (...args) => logs.push(args) },
+    () => ({ start: () => { workerStarted = true; } }),
+    false,
   );
   const [error] = await once(server, "error"); await new Promise((r) => setImmediate(r));
   assert.equal(error.code, "EADDRINUSE"); assert.equal(processState.exitCode, 1);
   assert.equal(authClosed, true); assert.equal(poolClosed, true);
+  assert.equal(workerStarted, false);
   assert.ok(logs.flat().some((value) => String(value).includes("already in use")));
   assert.ok(!logs.flat().some((value) => String(value).includes("listening on port")));
 });

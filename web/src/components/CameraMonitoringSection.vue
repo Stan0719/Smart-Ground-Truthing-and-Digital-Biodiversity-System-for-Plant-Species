@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { Chart, registerables } from 'chart.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { monitoringDate, monitoringLabels } from '../utils/officerMonitoringDisplay'
+import MonitoringIdentifier from './conservation/MonitoringIdentifier.vue'
 import AppModal from './conservation/AppModal.vue'
 import type { CameraEvent, PlantCameraStatus } from '../types/cameraMonitoring'
 
@@ -38,18 +41,9 @@ const formattedSystemTime = computed(() => localTimeFormatter.format(currentSyst
 const formatConfidence = (confidence: number | null) =>
   confidence === null ? 'Not available' : String(Math.round(confidence * 100)) + '%'
 
-const formatDateTime = (value?: string) => {
-  if (!value) return 'Not available'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Not available'
-  return new Intl.DateTimeFormat('en-MY', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
-}
+const { locale } = useI18n()
+const formatDateTime = (value?: string) => monitoringDate(value, locale.value)
+const cameraLabels = computed(() => monitoringLabels([camera.value.cameraId]))
 
 const eventCounts = computed(() => ({
   possiblePlantContact: cameraEvents.value.filter(
@@ -109,14 +103,14 @@ const renderConfidenceChart = async () => {
         },
       },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#75867e', font: { size: 9 } } },
+        x: { grid: { display: false }, ticks: { color: '#75867e', font: { size: 12 } } },
         y: {
           min: 0,
           max: 100,
           grid: { color: 'rgba(76, 108, 94, 0.09)' },
           ticks: {
             color: '#75867e',
-            font: { size: 9 },
+            font: { size: 12 },
             callback: (value) => String(value) + '%',
           },
         },
@@ -175,7 +169,7 @@ onBeforeUnmount(() => {
         <div class="camera-preview" role="group" aria-label="Live AI camera preview">
           <div class="preview-overlay preview-identity">
             <strong>{{ camera.name }}</strong>
-            <span>{{ camera.cameraId }}</span>
+            <span><MonitoringIdentifier :value="camera.cameraId" :labels="cameraLabels" /></span>
           </div>
           <div class="preview-overlay preview-state">
             <span>{{ formattedSystemTime }}</span>
@@ -291,7 +285,7 @@ onBeforeUnmount(() => {
     <AppModal
       v-if="cameraExpanded"
       title="Expanded Camera Preview"
-      :subtitle="camera.name + ' · ' + camera.cameraId"
+      :subtitle="camera.name + ' · ' + (cameraLabels.get(camera.cameraId) || camera.cameraId)"
       wide
       @close="cameraExpanded = false"
     >
@@ -299,7 +293,7 @@ onBeforeUnmount(() => {
       <div class="camera-preview expanded-preview">
         <div class="preview-overlay preview-identity">
           <strong>{{ camera.name }}</strong>
-          <span>{{ camera.cameraId }}</span>
+          <span><MonitoringIdentifier :value="camera.cameraId" :labels="cameraLabels" /></span>
         </div>
         <div class="preview-overlay preview-state">
           <span>{{ formattedSystemTime }}</span>
