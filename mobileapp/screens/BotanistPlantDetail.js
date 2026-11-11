@@ -2,9 +2,10 @@ import { useAppTranslation, t, translateLabel, translateFieldValue, translateUIM
 
 import React, { useCallback, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
-import { fetchBotanistPlant, fetchBotanistRecordChanges } from "../utils/botanistRecords";
+import { fetchBotanistPlant, fetchBotanistRecordChangeStatus } from "../utils/botanistRecords";
 import EditAction from "../components/EditAction";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
+import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 
 import {
   View,
@@ -16,16 +17,15 @@ import {
   Image,
   Alert,
   Modal,
+  RefreshControl,
 } from "react-native";
 import { stepPhotoIndex } from "../utils/plantPhotoGallery";
-
+import { fetchSpeciesDetail, getPlantRegisteredByDisplayName } from "../utils/plantApi";
 import {
   botanistPlantRecords,
   botanistSpeciesRequests,
   plants,
 } from "../data/mockData";
-
-const CATEGORIES = ["Trees", "Flowers", "Ferns", "Climbers"];
 
 const COLORS = {
   background: "#F7FBF4",
@@ -125,6 +125,22 @@ function formatValue(value) {
 
 function getPlantFieldValue(plant, field) {
   if (!plant) return undefined;
+  if (plant.isHistoricalVersion) {
+    const content = plant.historicalContent || {};
+    switch (field) {
+      case "scientificName": return plant.scientificName;
+      case "height": return content.heightCm ?? content.height_cm;
+      case "healthStatus": return content.healthStatus ?? content.health_status;
+      case "growthStage": return content.lifeStage ?? content.life_stage;
+      case "morphology": return content.morphology;
+      case "zone": return content.zone;
+      case "latitude": return content.latitude;
+      case "longitude": return content.longitude;
+      case "altitude": return content.altitudeM ?? content.altitude_m;
+      case "gpsAccuracy": return content.accuracyM ?? content.accuracy_m;
+      default: return content[field];
+    }
+  }
 
   switch (field) {
     case "scientificName":
@@ -186,18 +202,6 @@ case "healthStatus":
 }
 
 
-function getSpeciesName(item) {
-  if (!item) return "";
-
-  return (
-    item.scientificName ||
-    item.speciesName ||
-    item.name ||
-    ""
-  );
-}
-
-
 function getSpeciesDetails(plant) {
   if (!plant) return null;
 
@@ -213,6 +217,10 @@ function getSpeciesDetails(plant) {
   if (linkedSpecies) {
     return linkedSpecies;
   }
+
+  // For live server records, never try to recover species details from
+  // mock records or unrelated locally cached requests.
+  if (plant.isServerRecord) return null;
 
   // 2. If this plant has a new species request,
   // display that request first.
@@ -261,14 +269,8 @@ function getSpeciesDetails(plant) {
     return existingSpecies;
   }
 
-  // 4. If no catalogue record is found, still display
-  // the species name selected in the plant form.
-  if (plant.scientificName || plant.speciesName) {
-    return {
-      category: plant.category || "",
-    };
-  }
-
+  // 4. A missing link stays unavailable rather than borrowing the
+  // plant-level name, which is separate from the linked species name.
   return null;
 }
 
@@ -305,15 +307,18 @@ export default function BotanistPlantDetailScreen({
   useAppTranslation();
   const plantId = route.params?.plantId;
   const botanist = route.params?.botanist;
+  const botanistId = botanist?.id;
+  const botanistName = botanist?.name;
+  const historicalDetail = route.params?.historicalRecordDetail === true;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
   const [changeInfo, setChangeInfo] = useState(null);
   const [changeError, setChangeError] = useState("");
+  const [editAvailability, setEditAvailability] = useState("checking");
   const [selectedPhotoUri, setSelectedPhotoUri] = useState(null);
   const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
   const [failedPhotoUris, setFailedPhotoUris] = useState([]);
-
  
 function findPlant() {
   return botanistPlantRecords.find(
@@ -325,6 +330,7 @@ function findPlant() {
 
 
   const [plant, setPlant] = useState(null);
+
   useFocusEffect(useCallback(() => {
     let active = true;
     setLoading(true);
@@ -332,18 +338,74 @@ function findPlant() {
     setPlant(null);
     setChangeInfo(null);
     setChangeError("");
+    setEditAvailability("checking");
     setSelectedPhotoUri(null);
     setPhotoViewerVisible(false);
     setFailedPhotoUris([]);
-    fetchBotanistPlant(botanist?.id, plantId).then((record) => {
-      if (active) setPlant({ ...record, botanist: botanist?.name || record.registeredBy });
+    if (historicalDetail) {
+      setEditAvailability("not-required");
+      const suppliedSnapshot = route.params?.historicalSnapshot;
+      const snapshot = suppliedSnapshot && typeof suppliedSnapshot === "object" ? suppliedSnapshot : {};
+      const content = snapshot.content || {};
+      const suppliedSpecies = snapshot.species_details || snapshot.speciesDetails;
+      const historicalSpeciesId = snapshot.species_id ?? suppliedSpecies?.species_id ?? suppliedSpecies?.speciesId ?? null;
+      const suppliedScientificName = suppliedSpecies?.scientific_name ?? suppliedSpecies?.scientificName;
+      const canResolveHistoricalSpecies = !suppliedScientificName && historicalSpeciesId != null && botanistId != null;
+      const speciesDetails = suppliedSpecies && Object.keys(suppliedSpecies).length ? suppliedSpecies : null;
+      setPlant({
+        id: String(snapshot.plant_id ?? plantId), plantId: String(snapshot.plant_id ?? plantId),
+        isServerRecord: true, isHistoricalVersion: true, historicalSnapshotUnavailable: Object.keys(snapshot).length === 0,
+        status: route.params?.historicalVersionStatus || "",
+        historicalVersionLabel: route.params?.submissionVersionLabel || "",
+        historicalCurrent: route.params?.historicalCurrent === true,
+        historicalSuperseded: route.params?.historicalSuperseded === true,
+        scientificName: snapshot.scientific_name, speciesName: snapshot.scientific_name,
+        speciesId: historicalSpeciesId, historicalSpeciesDetails: speciesDetails,
+        historicalSpeciesLoading: canResolveHistoricalSpecies,
+        historicalContent: content,
+        qrCode: snapshot.qr_id != null ? `QR-${String(snapshot.qr_id).padStart(4, "0")}` : snapshot.qr_token,
+        botanist: getPlantRegisteredByDisplayName(
+          { registeredBy: route.params?.historicalSubmittedBy },
+          { id: botanistId, name: botanistName },
+          t("plantDetail.unknownBotanist"),
+        ),
+        photos: Array.isArray(route.params?.historicalPhotos) ? route.params.historicalPhotos : [],
+      });
+      if (canResolveHistoricalSpecies) {
+        fetchSpeciesDetail(historicalSpeciesId, undefined, { accountId: botanistId })
+          .then((resolvedSpecies) => {
+            if (active) setPlant((current) => current?.isHistoricalVersion &&
+              String(current.speciesId) === String(historicalSpeciesId)
+              ? { ...current, historicalSpeciesDetails: resolvedSpecies, historicalSpeciesLoading: false }
+              : current);
+          })
+          .catch(() => {
+            if (active) setPlant((current) => current?.isHistoricalVersion &&
+              String(current.speciesId) === String(historicalSpeciesId)
+              ? { ...current, historicalSpeciesLoading: false }
+              : current);
+          });
+      }
+      setLoading(false);
+      return () => { active = false; };
+    }
+    fetchBotanistPlant(botanistId, plantId).then((record) => {
+      if (active) setPlant({ ...record, botanist: getPlantRegisteredByDisplayName(record, { id: botanistId, name: botanistName }, t("plantDetail.unknownBotanist")) });
     }).catch((error) => { if (active) setLoadError(error.message); })
       .finally(() => { if (active) setLoading(false); });
-    fetchBotanistRecordChanges(botanist?.id).then((changes) => {
-      if (active) setChangeInfo(changes.find((change) => String(change.plant_id) === String(plantId)) || null);
-    }).catch((error) => { if (active) setChangeError(error.message); });
+    fetchBotanistRecordChangeStatus(botanistId, "plant", plantId).then((result) => {
+      if (!active) return;
+      setChangeInfo(result.pending || result.latest);
+      setEditAvailability(!result.available ? "unavailable" : result.pending ? "pending" : "clear");
+    }).catch((error) => {
+      if (!active) return;
+      setChangeError(error.message);
+      setEditAvailability("unavailable");
+    });
     return () => { active = false; };
-  }, [botanist?.id, botanist?.name, plantId, retry]));
+  }, [botanistId, botanistName, plantId, retry, historicalDetail, route.params?.historicalSnapshot,
+    route.params?.historicalVersionStatus, route.params?.submissionVersionLabel, route.params?.historicalCurrent,
+    route.params?.historicalSuperseded, route.params?.historicalSubmittedBy, route.params?.historicalPhotos]));
 
 
   const [isEditing, setIsEditing] = useState(false);
@@ -365,7 +427,6 @@ function findPlant() {
       longitude: String(item?.longitude ?? ""),
       altitude: String(item?.altitude ?? ""),
       gpsAccuracy: String(item?.gpsAccuracy ?? ""),
-      category: item?.category || "",
     };
   });
 
@@ -413,7 +474,6 @@ function findPlant() {
       longitude: String(currentPlant.longitude ?? ""),
       altitude: String(currentPlant.altitude ?? ""),
       gpsAccuracy: String(currentPlant.gpsAccuracy ?? ""),
-      category: currentPlant.category || "",
     });
 
     setIsEditing(true);
@@ -429,14 +489,6 @@ function findPlant() {
       Alert.alert(
         t("addObservation.missingInformation"),
         t("botanistPlantDetail.pleaseEnterTheScientificName")
-      );
-      return;
-    }
-
-    if (!form.category) {
-      Alert.alert(
-        t("addObservation.missingInformation"),
-        t("botanistPlantDetail.pleaseSelectACategory")
       );
       return;
     }
@@ -473,7 +525,6 @@ function findPlant() {
       // Plant information
       scientificName: form.scientificName.trim(),
       speciesName: form.scientificName.trim(),
-      category: form.category,
       height: updatedHeight,
       healthStatus: form.healthStatus.trim(),
       growthStage: form.growthStage.trim(),
@@ -560,12 +611,16 @@ function findPlant() {
     numeric = false,
     multiline = false,
   }) {
+    const fieldValue = getPlantFieldValue(plant, field);
+    const displayValue = plant?.isHistoricalVersion && (fieldValue == null || fieldValue === "")
+      ? t("recordEdits.historicalFieldUnavailable")
+      : translateFieldValue(field, formatValue(fieldValue));
     return (
       <View style={styles.field} key={field}>
         {isEditing ? (
           <OriginalUpdatedField
             label={translateLabel(label)}
-            originalValue={translateFieldValue(field, formatValue(getPlantFieldValue(plant, field)))}
+            originalValue={displayValue}
           >
             <TextInput
               style={[styles.input, multiline && styles.multiline]}
@@ -581,7 +636,7 @@ function findPlant() {
         ) : (
           <>
             <Text style={styles.label}>{translateLabel(label)}</Text>
-            <Text style={styles.value}>{translateFieldValue(field, formatValue(getPlantFieldValue(plant, field)))}</Text>
+            <Text style={styles.value}>{displayValue}</Text>
           </>
         )}
       </View>
@@ -621,20 +676,16 @@ function findPlant() {
   // ===================================================
 
   if (!plant) {
+    if (loading) return <ScrollView style={{ flex: 1, backgroundColor: COLORS.background }} contentContainerStyle={{ flexGrow: 1 }}>
+      <DetailSkeletonContent label={t("plantDetail.loadingPlantRecord")} sections={4} />
+    </ScrollView>;
     return (
       <View style={styles.notFoundContainer}>
-        <Text style={styles.title}>{loading ? t("botanistRecords.loading") : t("botanistPlantDetail.plantRecordNotFound")}</Text>
+        <Text style={styles.title}>{loadError ? t("plantDetail.plantDetailsUnavailable") : t("botanistPlantDetail.plantRecordNotFound")}</Text>
 
-        <Text style={styles.mutedText}>{loadError ? translateUIMessage(loadError) : loading ? "" : t("botanistPlantDetail.thisRecordMayHaveBeenRemoved")}</Text>
-        {!!loadError && <TouchableOpacity style={styles.secondaryButton} onPress={() => setRetry((value) => value + 1)}>
+        <Text style={styles.mutedText}>{loadError ? translateUIMessage(loadError) : t("botanistPlantDetail.thisRecordMayHaveBeenRemoved")}</Text>
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => setRetry((value) => value + 1)}>
           <Text style={styles.secondaryButtonText}>{t("common.tryAgain")}</Text>
-        </TouchableOpacity>}
-
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.primaryButtonText}>{t("common.goBack")}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -644,31 +695,18 @@ function findPlant() {
   // SPECIES INFORMATION
   // ===================================================
 
-  const species = getSpeciesDetails(plant);
+  const species = plant.isHistoricalVersion ? plant.historicalSpeciesDetails : getSpeciesDetails(plant);
 
-  // Do not display internal identifiers or duplicate
-  // the four sections with nested species objects.
-  const excludedSpeciesFields = [
-    "id",
-    "speciesId",
-    "speciesID",
-    "requestId",
-    "speciesDetails",
-    "speciesInfo",
-    "species",
-    "photos",
-    "photo",
-    "image",
-    "imageUrl",
-    "imageUri",
-  ];
-
-  const speciesEntries = species
-    ? Object.entries(species).filter(
-        ([key]) =>
-          !excludedSpeciesFields.includes(key)
-      )
-    : [];
+  const speciesScientificName = species?.scientific_name ?? species?.scientificName ?? species?.speciesScientificName;
+  const speciesEntries = species ? [
+    ["species", speciesScientificName || (plant.isHistoricalVersion ? t("recordEdits.historicalSpeciesUnavailable") : t("plant.notRecorded"))],
+    ["commonName", species.common_name ?? species.commonName ?? species.name],
+    ["genus", species.genus_name ?? species.genus],
+    ["family", species.family_name ?? species.family],
+    ["conservationStatus", species.conservation_status ?? species.conservationStatus],
+    ["description", species.description],
+    ["habitat", species.habitat],
+  ].filter(([, value]) => value != null && value !== "") : [];
 
   // ===================================================
   // PLANT PHOTOS
@@ -709,26 +747,35 @@ const rawPhotos = Array.isArray(plant.photos)
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        refreshControl={!historicalDetail ? <RefreshControl refreshing={loading} onRefresh={() => setRetry((value) => value + 1)} tintColor={COLORS.primary} /> : undefined}
       >
         {/* PAGE HEADER */}
 
-        <View style={styles.editHeadingRow}>
+        <View style={styles.editHeadingRow} testID={plant.isHistoricalVersion ? "historical-plant-heading" : undefined}>
           <Text style={styles.title}>
             {isEditing ? t("botanistPlantDetail.editPlantRecord") : t("botanistPlantDetail.plantRecord")}
           </Text>
-          {plant.isServerRecord && ["Approved", "Pending Review", "Rejected", "Correction Required"].includes(plant.status) &&
-            <EditAction testID="edit-own-plant" onPress={() => navigation.navigate("EditPlant", { plantId: plant.id, botanist })} />}
+          {!plant.isHistoricalVersion && plant.isServerRecord && ["Approved", "Pending Review", "Rejected", "Correction Required"].includes(plant.status) &&
+            <EditAction testID="edit-own-plant" disabled={plant.status === "Approved" && editAvailability !== "clear"}
+              labelKey={plant.status === "Approved" && editAvailability !== "clear" ? "recordEdits.editUnavailable" : undefined}
+              onPress={() => navigation.navigate("EditPlant", { plantId: plant.id, botanist })} />}
         </View>
 
-        <Text style={styles.subtitle}>{t("botanistPlantDetail.reviewAndManageYourPlantDocumentation")}</Text>
-        {plant.isServerRecord && <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate("RecordVersionHistory", { kind: "plant", targetId: plant.id, botanist })}>
-          <Text style={styles.subtitle}>{t("recordEdits.versionHistory")} ›</Text></TouchableOpacity>}
-        {changeInfo && <View style={styles.changeNotice}><Text style={styles.changeNoticeText}>
+        <Text style={styles.subtitle}>{plant.isHistoricalVersion ? t("botanistPlantDetail.readOnlyVersionSubtitle") : t("botanistPlantDetail.reviewAndManageYourPlantDocumentation")}</Text>
+        {plant.isHistoricalVersion && plant.historicalSnapshotUnavailable && <Text style={styles.mutedText}>{t("recordEdits.originalSnapshotUnavailable")}</Text>}
+        {!plant.isHistoricalVersion && plant.status === "Approved" && editAvailability === "pending" && <View style={styles.editAvailabilityNote}>
+          <Text style={styles.pendingEditLabel}>{t("recordEdits.pendingEdit")}</Text>
+          <Text style={styles.changeNoticeText}>{t("recordEdits.pendingEditExplanation")}</Text>
+          {!!changeInfo?.review_comment && <Text style={styles.changeNoticeText}>{changeInfo.review_comment}</Text>}
+        </View>}
+        {!plant.isHistoricalVersion && plant.status === "Approved" && editAvailability === "checking" && <Text style={styles.changeNoticeText}>{t("recordEdits.checkingEditAvailability")}</Text>}
+        {!plant.isHistoricalVersion && plant.status === "Approved" && editAvailability === "unavailable" && <Text style={styles.changeError}>{t("recordEdits.editAvailabilityUnavailable")}</Text>}
+        {!plant.isHistoricalVersion && changeInfo && !(plant.status === "Approved" && editAvailability === "pending") && <View style={styles.changeNotice}><Text style={styles.changeNoticeText}>
           {changeInfo.status === "Pending Review" ? t("recordEdits.changesPending") : changeInfo.status === "Rejected" ? t("recordEdits.changesRejected") : t("recordEdits.changesApproved")}
         </Text>{!!changeInfo.review_comment && <Text style={styles.changeNoticeText}>{changeInfo.review_comment}</Text>}</View>}
-        {!!changeError && <Text style={styles.changeError}>{translateUIMessage(changeError)}</Text>}
+        {!plant.isHistoricalVersion && !!changeError && plant.status !== "Approved" && <Text style={styles.changeError}>{translateUIMessage(changeError)}</Text>}
 
-        <View style={styles.recordMeta}>
+        <View style={styles.recordMeta} testID={plant.isHistoricalVersion ? "historical-plant-record-meta" : "plant-record-meta"}>
           <View style={styles.recordMetaText}>
             <Text style={styles.recordId}>{t("botanistPlantDetail.recordId")}</Text>
 
@@ -737,10 +784,19 @@ const rawPhotos = Array.isArray(plant.photos)
             </Text>
           </View>
 
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>
-              {translateLabel(formatValue(plant.status || "Pending"))}
-            </Text>
+          <View style={styles.recordMetaStatus}>
+            <View style={styles.statusBadge}>
+              <Text style={styles.statusText}>
+                {plant.isHistoricalVersion
+                  ? plant.status ? translateLabel(plant.status) : t("recordEdits.historicalFieldUnavailable")
+                  : translateLabel(formatValue(plant.status || "Pending"))}
+              </Text>
+            </View>
+          {plant.isHistoricalVersion && <View style={styles.versionMetaRow}>
+            <Text style={styles.versionPill}>{plant.historicalVersionLabel}</Text>
+            {plant.historicalCurrent && <Text style={styles.currentVersionPill}>{t("recordEdits.currentVersionLabel")}</Text>}
+            {plant.historicalSuperseded && <Text style={styles.supersededVersionPill}>{t("recordEdits.supersededLabel")}</Text>}
+          </View>}
           </View>
         </View>
 
@@ -755,12 +811,14 @@ const rawPhotos = Array.isArray(plant.photos)
             "Species classification and description"
           )}
 
-          {species ? (
+          {plant.isHistoricalVersion && plant.historicalSpeciesLoading ? (
+            <Text style={styles.mutedText}>{t("botanistRecords.loading")}</Text>
+          ) : species ? (
             speciesEntries.length > 0 ? (
               speciesEntries.map(([key, value]) => (
                 <View style={styles.speciesField} key={key}>
                   <Text style={styles.label}>
-                    {translateLabel(formatLabel(key))}
+                    {key === "species" ? t("plantDetail.species") : translateLabel(formatLabel(key))}
                   </Text>
 
                   <Text style={styles.value}>
@@ -773,11 +831,13 @@ const rawPhotos = Array.isArray(plant.photos)
             )
           ) : (
             <View style={styles.emptyInfo}>
+              {plant.isHistoricalVersion ? <Text style={styles.mutedText}>{t("recordEdits.historicalSpeciesUnavailable")}</Text> : <>
               <Text style={styles.emptyInfoTitle}>{t("botanistPlantDetail.noLinkedSpecies")}</Text>
 
               <Text style={styles.mutedText}>{t("botanistPlantDetail.noMatchingSpeciesInformationWasFoundForThisPlantRecord")}</Text>
 
               <Text style={styles.smallHint}>{t("botanistPlantDetail.linkTheRecordToASpeciesIdOrScientificName")}</Text>
+              </>}
             </View>
           )}
         </View>
@@ -797,34 +857,12 @@ const rawPhotos = Array.isArray(plant.photos)
             renderField(field)
           )}
 
-          <View style={styles.field}>
-            {isEditing ? (
-              <OriginalUpdatedField label={t("botanistPlantDetail.category")} originalValue={translateLabel(formatValue(plant.category))}>
-                <View style={styles.categoryRow}>
-                  {CATEGORIES.map((category) => {
-                    const selected = form.category === category;
+          {plant.isHistoricalVersion && [
+            ["notes", plant.historicalContent?.notes], ["taxonomy", plant.historicalContent?.taxonomy],
+          ].filter(([, value]) => value != null && value !== "").map(([field, value]) => <View style={styles.field} key={`historical-${field}`}>
+            <Text style={styles.label}>{translateLabel(formatLabel(field))}</Text><Text style={styles.value}>{formatValue(value)}</Text>
+          </View>)}
 
-                    return (
-                      <TouchableOpacity
-                        key={category}
-                        style={[styles.categoryButton, selected && styles.categoryButtonSelected]}
-                        onPress={() => updateField("category", category)}
-                      >
-                        <Text style={[styles.categoryText, selected && styles.categoryTextSelected]}>
-                          {translateLabel(category)}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </OriginalUpdatedField>
-            ) : (
-              <>
-                <Text style={styles.label}>{t("botanistPlantDetail.category")}</Text>
-                <Text style={styles.value}>{translateLabel(formatValue(plant.category))}</Text>
-              </>
-            )}
-          </View>
         </View>
 
         {/* =========================================== */}
@@ -851,28 +889,13 @@ const rawPhotos = Array.isArray(plant.photos)
               <Text style={styles.label}>{t("botanistPlantDetail.assignedQrCode")}</Text>
 
               <Text style={styles.qrValue}>
-                {plant.qrCode || t("botanistPlantDetail.notAssigned")}
+                {plant.qrCode || (plant.isHistoricalVersion ? t("recordEdits.historicalFieldUnavailable") : t("botanistPlantDetail.notAssigned"))}
               </Text>
 
               <Text style={styles.smallHint}>{t("botanistPlantDetail.qrAssignmentIsManagedSeparately")}</Text>
             </View>
           </View>
 
-          <View style={styles.staffMeta}>
-            <Text style={styles.label}>{t("botanistPlantDetail.submittedBy")}</Text>
-
-            <Text style={styles.value}>
-              {formatValue(plant.botanist)}
-            </Text>
-          </View>
-
-          <View style={styles.staffMeta}>
-            <Text style={styles.label}>{t("botanistPlantDetail.syncStatus")}</Text>
-
-            <Text style={styles.value}>
-              {translateLabel(formatValue(plant.syncStatus))}
-            </Text>
-          </View>
         </View>
 
         {/* =========================================== */}
@@ -915,9 +938,11 @@ const rawPhotos = Array.isArray(plant.photos)
                 🌿
               </Text>
 
-              <Text style={styles.emptyInfoTitle}>{t("botanistPlantDetail.noPhotosAttached")}</Text>
+              <Text style={styles.emptyInfoTitle}>{plant.photoLoadError
+                ? t("plantDetail.photoUnavailable")
+                : plant.isHistoricalVersion ? t("recordEdits.noPhotos") : t("botanistPlantDetail.noPhotosAttached")}</Text>
 
-              <Text style={styles.mutedText}>{t("botanistPlantDetail.thereAreNoDisplayablePhotosAttachedToThisPlantRecord")}</Text>
+              {!plant.isHistoricalVersion && !plant.photoLoadError && <Text style={styles.mutedText}>{t("botanistPlantDetail.thereAreNoDisplayablePhotosAttachedToThisPlantRecord")}</Text>}
             </View>
           )}
         </View>
@@ -944,7 +969,7 @@ const rawPhotos = Array.isArray(plant.photos)
               <Text style={styles.secondaryButtonText}>{t("botanistPlantDetail.cancelEditing")}</Text>
             </TouchableOpacity>
           </>
-        ) : !plant.isServerRecord && (
+        ) : !plant.isHistoricalVersion && !plant.isServerRecord && (
           <TouchableOpacity
             style={styles.primaryButton}
             onPress={handleEdit}
@@ -954,13 +979,6 @@ const rawPhotos = Array.isArray(plant.photos)
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.secondaryButtonText}>{t("botanistPlantDetail.backToDashboard")}</Text>
-        </TouchableOpacity>
       </ScrollView>
       <Modal visible={photoViewerVisible && Boolean(selectedPhoto)} animationType="fade" onRequestClose={() => setPhotoViewerVisible(false)}>
         <View style={styles.photoViewer}>
@@ -1002,11 +1020,13 @@ const styles = StyleSheet.create({
 
   content: {
     padding: 20,
-    paddingBottom: 40,
+    paddingBottom: 20,
   },
 
   editHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   changeNotice: { padding: 12, borderRadius: 12, backgroundColor: "#FFF1D6", marginBottom: 12, gap: 4 },
+  editAvailabilityNote: { padding: 10, borderRadius: 10, backgroundColor: "#FFF7E8", borderWidth: 1, borderColor: "#EAD9B5", marginBottom: 10, gap: 3 },
+  pendingEditLabel: { color: "#77501D", fontSize: 12, fontWeight: "700" },
   changeNoticeText: { color: "#52665A", lineHeight: 20 },
   changeError: { color: "#A34436", marginBottom: 12 },
 
@@ -1039,6 +1059,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  recordMetaStatus: { maxWidth: "58%", alignItems: "flex-end", gap: 6 },
+
   recordId: {
     fontSize: 11,
     color: COLORS.muted,
@@ -1052,7 +1074,7 @@ const styles = StyleSheet.create({
   },
 
   statusBadge: {
-    maxWidth: "50%",
+    maxWidth: "100%",
     paddingVertical: 7,
     paddingHorizontal: 10,
     borderRadius: 9,
@@ -1064,6 +1086,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: COLORS.primary,
   },
+
+  versionMetaRow: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 5 },
+  versionPill: { overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, color: COLORS.dark, backgroundColor: "#FFFFFF", fontSize: 10, fontWeight: "700" },
+  currentVersionPill: { overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, color: "#FFFFFF", backgroundColor: COLORS.primary, fontSize: 10, fontWeight: "700" },
+  supersededVersionPill: { overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, color: "#56625A", backgroundColor: "#E7EBE6", fontSize: 10, fontWeight: "700" },
 
   section: {
     marginBottom: 18,
@@ -1154,36 +1181,6 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
 
-  categoryRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-
-  categoryButton: {
-    paddingVertical: 9,
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.white,
-  },
-
-  categoryButtonSelected: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary,
-  },
-
-  categoryText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: COLORS.primary,
-  },
-
-  categoryTextSelected: {
-    color: COLORS.white,
-  },
-
   emptyInfo: {
     alignItems: "center",
     padding: 18,
@@ -1247,13 +1244,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: COLORS.primary,
-  },
-
-  staffMeta: {
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#EAF0E6",
   },
 
   photoGrid: {
@@ -1330,7 +1320,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.primary,
   },
-
   notFoundContainer: {
     flex: 1,
     justifyContent: "center",

@@ -1,3 +1,4 @@
+/* global Buffer */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -156,6 +157,62 @@ test("draft recovery after restart and failed writes preserve earlier observatio
   f.other();
   await assert.rejects(f.make().readDrafts("owner"), /owner/);
 });
+test("restart recovery retains linked plant path, observation fields, taxonomy and photo bytes", async () => {
+  const f = drafts();
+  const complete = {
+    client_key: "observation-plant-42",
+    path: "/plants/42/observations",
+    body: {
+      client_key: "observation-plant-42",
+      content: {
+        healthStatus: "Healthy", lifeStage: "Mature", heightCm: 12.5,
+        morphology: "Leaf details", notes: "Field notes", taxonomy: "Taxonomy line 1\nTaxonomy line 2",
+        latitude: 1.25, longitude: 2.5, accuracy_m: 6,
+      },
+    },
+    assets: [{ client_key: "photo-1", content_type: "image/jpeg", base64: "YWJj" }],
+  };
+  await f.make().saveDraft("owner", complete);
+  const restored = await f.make().readDrafts("owner");
+  assert.deepEqual(restored, [complete]);
+  assert.equal([...f.data.values()][0].includes("YWJj"), false);
+  assert.equal(Object.hasOwn(restored[0].body.content, "scientific_name"), false);
+  assert.equal(restored[0].body.content.taxonomy, "Taxonomy line 1\nTaxonomy line 2");
+});
+test("blank and partial observation drafts save and update by key while retaining correction target and revision", async () => {
+  const store = drafts().make();
+  const blank = {
+    client_key: "blank-observation", path: "/plants/42/observations", plant_id: "42",
+    body: { client_key: "blank-observation", content: {
+      heightCm: "", healthStatus: "", lifeStage: "", morphology: "", notes: "", taxonomy: "",
+      latitude: "", longitude: "", accuracy_m: "",
+    } }, assets: [],
+  };
+  await store.saveDraft("owner", blank);
+  assert.deepEqual((await store.readDrafts("owner"))[0], blank);
+  const partial = {
+    client_key: "correction-partial",
+    method: "PATCH",
+    path: "/observations/obs-17",
+    plant_id: "42",
+    body: { revision: 6, content: {
+      heightCm: "", healthStatus: "", lifeStage: "", morphology: "",
+      notes: "Visit note", taxonomy: "Taxonomy line 1\nTaxonomy line 2",
+      latitude: "", longitude: "", accuracy_m: "",
+    } },
+    assets: [],
+  };
+  await store.saveDraft("owner", partial);
+  await store.saveDraft("owner", { ...partial, body: { ...partial.body, content: { ...partial.body.content, notes: "Updated visit note" } } });
+  const restored = await store.readDrafts("owner");
+  assert.equal(restored.length, 2);
+  const correction = restored.find((row) => row.client_key === partial.client_key);
+  assert.equal(correction.path, "/observations/obs-17");
+  assert.equal(correction.body.revision, 6);
+  assert.equal(correction.body.content.heightCm, "");
+  assert.equal(correction.body.content.notes, "Updated visit note");
+  assert.equal(correction.body.content.taxonomy, "Taxonomy line 1\nTaxonomy line 2");
+});
 test("storage budget and low disk refuse new writes without deleting drafts", async () => {
   const f = drafts(),
     store = f.make();
@@ -178,6 +235,17 @@ test("sync removal cannot delete a newer edit of the same draft", async () => {
   await s.saveDraft("owner", { ...draft, body: { changed: true } });
   assert.equal(await s.removeDraft("owner", "one", draft), false);
   assert.equal((await s.readDrafts("owner")).length, 1);
+});
+
+test("a Botanist can delete one saved draft without removing other plant drafts", async () => {
+  const f = drafts(),
+    store = f.make(),
+    first = { client_key: "plant-one", path: "/plants/1/observations", body: { plant_id: 1 } },
+    second = { client_key: "plant-two", path: "/plants/2/observations", body: { plant_id: 2 } };
+  await store.saveDraft("owner", first);
+  await store.saveDraft("owner", second);
+  assert.equal(await store.removeDraft("owner", first.client_key, first), true);
+  assert.deepEqual(await store.readDrafts("owner"), [second]);
 });
 
 test("corrupt encrypted data fails closed without deleting stored observations", async () => {

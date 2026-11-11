@@ -9,7 +9,7 @@ import {
   View,
   Image,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import PersistentKnowledgeMap from "./PersistentKnowledgeMap";
 import { plantApi } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
 import {
@@ -81,34 +81,7 @@ export default function PersistentKnowledge({ route, navigation, user }) {
     return (
       <View style={{ flex: 1 }}>
         {!!error && <Text accessibilityRole="alert">{translateUIMessage(error)}</Text>}
-        <MapView
-          style={{ flex: 1 }}
-          initialRegion={{
-            latitude: 3.8,
-            longitude: 113.8,
-            latitudeDelta: 0.2,
-            longitudeDelta: 0.2,
-          }}
-        >
-          {plants
-            .filter(
-              (p) =>
-                Number.isFinite(Number(p.latitude)) &&
-                Number.isFinite(Number(p.longitude)) &&
-                p.latitude != null &&
-                p.longitude != null,
-            )
-            .map((p) => (
-              <Marker
-                key={p.plant_id}
-                coordinate={{
-                  latitude: Number(p.latitude),
-                  longitude: Number(p.longitude),
-                }}
-                title={t("persistentKnowledge.plant", { plant_id: p.plant_id })}
-              />
-            ))}
-        </MapView>
+        <PersistentKnowledgeMap plants={plants} />
       </View>
     );
   return (

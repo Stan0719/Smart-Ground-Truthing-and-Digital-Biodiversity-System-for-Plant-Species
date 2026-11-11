@@ -1,7 +1,7 @@
 import { useAppTranslation, t } from "../translations/i18n";
 import React, { useCallback, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
-import { fetchPlantRecords, getPlantDisplayObservation } from "../utils/plantApi";
+import { fetchPlantRecords, getPlantDisplayObservation, isPlantVisibleInRoleCatalog } from "../utils/plantApi";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 
 import {
@@ -45,7 +45,10 @@ export default function MapScreen({ navigation, user }) {
       ]);
       const recordsById = new Map(catalogRecords.map((record) => [record.plantId, record]));
       for (const record of ownedRecords) recordsById.set(record.plantId, record);
-      if (isCurrent()) setPlants([...recordsById.values()].filter((record) => record.plantId && record.plantId !== "Unknown ID"));
+      if (isCurrent()) setPlants([...recordsById.values()].filter((record) =>
+        record.plantId && record.plantId !== "Unknown ID" &&
+        isPlantVisibleInRoleCatalog(record, user.role, user.id)
+      ));
     } catch (loadError) {
       if (isCurrent()) {
         setPlants([]);
@@ -57,7 +60,7 @@ export default function MapScreen({ navigation, user }) {
         setRefreshing(false);
       }
     }
-  }, [user?.id]);
+  }, [user]);
 
   useFocusEffect(useCallback(() => {
     let current = true;
@@ -335,32 +338,7 @@ export default function MapScreen({ navigation, user }) {
           </View>
         ) : null}
         
-        {/* =====================================================
-            SUMMARY
-        ===================================================== */}
-
         {!loading && !error && <>
-        <View
-          style={
-            styles.summaryContainer
-          }
-        >
-          <View style={styles.summaryItem}>
-            <Text
-              style={
-                styles.summaryNumber
-              }
-            >
-              {documentedPlants.length}
-            </Text>
-
-            <Text
-              style={styles.summaryLabel}
-            >{t("map.totalRecords")}</Text>
-          </View>
-
-        </View>
-
         {/* =====================================================
             DOCUMENTED PLANTS
         ===================================================== */}
@@ -602,49 +580,11 @@ const styles = StyleSheet.create({
   },
 
   // =====================================================
-  // SUMMARY
-  // =====================================================
-
-  summaryContainer: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 15,
-    marginTop: 14,
-    paddingVertical: 15,
-    flexDirection: "row",
-    alignItems: "center",
-    elevation: 1,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-  },
-
-  summaryItem: {
-    flex: 1,
-    alignItems: "center",
-  },
-
-  summaryNumber: {
-    fontSize: 19,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  summaryLabel: {
-    fontSize: 10,
-    color: "#777",
-    marginTop: 3,
-  },
-
-  // =====================================================
   // SECTION
   // =====================================================
 
   sectionHeader: {
-    marginTop: 23,
+    marginTop: 8,
     marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",

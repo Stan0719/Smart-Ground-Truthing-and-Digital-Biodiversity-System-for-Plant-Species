@@ -19,6 +19,13 @@ test("missing approved GPS displays not recorded for Botanists", () => {
   assert.deepEqual(display({ latitude: null, longitude: null }, "botanist"), { status: "not_recorded" });
 });
 
+test("an authorized owner can see a saved pending Zone even when the GPS pair is unavailable", () => {
+  assert.deepEqual(display({ latitude: null, longitude: null, zone: "Zone B" }, "Botanist"), {
+    status: "not_recorded", zone: "Zone B",
+  });
+  assert.deepEqual(display({ latitude: null, longitude: null }, "Botanist"), { status: "not_recorded" });
+});
+
 test("an authorized Conservation Officer sees actual valid approved coordinates", () => {
   assert.deepEqual(display({ latitude: "4.123456", longitude: 113.654321, accuracyM: 5 }, "Conservation Officer"), {
     status: "available", latitude: 4.123456, longitude: 113.654321, accuracyM: 5, altitudeM: null, zone: null,
@@ -32,6 +39,7 @@ test("an authorized viewer sees not recorded when no approved GPS pair is return
 
 test("Visitors remain restricted even if the client object contains location fields", () => {
   assert.deepEqual(display({ latitude: 4, longitude: 113, altitudeM: 28, zone: "Zone A" }, "Visitor"), { status: "restricted" });
+  assert.deepEqual(display({ latitude: null, longitude: null, zone: "Owner-only Zone" }, "Visitor"), { status: "restricted" });
 });
 
 test("Map and Plant Details use the same location display policy", () => {
@@ -48,6 +56,9 @@ test("Map and Plant Details use the same location display policy", () => {
   assert.match(map, /recordsById\.set\(record\.plantId, record\)/);
   assert.match(detail, /fetchPlantDetail\(plantId, \{ \.\.\.options, scopeMine: true \}\)/);
   assert.match(detail, /if \(error\?\.status !== 404\) throw error/);
+  assert.match(detail, /isOwnedPendingPlant\(plant, user\?\.id\)/);
+  assert.match(detail, /const locationZoneValue = locationDisplay\.zone/);
+  assert.ok((detail.match(/\{locationZoneValue\}|value=\{locationZoneValue\}/g) || []).length >= 2);
   for (const value of ["accuracyM", "altitudeM", "zone"]) {
     assert.match(map, new RegExp(`location\\.${value}`));
     assert.match(detail, new RegExp(`locationDisplay\\.${value}`));

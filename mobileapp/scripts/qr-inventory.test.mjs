@@ -157,16 +157,27 @@ test("confirmed generation survives a failed read and invalidates older response
   assert.throws(() => loader.addGenerated(payload()), /did not return/);
 });
 
-test("confirmed deletion removes the item immediately and keeps it absent after refresh", async () => {
+test("confirmed retirement keeps the QR record and moves it out of the unused inventory", async () => {
   let serverRows = payload(row(1), row(2));
   const loader = createQRInventoryLoader(() => serverRows, () => {});
   await loader.refresh();
-  loader.removeDeleted("1");
-  assert.deepEqual(loader.getState().records.map((qr) => qr.id), ["2"]);
+  assert.equal(loader.retire("1"), true);
+  assert.deepEqual(loader.getState().records.map((qr) => [qr.id, qr.status]), [["2", "generated"], ["1", "retired"]]);
   assert.equal(loader.getState().hasLoaded, true);
-  serverRows = payload(row(2));
+  serverRows = payload(row(1, { status: "retired" }), row(2));
   assert.equal(await loader.refresh(), true);
-  assert.deepEqual(loader.getState().records.map((qr) => qr.id), ["2"]);
+  assert.deepEqual(loader.getState().records.map((qr) => [qr.id, qr.status]), [["2", "generated"], ["1", "retired"]]);
+});
+
+test("assigned and already retired QR records cannot be retired again", async () => {
+  const loader = createQRInventoryLoader(() => payload(
+    row(1, { plant_id: 8, status: "assigned" }),
+    row(2, { status: "retired" }),
+  ), () => {});
+  await loader.refresh();
+  assert.equal(loader.retire("1"), false);
+  assert.equal(loader.retire("2"), false);
+  assert.deepEqual(loader.getState().records.map((qr) => qr.status), ["retired", "assigned"]);
 });
 
 test("print builds a vector QR from the unchanged payload with A4 geometry", async () => {
