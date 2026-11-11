@@ -1,0 +1,32 @@
+{
+  "Sprint_2_Report_Group_10_No_Timeline": {
+    "pdf_pages": 21,
+    "word_tables": 18,
+    "narrative_paragraphs": 68,
+    "mean_words": 48.8,
+    "median_words": 48.0,
+    "main_sections": 4,
+    "timeline_heading": false
+  },
+  "Sprint_2_Technical_Documentation_Group_10": {
+    "pdf_pages": 14,
+    "word_tables": 8,
+    "narrative_paragraphs": 60,
+    "mean_words": 53.0,
+    "median_words": 52.5,
+    "main_sections": 4,
+    "timeline_heading": false
+  },
+  "jira": {
+    "total": 29,
+    "statuses": {
+      "Done": 13,
+      "In Progress": 15,
+      "To Do": 1
+    },
+    "source": "latest user-provided Sprint 2 screenshots"
+  },
+  "preparation_date": "2026-11-04",
+  "application_changes": "None for the documentation task.",
+  "backend_validation": "155 total; initial 153 passed; two blocked subprocess checks passed in a 21-case overlapping rerun."
+}

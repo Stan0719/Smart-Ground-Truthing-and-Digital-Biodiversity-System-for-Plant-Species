@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
+import React, { useEffect, useRef, useState } from "react";
 
 import {
   View,
@@ -13,15 +14,20 @@ import {
   useCameraPermissions,
 } from "expo-camera";
 
-import { plants } from "../data/mockData";
+import { fetchPlantByQRCode } from "../utils/plantApi";
+import { recordVisitorScan } from "../utils/visitorFeatures";
+import { parsePlantQrPayload } from "../utils/qrPayload";
 
 
-export default function ScanScreen({ navigation }) {
+export default function ScanScreen({ navigation, user }) {
+  useAppTranslation();
 
   const [permission, requestPermission] =
     useCameraPermissions();
 
   const [cameraKey, setCameraKey] = useState(0);
+  const scanInProgress = useRef(false);
+  useEffect(() => navigation.addListener("focus", () => { scanInProgress.current = false; }), [navigation]);
 
 
   // ==========================================
@@ -33,9 +39,7 @@ export default function ScanScreen({ navigation }) {
     return (
       <View style={styles.loading}>
 
-        <Text style={styles.loadingText}>
-          Loading camera...
-        </Text>
+        <Text style={styles.loadingText}>{t("scan.loadingCamera")}</Text>
 
       </View>
     );
@@ -60,14 +64,10 @@ export default function ScanScreen({ navigation }) {
         </View>
 
 
-        <Text style={styles.permissionTitle}>
-          Camera Permission
-        </Text>
+        <Text style={styles.permissionTitle}>{t("scan.cameraPermission")}</Text>
 
 
-        <Text style={styles.permissionText}>
-          Camera access is required to scan plant QR codes.
-        </Text>
+        <Text style={styles.permissionText}>{t("scan.cameraAccessIsRequiredToScanPlantQrCodes")}</Text>
 
 
         <TouchableOpacity
@@ -75,9 +75,7 @@ export default function ScanScreen({ navigation }) {
           onPress={requestPermission}
         >
 
-          <Text style={styles.buttonText}>
-            Allow Camera
-          </Text>
+          <Text style={styles.buttonText}>{t("scan.allowCamera")}</Text>
 
         </TouchableOpacity>
 
@@ -90,89 +88,50 @@ export default function ScanScreen({ navigation }) {
   // QR Scanner
   // ==========================================
 
-  function handleBarcodeScanned({ data }) {
+  async function handleBarcodeScanned({ data }) {
+    if (scanInProgress.current) return;
+    scanInProgress.current = true;
+    let navigated = false;
+    try {
+      const token = parsePlantQrPayload(data);
 
-    console.log("QR DATA:", data);
-
-
-    let plantId = data;
-
-
-    // ========================================
-    // Extract Plant ID from URL
-    // ========================================
-
-    if (data.includes("/plants/")) {
-
-      plantId =
-        data.split("/plants/")[1];
-
-
-      plantId =
-        plantId.split("?")[0];
-
-
-      plantId =
-        plantId.split("#")[0];
-    }
-
-
-    console.log("PLANT ID:", plantId);
-
-
-    // ========================================
-    // Find Plant
-    // ========================================
-
-    const plant = plants.find(
-      (item) =>
-        item.id === plantId ||
-        `NIAH-PLANT-${item.slug}` === plantId
-    );
-
-
-    // ========================================
-    // Plant Not Found
-    // ========================================
-
-    if (!plant) {
-
-      Alert.alert(
-        "Plant Not Found",
-        `No plant was found for:\n${plantId}`
-      );
-
-      return;
-    }
-
-
-    // ========================================
-    // Add ID if Missing
-    // ========================================
-
-    if (!plant.id) {
-
-      plant.id =
-        `NIAH-PLANT-${plant.slug}`;
-    }
-
-
-    console.log(
-      "Plant Found:",
-      plant.name
-    );
-
-
-    // ========================================
-    // Open Plant Details
-    // ========================================
-
-    navigation.navigate(
-      "PlantDetails",
-      {
-        plant,
+      let result;
+      let historyError = null;
+      if (user?.role?.toLowerCase() === "visitor") {
+        try {
+          result = await recordVisitorScan(user.id, token);
+        } catch (error) {
+          historyError = error;
+          // Preserve QR navigation if history storage is temporarily unavailable.
+          // This fallback never writes a scan event.
+          result = await fetchPlantByQRCode(token);
+        }
+      } else {
+        result = await fetchPlantByQRCode(token);
       }
-    );
+      if (result?.assigned === false) {
+        Alert.alert(t("scan.plantQrUnavailable"), t("scan.qrCodeNotAssigned"));
+        setCameraKey((current) => current + 1);
+        return;
+      }
+      const plantId = result?.plant?.plant_id;
+      if (!plantId) throw new Error("The QR code did not resolve to a plant record.");
+      if (historyError) Alert.alert(t("scanHistory.historySaveFailedTitle"), translateUIMessage(historyError.message || "Unable to save this scan."));
+      // PlantDetail loads by the plantId route parameter. Passing a plant object
+      // here left its required ID undefined and rendered the not-found screen.
+      navigation.navigate("PlantDetails", { plantId: String(plantId) });
+      navigated = true;
+    } catch (error) {
+      Alert.alert(
+        t("scan.plantQrUnavailable"),
+        error instanceof Error
+          ? translateUIMessage(error.message)
+          : t("scan.couldNotLoadThePlantRecordForThisQrCode"),
+      );
+      setCameraKey((current) => current + 1);
+    } finally {
+      if (!navigated) scanInProgress.current = false;
+    }
   }
 
 
@@ -211,13 +170,9 @@ export default function ScanScreen({ navigation }) {
 
       <View style={styles.topContent}>
 
-        <Text style={styles.title}>
-          Scan Plant QR
-        </Text>
+        <Text style={styles.title}>{t("scan.scanPlantQr")}</Text>
 
-        <Text style={styles.subtitle}>
-          Scan the QR code attached to a plant
-        </Text>
+        <Text style={styles.subtitle}>{t("scan.scanTheQrCodeAttachedToAPlant")}</Text>
 
       </View>
 
@@ -243,9 +198,7 @@ export default function ScanScreen({ navigation }) {
           Instruction
           ==================================== */}
 
-      <Text style={styles.instruction}>
-        Position the QR code inside the box
-      </Text>
+      <Text style={styles.instruction}>{t("scan.positionTheQrCodeInsideTheBox")}</Text>
 
     </View>
   );
@@ -281,7 +234,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
 
-    backgroundColor: "#DEF9C4",
+    backgroundColor: "#E7F2E2",
   },
 
 
@@ -303,7 +256,7 @@ const styles = StyleSheet.create({
 
     padding: 30,
 
-    backgroundColor: "#DEF9C4",
+    backgroundColor: "#E7F2E2",
   },
 
 
@@ -313,7 +266,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 50,
 
-    backgroundColor: "#9CDBA6",
+    backgroundColor: "#E9F7E4",
 
     justifyContent: "center",
     alignItems: "center",
@@ -423,7 +376,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 4,
     borderLeftWidth: 4,
 
-    borderColor: "#DEF9C4",
+    borderColor: "#E7F2E2",
 
     borderTopLeftRadius: 12,
   },
@@ -445,7 +398,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 4,
     borderRightWidth: 4,
 
-    borderColor: "#DEF9C4",
+    borderColor: "#E7F2E2",
 
     borderTopRightRadius: 12,
   },
@@ -467,7 +420,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 4,
     borderLeftWidth: 4,
 
-    borderColor: "#DEF9C4",
+    borderColor: "#E7F2E2",
 
     borderBottomLeftRadius: 12,
   },
@@ -489,7 +442,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 4,
     borderRightWidth: 4,
 
-    borderColor: "#DEF9C4",
+    borderColor: "#E7F2E2",
 
     borderBottomRightRadius: 12,
   },
@@ -522,13 +475,16 @@ const styles = StyleSheet.create({
   // ==========================================
 
   button: {
-    backgroundColor: "#50B498",
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#468585",
 
     paddingHorizontal: 28,
 
     paddingVertical: 14,
 
-    borderRadius: 12,
+    borderRadius: 14,
 
     marginTop: 20,
   },

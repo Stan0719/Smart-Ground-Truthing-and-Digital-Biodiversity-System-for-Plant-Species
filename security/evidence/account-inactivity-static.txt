@@ -1,0 +1,52 @@
+[
+  {
+    "command": [
+      "node",
+      "--check",
+      "web/server/account-inactivity.mjs"
+    ],
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "node",
+      "--check",
+      "web/server/account-inactivity.test.mjs"
+    ],
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "node",
+      "--check",
+      "web/server/auth.mjs"
+    ],
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "node",
+      "--check",
+      "web/server/operations.mjs"
+    ],
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "C:\\innovation project\\Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species\\web\\node_modules\\.bin\\eslint.cmd",
+      "server/account-inactivity.mjs",
+      "server/account-inactivity.test.mjs",
+      "server/auth.mjs",
+      "server/operations.mjs",
+      "server/activation.test.mjs",
+      "src/views/AdminUserManagementView.vue",
+      "--no-cache"
+    ],
+    "exitCode": 0,
+    "output": ""
+  }
+]

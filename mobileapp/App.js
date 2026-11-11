@@ -1,3 +1,4 @@
+import { t, useAppTranslation } from "./translations/i18n";
 import { faceDiagnostic } from "./utils/faceApi";
 import React, { useEffect, useRef, useState } from "react";
 
@@ -26,9 +27,15 @@ import PlantDetailsScreen from "./screens/PlantDetail";
 import ScanScreen from "./screens/Scan";
 import MapScreen from "./screens/Map";
 import LoginScreen from "./screens/Login";
-import BotanistDashboardScreen from "./screens/BotanistDashboard";
+import BotanistDashboardScreen, { BotanistSubmissionsScreen, BotanistCorrectionRequestsScreen } from "./screens/BotanistDashboard";
+import BotanistNotificationsScreen from "./screens/BotanistNotifications";
+import NotificationObservationScreen from "./screens/NotificationObservation";
 import AddPlantScreen from "./screens/AddPlant";
+import AddSpeciesRequestScreen from "./screens/AddSpeciesRequest";
 import EditPlantScreen from "./screens/EditPlant";
+import EditSpeciesRequestScreen from "./screens/EditSpeciesRequest";
+import RecordChangeReviewScreen from "./screens/RecordChangeReview";
+import RecordVersionHistoryScreen from "./screens/RecordVersionHistory";
 import VisitorRegisterScreen from "./screens/VisitorRegister";
 import PlantQRCodeScreen from "./screens/PlantQRCode";
 import AccountScreen from "./screens/Account";
@@ -37,9 +44,11 @@ import ScanHistoryScreen from "./screens/ScanHistory";
 import SpeciesScreen from "./screens/Species";
 import SpeciesDetailScreen from "./screens/SpeciesDetail";
 import BotanistPlantDetailScreen from "./screens/BotanistPlantDetail";
-import AddObservationScreen from "./screens/AddObservation";
+import BotanistSpeciesRequestDetailScreen from "./screens/BotanistSpeciesRequestDetail";
+import BotanistMyDraftsScreen from "./screens/BotanistMyDrafts";
 import FieldCollectionScreen from "./screens/FieldCollection";
 import PersistentKnowledgeScreen from "./screens/PersistentKnowledge";
+import BackButton from "./components/BackButton";
 
 
 const Tab = createBottomTabNavigator();
@@ -54,12 +63,37 @@ const theme = {
   dark: "#468585",
 };
 
+function centeredDetailHeader({ route, navigation, title }) {
+  const isHistoricalDetail = route.params?.historicalRecordDetail === true;
+  const backLabel = isHistoricalDetail ? t("submissions.title") : null;
+
+  return {
+    headerShown: true,
+    title,
+    headerBackTitle: backLabel || undefined,
+    headerBackVisible: false,
+    headerTitleAlign: "center",
+    headerTitleStyle: { fontSize: 17, fontWeight: "600", color: "#234A3C" },
+    headerLeft: ({ label }) => navigation.canGoBack() ? (
+      <BackButton
+        label={backLabel || label || t("common.goBack")}
+        accessibilityLabel={backLabel || label || t("common.goBack")}
+        onPress={() => navigation.goBack()}
+        variant="plain"
+      />
+    ) : null,
+    headerTintColor: theme.dark,
+    headerStyle: { backgroundColor: theme.light },
+  };
+}
+
 
 /* =========================================================
    HOME STACK
 ========================================================= */
 
 function HomeStack() {
+  useAppTranslation();
   return (
     <Stack.Navigator>
 
@@ -81,6 +115,7 @@ function HomeStack() {
 ========================================================= */
 
 function PlantsStack({ user }) {
+  useAppTranslation();
   return (
     <Stack.Navigator>
 
@@ -130,7 +165,7 @@ function PlantsStack({ user }) {
         name="PlantDetails"
         options={{
           headerShown: false,
-          title: "Plant Details",
+          title: t("navigation.plantDetails"),
           headerTintColor: theme.dark,
           headerStyle: {
             backgroundColor: theme.light,
@@ -155,22 +190,24 @@ function PlantsStack({ user }) {
 ========================================================= */
 
 function ScanStack({ user }) {
+  useAppTranslation();
   return (
     <Stack.Navigator>
 
       <Stack.Screen
         name="Scan"
-        component={ScanScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <ScanScreen {...props} user={user} />}
+      </Stack.Screen>
 
       <Stack.Screen
         name="PlantDetails"
         options={{
           headerShown: false,
-          title: "Plant Details",
+          title: t("navigation.plantDetails"),
 
           headerTintColor: theme.dark,
 
@@ -197,22 +234,24 @@ function ScanStack({ user }) {
 ========================================================= */
 
 function MapStack({ user }) {
+  useAppTranslation();
   return (
     <Stack.Navigator>
 
       <Stack.Screen
         name="Map"
-        component={MapScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <MapScreen {...props} user={user} />}
+      </Stack.Screen>
 
       <Stack.Screen
         name="PlantDetails"
         options={{
           headerShown: false,
-          title: "Plant Details",
+          title: t("navigation.plantDetails"),
 
           headerTintColor: theme.dark,
 
@@ -237,6 +276,7 @@ function AccountStack({
   user,
   onLogout,
 }) {
+  useAppTranslation();
   return (
     <Stack.Navigator>
 
@@ -257,22 +297,24 @@ function AccountStack({
 
       <Stack.Screen
         name="FavouritePlants"
-        component={FavouritePlantsScreen}
         options={{
-          title: "Favourite Plants",
+          headerShown: false,
+          title: t("navigation.favouritePlants"),
           headerTintColor: theme.dark,
           headerStyle: {
             backgroundColor: theme.light,
           },
         }}
-      />
+      >
+        {(props) => <FavouritePlantsScreen {...props} user={user} />}
+      </Stack.Screen>
 
       {/* Plant Details */}
       <Stack.Screen
         name="PlantDetails"
         options={{
           headerShown: false,
-          title: "Plant Details",
+          title: t("navigation.plantDetails"),
           headerTintColor: theme.dark,
           headerStyle: {
             backgroundColor: theme.light,
@@ -289,11 +331,20 @@ function AccountStack({
 
       <Stack.Screen
         name="ScanHistory"
-        component={ScanHistoryScreen}
         options={{
           headerShown: false,
         }}
-      />
+      >
+        {(props) => <ScanHistoryScreen {...props} user={user} />}
+      </Stack.Screen>
+
+      <Stack.Screen name="SpeciesDetail" options={{ headerShown: false }}>
+        {(props) => <SpeciesDetailScreen {...props} user={user} />}
+      </Stack.Screen>
+
+      <Stack.Screen name="Species" options={{ headerShown: false }}>
+        {(props) => <PlantsScreen {...props} user={user} />}
+      </Stack.Screen>
 
     </Stack.Navigator>
   );
@@ -308,6 +359,7 @@ function MainTabs({
   onLogin,
   onLogout,
 }) {
+  useAppTranslation();
 
   return (
     <Tab.Navigator
@@ -316,9 +368,9 @@ function MainTabs({
 
         headerShown: false,
 
-        tabBarActiveTintColor: theme.primary,
+        tabBarActiveTintColor: theme.dark,
 
-        tabBarInactiveTintColor: "#7A8A80",
+        tabBarInactiveTintColor: "#6D7F75",
 
         tabBarStyle: {
           height: 65,
@@ -326,11 +378,12 @@ function MainTabs({
           paddingBottom: 8,
           paddingTop: 5,
 
-          backgroundColor: "#FFFFFF",
+          backgroundColor: "#F7FBF4",
 
-          borderTopWidth: 0,
+          borderTopWidth: 1,
+          borderTopColor: "#E2EDE0",
 
-          elevation: 10,
+          elevation: 4,
         },
 
         tabBarLabelStyle: {
@@ -404,7 +457,7 @@ function MainTabs({
         name="HomeTab"
         component={HomeStack}
         options={{
-          title: "Home",
+          title: t("navigation.home"),
         }}
       />
 
@@ -413,7 +466,7 @@ function MainTabs({
       <Tab.Screen
         name="PlantsTab"
         options={{
-          title: "Plants",
+          title: t("navigation.plants"),
         }}
       >
         {(props) => (
@@ -429,7 +482,7 @@ function MainTabs({
       <Tab.Screen
         name="ScanTab"
         options={{
-          title: "Scan",
+          title: t("navigation.scan"),
         }}
       >
         {(props) => (
@@ -446,7 +499,7 @@ function MainTabs({
         <Tab.Screen
           name="MapTab"
           options={{
-            title: "Map",
+            title: t("navigation.map"),
           }}
         >
           {(props) => (
@@ -465,8 +518,8 @@ function MainTabs({
         name="AccountTab"
         options={{
           title: user?.role === "botanist"
-            ? "Dashboard"
-            : "Account",
+            ? t("common.dashboard")
+            : t("account.account"),
         }}
       >
         {(props) => {
@@ -519,6 +572,7 @@ function MainTabs({
 ========================================================= */
 
 export default function App({ homeRequest }) {
+  useAppTranslation();
   const navigationRef = useNavigationContainerRef();
   useEffect(() => {
     if (homeRequest && navigationRef.isReady()) {
@@ -527,11 +581,13 @@ export default function App({ homeRequest }) {
   }, [homeRequest, navigationRef]);
 
   const [user, setUser] = useState(null);
+  const userRef = useRef(null);
   const [restoringSession, setRestoringSession] = useState(true);
   const authGeneration = useRef(0);
   const faceNavigationReference = useRef(null);
   const restoredUser = useRef(null);
   const applyServerUser = (verifiedUser) => {
+    userRef.current = verifiedUser;
     setUser(verifiedUser);
     if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "MainTabs", params: { screen: verifiedUser.role === "botanist" ? "AccountTab" : "HomeTab" } }] });
     else restoredUser.current = verifiedUser;
@@ -547,22 +603,44 @@ export default function App({ homeRequest }) {
   useEffect(() => {
     let active = true;
     async function revalidate() {
-      if (!faceSession.hasSession()) return;
       const generation = authGeneration.current;
       try {
         const verifiedUser = await faceSession.restore();
-        if (active && generation === authGeneration.current && verifiedUser) setUser(verifiedUser);
-      } catch {
         if (active && generation === authGeneration.current) {
+          if (verifiedUser) {
+            userRef.current = verifiedUser;
+            setUser(verifiedUser);
+          } else if (userRef.current) {
+            userRef.current = null;
+            setUser(null);
+            if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+              navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+          }
+        }
+      } catch (error) {
+        if (error.transient === true || [502, 503, 504].includes(error.status)) return;
+        if (active && generation === authGeneration.current) {
+          const hadAuthenticatedUser = Boolean(userRef.current);
+          userRef.current = null;
           setUser(null);
-          if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+          if (hadAuthenticatedUser && navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+            navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
         }
       }
     }
     const listener = AppState.addEventListener("change", (state) => { if (state === "active") revalidate(); });
+    const unsubscribe = faceSession.subscribe?.(({ authenticated }) => {
+      if (!active || authenticated) return;
+      const hadAuthenticatedUser = Boolean(userRef.current);
+      authGeneration.current += 1;
+      userRef.current = null;
+      setUser(null);
+      if (hadAuthenticatedUser && navigationRef.isReady() && navigationRef.getCurrentRoute()?.name !== "Login")
+        navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
+    });
     const timer = setInterval(revalidate, 60000);
-    return () => { active = false; listener.remove(); clearInterval(timer); };
-  }, [navigationRef]);
+    return () => { active = false; listener.remove(); unsubscribe?.(); clearInterval(timer); };
+  }, [navigationRef, faceSession]);
 
 
   /* =======================================================
@@ -572,6 +650,7 @@ export default function App({ homeRequest }) {
   function handleLogin(loggedInUser, metadata) {
     faceNavigationReference.current = metadata?.reference || null;
     authGeneration.current += 1;
+    userRef.current = loggedInUser;
     setUser(loggedInUser);
     if (metadata?.reference) faceDiagnostic("auth_context_updated", metadata.reference);
   }
@@ -579,6 +658,7 @@ export default function App({ homeRequest }) {
   async function handleLogout() {
     authGeneration.current += 1;
     restoredUser.current = null;
+    userRef.current = null;
     setUser(null);
     if (navigationRef.isReady()) navigationRef.reset({ index: 0, routes: [{ name: "Login" }] });
     try { await faceSession.logout(); }
@@ -586,7 +666,7 @@ export default function App({ homeRequest }) {
   }
 
 
-  if (restoringSession) return <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#244B47" }}><ActivityIndicator color="#DEF9C4" /><Text style={{ color: "white", padding: 16 }}>Checking saved login…</Text></View>;
+  if (restoringSession) return <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#244B47" }}><ActivityIndicator color="#DEF9C4" /><Text style={{ color: "white", padding: 16 }}>{t("navigation.checkingSavedLogin")}</Text></View>;
 
   return (
     <NavigationContainer
@@ -613,6 +693,8 @@ export default function App({ homeRequest }) {
 
         screenOptions={{
           headerShown: false,
+          headerTintColor: theme.dark,
+          headerStyle: { backgroundColor: theme.light },
         }}
       >
 
@@ -685,7 +767,7 @@ export default function App({ homeRequest }) {
           options={{
             headerShown: true,
 
-            title: "Botanist Dashboard",
+            title: t("navigation.botanistDashboard"),
 
             headerTintColor: theme.dark,
 
@@ -693,46 +775,77 @@ export default function App({ homeRequest }) {
               backgroundColor: theme.light,
             },
           }}
+        />
+
+        <RootStack.Screen
+          name="BotanistSubmissions"
+          component={BotanistSubmissionsScreen}
+          options={{ headerShown: true, title: t("submissions.title"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
+        />
+
+        <RootStack.Screen name="BotanistMyDrafts" component={BotanistMyDraftsScreen}
+          options={{ headerShown: true, title: t("botanistDrafts.title"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
+
+        <RootStack.Screen
+          name="BotanistCorrectionRequests"
+          component={BotanistCorrectionRequestsScreen}
+          options={{ headerShown: true, title: t("botanistDashboard.correctionRequests"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
         />
 
         
         <RootStack.Screen
           name="BotanistPlantDetail"
           component={BotanistPlantDetailScreen}
-          options={{
-            headerShown: true,
-            title: "Plant Details",
-            headerTintColor: theme.dark,
-            headerStyle: {
-              backgroundColor: theme.light,
-            },
-          }}
+          options={({ route, navigation }) => centeredDetailHeader({
+            route,
+            navigation,
+            title: t("navigation.plantDetails"),
+          })}
         />
+
+        <RootStack.Screen name="BotanistSpeciesRequestDetail" component={BotanistSpeciesRequestDetailScreen}
+          options={({ route, navigation }) => centeredDetailHeader({
+            route,
+            navigation,
+            title: t("submissions.requestDetails"),
+          })} />
+
+        <RootStack.Screen name="EditSpeciesRequest" component={EditSpeciesRequestScreen}
+          options={{ headerShown: true, title: t("recordEdits.editSpecies"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light }, headerBackButtonMenuEnabled: false }} />
+
+        <RootStack.Screen name="RecordChangeReview" component={RecordChangeReviewScreen}
+          options={{ headerShown: true, title: t("recordEdits.reviewTitle"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
+        <RootStack.Screen name="RecordVersionHistory" component={RecordVersionHistoryScreen}
+          options={{ headerShown: false, title: t("recordEdits.versionHistory"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }} />
+
+        <RootStack.Screen
+          name="BotanistNotifications"
+          options={{ headerShown: true, title: t("navigation.notifications"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
+        >
+          {(props) => <BotanistNotificationsScreen {...props} user={user} />}
+        </RootStack.Screen>
+
+        <RootStack.Screen
+          name="NotificationObservation"
+          options={{ headerShown: true, title: t("navigation.observationDetails"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light } }}
+        >
+          {(props) => <NotificationObservationScreen {...props} user={user} />}
+        </RootStack.Screen>
 
         <RootStack.Screen
           name="AddObservation"
-          options={{
-            headerShown: true,
-            title: "Add New Observation",
-            headerTintColor: theme.dark,
-            headerStyle: {
-              backgroundColor: theme.light,
-            },
-          }}
-        >
-          {(props) => (
-            <AddObservationScreen
-              {...props}
-              user={user}
-            />
-          )}
-        </RootStack.Screen>
+          component={FieldCollectionScreen}
+          options={{ headerShown: true, title: t("navigation.addNewObservation"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light }, headerBackButtonMenuEnabled: false }}
+        />
 
 
 
         {/* ================================================
             ADD PLANT
         ================================================= */}
+
+        <RootStack.Screen name="AddSpeciesRequest" component={AddSpeciesRequestScreen}
+          options={{ headerShown: true, title: t("speciesRequestForm.title"), headerTintColor: theme.dark, headerStyle: { backgroundColor: theme.light }, headerBackButtonMenuEnabled: false }} />
 
         <RootStack.Screen
           name="AddPlant"
@@ -741,13 +854,14 @@ export default function App({ homeRequest }) {
           options={{
             headerShown: true,
 
-            title: "Add Plant",
+            title: t("navigation.addPlant"),
 
             headerTintColor: theme.dark,
 
             headerStyle: {
               backgroundColor: theme.light,
             },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -763,13 +877,14 @@ export default function App({ homeRequest }) {
           options={{
             headerShown: true,
 
-            title: "Edit Plant",
+            title: t("navigation.editPlant"),
 
             headerTintColor: theme.dark,
 
             headerStyle: {
               backgroundColor: theme.light,
             },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -778,9 +893,10 @@ export default function App({ homeRequest }) {
           component={FieldCollectionScreen}
           options={{
             headerShown: true,
-            title: "Field Collection",
+            title: t("navigation.fieldCollection"),
             headerTintColor: theme.dark,
             headerStyle: { backgroundColor: theme.light },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -789,9 +905,10 @@ export default function App({ homeRequest }) {
           component={FieldCollectionScreen}
           options={{
             headerShown: true,
-            title: "Register Plant",
+            title: t("navigation.registerPlant"),
             headerTintColor: theme.dark,
             headerStyle: { backgroundColor: theme.light },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
@@ -800,22 +917,24 @@ export default function App({ homeRequest }) {
           component={FieldCollectionScreen}
           options={{
             headerShown: true,
-            title: "Correct Observation",
+            title: t("navigation.correctObservation"),
             headerTintColor: theme.dark,
             headerStyle: { backgroundColor: theme.light },
+            headerBackButtonMenuEnabled: false,
           }}
         />
 
         <RootStack.Screen
           name="PersistentKnowledge"
-          options={{ headerShown: true, title: "Plant Knowledge" }}
+          options={{ headerShown: true, title: t("navigation.plantKnowledge") }}
         >
           {(props) => <PersistentKnowledgeScreen {...props} user={user} />}
         </RootStack.Screen>
 
+
         <RootStack.Screen
           name="KnowledgeMap"
-          options={{ headerShown: true, title: "Knowledge Map" }}
+          options={{ headerShown: true, title: t("navigation.knowledgeMap") }}
         >
           {(props) => <PersistentKnowledgeScreen {...props} user={user} />}
         </RootStack.Screen>
@@ -825,7 +944,7 @@ export default function App({ homeRequest }) {
           component={PlantQRCodeScreen}
           options={{
             headerShown: true,
-            title: "Plant QR Code",
+            title: t("plantQRCode.pageTitle"),
             headerTintColor: theme.dark,
             headerStyle: {
               backgroundColor: theme.light,

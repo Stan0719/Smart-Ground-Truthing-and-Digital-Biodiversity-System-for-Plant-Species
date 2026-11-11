@@ -1,6 +1,8 @@
+import { t, translateLabel, translateUIMessage, useAppTranslation } from "../translations/i18n";
 // screens/Plant.js
+import LanguageSelector from "../components/LanguageSelector";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 
 import {
   View,
@@ -10,12 +12,16 @@ import {
   TouchableOpacity,
   FlatList,
   Image,
-  SafeAreaView,
   Dimensions,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantRecords, fetchSpeciesCatalog } from "../utils/plantApi";
+import { useSpeciesCatalog } from "../utils/useSpeciesCatalog";
+import RefreshButton from "../components/RefreshButton";
+import FavouriteHeart from "../components/FavouriteHeart";
+import useVisitorFavourites from "../hooks/useVisitorFavourites";
+import { filterAndSortSpecies, getSpeciesFamilyOptions, resetMissingSpeciesFamily } from "../utils/speciesFilters";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -24,62 +30,35 @@ const GRID_GAP = SCREEN_WIDTH < 500 ? 8 : 10;
 const SPECIES_CARD_WIDTH =
   (SCREEN_WIDTH - GRID_HORIZONTAL_PADDING * 2 - GRID_GAP) / 2;
 
-const categories = [
-  "All",
-  "Trees",
-  "Flowers",
-  "Ferns",
-  "Climbers",
-];
+function SpeciesCardImage({ species }) {
+  const [failedImageKey, setFailedImageKey] = useState(null);
+  const source = getSpeciesImageSource(species);
+  const key = typeof source === "number" ? `local:${source}` : source?.uri || null;
+  if (!source || key === failedImageKey) {
+    return (
+      <View style={styles.imagePlaceholder}>
+        <Text style={styles.placeholderIcon}>🌿</Text>
+        <Text style={styles.placeholderText}>{t("species.imageComingSoon")}</Text>
+      </View>
+    );
+  }
+  return <Image source={source} style={styles.cardImage} resizeMode="cover" onError={() => setFailedImageKey(key)} />;
+}
 
-
-export default function Plant({ navigation, user }) {
+export default function Species({ navigation, user }) {
+  useAppTranslation();
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const isVisitor = user?.role?.toLowerCase() === "visitor";
 
-  const [plants, setPlants] = useState([]);
-  const [plantCounts, setPlantCounts] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
+  const { species: plants, counts: plantCounts, loading, error: errorMessage, refresh } = useSpeciesCatalog(user?.id, { publicOnly: !user || isVisitor });
+  const favourites = useVisitorFavourites(user);
+  const refreshFavourites = favourites.refresh;
+  const refreshAll = useCallback(() => Promise.all([refresh(), refreshFavourites(true)]), [refresh, refreshFavourites]);
 
-  useEffect(() => {
-    let isMounted = true;
+  const [activeFamily, setActiveFamily] = useState(null);
 
-    const loadBackendData = async () => {
-      try {
-        setLoading(true);
-        setErrorMessage("");
-        const speciesCatalog = await fetchSpeciesCatalog();
-        const records = await fetchPlantRecords(speciesCatalog);
-        const counts = records.reduce((result, record) => {
-          result[record.speciesId] = (result[record.speciesId] || 0) + 1;
-          return result;
-        }, {});
-
-        if (isMounted) {
-          setPlants(speciesCatalog);
-          setPlantCounts(counts);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setErrorMessage(
-            error.message || "Unable to load species."
-          );
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadBackendData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const [activeCategory, setActiveCategory] = useState("All");
+  const familyOptions = useMemo(() => getSpeciesFamilyOptions(plants), [plants]);
+  const selectedFamily = resetMissingSpeciesFamily(activeFamily, familyOptions);
 
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -92,106 +71,55 @@ export default function Plant({ navigation, user }) {
   // FILTER AND SORT
   // =====================================================
 
-  const filteredSpecies = useMemo(() => {
-  const query = searchQuery.trim().toLowerCase();
-
-  const filtered = plants.filter((item) => {
-    const matchesCategory =
-      activeCategory === "All" ||
-      item.category === activeCategory;
-
-    const matchesSearch =
-      !query ||
-      item.name?.toLowerCase().includes(query) ||
-      item.scientificName?.toLowerCase().includes(query) ||
-      item.genus?.toLowerCase().includes(query) ||
-      item.category?.toLowerCase().includes(query) ||
-      item.family?.toLowerCase().includes(query) ||
-      item.description?.toLowerCase().includes(query);
-
-    return matchesCategory && matchesSearch;
-  });
-
-  const sorted = [...filtered];
-
-  if (sortOption === "name-asc") {
-    sorted.sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
-  }
-
-  if (sortOption === "name-desc") {
-    sorted.sort((a, b) =>
-      b.name.localeCompare(a.name)
-    );
-  }
-
-  if (sortOption === "scientific-asc") {
-    sorted.sort((a, b) =>
-      a.scientificName.localeCompare(
-        b.scientificName
-      )
-    );
-  }
-
-  return sorted;
-}, [
-  plants,
-  activeCategory,
-  searchQuery,
-  sortOption,
-]);
+  const filteredSpecies = useMemo(() => filterAndSortSpecies(plants, {
+    family: selectedFamily,
+    query: searchQuery,
+    sortOption,
+  }), [plants, selectedFamily, searchQuery, sortOption]);
 
   // =====================================================
   // SPECIES CARD
   // =====================================================
 
   const renderSpeciesCard = ({ item }) => {
-    const plantCount = plantCounts[item.id] || 0;
-    const imageSource = getSpeciesImageSource(item);
+    const plantCount = plantCounts?.[item.id] || 0;
 
 
     return (
       <View style={styles.card}>
         <View style={styles.imageWrapper}>
-          {imageSource ? (
-            <Image
-              source={imageSource}
-              style={styles.cardImage}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.imagePlaceholder}>
-              <Text style={styles.placeholderIcon}>🌿</Text>
-              <Text style={styles.placeholderText}>
-                Image coming soon
-              </Text>
-            </View>
-          )}
+          <SpeciesCardImage species={item} />
 
           <View style={styles.badgeContainer}>
-            <Text style={styles.categoryBadge}>
-              {item.category}
-            </Text>
+            {!!item.family?.trim() && <Text style={styles.categoryBadge}>
+              {translateLabel(item.family)}
+            </Text>}
 
             {isBotanist && item.conservationStatus && (
               <Text style={styles.statusBadge}>
-                {item.conservationStatus}
+                {translateLabel(item.conservationStatus)}
               </Text>
             )}
           </View>
         </View>
 
         <View style={styles.cardContent}>
-          <Text style={styles.cardTitle}>{item.name}</Text>
-
-          <Text style={styles.scientificName}>
-            {item.scientificName}
-          </Text>
+          <View style={styles.cardTitleRow}>
+            <View style={styles.cardTitleCopy}>
+              <Text style={styles.cardTitle}>{item.name}</Text>
+              <Text style={styles.scientificName}>{item.scientificName}</Text>
+            </View>
+            {isVisitor && <FavouriteHeart
+              active={favourites.isFavourite("species", item.id)}
+              pending={favourites.isPending("species", item.id)}
+              disabled={favourites.loading}
+              onPress={() => void favourites.toggle("species", item.id)}
+              style={styles.cardHeart}
+            />}
+          </View>
 
           {item.family && (
-            <Text style={styles.family}>
-              Family: {item.family}
+            <Text style={styles.family}>{t("species.family")}{item.family}
             </Text>
           )}
 
@@ -199,10 +127,10 @@ export default function Plant({ navigation, user }) {
             {item.description}
           </Text>
 
-          <Text style={styles.recordCount}>
-            {plantCount} verified{" "}
-            {plantCount === 1 ? "plant" : "plants"}
-          </Text>
+          {plantCounts !== null && <Text style={styles.recordCount}>
+            {plantCount}{t("species.verified")}{" "}
+            {plantCount === 1 ? t("plant.plant") : t("plant.plants")}
+          </Text>}
 
           <View style={styles.actions}>
             <TouchableOpacity
@@ -210,12 +138,11 @@ export default function Plant({ navigation, user }) {
               onPress={() =>
                 navigation.navigate("SpeciesDetail", {
                   slug: item.slug,
+                  speciesId: item.id,
                 })
               }
             >
-              <Text style={styles.secondaryText}>
-                View Species
-              </Text>
+              <Text style={styles.secondaryText}>{t("species.viewSpecies")}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -228,9 +155,7 @@ export default function Plant({ navigation, user }) {
                 })
               }
             >
-              <Text style={styles.primaryText}>
-                View Plants →
-              </Text>
+              <Text style={styles.primaryText}>{t("species.viewPlants")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -246,6 +171,8 @@ export default function Plant({ navigation, user }) {
     <SafeAreaView style={styles.safeArea}>
       <FlatList
         data={filteredSpecies}
+        refreshing={loading || favourites.refreshing}
+        onRefresh={refreshAll}
         keyExtractor={(item) => item.slug}
         renderItem={renderSpeciesCard}
         numColumns={2}
@@ -257,41 +184,37 @@ export default function Plant({ navigation, user }) {
             {/* LIBRARY HEADER */}
 
             <View style={styles.libraryHeader}>
-              <View>
-                <Text style={styles.sectionLabel}>
-                  EXPLORE THE COLLECTION
-                </Text>
-
-                <Text style={styles.sectionTitle}>
-                  Discover Niah's flora
-                </Text>
+              <View style={styles.libraryHeaderRow}>
+                <View style={styles.libraryHeading}>
+                  <Text style={styles.sectionLabel}>{t("species.exploreTheCollection")}</Text>
+                  <Text style={styles.sectionTitle}>{t("species.discoverNiahSFlora")}</Text>
+                </View>
+                <LanguageSelector />
               </View>
 
               <Text style={styles.speciesCount}>
-                {filteredSpecies.length} species found
-              </Text>
+                {filteredSpecies.length}{t("species.speciesFound")}</Text>
             </View>
 
             {/* LOADING AND ERROR MESSAGES */}
 
             {loading && (
-              <Text style={styles.messageText}>
-                Loading species...
-              </Text>
+              <Text style={styles.messageText}>{t("plant.loadingSpecies")}</Text>
             )}
+
+            {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.errorText}>{translateUIMessage(favourites.mutationError)}</Text>}
+            {!!favourites.error && !favourites.loading && <Text accessibilityRole="alert" style={styles.errorText}>{translateUIMessage(favourites.error)}</Text>}
 
             {!loading && errorMessage !== "" && (
               <Text style={styles.errorText}>
-                {errorMessage}
+                {translateUIMessage(errorMessage)}
               </Text>
             )}
 
             {!loading &&
               !errorMessage &&
-              plants.length === 0 && (
-                <Text style={styles.messageText}>
-                  No species found.
-                </Text>
+              filteredSpecies.length === 0 && (
+                <Text style={styles.messageText}>{t("species.noSpeciesFound")}</Text>
               )}
 
             {/* SEARCH AND SORT */}
@@ -300,25 +223,31 @@ export default function Plant({ navigation, user }) {
               <TextInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                placeholder="Search by name..."
+                maxLength={100}
+                placeholder={t("species.searchByName")}
                 placeholderTextColor="#8A968F"
                 style={styles.searchInput}
+              />
+
+              <RefreshButton
+                onPress={refreshAll}
+                loading={loading || favourites.refreshing}
+                label={t("species.refreshSpecies")}
+                testID="catalogue-species-refresh"
               />
 
               <TouchableOpacity
                 style={styles.sortButton}
                 onPress={() => setSortOpen(!sortOpen)}
               >
-                <Text style={styles.sortButtonText}>
-                  ☷ Sort
-                </Text>
+                <Text style={styles.sortButtonText}>{t("species.sort")}</Text>
               </TouchableOpacity>
             </View>
 
             {sortOpen && (
               <View style={styles.sortMenu}>
                 <SortOption
-                  label="Default order"
+                  label={t("species.defaultOrder")}
                   selected={sortOption === "default"}
                   onPress={() => {
                     setSortOption("default");
@@ -327,7 +256,7 @@ export default function Plant({ navigation, user }) {
                 />
 
                 <SortOption
-                  label="Name: A-Z"
+                  label={t("species.nameAZ")}
                   selected={sortOption === "name-asc"}
                   onPress={() => {
                     setSortOption("name-asc");
@@ -336,7 +265,7 @@ export default function Plant({ navigation, user }) {
                 />
 
                 <SortOption
-                  label="Name: Z-A"
+                  label={t("species.nameZA")}
                   selected={sortOption === "name-desc"}
                   onPress={() => {
                     setSortOption("name-desc");
@@ -345,7 +274,7 @@ export default function Plant({ navigation, user }) {
                 />
 
                 <SortOption
-                  label="Scientific name: A-Z"
+                  label={t("species.scientificNameAZ")}
                   selected={sortOption === "scientific-asc"}
                   onPress={() => {
                     setSortOption("scientific-asc");
@@ -359,27 +288,27 @@ export default function Plant({ navigation, user }) {
 
             <FlatList
               horizontal
-              data={categories}
-              keyExtractor={(item) => item}
+              data={[null, ...familyOptions]}
+              keyExtractor={(item) => item ?? "all-families"}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.categoryList}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[
                     styles.categoryButton,
-                    activeCategory === item &&
+                    selectedFamily === item &&
                       styles.categoryButtonActive,
                   ]}
-                  onPress={() => setActiveCategory(item)}
+                  onPress={() => setActiveFamily(item)}
                 >
                   <Text
                     style={[
                       styles.categoryText,
-                      activeCategory === item &&
+                      selectedFamily === item &&
                         styles.categoryTextActive,
                     ]}
                   >
-                    {item}
+                    {item === null ? t("common.all") : translateLabel(item)}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -391,25 +320,18 @@ export default function Plant({ navigation, user }) {
             <View style={styles.emptyState}>
               <Text style={styles.emptyIcon}>🌿</Text>
 
-              <Text style={styles.emptyTitle}>
-                No matching species
-              </Text>
+              <Text style={styles.emptyTitle}>{t("species.noMatchingSpecies")}</Text>
 
-              <Text style={styles.emptyDescription}>
-                Try another search term or select a
-                different category.
-              </Text>
+              <Text style={styles.emptyDescription}>{t("species.tryAnotherSearchTermOrSelectADifferentCategory")}</Text>
 
               <TouchableOpacity
                 style={styles.clearButton}
                 onPress={() => {
                   setSearchQuery("");
-                  setActiveCategory("All");
+                  setActiveFamily(null);
                 }}
               >
-                <Text style={styles.clearButtonText}>
-                  Clear Filters
-                </Text>
+                <Text style={styles.clearButtonText}>{t("map.clearFilters")}</Text>
               </TouchableOpacity>
             </View>
           ) : null
@@ -427,6 +349,7 @@ export default function Plant({ navigation, user }) {
 // SORT OPTION
 
 function SortOption({ label, selected, onPress }) {
+  useAppTranslation();
   return (
     <TouchableOpacity
       style={[
@@ -442,7 +365,7 @@ function SortOption({ label, selected, onPress }) {
         ]}
       >
         {selected ? "✓ " : ""}
-        {label}
+        {translateLabel(label)}
       </Text>
     </TouchableOpacity>
   );
@@ -453,7 +376,7 @@ function SortOption({ label, selected, onPress }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
 
   listContent: {
@@ -471,8 +394,11 @@ const styles = StyleSheet.create({
     paddingBottom: SCREEN_WIDTH < 500 ? 14 : 18,
   },
 
+  libraryHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  libraryHeading: { flex: 1, minWidth: 0 },
+
   sectionLabel: {
-    color: "#50A078",
+    color: "#468585",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 2,
@@ -480,22 +406,23 @@ const styles = StyleSheet.create({
   },
 
   sectionTitle: {
-    color: "#254B42",
+    flexShrink: 1,
+    color: "#234B3A",
     fontSize: SCREEN_WIDTH < 500 ? 26 : 28,
     lineHeight: SCREEN_WIDTH < 500 ? 32 : 34,
-    fontWeight: "600",
+    fontWeight: "700",
   },
 
   speciesCount: {
     marginTop: 6,
-    color: "#6A7B73",
+    color: "#6D7F75",
     fontSize: 11,
   },
 
   messageText: {
     marginHorizontal: 20,
     marginBottom: 12,
-    color: "#315B49",
+    color: "#468585",
     fontSize: 13,
   },
 
@@ -521,11 +448,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: SCREEN_WIDTH < 500 ? 10 : 13,
     borderWidth: 1,
-    borderColor: "#D9D9CF",
-    borderRadius: 11,
+    borderColor: "#E2EDE0",
+    borderRadius: 13,
     backgroundColor: "#FFFFFF",
-    color: "#254B42",
-    fontSize: 13,
+    color: "#234B3A",
+    fontSize: 14,
   },
 
   sortButton: {
@@ -535,15 +462,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "#D9D9CF",
-    borderRadius: 11,
+    borderColor: "#E2EDE0",
+    borderRadius: 13,
     backgroundColor: "#FFFFFF",
   },
 
   sortButtonText: {
     color: "#44564E",
-    fontSize: 12,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   sortMenu: {
@@ -552,9 +479,12 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 12,
     backgroundColor: "#FFFFFF",
-    elevation: 4,
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2EDE0",
+    elevation: 2,
+    shadowColor: "#234B3A",
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
   },
 
   sortOption: {
@@ -564,7 +494,7 @@ const styles = StyleSheet.create({
   },
 
   sortOptionSelected: {
-    backgroundColor: "#DFE8DA",
+    backgroundColor: "#E1F0EA",
   },
 
   sortOptionText: {
@@ -573,7 +503,7 @@ const styles = StyleSheet.create({
   },
 
   sortOptionTextSelected: {
-    color: "#254B42",
+    color: "#234B3A",
     fontWeight: "700",
   },
 
@@ -587,11 +517,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: SCREEN_WIDTH < 500 ? 12 : 15,
     paddingVertical: SCREEN_WIDTH < 500 ? 7 : 9,
     borderRadius: 999,
-    backgroundColor: "#EEECE3",
+    backgroundColor: "#E7F2E2",
   },
 
   categoryButtonActive: {
-    backgroundColor: "#35652F",
+    backgroundColor: "#468585",
   },
 
   categoryText: {
@@ -613,10 +543,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderRadius: SCREEN_WIDTH < 500 ? 13 : 16,
     backgroundColor: "#FFFFFF",
-    elevation: 3,
-    shadowColor: "#21392C",
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E2EDE0",
+    elevation: 1,
+    shadowColor: "#234B3A",
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
   },
 
   imageWrapper: {
@@ -685,8 +617,12 @@ const styles = StyleSheet.create({
     padding: SCREEN_WIDTH < 500 ? 10 : 14,
   },
 
+  cardTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  cardTitleCopy: { flex: 1, minWidth: 0 },
+  cardHeart: { backgroundColor: "#F1F6EF" },
+
   cardTitle: {
-    color: "#203F35",
+    color: "#234B3A",
     fontSize:
       SCREEN_WIDTH < 360 ? 15 : SCREEN_WIDTH < 500 ? 16 : 20,
     lineHeight:
@@ -696,7 +632,7 @@ const styles = StyleSheet.create({
 
   scientificName: {
     marginTop: 3,
-    color: "#7C6C5B",
+    color: "#6D7F75",
     fontSize: SCREEN_WIDTH < 500 ? 10 : 12,
     lineHeight: SCREEN_WIDTH < 500 ? 14 : 16,
     fontStyle: "italic",
@@ -704,7 +640,7 @@ const styles = StyleSheet.create({
 
   family: {
     marginTop: SCREEN_WIDTH < 500 ? 5 : 7,
-    color: "#66786F",
+    color: "#6D7F75",
     fontSize: SCREEN_WIDTH < 500 ? 8 : 9,
   },
 
@@ -731,33 +667,33 @@ const styles = StyleSheet.create({
 
   secondaryButton: {
     flex: 1,
-    minHeight: SCREEN_WIDTH < 500 ? 36 : 38,
+    minHeight: SCREEN_WIDTH < 500 ? 42 : 44,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#B7C7BD",
-    borderRadius: 999,
-    backgroundColor: "#F7F6EF",
+    borderColor: "#E2EDE0",
+    borderRadius: 12,
+    backgroundColor: "#E7F2E2",
   },
 
   secondaryText: {
-    color: "#315B49",
-    fontSize: SCREEN_WIDTH < 360 ? 7.5 : SCREEN_WIDTH < 500 ? 8.5 : 9,
+    color: "#468585",
+    fontSize: SCREEN_WIDTH < 360 ? 8.5 : SCREEN_WIDTH < 500 ? 9.5 : 12,
     fontWeight: "700",
   },
 
   primaryButton: {
     flex: 1,
-    minHeight: SCREEN_WIDTH < 500 ? 36 : 38,
+    minHeight: SCREEN_WIDTH < 500 ? 42 : 44,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 999,
-    backgroundColor: "#315B49",
+    borderRadius: 12,
+    backgroundColor: "#468585",
   },
 
   primaryText: {
     color: "#FFFFFF",
-    fontSize: SCREEN_WIDTH < 360 ? 7.5 : SCREEN_WIDTH < 500 ? 8.5 : 9,
+    fontSize: SCREEN_WIDTH < 360 ? 8.5 : SCREEN_WIDTH < 500 ? 9.5 : 12,
     fontWeight: "700",
   },
 
@@ -767,7 +703,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#BDC8BD",
+    borderColor: "#E2EDE0",
     borderRadius: 16,
   },
 
@@ -777,32 +713,32 @@ const styles = StyleSheet.create({
 
   emptyTitle: {
     marginTop: 10,
-    color: "#254B42",
+    color: "#234B3A",
     fontSize: SCREEN_WIDTH < 500 ? 18 : 20,
     fontWeight: "600",
   },
 
   emptyDescription: {
     marginTop: 6,
-    color: "#63736A",
+    color: "#6D7F75",
     fontSize: SCREEN_WIDTH < 500 ? 11 : 12,
     lineHeight: SCREEN_WIDTH < 500 ? 17 : 18,
     textAlign: "center",
   },
 
   clearButton: {
-    minHeight: 42,
+    minHeight: 44,
     marginTop: 15,
     paddingHorizontal: 17,
     paddingVertical: 9,
     justifyContent: "center",
-    borderRadius: 999,
-    backgroundColor: "#35652F",
+    borderRadius: 14,
+    backgroundColor: "#468585",
   },
 
   clearButtonText: {
     color: "#FFFFFF",
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "700",
   },
 });

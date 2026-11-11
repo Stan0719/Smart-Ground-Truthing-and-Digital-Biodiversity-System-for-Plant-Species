@@ -1,0 +1,6 @@
+
+> mobileapp@1.0.0 type-check
+> tsc --noEmit
+
+
+Process exit code: 0

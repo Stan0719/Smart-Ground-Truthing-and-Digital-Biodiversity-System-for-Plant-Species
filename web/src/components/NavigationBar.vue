@@ -262,6 +262,7 @@ const logout = async () => {
                 autocomplete="off"
                 :placeholder="t('nav.searchHere')"
                 type="search"
+                maxlength="100"
               />
             </label>
 
@@ -429,6 +430,7 @@ const logout = async () => {
             <input
               v-model="navSearch"
               type="search"
+                maxlength="100"
               autocomplete="off"
               :placeholder="t('nav.searchSpecies')"
               :aria-label="t('nav.searchSpecies')"

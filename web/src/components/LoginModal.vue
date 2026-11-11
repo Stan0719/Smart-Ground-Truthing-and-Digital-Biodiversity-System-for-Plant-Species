@@ -49,6 +49,11 @@ const openForgotPassword = () => {
 const submitting = ref(false)
 const handleLogin = async () => {
   if (submitting.value) return
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim()) || email.value.length > 254 || !password.value) {
+    loginError.value = 'loginModal.errors.invalid'
+    return
+  }
+  email.value = email.value.trim()
   submitting.value = true
   loginError.value = ''
   platformMessage.value = ''
@@ -117,6 +122,7 @@ const handleLogin = async () => {
               v-model="email"
               class="form-input"
               type="email"
+              maxlength="254"
               placeholder=" "
               autocomplete="email"
               required

@@ -53,7 +53,7 @@ test("logout during business request invalidates its response", async () => {
 });
 
  test('mobile business catalogue forwards bearer authority, scientific scope and draft owner',async t=>{
- const requests=[];globalThis.__plantAuditSession={hasSession:()=>true,withToken:async work=>work('a'.repeat(64),{id:'owner',role:'botanist'})};globalThis.__plantAuditFetch=async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>({species:[]})}};
+ const requests=[];globalThis.__plantAuditSession={hasSession:()=>true,withToken:async work=>work('a'.repeat(64),{id:'owner',role:'botanist'})};globalThis.__plantAuditFetch=async(url,options)=>{requests.push({url,options});return new Response(JSON.stringify({species:[]}),{status:200,headers:{"Content-Type":"application/json"}})};
  t.after(()=>{delete globalThis.__plantAuditSession;delete globalThis.__plantAuditFetch});
  const source=readFileSync(new URL('../utils/plantApi.js',import.meta.url),'utf8').replace(/import \{faceSession\} from "\.\/faceSession";/,'const faceSession=globalThis.__plantAuditSession;').replace(/import \{ mobileApiUrl \} from "\.\/apiConfiguration\.js";/,'const mobileApiUrl=()=>"https://approved.example.invalid";').replaceAll('await fetch(','await globalThis.__plantAuditFetch(');
  const client=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));

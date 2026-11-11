@@ -1,6 +1,12 @@
-import React, { useMemo, useState } from "react";
+import { useAppTranslation, t } from "../translations/i18n";
+import React, { useCallback, useMemo, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { fetchPlantRecords, getPlantDisplayObservation, isPlantVisibleInRoleCatalog } from "../utils/plantApi";
+import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 
 import {
+  ActivityIndicator,
+  RefreshControl,
   View,
   Text,
   StyleSheet,
@@ -10,98 +16,72 @@ import {
   FlatList,
 } from "react-native";
 
-import {
-  plants,
-  plantRecords,
-} from "../data/mockData";
-
-export default function MapScreen({ navigation }) {
+export default function MapScreen({ navigation, user }) {
+  useAppTranslation();
   const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] =
-    useState("All");
+  const [plants, setPlants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadPlants = useCallback(async (pullToRefresh = false, isCurrent = () => true) => {
+    if (!user?.id) {
+      if (isCurrent()) {
+        setPlants([]);
+        setError(t("botanistRecords.sessionRequired"));
+        setLoading(false);
+        setRefreshing(false);
+      }
+      return;
+    }
+
+    if (pullToRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError("");
+    try {
+      const [catalogRecords, ownedRecords] = await Promise.all([
+        fetchPlantRecords([], { accountId: user.id }),
+        fetchPlantRecords([], { accountId: user.id, scopeMine: true }),
+      ]);
+      const recordsById = new Map(catalogRecords.map((record) => [record.plantId, record]));
+      for (const record of ownedRecords) recordsById.set(record.plantId, record);
+      if (isCurrent()) setPlants([...recordsById.values()].filter((record) =>
+        record.plantId && record.plantId !== "Unknown ID" &&
+        isPlantVisibleInRoleCatalog(record, user.role, user.id)
+      ));
+    } catch (loadError) {
+      if (isCurrent()) {
+        setPlants([]);
+        setError(loadError?.message || t("common.error"));
+      }
+    } finally {
+      if (isCurrent()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, [user]);
+
+  useFocusEffect(useCallback(() => {
+    let current = true;
+    void loadPlants(false, () => current);
+    return () => { current = false; };
+  }, [loadPlants]));
 
   // =====================================================
-  // CATEGORIES
+  // MAP BACKEND RECORDS
   // =====================================================
 
-  const categories = [
-    "All",
-    ...new Set(
-      plants
-        .map((plant) => plant.category)
-        .filter(Boolean)
-    ),
-  ];
-
-  // =====================================================
-  // COMBINE SPECIES + PLANT RECORDS
-  // =====================================================
-
-  const documentedPlants = useMemo(() => {
-    return plantRecords.map((record) => {
-      const species = plants.find(
-        (plant) =>
-          plant.slug === record.speciesSlug
-      );
-
-      return {
-        ...record,
-
-        // Species information
-        speciesName:
-          species?.name ||
-          "Unknown Plant",
-
-        scientificName:
-          species?.scientificName ||
-          "Unknown species",
-
-        category:
-          species?.category ||
-          "Unknown",
-
-        family:
-          species?.family ||
-          "",
-
-        description:
-          species?.description ||
-          "",
-
-        speciesImage:
-          species?.image ||
-          null,
-
-        // Common name
-        name:
-          species?.name ||
-          "Unknown Plant",
-
-        // Record ID
-        id:
-          record.plantId,
-      };
-    });
-  }, []);
-
-  // =====================================================
-  // CHECK GPS
-  // =====================================================
-
-  // function hasLocation(plant) {
-  //   return (
-  //     plant.latitude !== null &&
-  //     plant.latitude !== undefined &&
-  //     plant.longitude !== null &&
-  //     plant.longitude !== undefined &&
-  //     !Number.isNaN(
-  //       Number(plant.latitude)
-  //     ) &&
-  //     !Number.isNaN(
-  //       Number(plant.longitude)
-  //     )
-  //   );
-  // }
+  const documentedPlants = useMemo(() => plants.map((record) => {
+    return {
+      ...record,
+      name: record.plantCommonName || "",
+      scientificName: record.plantScientificName || "",
+      family: record.family ?? "",
+      id: record.plantId,
+      status: record.currentStatus ?? record.status,
+    };
+  }), [plants]);
 
   // =====================================================
   // FILTER RECORDS
@@ -124,59 +104,13 @@ export default function MapScreen({ navigation }) {
           plant.family
             ?.toLowerCase()
             .includes(searchText) ||
-          plant.category
-            ?.toLowerCase()
-            .includes(searchText) ||
           plant.plantId
             ?.toLowerCase()
             .includes(searchText);
-
-        const matchesCategory =
-          selectedCategory === "All" ||
-          plant.category ===
-            selectedCategory;
-
-        return (
-          matchesSearch &&
-          matchesCategory
-        );
+        return matchesSearch;
       }
     );
-  }, [
-    documentedPlants,
-    search,
-    selectedCategory,
-  ]);
-
-  // =====================================================
-  // GPS RECORDS
-  // =====================================================
-
-  // const plantsWithLocation =
-  //   filteredPlants.filter(
-  //     hasLocation
-  //   );
-
-  // const totalPlantsWithLocation =
-  //   documentedPlants.filter(
-  //     hasLocation
-  //   ).length;
-
-  // =====================================================
-  // FORMAT COORDINATE
-  // =====================================================
-
-  // function formatCoordinate(value) {
-  //   if (
-  //     value === undefined ||
-  //     value === null ||
-  //     value === ""
-  //   ) {
-  //     return "Not available";
-  //   }
-
-  //   return Number(value).toFixed(6);
-  // }
+  }, [documentedPlants, search]);
 
   // =====================================================
   // RECORD PRESS
@@ -197,7 +131,6 @@ export default function MapScreen({ navigation }) {
 
   function clearFilters() {
     setSearch("");
-    setSelectedCategory("All");
   }
 
   // =====================================================
@@ -207,10 +140,23 @@ export default function MapScreen({ navigation }) {
   function renderPlantCard({
     item,
   }) {
+    const observation = getPlantDisplayObservation(item);
     const photos =
       item.images ||
       item.photos ||
       [];
+    const location = getPlantLocationDisplay(item.location, user?.role);
+    const locationText = location.status === "available"
+      ? [
+          `${t("map.latitude")}: ${location.latitude.toFixed(6)}`,
+          `${t("map.longitude")}: ${location.longitude.toFixed(6)}`,
+          `${t("plantDetail.gpsAccuracy")}: ${location.accuracyM != null ? `± ${location.accuracyM} m` : t("plant.notRecorded")}`,
+          `${t("plantDetail.altitude")}: ${location.altitudeM != null ? `${location.altitudeM} m` : t("plant.notRecorded")}`,
+          `${t("plantDetail.locationZone")}: ${location.zone || t("plant.notRecorded")}`,
+        ].join("\n")
+      : location.status === "restricted"
+        ? t("map.locationRestricted")
+        : t("map.locationNotRecorded");
 
     return (
       <TouchableOpacity
@@ -238,7 +184,7 @@ export default function MapScreen({ navigation }) {
           style={styles.plantName}
           numberOfLines={2}
         >
-          {item.scientificName}
+          {item.scientificName || t("plant.notRecorded")}
         </Text>
 
         {/* COMMON NAME */}
@@ -247,26 +193,8 @@ export default function MapScreen({ navigation }) {
           style={styles.commonName}
           numberOfLines={1}
         >
-          {item.name}
+          {item.name || t("plant.notRecorded")}
         </Text>
-
-        {/* CATEGORY */}
-
-        {item.category && (
-          <View
-            style={
-              styles.categoryBadge
-            }
-          >
-            <Text
-              style={
-                styles.categoryText
-              }
-            >
-              {item.category}
-            </Text>
-          </View>
-        )}
 
         {/* RECORD ID */}
 
@@ -277,6 +205,16 @@ export default function MapScreen({ navigation }) {
           {item.plantId}
         </Text>
 
+        <Text style={styles.locationText} numberOfLines={2}>
+          {t("plant.height")}: {observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
+          {" · "}{t("plant.lifeStage2")}: {observation?.lifeStage || t("plant.notRecorded")}
+          {" · "}{t("plant.health")}: {observation?.healthStatus || t("plant.notRecorded")}
+        </Text>
+
+        <Text style={styles.locationText} numberOfLines={5}>
+          {t("map.location")}: {locationText}
+        </Text>
+
         {/* STATUS */}
 
         <View
@@ -285,7 +223,7 @@ export default function MapScreen({ navigation }) {
           <View
             style={[
               styles.statusBadge,
-              item.status ===
+              String(item.status || "").toLowerCase() ===
                 "approved"
                 ? styles.statusApproved
                 : styles.statusPending,
@@ -294,7 +232,7 @@ export default function MapScreen({ navigation }) {
             <Text
               style={[
                 styles.statusText,
-                item.status ===
+                String(item.status || "").toLowerCase() ===
                   "approved"
                   ? styles.statusApprovedText
                   : styles.statusPendingText,
@@ -305,7 +243,7 @@ export default function MapScreen({ navigation }) {
                     .charAt(0)
                     .toUpperCase() +
                   item.status.slice(1)
-                : "Unknown"}
+                : t("map.unknown")}
             </Text>
           </View>
 
@@ -331,6 +269,7 @@ export default function MapScreen({ navigation }) {
         showsVerticalScrollIndicator={
           false
         }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadPlants(true)} tintColor="#468585" colors={["#468585"]} />}
         contentContainerStyle={
           styles.content
         }
@@ -340,15 +279,9 @@ export default function MapScreen({ navigation }) {
         ===================================================== */}
 
         <View style={styles.header}>
-          <Text style={styles.title}>
-            Plant Map
-          </Text>
+          <Text style={styles.title}>{t("map.plantMap")}</Text>
 
-          <Text style={styles.subtitle}>
-            Explore documented plant
-            locations in Niah National
-            Park
-          </Text>
+          <Text style={styles.subtitle}>{t("map.exploreDocumentedPlantLocationsInNiahNationalPark")}</Text>
         </View>
 
         {/* =====================================================
@@ -366,7 +299,7 @@ export default function MapScreen({ navigation }) {
 
           <TextInput
             style={styles.searchInput}
-            placeholder="Search plants..."
+            placeholder={t("map.searchPlants")}
             placeholderTextColor="#999"
             value={search}
             onChangeText={setSearch}
@@ -390,113 +323,22 @@ export default function MapScreen({ navigation }) {
           )}
         </View>
 
-        {/* =====================================================
-            CATEGORY FILTER
-        ===================================================== */}
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={
-            false
-          }
-          contentContainerStyle={
-            styles.categoryList
-          }
-        >
-          {categories.map(
-            (category) => {
-              const selected =
-                selectedCategory ===
-                category;
-
-              return (
-                <TouchableOpacity
-                  key={category}
-                  style={[
-                    styles.filterButton,
-                    selected &&
-                      styles.filterButtonSelected,
-                  ]}
-                  onPress={() =>
-                    setSelectedCategory(
-                      category
-                    )
-                  }
-                  activeOpacity={0.8}
-                >
-                  <Text
-                    style={[
-                      styles.filterText,
-                      selected &&
-                        styles.filterTextSelected,
-                    ]}
-                  >
-                    {category}
-                  </Text>
-                </TouchableOpacity>
-              );
-            }
-          )}
-        </ScrollView>
-
+        {loading ? (
+          <View style={styles.emptyContainer}>
+            <ActivityIndicator size="small" color="#468585" />
+            <Text style={styles.emptyText}>{t("plant.loadingPlantRecords")}</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyTitle}>{t("common.error")}</Text>
+            <Text style={styles.emptyText}>{error}</Text>
+            <TouchableOpacity style={styles.clearFiltersButton} onPress={() => void loadPlants(true)} activeOpacity={0.8}>
+              <Text style={styles.clearFiltersText}>{t("common.refresh")}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         
-        {/* =====================================================
-            SUMMARY
-        ===================================================== */}
-
-        <View
-          style={
-            styles.summaryContainer
-          }
-        >
-          <View style={styles.summaryItem}>
-            <Text
-              style={
-                styles.summaryNumber
-              }
-            >
-              {documentedPlants.length}
-            </Text>
-
-            <Text
-              style={styles.summaryLabel}
-            >
-              Total Records
-            </Text>
-          </View>
-
-          <View
-            style={
-              styles.summaryDivider
-            }
-          />
-          
-          <View
-            style={
-              styles.summaryDivider
-            }
-          />
-
-          <View style={styles.summaryItem}>
-            <Text
-              style={
-                styles.summaryNumber
-              }
-            >
-              {Math.max(
-                categories.length - 1,
-                0
-              )}
-            </Text>
-
-            <Text
-              style={styles.summaryLabel}
-            >
-              Categories
-            </Text>
-          </View>
-        </View>
-
+        {!loading && !error && <>
         {/* =====================================================
             DOCUMENTED PLANTS
         ===================================================== */}
@@ -513,18 +355,13 @@ export default function MapScreen({ navigation }) {
               style={
                 styles.sectionTitle
               }
-            >
-              Documented Plants
-            </Text>
+            >{t("map.documentedPlants")}</Text>
 
             <Text
               style={
                 styles.sectionSubtitle
               }
-            >
-              Tap a record to view its
-              details
-            </Text>
+            >{t("map.tapARecordToViewItsDetails")}</Text>
           </View>
 
           <View
@@ -560,17 +397,11 @@ export default function MapScreen({ navigation }) {
 
             <Text
               style={styles.emptyTitle}
-            >
-              No records found
-            </Text>
+            >{t("map.noRecordsFound")}</Text>
 
             <Text
               style={styles.emptyText}
-            >
-              Try searching for another
-              plant or selecting a
-              different category.
-            </Text>
+            >{t("map.tryAnotherSearchOrClearYourSearch")}</Text>
 
             <TouchableOpacity
               style={
@@ -583,9 +414,7 @@ export default function MapScreen({ navigation }) {
                 style={
                   styles.clearFiltersText
                 }
-              >
-                Clear Filters
-              </Text>
+              >{t("map.clearSearch")}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -604,6 +433,7 @@ export default function MapScreen({ navigation }) {
             }
           />
         )}
+        </>}
       </ScrollView>
     </View>
   );
@@ -621,7 +451,7 @@ const styles = StyleSheet.create({
 
   content: {
     paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingTop: 50,
     paddingBottom: 35,
   },
 
@@ -678,39 +508,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: "#888",
     lineHeight: 24,
-  },
-
-  // =====================================================
-  // CATEGORY
-  // =====================================================
-
-  categoryList: {
-    paddingBottom: 4,
-  },
-
-  filterButton: {
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D6E5D0",
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    marginRight: 8,
-  },
-
-  filterButtonSelected: {
-    backgroundColor: "#468585",
-    borderColor: "#468585",
-  },
-
-  filterText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#687568",
-  },
-
-  filterTextSelected: {
-    color: "#FFFFFF",
   },
 
   // =====================================================
@@ -783,55 +580,11 @@ const styles = StyleSheet.create({
   },
 
   // =====================================================
-  // SUMMARY
-  // =====================================================
-
-  summaryContainer: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 15,
-    marginTop: 14,
-    paddingVertical: 15,
-    flexDirection: "row",
-    alignItems: "center",
-    elevation: 1,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-  },
-
-  summaryItem: {
-    flex: 1,
-    alignItems: "center",
-  },
-
-  summaryNumber: {
-    fontSize: 19,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  summaryLabel: {
-    fontSize: 10,
-    color: "#777",
-    marginTop: 3,
-  },
-
-  summaryDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: "#E5ECE2",
-  },
-
-  // =====================================================
   // SECTION
   // =====================================================
 
   sectionHeader: {
-    marginTop: 23,
+    marginTop: 8,
     marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -923,26 +676,18 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
-  categoryBadge: {
-    alignSelf: "flex-start",
-    backgroundColor: "#DEF9C4",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-
-  categoryText: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
   recordId: {
     fontSize: 9,
     color: "#999",
     marginTop: 7,
     fontWeight: "600",
+  },
+
+  locationText: {
+    marginTop: 5,
+    color: "#687568",
+    fontSize: 9,
+    lineHeight: 13,
   },
 
   // =====================================================

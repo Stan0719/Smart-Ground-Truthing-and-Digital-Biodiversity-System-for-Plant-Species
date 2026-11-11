@@ -31,15 +31,16 @@ export function createMobileLoginGateway(ports={}, { trace = process.env.NODE_EN
   for(const name of Object.keys(headers))if(name==='forwarded'||name.startsWith('x-forwarded-'))delete headers[name]
   headers.host=`127.0.0.1:${route.port}`
   const upstream=request({hostname:'127.0.0.1',port:route.port,path:route.path,method:req.method,headers},response=>{
-   if(response.statusCode>=300&&response.statusCode<400){response.resume();return send(502,'Upstream redirect rejected.')}
+   if([301,302,303,307,308].includes(response.statusCode)){response.resume();return send(502,'Upstream redirect rejected.')}
    if(res.destroyed){response.destroy();return}
    res.writeHead(response.statusCode,headersWithoutHop(response.headers));response.pipe(res)
    response.on('error',()=>res.destroy())
   })
-  upstream.setTimeout(route.port===(ports.facePort||8000)?120000:15000,()=>upstream.destroy())
+  upstream.setTimeout(route.port===(ports.facePort||8000)?120000:req.url?.split('?')[0]==='/api/plant-submissions'?90000:15000,()=>upstream.destroy())
   upstream.on('error',()=>send(503,'Service unavailable. Please try again.'))
   let size=0
-  req.on('data',chunk=>{size+=chunk.length;if(size>6*1024*1024){send(413,'Request too large.');upstream.destroy()}})
+  const bodyLimit = req.url?.split('?')[0] === '/api/plant-submissions' ? 64*1024*1024 : 6*1024*1024
+  req.on('data',chunk=>{size+=chunk.length;if(size>bodyLimit){send(413,'Request too large.');upstream.destroy()}})
   req.on('aborted',()=>upstream.destroy())
   res.on('close',()=>{if(!res.writableFinished)upstream.destroy()})
   req.pipe(upstream)

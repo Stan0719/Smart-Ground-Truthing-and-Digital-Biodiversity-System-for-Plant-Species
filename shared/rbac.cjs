@@ -15,6 +15,9 @@ const grants = Object.freeze({
   "plants.scientific.read": ["Botanist", "Conservation Officer"],
   "plants.protected.read": ["Conservation Officer"],
   "plants.gps.exact.read": ["Conservation Officer"],
+  // Botanists receive only the approved location projection on authorized
+  // plant reads; this does not grant access to arbitrary observation GPS.
+  "plants.gps.approved.read": ["Botanist"],
   "plants.create": ["Botanist"],
   "observations.create": ["Botanist"],
   "observations.edit.own": ["Botanist"],
@@ -46,6 +49,18 @@ const exactGpsFields = new Set([
   "gpsLatitude",
   "gpsLongitude",
   "accuracyM",
+  "altitude_m",
+  "altitudeM",
+  "altitude",
+  "zone",
+]);
+const approvedPlantLocationFields = ["latitude", "longitude", "accuracy_m", "altitude_m", "zone"];
+const nestedLocationFields = new Set([
+  ...exactGpsFields,
+  "altitude_m",
+  "altitudeM",
+  "altitude",
+  "zone",
 ]);
 function projectGps(value, user) {
   if (permitted(user, "plants.gps.exact.read")) return value;
@@ -57,6 +72,30 @@ function projectGps(value, user) {
   for (const [key, item] of Object.entries(value))
     if (!exactGpsFields.has(key)) projected[key] = projectGps(item, user);
   return projected;
+}
+function projectApprovedPlantGps(value, user) {
+  if (!permitted(user, "plants.gps.approved.read"))
+    return projectGps(value, user);
+  if (Array.isArray(value))
+    return value.map((item) => projectApprovedPlantGps(item, user));
+  if (!value || typeof value !== "object")
+    return value;
+  const redactNested = (item) => {
+    if (Array.isArray(item)) return item.map(redactNested);
+    if (!item || typeof item !== "object") return item;
+    const prototype = Object.getPrototypeOf(item);
+    if (prototype !== Object.prototype && prototype !== null) return item;
+    const result = {};
+    for (const [key, child] of Object.entries(item))
+      if (!nestedLocationFields.has(key)) result[key] = redactNested(child);
+    return result;
+  };
+  const result = redactNested(value);
+  // These top-level fields are populated exclusively by the approved-location
+  // lateral query in /api/plants and /api/plants/:id.
+  for (const field of approvedPlantLocationFields)
+    result[field] = value[field] ?? null;
+  return result;
 }
 function visibilityFor(user) {
   if (permitted(user, "plants.protected.read"))
@@ -76,6 +115,10 @@ function projectSpecies(row, scientific = false) {
     habitat: data.habitat || "",
     culturalSignificance: data.culturalSignificance || "",
   };
+  if (row.image_asset_id) Object.assign(result, {
+    image_asset_id: String(row.image_asset_id),
+    image_url: `/api/assets/${encodeURIComponent(row.image_asset_id)}`,
+  });
   if (scientific)
     Object.assign(result, {
       conservation_status: row.conservation_status,
@@ -122,6 +165,7 @@ module.exports = {
   grants,
   permitted,
   projectGps,
+  projectApprovedPlantGps,
   visibilityFor,
   projectSpecies,
   assertEdit,

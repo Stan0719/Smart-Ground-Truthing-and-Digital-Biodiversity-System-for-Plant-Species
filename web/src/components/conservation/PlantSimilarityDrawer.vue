@@ -30,7 +30,7 @@ const formatDistance = (distanceMeters?: number) => {
   if (distanceMeters < 10) return `${distanceMeters.toFixed(1)} m`
   return `${Math.round(distanceMeters)} m`
 }
-// These categories are prototype review guidance, not validated duplicate thresholds.
+// Display guidance only; these distances are not validated duplicate thresholds.
 const distanceLabel = (distanceMeters?: number) => {
   if (distanceMeters === undefined || !Number.isFinite(distanceMeters) || distanceMeters < 0) {
     return 'Location distance unavailable'
@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="similarity-drawer-layer">
+    <div class="similarity-drawer-layer officer-type-layer">
       <button
         class="similarity-drawer-backdrop"
         type="button"
@@ -97,7 +97,7 @@ onBeforeUnmount(() => {
       >
         <header class="similarity-drawer-header">
           <div>
-            <span class="prototype-label">Frontend prototype</span>
+            <span class="prototype-label">BioCLIP 2</span>
             <h2 id="similarity-drawer-title">AI Plant Similarity</h2>
             <p>{{ props.analysis.observationId }} · {{ props.analysis.plantId }}</p>
           </div>
@@ -119,9 +119,9 @@ onBeforeUnmount(() => {
               <path d="M12 10v6M12 7h.01" />
             </svg>
             <p>
-              Frontend prototype: visual similarity and recorded-location comparisons are
-              demonstration data and were not generated from the current submission. Neither
-              signal confirms that two records represent the same physical plant.
+              BioCLIP 2 compared this submission's stored photo with approved plant photos.
+              Distances use recorded GPS coordinates when available. Neither signal confirms
+              that two records represent the same physical plant.
             </p>
           </div>
 
@@ -191,9 +191,10 @@ onBeforeUnmount(() => {
           </section>
 
           <p class="similarity-footnote">
-            Visual-similarity percentages and location distances are prototype demonstration
-            values. They are separate review signals, not identification confidence or duplicate
-            certainty. Conservation Officer decisions remain independent.
+            Percentages display BioCLIP cosine similarity, not identification confidence or
+            duplicate certainty. High/moderate/low labels are review guidance, not validated
+            duplicate thresholds. GPS distance is separate supporting evidence. Conservation
+            Officer decisions remain independent.
           </p>
         </div>
       </aside>

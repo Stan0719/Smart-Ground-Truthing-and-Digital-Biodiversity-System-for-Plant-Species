@@ -1,11 +1,14 @@
 import { ref } from 'vue'
+import { mapPlantCardMetadata } from './plantCardMapping'
 import { plantApi, type Species } from './plantApi'
 import { plants } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
 import { refreshSession } from '../composables/usePrototypeSession'
+import { plantThumbnailImages, speciesImageSelection } from './assetImages'
 export const knowledgeError = ref('')
 let generation = 0
 interface RecordRow {
+  plant_image_asset_id?: string
   plant_id: string
   species_id: string
   rbac_status?: string
@@ -13,6 +16,8 @@ interface RecordRow {
   latitude?: number
   longitude?: number
   accuracy_m?: number
+  zone?: string | null
+  altitude_m?: number | null
   registered_at?: string
   observed_at?: string
   registered_subject?: string
@@ -70,25 +75,11 @@ export async function refreshKnowledge() {
           speciesId: String(r.species_id),
           speciesName: s?.scientificName || '',
           commonName: s?.name || '',
-          latestApproved: {
-            date: r.observed_at?.slice(0, 10) || r.registered_at?.slice(0, 10) || '',
-            heightCm: r.latest_approved?.heightCm ?? NaN,
-            healthStatus: r.latest_approved?.healthStatus || '',
-            lifeStage: r.latest_approved?.lifeStage || '',
-            morphology: r.latest_approved?.morphology || '',
-            notes: r.latest_approved?.notes || '',
-          },
-          location: {
-            zone: '',
-            latitude: r.latitude === undefined ? NaN : Number(r.latitude),
-            longitude: r.longitude === undefined ? NaN : Number(r.longitude),
-            altitudeM: NaN,
-            accuracyM: Number(r.accuracy_m ?? NaN),
-          },
+          ...mapPlantCardMetadata(r),
           qr: { code: '', status: r.rbac_status || r.status || '' },
           registeredBy: r.registered_subject || '',
           registeredAt: r.registered_at?.slice(0, 10) || '',
-          images: [],
+          images: plantThumbnailImages(r),
           observations: [],
         }
       }),
@@ -100,10 +91,8 @@ export async function refreshKnowledge() {
             `/assets?species_id=${s.speciesId}`,
           )
           if (attempt !== generation) return
-          s.images = result.assets
-            .filter((a) => a.content_type.startsWith('image/'))
-            .map((a) => ({ path: `/api/data/assets/${a.id}`, caption: 'Official species photo' }))
-          s.image = s.images[0]?.path
+          const portrait = catalog.species.find(row => String(row.species_id) === s.speciesId)
+          Object.assign(s, speciesImageSelection(result.assets, portrait?.image_url, portrait?.image_asset_id))
         }),
       )
       if (attempt !== generation) return

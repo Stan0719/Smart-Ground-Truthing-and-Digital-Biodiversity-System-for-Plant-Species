@@ -1,10 +1,17 @@
 from datetime import datetime
 from pathlib import Path
+import os
 import time
 
 import cv2
-import numpy as np
 from ultralytics import YOLO, YOLOWorld
+
+if __package__:
+    from . import camera_server
+    from .iot_movement import IoTMovementSource
+else:
+    import camera_server
+    from iot_movement import IoTMovementSource
 
 try:
     import winsound
@@ -14,7 +21,7 @@ except ImportError:
 
 WINDOW_NAME = "Human and Animal Detection"
 BASE_DIR = Path(__file__).resolve().parent
-CAMERA_INDEX = 1
+CAMERA_INDEX = 0
 FRAME_SIZE = (960, 540)
 PANEL_WIDTH = 300
 ALERT_COOLDOWN_SECONDS = 3
@@ -23,8 +30,6 @@ PLANT_CONFIDENCE = 0.25
 WRIST_CONFIDENCE = 0.35
 PLANT_CONTACT_SECONDS = 2.0
 WRIST_REACH_PIXELS = 24
-PLANT_MOTION_PIXELS = 2.5
-MIN_PLANT_MOTION_POINTS = 8
 RECORDING_SIZE = (640, 360)
 RECORDING_FPS = 60
 
@@ -99,67 +104,6 @@ class FixedPlantRegion:
             cv2.rectangle(frame, self.drag_start, self.drag_end, (0, 220, 255), 2)
 
 
-class PlantMotionMonitor:
-    def __init__(self):
-        self.previous_gray = None
-        self.previous_plants = {}
-        self.previous_people = []
-
-    def update(self, frame, plants, people, wrists):
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        current = {key: bounds for key, bounds in plants if key is not None}
-        previous_gray, previous_plants = self.previous_gray, self.previous_plants
-        excluded_people = self.previous_people + people
-        self.previous_gray, self.previous_plants = gray, current
-        self.previous_people = list(people)
-        if previous_gray is None:
-            return set()
-
-        mask = np.full(gray.shape, 255, dtype=np.uint8)
-        for x1, y1, x2, y2 in excluded_people:
-            cv2.rectangle(mask, (x1, y1), (x2, y2), 0, -1)
-        for x, y in wrists:
-            cv2.circle(mask, (int(x), int(y)), WRIST_REACH_PIXELS + 12, 0, -1)
-        points = cv2.goodFeaturesToTrack(previous_gray, 500, 0.01, 5, mask=mask)
-        if points is None:
-            return set()
-        moved, status, _ = cv2.calcOpticalFlowPyrLK(previous_gray, gray, points, None)
-        if moved is None or status is None:
-            return set()
-        back, back_status, _ = cv2.calcOpticalFlowPyrLK(gray, previous_gray, moved, None)
-        if back is None or back_status is None:
-            return set()
-        valid = (status.ravel() == 1) & (back_status.ravel() == 1)
-        valid &= np.linalg.norm(points.reshape(-1, 2) - back.reshape(-1, 2), axis=1) < 1.5
-        before, after = points.reshape(-1, 2)[valid], moved.reshape(-1, 2)[valid]
-        if not len(before):
-            return set()
-
-        def inside(coords, bounds):
-            x1, y1, x2, y2 = bounds
-            return ((coords[:, 0] >= x1) & (coords[:, 0] <= x2)
-                    & (coords[:, 1] >= y1) & (coords[:, 1] <= y2))
-
-        after_x = np.clip(after[:, 0].astype(int), 0, gray.shape[1] - 1)
-        after_y = np.clip(after[:, 1].astype(int), 0, gray.shape[0] - 1)
-        usable = mask[after_y, after_x] > 0
-        background = usable.copy()
-        for bounds in list(previous_plants.values()) + list(current.values()) + excluded_people:
-            background &= ~inside(before, bounds) & ~inside(after, bounds)
-        # Without background references, camera movement cannot be ruled out.
-        if background.sum() < 12:
-            return set()
-        flow = after - before
-        camera_shift = np.median(flow[background], axis=0)
-        residual = np.linalg.norm(flow - camera_shift, axis=1)
-        moving = set()
-        for key, bounds in current.items():
-            if key not in previous_plants:
-                continue
-            local = inside(before, previous_plants[key]) & inside(after, bounds) & usable
-            if local.sum() >= MIN_PLANT_MOTION_POINTS and np.median(residual[local]) >= PLANT_MOTION_PIXELS:
-                moving.add(key)
-        return moving
 
 animal_classes = {
     "bird",
@@ -251,7 +195,7 @@ def build_ui_frame(
     plant_count=0,
     wrist_count=0,
     contact_seconds=0,
-    moving_count=0,
+    iot_status="unavailable",
     fixed_region=False,
 ):
     width = video_frame.shape[1]
@@ -301,7 +245,7 @@ def build_ui_frame(
 
     draw_button(ui_frame, "Space  Pause", (panel_x + 22, 445), (120, 42), (58, 69, 82))
     draw_button(ui_frame, "Q  Quit", (panel_x + 158, 445), (100, 42), (125, 55, 60))
-    put_text(ui_frame, f"Moving plants: {moving_count}", (panel_x + 22, 522), 0.4, (155, 165, 175), 1)
+    put_text(ui_frame, f"MPU6050: {iot_status}", (panel_x + 22, 522), 0.4, (155, 165, 175), 1)
 
     return ui_frame
 
@@ -321,7 +265,7 @@ def start_recording(recordings_dir, fps, frame_size):
     return EventVideoWriter(writer, fps, frame_size), str(recording_path)
 
 
-def main():
+def _run_camera(web_enabled=False, sensor=None):
     model = YOLO(str(BASE_DIR / "yolov8n.pt"))
     plant_model = YOLOWorld(str(BASE_DIR / "yolov8s-worldv2.pt"))
     plant_model.set_classes(["plant", "potted plant"])
@@ -345,8 +289,6 @@ def main():
     last_contact_alert_time = float("-inf")
     last_contact_seen_time = 0
     contact_monitor = PlantContactMonitor()
-    motion_monitor = PlantMotionMonitor()
-    movement_during_contact = set()
     video_writer = None
     recording_path = ""
     saved_clip_count = 0
@@ -355,10 +297,7 @@ def main():
     unique_animal_ids = set()
 
     def reset_monitoring():
-        nonlocal motion_monitor
         contact_monitor.started.clear()
-        motion_monitor = PlantMotionMonitor()
-        movement_during_contact.clear()
 
     def finish_recording(announce=False):
         nonlocal video_writer, saved_clip_count, recording_path
@@ -379,8 +318,9 @@ def main():
     [p]     = Select fixed region (Enter confirms, Escape cancels)
     [c]     = Clear fixed region and monitor automatic plant regions
 
-    Alerts require {PLANT_CONTACT_SECONDS:g} seconds of wrist proximity plus movement of that plant.
-    Wrist proximity without plant movement does not alert or start recording.
+    Select this sensor's plant with P or drag a fixed region.
+    Alerts require {PLANT_CONTACT_SECONDS:g} seconds of wrist proximity plus fresh MPU6050 movement.
+    Missing, disconnected or stale sensor readings cannot alert or start recording.
     Recording stops 5 seconds after the confirmed contact is no longer detected.
     """)
 
@@ -422,7 +362,6 @@ def main():
 
             human_count_frame = 0
             animal_count_frame = 0
-            people_bounds = []
 
             annotated_frame = frame.copy()
             plant_count_frame = 0
@@ -452,7 +391,6 @@ def main():
                         display_label = "Human"
                         color = (0, 255, 0)
                         human_count_frame += 1
-                        people_bounds.append(tuple(map(int, box.xyxy[0])))
                     elif label in animal_classes:
                         display_label = "Animal"
                         color = (255, 150, 40)
@@ -490,25 +428,25 @@ def main():
             monitored_plants = fixed_region.monitoring_regions(plants)
             now = time.monotonic()
             contact_ids, contact_elapsed = contact_monitor.update(monitored_plants, wrists, now)
-            moving_ids = motion_monitor.update(frame, monitored_plants, people_bounds, wrists)
-            movement_during_contact.intersection_update(contact_elapsed)
-            movement_during_contact.update(moving_ids.intersection(contact_elapsed))
-            handling_ids = contact_ids.intersection(movement_during_contact)
+            sensor_state = sensor.snapshot() if sensor is not None else {'status': 'unavailable', 'movement': None}
+            # Detector track IDs are not database plant IDs. A selected region
+            # identifies the one plant monitored by this configured physical sensor.
+            sensor_moving = sensor_state['status'] == 'moving' and sensor_state['movement'] == 1
+            handling_ids = contact_ids if fixed_region.bounds is not None and sensor_moving else set()
+            put_text(annotated_frame, f"MPU6050: {sensor_state['status']}", (20, 75),
+                     0.55, (100, 220, 220), 1)
             contact_seconds = max(contact_elapsed.values(), default=0)
             for plant_id, bounds in monitored_plants:
                 if plant_id in contact_elapsed:
                     put_text(annotated_frame, f"Possible contact: {contact_elapsed[plant_id]:.1f}/{PLANT_CONTACT_SECONDS:g}s",
                              (bounds[0], min(FRAME_SIZE[1] - 10, bounds[3] + 22)),
                              0.5, (0, 220, 255), 1)
-                if plant_id in moving_ids:
-                    put_text(annotated_frame, "Movement", (bounds[0], max(20, bounds[1] - 30)),
-                             0.5, (0, 160, 255), 1)
 
             if handling_ids:
                 last_contact_seen_time = now
                 put_text(
                     annotated_frame,
-                    "POSSIBLE HANDLING: CONTACT + MOVEMENT",
+                    "POSSIBLE HANDLING: CONTACT + MPU6050",
                     (20, 44),
                     0.7,
                     (0, 0, 255),
@@ -516,7 +454,15 @@ def main():
                 )
 
                 if now - last_contact_alert_time >= ALERT_COOLDOWN_SECONDS:
-                    print(f"ALERT: {PLANT_CONTACT_SECONDS:g}s contact plus plant movement. Plant IDs: {sorted(handling_ids)}")
+                    print(f"ALERT: {PLANT_CONTACT_SECONDS:g}s camera contact plus fresh MPU6050 movement.")
+
+                    if web_enabled:
+                        camera_server.publish_event(
+                            "possible_plant_contact",
+                            "Camera contact + MPU6050 movement",
+                            f"Wrist proximity for at least {PLANT_CONTACT_SECONDS:g} seconds "
+                            "with fresh MPU6050 movement from this plant's sensor. Please review.",
+                        )
 
                     if winsound is not None:
                         winsound.Beep(1000, 300)
@@ -529,14 +475,18 @@ def main():
                         RECORDING_FPS,
                         RECORDING_SIZE,
                     )
+            elif fixed_region.bounds is None:
+                put_text(annotated_frame, "SELECT THIS PLANT WITH P", (20, 44),
+                         0.7, (0, 220, 255), 2)
             elif contact_ids:
-                put_text(annotated_frame, "CONTACT ONLY: NO MOVEMENT", (20, 44),
+                put_text(annotated_frame, "CONTACT ONLY: WAITING FOR MPU6050", (20, 44),
                          0.7, (0, 220, 255), 2)
 
             should_stop_recording = (
                 video_writer is not None
                 and not handling_ids
-                and now - last_contact_seen_time >= RECORD_AFTER_CONTACT_SECONDS
+                and (sensor_state['status'] not in ('moving', 'stationary')
+                     or now - last_contact_seen_time >= RECORD_AFTER_CONTACT_SECONDS)
             )
 
             if should_stop_recording:
@@ -553,9 +503,12 @@ def main():
                 plant_count_frame,
                 wrist_count_frame,
                 contact_seconds,
-                len(moving_ids),
+                sensor_state['status'],
                 fixed_region.bounds is not None,
             )
+
+            if web_enabled:
+                camera_server.publish_frame(annotated_frame)
 
             if video_writer is not None:
                 video_writer.write(annotated_frame, now)
@@ -596,6 +549,32 @@ def main():
     print(f"Saved plant contact clips: {saved_clip_count}")
 
 
+def main():
+    # A plain desktop launch does not need website configuration or port 8001.
+    plant_id = os.environ.get("CAMERA_PLANT_ID", "").strip()
+    sensor = IoTMovementSource.from_environment(plant_id)
+    if not plant_id:
+        # Detection still runs, but combined alerts remain disabled without a plant.
+        _run_camera(sensor=sensor)
+        return
+
+    camera_id = os.environ.get("CAMERA_ID", "CAM-001").strip() or "CAM-001"
+    try:
+        server = camera_server.start_server(camera_id, plant_id)
+    except OSError as error:
+        raise SystemExit(
+            "Could not start the camera HTTP service on 127.0.0.1:8001. "
+            "Check whether another camera service is already running."
+        ) from error
+
+    try:
+        sensor.start()
+        _run_camera(web_enabled=True, sensor=sensor)
+    finally:
+        sensor.close()
+        server.shutdown()
+        server.server_close()
+
+
 if __name__ == "__main__":
     main()
-

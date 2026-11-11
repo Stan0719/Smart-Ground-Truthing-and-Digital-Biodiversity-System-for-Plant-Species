@@ -2,6 +2,8 @@ import pg from 'pg'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { readFileSync, existsSync } from 'node:fs'
 import { parseEnv } from 'node:util'
+import { dataEncryptionFromEnvironment } from './data-encryption.mjs'
+import { createAccountNameStorage } from './account-name-storage.mjs'
 
 // Backend settings first, then authentication-specific overrides. Existing process
 // variables always win. Database credentials never enter a Vite/public variable.
@@ -91,7 +93,7 @@ export function parameters(sql) {
   return output
 }
 
-export function postgresDatabase(pool, schema = 'plant_auth') {
+export function postgresDatabase(pool, schema = 'plant_auth', { accountNames } = {}) {
   if (
     !/^[a-z][a-z0-9_]{0,62}$/.test(schema) ||
     ['public', 'auth', 'storage', 'extensions', 'information_schema'].includes(schema) ||
@@ -120,7 +122,11 @@ export function postgresDatabase(pool, schema = 'plant_auth') {
     },
     async query(sql, values = []) {
       if (!context.getStore()) return db.transaction(() => db.query(sql, values))
-      const result = await context.getStore().query(parameters(sql), values)
+      const statement = parameters(sql)
+      const bound = accountNames ? accountNames.write(statement, values) : values
+      const result = await context.getStore().query(statement, bound)
+      if (/\b(?:FROM|JOIN|UPDATE|INTO)\s+(?:["a-z0-9_]+\.)?"?(users|visitors)\b/i.test(statement))
+        accountNames?.read(result.rows)
       for (const row of result.rows ?? [])
         for (const key of ['n', 'count', 'created_at', 'expires_at'])
           if (
@@ -160,5 +166,6 @@ export function connectAuth(env = process.env) {
   pool.on('error', (error) =>
     console.error('Authentication database connection failed:', error.code ?? error.name),
   )
-  return postgresDatabase(pool, env.AUTH_PG_SCHEMA || 'plant_auth')
+  const accountNames = createAccountNameStorage(() => dataEncryptionFromEnvironment(env))
+  return postgresDatabase(pool, env.AUTH_PG_SCHEMA || 'plant_auth', { accountNames })
 }

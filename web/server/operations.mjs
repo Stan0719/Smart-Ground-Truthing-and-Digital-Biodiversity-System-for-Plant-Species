@@ -2,6 +2,7 @@ import { publicUser } from './auth.mjs'
 import policy from '../../shared/rbac.cjs'
 const { grants } = policy
 export async function adminRequest({ auth, activation, recovery, path, method, body, user, ip }) {
+  if (!policy.permitted(user, 'accounts.manage')) return { status: user ? 403 : 401, error: 'Access denied.' }
   const db = auth.db
   if (path === '/api/admin/permissions' && method === 'GET')
     return { status: 200, permissions: grants }
@@ -94,7 +95,7 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
     return { status: 404, error: 'Account not found.' }
   if (action === 'resend' && method === 'POST') return activation.invite(current, user.id, ip, id)
   if (action === 'status' && method === 'PATCH') {
-    if (!['Active', 'Inactive', 'Suspended'].includes(body.status))
+    if (!['Active', 'Suspended'].includes(body.status))
       return { status: 400, error: 'Invalid status.' }
     if (id === user.id && body.status !== 'Active')
       return { status: 400, error: 'Ask another administrator to disable your account.' }
@@ -133,7 +134,7 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
     !(
       table === 'visitors' ? ['Visitor'] : ['Administrator', 'Conservation Officer', 'Botanist']
     ).includes(body.role) ||
-    !['Active', 'Inactive', 'Suspended', 'Pending Activation'].includes(body.status)
+    !(['Active', 'Suspended'].includes(body.status) || (current.status === body.status && ['Inactive', 'Pending Activation'].includes(body.status)))
   )
     return { status: 400, error: 'Enter a valid name, email, role and status.' }
   if ((current.status === 'Pending Activation') !== (body.status === 'Pending Activation'))
@@ -141,7 +142,8 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
   if (id === user.id && (body.role !== current.role || body.status !== current.status))
     return { status: 400, error: 'You cannot change your own role or status.' }
   await db.transaction(async () => {
-    await db.prepare(`SELECT id FROM ${table} WHERE id=? FOR UPDATE`).get(id)
+    await auth.lockAccountPolicy()
+    const locked = await db.prepare(`SELECT * FROM ${table} WHERE id=? FOR UPDATE`).get(id)
     if (
       await db
         .prepare("SELECT 1 FROM auth_events WHERE user_id=? AND reason='account_archived'")
@@ -151,6 +153,7 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
     await db
       .prepare(`UPDATE ${table} SET name=?,email=?,role=?,status=? WHERE id=?`)
       .run(body.name.trim(), body.email.trim().toLowerCase(), body.role, body.status, id)
+    await auth.recordReactivation(id, locked.status, body.status, user.id, ip)
     if (current.role !== body.role || current.email !== body.email.trim().toLowerCase())
       await db.prepare(`DELETE FROM ${sessions} WHERE user_id=?`).run(id)
     await auth.event(id, ip, 'account_updated', user.id)

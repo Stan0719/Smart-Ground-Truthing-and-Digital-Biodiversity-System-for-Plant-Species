@@ -64,13 +64,19 @@ class PlantContactTests(unittest.TestCase):
         monitor.update(plants, [(150, 150)], 0)
         self.assertEqual(monitor.update(plants, [(350, 350)], 7)[0], set())
 
-    def test_camera_requires_two_seconds_and_movement_of_the_contacted_plant(self):
-        cases = [(near, movement, False, True) for near, movement in
-                 ((True, set()), (True, {1}), (False, {1}), (False, set()), (True, {2}))]
-        cases += [(True, {-1}, True, False), (True, set(), True, False),
-                  (True, {1}, True, True), (False, {-1}, True, False)]
-        for wrist_near, moving, fixed, detected in cases:
-            with self.subTest(wrist_near=wrist_near, moving=moving, fixed=fixed, detected=detected):
+    def test_camera_requires_wrist_contact_fixed_plant_and_live_mpu_movement(self):
+        cases = [
+            (True, 'moving', 1, True, True),
+            (True, 'moving', 1, True, False),
+            (True, 'stationary', 0, True, True),
+            (True, 'unavailable', None, True, True),
+            (True, 'stale', None, True, True),
+            (False, 'moving', 1, True, True),
+            (True, 'moving', 1, False, True),
+            (True, 'moving', 1, False, False),
+        ]
+        for wrist_near, status, movement, fixed, detected in cases:
+            with self.subTest(near=wrist_near, status=status, fixed=fixed, detected=detected):
                 frame = np.zeros((540, 960, 3), dtype=np.uint8)
                 capture = MagicMock()
                 capture.isOpened.return_value = True
@@ -87,58 +93,59 @@ class PlantContactTests(unittest.TestCase):
                 points = torch.zeros((1, 17, 3))
                 points[0, 9] = torch.tensor([150 if wrist_near else 400, 150, 0.9])
                 pose_model.predict.return_value = [SimpleNamespace(keypoints=SimpleNamespace(data=points))]
-                writer = MagicMock()
-                sound = MagicMock()
+                writer, sound, sensor = MagicMock(), MagicMock(), MagicMock()
+                sensor.snapshot.return_value = {'status': status, 'movement': movement}
                 with patch.multiple(cam.cv2, VideoCapture=MagicMock(return_value=capture),
                                     VideoWriter=MagicMock(return_value=writer), namedWindow=MagicMock(),
-                                    setMouseCallback=MagicMock(),
-                                    imshow=MagicMock(), destroyAllWindows=MagicMock(),
+                                    setMouseCallback=MagicMock(), imshow=MagicMock(),
+                                    destroyAllWindows=MagicMock(),
                                     waitKey=MagicMock(side_effect=[-1, -1, ord('q')])), \
                         patch.object(cam, 'YOLO', side_effect=[detector, pose_model]), \
                         patch.object(cam, 'YOLOWorld', return_value=plant_model), \
                         patch.object(cam, 'FixedPlantRegion', return_value=region), \
-                        patch.object(cam.time, 'monotonic', side_effect=[0, 1.9, 2]), \
-                        patch.object(cam.PlantMotionMonitor, 'update', return_value=moving), \
+                        patch.object(cam.time, 'monotonic', side_effect=[0, 0, 1.9, 2]), \
+                        patch.object(cam.camera_server, 'publish_frame') as publish_frame, \
+                        patch.object(cam.camera_server, 'publish_event') as publish_event, \
                         patch.object(cam, 'put_text', wraps=cam.put_text) as text, \
                         patch.object(cam, 'winsound', sound):
-                    cam.main()
-                should_alert = wrist_near and (-1 if fixed else 1) in moving
+                    cam._run_camera(web_enabled=True, sensor=sensor)
+                should_alert = wrist_near and fixed and movement == 1 and status == 'moving'
                 self.assertEqual(writer.write.call_count, 1 if should_alert else 0)
                 self.assertEqual(sound.Beep.call_count, 1 if should_alert else 0)
+                self.assertEqual(publish_frame.call_count, 3)
+                self.assertEqual(publish_event.call_count, 1 if should_alert else 0)
+                if should_alert:
+                    self.assertEqual(publish_event.call_args.args[0], 'possible_plant_contact')
+                    self.assertIn('MPU6050', publish_event.call_args.args[2])
                 handling_labels = [call.args[1] for call in text.call_args_list
                                    if call.args[1].startswith('POSSIBLE HANDLING:')]
                 self.assertEqual(bool(handling_labels), should_alert)
                 capture.release.assert_called_once()
-                self.assertEqual(plant_model.track.call_count, 3)
 
-    def test_optical_flow_detects_plant_motion_but_rejects_camera_translation(self):
-        rng = np.random.default_rng(42)
-        frame = rng.integers(0, 256, (300, 400, 3), dtype=np.uint8)
-        frame = cam.cv2.GaussianBlur(frame, (5, 5), 0)
-        plants = [(1, (100, 80, 240, 220))]
-        moved = frame.copy()
-        moved[80:220, 100:240] = np.roll(frame[80:220, 100:240], 5, axis=1)
-        monitor = cam.PlantMotionMonitor()
-        self.assertEqual(monitor.update(frame, plants, [], []), set())
-        self.assertEqual(monitor.update(moved, plants, [], []), {1})
-        camera_moved = cam.cv2.warpAffine(frame, np.float32([[1, 0, 5], [0, 1, 0]]), (400, 300))
-        monitor = cam.PlantMotionMonitor()
-        monitor.update(frame, plants, [], [])
-        self.assertEqual(monitor.update(camera_moved, [(1, (105, 80, 245, 220))], [], []), set())
+    def test_desktop_launch_does_not_require_a_plant_or_http_server(self):
+        with patch.dict(cam.os.environ, {}, clear=True), \
+                patch.object(cam.IoTMovementSource, 'from_environment') as source, \
+                patch.object(cam.camera_server, 'start_server') as start, \
+                patch.object(cam, '_run_camera') as run:
+            cam.main()
+        start.assert_not_called()
+        run.assert_called_once_with(sensor=source.return_value)
+        source.return_value.start.assert_not_called()
 
-    def test_human_region_and_missing_texture_do_not_supply_movement_evidence(self):
-        frame = np.zeros((300, 400, 3), dtype=np.uint8)
-        monitor = cam.PlantMotionMonitor()
-        plants = [(1, (100, 80, 240, 220))]
-        monitor.update(frame, plants, [], [])
-        self.assertEqual(monitor.update(frame, plants, [], []), set())
-        rng = np.random.default_rng(7)
-        frame = rng.integers(0, 256, frame.shape, dtype=np.uint8)
-        moved = frame.copy()
-        moved[80:220, 100:240] = np.roll(frame[80:220, 100:240], 5, axis=1)
-        monitor = cam.PlantMotionMonitor()
-        monitor.update(frame, plants, [(90, 70, 250, 230)], [])
-        self.assertEqual(monitor.update(moved, plants, [(90, 70, 250, 230)], []), set())
+    def test_web_launch_closes_http_service_even_if_camera_initialization_fails(self):
+        server = MagicMock()
+        with patch.dict(cam.os.environ, {'CAMERA_ID': 'CAM-TEST', 'CAMERA_PLANT_ID': '42'}), \
+                patch.object(cam.IoTMovementSource, 'from_environment') as source, \
+                patch.object(cam.camera_server, 'start_server', return_value=server) as start, \
+                patch.object(cam, '_run_camera', side_effect=RuntimeError('Camera failed')) as run:
+            with self.assertRaisesRegex(RuntimeError, 'Camera failed'):
+                cam.main()
+        start.assert_called_once_with('CAM-TEST', '42')
+        run.assert_called_once_with(web_enabled=True, sensor=source.return_value)
+        source.return_value.close.assert_called_once_with()
+        server.shutdown.assert_called_once_with()
+        server.server_close.assert_called_once_with()
+
 
 
 if __name__ == '__main__':

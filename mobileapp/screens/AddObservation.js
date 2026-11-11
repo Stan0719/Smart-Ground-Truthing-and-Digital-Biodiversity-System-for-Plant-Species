@@ -1,3 +1,4 @@
+import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 import React, { useState } from "react";
 
 import {
@@ -15,6 +16,7 @@ import {
   getPlantById,
   getSpeciesBySlug,
 } from "../data/mockData";
+import BackButton from "../components/BackButton";
 
 const HEALTH_STATUSES = ["Healthy", "Monitoring", "Poor"];
 const LIFE_STAGES = ["Seedling", "Juvenile", "Mature", "Flowering"];
@@ -34,6 +36,7 @@ const getLocalDateParts = () => {
 };
 
 export default function AddObservation({ route, navigation, user }) {
+  useAppTranslation();
   const plantId = route.params?.plantId;
   const plant = getPlantById(plantId);
   const species = plant ? getSpeciesBySlug(plant.speciesSlug) : null;
@@ -52,32 +55,37 @@ export default function AddObservation({ route, navigation, user }) {
 
   const handleSubmit = () => {
     if (!isBotanist) {
-      Alert.alert("Not Available", "Only Botanists can add observations.");
+      Alert.alert(t("addObservation.notAvailable"), t("addObservation.onlyBotanistsCanAddObservations"));
+      return;
+    }
+
+    if (morphology.trim().length > 4000 || notes.trim().length > 4000) {
+      Alert.alert(t("addObservation.textTooLong"), t("addObservation.morphologyAndFieldNotesMustBe4000CharactersOr"));
       return;
     }
 
     const heightCm = Number(height);
 
     if (!Number.isFinite(heightCm) || heightCm <= 0) {
-      Alert.alert("Invalid Height", "Enter a valid plant height in centimetres.");
+      Alert.alert(t("addObservation.invalidHeight"), t("addObservation.enterAValidPlantHeightInCentimetres"));
       return;
     }
 
     if (!healthStatus || !lifeStage || !morphology.trim()) {
       Alert.alert(
-        "Missing Information",
-        "Complete the health status, life stage, and morphology fields."
+        t("addObservation.missingInformation"),
+        t("addObservation.completeTheHealthStatusLifeStageAndMorphologyFields")
       );
       return;
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(observationDate)) {
-      Alert.alert("Invalid Date", "Use the date format YYYY-MM-DD.");
+      Alert.alert(t("addObservation.invalidDate"), t("addObservation.useTheDateFormatYyyyMmDd"));
       return;
     }
 
     if (!/^\d{2}:\d{2}$/.test(observationTime)) {
-      Alert.alert("Invalid Time", "Use the time format HH:MM.");
+      Alert.alert(t("addObservation.invalidTime"), t("addObservation.useTheTimeFormatHhMm"));
       return;
     }
 
@@ -93,29 +101,27 @@ export default function AddObservation({ route, navigation, user }) {
     });
 
     if (!observation) {
-      Alert.alert("Error", "Plant record not found.");
+      Alert.alert(t("common.error"), t("addObservation.plantRecordNotFound"));
       return;
     }
 
     Alert.alert(
-      "Observation Submitted",
-      "The new observation is pending review.",
-      [{ text: "OK", onPress: () => navigation.goBack() }]
+      t("addObservation.observationSubmitted"),
+      t("addObservation.theNewObservationIsPendingReview"),
+      [{ text: t("common.ok"), onPress: () => navigation.goBack() }]
     );
   };
 
   if (!plant || !isBotanist) {
     return (
       <View style={styles.unavailable}>
-        <Text style={styles.unavailableTitle}>Observation unavailable</Text>
+        <Text style={styles.unavailableTitle}>{t("addObservation.observationUnavailable")}</Text>
         <Text style={styles.unavailableText}>
           {!plant
-            ? "The selected plant record could not be found."
-            : "Only Botanists can add observations."}
+            ? t("addObservation.theSelectedPlantRecordCouldNotBeFound")
+            : t("addObservation.onlyBotanistsCanAddObservations")}
         </Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backButtonText}>Go Back</Text>
-        </TouchableOpacity>
+        <BackButton label={t("common.goBack")} onPress={() => navigation.goBack()} style={styles.backButton} />
       </View>
     );
   }
@@ -126,19 +132,14 @@ export default function AddObservation({ route, navigation, user }) {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.sectionLabel}>FIELD OBSERVATION</Text>
-      <Text style={styles.title}>Add New Observation</Text>
-      <Text style={styles.description}>
-        Record a new visit for {species?.name || plant.speciesSlug}. The verified
-        record will remain unchanged until this observation is reviewed.
-      </Text>
+      <Text style={styles.sectionLabel}>{t("addObservation.fieldObservation")}</Text>
+      <Text style={styles.title}>{t("navigation.addNewObservation")}</Text>
+      <Text style={styles.description}>{t("addObservation.recordANewVisitFor")}{species?.name || plant.speciesSlug}{t("addObservation.theVerifiedRecordWillRemainUnchangedUntilThisObservationIs")}</Text>
 
       <View style={styles.identityCard}>
-        <Text style={styles.identityLabel}>PLANT ID</Text>
+        <Text style={styles.identityLabel}>{t("addObservation.plantId")}</Text>
         <Text style={styles.identityValue}>{plant.plantId}</Text>
-        <Text style={styles.locationNote}>
-          Location remains {plant.location.zone}. GPS details cannot be changed here.
-        </Text>
+        <Text style={styles.locationNote}>{t("addObservation.locationRemains")}{plant.location.zone}{t("addObservation.gpsDetailsCannotBeChangedHere")}</Text>
       </View>
 
       <View style={styles.formCard}>
@@ -165,7 +166,7 @@ export default function AddObservation({ route, navigation, user }) {
           onChangeText={setMorphology}
           multiline
           textAlignVertical="top"
-          placeholder="Describe the current plant condition"
+          placeholder={t("addObservation.describeTheCurrentPlantCondition")}
           placeholderTextColor="#93A099"
         />
 
@@ -176,7 +177,7 @@ export default function AddObservation({ route, navigation, user }) {
           onChangeText={setNotes}
           multiline
           textAlignVertical="top"
-          placeholder="Optional notes from this visit"
+          placeholder={t("addObservation.optionalNotesFromThisVisit")}
           placeholderTextColor="#93A099"
         />
 
@@ -187,7 +188,7 @@ export default function AddObservation({ route, navigation, user }) {
               style={styles.input}
               value={observationDate}
               onChangeText={setObservationDate}
-              placeholder="YYYY-MM-DD"
+              placeholder={t("addObservation.yyyyMmDd")}
               placeholderTextColor="#93A099"
             />
           </View>
@@ -197,7 +198,7 @@ export default function AddObservation({ route, navigation, user }) {
               style={styles.input}
               value={observationTime}
               onChangeText={setObservationTime}
-              placeholder="HH:MM"
+              placeholder={t("addObservation.hhMm")}
               placeholderTextColor="#93A099"
             />
           </View>
@@ -205,17 +206,19 @@ export default function AddObservation({ route, navigation, user }) {
       </View>
 
       <TouchableOpacity style={styles.submitButton} activeOpacity={0.8} onPress={handleSubmit}>
-        <Text style={styles.submitButtonText}>Submit for Review</Text>
+        <Text style={styles.submitButtonText}>{t("addObservation.submitForReview")}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
 function FieldLabel({ text }) {
-  return <Text style={styles.label}>{text}</Text>;
+  useAppTranslation();
+  return <Text style={styles.label}>{translateLabel(text)}</Text>;
 }
 
 function OptionRow({ options, value, onChange }) {
+  useAppTranslation();
   return (
     <View style={styles.options}>
       {options.map((option) => (
@@ -225,7 +228,7 @@ function OptionRow({ options, value, onChange }) {
           onPress={() => onChange(option)}
         >
           <Text style={[styles.optionText, value === option && styles.optionTextSelected]}>
-            {option}
+            {translateLabel(option)}
           </Text>
         </TouchableOpacity>
       ))}
@@ -260,6 +263,5 @@ const styles = StyleSheet.create({
   unavailable: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, backgroundColor: "#F8F6EE" },
   unavailableTitle: { color: "#234A3C", fontSize: 22, fontWeight: "700" },
   unavailableText: { marginTop: 8, color: "#63736A", fontSize: 12, lineHeight: 18, textAlign: "center" },
-  backButton: { minHeight: 44, marginTop: 18, justifyContent: "center", paddingHorizontal: 18, borderRadius: 999, backgroundColor: "#315B49" },
-  backButtonText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
+  backButton: { marginTop: 18 },
 });

@@ -1,0 +1,60 @@
+✔ version 2 JSON round trip includes a key ID and hides account plaintext (2.7886ms)
+✔ rotation encrypts with the active ID and reads old envelopes using retained keys (0.4991ms)
+✔ v1 compatibility is explicit; versions and plaintext never silently fall back (0.4467ms)
+✔ wrong keys and altered key IDs, versions, algorithms and contexts fail closed (0.5568ms)
+✔ tampering and malformed nonce/tag/ciphertext are rejected (0.8443ms)
+✔ fresh encryptions use unique nonces and do not mutate input records (1.9992ms)
+✔ keyring validation rejects missing keys, wrong lengths/types and invalid IDs (0.6679ms)
+✔ backend environment configuration fails without keys and rejects public variable prefixes (0.4737ms)
+✔ encryption/decryption errors do not echo plaintext, keys or underlying exceptions (0.3312ms)
+✔ AES-256-GCM round trip survives envelope JSON serialization (0.3676ms)
+✔ repeated encryption uses fresh nonces and ciphertext (2.313ms)
+✔ missing, wrong-type and non-256-bit keys fail closed (0.4157ms)
+✔ record context is required and authenticated (0.2849ms)
+✔ tampering with nonce, tag or ciphertext is rejected (0.2631ms)
+✔ malformed envelopes, truncated tags and noncanonical base64 are rejected (0.6942ms)
+✔ unsupported serialization fails without returning a partial envelope (0.2961ms)
+✔ actual staff/Visitor inserts encrypt names in bound parameters and PostgreSQL; reads preserve responses (1936.8482ms)
+✔ real HTTP account creation/edit/list/login/recovery decrypt names and keep authorization/contracts (2398.4802ms)
+✔ legacy plaintext records remain readable, and editing one encrypts only its name (1390.948ms)
+✔ wrong keys, corrupted ciphertext, record substitution and missing keys fail without data loss (1201.2249ms)
+✔ missing configured key prevents real backend writes before INSERT, without plaintext fallback (1524.1991ms)
+✔ administrator provisions temporary password; first change is mandatory before RBAC access (2611.2404ms)
+✔ missing delivery creates nothing; failed delivery keeps first-change restrictions and permits retry (1408.9458ms)
+✔ resend rotates temporary password and sessions but cannot reset completed or blocked staff (2540.3129ms)
+✔ legacy pending account is preserved until administrator issues its temporary password (1365.2939ms)
+✔ Visitor administration uses Visitor table without permitting staff promotion (1378.7868ms)
+✔ activation diagnostic rejects missing/placeholders and never reveals configured values (0.8664ms)
+✔ invitation abuse limit rejects delivery before rotating tokens or creating accounts (1199.1668ms)
+✔ startup and diagnostics share public fallback without reusing OTP or overriding server settings (5.5341ms)
+✔ EmailJS errors expose only safe actionable categories, never provider text or secrets (1190.6518ms)
+Rejected website origin: "https://other-workspace-5173.app.github.dev"
+Rejected website origin: "(missing)"
+Rejected website origin: "https://evil.example"
+✔ HTTP API enforces status, role, cookies, origin and revocation (3892.4979ms)
+✔ one-hour Botanist credentials expire; mobile-only first login and independent native sessions (3003.5711ms)
+✔ only Administrator can initiate another account recovery without changing its password (2389.1898ms)
+✔ listener remains healthy; overlapping shutdown requests close the listener and database only once (5.0951ms)
+✔ unexpected server closure and event-loop drain are distinguishable from requested shutdown (0.8357ms)
+✔ database shutdown failure is recorded safely and produces a nonzero exit (0.9448ms)
+✔ fatal observers retain safe metadata without swallowing exceptions or unhandled rejections (0.2146ms)
+✔ all roles enforce status, log denials and permanently revoke old sessions (4784.6331ms)
+✔ password change, expiry, direct database disable and throttling (2207.1026ms)
+✔ explicit email administrator bootstrap preserves existing users and never returns credentials (1538.377ms)
+✔ security settings are constrained, persisted, audited and revoke sessions (1387.763ms)
+✔ delete archives staff and visitors, hides them after reload and blocks reactivation (1926.2989ms)
+✔ Visitor registration persists hashed credentials, authenticates and revokes correctly (1624.3247ms)
+✔ server recovery expiry, attempts, single use, password update and session revocation (1978.2496ms)
+✔ delivery failures do not claim delivery and blocked accounts cannot reset (1187.6486ms)
+✔ signed recovery HTTP returns a distinct recovery identifier and validates real session after reset (1598.5751ms)
+✔ private environment recovery key requires no file and rejects malformed key material (1.8059ms)
+ℹ tests 47
+ℹ suites 0
+ℹ pass 47
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47827.9553
+
+Process exit code: 0

@@ -1,0 +1,46 @@
+[
+  {
+    "command": [
+      "node",
+      "--check",
+      "web/server/account-name-storage.mjs"
+    ],
+    "workingDirectory": ".",
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "node",
+      "--check",
+      "web/server/account-name-storage.test.mjs"
+    ],
+    "workingDirectory": ".",
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "node",
+      "--check",
+      "web/server/postgres.mjs"
+    ],
+    "workingDirectory": ".",
+    "exitCode": 0,
+    "output": ""
+  },
+  {
+    "command": [
+      "C:\\innovation project\\Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species\\web\\node_modules\\.bin\\eslint.cmd",
+      "server/account-name-storage.mjs",
+      "server/account-name-storage.test.mjs",
+      "server/postgres.mjs",
+      "server/test-postgres.mjs",
+      "server/activation.test.mjs",
+      "--no-cache"
+    ],
+    "workingDirectory": "web",
+    "exitCode": 0,
+    "output": ""
+  }
+]

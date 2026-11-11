@@ -11,6 +11,13 @@ const error = ref(''),
 const form = ref({ name: '', username: '', email: '', role: 'Botanist' })
 async function invite() {
   if (busy.value) return
+  form.value.name = form.value.name.trim()
+  form.value.email = form.value.email.trim().toLowerCase()
+  if (!form.value.name || form.value.name.length > 100 ||
+      form.value.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.value.email)) {
+    error.value = 'Enter a name (up to 100 characters) and a valid email address.'
+    return
+  }
   busy.value = true
   emit('busy', true)
   error.value = ''

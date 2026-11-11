@@ -3,6 +3,9 @@ import { PGlite } from '@electric-sql/pglite'
 import { postgresDatabase } from './postgres.mjs'
 import { migrateAuth } from './migrate.mjs'
 import { createAuth } from './auth.mjs'
+import { randomBytes } from 'node:crypto'
+import { createDataEncryption } from './data-encryption.mjs'
+import { createAccountNameStorage } from './account-name-storage.mjs'
 export async function testPool() {
   const engine = new PGlite()
   await engine.waitReady
@@ -44,7 +47,10 @@ export async function createTestAuth() {
 }
 
 export async function testDatabase() {
-  const db = postgresDatabase(await testPool())
+  const encryption = createDataEncryption({ activeKeyId: 'isolated-test', keys: { 'isolated-test': randomBytes(32).toString('base64') } })
+  const db = postgresDatabase(await testPool(), 'plant_auth', {
+    accountNames: createAccountNameStorage(() => encryption),
+  })
   await migrateAuth(db)
   return db
 }

@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
+import { monitoringDate, monitoringLabels } from '../../utils/officerMonitoringDisplay'
 import AppModal from '../../components/conservation/AppModal.vue'
 import CameraMonitoringSection from '../../components/CameraMonitoringSection.vue'
 import SensorHistoryChart, {
@@ -9,52 +11,25 @@ import SensorHistoryChart, {
 } from '../../components/conservation/SensorHistoryChart.vue'
 import { useConservationText } from '../../composables/useConservationText'
 import { formatPlantId } from '../../utils/plantId'
-
-interface ApiSensorReading {
-  reading_id: string | number
-  plant_id: string | number
-  temperature_c: string | number | null
-  humidity: string | number | null
-  soil_moisture: string | number | null
-  rainfall_mm: string | number | null
-  motion_detected: boolean | null
-  gps_latitude: string | number | null
-  gps_longitude: string | number | null
-  recorded_at: string
-}
-
-interface ApiSensorDevice {
-  sensor_id: string | number
-  device_name: string
-  device_type: string
-  serial_number: string | null
-  location_description: string | null
-  status: string
-  installed_at: string | null
-  latest_reading: ApiSensorReading | null
-}
-
-interface IoTDevicesResponse {
-  message: string
-  count: number
-  devices: ApiSensorDevice[]
-}
-
-interface SensorReadingsResponse {
-  message: string
-  sensor: Omit<ApiSensorDevice, 'installed_at' | 'latest_reading'>
-  count: number
-  readings: ApiSensorReading[]
-}
+import {
+  loadCanonicalDevices,
+  loadCanonicalHistory,
+  type IoTDevice as ApiSensorDevice,
+  type IoTReading as ApiSensorReading,
+} from '../../services/iotMonitoring'
 
 const { t } = useI18n()
-const { ct, dt } = useConservationText()
+const { ct, locale } = useConservationText()
+const dt = (value?: string | null) => monitoringDate(value, locale.value)
 const router = useRouter()
 const devices = ref<ApiSensorDevice[]>([])
 const selectedDevice = ref<ApiSensorDevice | null>(null)
 const selectedReading = ref<ApiSensorReading | null>(null)
 const historyDevice = ref<ApiSensorDevice | null>(null)
 const historyReadings = ref<ApiSensorReading[]>([])
+const deviceLabels = computed(() => monitoringLabels([...devices.value.map(item => item.sensor_id), selectedDevice.value?.sensor_id, historyDevice.value?.sensor_id]))
+const readingLabels = computed(() => monitoringLabels([...devices.value.map(item => item.latest_reading?.reading_id), ...historyReadings.value.map(item => item.reading_id), selectedReading.value?.reading_id]))
+const historyHasMore = ref(false)
 const isHistoryLoading = ref(false)
 const historyErrorMessage = ref('')
 const search = ref('')
@@ -67,10 +42,7 @@ const loadDevices = async () => {
   isLoading.value = true
   errorMessage.value = ''
   try {
-    const response = await fetch('/api/iot/devices')
-    const result = (await response.json()) as Partial<IoTDevicesResponse>
-    if (!response.ok) throw new Error(result.message || 'Unable to retrieve IoT devices.')
-    devices.value = Array.isArray(result.devices) ? result.devices : []
+    devices.value = await loadCanonicalDevices()
   } catch (error) {
     devices.value = []
     errorMessage.value = error instanceof Error ? error.message : 'Unable to retrieve IoT devices.'
@@ -84,9 +56,9 @@ onMounted(loadDevices)
 const filteredDevices = computed(() =>
   devices.value.filter((device) => {
     const reading = device.latest_reading
-    const plantId = reading ? formatPlantId(reading.plant_id) : ''
+    const plantId = reading?.plant_id ? formatPlantId(reading.plant_id) : ''
     const matchesSearch =
-      `${device.sensor_id} ${device.device_name} ${device.device_type} ${device.serial_number ?? ''} ${device.location_description ?? ''} ${plantId ?? ''}`
+      `${device.sensor_id} ${device.device_name} ${device.device_type} ${device.status} ${device.serial_number ?? ''} ${device.location_description ?? ''} ${plantId ?? ''}`
         .toLowerCase()
         .includes(search.value.toLowerCase())
     return (
@@ -108,11 +80,15 @@ const cards = computed(() => [
   ['totalDevices', devices.value.length],
   [
     'onlineDevices',
-    devices.value.filter((device) => device.status.toLowerCase() === 'online').length,
+    devices.value.some((device) => device.status.toLowerCase() === 'online')
+      ? devices.value.filter((device) => device.status.toLowerCase() === 'online').length
+      : '—',
   ],
   [
     'offlineDevices',
-    devices.value.filter((device) => device.status.toLowerCase() === 'offline').length,
+    devices.value.some((device) => device.status.toLowerCase() === 'offline')
+      ? devices.value.filter((device) => device.status.toLowerCase() === 'offline').length
+      : '—',
   ],
   ['latestReadings', latestReadings.value.length],
 ])
@@ -120,7 +96,7 @@ const cards = computed(() => [
 const valueOrDash = (value: string | number | null | undefined, suffix = '') =>
   value === null || value === undefined || value === '' ? '—' : `${value}${suffix}`
 const plantDisplayId = (reading: ApiSensorReading | null) =>
-  reading ? formatPlantId(reading.plant_id) || '—' : '—'
+  reading?.plant_id ? formatPlantId(reading.plant_id) || '—' : '—'
 const gpsValue = (reading: ApiSensorReading | null) =>
   reading?.gps_latitude !== null &&
   reading?.gps_latitude !== undefined &&
@@ -137,7 +113,7 @@ const viewDeviceAlerts = (device: ApiSensorDevice) => {
   selectedDevice.value = null
   void router.push({
     name: 'conservation-alerts',
-    query: { sensor: String(device.sensor_id) },
+    query: { device: String(device.sensor_id) },
   })
 }
 
@@ -150,7 +126,7 @@ const viewReadingAlerts = (reading: ApiSensorReading) => {
 }
 
 const viewReadingOnMap = (reading: ApiSensorReading, source: 'device' | 'reading') => {
-  const plantId = formatPlantId(reading.plant_id)
+  const plantId = reading.plant_id ? formatPlantId(reading.plant_id) : null
   if (!plantId) return
 
   if (source === 'device') selectedDevice.value = null
@@ -163,13 +139,13 @@ const loadReadingHistory = async (device: ApiSensorDevice) => {
   historyDevice.value = device
   selectedDevice.value = null
   historyReadings.value = []
+  historyHasMore.value = false
   historyErrorMessage.value = ''
   isHistoryLoading.value = true
   try {
-    const response = await fetch(`/api/iot/sensors/${device.sensor_id}/readings`)
-    const result = (await response.json()) as Partial<SensorReadingsResponse>
-    if (!response.ok) throw new Error(result.message || 'Unable to retrieve sensor readings.')
-    historyReadings.value = Array.isArray(result.readings) ? result.readings : []
+    const result = await loadCanonicalHistory(device)
+    historyReadings.value = result.readings
+    historyHasMore.value = result.hasMore
   } catch (error) {
     historyErrorMessage.value =
       error instanceof Error ? error.message : 'Unable to retrieve sensor readings.'
@@ -181,6 +157,7 @@ const loadReadingHistory = async (device: ApiSensorDevice) => {
 const closeReadingHistory = () => {
   historyDevice.value = null
   historyReadings.value = []
+  historyHasMore.value = false
   historyErrorMessage.value = ''
 }
 
@@ -254,26 +231,26 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         </div>
       </header>
       <p v-if="!filteredDevices.length" class="state-message">No sensor devices found.</p>
-      <div v-else class="table-scroll">
-        <table>
+      <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="t('conservationPages.iot.devices')" tabindex="0">
+        <table class="officer-data-table iot-device-table"><colgroup><col class="column-id" /><col class="column-name" /><col class="column-type" /><col class="column-identifier" /><col class="column-plant" /><col class="column-description" /><col class="column-status" /><col class="column-time" /><col class="column-time" /><col class="column-actions" /></colgroup>
           <thead>
             <tr>
-              <th>Sensor ID</th>
-              <th>Device Name</th>
-              <th>Device Type</th>
-              <th>Serial Number</th>
-              <th>Related Plant</th>
-              <th>Location Description</th>
-              <th>Status</th>
-              <th>Installed At</th>
-              <th>Latest Reading</th>
-              <th>Actions</th>
+              <th scope="col">Sensor ID</th>
+              <th scope="col">Device Name</th>
+              <th scope="col">Device Type</th>
+              <th scope="col">Serial Number</th>
+              <th scope="col">Related Plant</th>
+              <th scope="col">Location Description</th>
+              <th scope="col">Status</th>
+              <th scope="col">Installed At</th>
+              <th scope="col">Latest Reading</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="device in filteredDevices" :key="String(device.sensor_id)">
               <td>
-                <strong>{{ device.sensor_id }}</strong>
+                <strong><MonitoringIdentifier :value="device.sensor_id" :labels="deviceLabels" /></strong>
               </td>
               <td>{{ device.device_name }}</td>
               <td>{{ device.device_type }}</td>
@@ -315,29 +292,29 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         </div>
       </header>
       <p v-if="!latestReadings.length" class="state-message">No sensor readings available.</p>
-      <div v-else class="table-scroll">
-        <table>
+      <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="t('conservationPages.iot.recentReadings')" tabindex="0">
+        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
           <thead>
             <tr>
-              <th>Reading ID</th>
-              <th>Sensor ID</th>
-              <th>Plant ID</th>
-              <th>Temperature</th>
-              <th>Humidity</th>
-              <th>Soil Moisture</th>
-              <th>Rainfall</th>
-              <th>Motion</th>
-              <th>GPS</th>
-              <th>Recorded At</th>
-              <th>Actions</th>
+              <th scope="col">Reading ID</th>
+              <th scope="col">Sensor ID</th>
+              <th scope="col">Plant ID</th>
+              <th scope="col">Temperature</th>
+              <th scope="col">Humidity</th>
+              <th scope="col">Soil Moisture</th>
+              <th scope="col">Rainfall</th>
+              <th scope="col">Motion</th>
+              <th scope="col">GPS</th>
+              <th scope="col">Recorded At</th>
+              <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="item in latestReadings" :key="String(item.reading.reading_id)">
               <td>
-                <strong>{{ item.reading.reading_id }}</strong>
+                <strong><MonitoringIdentifier :value="item.reading.reading_id" :labels="readingLabels" /></strong>
               </td>
-              <td>{{ item.device.sensor_id }}</td>
+              <td><MonitoringIdentifier :value="item.device.sensor_id" :labels="deviceLabels" /></td>
               <td>{{ plantDisplayId(item.reading) }}</td>
               <td>{{ valueOrDash(item.reading.temperature_c, ' °C') }}</td>
               <td>{{ valueOrDash(item.reading.humidity, '%') }}</td>
@@ -365,9 +342,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
   <AppModal
     v-if="selectedDevice"
     :title="selectedDevice.device_name"
-    :subtitle="String(selectedDevice.sensor_id)"
+    :subtitle="deviceLabels.get(String(selectedDevice.sensor_id)) || String(selectedDevice.sensor_id)"
     @close="selectedDevice = null"
   >
+    <MonitoringIdentifier :value="selectedDevice.sensor_id" :labels="deviceLabels" />
     <dl class="detail-list">
       <div>
         <dt>Device Type</dt>
@@ -413,7 +391,8 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       </button>
       <button
         v-if="
-          selectedDevice.latest_reading && formatPlantId(selectedDevice.latest_reading.plant_id)
+          selectedDevice.latest_reading?.plant_id &&
+          formatPlantId(selectedDevice.latest_reading.plant_id)
         "
         class="action-button"
         type="button"
@@ -427,10 +406,11 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
   <AppModal
     v-if="historyDevice"
     :title="`Reading History · ${historyDevice.device_name}`"
-    :subtitle="`Sensor ${historyDevice.sensor_id}`"
+    :subtitle="`Sensor ${deviceLabels.get(String(historyDevice.sensor_id)) || historyDevice.sensor_id}`"
     wide
     @close="closeReadingHistory"
   >
+    <MonitoringIdentifier :value="historyDevice.sensor_id" :labels="deviceLabels" />
     <p v-if="isHistoryLoading" class="state-message">Loading reading history...</p>
     <div v-else-if="historyErrorMessage" class="state-message error-state">
       <p>{{ historyErrorMessage }}</p>
@@ -442,6 +422,9 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       No historical readings are available for this sensor.
     </p>
     <template v-else>
+      <p v-if="historyHasMore" class="state-message">
+        Showing the latest {{ historyReadings.length }} readings. More history is available.
+      </p>
       <section class="history-charts" aria-label="Historical sensor charts">
         <SensorHistoryChart
           title="Temperature over time"
@@ -469,25 +452,25 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
           :points="rainfallChartPoints"
         />
       </section>
-      <div class="table-scroll history-table">
-        <table>
+      <div class="table-scroll officer-table-scroll history-table" role="region" :aria-label="`Reading History · ${historyDevice.device_name}`" tabindex="0">
+        <table class="officer-data-table iot-history-table"><colgroup><col class="column-id" /><col class="column-time" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-coordinates" /></colgroup>
           <thead>
             <tr>
-              <th>Reading ID</th>
-              <th>Recorded Time</th>
-              <th>Related Plant</th>
-              <th>Temperature</th>
-              <th>Humidity</th>
-              <th>Soil Moisture</th>
-              <th>Rainfall</th>
-              <th>Motion</th>
-              <th>GPS</th>
+              <th scope="col">Reading ID</th>
+              <th scope="col">Recorded Time</th>
+              <th scope="col">Related Plant</th>
+              <th scope="col">Temperature</th>
+              <th scope="col">Humidity</th>
+              <th scope="col">Soil Moisture</th>
+              <th scope="col">Rainfall</th>
+              <th scope="col">Motion</th>
+              <th scope="col">GPS</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="reading in historyReadings" :key="String(reading.reading_id)">
               <td>
-                <strong>{{ reading.reading_id }}</strong>
+                <strong><MonitoringIdentifier :value="reading.reading_id" :labels="readingLabels" /></strong>
               </td>
               <td>{{ dt(reading.recorded_at) }}</td>
               <td>{{ plantDisplayId(reading) }}</td>
@@ -506,10 +489,11 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
 
   <AppModal
     v-if="selectedReading"
-    :title="`Reading ${selectedReading.reading_id}`"
+    :title="`Reading ${readingLabels.get(String(selectedReading.reading_id)) || selectedReading.reading_id}`"
     :subtitle="`Plant ${plantDisplayId(selectedReading)}`"
     @close="selectedReading = null"
   >
+    <MonitoringIdentifier :value="selectedReading.reading_id" :labels="readingLabels" />
     <dl class="detail-list">
       <div>
         <dt>Temperature</dt>
@@ -545,7 +529,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         View Alerts
       </button>
       <button
-        v-if="formatPlantId(selectedReading.plant_id)"
+        v-if="selectedReading.plant_id && formatPlantId(selectedReading.plant_id)"
         class="action-button"
         type="button"
         @click="viewReadingOnMap(selectedReading, 'reading')"
@@ -587,3 +571,5 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
   }
 }
 </style>
+
+<style src="../../styles/officer-data-tables.css"></style>

@@ -47,6 +47,13 @@ async function main() {
     await client.query(
       readFileSync(resolve(__dirname, "../schema.postgres.sql"), "utf8"),
     );
+    const qrInventoryMigration = readFileSync(
+      resolve(__dirname, "../migrations/003-plant-qr-inventory.sql"),
+      "utf8",
+    )
+      .replace(/^\s*BEGIN;\s*/i, "")
+      .replace(/\s*COMMIT;\s*$/i, "");
+    await client.query(qrInventoryMigration);
     await client.query("COMMIT");
     console.log("PostgreSQL plant schema ready; existing data preserved.");
   } catch (error) {

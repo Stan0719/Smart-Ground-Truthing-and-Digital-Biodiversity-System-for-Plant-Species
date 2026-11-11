@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import 'leaflet/dist/leaflet.css'
 import * as L from 'leaflet'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 interface PreviewPlant {
@@ -24,12 +24,13 @@ let settleTimer: ReturnType<typeof setTimeout> | null = null
 
 const mappedPlants = computed(() =>
   props.plants.filter(
-    (plant) => Number.isFinite(plant.latitude) && Number.isFinite(plant.longitude),
+    (plant) =>
+      Number.isFinite(plant.latitude) &&
+      Math.abs(plant.latitude) <= 90 &&
+      Number.isFinite(plant.longitude) &&
+      Math.abs(plant.longitude) <= 180,
   ),
 )
-
-const scientificNameFor = (plantId: string) =>
-  props.plants.find((plant) => plant.id === plantId)?.scientificName || 'Identification pending'
 
 const markerIcon = () =>
   L.divIcon({
@@ -48,32 +49,44 @@ const scheduleMapResize = () => {
   })
 }
 
-onMounted(async () => {
-  await nextTick()
-  if (!mapElement.value || !mappedPlants.value.length || map) return
+const updateMap = () => {
+  if (!mapElement.value) return
+  markerLayer?.clearLayers()
+  if (!mappedPlants.value.length) return
 
-  map = L.map(mapElement.value, { zoomControl: true, minZoom: 3 })
-  L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    {
-      maxZoom: 20,
-      maxNativeZoom: 19,
-      attribution:
-        'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-    },
-  ).addTo(map)
-  markerLayer = L.layerGroup().addTo(map)
+  if (!map) {
+    map = L.map(mapElement.value, { zoomControl: true, minZoom: 3 })
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 20,
+        maxNativeZoom: 19,
+        attribution:
+          'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+      },
+    ).addTo(map)
+    markerLayer = L.layerGroup().addTo(map)
+    resizeObserver = new ResizeObserver(scheduleMapResize)
+    resizeObserver.observe(mapElement.value)
+  }
 
   const bounds = L.latLngBounds([])
   mappedPlants.value.forEach((plant) => {
-    const scientificName = scientificNameFor(plant.id)
+    const scientificName = plant.scientificName || plant.commonName || plant.id
+    // Use text nodes because species names come from backend records.
+    const tooltip = document.createElement('div')
+    const heading = document.createElement('strong')
+    heading.textContent = plant.id
+    const label = document.createElement('em')
+    label.textContent = scientificName
+    tooltip.append(heading, document.createElement('br'), label)
     const marker = L.marker([plant.latitude, plant.longitude], {
       icon: markerIcon(),
       title: `${plant.id}: ${scientificName}`,
       riseOnHover: true,
       keyboard: true,
     })
-      .bindTooltip(`<strong>${plant.id}</strong><br><em>${scientificName}</em>`, {
+      .bindTooltip(tooltip, {
         direction: 'top',
         opacity: 0.96,
       })
@@ -83,18 +96,20 @@ onMounted(async () => {
       .addTo(markerLayer!)
     bounds.extend(marker.getLatLng())
   })
-  resizeObserver = new ResizeObserver(scheduleMapResize)
-  resizeObserver.observe(mapElement.value)
-  await nextTick()
+  if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = null
     map?.invalidateSize({ pan: false })
     map?.fitBounds(bounds, { padding: [32, 32], maxZoom: 16 })
   })
+  if (settleTimer !== null) clearTimeout(settleTimer)
   settleTimer = setTimeout(() => {
     map?.invalidateSize({ pan: false })
   }, 150)
-})
+}
+
+onMounted(updateMap)
+watch(mappedPlants, updateMap, { deep: true, flush: 'post' })
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
@@ -122,12 +137,14 @@ onBeforeUnmount(() => {
 <template>
   <div class="dashboard-map-preview-shell">
     <div
-      v-if="mappedPlants.length"
+      v-show="mappedPlants.length"
       ref="mapElement"
       class="dashboard-map-preview"
       aria-label="Plant distribution map preview"
     ></div>
-    <div v-else class="dashboard-map-empty" role="status">No mapped plant records available.</div>
+    <div v-if="!mappedPlants.length" class="dashboard-map-empty" role="status">
+      No mapped plant records available.
+    </div>
   </div>
 </template>
 

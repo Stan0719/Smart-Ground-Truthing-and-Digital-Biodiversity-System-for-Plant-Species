@@ -9,7 +9,11 @@ import { createAuthDiagnostics, authStoreFingerprint } from './auth-diagnostics.
 import { createAuthLifecycle } from './auth-lifecycle.mjs'
 import { emailSettings } from './activation-configuration.mjs'
 import { createStaffInvitations, temporaryPasswordDelivery } from './activation.mjs'
+import { emailRuntimeConfiguration } from './email-diagnostics.mjs'
+const inheritedEmailEnvironment = { ...process.env }
 loadServerEnvironment()
+const staffEmailSettings = emailSettings(process.env)
+console.info(JSON.stringify({ event: 'staff_email_runtime', ...emailRuntimeConfiguration(inheritedEmailEnvironment, staffEmailSettings) }))
 const database = connectAuth()
 const diagnostics = createAuthDiagnostics({
   directory: fileURLToPath(new URL('./data/', import.meta.url)),
@@ -20,7 +24,7 @@ const auth = await createAuth(database, { diagnostic: diagnostics.record })
 const resetConfiguration = recoveryConfig(fileURLToPath(new URL('./data/auth', import.meta.url)))
 const staff = createStaffInvitations({
   auth,
-  deliver: temporaryPasswordDelivery(emailSettings(process.env)),
+  deliver: temporaryPasswordDelivery(staffEmailSettings),
   origin: process.env.APP_ORIGIN ?? 'http://localhost:5173',
 })
 const recovery = createRecovery({

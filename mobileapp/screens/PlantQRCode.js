@@ -1,6 +1,8 @@
+import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 // PlantQRCode.js
 
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 
 import {
   View,
@@ -11,1177 +13,441 @@ import {
   ActivityIndicator,
   ScrollView,
   TextInput,
+  RefreshControl,
+  Platform,
 } from "react-native";
 
 import QRCode from "react-native-qrcode-svg";
+import Ionicons from "@expo/vector-icons/Ionicons";
 
 import * as Print from "expo-print";
 
-import {
-  qrCodes,
-  generateQRCodes,
-  deleteQRCode,
-} from "../data/qrData";
+import { plantApi } from "../utils/plantApi";
+import RefreshButton from "../components/RefreshButton";
+
+import { createQRInventoryLoader, emptyQRInventory } from "../utils/qrInventory";
+import { A4_PRINT_OPTIONS, buildQRPrintHtml } from "../utils/qrPrint";
 
 
-export default function PlantQRCodeScreen({
-  route,
-  navigation,
-}) {
-  const botanist = route.params?.botanist;
-
+export default function PlantQRCodeScreen({ route }) {
+  useAppTranslation();
+  const accountId = route.params?.botanist?.id;
   const [numberOfCodes, setNumberOfCodes] = useState("3");
+  const [activeTab, setActiveTab] = useState("unused");
+  const [expandedQrId, setExpandedQrId] = useState(null);
+  const [inventory, setInventory] = useState(emptyQRInventory);
+  const [generating, setGenerating] = useState(false);
+  const [printingId, setPrintingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const generatingRef = useRef(false);
+  const printingRef = useRef(false);
+  const deletingRef = useRef(false);
+  const focusedRef = useRef(false);
+  const loader = useMemo(() => createQRInventoryLoader(
+    () => plantApi("/qr-codes", { expectedAccountId: accountId }),
+    setInventory,
+  ), [accountId]);
+  const { records: plantQRCodes, loading: loadingRecords, hasLoaded, error: loadError } = inventory;
+  const availableQRCodes = plantQRCodes.filter((qr) => !qr.plantId && qr.status === "generated");
+  const assignedQRCodes = plantQRCodes.filter((qr) => qr.status !== "retired" && (Boolean(qr.plantId) || qr.status === "assigned" || qr.status === "active"));
+  const activeQRCodesCount = availableQRCodes.length + assignedQRCodes.length;
+  const visibleQRCodes = activeTab === "assigned" ? assignedQRCodes : availableQRCodes;
+  const loadingPrint = printingId !== null;
 
-  const [loadingPrint, setLoadingPrint] =
-    useState(false);
+  const loadPlantQRCodes = useCallback(() => {
+    if (generatingRef.current) return Promise.resolve(false);
+    return loader.refresh();
+  }, [loader]);
 
-  const [refresh, setRefresh] =
-    useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      focusedRef.current = true;
+      void loadPlantQRCodes();
+      return () => {
+        focusedRef.current = false;
+        loader.cancel();
+      };
+    }, [loader, loadPlantQRCodes]),
+  );
 
-
-  const availableQRCodes =
-    qrCodes.filter(
-      (qr) => qr.status === "AVAILABLE"
-    );
-
-
-  function handleGenerate() {
-    const amount =
-      parseInt(numberOfCodes, 10);
-
-    if (
-      !amount ||
-      amount < 1 ||
-      amount > 3
-    ) {
-      Alert.alert(
-        "Invalid Number",
-        "Please enter a number between 1 and 3."
-      );
-
+  async function handleGenerate() {
+    if (generatingRef.current || loader.getState().loading) return;
+    const count = Number(numberOfCodes);
+    if (!Number.isInteger(count) || count < 1 || count > 3) {
+      Alert.alert(t("plantQRCode.invalidNumber"), t("plantQRCode.generateBetween1And3QrCodesAtATime"));
       return;
     }
-
-    generateQRCodes(
-      amount,
-      botanist?.name || "Unknown"
-    );
-
-    setRefresh((value) => value + 1);
-
-    Alert.alert(
-      "QR Codes Generated",
-      `${amount} QR code${amount > 1 ? "s have" : " has"} been generated successfully.`
-    );
+    generatingRef.current = true;
+    setGenerating(true);
+    try {
+      const result = await plantApi("/qr-codes", {
+        method: "POST",
+        body: { count },
+        expectedAccountId: accountId,
+      });
+      if (!focusedRef.current) return;
+      // Keep confirmed creations visible even if the following refresh fails.
+      const generated = loader.addGenerated(result);
+      setActiveTab("unused");
+      setExpandedQrId(null);
+      await loader.refresh();
+      if (focusedRef.current) Alert.alert(t("plantQRCode.qrCodesGenerated"), t("plantQRCode.generatedReady", { count: generated }));
+    } catch (error) {
+      if (focusedRef.current) Alert.alert(t("plantQRCode.qrGenerationFailed"), error instanceof Error ? translateUIMessage(error.message) : t("plantQRCode.couldNotGenerateQrCodesRefreshBeforeTryingAgain"));
+    } finally {
+      generatingRef.current = false;
+      setGenerating(false);
+    }
   }
 
+  async function printCodes(records, id) {
+    if (printingRef.current) return;
+    if (Platform.OS === "web") {
+      Alert.alert(t("plantQRCode.printQrTags"), t("plantQRCode.openThisPageInTheMobileAppToPrintThe"));
+      return;
+    }
+    if (!records.length) {
+      Alert.alert(t("plantQRCode.noQrCodes"), t("plantQRCode.generateAnUnusedQrCodeBeforePrinting"));
+      return;
+    }
+    printingRef.current = true;
+    setPrintingId(id);
+    try {
+      const pages = [];
+      for (const qr of records) {
+        pages.push({ qr });
+      }
+      await Print.printAsync({ ...A4_PRINT_OPTIONS, html: buildQRPrintHtml(pages, {
+        park: t("qrPrint.park"), plant: t("qrPrint.plant"),
+        tag: t("qrPrint.tag"), instruction: t("qrPrint.instruction"),
+      }) });
+    } catch (error) {
+      // Closing the iOS print dialog is a normal cancellation.
+      if (!/cancel/i.test(String(error?.code || "") + " " + String(error?.message || ""))) {
+        Alert.alert(t("plantQRCode.unableToPrint"), t("plantQRCode.thePrintWorkflowCouldNotFinishCheckYourPrinterConnection"));
+      }
+    } finally {
+      printingRef.current = false;
+      setPrintingId(null);
+    }
+  }
 
-  function handleDelete(qrId) {
+  const handlePrintQR = (qr) => printCodes([qr], qr.id);
+  const handlePrintAll = () => printCodes(availableQRCodes, "all");
+  async function deleteQR(qr) {
+    if (deletingRef.current) return;
+    deletingRef.current = true;
+    setDeletingId(qr.id);
+    try {
+      await plantApi(`/qr-codes/${encodeURIComponent(qr.id)}`, {
+        method: "DELETE",
+        body: {},
+        expectedAccountId: accountId,
+      });
+      loader.retire(qr.id);
+      setExpandedQrId(null);
+      await loader.refresh();
+      if (focusedRef.current) {
+        Alert.alert(t("plantQRCode.qrCodeDeleted"), t("plantQRCode.qrCodeDeletedMessage", { label: qr.label }));
+      }
+    } catch (error) {
+      await loader.refresh();
+      if (focusedRef.current) {
+        Alert.alert(t("plantQRCode.qrCodeDeleteFailed"), translateUIMessage(error instanceof Error ? error.message : "Could not delete this QR code."));
+      }
+    } finally {
+      deletingRef.current = false;
+      setDeletingId(null);
+    }
+  }
+  function confirmDeleteQR(qr) {
     Alert.alert(
-      "Delete QR Code",
-      `Are you sure you want to delete ${qrId}?`,
+      t("plantQRCode.confirmDeleteQrCodeTitle"),
+      t("plantQRCode.confirmDeleteQrCodeMessage", { label: qr.label }),
       [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
-
-        {
-          text: "Delete",
-          style: "destructive",
-
-          onPress: () => {
-            const deleted =
-              deleteQRCode(qrId);
-
-            if (deleted) {
-              setRefresh((value) => value + 1);
-
-              Alert.alert(
-                "Deleted",
-                `${qrId} has been deleted.`
-              );
-            } else {
-              Alert.alert(
-                "Cannot Delete",
-                "Only available QR codes can be deleted."
-              );
-            }
-          },
-        },
-      ]
+        { text: t("common.cancel"), style: "cancel" },
+        { text: t("common.delete"), style: "destructive", onPress: () => { void deleteQR(qr); } },
+      ],
     );
   }
 
-
-  async function handlePrintQR(qr) {
-    try {
-      setLoadingPrint(true);
-
-      const encodedQR =
-        encodeURIComponent(qr.value);
-
-      const qrImage =
-        `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodedQR}`;
-
-      const html = `
-        <!DOCTYPE html>
-
-        <html>
-
-        <head>
-
-          <meta
-            name="viewport"
-            content="width=device-width, initial-scale=1.0"
-          />
-
-          <style>
-
-            body {
-              font-family: Arial, sans-serif;
-              text-align: center;
-              padding: 40px;
-            }
-
-            .container {
-              max-width: 500px;
-              margin: auto;
-            }
-
-            h1 {
-              color: #234A3C;
-              margin-bottom: 8px;
-            }
-
-            .qr-id {
-              color: #468585;
-              font-size: 22px;
-              font-weight: bold;
-              margin-top: 15px;
-            }
-
-            img {
-              width: 300px;
-              height: 300px;
-              margin: 20px auto;
-            }
-
-            .instruction {
-              color: #666;
-              font-size: 14px;
-              margin-top: 20px;
-              line-height: 20px;
-            }
-
-          </style>
-
-        </head>
-
-        <body>
-
-          <div class="container">
-
-            <h1>
-              Niah National Park
-            </h1>
-
-            <div class="qr-id">
-              ${qr.value}
-            </div>
-
-            <img
-              src="${qrImage}"
-            />
-
-            <div class="instruction">
-              Biodiversity Plant Identification QR Code
-              <br />
-              Attach this QR code to a documented plant.
-            </div>
-
-          </div>
-
-        </body>
-
-        </html>
-      `;
-
-      await Print.printAsync({
-        html,
-      });
-
-    } catch (error) {
-
-      console.log(
-        "Print error:",
-        error
-      );
-
-      Alert.alert(
-        "Print Error",
-        "Unable to print the QR code."
-      );
-
-    } finally {
-
-      setLoadingPrint(false);
-    }
-  }
-
-
-  async function handlePrintAll() {
-    if (availableQRCodes.length === 0) {
-      Alert.alert(
-        "No QR Codes",
-        "Please generate QR codes first."
-      );
-
-      return;
-    }
-
-    try {
-      setLoadingPrint(true);
-
-      const qrSections =
-        availableQRCodes
-          .map((qr) => {
-
-            const encodedQR =
-              encodeURIComponent(qr.value);
-
-            const qrImage =
-              `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodedQR}`;
-
-            return `
-              <div class="qr-item">
-
-                <h2>
-                  ${qr.value}
-                </h2>
-
-                <img
-                  src="${qrImage}"
-                />
-
-                <p>
-                  Niah National Park
-                </p>
-
-                <p class="instruction">
-                  Attach this QR code to a documented plant.
-                </p>
-
-              </div>
-            `;
-          })
-          .join("");
-
-      const html = `
-        <!DOCTYPE html>
-
-        <html>
-
-        <head>
-
-          <meta
-            name="viewport"
-            content="width=device-width, initial-scale=1.0"
-          />
-
-          <style>
-
-            body {
-              font-family: Arial, sans-serif;
-              text-align: center;
-              padding: 30px;
-            }
-
-            h1 {
-              color: #234A3C;
-            }
-
-            .qr-item {
-              page-break-after: always;
-              padding: 20px;
-            }
-
-            .qr-item h2 {
-              color: #468585;
-              font-size: 24px;
-            }
-
-            img {
-              width: 300px;
-              height: 300px;
-            }
-
-            p {
-              color: #555;
-            }
-
-            .instruction {
-              font-size: 14px;
-              color: #777;
-            }
-
-          </style>
-
-        </head>
-
-        <body>
-
-          <h1>
-            Niah National Park
-          </h1>
-
-          ${qrSections}
-
-        </body>
-
-        </html>
-      `;
-
-      await Print.printAsync({
-        html,
-      });
-
-    } catch (error) {
-
-      console.log(
-        "Print all error:",
-        error
-      );
-
-      Alert.alert(
-        "Print Error",
-        "Unable to print the QR codes."
-      );
-
-    } finally {
-
-      setLoadingPrint(false);
-    }
-  }
-
-
-  function getStatusText(status) {
-    switch (status) {
-
-      case "AVAILABLE":
-        return "Available";
-
-      case "PENDING_APPROVAL":
-        return "Pending Approval";
-
-      case "APPROVED":
-        return "Approved";
-
-      case "REJECTED":
-        return "Rejected";
-
-      default:
-        return status;
-    }
-  }
-
-
-  function getStatusStyle(status) {
-    switch (status) {
-
-      case "AVAILABLE":
-        return styles.availableBadge;
-
-      case "PENDING_APPROVAL":
-        return styles.pendingBadge;
-
-      case "APPROVED":
-        return styles.approvedBadge;
-
-      case "REJECTED":
-        return styles.rejectedBadge;
-
-      default:
-        return styles.availableBadge;
-    }
-  }
-
+  const tabs = [
+    { key: "unused", label: t("plantQRCode.unused"), count: availableQRCodes.length },
+    { key: "assigned", label: t("plantQRCode.assigned"), count: assignedQRCodes.length },
+  ];
 
   return (
     <View style={styles.container}>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={
-          styles.scrollContent
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={hasLoaded && loadingRecords}
+            onRefresh={loadPlantQRCodes}
+            enabled={!generating}
+            tintColor="#468585"
+            colors={["#468585"]}
+          />
         }
       >
-
-        {/* Introduction */}
-
-        <View style={styles.introCard}>
-
-          <Text style={styles.introIcon}>
-            ▦
-          </Text>
-
-          <View style={styles.introContent}>
-
-            <Text style={styles.introTitle}>
-              Prepare QR Codes
-            </Text>
-
-            <Text style={styles.introText}>
-              Generate and print QR codes before
-              going to Niah National Park. Attach
-              one QR code to each plant during
-              your field survey.
-            </Text>
-
-          </View>
-
+        <View style={styles.pageHeader}>
+          <Text style={styles.pageDescription}>{t("plantQRCode.pageDescription")}</Text>
         </View>
 
+        <View style={styles.summaryRow}>
+          {[
+            { key: "total", label: t("plantQRCode.totalCodes"), count: activeQRCodesCount },
+            { key: "unused", label: t("plantQRCode.unusedCodes"), count: availableQRCodes.length },
+            { key: "assigned", label: t("plantQRCode.assignedCodes"), count: assignedQRCodes.length },
+          ].map((item) => (
+            <View key={item.key} style={styles.summaryCard}>
+              <Text style={styles.summaryCount}>{hasLoaded ? item.count : "—"}</Text>
+              <Text style={styles.summaryLabel}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
 
-        {/* Generate */}
-
-        <View style={styles.section}>
-
-          <Text style={styles.sectionTitle}>
-            Generate QR Codes
-          </Text>
-
-          <Text style={styles.sectionDescription}>
-            Generate up to 3 QR codes at a time for
-            your field survey.
-          </Text>
-
-
+        <View style={styles.card}>
+          <View style={styles.generateHeading}>
+            <View style={styles.generateIcon}><Ionicons name="qr-code-outline" size={21} color="#2F6B4F" /></View>
+            <View style={styles.generateCopy}>
+              <Text style={styles.cardTitle}>{t("plantQRCode.generateQrCodes")}</Text>
+              <Text style={styles.cardDescription}>{t("plantQRCode.generateDescription")}</Text>
+            </View>
+          </View>
           <View style={styles.generateRow}>
-
-            <TextInput
-              style={styles.numberInput}
-              value={numberOfCodes}
-              onChangeText={setNumberOfCodes}
-              keyboardType="number-pad"
-              maxLength={1}
-            />
-
-
+            <View style={styles.quantityField}>
+              <Text style={styles.inputLabel}>{t("plantQRCode.quantity")}</Text>
+              <TextInput
+                style={styles.numberInput}
+                value={numberOfCodes}
+                onChangeText={setNumberOfCodes}
+                keyboardType="number-pad"
+                maxLength={1}
+                accessibilityLabel={t("plantQRCode.numberOfQrCodesToGenerate")}
+              />
+            </View>
             <TouchableOpacity
-              style={styles.generateButton}
+              style={[styles.generateButton, (loadingRecords || generating) && styles.disabledButton]}
+              accessibilityRole="button"
+              accessibilityLabel={t("plantQRCode.generate")}
+              accessibilityState={{ disabled: loadingRecords || generating, busy: generating }}
               onPress={handleGenerate}
+              disabled={loadingRecords || generating}
               activeOpacity={0.8}
             >
-
-              <Text style={styles.generateButtonText}>
-                + Generate
-              </Text>
-
+              {generating ? <ActivityIndicator color="#FFFFFF" /> : <>
+                <Ionicons name="add" size={20} color="#FFFFFF" />
+                <Text style={styles.generateButtonText}>{t("plantQRCode.generate")}</Text>
+              </>}
             </TouchableOpacity>
-
           </View>
-
         </View>
 
-
-        {/* Available QR Codes */}
-
-        <View style={styles.section}>
-
-          <View style={styles.sectionHeader}>
-
-            <View style={styles.sectionHeaderContent}>
-
-              <Text style={styles.sectionTitle}>
-                Available QR Codes
-              </Text>
-
-              <Text style={styles.sectionDescription}>
-                Print these codes before your field trip.
-              </Text>
-
+        <View style={styles.card}>
+          <View style={styles.inventoryHeader}>
+            <View style={styles.inventoryHeading}>
+              <Text style={styles.cardTitle}>{t("plantQRCode.qrCodeInventory")}</Text>
+              {hasLoaded && <Text style={styles.inventoryTotal}>{t("plantQRCode.totalCodes")}: {activeQRCodesCount}</Text>}
             </View>
-
-            <View style={styles.countBadge}>
-
-              <Text style={styles.countText}>
-                {availableQRCodes.length}
-              </Text>
-
-            </View>
-
+            <RefreshButton
+              onPress={loadPlantQRCodes}
+              loading={loadingRecords || generating}
+              label={t("plantQRCode.refreshQrCodes")}
+            />
           </View>
 
-
-          {availableQRCodes.length === 0 ? (
-
-            <View style={styles.emptyQR}>
-
-              <Text style={styles.emptyQRIcon}>
-                ▦
-              </Text>
-
-              <Text style={styles.emptyQRTitle}>
-                No QR codes available
-              </Text>
-
-              <Text style={styles.emptyQRText}>
-                Generate QR codes above before
-                your field survey.
-              </Text>
-
+          {!!loadError && (
+            <View style={styles.errorNotice} accessibilityRole="alert">
+              <Text style={styles.errorTitle}>{hasLoaded ? t("plantQRCode.couldNotRefreshQrCodes") : t("plantQRCode.couldNotLoadQrCodes")}</Text>
+              <Text style={styles.errorText}>{translateUIMessage(loadError)}</Text>
+              {hasLoaded && <Text style={styles.errorText}>{t("plantQRCode.showingYourLastSuccessfullyLoadedRecords")}</Text>}
             </View>
+          )}
 
-          ) : (
-
-            <View>
-
-              {availableQRCodes.map((qr) => (
-
-                <View
-                  key={qr.id}
-                  style={styles.qrCard}
+          <View style={styles.tabs} accessibilityRole="tablist">
+            {tabs.map((tab) => {
+              const selected = activeTab === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[styles.tab, selected && styles.selectedTab]}
+                  onPress={() => { setActiveTab(tab.key); setExpandedQrId(null); }}
+                  activeOpacity={0.8}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected }}
                 >
+                  <Text numberOfLines={1} style={[styles.tabText, selected && styles.selectedTabText]}>{tab.label}</Text>
+                  <Text style={[styles.tabCount, selected && styles.selectedTabText]}>{hasLoaded ? tab.count : "—"}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
-                  {/* QR Preview */}
-
-                  <View style={styles.qrPreview}>
-
-                    <QRCode
-                      value={qr.value}
-                      size={85}
-                      backgroundColor="#FFFFFF"
-                      color="#234A3C"
-                    />
-
-                  </View>
-
-
-                  {/* QR Information */}
-
-                  <View style={styles.qrInfo}>
-
-                    <Text style={styles.qrId}>
-                      {qr.value}
-                    </Text>
-
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        getStatusStyle(qr.status),
-                      ]}
-                    >
-
-                      <Text style={styles.statusText}>
-                        {getStatusText(qr.status)}
-                      </Text>
-
-                    </View>
-
-                  </View>
-
-
-                  {/* Print and Delete */}
-
-                  <View style={styles.qrActions}>
-
+          {!hasLoaded && loadingRecords ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator color="#468585" />
+              <Text style={styles.emptyStateText}>{t("plantQRCode.loadingYourPlantQrCodes")}</Text>
+            </View>
+          ) : hasLoaded && visibleQRCodes.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="qr-code-outline" size={25} color="#789083" />
+              <Text style={styles.emptyStateTitle}>
+                {activeTab === "unused"
+                  ? plantQRCodes.length ? t("plantQRCode.noUnusedQrCodes") : t("plantQRCode.noQrCodesYet")
+                  : t("plantQRCode.noAssignedQrCodes")}
+              </Text>
+              {activeTab === "unused" && <Text style={styles.emptyStateText}>{t("plantQRCode.generateCodesAboveToPrintThemBeforeYourFieldVisit")}</Text>}
+            </View>
+          ) : (
+            <View style={styles.codeList}>
+              {visibleQRCodes.map((qr) => {
+                const expanded = expandedQrId === qr.id;
+                const unused = !qr.plantId && qr.status === "generated";
+                const statusLabel = unused ? t("plantQRCode.unused") : t("plantQRCode.assigned");
+                const subtitle = unused
+                  ? t("plantQRCode.availableForAssignment")
+                  : qr.plantName || (qr.plantId ? t("plantQRCode.plant", { plantId: qr.plantId }) : t("plantQRCode.notAssignedToAPlant"));
+                return (
+                  <View key={qr.id} style={[styles.qrCard, expanded && styles.expandedQrCard]}>
                     <TouchableOpacity
-                      style={styles.printSmallButton}
-                      onPress={() => handlePrintQR(qr)}
-                      disabled={loadingPrint}
-                      activeOpacity={0.8}
+                      style={styles.qrCardHeader}
+                      onPress={() => setExpandedQrId(expanded ? null : qr.id)}
+                      activeOpacity={0.78}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${expanded ? t("plantQRCode.collapseQrCode") : t("plantQRCode.expandQrCode")} ${qr.label}, ${statusLabel}`}
+                      accessibilityState={{ expanded }}
                     >
-
-                      <Text style={styles.printSmallText}>
-                        🖨
-                      </Text>
-
+                      <View style={styles.qrInfo}>
+                        <Text style={styles.qrId} numberOfLines={1} selectable>{qr.label}</Text>
+                        <Text style={styles.qrSubtitle} numberOfLines={2}>{subtitle}</Text>
+                      </View>
+                      <View style={[styles.statusBadge, unused ? styles.unusedBadge : styles.assignedBadge]}>
+                        <Text style={styles.statusText}>{statusLabel}</Text>
+                      </View>
+                      <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={19} color="#5F7F70" />
                     </TouchableOpacity>
 
-
-                    <TouchableOpacity
-                      style={styles.deleteSmallButton}
-                      onPress={() => handleDelete(qr.id)}
-                      activeOpacity={0.8}
-                    >
-
-                      <Text style={styles.deleteSmallText}>
-                        🗑
-                      </Text>
-
-                    </TouchableOpacity>
-
+                    {expanded && (
+                      <View style={styles.expandedContent}>
+                        <View style={styles.qrPreview}>
+                          <QRCode value={qr.value} size={100} quietZone={20} backgroundColor="#FFFFFF" color="#000000" />
+                        </View>
+                        <View style={styles.qrActions}>
+                          <TouchableOpacity
+                            style={[styles.actionButton, styles.printButton, loadingPrint && styles.disabledButton]}
+                            onPress={() => handlePrintQR(qr)}
+                            disabled={loadingPrint}
+                            activeOpacity={0.8}
+                            accessibilityRole="button"
+                            accessibilityLabel={t("plantQRCode.print", { label: qr.label })}
+                            accessibilityState={{ disabled: loadingPrint, busy: printingId === qr.id }}
+                          >
+                            {printingId === qr.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="print-outline" size={17} color="#FFFFFF" />}
+                            <Text style={styles.actionButtonText}>{t("plantQRCode.printAction")}</Text>
+                          </TouchableOpacity>
+                          {unused && <TouchableOpacity
+                            style={[styles.actionButton, styles.deleteButton, (loadingRecords || generating || deletingId !== null) && styles.disabledButton]}
+                            onPress={() => confirmDeleteQR(qr)}
+                            disabled={loadingRecords || generating || deletingId !== null}
+                            activeOpacity={0.8}
+                            accessibilityRole="button"
+                            accessibilityLabel={t("plantQRCode.deleteQrCode", { label: qr.label })}
+                            accessibilityState={{ disabled: loadingRecords || generating || deletingId !== null, busy: deletingId === qr.id }}
+                          >
+                            {deletingId === qr.id ? <ActivityIndicator size="small" color="#A34740" /> : <Ionicons name="trash-outline" size={17} color="#A34740" />}
+                            <Text style={styles.deleteButtonText}>{t("plantQRCode.deleteAction")}</Text>
+                          </TouchableOpacity>}
+                        </View>
+                      </View>
+                    )}
                   </View>
+                );
+              })}
 
-                </View>
-
-              ))}
-
-
-              {/* Print All */}
-
-              <TouchableOpacity
-                style={styles.printAllButton}
+              {activeTab === "unused" && availableQRCodes.length > 0 && <TouchableOpacity
+                style={[styles.printAllButton, loadingPrint && styles.disabledButton]}
                 onPress={handlePrintAll}
                 disabled={loadingPrint}
                 activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={t("plantQRCode.printAllUnusedQrCodes")}
               >
-
-                {loadingPrint ? (
-
-                  <ActivityIndicator
-                    color="#FFFFFF"
-                  />
-
-                ) : (
-
-                  <Text style={styles.printAllText}>
-                    🖨 Print All Available QR Codes
-                  </Text>
-
-                )}
-
-              </TouchableOpacity>
-
+                {printingId === "all" ? <ActivityIndicator color="#FFFFFF" /> : <>
+                  <Ionicons name="print-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.printAllText}>{t("plantQRCode.printAllUnusedQrCodes")}</Text>
+                </>}
+              </TouchableOpacity>}
             </View>
-
           )}
-
         </View>
-
-
-        {/* QR Status */}
-
-        <View style={styles.section}>
-
-          <Text style={styles.sectionTitle}>
-            QR Code Status
-          </Text>
-
-
-          {qrCodes.length === 0 ? (
-
-            <Text style={styles.noStatusText}>
-              No QR codes have been generated yet.
-            </Text>
-
-          ) : (
-
-            qrCodes.map((qr) => (
-
-              <View
-                key={qr.id}
-                style={styles.statusRow}
-              >
-
-                <Text style={styles.statusQRId}>
-                  {qr.value}
-                </Text>
-
-                <View
-                  style={[
-                    styles.statusBadge,
-                    getStatusStyle(qr.status),
-                  ]}
-                >
-
-                  <Text style={styles.statusText}>
-                    {getStatusText(qr.status)}
-                  </Text>
-
-                </View>
-
-              </View>
-
-            ))
-
-          )}
-
-        </View>
-
-
-        {/* Workflow */}
-
-        <View style={styles.workflowCard}>
-
-          <Text style={styles.workflowTitle}>
-            Field Survey Workflow
-          </Text>
-
-
-          <View style={styles.workflowStep}>
-
-            <View style={styles.stepCircle}>
-              <Text style={styles.stepNumber}>
-                1
-              </Text>
-            </View>
-
-            <Text style={styles.stepText}>
-              Generate QR codes before visiting Niah.
-            </Text>
-
-          </View>
-
-
-          <View style={styles.workflowStep}>
-
-            <View style={styles.stepCircle}>
-              <Text style={styles.stepNumber}>
-                2
-              </Text>
-            </View>
-
-            <Text style={styles.stepText}>
-              Print the QR codes.
-            </Text>
-
-          </View>
-
-
-          <View style={styles.workflowStep}>
-
-            <View style={styles.stepCircle}>
-              <Text style={styles.stepNumber}>
-                3
-              </Text>
-            </View>
-
-            <Text style={styles.stepText}>
-              Attach a printed QR code to each plant.
-            </Text>
-
-          </View>
-
-
-          <View style={styles.workflowStep}>
-
-            <View style={styles.stepCircle}>
-              <Text style={styles.stepNumber}>
-                4
-              </Text>
-            </View>
-
-            <Text style={styles.stepText}>
-              Create the plant record and select its QR code.
-            </Text>
-
-          </View>
-
-
-          <View style={styles.workflowStep}>
-
-            <View style={styles.stepCircle}>
-              <Text style={styles.stepNumber}>
-                5
-              </Text>
-            </View>
-
-            <Text style={styles.stepText}>
-              Submit the plant record for approval.
-            </Text>
-
-          </View>
-
-
-          <View style={styles.workflowStep}>
-
-            <View style={styles.stepCircle}>
-              <Text style={styles.stepNumber}>
-                6
-              </Text>
-            </View>
-
-            <Text style={styles.stepText}>
-              Once approved, the QR code becomes active.
-            </Text>
-
-          </View>
-
-        </View>
-
-
-        <View style={styles.bottomSpace} />
-
       </ScrollView>
-
     </View>
   );
 }
 
 
 const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F7FBF4" },
+  scrollContent: { width: "100%", maxWidth: 960, alignSelf: "center", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24, gap: 12 },
+  pageHeader: { paddingHorizontal: 2, paddingBottom: 1 },
+  pageDescription: { color: "#63776D", fontSize: 13, lineHeight: 19 },
 
-  container: {
-    flex: 1,
-    backgroundColor: "#F3F8F4",
-  },
+  summaryRow: { flexDirection: "row", gap: 8 },
+  summaryCard: { flex: 1, minWidth: 0, minHeight: 76, justifyContent: "center", paddingHorizontal: 10, paddingVertical: 10, borderWidth: 1, borderColor: "#E0EAE1", borderRadius: 14, backgroundColor: "#FFFFFF" },
+  summaryCount: { color: "#234B3A", fontSize: 21, lineHeight: 26, fontWeight: "800" },
+  summaryLabel: { marginTop: 3, color: "#63776D", fontSize: 10, lineHeight: 14, fontWeight: "600" },
 
-  topBar: {
-    height: 65,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    backgroundColor: "#F3F8F4",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E1EAE4",
-  },
+  card: { padding: 16, borderWidth: 1, borderColor: "#E0EAE1", borderRadius: 16, backgroundColor: "#FFFFFF" },
+  cardTitle: { color: "#234B3A", fontSize: 16, lineHeight: 21, fontWeight: "700" },
+  cardDescription: { marginTop: 3, color: "#63776D", fontSize: 12, lineHeight: 17 },
+  generateHeading: { flexDirection: "row", alignItems: "center", gap: 11 },
+  generateIcon: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: "#E9F7E4" },
+  generateCopy: { flex: 1, minWidth: 0 },
+  generateRow: { flexDirection: "row", alignItems: "flex-end", gap: 12, marginTop: 14 },
+  quantityField: { width: 78, gap: 5 },
+  inputLabel: { color: "#52665A", fontSize: 11, fontWeight: "600" },
+  numberInput: { width: 72, minHeight: 48, borderWidth: 1, borderColor: "#D6E5D0", borderRadius: 11, paddingHorizontal: 12, fontSize: 16, color: "#234B3A", backgroundColor: "#FAFDF9", textAlign: "center" },
+  generateButton: { flex: 1, minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 14, borderRadius: 11, backgroundColor: "#2F6B4F" },
+  generateButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+  disabledButton: { opacity: 0.52 },
 
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#E2F5E8",
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  inventoryHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  inventoryHeading: { flex: 1, minWidth: 0 },
+  inventoryTotal: { marginTop: 3, color: "#718078", fontSize: 11 },
+  errorNotice: { marginTop: 12, padding: 12, borderWidth: 1, borderColor: "#F2D6BC", borderRadius: 12, backgroundColor: "#FFF8EF" },
+  errorTitle: { marginBottom: 4, color: "#87562F", fontSize: 13, fontWeight: "700" },
+  errorText: { color: "#785F4B", fontSize: 12, lineHeight: 18 },
+  tabs: { flexDirection: "row", gap: 6, marginTop: 14, padding: 4, borderRadius: 13, backgroundColor: "#F1F6F2" },
+  tab: { flex: 1, minWidth: 0, minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 5, borderRadius: 10 },
+  selectedTab: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCE8D6" },
+  tabText: { flexShrink: 1, color: "#63776D", fontSize: 11, fontWeight: "600" },
+  tabCount: { color: "#718078", fontSize: 10, fontWeight: "700" },
+  selectedTabText: { color: "#2F6B4F" },
+  codeList: { gap: 8, marginTop: 10 },
+  qrCard: { overflow: "hidden", borderWidth: 1, borderColor: "#E1EAE4", borderRadius: 13, backgroundColor: "#FFFFFF" },
+  expandedQrCard: { borderColor: "#BFD8C6" },
+  qrCardHeader: { minHeight: 68, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 12, paddingVertical: 10 },
+  qrInfo: { flex: 1, minWidth: 0 },
+  qrId: { color: "#234A3C", fontSize: 14, lineHeight: 19, fontWeight: "700" },
+  qrSubtitle: { marginTop: 3, color: "#6B7C73", fontSize: 11, lineHeight: 16 },
+  statusBadge: { maxWidth: "34%", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 9 },
+  unusedBadge: { backgroundColor: "#FFF3D6" },
+  assignedBadge: { backgroundColor: "#DEF2E5" },
+  statusText: { color: "#426454", fontSize: 10, lineHeight: 13, fontWeight: "700" },
+  expandedContent: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 12, padding: 12, borderTopWidth: 1, borderTopColor: "#EAF0E6", backgroundColor: "#FCFDFC" },
+  qrPreview: { width: 120, height: 120, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#E3EBE3", borderRadius: 12, backgroundColor: "#FFFFFF" },
+  qrActions: { flex: 1, minWidth: 132, flexDirection: "row", gap: 7 },
+  actionButton: { flex: 1, minWidth: 62, minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 6, borderWidth: 1, borderRadius: 10 },
+  printButton: { borderColor: "#2F6B4F", backgroundColor: "#2F6B4F" },
+  deleteButton: { borderColor: "#EDD1CC", backgroundColor: "#FFF2F0" },
+  actionButtonText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
+  deleteButtonText: { color: "#A34740", fontSize: 11, fontWeight: "700" },
+  printAllButton: { minHeight: 46, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 2, paddingHorizontal: 12, borderRadius: 11, backgroundColor: "#2F6B4F" },
+  printAllText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
 
-  closeButtonText: {
-    color: "#468585",
-    fontSize: 20,
-    fontWeight: "600",
-  },
-
-  topTitle: {
-    color: "#234A3C",
-    fontSize: 19,
-    fontWeight: "700",
-  },
-
-  topRightSpace: {
-    width: 40,
-  },
-
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 40,
-  },
-
-  introCard: {
-    flexDirection: "row",
-    backgroundColor: "#DEF9C4",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 18,
-  },
-
-  introIcon: {
-    fontSize: 36,
-    color: "#468585",
-    marginRight: 14,
-  },
-
-  introContent: {
-    flex: 1,
-  },
-
-  introTitle: {
-    color: "#35652F",
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 5,
-  },
-
-  introText: {
-    color: "#466047",
-    fontSize: 13,
-    lineHeight: 19,
-  },
-
-  section: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 18,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 15,
-  },
-
-  sectionHeaderContent: {
-    flex: 1,
-    paddingRight: 10,
-  },
-
-  sectionTitle: {
-    color: "#468585",
-    fontSize: 19,
-    fontWeight: "700",
-  },
-
-  sectionDescription: {
-    color: "#777",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 5,
-  },
-
-  countBadge: {
-    minWidth: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#DEF9C4",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  countText: {
-    color: "#35652F",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-
-  generateRow: {
-    flexDirection: "row",
-    marginTop: 15,
-    gap: 10,
-  },
-
-  numberInput: {
-    width: 90,
-    height: 50,
-    borderWidth: 1,
-    borderColor: "#D6E5D0",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    fontSize: 16,
-    color: "#333",
-    backgroundColor: "#FAFDF9",
-    textAlign: "center",
-  },
-
-  generateButton: {
-    flex: 1,
-    height: 50,
-    borderRadius: 10,
-    backgroundColor: "#50B498",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  generateButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-
-  qrCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F7FBF4",
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E1EAE4",
-  },
-
-  qrPreview: {
-    width: 100,
-    height: 100,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  qrInfo: {
-    flex: 1,
-    marginLeft: 13,
-  },
-
-  qrId: {
-    color: "#234A3C",
-    fontSize: 17,
-    fontWeight: "700",
-    marginBottom: 8,
-  },
-
-  statusBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 9,
-  },
-
-  availableBadge: {
-    backgroundColor: "#E2F5E8",
-  },
-
-  pendingBadge: {
-    backgroundColor: "#FFF3D6",
-  },
-
-  approvedBadge: {
-    backgroundColor: "#DEF9C4",
-  },
-
-  rejectedBadge: {
-    backgroundColor: "#FFE3E3",
-  },
-
-  statusText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  qrActions: {
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 8,
-    gap: 8,
-  },
-
-  printSmallButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: "#468585",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  printSmallText: {
-    fontSize: 19,
-    color: "#FFFFFF",
-  },
-
-  deleteSmallButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    backgroundColor: "#D9534F",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  deleteSmallText: {
-    fontSize: 18,
-    color: "#FFFFFF",
-  },
-
-  printAllButton: {
-    backgroundColor: "#468585",
-    borderRadius: 12,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
-  },
-
-  printAllText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-
-  emptyQR: {
-    alignItems: "center",
-    paddingVertical: 25,
-  },
-
-  emptyQRIcon: {
-    fontSize: 40,
-    color: "#9CDBA6",
-    marginBottom: 10,
-  },
-
-  emptyQRTitle: {
-    color: "#468585",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-
-  emptyQRText: {
-    color: "#777",
-    fontSize: 13,
-    textAlign: "center",
-    marginTop: 5,
-    lineHeight: 19,
-  },
-
-  noStatusText: {
-    color: "#777",
-    fontSize: 13,
-    marginTop: 10,
-  },
-
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEF3EF",
-  },
-
-  statusQRId: {
-    color: "#468585",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-
-  workflowCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 18,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-
-  workflowTitle: {
-    color: "#234A3C",
-    fontSize: 17,
-    fontWeight: "700",
-    marginBottom: 15,
-  },
-
-  workflowStep: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 13,
-  },
-
-  stepCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#DEF9C4",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-  },
-
-  stepNumber: {
-    color: "#468585",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-
-  stepText: {
-    flex: 1,
-    color: "#5F6F65",
-    fontSize: 13,
-    lineHeight: 19,
-  },
-
-  bottomSpace: {
-    height: 20,
-  },
-
+  emptyState: { minHeight: 128, alignItems: "center", justifyContent: "center", gap: 7, marginTop: 10, padding: 18, borderWidth: 1, borderStyle: "dashed", borderColor: "#DCE8D6", borderRadius: 12, backgroundColor: "#FAFCFA" },
+  emptyStateTitle: { color: "#426454", fontSize: 14, fontWeight: "700", textAlign: "center" },
+  emptyStateText: { color: "#718078", fontSize: 12, lineHeight: 17, textAlign: "center" },
 });

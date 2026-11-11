@@ -1,6 +1,7 @@
 import { randomBytes, scrypt, pbkdf2, timingSafeEqual, createHash, randomUUID } from 'node:crypto'
 import { promisify } from 'node:util'
 import { connectAuth } from './postgres.mjs'
+import { createAccountInactivity } from './account-inactivity.mjs'
 
 const derive = promisify(scrypt)
 const derivePbkdf2 = promisify(pbkdf2)
@@ -56,6 +57,7 @@ export function publicUser(user) {
   }
 }
 export async function createAuth(database = connectAuth(), {
+  now = Date.now,
   diagnostic = (entry) => {
     if (process.env.AUTH_DEBUG === '1') console.info(JSON.stringify(entry))
   },
@@ -77,18 +79,20 @@ export async function createAuth(database = connectAuth(), {
   const event = async (userId, ip, reason, actor = null) =>
     await db
       .prepare('INSERT INTO auth_events(created_at,user_id,ip,reason,actor_id) VALUES(?,?,?,?,?)')
-      .run(Date.now(), userId, ip, reason, actor)
-  const temporaryExpired=async(user)=>Boolean(user?.must_change_password&&await db.prepare('SELECT 1 FROM activation_tokens WHERE user_id=? AND used=0 AND expires_at<=?').get(user.id,Date.now()))
+      .run(now(), userId, ip, reason, actor)
+  const inactivity = createAccountInactivity({ db, event, now })
+  const temporaryExpired=async(user)=>Boolean(user?.must_change_password&&await db.prepare('SELECT 1 FROM activation_tokens WHERE user_id=? AND used=0 AND expires_at<=?').get(user.id,now()))
   const byEmail = async (email) =>
-    (await db.prepare('SELECT * FROM users WHERE email=?').get(email)) ??
-    (await db.prepare('SELECT * FROM visitors WHERE email=?').get(email))
+    inactivity.apply((await db.prepare('SELECT * FROM users WHERE email=?').get(email)) ??
+    (await db.prepare('SELECT * FROM visitors WHERE email=?').get(email)))
   const byId = async (id) =>
-    (await db.prepare('SELECT * FROM users WHERE id=?').get(id)) ??
-    (await db.prepare('SELECT * FROM visitors WHERE id=?').get(id))
+    inactivity.apply((await db.prepare('SELECT * FROM users WHERE id=?').get(id)) ??
+    (await db.prepare('SELECT * FROM visitors WHERE id=?').get(id)))
   const sessionTable = (user) => (user.role === 'Visitor' ? 'visitor_sessions' : 'sessions')
   // These reasons stay in opt-in server logs; clients receive the same generic error.
   const accountDenial = async (current, expectedHash, requirements) => {
     if (!current) return 'account_missing'
+    if ((await inactivity.apply(current))?.status !== 'Active') return 'account_inactive'
     if (current.status !== 'Active') return 'account_inactive'
     if (await temporaryExpired(current)) return 'temporary_password_expired'
     if (current.password_hash !== expectedHash) return 'credentials_changed'
@@ -102,6 +106,8 @@ export async function createAuth(database = connectAuth(), {
     db,
     byEmail,
     byId,
+    lockAccountPolicy: inactivity.lock,
+    recordReactivation: inactivity.reactivated,
     async createVisitor({ name, email, password }) {
       email = email.trim().toLowerCase()
       if (await byEmail(email))
@@ -110,10 +116,13 @@ export async function createAuth(database = connectAuth(), {
         hash = await hashPassword(password)
       if (await byEmail(email))
         return { error: 'Unable to register this email. Contact the administrator.', status: 409 }
+      return db.transaction(async () => {
       await db
         .prepare('INSERT INTO visitors(id,name,email,password_hash) VALUES(?,?,?,?)')
         .run(id, name.trim(), email, hash)
+      await event(id, null, 'account_created')
       return { user: publicUser(await byId(id)) }
+      })
     },
     async resetPassword(id, password) {
       const current = await byId(id)
@@ -134,12 +143,15 @@ export async function createAuth(database = connectAuth(), {
     async createUser({ name, email, role, password, mustChangePassword = true }) {
       const id = randomUUID()
       const hash = await hashPassword(password)
+      return db.transaction(async () => {
       await db
         .prepare(
           'INSERT INTO users(id,name,username,email,role,password_hash,must_change_password) VALUES(?,?,?,?,?,?,?)',
         )
         .run(id, name, id, email.trim().toLowerCase(), role, hash, Number(mustChangePassword))
+      await event(id, null, 'account_created')
       return publicUser(await db.prepare('SELECT * FROM users WHERE id=?').get(id))
+      })
     },
     async login(email, password, ip, requirements = {}) {
       const report = (reason, stage) => {
@@ -158,7 +170,7 @@ export async function createAuth(database = connectAuth(), {
             .prepare(
               "SELECT COUNT(*) AS count FROM auth_events WHERE ip=? AND created_at>? AND reason LIKE 'login_%'",
             )
-            .get(ip, Date.now() - 15 * 60 * 1000)
+            .get(ip, now() - 15 * 60 * 1000)
         ).count
         if (count >= settings.login_limit) {
           await event(null, ip, 'throttled')
@@ -183,6 +195,7 @@ export async function createAuth(database = connectAuth(), {
         return { error: LOGIN_ERROR, status: 401 }
       }
       return db.transaction(async () => {
+        await inactivity.lock()
         const table = current.role === 'Visitor' ? 'visitors' : 'users'
         const locked = await db
           .prepare(`SELECT * FROM ${table} WHERE id=? FOR UPDATE`)
@@ -198,7 +211,7 @@ export async function createAuth(database = connectAuth(), {
           .run(
             digest(token),
             locked.id,
-            Date.now() +
+            now() +
               (await db.prepare('SELECT session_hours FROM security_settings WHERE id=1').get())
                 .session_hours *
                 60 *
@@ -207,7 +220,7 @@ export async function createAuth(database = connectAuth(), {
           )
         await db
           .prepare(`UPDATE ${table} SET last_login=? WHERE id=?`)
-          .run(new Date().toISOString(), locked.id)
+          .run(new Date(now()).toISOString(), locked.id)
         await event(locked.id, ip, 'authenticated')
         report('authenticated', 'session_created')
         return { token, user: publicUser(locked) }
@@ -256,24 +269,27 @@ export async function createAuth(database = connectAuth(), {
         .prepare(
           'SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.status=?',
         )
-        .get(digest(token), Date.now(), 'Active')
+        .get(digest(token), now(), 'Active')
       const visitor = user
         ? null
         : await db
             .prepare(
               "SELECT v.* FROM visitor_sessions s JOIN visitors v ON v.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND v.status='Active'",
             )
-            .get(digest(token), Date.now())
+            .get(digest(token), now())
+      const checked = await inactivity.apply(user ?? visitor)
+      if (!checked || checked.status !== 'Active') return null
       if(await temporaryExpired(user))return null
-      return user ? publicUser(user) : visitor ? publicUser(visitor) : null
+      return publicUser(checked)
     },
     async setStatus(id, status, actor, ip) {
       if (!['Active', 'Inactive', 'Suspended'].includes(status)) throw Error('Invalid status')
       return db.transaction(async () => {
+        await inactivity.lock()
         const existing = await byId(id)
         if (!existing) return false
         const table = existing.role === 'Visitor' ? 'visitors' : 'users'
-        await db.prepare(`SELECT id FROM ${table} WHERE id=? FOR UPDATE`).get(id)
+        const locked = await db.prepare(`SELECT * FROM ${table} WHERE id=? FOR UPDATE`).get(id)
         if (
           await db
             .prepare("SELECT 1 FROM auth_events WHERE user_id=? AND reason='account_archived'")
@@ -281,7 +297,8 @@ export async function createAuth(database = connectAuth(), {
         )
           return false
         const result = await db.prepare(`UPDATE ${table} SET status=? WHERE id=?`).run(status, id)
-        if (result.changes) await event(id, ip, `status_${status}`, actor)
+        if (result.changes) await inactivity.reactivated(id, locked.status, status, actor, ip)
+        if (result.changes && locked.status !== status) await event(id, ip, `status_${status}`, actor)
         return Boolean(result.changes)
       })
     },

@@ -6,7 +6,7 @@ import AdminPageShell from '../components/AdminPageShell.vue'
 import { api, currentUser, type AuthUser } from '../services/auth'
 import StaffDialog from '../components/StaffDialog.vue'
 import StaffInvitations from '../components/StaffInvitations.vue'
-type UserStatus = 'Active' | 'Inactive' | 'Suspended'
+type UserStatus = 'Active' | 'Inactive' | 'Suspended' | 'Pending Activation'
 type UserRole = 'Administrator' | 'Conservation Officer' | 'Botanist' | 'Visitor'
 
 interface UserRecord {
@@ -22,7 +22,7 @@ interface UserRecord {
 
 const { t } = useI18n()
 const roleOptions: UserRole[] = ['Administrator', 'Conservation Officer', 'Botanist', 'Visitor']
-const statusOptions: UserStatus[] = ['Active', 'Inactive', 'Suspended']
+const statusOptions: UserStatus[] = ['Active', 'Suspended']
 const roleLabel = (role: UserRole) => t(`adminUsers.roles.${role.replaceAll(' ', '')}`)
 const statusLabel = (status: UserStatus) => t(`adminUsers.statuses.${status.toLowerCase()}`)
 const lastLoginLabel = (value: string) => {
@@ -51,26 +51,12 @@ onMounted(async () => {
   currentAdminId.value = (await currentUser())?.id ?? ''
   await loadUsers()
 })
-const setStatus = async (user: UserRecord, event: Event) => {
-  const target = event.target as HTMLSelectElement
-  target.disabled = true
-  try {
-    await api(`/admin/users/${user.id}/status`, 'PATCH', { status: target.value })
-    await loadUsers()
-  } catch (error) {
-    target.value = user.status
-    loadError.value = error instanceof Error ? error.message : 'Unable to change status.'
-  } finally {
-    target.disabled = false
-  }
-}
-
 const actionMode = ref<'view' | 'edit' | 'delete' | null>(null)
 const selectedUser = ref<UserRecord | null>(null)
 const actionError = ref('')
 const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
 let feedbackId = 0
-const editUser = ref<{ name: string; email: string; role: UserRole; status: UserStatus }>({
+const editUser = ref<{ name: string; email: string; role: UserRole; status: UserStatus | '' }>({
   name: '',
   email: '',
   role: 'Botanist',
@@ -115,7 +101,7 @@ const openUserAction = (mode: 'view' | 'edit' | 'delete', user: UserRecord) => {
   selectedUser.value = user
   actionMode.value = mode
   actionError.value = ''
-  editUser.value = { name: user.name, email: user.email, role: user.role, status: user.status }
+  editUser.value = { name: user.name, email: user.email, role: user.role, status: statusOptions.includes(user.status) ? user.status : '' }
 }
 
 const closeUserAction = () => {
@@ -127,8 +113,24 @@ const closeUserAction = () => {
 const saveEditedUser = async () => {
   if (!selectedUser.value) return
   actionError.value = ''
+  const status = selectedUser.value.status === 'Pending Activation' ? 'Pending Activation' : editUser.value.status
+  if (!status) {
+    actionError.value = 'Choose Active or Suspended. The existing account status has not been changed.'
+    return
+  }
   try {
-    await api(`/admin/users/${selectedUser.value.id}`, 'PATCH', { ...editUser.value })
+    const detailsChanged = editUser.value.name !== selectedUser.value.name ||
+      editUser.value.email !== selectedUser.value.email || editUser.value.role !== selectedUser.value.role
+    if (!detailsChanged && status === selectedUser.value.status) {
+      closeUserAction()
+      return
+    }
+    if (!detailsChanged && statusOptions.includes(status)) {
+      // Status-only actions must not rewrite personal fields or require name keys.
+      await api(`/admin/users/${selectedUser.value.id}/status`, 'PATCH', { status })
+    } else {
+      await api(`/admin/users/${selectedUser.value.id}`, 'PATCH', { ...editUser.value, status })
+    }
     await loadUsers()
     closeUserAction()
     showSuccessMessage('Account updated successfully.')
@@ -191,6 +193,7 @@ const clearFilters = () => {
         <div>
           <h2>Manage system users</h2>
           <p>View accounts, assign access roles, and manage user status.</p>
+          <p>Accounts are suspended after 30 days without a successful login. Only an Administrator can reactivate them. The last active Administrator is protected from automatic suspension.</p>
         </div>
         <button class="primary-button" type="button" @click="openAddUser">
           <span>＋</span> Add New User
@@ -441,9 +444,9 @@ const clearFilters = () => {
               </select></label
             >
             <label
-              >Status<select v-model="editUser.status" :disabled="selectedIsCurrentAdmin">
+              >Status<select v-model="editUser.status" required :disabled="selectedIsCurrentAdmin || selectedUser.status === 'Pending Activation'">
+                <option disabled value="">Choose Active or Suspended</option>
                 <option>Active</option>
-                <option>Inactive</option>
                 <option>Suspended</option>
               </select></label
             >
@@ -454,6 +457,12 @@ const clearFilters = () => {
           </p>
           <p v-if="selectedIsVisitor" class="form-note">
             Visitor accounts are self-registered. Their role cannot be changed from User Management.
+          </p>
+          <p v-if="selectedUser.status === 'Inactive'" class="form-note">
+            This is a legacy disabled account. Its status stays unchanged until you explicitly choose Active or Suspended.
+          </p>
+          <p v-if="selectedUser.status === 'Pending Activation'" class="form-note">
+            This account's status is controlled by its existing activation workflow.
           </p>
           <p v-if="selectedIsCurrentAdmin" class="form-note">
             Your own Administrator role and account status cannot be changed from User Management.

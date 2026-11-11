@@ -1,3 +1,4 @@
+import { t, translateLabel, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import { can } from "../utils/rbac";
 import React, { useEffect, useState } from "react";
 import {
@@ -8,7 +9,7 @@ import {
   View,
   Image,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
+import PersistentKnowledgeMap from "./PersistentKnowledgeMap";
 import { plantApi } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
 import {
@@ -19,6 +20,7 @@ const imageConnectivity = createConnectivityGuard("plant", () =>
   mobileApiUrl("plant"),
 );
 export default function PersistentKnowledge({ route, navigation, user }) {
+  useAppTranslation();
   const [species, setSpecies] = useState([]),
     [plants, setPlants] = useState([]),
     [error, setError] = useState(""),
@@ -78,35 +80,8 @@ export default function PersistentKnowledge({ route, navigation, user }) {
   if (map)
     return (
       <View style={{ flex: 1 }}>
-        {!!error && <Text accessibilityRole="alert">{error}</Text>}
-        <MapView
-          style={{ flex: 1 }}
-          initialRegion={{
-            latitude: 3.8,
-            longitude: 113.8,
-            latitudeDelta: 0.2,
-            longitudeDelta: 0.2,
-          }}
-        >
-          {plants
-            .filter(
-              (p) =>
-                Number.isFinite(Number(p.latitude)) &&
-                Number.isFinite(Number(p.longitude)) &&
-                p.latitude != null &&
-                p.longitude != null,
-            )
-            .map((p) => (
-              <Marker
-                key={p.plant_id}
-                coordinate={{
-                  latitude: Number(p.latitude),
-                  longitude: Number(p.longitude),
-                }}
-                title={`Plant ${p.plant_id}`}
-              />
-            ))}
-        </MapView>
+        {!!error && <Text accessibilityRole="alert">{translateUIMessage(error)}</Text>}
+        <PersistentKnowledgeMap plants={plants} />
       </View>
     );
   return (
@@ -118,14 +93,14 @@ export default function PersistentKnowledge({ route, navigation, user }) {
       }}
     >
       <Text style={{ fontSize: 26, color: "#234b3a" }}>
-        {selected ? selected.scientific_name : "Plant knowledge"}
+        {selected ? selected.scientific_name : t("persistentKnowledge.plantKnowledge")}
       </Text>
       <TouchableOpacity onPress={load}>
-        <Text style={{ padding: 12 }}>Refresh</Text>
+        <Text style={{ padding: 12 }}>{t("common.refresh")}</Text>
       </TouchableOpacity>
       {!!error && (
         <Text accessibilityRole="alert" style={{ color: "#a02020" }}>
-          {error}
+          {translateUIMessage(error)}
         </Text>
       )}
       {selected ? (
@@ -138,7 +113,7 @@ export default function PersistentKnowledge({ route, navigation, user }) {
           <Text>{selected.habitat}</Text>
           <Text>{selected.culturalSignificance}</Text>
           {!!selected.conservation_status && (
-            <Text>Conservation: {selected.conservation_status}</Text>
+            <Text>{t("persistentKnowledge.conservation")}{translateLabel(selected.conservation_status)}</Text>
           )}
           {images.map((a) => (
             <AuthenticatedImage key={a.id} id={a.id} userId={user?.id} />
@@ -147,10 +122,9 @@ export default function PersistentKnowledge({ route, navigation, user }) {
             .filter((p) => String(p.species_id) === selected.species_id)
             .map((p) => (
               <View key={p.plant_id}>
-                <Text>Plant {p.plant_id}</Text>
+                <Text>{t("fieldCollection.plant")}{p.plant_id}</Text>
                 {p.latitude !== undefined && (
-                  <Text>
-                    GPS: {p.latitude}, {p.longitude}
+                  <Text>{t("editPlant.gps")}{p.latitude}, {p.longitude}
                   </Text>
                 )}
               </View>
@@ -159,8 +133,8 @@ export default function PersistentKnowledge({ route, navigation, user }) {
       ) : (
         <>
           <TextInput
-            accessibilityLabel="Search plants"
-            placeholder="Search plant names"
+            accessibilityLabel={t("persistentKnowledge.searchPlants")}
+            placeholder={t("persistentKnowledge.searchPlantNames")}
             value={search}
             onChangeText={setSearch}
             style={{ borderWidth: 1, padding: 12, marginVertical: 12 }}
@@ -196,6 +170,7 @@ export default function PersistentKnowledge({ route, navigation, user }) {
   );
 }
 function AuthenticatedImage({ id, userId }) {
+  useAppTranslation();
   const [source, setSource] = useState(null),
     [error, setError] = useState("");
   useEffect(() => {
@@ -223,7 +198,7 @@ function AuthenticatedImage({ id, userId }) {
       active = false;
     };
   }, [id, userId]);
-  if (error) return <Text accessibilityRole="alert">{error}</Text>;
+  if (error) return <Text accessibilityRole="alert">{translateUIMessage(error)}</Text>;
   return source ? (
     <Image
       source={source}

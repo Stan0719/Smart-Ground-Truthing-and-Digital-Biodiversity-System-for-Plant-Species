@@ -1,6 +1,7 @@
+import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/SpeciesDetail.js
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 
 import {
   View,
@@ -9,131 +10,173 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  RefreshControl,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   getSpeciesBySlug,
 } from "../data/mockData";
+import { useFocusEffect } from "@react-navigation/native";
 import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantRecords, fetchSpeciesDetail } from "../utils/plantApi";
+import BackButton from "../components/BackButton";
+import { fetchPlantRecords, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords, isPlantVisibleInRoleCatalog } from "../utils/plantApi";
 
 import PlantCard from "../components/PlantCard";
+import RefreshButton from "../components/RefreshButton";
+import FavouriteHeart from "../components/FavouriteHeart";
+import useVisitorFavourites from "../hooks/useVisitorFavourites";
+import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 
 export default function SpeciesDetail({
   route,
   navigation,
   user,
 }) {
+  useAppTranslation();
 
   const { slug, speciesId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const isVisitor = user?.role?.toLowerCase() === "visitor";
+  const publicOnly = !user || isVisitor;
+  const favourites = useVisitorFavourites(user);
 
   const [selectedSpecies, setSelectedSpecies] = useState(
     route.params?.species || getSpeciesBySlug(slug) || null
   );
+  const [failedPrimaryImageKey, setFailedPrimaryImageKey] = useState(null);
   const [speciesPlants, setSpeciesPlants] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const requestRef = useRef(null);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadSpeciesDetails = async () => {
+  const loadSpeciesDetails = useCallback((isRefresh = false) => {
+    if (requestRef.current) return requestRef.current;
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setErrorMessage("");
+    const request = (async () => {
       try {
-        setLoading(true);
-        setErrorMessage("");
         const [backendSpecies, records] = await Promise.all([
-          fetchSpeciesDetail(speciesId, slug),
-          fetchPlantRecords(),
+          fetchSpeciesDetail(speciesId, slug, { accountId: user?.id, publicOnly }),
+          fetchPlantRecords([], { accountId: user?.id, publicOnly }),
         ]);
         const resolvedSpecies = backendSpecies || route.params?.species || getSpeciesBySlug(slug) || null;
         const resolvedId = resolvedSpecies?.id ?? speciesId;
-        const recordsForSpecies = resolvedId != null
-          ? records.filter((record) => String(record.speciesId) === String(resolvedId))
-          : records.filter((record) => record.speciesSlug === slug);
+        const recordsForSpecies = filterUniqueSpeciesPlantRecords(records, resolvedId, slug)
+          .filter((record) => isPlantVisibleInRoleCatalog(record, user?.role, user?.id));
 
-        if (isMounted) {
-          setSelectedSpecies(resolvedSpecies);
-          setSpeciesPlants(recordsForSpecies);
-        }
+        setSelectedSpecies(resolvedSpecies);
+        setSpeciesPlants(recordsForSpecies);
       } catch (error) {
-        if (isMounted) {
-          setErrorMessage(error.message || "Unable to load species details.");
-          setSpeciesPlants([]);
-        }
+        setErrorMessage(error.message || "Unable to load species details.");
       } finally {
-        if (isMounted) setLoading(false);
+        if (requestRef.current === request) requestRef.current = null;
+        setLoading(false);
+        setRefreshing(false);
       }
-    };
+    })();
+    requestRef.current = request;
+    return request;
+  }, [route.params, user, slug, speciesId, publicOnly]);
 
-    loadSpeciesDetails();
-    return () => {
-      isMounted = false;
-    };
-  }, [slug, speciesId, route.params?.species]);
+  useFocusEffect(useCallback(() => {
+    void loadSpeciesDetails(false);
+  }, [loadSpeciesDetails]));
 
   const primaryImageSource = getSpeciesImageSource(selectedSpecies);
+  const primaryImageKey = typeof primaryImageSource === "number" ? `local:${primaryImageSource}` : primaryImageSource?.uri || null;
+  const backButton = <BackButton
+    label={t("plant.back")}
+    variant="plain"
+    style={styles.backButton}
+    onPress={() => navigation.goBack()}
+  />;
 
   if (!selectedSpecies) {
+    if (loading) return (
+      <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
+        <View style={styles.stateHeader}>{backButton}</View>
+        <ScrollView style={styles.stateContent} contentContainerStyle={{ flexGrow: 1 }}>
+          <DetailSkeletonContent label={t("plant.loadingSpecies")} sections={2} />
+        </ScrollView>
+      </SafeAreaView>
+    );
     return (
-      <View style={styles.notFound}>
+      <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
+        <View style={styles.stateHeader}>{backButton}</View>
+        <View style={styles.notFound}>
 
         <Text style={styles.notFoundIcon}>
           🌿
         </Text>
 
         <Text style={styles.notFoundTitle}>
-          {loading ? "Loading species..." : "Species not found"}
+          {errorMessage ? t("plant.speciesDetailsUnavailable") : t("plant.speciesNotFound")}
         </Text>
 
         <Text style={styles.notFoundText}>
-          {errorMessage || "The species you are looking for is not in the collection."}
+          {errorMessage || t("speciesDetail.theSpeciesYouAreLookingForIsNotInThe")}
         </Text>
 
-        <TouchableOpacity
-          style={styles.notFoundButton}
-          onPress={() =>
-            navigation.navigate("Plants")
-          }
-        >
-          <Text style={styles.notFoundButtonText}>
-            Return to Species
-          </Text>
+        {!!errorMessage && <TouchableOpacity style={styles.notFoundButton} onPress={() => { void loadSpeciesDetails(false); }}>
+          <Text style={styles.notFoundButtonText}>{t("common.tryAgain")}</Text>
+        </TouchableOpacity>}
+        <TouchableOpacity style={styles.notFoundButton} onPress={() => navigation.navigate("Plants")}>
+          <Text style={styles.notFoundButtonText}>{t("plant.returnToSpecies")}</Text>
         </TouchableOpacity>
 
-      </View>
+        </View>
+      </SafeAreaView>
     );
   }
 
 
   return (
+    <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
+    <View style={styles.stateHeader}>{backButton}</View>
     <ScrollView
       style={styles.page}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing || favourites.refreshing}
+          onRefresh={() => { void loadSpeciesDetails(true); void favourites.refresh(true); }}
+          tintColor="#468585"
+          colors={["#468585"]}
+        />
+      }
     >
 
       {/* HERO */}
 
       <View style={styles.hero}>
 
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() =>
-            navigation.goBack()
-          }
-        >
-          <Text style={styles.backText}>
-            ← Back
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.heroToolbar}>
+        <RefreshButton
+          onPress={() => { void loadSpeciesDetails(true); void favourites.refresh(true); }}
+          loading={loading || refreshing || favourites.refreshing}
+          label={t("common.refresh")}
+          testID="species-detail-refresh"
+        />
+        {isVisitor && <FavouriteHeart
+          active={favourites.isFavourite("species", selectedSpecies.id ?? speciesId)}
+          pending={favourites.isPending("species", selectedSpecies.id ?? speciesId)}
+          disabled={favourites.loading}
+          onPress={() => void favourites.toggle("species", selectedSpecies.id ?? speciesId)}
+        />}
+        </View>
+        {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.refreshError}>{translateUIMessage(favourites.mutationError)}</Text>}
 
 
         <View style={styles.heroImage}>
 
-          {primaryImageSource ? (
+          {primaryImageSource && primaryImageKey !== failedPrimaryImageKey ? (
             <Image
               source={primaryImageSource}
               style={styles.image}
+              onError={() => setFailedPrimaryImageKey(primaryImageKey)}
             />
           ) : (
             <View style={styles.placeholder}>
@@ -141,9 +184,7 @@ export default function SpeciesDetail({
                 🌿
               </Text>
 
-              <Text style={styles.placeholderText}>
-                Plant image coming soon
-              </Text>
+              <Text style={styles.placeholderText}>{t("speciesDetail.plantImageComingSoon")}</Text>
             </View>
           )}
 
@@ -155,12 +196,12 @@ export default function SpeciesDetail({
           <View style={styles.badges}>
 
             <Text style={styles.category}>
-              {selectedSpecies.category}
+              {translateLabel(selectedSpecies.category)}
             </Text>
 
             {isBotanist && selectedSpecies.conservationStatus && (
               <Text style={styles.conservation}>
-                {selectedSpecies.conservationStatus}
+                {translateLabel(selectedSpecies.conservationStatus)}
               </Text>
             )}
 
@@ -176,7 +217,7 @@ export default function SpeciesDetail({
           </Text>
 
           <Text style={styles.summary}>
-          {selectedSpecies.description || "No description has been recorded."}
+          {selectedSpecies.description || t("speciesDetail.noDescriptionHasBeenRecorded")}
           </Text>
 
         </View>
@@ -188,33 +229,25 @@ export default function SpeciesDetail({
 
       <View style={styles.section}>
 
-        <Text style={styles.sectionLabel}>
-          ABOUT THIS SPECIES
-        </Text>
+        <Text style={styles.sectionLabel}>{t("speciesDetail.aboutThisSpecies")}</Text>
 
-        <Text style={styles.sectionTitle}>
-          About {selectedSpecies.name}
+        <Text style={styles.sectionTitle}>{t("speciesDetail.about")}{selectedSpecies.name}
         </Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.overview || selectedSpecies.description || "No overview has been recorded."}
+          {selectedSpecies.overview || selectedSpecies.description || t("speciesDetail.noOverviewHasBeenRecorded")}
         </Text>
 
-
-        <Text style={styles.subTitle}>
-          Natural habitat
-        </Text>
+        <Text style={styles.subTitle}>{t("speciesDetail.naturalHabitat")}</Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.habitat || "Habitat information has not been recorded."}
+          {selectedSpecies.habitat || t("speciesDetail.habitatInformationHasNotBeenRecorded")}
         </Text>
 
 
         {selectedSpecies.distribution && (
           <>
-            <Text style={styles.subTitle}>
-              Distribution
-            </Text>
+            <Text style={styles.subTitle}>{t("speciesDetail.distribution")}</Text>
 
             <Text style={styles.paragraph}>
               {selectedSpecies.distribution}
@@ -223,20 +256,16 @@ export default function SpeciesDetail({
         )}
 
 
-        <Text style={styles.subTitle}>
-          Ecological importance
-        </Text>
+        <Text style={styles.subTitle}>{t("speciesDetail.ecologicalImportance")}</Text>
 
         <Text style={styles.paragraph}>
-          {selectedSpecies.ecologicalRole || "Ecological information has not been recorded."}
+          {selectedSpecies.ecologicalRole || t("speciesDetail.ecologicalInformationHasNotBeenRecorded")}
         </Text>
 
 
         {selectedSpecies.culturalSignificance && (
           <>
-            <Text style={styles.subTitle}>
-              Traditional and cultural importance
-            </Text>
+            <Text style={styles.subTitle}>{t("speciesDetail.traditionalAndCulturalImportance")}</Text>
 
             <Text style={styles.paragraph}>
               {selectedSpecies.culturalSignificance}
@@ -251,18 +280,12 @@ export default function SpeciesDetail({
 
       <View style={styles.quickFacts}>
 
-        <Text style={styles.sectionLabel}>
-          TAXONOMY & QUICK FACTS
-        </Text>
+        <Text style={styles.sectionLabel}>{t("speciesDetail.taxonomyQuickFacts")}</Text>
 
-        <Text style={styles.quickTitle}>
-          Species reference
-        </Text>
+        <Text style={styles.quickTitle}>{t("fieldCollection.speciesReference")}</Text>
 
 
-        <Text style={styles.characteristicTitle}>
-          Key characteristics
-        </Text>
+        <Text style={styles.characteristicTitle}>{t("speciesDetail.keyCharacteristics")}</Text>
 
 
         {(selectedSpecies.characteristics || []).map(
@@ -283,7 +306,7 @@ export default function SpeciesDetail({
         )}
 
         {(!selectedSpecies.characteristics || selectedSpecies.characteristics.length === 0) && (
-          <Text style={styles.characteristicText}>No characteristics have been recorded.</Text>
+          <Text style={styles.characteristicText}>{t("speciesDetail.noCharacteristicsHaveBeenRecorded")}</Text>
         )}
 
 
@@ -291,44 +314,44 @@ export default function SpeciesDetail({
 
 
         <Fact
-          label="Common name"
+          label={t("speciesDetail.commonName")}
           value={selectedSpecies.name}
         />
 
         <Fact
-          label="Scientific name"
+          label={t("plantDetail.scientificName")}
           value={selectedSpecies.scientificName}
         />
 
         <Fact
-          label="Family"
+          label={t("speciesDetail.family")}
           value={selectedSpecies.family}
         />
 
         <Fact
-          label="Genus"
+          label={t("plant.genus")}
           value={selectedSpecies.genus}
         />
 
         <Fact
-          label="Plant group"
+          label={t("speciesDetail.plantGroup")}
           value={selectedSpecies.category}
         />
 
         <Fact
-          label="Local name"
+          label={t("speciesDetail.localName")}
           value={selectedSpecies.localName}
         />
 
         {isBotanist && (
           <>
             <Fact
-              label="Conservation status"
+              label={t("speciesDetail.conservationStatus")}
               value={selectedSpecies.conservationStatus}
             />
 
             <Fact
-              label="Sensitivity level"
+              label={t("speciesDetail.sensitivityLevel")}
               value={selectedSpecies.sensitivityLevel}
             />
           </>
@@ -341,27 +364,22 @@ export default function SpeciesDetail({
 
       <View style={styles.individualSection}>
 
-        <Text style={styles.sectionLabel}>
-          INDIVIDUAL PLANTS OF THIS SPECIES
-        </Text>
+        <Text style={styles.sectionLabel}>{t("speciesDetail.individualPlantsOfThisSpecies")}</Text>
 
-        <Text style={styles.sectionTitle}>
-          Registered plants in Niah
-        </Text>
+        <Text style={styles.sectionTitle}>{t("speciesDetail.registeredPlantsInNiah")}</Text>
 
         <Text style={styles.sectionDescription}>
-          {speciesPlants.length} registered plant {speciesPlants.length === 1 ? "record is" : "records are"}
-          {" "}linked to this species.
-        </Text>
+          {speciesPlants.length}{t("speciesDetail.registeredPlant")}{speciesPlants.length === 1 ? t("speciesDetail.recordIs") : t("speciesDetail.recordsAre")}
+          {" "}{t("speciesDetail.linkedToThisSpecies")}</Text>
 
-        {loading && <Text style={styles.sectionDescription}>Loading species records...</Text>}
-        {!!errorMessage && <Text style={{ color: "#B42318", marginBottom: 12 }}>{errorMessage}</Text>}
+        {loading && <Text style={styles.sectionDescription}>{t("speciesDetail.loadingSpeciesRecords")}</Text>}
+        {!!errorMessage && <Text style={{ color: "#B42318", marginBottom: 12 }}>{translateUIMessage(errorMessage)}</Text>}
 
 
         {speciesPlants.length === 0 ? (
           <View style={styles.noRecords}>
             <Text>
-              {loading ? "Loading plant records..." : "No plant records are linked to this species yet."}
+              {loading ? t("plant.loadingPlantRecords") : t("speciesDetail.noPlantRecordsAreLinkedToThisSpeciesYet")}
             </Text>
           </View>
         ) : (
@@ -374,6 +392,7 @@ export default function SpeciesDetail({
                   plant={plant}
                   navigation={navigation}
                 user={user}
+                  speciesDetailCard
                 />
               ))}
 
@@ -391,9 +410,7 @@ export default function SpeciesDetail({
                 )
               }
             >
-              <Text style={styles.viewAllText}>
-                View All Plants →
-              </Text>
+              <Text style={styles.viewAllText}>{t("speciesDetail.viewAllPlants")}</Text>
             </TouchableOpacity>
           </>
         )}
@@ -405,19 +422,11 @@ export default function SpeciesDetail({
 
       <View style={styles.gallerySection}>
 
-        <Text style={styles.sectionLabel}>
-          BOTANICAL PHOTOGRAPHS
-        </Text>
+        <Text style={styles.sectionLabel}>{t("speciesDetail.botanicalPhotographs")}</Text>
 
-        <Text style={styles.sectionTitle}>
-          Identification from different views
-        </Text>
+        <Text style={styles.sectionTitle}>{t("speciesDetail.identificationFromDifferentViews")}</Text>
 
-        <Text style={styles.sectionDescription}>
-          Photographs support species identification
-          by showing important botanical features
-          and growth form.
-        </Text>
+        <Text style={styles.sectionDescription}>{t("speciesDetail.photographsSupportSpeciesIdentificationByShowingImportantBotanicalFeaturesAnd")}</Text>
 
 
         <View style={styles.galleryGrid}>
@@ -442,9 +451,7 @@ export default function SpeciesDetail({
                       🌿
                     </Text>
 
-                    <Text style={styles.placeholderText}>
-                      Photograph coming soon
-                    </Text>
+                    <Text style={styles.placeholderText}>{t("speciesDetail.photographComingSoon")}</Text>
                   </View>
                 )}
 
@@ -464,6 +471,7 @@ export default function SpeciesDetail({
 
 
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -473,17 +481,18 @@ export default function SpeciesDetail({
 // =====================================================
 
 function Fact({ label, value }) {
+  useAppTranslation();
   if (!value) return null;
 
   return (
     <View style={styles.fact}>
 
       <Text style={styles.factLabel}>
-        {label}
+        {translateLabel(label)}
       </Text>
 
       <Text style={styles.factValue}>
-        {value}
+        {translateFieldValue(label, value)}
       </Text>
 
     </View>
@@ -498,29 +507,22 @@ const styles = StyleSheet.create({
 
   page: {
     flex: 1,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
+
+  stateHeader: { alignItems: "flex-start", paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8, backgroundColor: "#F7FBF4" },
+  backButton: { alignSelf: "flex-start", maxWidth: "100%" },
+  stateContent: { flex: 1 },
 
   hero: {
     padding: 20,
-    paddingTop: 50,
-    backgroundColor: "#E1EADB",
+    paddingTop: 0,
+    backgroundColor: "#E7F2E2",
   },
 
-  backButton: {
-    alignSelf: "flex-start",
-    marginBottom: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: "#FFFFFFAA",
-  },
+  refreshError: { color: "#A52A3A", fontSize: 12, marginBottom: 10 },
 
-  backText: {
-    color: "#315B49",
-    fontSize: 12,
-    fontWeight: "700",
-  },
+  heroToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
 
   heroImage: {
     width: "100%",
@@ -570,8 +572,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: "#D4E4CF",
-    color: "#35652F",
+    backgroundColor: "#E1F0EA",
+    color: "#468585",
     fontSize: 9,
     fontWeight: "700",
   },
@@ -587,21 +589,21 @@ const styles = StyleSheet.create({
   },
 
   title: {
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 36,
     fontWeight: "600",
   },
 
   scientificName: {
     marginTop: 7,
-    color: "#7C6955",
+    color: "#6D7F75",
     fontSize: 17,
     fontStyle: "italic",
   },
 
   summary: {
     marginTop: 15,
-    color: "#50675D",
+    color: "#6D7F75",
     fontSize: 13,
     lineHeight: 21,
   },
@@ -612,21 +614,21 @@ const styles = StyleSheet.create({
 
   sectionLabel: {
     marginBottom: 8,
-    color: "#50A078",
+    color: "#468585",
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 1.7,
   },
 
   sectionTitle: {
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 28,
     fontWeight: "600",
     marginBottom: 18,
   },
 
   paragraph: {
-    color: "#50675D",
+    color: "#6D7F75",
     fontSize: 13,
     lineHeight: 22,
   },
@@ -634,7 +636,7 @@ const styles = StyleSheet.create({
   subTitle: {
     marginTop: 25,
     marginBottom: 8,
-    color: "#315F4E",
+    color: "#234B3A",
     fontSize: 20,
     fontWeight: "600",
   },
@@ -651,14 +653,14 @@ const styles = StyleSheet.create({
 
   quickTitle: {
     marginBottom: 18,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 25,
     fontWeight: "600",
   },
 
   characteristicTitle: {
     marginBottom: 12,
-    color: "#315F4E",
+    color: "#234B3A",
     fontSize: 14,
     fontWeight: "700",
   },
@@ -670,13 +672,13 @@ const styles = StyleSheet.create({
 
   check: {
     width: 25,
-    color: "#50A078",
+    color: "#468585",
     fontWeight: "800",
   },
 
   characteristicText: {
     flex: 1,
-    color: "#405F56",
+    color: "#6D7F75",
     fontSize: 12,
     lineHeight: 18,
   },
@@ -701,14 +703,14 @@ const styles = StyleSheet.create({
   },
 
   factValue: {
-    color: "#315447",
+    color: "#234B3A",
     fontSize: 13,
     fontWeight: "600",
   },
 
   individualSection: {
     padding: 24,
-    backgroundColor: "#E8EFE3",
+    backgroundColor: "#E7F2E2",
   },
 
   sectionDescription: {
@@ -743,7 +745,7 @@ const styles = StyleSheet.create({
   },
 
   plantId: {
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 14,
     fontWeight: "700",
   },
@@ -763,7 +765,7 @@ const styles = StyleSheet.create({
 
   plantView: {
     marginTop: 7,
-    color: "#315B49",
+    color: "#468585",
     fontSize: 10,
     fontWeight: "700",
   },
@@ -774,7 +776,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 11,
     borderRadius: 999,
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   viewAllText: {
@@ -794,7 +796,7 @@ const styles = StyleSheet.create({
 
   gallerySection: {
     padding: 24,
-    backgroundColor: "#E8EFE3",
+    backgroundColor: "#E7F2E2",
   },
 
   galleryGrid: {
@@ -822,14 +824,14 @@ const styles = StyleSheet.create({
 
   caption: {
     padding: 12,
-    color: "#405F56",
+    color: "#6D7F75",
     fontSize: 11,
     fontWeight: "700",
   },
 
   distribution: {
     padding: 24,
-    backgroundColor: "#F8F6EE",
+    backgroundColor: "#F7FBF4",
   },
 
   statsRow: {
@@ -930,7 +932,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     borderRadius: 999,
     backgroundColor: "#FFF4D8",
-    color: "#315B49",
+    color: "#468585",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -949,14 +951,14 @@ const styles = StyleSheet.create({
 
   notFoundTitle: {
     marginTop: 15,
-    color: "#234A3C",
+    color: "#234B3A",
     fontSize: 25,
     fontWeight: "600",
   },
 
   notFoundText: {
     marginTop: 8,
-    color: "#50675D",
+    color: "#6D7F75",
     fontSize: 13,
     textAlign: "center",
   },
@@ -966,7 +968,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 11,
     borderRadius: 999,
-    backgroundColor: "#315B49",
+    backgroundColor: "#468585",
   },
 
   notFoundButtonText: {

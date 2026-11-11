@@ -211,7 +211,7 @@ const closeControl = () =>
       </nav>
 
       <div class="sidebar-footer">
-        <button type="button" @click="signOut">{{ t('nav.logout') }}</button>
+        <button type="button" @click="signOut"><svg class="logout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg><span>{{ t('nav.logout') }}</span></button>
       </div>
     </aside>
     <button
@@ -223,19 +223,21 @@ const closeControl = () =>
     ></button>
     <div class="main-area">
       <header class="topbar">
-        <button
-          class="menu-button"
-          type="button"
-          :aria-label="t('dashboardNav.toggleNavigation')"
-          @click="toggle"
-        >
-          <span></span><span></span><span></span>
-        </button>
-        <div class="page-heading">
-          <p>{{ section }}</p>
-          <h1>{{ title }}</h1>
+        <div class="officer-header-content">
+          <button
+            class="menu-button"
+            type="button"
+            :aria-label="t('dashboardNav.toggleNavigation')"
+            @click="toggle"
+          >
+            <span></span><span></span><span></span>
+          </button>
+          <div class="page-heading">
+            <p>{{ section }}</p>
+            <h1>{{ title }}</h1>
+          </div>
+          <ConservationTopbarActions />
         </div>
-        <ConservationTopbarActions />
       </header>
       <main class="conservation-page">
         <RouterView v-slot="{ Component, route }">
@@ -247,3 +249,5 @@ const closeControl = () =>
 </template>
 
 <style src="../styles/conservation.css"></style>
+<style src="../styles/officer-typography.css"></style>
+<style src="../styles/officer-header.css"></style>

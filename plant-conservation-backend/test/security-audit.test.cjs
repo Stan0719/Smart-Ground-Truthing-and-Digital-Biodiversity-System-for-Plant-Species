@@ -179,26 +179,69 @@ test("invalid upload bodies are rejected as client errors rather than service fa
   });
   assert.equal(response.status, 415);
 });
-test("unavailable PostgreSQL fails cleanly without exposing credentials or a startup stack", async (t) => {
-  const { mkdtempSync, rmSync } = require("node:fs"),
-    { tmpdir } = require("node:os"),
-    { join, resolve } = require("node:path");
-  const { spawn } = require("node:child_process");
-  const folder = mkdtempSync(join(tmpdir(), "niah-startup-audit-"));
-  t.after(() => rmSync(folder, { recursive: true, force: true }));
-  const server = require("node:net").createServer().listen(0, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const child = spawn(process.execPath, [resolve(__dirname, "../server.js")], {
-    env: {
-      ...process.env,
-      AUTH_DATABASE_URL: "postgresql://invalid:invalid@127.0.0.1:1/missing",
-      PLANT_DB: join(folder, "plants.sqlite"),
-      HOST: "127.0.0.1",
-      PORT: String(server.address().port),
-    },
-    stdio: ["ignore", "pipe", "pipe"],
+function offlineStartupFailureScript() {
+  const { readFileSync } = require("node:fs"),
+    { join } = require("node:path");
+  const source = readFileSync(join(__dirname, "../server.js"), "utf8");
+  const marker = "start().catch(";
+  assert.ok(source.lastIndexOf(marker) >= 0);
+  const callback = source.slice(source.lastIndexOf(marker) + marker.length, source.lastIndexOf("module.exports"))
+    .replace(/\);\s*$/, "");
+  const begin = source.indexOf("  const auth = await createAuth(),", source.indexOf("async function start()"));
+  const end = source.indexOf("  const officerNotifications =", begin);
+  assert.ok(begin >= 0 && end > begin);
+  // Actual bootstrap/preflight/cleanup code and rejection handler, with inert
+  // factories. No environment loaders, real pools, sockets or database traffic.
+  return `let authClosed=false, poolClosed=false, queryCalls=0;
+    const createAuth=async()=>({db:{close:async()=>{authClosed=true;}}});
+    const poolFromEnvironment=()=>({
+      query:async()=>{queryCalls++; const error=Object.assign(Error('SIMULATED_PRIVATE_DRIVER_DETAILS'),{code:'ECONNREFUSED'});
+        error.stack='SIMULATED_PRIVATE_STACK'; throw error;},
+      end:async()=>{poolClosed=true;}
+    });
+    const speciesPhotoWritesRequested=()=>false;
+    async function simulatedStart() { ${source.slice(begin,end)} }
+    simulatedStart().then(()=>{throw Error('EXPECTED_OFFLINE_FAILURE');},error=>{
+      if(!authClosed || !poolClosed || queryCalls!==1 || error.code!=='ECONNREFUSED')
+        throw Error('BOOTSTRAP_CLEANUP_NOT_VERIFIED');
+      (${callback})(error);
+      console.log('OFFLINE_QUERY_REJECTED_RESOURCES_CLOSED');
+    });`;
+}
+
+test("offline database failure closes startup resources and uses the real sanitized rejection handler", async () => {
+  const logs = [], state = { argv: [], exitCode: 0 };
+  await require("node:vm").runInNewContext(offlineStartupFailureScript(), {
+    process: state,
+    console: { log: (...args) => logs.push(args.join(" ")), error: (...args) => logs.push(args.join(" ")) },
   });
+  assert.equal(state.exitCode, 1);
+  const output = logs.join("\n");
+  assert.match(output, /OFFLINE_QUERY_REJECTED_RESOURCES_CLOSED/);
+  assert.match(output, /Startup error code: ECONNREFUSED/);
+  assert.doesNotMatch(output, /SIMULATED_PRIVATE_DRIVER_DETAILS|SIMULATED_PRIVATE_STACK|listening on port/);
+});
+
+test("simulated database startup rejection exits cleanly without private details (offline subprocess)", async (t) => {
+  const { spawn } = require("node:child_process");
+  const script = offlineStartupFailureScript();
+  const blocked = (error) => {
+    if (!["EPERM", "EACCES"].includes(error.code)) return false;
+    t.skip(`Node subprocess launch denied (${error.code}); process-level result NOT VERIFIED`);
+    return true;
+  };
+  let child;
+  try {
+    child = spawn(process.execPath, ["-e", script], {
+      // Do not inherit credentials, activation settings or NODE_OPTIONS preloads.
+      env: process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {},
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+  } catch (error) {
+    if (blocked(error)) return;
+    throw error;
+  }
   let output = "";
   child.stdout.on("data", (chunk) => {
     output += chunk;
@@ -206,8 +249,44 @@ test("unavailable PostgreSQL fails cleanly without exposing credentials or a sta
   child.stderr.on("data", (chunk) => {
     output += chunk;
   });
-  const [code] = await once(child, "close");
+  let code;
+  try {
+    [code] = await once(child, "close");
+  } catch (error) {
+    if (blocked(error)) return;
+    throw error;
+  }
   assert.equal(code, 1);
   assert.match(output, /Plant API startup failed; verify configuration/);
+  assert.match(output, /Startup error code: ECONNREFUSED/);
+  assert.match(output, /OFFLINE_QUERY_REJECTED_RESOURCES_CLOSED/);
+  assert.doesNotMatch(output, /SIMULATED_PRIVATE_DRIVER_DETAILS|SIMULATED_PRIVATE_STACK/);
   assert.doesNotMatch(output, /TypeError|server\.address|listening on port/);
+});
+
+
+test("startup rejection diagnostics retain safe codes without raw messages, stacks or credentials", () => {
+  const { readFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const vm = require("node:vm");
+  const source = readFileSync(join(__dirname, "../server.js"), "utf8");
+  // Execute the actual startup rejection callback without starting services or
+  // loading environment variables; subprocess behavior is tested separately.
+  const marker = "start().catch(";
+  const callback = source.slice(source.lastIndexOf(marker) + marker.length, source.lastIndexOf("module.exports"))
+    .replace(/\);\s*$/, "");
+  for (const code of ["ECONNREFUSED", "28P01", "postgresql://secret:password@host/db", undefined]) {
+    const logs = [], state = {};
+    const reject = vm.runInNewContext(`(${callback})`, {
+      console: { error: (...args) => logs.push(args.join(" ")) }, process: state,
+    });
+    const error = Object.assign(Error("postgresql://secret:password@host/db driver details"), {code});
+    error.stack = "sensitive startup stack";
+    reject(error);
+    assert.equal(state.exitCode, 1);
+    const output = logs.join("\n");
+    assert.match(output, /Plant API startup failed; verify configuration/);
+    assert.match(output, new RegExp(`Startup error code: ${["ECONNREFUSED", "28P01"].includes(code) ? code : "STARTUP_FAILURE"}`));
+    assert.doesNotMatch(output, /secret|password|postgresql|driver details|sensitive startup stack/);
+  }
 });

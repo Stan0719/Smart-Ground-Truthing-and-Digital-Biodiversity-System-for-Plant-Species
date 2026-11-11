@@ -131,9 +131,9 @@ test('legacy pending account is preserved until administrator issues its tempora
   try {
     await auth.db
       .prepare(
-        "INSERT INTO users(id,name,username,email,role,status,password_hash,must_change_password) VALUES('legacy',?,?,?,?, 'Pending Activation',NULL,0)",
+        "INSERT INTO users(id,name,username,email,role,status,password_hash,must_change_password) VALUES(?,?,?,?,?, 'Pending Activation',NULL,0)",
       )
-      .run(body.name, body.username, body.email, body.role)
+      .run('legacy', body.name, body.username, body.email, body.role)
     await auth.db
       .prepare('INSERT INTO activation_tokens VALUES(?,?,?,0)')
       .run(digest('old-link'), 'legacy', Date.now() + 10000)
@@ -169,7 +169,7 @@ test('Visitor administration uses Visitor table without permitting staff promoti
       login = await auth.login('visitor@example.invalid', 'visitor-test-password', 'test')
     const base = {
       auth,
-      user: { id: 'admin' },
+      user: await auth.createUser({ name: 'Administrator', email: 'visitor-admin@example.invalid', role: 'Administrator', password: 'Administrator test password!', mustChangePassword: false }),
       ip: 'test',
       activation: null,
       path: `/api/admin/users/${created.user.id}`,

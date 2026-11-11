@@ -1,3 +1,5 @@
+import LanguageSelector from "../components/LanguageSelector";
+import { t, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import React, { useEffect, useRef, useState } from "react";
 
 import {
@@ -6,7 +8,6 @@ import {
   Switch,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { router } from "expo-router";
 
@@ -34,7 +36,7 @@ const BIOMETRIC_KEY = "niah.biometric.credentials";
 const BIOMETRIC_OPTIONS = {
   requireAuthentication: true,
   keychainService: "niah.biometric.login",
-  authenticationPrompt: "Unlock your saved Niah login",
+  get authenticationPrompt() { return t("login.unlockSavedLogin"); },
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 
@@ -52,6 +54,7 @@ function FloatingInput({
   onFocus,
   editable = true,
 }) {
+  useAppTranslation();
   const [isFocused, setIsFocused] = useState(false);
 
   const animation = useRef(
@@ -151,6 +154,7 @@ export default function LoginScreen({
   onLogin,
   route,
 }) {
+  useAppTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pendingPasswordSession, setPendingPasswordSession] = useState(null);
@@ -160,6 +164,11 @@ export default function LoginScreen({
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [faceRequest, setFaceRequest] = useState(null);
   const [registerCameraFace, setRegisterCameraFace] = useState(false);
+  const registrationIntent = useRef(false);
+  function selectFaceRegistration(selected) {
+    registrationIntent.current = selected;
+    setRegisterCameraFace(selected);
+  }
   const [cameraMessage, setCameraMessage] = useState("");
   const [manageLegacy, setManageLegacy] = useState(false);
   const [legacyEmail, setLegacyEmail] = useState("");
@@ -196,6 +205,9 @@ export default function LoginScreen({
         faceDiagnostic("session_or_navigation_failed", result.requestId, { code: error.code || "session_or_navigation_error" });
         setCameraMessage(error.message || "Session verification failed. Use email/password or retry face login.");
       }).finally(() => { loginLock.current = false; });
+    } else if (completed.mode === "recognize" && result?.enrollmentRequired) {
+      selectFaceRegistration(true);
+      setCameraMessage("Sign in with your password to register your face. Complete any required password change, then sign in with your permanent password. Registration requires your consent.");
     } else if (result?.error) setCameraMessage(result.error);
     if (completed.mode === "enroll") {
       faceCompletion.current?.(result);
@@ -346,12 +358,12 @@ export default function LoginScreen({
     let authenticated;
     try {
       const consent = await new Promise(resolve => Alert.alert(
-        reenroll ? "Save a new enrollment?" : "Link existing enrollment?",
+        reenroll ? t("login.saveANewEnrollment") : t("login.linkExistingEnrollment"),
         reenroll
-          ? "I own both accounts and consent to linking them and saving a new live template. The old template remains preserved but will leave active matching. Roles and permissions stay the same."
-          : "I own both accounts and consent to linking the existing facial template to my real account. Linking does not improve recognition or confirm historical model compatibility.",
-        [{ text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-          { text: "I own both accounts and agree", onPress: () => resolve(true) }],
+          ? t("login.iOwnBothAccountsAndConsentToLinkingThemAnd")
+          : t("login.iOwnBothAccountsAndConsentToLinkingTheExisting"),
+        [{ text: t("common.cancel"), style: "cancel", onPress: () => resolve(false) },
+          { text: t("login.iOwnBothAccountsAndAgree"), onPress: () => resolve(true) }],
         { cancelable: true, onDismiss: () => resolve(false) }
       ));
       if (!consent) return;
@@ -386,8 +398,9 @@ export default function LoginScreen({
   }
 
 
-  async function handleLogin() {
+  async function handleLogin(forceRegistration = false) {
   if (loginLock.current || biometricLock.current || faceRequest) return;
+  const wantsRegistration = forceRegistration === true || registrationIntent.current || registerCameraFace;
   loginLock.current = true;
   setPasswordBusy(true);
   setLoginError("");
@@ -442,11 +455,11 @@ export default function LoginScreen({
         BIOMETRIC_OPTIONS
       );
     } catch {
-      Alert.alert("Biometric autofill not saved", "You can still sign in normally. Try enabling biometric autofill next time.");
+      Alert.alert(t("login.biometricAutofillNotSaved"), t("login.youCanStillSignInNormallyTryEnablingBiometricAutofill"));
     }
   }
 
-  if (registerCameraFace && cameraEnabled) {
+  if (wantsRegistration && cameraEnabled) {
     try {
       const status = await faceApi("/enrollment-status", {}, serverToken);
       if (status.user?.id !== user.id || typeof status.enrolled !== "boolean") throw new Error("Unable to confirm enrollment for this account.");
@@ -455,13 +468,16 @@ export default function LoginScreen({
         faceCameraController.current.openEnrollment({ token: serverToken, user });
       });
       if (result?.alreadyEnrolled) {
-        setRegisterCameraFace(false);
+        selectFaceRegistration(false);
         setCameraMessage("Your face is already registered. You can now use Face Login.");
-        Alert.alert("Face Login ready", "Your face is already registered. You can now use Face Login.");
-      } else if (result?.enrolled === true) Alert.alert("Face registered", "You can use Login with Face ID next time.");
-      else Alert.alert("Face registration not completed", "Your password login will continue. You can register your face next time.");
+        Alert.alert(t("login.faceLoginReady"), t("login.yourFaceIsAlreadyRegisteredYouCanNowUseFace"));
+      } else if (result?.enrolled === true && result.user?.id === user.id && result.user?.email === user.email) {
+        selectFaceRegistration(false);
+        Alert.alert(t("login.faceRegistered"), t("login.youCanUseLoginWithFaceIdNextTime"));
+      }
+      else Alert.alert(t("login.faceRegistrationNotCompleted"), t("login.yourPasswordLoginWillContinueYouCanRegisterYourFace"));
     } catch (error) {
-      Alert.alert("Unable to check face registration", error.message || "Your password login will continue. Try again later.");
+      Alert.alert(t("login.unableToCheckFaceRegistration"), translateUIMessage(error.message) || t("login.yourPasswordLoginWillContinueTryAgainLater"));
     }
   }
 
@@ -516,18 +532,18 @@ export default function LoginScreen({
       <FaceCameraModal request={faceRequest} onClose={(requestId) => finishFaceCamera(null, requestId)} onResult={finishFaceCamera} isCurrent={(id) => faceCameraController.current.isCurrent(id)} />
 
             {typeof __DEV__ === "boolean" && __DEV__ ? (
-              <View style={{ backgroundColor: "#E8F3ED", borderColor: "#397558", borderWidth: 1, borderRadius: 12, padding: 14, margin: 10, flexShrink: 0, gap: 8 }}>
-                <Text style={{ color: "#174B35", fontWeight: "700" }}>Development build: 20261029.4</Text>
-                <Text style={{ color: "#174B35", fontSize: 12 }}>Metro: {Constants.expoConfig?.hostUri || "Not supplied by runtime"}</Text>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Check authentication connection (no credentials)" disabled={checkingConnection || passwordBusy} onPress={async () => {
+              <View style={{ display: "none", backgroundColor: "#E8F3ED", borderColor: "#397558", borderWidth: 1, borderRadius: 12, padding: 14, margin: 10, flexShrink: 0, gap: 8 }}>
+                <Text style={{ color: "#174B35", fontWeight: "700" }}>{t("login.developmentBuild202610294")}</Text>
+                <Text style={{ color: "#174B35", fontSize: 12 }}>{t("login.metro")}{Constants.expoConfig?.hostUri || t("login.notSuppliedByRuntime")}</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("login.checkAuthenticationConnectionNoCredentials")} disabled={checkingConnection || passwordBusy} onPress={async () => {
                   setCheckingConnection(true); setConnectionCheck("Checking authentication connection…");
                   try { const result = await probeAuthConnection(); setConnectionCheck(`HTTP ${result.status}: Connected\n${result.base}\nReference: ${result.reference}`); }
                   catch (error) { setConnectionCheck(`${error.status ? `HTTP ${error.status} received` : "No HTTP response received"}\n${error.code || "API_CLIENT_ERROR"}: ${error.message}\nReference: ${error.requestId || "Not available"}`); }
                   finally { setCheckingConnection(false); }
                 }} style={{ backgroundColor: "#175E3E", borderRadius: 8, padding: 12 }}>
-                  <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>{checkingConnection ? "Checking connection…" : "Check authentication connection (no credentials)"}</Text>
+                  <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>{checkingConnection ? t("login.checkingConnection") : t("login.checkAuthenticationConnectionNoCredentials")}</Text>
                 </TouchableOpacity>
-                {!!connectionCheck && <ScrollView style={{ maxHeight: 120 }} keyboardShouldPersistTaps="handled"><Text selectable accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: "#174B35", fontSize: 12 }}>{connectionCheck}</Text></ScrollView>}
+                {!!connectionCheck && <ScrollView style={{ maxHeight: 120 }} keyboardShouldPersistTaps="handled"><Text selectable accessibilityRole="alert" accessibilityLiveRegion="polite" style={{ color: "#174B35", fontSize: 12 }}>{translateUIMessage(connectionCheck)}</Text></ScrollView>}
               </View>
             ) : null}
 
@@ -572,6 +588,8 @@ export default function LoginScreen({
             ]}
           >
 
+            <View style={{ alignSelf: "flex-end", marginBottom: 8 }}><LanguageSelector /></View>
+
             {/* User icon */}
             <Animated.View
               style={[
@@ -594,15 +612,11 @@ export default function LoginScreen({
 
 
             {/* Title */}
-            <Text style={styles.title}>
-              Welcome Back
-            </Text>
+            <Text style={styles.title}>{t("login.welcomeBack")}</Text>
 
 
             {/* Subtitle */}
-            <Text style={styles.subtitle}>
-              Sign in to access the Niah Biodiversity System.
-            </Text>
+            <Text style={styles.subtitle}>{t("login.signInToAccessTheNiahBiodiversitySystem")}</Text>
 
 
 
@@ -614,7 +628,7 @@ export default function LoginScreen({
               <FloatingInput
                 onFocus={() => fillFromBiometrics(true)}
                 editable={!biometricBusy && !passwordBusy}
-                label="Email"
+                label={t("login.email")}
                 value={email}
                 onChangeText={updateEmail}
                 keyboardType="email-address"
@@ -626,7 +640,7 @@ export default function LoginScreen({
               {/* Password */}
               <FloatingInput
                 editable={!biometricBusy && !passwordBusy}
-                label="Password"
+                label={t("login.password")}
                 value={password}
                 onChangeText={updatePassword}
                 secureTextEntry
@@ -639,47 +653,55 @@ export default function LoginScreen({
               {!cameraEnabled && <View style={{ gap: 10 }}>
                 <Text style={styles.biometricHelp}>
                   {biometricAvailable
-                    ? "Sign in once and enable biometric autofill. Next time, tap Email to unlock your saved email and password with Face ID or fingerprint."
-                    : "Biometric autofill needs a native app build and Face ID or fingerprint enabled in your phone settings. You can always sign in manually."}
+                    ? t("login.signInOnceAndEnableBiometricAutofillNextTimeTap")
+                    : t("login.biometricAutofillNeedsANativeAppBuildAndFaceId")}
                 </Text>
                 {biometricAvailable && <>
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                    <Text style={[styles.biometricHelp, { flex: 1 }]}>Save this login for biometric autofill on this device</Text>
-                    <Switch value={saveBiometric} onValueChange={setSaveBiometric} disabled={biometricBusy} accessibilityLabel="Save login for biometric autofill" />
+                    <Text style={[styles.biometricHelp, { flex: 1 }]}>{t("login.saveThisLoginForBiometricAutofillOnThisDevice")}</Text>
+                    <Switch value={saveBiometric} onValueChange={setSaveBiometric} disabled={biometricBusy} accessibilityLabel={t("login.saveLoginForBiometricAutofill")} />
                   </View>
                   <TouchableOpacity onPress={() => fillFromBiometrics()} disabled={biometricBusy} accessibilityRole="button">
-                    <Text style={styles.guestButtonText}>{biometricBusy ? "Unlocking…" : "Autofill with biometrics"}</Text>
+                    <Text style={styles.guestButtonText}>{biometricBusy ? t("login.unlocking") : t("login.autofillWithBiometrics")}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity onPress={forgetBiometricLogin} disabled={biometricBusy} accessibilityRole="button">
-                    <Text style={styles.biometricHelp}>Remove saved biometric login</Text>
+                    <Text style={styles.biometricHelp}>{t("login.removeSavedBiometricLogin")}</Text>
                   </TouchableOpacity>
                 </>}
-                {!!biometricMessage && <Text style={styles.biometricHelp} accessibilityLiveRegion="polite">{biometricMessage}</Text>}
+                {!!biometricMessage && <Text style={styles.biometricHelp} accessibilityLiveRegion="polite">{translateUIMessage(biometricMessage)}</Text>}
               </View>}
 
               {cameraEnabled && <View style={{ gap: 12 }}>
-                <Text style={styles.biometricHelp}>Register once for your eligible account, then use Login with Face ID without typing your email or password.</Text>
+                <Text style={styles.biometricHelp}>{t("login.registerOnceForYourEligibleAccountThenUseLoginWith")}</Text>
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <Text style={[styles.biometricHelp, { flex: 1 }]}>Register my face after password login</Text>
-                  <Switch value={registerCameraFace} onValueChange={setRegisterCameraFace} accessibilityLabel="Register face after login" />
+                  <Text style={[styles.biometricHelp, { flex: 1 }]}>{t("login.registerMyFaceAfterPasswordLogin")}</Text>
+                  <Switch value={registerCameraFace} onValueChange={selectFaceRegistration} accessibilityLabel={t("login.registerFaceAfterLogin")} />
                 </View>
+                {typeof __DEV__ === "boolean" && __DEV__ && <Text style={styles.biometricHelp}>{t("login.faceFlow")}{FACE_CAPTURE_VERSION}</Text>}
+                <TouchableOpacity accessibilityRole="button" disabled={passwordBusy} onPress={() => {
+                  selectFaceRegistration(true);
+                  return handleLogin(true);
+                }}>
+                  <Text style={styles.guestButtonText}>{t("login.registerFaceWithPassword")}</Text>
+                </TouchableOpacity>
                 <TouchableOpacity accessibilityRole="button" onPress={() => {
                   if (!loginLock.current && !biometricLock.current && !faceRequest) {
-                    setRegisterCameraFace(false);
+                    if (registrationIntent.current || registerCameraFace) return handleLogin(true);
                     faceCameraController.current.openLogin();
                   }
                 }}>
-                  <Text style={styles.guestButtonText}>Login with Face ID</Text>
+                  <Text style={styles.guestButtonText}>{registerCameraFace ? t("login.signInAndRegisterMyFace") : t("login.loginWithFaceId")}</Text>
                 </TouchableOpacity>
+                {registerCameraFace && <Text style={styles.biometricHelp}>{t("login.enterYourEmailAndPermanentPasswordThenSignInTo")}</Text>}
                 <TouchableOpacity accessibilityRole="button" onPress={() => {
                   if (!loginLock.current && !faceRequest) { setManageLegacy(!manageLegacy); setLegacyPassword(""); }
-                }}><Text style={styles.biometricHelp}>Manage my existing facial enrollment</Text></TouchableOpacity>
+                }}><Text style={styles.biometricHelp}>{t("login.manageMyExistingFacialEnrollment")}</Text></TouchableOpacity>
                 {manageLegacy && <View style={{ gap: 16 }}>
-                  <Text style={styles.biometricHelp}>Enter your eligible real account email/password above. Enter your original face-enrollment credentials below. Never use another person's enrollment.</Text>
-                  <FloatingInput label="Legacy email" value={legacyEmail} onChangeText={setLegacyEmail} keyboardType="email-address" />
-                  <FloatingInput label="Legacy password" value={legacyPassword} onChangeText={setLegacyPassword} secureTextEntry />
-                  <TouchableOpacity accessibilityRole="button" onPress={() => recoverLegacyFace(false)}><Text style={styles.guestButtonText}>Link my existing enrollment</Text></TouchableOpacity>
-                  <TouchableOpacity accessibilityRole="button" onPress={() => recoverLegacyFace(true)}><Text style={styles.guestButtonText}>Enroll a new capture, preserve my old template</Text></TouchableOpacity>
+                  <Text style={styles.biometricHelp}>{t("login.enterYourEligibleRealAccountEmailPasswordAboveEnterYour")}</Text>
+                  <FloatingInput label={t("login.legacyEmail")} value={legacyEmail} onChangeText={setLegacyEmail} keyboardType="email-address" />
+                  <FloatingInput label={t("login.legacyPassword")} value={legacyPassword} onChangeText={setLegacyPassword} secureTextEntry />
+                  <TouchableOpacity accessibilityRole="button" onPress={() => recoverLegacyFace(false)}><Text style={styles.guestButtonText}>{t("login.linkMyExistingEnrollment")}</Text></TouchableOpacity>
+                  <TouchableOpacity accessibilityRole="button" onPress={() => recoverLegacyFace(true)}><Text style={styles.guestButtonText}>{t("login.enrollANewCapturePreserveMyOldTemplate")}</Text></TouchableOpacity>
                 </View>}
                 <TouchableOpacity accessibilityRole="button" onPress={async () => {
                   if (loginLock.current || biometricLock.current || faceRequest) return;
@@ -688,8 +710,8 @@ export default function LoginScreen({
                     await faceApi("/delete-face", {}, session.token);
                     setCameraMessage("Face registration removed and sessions revoked.");
                   } catch (error) { setCameraMessage(error.message); }
-                }}><Text style={styles.biometricHelp}>Remove my face (enter email and password above)</Text></TouchableOpacity>
-                {!!cameraMessage && <Text style={styles.biometricHelp} accessibilityLiveRegion="polite">{cameraMessage}</Text>}
+                }}><Text style={styles.biometricHelp}>{t("login.removeMyFaceEnterEmailAndPasswordAbove")}</Text></TouchableOpacity>
+                {!!cameraMessage && <Text style={styles.biometricHelp} accessibilityLiveRegion="polite">{translateUIMessage(cameraMessage)}</Text>}
               </View>}
 
               {/* Forgot password */}
@@ -699,9 +721,7 @@ export default function LoginScreen({
                 activeOpacity={0.65}
                 accessibilityRole="button"
               >
-                <Text style={styles.forgotText}>
-                  Forget password?
-                </Text>
+                <Text style={styles.forgotText}>{t("login.forgetPassword")}</Text>
               </TouchableOpacity>
 
 
@@ -711,7 +731,7 @@ export default function LoginScreen({
                   style={styles.errorText}
                   accessibilityRole="alert"
                 >
-                  {loginError}
+                  {translateUIMessage(loginError)}
                 </Text>
               ) : null}
 
@@ -725,7 +745,7 @@ export default function LoginScreen({
                 accessibilityRole="button"
               >
                 <Text style={styles.loginButtonText}>
-                  {passwordBusy ? "Signing in…" : "Login with Email and Password"}
+                  {passwordBusy ? t("login.signingIn") : t("login.loginWithEmailAndPassword")}
                 </Text>
               </TouchableOpacity>
 
@@ -737,11 +757,8 @@ export default function LoginScreen({
                 activeOpacity={0.65}
                 accessibilityRole="button"
               >
-                <Text style={styles.registerPromptText}>
-                  New visitor?{" "}
-                  <Text style={styles.registerLinkText}>
-                    Create an account
-                  </Text>
+                <Text style={styles.registerPromptText}>{t("login.newVisitor")}{" "}
+                  <Text style={styles.registerLinkText}>{t("login.createAnAccount")}</Text>
                 </Text>
               </TouchableOpacity>
 
@@ -751,9 +768,7 @@ export default function LoginScreen({
 
                 <View style={styles.divider} />
 
-                <Text style={styles.dividerText}>
-                  OR
-                </Text>
+                <Text style={styles.dividerText}>{t("login.or")}</Text>
 
                 <View style={styles.divider} />
 
@@ -767,9 +782,7 @@ export default function LoginScreen({
                 activeOpacity={0.75}
                 accessibilityRole="button"
               >
-                <Text style={styles.guestButtonText}>
-                  Continue as Guest
-                </Text>
+                <Text style={styles.guestButtonText}>{t("login.continueAsGuest")}</Text>
               </TouchableOpacity>
 
             </View>
