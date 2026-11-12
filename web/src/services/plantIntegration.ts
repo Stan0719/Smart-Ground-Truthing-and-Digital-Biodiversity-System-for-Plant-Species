@@ -83,11 +83,7 @@ export const mapSpeciesContract = (value: unknown): SpeciesContract | null => {
     conservationStatus: text(item.conservation_status),
     description: text(item.description),
     habitat: text(item.habitat),
-<<<<<<< Updated upstream
     imageUrl: webAssetUrl(item.image_url),
-=======
-    imageUrl: /^\/api\/assets\/[A-Za-z0-9_-]+$/.test(text(item.image_url)) ? text(item.image_url) : '',
->>>>>>> Stashed changes
   }
 }
 
