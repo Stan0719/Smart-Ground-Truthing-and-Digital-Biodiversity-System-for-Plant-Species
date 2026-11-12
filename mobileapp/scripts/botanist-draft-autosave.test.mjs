@@ -196,6 +196,18 @@ test("stopping after successful submission or deletion cancels pending writes", 
   } finally { restoreTimers(); }
 });
 
+test("a draft can be stopped by account/key before its first debounce writes anything", async () => {
+  const h = harness(), restoreTimers = h.installTimers(), saved = [];
+  try {
+    h.render({ enabled: true, signature: "typed", accountId: "owner", clientKey: "new-draft", save: async () => saved.push("unexpected") });
+    await h.stopDraftWriter("owner", "new-draft");
+    h.advanceTime(Infinity);
+    h.unmount();
+    await tick();
+    assert.deepEqual(saved, []);
+  } finally { restoreTimers(); }
+});
+
 test("all active Botanist form routes use the shared encrypted-draft autosave lifecycle", () => {
   for (const path of ["AddPlant.js", "EditPlantRecord.js", "AddSpeciesRequest.js", "EditSpeciesRequest.js", "FieldCollection.js"]) {
     const screen = readFileSync(new URL(`../screens/${path}`, import.meta.url), "utf8");

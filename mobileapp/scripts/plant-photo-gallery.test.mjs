@@ -116,6 +116,7 @@ test('Plant Detail thumbnail taps select a distinct image and the viewer navigat
   const dependencies = {
     react: hooks,
     'react-native': native,
+    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
     '../translations/i18n': translations,
     '../data/mockData': { getPlantById: () => null, getSpeciesBySlug: () => null },
     '../utils/plantApi': { fetchPlantDetail: async () => plant, getPlantDisplayObservation: (record) => record.latestApproved,
@@ -157,6 +158,17 @@ test('Plant Detail thumbnail taps select a distinct image and the viewer navigat
   const treeText = (node) => typeof node === 'string' || typeof node === 'number' ? String(node) : children(node).map(treeText).join(' ')
 
   let tree = render()
+  assert.equal(tree.type, 'SafeAreaView')
+  assert.deepEqual(tree.props.edges, ['top', 'left', 'right'])
+  const [fixedHeader, scrollingContent] = children(tree)
+  assert.equal(fixedHeader.type, 'View')
+  assert.equal(fixedHeader.props.style.paddingTop, 8)
+  assert.equal(fixedHeader.props.style.paddingBottom, 8)
+  assert.equal(fixedHeader.props.style.backgroundColor, '#F7FBF4')
+  assert.equal(scrollingContent.type, 'ScrollView')
+  assert.equal(find(scrollingContent, (node) => node?.type === 'RefreshButton'), undefined, 'toolbar actions stay outside scrolling content')
+  assert.equal(find(scrollingContent, (node) => node?.type === 'FavouriteHeart'), undefined)
+  assert.ok(find(fixedHeader, (node) => node?.type === 'RefreshButton'))
   flushEffects()
   state[0] = plant // Simulate the plant response after the route-focus fetch.
   tree = render()
@@ -191,4 +203,82 @@ test('Plant Detail thumbnail taps select a distinct image and the viewer navigat
   const newPlantImage = find(tree, (node) => node?.type === 'Image' && node.props.style?.height === '100%')
   assert.equal(newPlantImage.props.source.uri, 'https://images.test/plant-18-1.jpg')
   assert.equal(treeText(tree).includes('2 / 2'), false)
+})
+
+test('Plant Detail keeps plain Back on the left and Refresh before Favourite on the right for every role', () => {
+  const source = readFileSync(new URL('../screens/PlantDetail.js', import.meta.url), 'utf8')
+  const start = source.indexOf('  const header = (') + '  const header = ('.length
+  const toolbar = source.slice(start, source.indexOf('\n  );', start)).trim()
+  const styleSource = source.slice(source.indexOf('const styles = StyleSheet.create('))
+  const compiled = ts.transpileModule(`${styleSource}\nmodule.exports = (isVisitor) => (${toolbar});`, {
+    compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  for (const role of ['Visitor', 'Guest', 'Botanist', 'Officer']) {
+    const calls = []
+    const module = { exports: {} }
+    new Function('React', 'View', 'BackButton', 'RefreshButton', 'FavouriteHeart', 'StyleSheet', 't', 'navigation', 'loadPlant', 'favourites', 'loading', 'refreshing', 'plant', 'module', compiled)(
+      React, 'View', 'BackButton', 'RefreshButton', 'FavouriteHeart', { create: (styles) => styles }, (key) => key,
+      { goBack: () => calls.push('back') }, (pull) => calls.push(['refresh', pull]),
+      { refreshing: false, loading: false, isFavourite: () => true, isPending: () => false, refresh: (pull) => calls.push(['favourites-refresh', pull]), toggle: (...args) => calls.push(args) },
+      false, false, { plantId: '17' }, module,
+    )
+    const tree = module.exports(role === 'Visitor')
+    const [back, actions] = React.Children.toArray(tree.props.children)
+    assert.equal(back.type, 'BackButton')
+    assert.equal(back.props.variant, 'plain')
+    assert.deepEqual(back.props.style, { alignSelf: 'flex-start', maxWidth: '100%' })
+    assert.equal(tree.props.style.justifyContent, 'space-between')
+    assert.equal(tree.props.style.alignItems, 'center')
+    assert.equal(actions.props.style.flexDirection, 'row')
+    assert.equal(actions.props.style.alignItems, 'center')
+    assert.equal(actions.props.style.gap, 8)
+    const buttons = React.Children.toArray(actions.props.children)
+    assert.equal(buttons[0].type, 'RefreshButton')
+    assert.equal(buttons.length, role === 'Visitor' ? 2 : 1)
+    for (const button of buttons) {
+      assert.equal(button.props.style.minWidth, 44)
+      assert.equal(button.props.style.height, 44)
+      assert.equal(button.props.style.borderRadius, 13)
+    }
+    back.props.onPress()
+    buttons[0].props.onPress()
+    assert.deepEqual(calls.slice(0, 3), ['back', ['refresh', true], ['favourites-refresh', true]])
+    if (role === 'Visitor') {
+      assert.equal(buttons[1].type, 'FavouriteHeart')
+      assert.equal(buttons[1].props.active, true)
+      buttons[1].props.onPress()
+      assert.deepEqual(calls.at(-1), ['plant', '17'])
+    }
+  }
+})
+
+test('Plant Detail title uses scientific name then localized Plant ID for Botanist, Visitor and Guest', () => {
+  const source = readFileSync(new URL('../screens/PlantDetail.js', import.meta.url), 'utf8')
+  const start = source.indexOf('<Text style={styles.headerLabel}>')
+  const title = source.slice(start, source.indexOf('<View style={styles.heroBadges}>', start))
+  const roleLogic = source.match(/const useScientificHeading = .*;/)[0]
+  const styleSource = source.slice(source.indexOf('const styles = StyleSheet.create('))
+  const compiled = ts.transpileModule(`${styleSource}\nmodule.exports = (user, plant, selectedSpecies) => { ${roleLogic} return <>${title}</>; };`, {
+    compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  for (const language of ['en', 'ms', 'zh']) {
+    const catalog = JSON.parse(readFileSync(new URL(`../translations/${language}.json`, import.meta.url), 'utf8'))
+    const t = (key) => key.split('.').reduce((value, part) => value?.[part], catalog) || key
+    const module = { exports: {} }
+    new Function('React', 'Text', 'StyleSheet', 't', 'module', compiled)(React, 'Text', { create: (styles) => styles }, t, module)
+    for (const user of [null, { role: 'Guest' }, { role: 'Visitor' }, { role: 'Botanist' }]) {
+      for (const plantScientificName of ['Jn plant scientific', null, '   ']) {
+        const plant = { plantId: '83', plantScientificName }
+        const texts = React.Children.toArray(module.exports(user, plant, { name: 'Jn species common' }).props.children)
+        assert.equal(texts[0].props.children, t('plantDetail.plantRecord'))
+        assert.equal(texts[1].props.children, plantScientificName?.trim() || t('plant.notRecorded'))
+        assert.equal(texts[2].props.children, `${t('plantDetail.plantId')}: 83`)
+        assert.equal(texts[3].props.children, `${t('plantDetail.species')}: Jn species common`)
+        assert.ok(texts[1].props.style.fontSize > texts[2].props.style.fontSize)
+      }
+    }
+    const officer = React.Children.toArray(module.exports({ role: 'Officer' }, { plantId: '83', plantScientificName: 'Jn plant scientific' }, { name: 'Jn species common' }).props.children)
+    assert.equal(officer[1].props.children, `${t('fieldCollection.plant')}83`)
+    assert.equal(officer[2].props.children, 'Jn plant scientific')
+  }
 })

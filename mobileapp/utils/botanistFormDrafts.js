@@ -8,6 +8,19 @@ const isPrivatePhoto = (uri) => typeof uri === "string" && uri.startsWith(privat
 const randomPart = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const writeQueues = new Map();
 
+// Default selections and submission metadata alone do not make an unfinished form.
+export function hasMeaningfulAddPlantDraft(form, photos = []) {
+  if (!form || typeof form !== "object" || Array.isArray(form)) return false;
+  const fields = ["plantScientificName", "height", "description", "growthStage", "morphology", "zone",
+    "latitude", "longitude", "altitude", "gpsAccuracy", "speciesScientificName", "speciesCommonName",
+    "speciesGenus", "speciesFamily", "speciesDescription", "speciesHabitat"];
+  return fields.some((key) => String(form[key] ?? "").trim()) ||
+    Boolean(form.selectedSpecies?.id || form.selectedQRCode?.qr_id) ||
+    Boolean(form.healthStatus && form.healthStatus !== "Healthy") ||
+    Boolean(form.speciesConservationStatus && form.speciesConservationStatus !== "Not Assessed") ||
+    (Array.isArray(photos) && photos.some((photo) => Boolean(photo?.uri)));
+}
+
 function serialDraft(key, operation) {
   const prior = writeQueues.get(key) || Promise.resolve();
   const next = prior.catch(() => {}).then(operation);
@@ -41,6 +54,7 @@ export async function findBotanistFormDraft(accountId, formType, targetId) {
   if (!accountId) throw Error("Sign in with the Botanist account that owns this draft.");
   const rows = await readDrafts(accountId);
   return rows.filter((row) => row.kind === KIND && row.form_type === formType &&
+    (formType !== "add-plant" || hasMeaningfulAddPlantDraft(row.form, row.photo_refs)) &&
     (targetId === undefined || String(row.target_id ?? "") === String(targetId)))
     .sort((a, b) => new Date(b.saved_at || 0) - new Date(a.saved_at || 0))[0] || null;
 }

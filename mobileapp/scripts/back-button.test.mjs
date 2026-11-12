@@ -22,6 +22,21 @@ test("localized plant Back labels retain their text without embedded arrows", ()
   }
 });
 
+test("Plant and Plant Detail reuse the Species Detail plain Back style in every screen state", () => {
+  for (const file of ["Plant", "PlantDetail", "SpeciesDetail"]) {
+    const source = read(`../screens/${file}.js`);
+    const buttons = source.match(/<BackButton\b[\s\S]*?\/>/g) || [];
+    assert.equal(buttons.length, 1);
+    for (const button of buttons) {
+      assert.match(button, /variant="plain"/);
+      assert.match(button, /style=\{styles\.backButton\}/);
+      assert.match(button, /label=\{t\("plant\.back"\)\}/);
+      assert.match(button, /navigation\.goBack\(\)/);
+    }
+    assert.match(source, /backButton: \{ alignSelf: "flex-start", maxWidth: "100%" \}/);
+  }
+});
+
 test("localized strings contain no arrow glyphs that can duplicate the shared icon", () => {
   for (const language of ["en", "ms", "zh"]) {
     const translations = JSON.parse(read(`../translations/${language}.json`));

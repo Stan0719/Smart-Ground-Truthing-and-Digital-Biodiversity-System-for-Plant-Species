@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url), React = require("react"), ts = r
 const en = JSON.parse(readFileSync(new URL("../translations/en.json", import.meta.url), "utf8"));
 const ms = JSON.parse(readFileSync(new URL("../translations/ms.json", import.meta.url), "utf8"));
 const source = readFileSync(new URL("../screens/AddPlant.js", import.meta.url), "utf8");
-const stateNames = [...source.matchAll(/const \[(\w+),\s*(\w+)\] =\s*useState/g)].map((m) => [m[1], m[2]]);
+const stateNames = [...source.slice(source.indexOf("export function AddPlantForm(")).matchAll(/\[(\w+)(?:,\s*(\w+))?\]\s*=\s*useState/g)].map((m) => [m[1], m[2]]);
 const code = ts.transpileModule(source, { fileName: "AddPlant.jsx", compilerOptions: {
   jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022,
 } }).outputText;
@@ -19,9 +19,9 @@ async function fixture(language = "en", initial = {}, api) {
   const app = createLocalization({ resources: { en: { translation: en }, ms: { translation: ms } }, storage: { getItem: async () => null, setItem: async () => {} } });
   await app.changeLanguage(language);
   const display = createDisplayTranslator(app.i18n, en), t = (key, values) => app.i18n.t(key, values);
-  const state = { speciesCatalog: [species], loadingSpeciesCatalog: false, ...initial }, refs = [], alerts = [], network = [], speciesReads = [];
+  const state = { speciesCatalog: [species], loadingSpeciesCatalog: false, recoveryResolved: true, ...initial }, refs = [], alerts = [], network = [], speciesReads = [];
   let stateIndex, refIndex, tree, focusEffect;
-  const hooks = { ...React, useEffect: () => {}, useCallback: (fn) => fn, useState: (value) => {
+  const hooks = { ...React, useId: () => "workflow-form", useEffect: () => {}, useCallback: (fn) => fn, useState: (value) => {
     const [key, setterName] = stateNames[stateIndex++];
     if (!(key in state)) state[key] = typeof value === "function" ? value() : value;
     const setter = (next) => { state[key] = typeof next === "function" ? next(state[key]) : next; };
@@ -32,6 +32,8 @@ async function fixture(language = "en", initial = {}, api) {
   const deps = { react: hooks, "react-native": native, "@react-navigation/native": { useFocusEffect: (fn) => { focusEffect = fn; } },
     "../translations/i18n": { useAppTranslation: () => {}, t, translateLabel: display.label, translateUIMessage: display.message },
     "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails },
+    "../utils/botanistFormDrafts": { hasMeaningfulAddPlantDraft: () => true, deleteBotanistFormDraft: async () => true },
+    "../utils/botanistDraftAutosave": { useBotanistDraftAutosave: () => ({ stop: async () => {}, flush: async () => {}, retry: async () => {} }), stopBotanistDraftAutosave: async () => {} },
     "expo-location": {}, "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => ({ status: "granted" }), launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: proposal.photoUri }] }) },
     "expo-file-system/legacy": { EncodingType: { Base64: "base64" }, readAsStringAsync: async () => "cGhvdG8=" },
     "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" }, "../components/QRRefreshButton": { default: "QRRefreshButton" }, "../components/RefreshButton": { default: "RefreshButton" },
@@ -47,7 +49,7 @@ async function fixture(language = "en", initial = {}, api) {
   new Function("require", "module", "exports", code)((name) => {
     assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" };
   }, module, module.exports);
-  const render = () => { stateIndex = 0; refIndex = 0; tree = module.exports.default({ route: { params: { botanist: { id: "bot", name: "Aina" } } }, navigation: { goBack: () => {} } }); };
+  const render = () => { stateIndex = 0; refIndex = 0; tree = module.exports.AddPlantForm({ onSubmitted() {}, onStartNew() {}, route: { params: { botanist: { id: "bot", name: "Aina" } } }, navigation: { goBack: () => {}, setParams() {} } }); };
   const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
   const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
   function find(predicate, node = tree) { if (predicate(node)) return node; for (const child of children(node)) { const found = find(predicate, child); if (found) return found; } }

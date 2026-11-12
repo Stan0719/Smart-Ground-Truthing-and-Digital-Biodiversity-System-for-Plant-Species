@@ -785,11 +785,14 @@ const rawPhotos = Array.isArray(plant.photos)
           </View>
 
           <View style={styles.recordMetaStatus}>
-            <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>
+            <View style={[styles.statusBadge, !plant.isHistoricalVersion && (
+              plant.status === "Approved" ? styles.approvedStatusBadge :
+                plant.status === "Pending Review" ? styles.pendingStatusBadge : null
+            )]}>
+              <Text style={[styles.statusText, !plant.isHistoricalVersion && plant.status === "Pending Review" && styles.pendingStatusText]}>
                 {plant.isHistoricalVersion
                   ? plant.status ? translateLabel(plant.status) : t("recordEdits.historicalFieldUnavailable")
-                  : translateLabel(formatValue(plant.status || "Pending"))}
+                  : translateLabel(formatValue(plant.status || t("plant.notRecorded")))}
               </Text>
             </View>
           {plant.isHistoricalVersion && <View style={styles.versionMetaRow}>
@@ -1086,6 +1089,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: COLORS.primary,
   },
+
+  approvedStatusBadge: { backgroundColor: "#D8EBD9" },
+  pendingStatusBadge: { backgroundColor: "#F4E7D2" },
+  pendingStatusText: { color: "#8A6939" },
 
   versionMetaRow: { flexDirection: "row", justifyContent: "flex-end", flexWrap: "wrap", gap: 5 },
   versionPill: { overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, color: COLORS.dark, backgroundColor: "#FFFFFF", fontSize: 10, fontWeight: "700" },

@@ -347,3 +347,14 @@ test("language selector exposes the English, Bahasa Melayu and 中文 options", 
   assert.match(source, /name: "中文"/);
   assert.match(source, /code: "zh"/);
 });
+
+test("Plant page uses the same All Plants title for every role in EN/MS/ZH", async () => {
+  const source = readFileSync(new URL("screens/Plant.js", root), "utf8");
+  assert.match(source, /<Text style=\{styles\.heading\}>\{t\("plant\.allVisiblePlants"\)\}<\/Text>/);
+  assert.doesNotMatch(source, /t\("plant\.allVerifiedPlants"\)/);
+  const app = fixture();
+  for (const [language, expected] of Object.entries({ en: "All Plants", ms: "Semua Tumbuhan", zh: "\u6240\u6709\u690d\u7269" })) {
+    await app.changeLanguage(language);
+    assert.equal(app.i18n.t("plant.allVisiblePlants"), expected);
+  }
+});

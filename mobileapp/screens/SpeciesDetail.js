@@ -94,10 +94,32 @@ export default function SpeciesDetail({
     onPress={() => navigation.goBack()}
   />;
 
+  const header = (
+    <View style={styles.stateHeader}>
+      {backButton}
+      <View style={styles.headerActions}>
+        <RefreshButton
+          style={styles.headerButton}
+          onPress={() => { void loadSpeciesDetails(true); void favourites.refresh(true); }}
+          loading={loading || refreshing || favourites.refreshing}
+          label={t("common.refresh")}
+          testID="species-detail-refresh"
+        />
+        {isVisitor && selectedSpecies && <FavouriteHeart
+          style={styles.headerButton}
+          active={favourites.isFavourite("species", selectedSpecies.id ?? speciesId)}
+          pending={favourites.isPending("species", selectedSpecies.id ?? speciesId)}
+          disabled={favourites.loading}
+          onPress={() => void favourites.toggle("species", selectedSpecies.id ?? speciesId)}
+        />}
+      </View>
+    </View>
+  );
+
   if (!selectedSpecies) {
     if (loading) return (
       <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
-        <View style={styles.stateHeader}>{backButton}</View>
+        {header}
         <ScrollView style={styles.stateContent} contentContainerStyle={{ flexGrow: 1 }}>
           <DetailSkeletonContent label={t("plant.loadingSpecies")} sections={2} />
         </ScrollView>
@@ -105,7 +127,7 @@ export default function SpeciesDetail({
     );
     return (
       <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
-        <View style={styles.stateHeader}>{backButton}</View>
+        {header}
         <View style={styles.notFound}>
 
         <Text style={styles.notFoundIcon}>
@@ -135,7 +157,7 @@ export default function SpeciesDetail({
 
   return (
     <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
-    <View style={styles.stateHeader}>{backButton}</View>
+    {header}
     <ScrollView
       style={styles.page}
       showsVerticalScrollIndicator={false}
@@ -153,20 +175,6 @@ export default function SpeciesDetail({
 
       <View style={styles.hero}>
 
-        <View style={styles.heroToolbar}>
-        <RefreshButton
-          onPress={() => { void loadSpeciesDetails(true); void favourites.refresh(true); }}
-          loading={loading || refreshing || favourites.refreshing}
-          label={t("common.refresh")}
-          testID="species-detail-refresh"
-        />
-        {isVisitor && <FavouriteHeart
-          active={favourites.isFavourite("species", selectedSpecies.id ?? speciesId)}
-          pending={favourites.isPending("species", selectedSpecies.id ?? speciesId)}
-          disabled={favourites.loading}
-          onPress={() => void favourites.toggle("species", selectedSpecies.id ?? speciesId)}
-        />}
-        </View>
         {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.refreshError}>{translateUIMessage(favourites.mutationError)}</Text>}
 
 
@@ -510,19 +518,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#F7FBF4",
   },
 
-  stateHeader: { alignItems: "flex-start", paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8, backgroundColor: "#F7FBF4" },
+  stateHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8, backgroundColor: "#F7FBF4" },
   backButton: { alignSelf: "flex-start", maxWidth: "100%" },
   stateContent: { flex: 1 },
 
   hero: {
     padding: 20,
-    paddingTop: 0,
+    paddingTop: 20,
     backgroundColor: "#E7F2E2",
   },
 
   refreshError: { color: "#A52A3A", fontSize: 12, marginBottom: 10 },
 
-  heroToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
+  headerButton: { minWidth: 44, minHeight: 44, height: 44, borderRadius: 13, borderWidth: 1, borderColor: "#CDE3DC", backgroundColor: "#EFF8F4" },
 
   heroImage: {
     width: "100%",

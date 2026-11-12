@@ -744,7 +744,7 @@
     "unableToLoadPlantRecords": "Unable to load plant records.",
     "recordVisibilityFilters": "Filter plant records by review status",
     "allVisible": "All Visible",
-    "allVisiblePlants": "All Visible Plants",
+    "allVisiblePlants": "All Plants",
     "approvedOnly": "Approved",
     "myPending": "My Pending",
     "awaitingOfficerApproval": "This plant record is awaiting Officer approval."

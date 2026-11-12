@@ -10,6 +10,20 @@ const detachedFailures = new Map();
 const failureListeners = new Set();
 const activeWriters = new Map();
 
+function registerWriter(accountId, clientKey, stop) {
+  if (!accountId || !clientKey || !stop) return;
+  const key = `${accountId}:${clientKey}`;
+  if (!activeWriters.has(key)) activeWriters.set(key, new Set());
+  activeWriters.get(key).add(stop);
+}
+
+function unregisterWriter(stop) {
+  for (const [key, writers] of activeWriters) {
+    writers.delete(stop);
+    if (!writers.size) activeWriters.delete(key);
+  }
+}
+
 function emitFailures() {
   const failures = [...detachedFailures.entries()].map(([key, value]) => ({ key, message: value.message }));
   failureListeners.forEach((listener) => listener(failures));
@@ -30,8 +44,8 @@ export async function retryBotanistDraftAutosave(key) {
 
 export async function stopBotanistDraftAutosave(accountId, clientKey) {
   if (!accountId || !clientKey) return;
-  const writer = activeWriters.get(`${accountId}:${clientKey}`);
-  if (writer) await writer.stop();
+  const writers = activeWriters.get(`${accountId}:${clientKey}`);
+  if (writers) await Promise.all([...writers].map((stop) => stop()));
 }
 
 /**
@@ -39,7 +53,7 @@ export async function stopBotanistDraftAutosave(accountId, clientKey) {
  * Back/gesture navigation is deliberately never prevented: blur/unmount starts
  * a best-effort flush and the pending async write may complete after unmount.
  */
-export function useBotanistDraftAutosave({ enabled, signature, save, navigation, onSaving, onError, errorKey, accountId }) {
+export function useBotanistDraftAutosave({ enabled, signature, save, navigation, onSaving, onError, errorKey, accountId, clientKey }) {
   const config = useRef({ save, onSaving, onError, errorKey, accountId });
   const state = useRef({ fastTimer: null, maxTimer: null, fullTimer: null, latest: 0, written: 0, running: null, stopped: false, errorKey });
   const flushRef = useRef(null);
@@ -68,17 +82,18 @@ export function useBotanistDraftAutosave({ enabled, signature, save, navigation,
       while (!current.stopped && current.written < current.latest) {
         const version = current.latest;
         const attemptKey = current.errorKey;
+        const attemptConfig = config.current;
         try {
           if (mounted.current) config.current.onSaving?.();
           // The form callback captures the current complete snapshot and writes
           // it through the existing encrypted store. No React state is needed
           // after the write starts, so it remains safe when the screen unmounts.
-          const saved = await config.current.save({ isMounted: () => mounted.current, version });
+          const saved = await attemptConfig.save({ isMounted: () => mounted.current, version });
           current.written = version;
           if (saved?.client_key) current.storeKey = saved.client_key;
-          current.storeAccountId = config.current.accountId;
+          current.storeAccountId = attemptConfig.accountId;
           if (current.storeAccountId && current.storeKey && stopRef.current)
-            activeWriters.set(`${current.storeAccountId}:${current.storeKey}`, { stop: stopRef.current });
+            registerWriter(current.storeAccountId, current.storeKey, stopRef.current);
           if (attemptKey) {
             detachedFailures.delete(attemptKey);
             emitFailures();
@@ -120,9 +135,14 @@ export function useBotanistDraftAutosave({ enabled, signature, save, navigation,
       detachedFailures.delete(current.errorKey);
       emitFailures();
     }
-    if (current.storeAccountId && current.storeKey) activeWriters.delete(`${current.storeAccountId}:${current.storeKey}`);
+    unregisterWriter(stopRef.current);
   }, []);
   useEffect(() => { stopRef.current = stop; }, [stop]);
+  // Register before the first write completes, so discard can cancel a debounce
+  // or drain a write still copying photos after a screen has been left.
+  useLayoutEffect(() => {
+    if (!state.current.stopped) registerWriter(accountId, clientKey, stop);
+  }, [accountId, clientKey, stop]);
 
   useLayoutEffect(() => {
     const current = state.current;
@@ -147,6 +167,7 @@ export function useBotanistDraftAutosave({ enabled, signature, save, navigation,
   }, [enabled, signature, flush, errorKey]);
 
   useEffect(() => {
+    const current = state.current;
     const appState = AppState.addEventListener("change", (next) => {
       if (next !== "active") void flush().catch(() => {});
     });
@@ -156,7 +177,9 @@ export function useBotanistDraftAutosave({ enabled, signature, save, navigation,
       blur?.();
       // React Navigation proceeds immediately; this best-effort write does not
       // hold the transition or install a native-stack removal guard.
-      void flush().catch(() => {});
+      void flush().catch(() => {}).finally(() => {
+        if (!mounted.current && !detachedFailures.has(current.errorKey)) unregisterWriter(stopRef.current);
+      });
     };
   }, [flush, navigation]);
 

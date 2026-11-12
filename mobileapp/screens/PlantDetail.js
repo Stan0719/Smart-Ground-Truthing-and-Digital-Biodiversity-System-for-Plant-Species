@@ -14,6 +14,7 @@ import {
   Modal,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   getPlantById,
@@ -40,6 +41,7 @@ export default function PlantDetail({
   const focusObservationId = route.params?.focusObservationId;
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isVisitor = user?.role?.toLowerCase() === "visitor";
+  const useScientificHeading = !user || ["botanist", "visitor", "guest"].includes(user?.role?.toLowerCase());
   const favourites = useVisitorFavourites(user);
   const [plant, setPlant] = useState(null);
   const [observationEligibility, setObservationEligibility] = useState("checking");
@@ -148,29 +150,44 @@ export default function PlantDetail({
   // PLANT NOT FOUND
   // =====================================================
 
+  const header = (
+    <View style={styles.stateHeader}>
+      <BackButton label={t("plant.back")} variant="plain" style={styles.backButton} onPress={() => navigation.goBack()} />
+      <View style={styles.headerActions}>
+        <RefreshButton
+          style={styles.headerButton}
+          onPress={() => { void loadPlant(Boolean(plant)); if (plant) void favourites.refresh(true); }}
+          loading={loading || refreshing || favourites.refreshing}
+          label={t(!plant && !loading ? "common.tryAgain" : "common.refresh")}
+          testID={plant ? "plant-detail-refresh" : loading ? "plant-detail-loading-retry" : "plant-detail-error-retry"}
+        />
+        {isVisitor && plant && <FavouriteHeart
+          style={styles.headerButton}
+          active={favourites.isFavourite("plant", plant.plantId)}
+          pending={favourites.isPending("plant", plant.plantId)}
+          disabled={favourites.loading}
+          onPress={() => void favourites.toggle("plant", plant.plantId)}
+        />}
+      </View>
+    </View>
+  );
+
   if (loading && !plant) {
     return (
-      <View style={styles.viewerRoot}>
+      <SafeAreaView style={styles.viewerRoot} edges={["top", "left", "right"]}>
+        {header}
         <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1 }}>
-          <View style={styles.header}><View style={styles.heroToolbar}>
-            <BackButton label={t("plant.back")} variant="glass" onPress={() => navigation.goBack()} />
-            <RefreshButton onPress={() => { void loadPlant(false); }} loading={loading} label={t("common.refresh")} testID="plant-detail-loading-retry" />
-          </View></View>
           <DetailSkeletonContent label={t("plantDetail.loadingPlantRecord")} sections={4} />
         </ScrollView>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (!plant) {
     return (
-      <View style={styles.notFoundContainer}>
-
-        <View style={[styles.heroToolbar, { width: "100%", justifyContent: "space-between" }]}>
-          <BackButton label={t("plant.back")} variant="glass" onPress={() => navigation.goBack()} />
-          <RefreshButton onPress={() => { void loadPlant(false); }} loading={loading} label={t("common.tryAgain")} testID="plant-detail-error-retry" />
-        </View>
-
+      <SafeAreaView style={styles.viewerRoot} edges={["top", "left", "right"]}>
+        {header}
+        <View style={styles.notFoundContainer}>
         <Text style={styles.notFoundIcon}>
           🌿
         </Text>
@@ -181,7 +198,8 @@ export default function PlantDetail({
           {errorMessage || t("plantDetail.thePlantRecordYouAreLookingForDoesNotExist")}
         </Text>
 
-      </View>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -235,7 +253,8 @@ export default function PlantDetail({
   // =====================================================
 
   return (
-    <View style={styles.viewerRoot}>
+    <SafeAreaView style={styles.viewerRoot} edges={["top", "left", "right"]}>
+    {header}
     <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
@@ -257,21 +276,6 @@ export default function PlantDetail({
   {!!errorMessage && (
     <Text style={styles.refreshError}>{translateUIMessage(errorMessage)}</Text>
   )}
-  <View style={styles.heroToolbar}>
-  <BackButton label={t("plant.back")} variant="glass" onPress={() => navigation.goBack()} />
-  <RefreshButton
-    onPress={() => { void loadPlant(true); void favourites.refresh(true); }}
-    loading={loading || refreshing || favourites.refreshing}
-    label={t("common.refresh")}
-    testID="plant-detail-refresh"
-  />
-  {isVisitor && <FavouriteHeart
-    active={favourites.isFavourite("plant", plant.plantId)}
-    pending={favourites.isPending("plant", plant.plantId)}
-    disabled={favourites.loading}
-    onPress={() => void favourites.toggle("plant", plant.plantId)}
-  />}
-  </View>
   {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.refreshError}>{translateUIMessage(favourites.mutationError)}</Text>}
 
   <View style={styles.heroGrid}>
@@ -332,11 +336,16 @@ export default function PlantDetail({
     <View style={styles.heroCopy}>
       <Text style={styles.headerLabel}>{t("plantDetail.plantRecord")}</Text>
 
-      <Text style={styles.plantId}>{t("fieldCollection.plant")}{plant.plantId}
+      <Text style={styles.plantId}>
+        {useScientificHeading
+          ? plant.plantScientificName?.trim() || t("plant.notRecorded")
+          : `${t("fieldCollection.plant")}${plant.plantId}`}
       </Text>
 
       <Text style={styles.speciesName}>
-        {plant.plantScientificName || t("plant.notRecorded")}
+        {useScientificHeading
+          ? `${t("plantDetail.plantId")}: ${plant.plantId}`
+          : plant.plantScientificName || t("plant.notRecorded")}
       </Text>
 
       <Text style={styles.scientificName}>
@@ -344,6 +353,18 @@ export default function PlantDetail({
       </Text>
 
       <View style={styles.heroBadges}>
+        {isBotanist && (
+          <Text numberOfLines={2} style={[
+            styles.heroBadge,
+            styles.approvalHeroBadge,
+            plant.currentStatus === "Approved" ? styles.approvedBadge :
+              plant.currentStatus === "Pending Review" ? styles.pendingBadge : styles.otherStatusBadge,
+            plant.currentStatus === "Approved" ? styles.approvedText :
+              plant.currentStatus === "Pending Review" ? styles.pendingText : styles.otherStatusText,
+          ]}>
+            {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
+          </Text>
+        )}
         {isBotanist && (
           <Text style={styles.heroBadge}>
             {translateLabel(displayedObservation?.healthStatus || t("plant.notRecorded"))}
@@ -728,7 +749,7 @@ export default function PlantDetail({
         {displayablePhotos.length > 1 && <Text style={styles.viewerCounter}>{activePhotoIndex + 1} / {displayablePhotos.length}</Text>}
       </View>
     </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -917,7 +938,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F7FBF4",
   },
 
-  viewerRoot: { flex: 1 },
+  viewerRoot: { flex: 1, backgroundColor: "#F7FBF4" },
   imageColumn: { width: "100%" },
   mainImageTap: { width: "100%", height: "100%" },
   thumbnailList: { gap: 9, paddingTop: 11, paddingHorizontal: 2 },
@@ -949,7 +970,7 @@ const styles = StyleSheet.create({
   
 header: {
   paddingHorizontal: 20,
-  paddingTop: 50,
+  paddingTop: 20,
   paddingBottom: 30,
   backgroundColor: "#E7F2E2",
 },
@@ -965,7 +986,10 @@ refreshError: {
   lineHeight: 18,
 },
 
-heroToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+stateHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8, backgroundColor: "#F7FBF4" },
+backButton: { alignSelf: "flex-start", maxWidth: "100%" },
+headerActions: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
+headerButton: { minWidth: 44, minHeight: 44, height: 44, borderRadius: 13, borderWidth: 1, borderColor: "#CDE3DC", backgroundColor: "#EFF8F4" },
 
 heroGrid: {
   flexDirection: "column",
@@ -1314,6 +1338,10 @@ observationArrow: {
   pendingText: {
     color: "#8A6939",
   },
+
+  otherStatusBadge: { backgroundColor: "#E7EBE6" },
+  otherStatusText: { color: "#52645A" },
+  approvalHeroBadge: { maxWidth: "100%", flexShrink: 1, paddingHorizontal: 9, paddingVertical: 5, fontSize: 10 },
 
   divider: {
     height: 1,

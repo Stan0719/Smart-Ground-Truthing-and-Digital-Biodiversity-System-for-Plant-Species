@@ -1,5 +1,5 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
-import React, { useCallback, useEffect, useId, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   View,
@@ -23,8 +23,8 @@ import { fieldFormStyles } from "../components/fieldFormStyles";
 import { plantApi, fetchSpeciesCatalog } from "../utils/plantApi";
 import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation";
 import { useFocusEffect } from "@react-navigation/native";
-import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
-import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
+import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft, hasMeaningfulAddPlantDraft } from "../utils/botanistFormDrafts";
+import { useBotanistDraftAutosave, stopBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 
 const createPlantClientKey = () =>
   `plant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -74,22 +74,47 @@ const REQUIRED_PHOTO_KEYS = PHOTO_GUIDES
 // MAIN SCREEN
 // =====================================================
 
-export default function AddPlantScreen({
+export default function AddPlantScreen(props) {
+  useAppTranslation();
+  return <AddPlantSession key={props.route.params?.botanist?.id || "signed-out"} {...props} />;
+}
+
+function AddPlantSession({ route, navigation }) {
+  useAppTranslation();
+  const [session, setSession] = useState({ revision: 0, fresh: false });
+  const freshOnFocus = useRef(false);
+  const startFresh = useCallback(() => {
+    navigation.setParams({ formDraftKey: undefined });
+    setSession((current) => ({ revision: current.revision + 1, fresh: true }));
+  }, [navigation]);
+  useFocusEffect(useCallback(() => {
+    if (freshOnFocus.current) {
+      freshOnFocus.current = false;
+      startFresh();
+    }
+  }, [startFresh]));
+  return <AddPlantForm key={`${session.revision}:${route.params?.formDraftKey || "new"}`} route={route} navigation={navigation}
+    skipRecovery={session.fresh} onStartNew={startFresh} onSubmitted={() => { freshOnFocus.current = true; }} />;
+}
+
+export function AddPlantForm({
   route,
   navigation,
+  skipRecovery = false,
+  onStartNew,
+  onSubmitted,
 }) {
   useAppTranslation();
 
   const botanist = route.params?.botanist;
   const accountId = botanist?.id;
-  const draftIdentity = useId();
   const clientKeyRef = useRef(createPlantClientKey());
-  const [localFormDraftKey, setLocalFormDraftKey] = useState(() => route.params?.formDraftKey || `add-plant-${draftIdentity}`);
-  const [draftKeyVersion, setDraftKeyVersion] = useState(0);
-  const [recoveryResolved, setRecoveryResolved] = useState(false);
+  const [localFormDraftKey] = useState(() => `add-plant-${accountId}-${createPlantClientKey()}`);
+  const [recoveryResolved, setRecoveryResolved] = useState(skipRecovery);
   const activeFormDraftKey = route.params?.formDraftKey || localFormDraftKey;
   const restoredDraftRef = useRef(null);
-  const recoveryPromptedRef = useRef(false);
+  const recoveryPromptedRef = useRef(skipRecovery);
+  const draftEndedRef = useRef(false);
   const [draftSaving, setDraftSaving] = useState(false), [draftMessage, setDraftMessage] = useState(""), [draftError, setDraftError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const submissionBusyRef = useRef(false);
@@ -271,50 +296,72 @@ export default function AddPlantScreen({
     return () => { active = false; };
   }, [botanist?.id, route.params?.formDraftKey]);
 
+  const draftForm = {
+    selectedSpecies: selectedSpecies ? { id: selectedSpecies.id, scientificName: selectedSpecies.scientificName, commonName: selectedSpecies.commonName, name: selectedSpecies.name } : null,
+    speciesSearch, plantScientificName, height, description, healthStatus, growthStage, morphology, zone, latitude, longitude, altitude, gpsAccuracy,
+    selectedQRCode: selectedQRCode ? { qr_id: selectedQRCode.qr_id, qr_code: selectedQRCode.qr_code, label: selectedQRCode.label } : null,
+    showSpeciesForm, speciesScientificName, speciesCommonName, speciesGenus, speciesFamily, speciesConservationStatus, speciesDescription, speciesHabitat,
+  };
+  const draftPhotos = [
+    ...Object.entries(guidedPhotos).filter(([, uri]) => uri).map(([slot, uri]) => ({ slot: `guided:${slot}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
+    ...additionalPhotos.map((uri, index) => ({ slot: `additional:${String(index).padStart(2, "0")}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
+    ...speciesImages.map((uri, index) => ({ slot: `species:${index}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
+  ];
+  const buildDraftInput = (autoSaved = false) => ({
+    client_key: activeFormDraftKey, form_type: "add-plant", submission_client_key: clientKeyRef.current,
+    title: plantScientificName.trim() || selectedSpecies?.scientificName || selectedSpecies?.name || "",
+    auto_saved: autoSaved,
+    form: { ...draftForm, submissionClientKey: clientKeyRef.current }, photos: draftPhotos,
+  });
+  const autosaveSignature = JSON.stringify({ selectedSpecies: selectedSpecies?.id, plantScientificName, height, description, healthStatus, growthStage, morphology,
+    zone, latitude, longitude, altitude, gpsAccuracy, selectedQRCode: selectedQRCode?.qr_id, showSpeciesForm, speciesScientificName,
+    speciesCommonName, speciesGenus, speciesFamily, speciesConservationStatus, speciesDescription, speciesHabitat,
+    photos: [...Object.values(guidedPhotos), ...additionalPhotos, ...speciesImages] });
+  const hasMeaningfulDraft = hasMeaningfulAddPlantDraft(draftForm, draftPhotos);
+  const autosave = useBotanistDraftAutosave({ enabled: Boolean(accountId && recoveryResolved && hasMeaningfulDraft && !submittedQr),
+    signature: autosaveSignature, navigation, accountId, clientKey: activeFormDraftKey, errorKey: accountId && route.key ? `${accountId}:${route.key}` : undefined,
+    onSaving: () => setAutoSaveState("saving"),
+    save: async ({ isMounted } = {}) => { if (draftEndedRef.current || !hasMeaningfulDraft) return; const saved = await saveBotanistFormDraft(accountId, buildDraftInput(true)); restoredDraftRef.current = saved; if (isMounted?.() && !draftEndedRef.current) setAutoSaveState("saved"); return saved; },
+    onError: (error) => { setAutoSaveState("error"); setDraftError(translateUIMessage(error.message) || t("botanistDrafts.autoSaveFailed")); } });
+  const stopAutosave = autosave.stop;
+
   useEffect(() => {
     if (!accountId || route.params?.formDraftKey || recoveryPromptedRef.current) return;
     recoveryPromptedRef.current = true;
     let active = true;
+    let promptShown = false;
     findBotanistFormDraft(accountId, "add-plant").then((draft) => {
       if (!active) return;
       if (!draft) { setRecoveryResolved(true); return; }
+      const discardDetectedDraft = async () => {
+        if (!active) return;
+        try {
+          await stopAutosave();
+          await stopBotanistDraftAutosave(accountId, draft.client_key);
+          const removed = await deleteBotanistFormDraft(accountId, draft.client_key);
+          if (!removed) throw Error(t("botanistDrafts.newerDraftKept"));
+          if (!active) return;
+          draftEndedRef.current = true;
+          restoredDraftRef.current = null;
+          onStartNew(); // A new form instance resets fields, photos, QR and autosave metadata together.
+        } catch (error) {
+          if (!active) return;
+          setDraftError(translateUIMessage(error.message) || t("botanistDrafts.cleanupFailed"));
+          Alert.alert(t("botanistDrafts.cleanupFailed"), translateUIMessage(error.message), [
+            { text: t("common.tryAgain"), onPress: () => { void discardDetectedDraft(); } },
+          ]);
+        }
+      };
+      promptShown = true;
       Alert.alert(t("botanistDrafts.recoveryTitle"), t("botanistDrafts.recoveryMessage"), [
-        { text: t("botanistDrafts.continueDraft"), onPress: () => navigation.setParams({ formDraftKey: draft.client_key }) },
-        { text: t("botanistDrafts.startNewDraft"), style: "cancel", onPress: () => {
-          setLocalFormDraftKey(`add-plant-${accountId}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-          setDraftKeyVersion((value) => value + 1);
-          setRecoveryResolved(true);
-        } },
+        { text: t("botanistDrafts.continueDraft"), onPress: () => { if (active) navigation.setParams({ formDraftKey: draft.client_key }); } },
+        { text: t("botanistDrafts.startNewDraft"), style: "cancel", onPress: discardDetectedDraft },
       ]);
     }).catch((error) => { if (active) { setDraftError(translateUIMessage(error.message) || t("botanistDrafts.restoreFailed")); setRecoveryResolved(true); } });
-    return () => { active = false; };
-  }, [accountId, navigation, route.params?.formDraftKey]);
+    return () => { active = false; if (!promptShown) recoveryPromptedRef.current = false; };
+  }, [accountId, navigation, route.params?.formDraftKey, stopAutosave, onStartNew]);
 
-  const buildDraftInput = (autoSaved = false) => {
-    const photos = [
-      ...Object.entries(guidedPhotos).filter(([, uri]) => uri).map(([slot, uri]) => ({ slot: `guided:${slot}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
-      ...additionalPhotos.map((uri, index) => ({ slot: `additional:${String(index).padStart(2, "0")}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
-      ...speciesImages.map((uri, index) => ({ slot: `species:${index}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })),
-    ];
-    return { client_key: activeFormDraftKey, form_type: "add-plant", submission_client_key: clientKeyRef.current,
-      title: plantScientificName.trim() || selectedSpecies?.scientificName || selectedSpecies?.name || "",
-      auto_saved: autoSaved,
-      form: { selectedSpecies: selectedSpecies ? { id: selectedSpecies.id, scientificName: selectedSpecies.scientificName, commonName: selectedSpecies.commonName, name: selectedSpecies.name } : null,
-        speciesSearch, plantScientificName, height, description, healthStatus, growthStage, morphology, zone, latitude, longitude, altitude, gpsAccuracy,
-        selectedQRCode: selectedQRCode ? { qr_id: selectedQRCode.qr_id, qr_code: selectedQRCode.qr_code, label: selectedQRCode.label } : null,
-        showSpeciesForm, speciesScientificName, speciesCommonName, speciesGenus, speciesFamily, speciesConservationStatus, speciesDescription, speciesHabitat,
-        submissionClientKey: clientKeyRef.current }, photos };
-  };
-  const autosaveSignature = JSON.stringify({ selectedSpecies: selectedSpecies?.id, plantScientificName, height, description, growthStage, morphology,
-    zone, latitude, longitude, altitude, gpsAccuracy, selectedQRCode: selectedQRCode?.qr_id, showSpeciesForm, speciesScientificName,
-    speciesCommonName, speciesGenus, speciesFamily, speciesConservationStatus, speciesDescription, speciesHabitat,
-    photos: [...Object.values(guidedPhotos), ...additionalPhotos, ...speciesImages] });
-  const hasMeaningfulDraft = Boolean(selectedSpecies || plantScientificName || height || description || growthStage || morphology || zone || latitude || longitude || altitude || gpsAccuracy || selectedQRCode || showSpeciesForm || speciesScientificName || speciesCommonName || speciesGenus || speciesFamily || speciesDescription || speciesHabitat || Object.values(guidedPhotos).some(Boolean) || additionalPhotos.length || speciesImages.length);
-  const autosave = useBotanistDraftAutosave({ enabled: Boolean(accountId && recoveryResolved && hasMeaningfulDraft && !submittedQr),
-    signature: autosaveSignature + draftKeyVersion, navigation, accountId, errorKey: accountId && route.key ? `${accountId}:${route.key}` : undefined,
-    onSaving: () => setAutoSaveState("saving"),
-    save: async ({ isMounted } = {}) => { const saved = await saveBotanistFormDraft(accountId, buildDraftInput(true)); restoredDraftRef.current = saved; if (isMounted?.()) setAutoSaveState("saved"); return saved; },
-    onError: (error) => { setAutoSaveState("error"); setDraftError(translateUIMessage(error.message) || t("botanistDrafts.autoSaveFailed")); } });
+
 
 
   // ===================================================
@@ -660,7 +707,7 @@ function handleRemoveSpeciesPhoto(index) {
 
   // One final action saves the species (when proposed), plant, photos and QR assignment.
   async function saveLocalDraft() {
-    if (draftSaving || submitting || submittedQr) return;
+    if (draftSaving || submitting || submittedQr || !recoveryResolved || draftEndedRef.current || !hasMeaningfulDraft) return;
     setDraftSaving(true); setDraftError(""); setDraftMessage("");
     try {
       if (!botanist?.id) throw Error(t("botanistDrafts.ownerRequired"));
@@ -676,7 +723,7 @@ function handleRemoveSpeciesPhoto(index) {
   }
 
   async function handleSubmitPlant() {
-    if (submissionBusyRef.current || submittedQr) return;
+    if (submissionBusyRef.current || submittedQr || !recoveryResolved || draftEndedRef.current) return;
     const speciesData = showSpeciesForm ? {
       scientific_name: speciesScientificName.trim(), common_name: speciesCommonName.trim(),
       genus_name: speciesGenus.trim(), family_name: speciesFamily.trim(),
@@ -776,15 +823,16 @@ function handleRemoveSpeciesPhoto(index) {
       });
       const plantId = String(created.plant_id ?? "");
       if (!/^\d+$/.test(plantId) || !created.qr_token) throw Error(t("addPlantWorkflow.invalidCombinedResponse"));
+      draftEndedRef.current = true;
       await autosave.stop();
-      if (restoredDraftRef.current) {
-        try {
-          const removed = await deleteBotanistFormDraft(botanist.id, activeFormDraftKey, restoredDraftRef.current?.saved_at);
-          if (!removed) setDraftError(t("botanistDrafts.newerDraftKept"));
-          else restoredDraftRef.current = null;
-        } catch { setDraftError(t("botanistDrafts.cleanupFailed")); }
-      }
+      await stopBotanistDraftAutosave(accountId, activeFormDraftKey);
+      try {
+        const removed = await deleteBotanistFormDraft(botanist.id, activeFormDraftKey, restoredDraftRef.current?.saved_at);
+        if (!removed) setDraftError(t("botanistDrafts.newerDraftKept"));
+        else restoredDraftRef.current = null;
+      } catch { setDraftError(t("botanistDrafts.cleanupFailed")); }
       setSubmittedQr({ plantId, token: created.qr_token });
+      onSubmitted();
       clientKeyRef.current = createPlantClientKey();
       Alert.alert(
         t("addPlant.plantSubmitted"),
@@ -794,6 +842,7 @@ function handleRemoveSpeciesPhoto(index) {
         }) }],
       );
     } catch (error) {
+      await autosave.flush().catch(() => {});
       Alert.alert(
         t("addPlant.submissionFailed"),
         error instanceof Error ? translateUIMessage(error.message) : t("addPlant.thePlantCouldNotBeSavedCheckYourConnectionAnd")

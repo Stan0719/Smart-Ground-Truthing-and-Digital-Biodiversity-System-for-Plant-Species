@@ -744,7 +744,7 @@
     "unableToLoadPlantRecords": "无法加载植物记录。",
     "recordVisibilityFilters": "按审核状态筛选植物记录",
     "allVisible": "全部可见",
-    "allVisiblePlants": "全部可查看植物",
+    "allVisiblePlants": "所有植物",
     "approvedOnly": "已批准",
     "myPending": "我的待审核记录",
     "awaitingOfficerApproval": "此植物记录正在等待官员审核。"

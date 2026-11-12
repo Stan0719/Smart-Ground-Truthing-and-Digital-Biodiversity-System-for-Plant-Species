@@ -8,13 +8,14 @@ const ts = require("typescript");
 const React = require("react");
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-function makeScreen({ language = "en", species = null, fetchSpeciesDetail = async () => null } = {}) {
+function makeScreen({ language = "en", species = null, fetchSpeciesDetail = async () => null, user = null } = {}) {
   const state = [];
   const refs = [];
   let stateIndex = 0;
   let refIndex = 0;
   let focus;
   const navigations = [];
+  const favouriteCalls = [];
   const hooks = {
     ...React,
     useState(initialValue) {
@@ -49,7 +50,7 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
     "../components/PlantCard": { default: "PlantCard" },
     "../components/RefreshButton": { default: "RefreshButton" },
     "../components/FavouriteHeart": { default: "FavouriteHeart" },
-    "../hooks/useVisitorFavourites": { default: () => ({ isFavourite: () => false, isPending: () => false, loading: false, refreshing: false, mutationError: "", refresh: async () => {}, toggle: async () => {} }) },
+    "../hooks/useVisitorFavourites": { default: () => ({ isFavourite: () => false, isPending: () => false, loading: false, refreshing: false, mutationError: "", refresh: async (...args) => { favouriteCalls.push(["refresh", ...args]); }, toggle: async (...args) => { favouriteCalls.push(["toggle", ...args]); } }) },
     "../components/BotanicalSkeleton": { DetailSkeletonContent: "DetailSkeletonContent" },
   };
   const module = { exports: {} };
@@ -63,11 +64,11 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
   const render = () => {
     stateIndex = 0;
     refIndex = 0;
-    return screen({ route: { params: species ? { species } : { slug: "not-in-mock", speciesId: "6" } }, navigation, user: null });
+    return screen({ route: { params: species ? { species } : { slug: "not-in-mock", speciesId: "6" } }, navigation, user });
   };
   const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
   const allNodes = (root) => [root, ...children(root).flatMap(allNodes)];
-  return { render, get focus() { return focus; }, navigations, allNodes };
+  return { render, get focus() { return focus; }, navigations, favouriteCalls, allNodes };
 }
 
 function assertOneWorkingBackButton(fixture, tree, expectedLabel) {
@@ -77,7 +78,7 @@ function assertOneWorkingBackButton(fixture, tree, expectedLabel) {
   assert.equal(buttons[0].props.label, expectedLabel);
   assert.equal(buttons[0].props.variant, "plain", "Back uses the compact, borderless shared style");
   assert.deepEqual(buttons[0].props.style, { alignSelf: "flex-start", maxWidth: "100%" });
-  const backRow = fixture.allNodes(tree).find((node) => node?.props?.style?.alignItems === "flex-start" && node.props.style.paddingHorizontal === 20);
+  const backRow = fixture.allNodes(tree).find((node) => node?.props?.style?.alignItems === "center" && node.props.style.paddingHorizontal === 20);
   assert.ok(backRow, "Back is in a left-aligned row in every screen state");
   assert.equal(backRow.props.style.paddingHorizontal, 20, "Back aligns with the content inset");
   buttons[0].props.onPress();
@@ -117,4 +118,49 @@ test("Species Detail stacks keep native headers hidden so the screen renders no 
   const app = read("../App.js");
   const matches = app.match(/name="SpeciesDetail"[\s\S]{0,100}?headerShown: false/g) || [];
   assert.ok(matches.length >= 2, "Plants and Account stacks use the in-screen Back control without native headers");
+});
+
+test("Species Detail shares one safe-area header row with working right-aligned actions for every role", async () => {
+  for (const language of ["en", "ms", "zh"]) {
+    for (const user of [null, { role: "Guest" }, { role: "Visitor" }, { role: "Botanist" }, { role: "Officer" }]) {
+      let reads = 0;
+      const species = { id: "6", slug: "species-six", name: "Species Six" };
+      const fixture = makeScreen({ language, user, species, fetchSpeciesDetail: async () => { reads++; return species; } });
+      let tree = fixture.render();
+      fixture.focus();
+      await new Promise((resolve) => setImmediate(resolve));
+      tree = fixture.render();
+      assert.deepEqual(tree.props.edges, ["top", "left", "right"]);
+      const all = fixture.allNodes(tree);
+      const refreshes = all.filter((node) => node?.type === "RefreshButton");
+      assert.equal(refreshes.length, 1);
+      const row = React.Children.toArray(tree.props.children)[0];
+      assert.equal(row.props.style.justifyContent, "space-between");
+      assert.equal(row.props.style.alignItems, "center");
+      const [back, actions] = React.Children.toArray(row.props.children);
+      assert.equal(back.props.variant, "plain");
+      assert.equal(actions.props.style.gap, 8);
+      assert.equal(actions.props.style.alignItems, "center");
+      const buttons = React.Children.toArray(actions.props.children);
+      assert.equal(buttons[0].type, "RefreshButton");
+      assert.equal(buttons.length, user?.role === "Visitor" ? 2 : 1);
+      for (const button of buttons) {
+        assert.equal(button.props.style.minWidth, 44);
+        assert.equal(button.props.style.height, 44);
+        assert.equal(button.props.style.borderRadius, 13);
+      }
+      assert.equal(buttons[0].props.loading, false);
+      buttons[0].props.onPress();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(reads, 2);
+      assert.deepEqual(fixture.favouriteCalls[0], ["refresh", true]);
+      if (user?.role === "Visitor") {
+        assert.equal(buttons[1].type, "FavouriteHeart");
+        buttons[1].props.onPress();
+        assert.deepEqual(fixture.favouriteCalls.at(-1), ["toggle", "species", "6"]);
+      }
+      back.props.onPress();
+      assert.deepEqual(fixture.navigations, ["back"]);
+    }
+  }
 });

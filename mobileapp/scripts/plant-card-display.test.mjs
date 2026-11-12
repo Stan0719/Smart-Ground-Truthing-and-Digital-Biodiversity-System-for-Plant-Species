@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const React = require("react");
+const ts = require("typescript");
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -87,27 +92,87 @@ test("Plant card displays plant-record status separately from observation status
   assert.match(list, /failedImageKey/);
 });
 
-test("Visitor cards trust the approved-only catalogue, hide explicit non-approved rows, and label status clearly", () => {
-  const list = read("../screens/Plant.js");
-  assert.match(list, /isPlantVisibleInRoleCatalog\(record, user\?\.role, user\?\.id\)/);
-  assert.match(read("../utils/plantApi.js"), /normalizedRole === "visitor"\) return plant\?\.currentStatus === "Approved"/);
-  assert.match(list, /const displayStatus = plant\.currentStatus/);
-  assert.match(list, /!isVisitor && <View pointerEvents="none" style=\{styles\.imageBadges\}>/);
-  assert.match(list, /isVisitor && <View style=\{styles\.visitorBadges\}>/);
-  assert.match(list, /visitorBadge, styles\.statusBadge, plantStatusStyle\(displayStatus\)/);
-  assert.match(list, /visitorBadges: \{ flexDirection: "row", flexWrap: "wrap"/);
-  assert.match(list, /numberOfLines=\{2\} style=\{\[styles\.imageBadge, styles\.visitorBadge/);
-  assert.match(list, /plantHeart: \{ position: "absolute", top: 8, right: 8/);
-  assert.match(list, /favourites\.toggle\("plant", plant\.plantId\)/);
-  assert.match(read("../components/FavouriteHeart.js"), /width: 44, height: 44/);
-  assert.match(list, /imageSource \? \(/);
-  assert.match(list, /styles\.plantIcon/);
+function renderListCard(user, language = "en", status = "Approved") {
+  const source = read("../screens/Plant.js");
+  const cardSource = source.slice(source.indexOf("function PlantCard("));
+  const catalog = JSON.parse(read(`../translations/${language}.json`));
+  const t = (key) => key.split(".").reduce((value, part) => value?.[part], catalog) || key;
+  const calls = [];
+  const plant = {
+    plantId: "17", currentStatus: status, plantImage: { uri: "plant-17.jpg" },
+    plantScientificName: "Plant 17", latestApproved: { date: "2026-11-12", heightCm: 64, lifeStage: "Mature", healthStatus: "Healthy", morphology: "Leaves" },
+  };
+  const scope = {
+    React, useState: (value) => [value, () => {}], useAppTranslation() {}, t,
+    translateLabel: (value) => value, translateFieldValue: (_label, value) => value,
+    dateLocale: () => ({ en: "en-GB", ms: "ms-MY", zh: "zh-CN" })[language],
+    getPlantDisplayObservation: (record) => record.latestApproved,
+    getPlantCardZoneLabel: () => t("map.locationRestricted"), isOwnedPendingPlant: () => false,
+    StyleSheet: { create: (styles) => styles },
+  };
+  for (const name of ["View", "Text", "TouchableOpacity", "Image", "FavouriteHeart"]) scope[name] = name;
+  const compiled = ts.transpileModule(`${cardSource}\nmodule.exports = { PlantCard, styles };`, {
+    compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const module = { exports: {} };
+  new Function(...Object.keys(scope), "module", compiled)(...Object.values(scope), module);
+  const tree = module.exports.PlantCard({
+    plant, user, isVisitor: user?.role?.toLowerCase() === "visitor",
+    navigation: { navigate: (...args) => calls.push(args) },
+    favourites: { isFavourite: () => true, isPending: () => false, loading: false, toggle: (...args) => calls.push(args) },
+  });
+  const nodes = (node) => node && typeof node === "object"
+    ? [node, ...React.Children.toArray(node.props?.children).flatMap(nodes)] : [];
+  return { all: nodes(tree), styles: module.exports.styles, plant, calls, t };
+}
+
+test("Visitor and Guest cards omit all badges and Location Zone in EN/MS/ZH while preserving facts and actions", () => {
+  for (const language of ["en", "ms", "zh"]) {
+    for (const user of [{ role: "Visitor" }, null, { role: "Guest" }]) {
+      const { all, styles, plant, calls, t } = renderListCard(user, language);
+      assert.equal(all.some((node) => node.props.style === styles.imageBadges), false);
+      assert.equal(all.some((node) => node.props.label === t("plant.locationZone")), false);
+      assert.equal(all.some((node) => node.props.children === t("map.locationRestricted")), false);
+      assert.equal(all.some((node) => node.props.children === "Approved"), false);
+      for (const key of ["height", "lifeStage2", "lastVerified", "health", "morphology"]) {
+        assert.ok(all.some((node) => node.props.label === t(`plant.${key}`)), key);
+      }
+      assert.equal(all.find((node) => node.type === "Image").props.source, plant.plantImage);
+      assert.ok(all.some((node) => node.props.children === plant.plantScientificName));
+      assert.ok(all.some((node) => node.props.children === t("plant.viewPlantRecord")));
+      all.find((node) => node.type === "TouchableOpacity").props.onPress();
+      assert.deepEqual(calls.shift(), ["PlantDetails", { plantId: "17" }]);
+      const heart = all.find((node) => node.type === "FavouriteHeart");
+      if (user?.role === "Visitor") {
+        assert.equal(heart.props.active, true);
+        heart.props.onPress();
+        assert.deepEqual(calls.shift(), ["plant", "17"]);
+      } else {
+        assert.equal(heart, undefined, "Guest favourites behavior stays unchanged");
+      }
+      assert.equal(plant.currentStatus, "Approved");
+      assert.equal(styles.visitorBadges, undefined, "no empty badge row spacing remains");
+      assert.equal(styles.infoGrid.flexWrap, "wrap");
+    }
+  }
 });
 
-test("Visitor status and location badges wrap below the image instead of competing with the heart", () => {
-  const list = read("../screens/Plant.js");
-  const cardBody = list.slice(list.indexOf("function PlantCard("), list.indexOf("function plantStatusStyle"));
-  assert.ok(cardBody.indexOf("visitorBadges") > cardBody.indexOf("cardImage"));
-  assert.ok(cardBody.indexOf("visitorBadges") < cardBody.indexOf("plantHeart"));
-  assert.match(list, /visitorBadge: \{ maxWidth: "100%", flexShrink: 1 \}/);
+test("Botanist and Officer keep their existing location field and image badges", () => {
+  for (const role of ["Botanist", "Officer"]) {
+    const { all, styles, t } = renderListCard({ role });
+    assert.ok(all.some((node) => node.props.style === styles.imageBadges));
+    assert.ok(all.some((node) => node.props.label === t("plant.locationZone")));
+    assert.ok(all.some((node) => node.props.children === t("map.locationRestricted")));
+    assert.equal(all.some((node) => node.props.children === "Approved"), true);
+  }
+});
+
+test("Botanist list cards render exactly the backend plant status, independently of observation status", () => {
+  for (const status of ["Approved", "Pending Review", "Rejected", "Draft", "Correction Required", "Changes Requested", "Not recorded"]) {
+    const { all, styles } = renderListCard({ role: "Botanist" }, "en", status);
+    const badge = all.filter((node) => Array.isArray(node.props.style) && node.props.style.includes(styles.statusBadge));
+    assert.equal(badge.length, 1);
+    assert.equal(badge[0].props.children, status);
+    assert.ok(badge[0].props.style.includes(status === "Approved" ? styles.statusApproved : status === "Pending Review" ? styles.statusPending : styles.statusBadge));
+  }
 });

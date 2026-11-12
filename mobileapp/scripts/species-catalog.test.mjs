@@ -81,6 +81,7 @@ test('a slower request for the previous species cannot replace the selected spec
   for(const name of ['View','Text','TextInput','TouchableOpacity','ScrollView','Image','RefreshControl'])native[name]=name;
   const screen=load('screens/Plant.js',{
     react:{...React,...hooks},'react-native':native,
+    'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},
     '@react-navigation/native':{useFocusEffect:fn=>{focus=fn}},
     '../translations/i18n':{t:key=>key,translateLabel:value=>value,translateUIMessage:value=>value,dateLocale:'en',useAppTranslation(){},translateFieldValue:value=>value},
     '../components/LanguageSelector':{default:'LanguageSelector'},'../data/mockData':{getSpeciesBySlug:()=>null},
@@ -98,7 +99,8 @@ test('a slower request for the previous species cannot replace the selected spec
     '../components/RefreshButton':{default:'RefreshButton'},'../components/FavouriteHeart':{default:'FavouriteHeart'},
     '../hooks/useVisitorFavourites':{default:()=>({refresh:async()=>{},refreshing:false,loading:false,error:'',mutationError:'',isFavourite:()=>false,isPending:()=>false,toggle:async()=>{}})},
   });
-  const render=(id,slug)=>{stateIndex=0;refIndex=0;screen.default({route:{params:{speciesId:id,slug,species:{id,slug,name:`Species ${id}`}}},navigation:{navigate(){},goBack(){}},user:{id:'visitor',role:'Visitor'}});return refs[0].current.promise};
+  let screenTree;
+  const render=(id,slug)=>{stateIndex=0;refIndex=0;screenTree=screen.default({route:{params:{speciesId:id,slug,species:{id,slug,name:`Species ${id}`}}},navigation:{navigate(){},goBack(){}},user:{id:'visitor',role:'Visitor'}});return refs[0].current.promise};
   render('5','species-5');
   focus();
   const previousRequest=refs[0].current.promise;
@@ -110,6 +112,30 @@ test('a slower request for the previous species cannot replace the selected spec
   resolveSecond([{id:'6',slug:'species-6',name:'Species 6'}]);
   await Promise.all([previousRequest,selectedRequest]);
   assert.deepEqual(state[1].map(plant=>plant.plantId),['8']);
+  render('6','species-6');
+  assert.equal(screenTree.type,'SafeAreaView');
+  assert.deepEqual(screenTree.props.edges,['top','left','right']);
+  const [header,scroll]=React.Children.toArray(screenTree.props.children);
+  assert.equal(header.type,'View');
+  assert.equal(screenTree.props.style.backgroundColor,header.props.style.backgroundColor,'safe area behind the status bar matches the light-green fixed header');
+  assert.equal(screenTree.props.style.backgroundColor,'#E7F2E2');
+  assert.equal(header.props.style.paddingTop,8,'safe area replaces the fixed 50-point top gap');
+  assert.equal(scroll.type,'ScrollView');
+  assert.equal(scroll.props.style.backgroundColor,'#F7FBF4','scrolling content retains its existing background');
+  const nodes=node=>node&&typeof node==='object'?[node,...React.Children.toArray(node.props?.children).flatMap(nodes)]:[];
+  const headerNodes=nodes(header),scrollNodes=nodes(scroll);
+  assert.equal(headerNodes.filter(node=>node.type==='RefreshButton').length,1);
+  assert.equal(scrollNodes.some(node=>node.type==='RefreshButton'),false);
+  assert.equal(headerNodes.some(node=>node.type==='TextInput'),false);
+  assert.equal(scrollNodes.filter(node=>node.type==='TextInput').length,1,'search remains in scrolling content');
+  assert.ok(headerNodes.some(node=>node.props?.children==='plant.allVisiblePlants'));
+  const refresh=headerNodes.find(node=>node.type==='RefreshButton');
+  assert.equal(refresh.props.testID,'plant-list-refresh');
+  refresh.props.onPress();
+  await refs[0].current.promise;
+  render('6','species-6');
+  assert.equal(React.Children.toArray(screenTree.props.children)[0].type,'View','header stays outside scroll after refresh');
+
 });
 
 test('actual catalogue renders an approved species and both refresh actions', () => {

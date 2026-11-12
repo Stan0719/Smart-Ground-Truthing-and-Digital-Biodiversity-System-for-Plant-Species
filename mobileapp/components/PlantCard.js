@@ -38,6 +38,7 @@ export default function PlantCard({
   const imageUri = typeof imageSource === "number" ? `local:${imageSource}` : imageSource?.uri || null;
   const imageFailed = imageUri === failedImageUri;
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const isPublicViewer = !user || ["visitor", "guest"].includes(user?.role?.toLowerCase());
   const observation = getPlantDisplayObservation(plant);
   const lastVerified = formatDate(plant.latestApproved?.date);
   const zoneBadge = getPlantCardZoneLabel(plant, user?.role, {
@@ -85,7 +86,7 @@ export default function PlantCard({
           </View>
         )}
 
-        {!speciesDetailCard && <View pointerEvents="none" style={styles.imageBadges}>
+        {!speciesDetailCard && !isPublicViewer && <View pointerEvents="none" style={styles.imageBadges}>
           <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, statusStyle(plant.currentStatus)]}>
             {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
@@ -101,7 +102,7 @@ export default function PlantCard({
       <View style={styles.content}>
         <View onLayout={speciesDetailCard ? handleContentLayout : undefined}>
 
-        {speciesDetailCard && <View style={styles.speciesDetailBadges}>
+        {speciesDetailCard && !isPublicViewer && <View style={styles.speciesDetailBadges}>
           <Text style={[styles.speciesDetailBadge, isTabletLayout && styles.tabletBadge, styles.statusBadge, statusStyle(plant.currentStatus)]}>
             {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
@@ -143,7 +144,7 @@ export default function PlantCard({
               label={t("plant.morphology")}
               value={observation?.morphology || t("plant.notRecorded")}
             />
-            <PublicFact label={t("plant.locationZone")} value={zoneBadge} />
+            {!(speciesDetailCard && isPublicViewer) && <PublicFact label={t("plant.locationZone")} value={zoneBadge} />}
             <PublicFact
               label={t("plant.lastVerified")}
               value={lastVerified}

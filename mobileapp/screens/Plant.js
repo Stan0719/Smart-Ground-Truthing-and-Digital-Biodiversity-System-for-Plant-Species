@@ -20,6 +20,7 @@ import {
   getSpeciesBySlug,
 } from "../data/mockData";
 import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import BackButton from "../components/BackButton";
 import { fetchPlantRecords, fetchSpeciesCatalog, filterUniqueSpeciesPlantRecords, filterPlantRecordsForRole, getPlantDisplayObservation, isOwnedPendingPlant, mergeOwnedPendingPlantZones } from "../utils/plantApi";
 import { getPlantCardZoneLabel, getPlantCardZoneValue } from "../utils/plantCardDisplay";
@@ -355,25 +356,13 @@ export default function Species({
 
 
   return (
-    <ScrollView
-      style={styles.page}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing || favourites.refreshing}
-          onRefresh={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
-          tintColor="#468585"
-          colors={["#468585"]}
-        />
-      }
-    >
-
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       {/* HEADER */}
 
       <View style={styles.header}>
 
         <View style={styles.headerToolbar}>
-        <BackButton label={t("plant.back")} variant="glass" onPress={() => navigation.goBack()} />
+        <BackButton label={t("plant.back")} variant="plain" style={styles.backButton} onPress={() => navigation.goBack()} />
         <LanguageSelector />
         </View>
 
@@ -381,7 +370,7 @@ export default function Species({
         <Text style={styles.label}>{t("plant.plantRecords")}</Text>
 
         <View style={styles.headingRow}>
-          <Text style={styles.heading}>{isBotanist ? t("plant.allVisiblePlants") : t("plant.allVerifiedPlants")}</Text>
+          <Text style={styles.heading}>{t("plant.allVisiblePlants")}</Text>
           <RefreshButton
             onPress={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
             loading={loading || refreshing || favourites.refreshing}
@@ -405,6 +394,19 @@ export default function Species({
 
       </View>
 
+
+    <ScrollView
+      style={styles.page}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing || favourites.refreshing}
+          onRefresh={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
+          tintColor="#468585"
+          colors={["#468585"]}
+        />
+      }
+    >
 
       {/* SEARCH */}
 
@@ -621,6 +623,7 @@ export default function Species({
       </View>
 
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -721,7 +724,7 @@ function PlantCard({
   const imageSource = plant.plantImage && sourceKey(plant.plantImage) !== failedImageKey ? plant.plantImage : null;
   const observation = getPlantDisplayObservation(plant);
   const isBotanist = user?.role?.toLowerCase() === "botanist";
-  const displayStatus = plant.currentStatus;
+  const isPublicViewer = !user || isVisitor || user?.role?.toLowerCase() === "guest";
   const zoneLabel = getPlantCardZoneLabel(plant, user?.role, {
     restricted: t("map.locationRestricted"),
     missing: t("plant.notRecorded"),
@@ -751,11 +754,11 @@ function PlantCard({
           </Text>
         )}
 
-        {!isVisitor && <View pointerEvents="none" style={styles.imageBadges}>
+        {!isPublicViewer && <View pointerEvents="none" style={styles.imageBadges}>
           <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, plantStatusStyle(plant.currentStatus)]}>
             {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
-          <Text numberOfLines={2} style={[styles.imageBadge, styles.zoneBadge]}>{zoneLabel}</Text>
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.zoneBadge, styles.imageZoneBadge]}>{zoneLabel}</Text>
         </View>}
 
       </View>
@@ -763,13 +766,6 @@ function PlantCard({
 
       {/* CONTENT */}
       <View style={styles.cardContent}>
-
-        {isVisitor && <View style={styles.visitorBadges}>
-          <Text numberOfLines={2} style={[styles.imageBadge, styles.visitorBadge, styles.statusBadge, plantStatusStyle(displayStatus)]}>
-            {translateLabel(displayStatus || t("plant.notRecorded"))}
-          </Text>
-          <Text numberOfLines={2} style={[styles.imageBadge, styles.visitorBadge, styles.zoneBadge]}>{zoneLabel}</Text>
-        </View>}
 
         <Text style={styles.species}>
           {plant.plantScientificName || t("plant.unnamedPlant")}
@@ -822,7 +818,7 @@ function PlantCard({
               />
               <Info label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
               <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
-              <Info label={t("plant.locationZone")} value={zoneLabel} />
+              {!isPublicViewer && <Info label={t("plant.locationZone")} value={zoneLabel} />}
             </>
           )}
 
@@ -903,6 +899,11 @@ function formatDate(dateString) {
 
 const styles = StyleSheet.create({
 
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#E7F2E2",
+  },
+
   page: {
     flex: 1,
     backgroundColor: "#F7FBF4",
@@ -910,11 +911,12 @@ const styles = StyleSheet.create({
 
   header: {
     padding: 22,
-    paddingTop: 50,
+    paddingTop: 8,
     backgroundColor: "#E7F2E2",
   },
 
   headerToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+  backButton: { alignSelf: "flex-start", maxWidth: "100%" },
   headingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   unavailableLanguageHeader: { position: "absolute", top: 50, right: 22 },
 
@@ -1186,8 +1188,6 @@ filterToggle: {
 
   imageBadges: { position: "absolute", top: 9, left: 10, right: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 6 },
   imageBadge: { maxWidth: "48%", overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, color: "#FFFFFF", fontSize: 9, lineHeight: 12, fontWeight: "700", textAlign: "center" },
-  visitorBadges: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 6, marginBottom: 9 },
-  visitorBadge: { maxWidth: "100%", flexShrink: 1 },
   statusBadge: { backgroundColor: "#315B49" },
   statusApproved: { backgroundColor: "#23734D" },
   statusPending: { backgroundColor: "#A76512" },
@@ -1200,6 +1200,7 @@ filterToggle: {
     },
 
   zoneBadge: { backgroundColor: "#143625DD" },
+  imageZoneBadge: { marginLeft: "auto" },
 
   cardContent: {
     padding: 14,
