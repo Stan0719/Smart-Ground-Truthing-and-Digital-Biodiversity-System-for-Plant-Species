@@ -4,6 +4,18 @@
 #include <DHT.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+
+// Create wifi_config.h from wifi_config.example.h. It is ignored by Git.
+#if __has_include("wifi_config.h")
+#include "wifi_config.h"
+#endif
+
+#ifndef PLANT_TRANSPORT_WIFI
+#define PLANT_TRANSPORT_WIFI 0
+#endif
 
 // ==================== PIN CONFIGURATION ====================
 
@@ -102,6 +114,36 @@ const unsigned long QUIET_TIME = 1500;
 
 unsigned long lastDashboardRefresh = 0;
 const unsigned long DASHBOARD_INTERVAL = 2000;
+
+#if PLANT_TRANSPORT_WIFI
+WiFiClientSecure wifiTls;
+unsigned long lastWifiAttempt = 0;
+const unsigned long WIFI_RETRY_INTERVAL = 10000;
+
+void sendReadingsOverWifi() {
+    if (WiFi.status() != WL_CONNECTED) return;
+    wifiTls.setCACert(LAPTOP_CA_CERT);
+    HTTPClient https;
+    String url = String("https://") + LAPTOP_HOST + ":" + LAPTOP_PORT + "/readings";
+    if (!https.begin(wifiTls, url)) return;
+    https.addHeader("Content-Type", "application/json");
+    https.addHeader("Authorization", String("Bearer ") + INGRESS_TOKEN);
+    String body = "{\"values\":{";
+    bool separator = false;
+    if (soilHasReading) { body += "\"soilMoisture\":" + String(soilValue); separator = true; }
+    if (rainHasReading) { if (separator) body += ","; body += "\"rainfall\":" + String(rainValue); separator = true; }
+    if (dhtHasReading) {
+        if (separator) body += ",";
+        body += "\"temperature\":" + String(temperature, 1) + ",\"humidity\":" + String(humidity, 1);
+        separator = true;
+    }
+    if (separator) body += ",";
+    body += "\"movement\":" + String(movementActive ? 1 : 0) +
+        "},\"capture\":{\"mpu_connected\":" + String(mpuReady ? "true" : "false") + "}}";
+    https.POST(body);
+    https.end();
+}
+#endif
 
 // ==================== SENSOR CLASSIFICATIONS ====================
 
@@ -623,6 +665,28 @@ void displayDashboard() {
         "ESP32"
     );
 
+#if PLANT_TRANSPORT_WIFI
+    Serial.printf(
+        "%-22s : %s\r\n",
+        "WiFi",
+        WiFi.status() == WL_CONNECTED ? "Connected" : "Not connected"
+    );
+    Serial.printf(
+        "%-22s : %d\r\n",
+        "WiFi Status Code",
+        WiFi.status()
+    );
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf(
+            "%-22s : %s\r\n",
+            "WiFi IP",
+            WiFi.localIP().toString().c_str()
+        );
+    }
+#else
+    Serial.printf("%-22s : Disabled\r\n", "WiFi");
+#endif
+
     // DHT11 health status
 
     Serial.printf(
@@ -772,6 +836,11 @@ void setup() {
 
     Serial.begin(115200);
 
+#if PLANT_TRANSPORT_WIFI
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#endif
+
     delay(1000);
 
     pinMode(LED_PIN, OUTPUT);
@@ -833,6 +902,13 @@ void loop() {
 
     unsigned long now = millis();
 
+#if PLANT_TRANSPORT_WIFI
+    if (WiFi.status() != WL_CONNECTED && now - lastWifiAttempt >= WIFI_RETRY_INTERVAL) {
+        lastWifiAttempt = now;
+        WiFi.reconnect();
+    }
+#endif
+
     // Check the MPU6050 connection.
 
     updateMPUHealth();
@@ -879,5 +955,8 @@ void loop() {
         lastDashboardRefresh = now;
 
         displayDashboard();
+#if PLANT_TRANSPORT_WIFI
+        sendReadingsOverWifi();
+#endif
     }
 }

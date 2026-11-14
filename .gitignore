@@ -3,6 +3,8 @@
 .env
 .env.*
 !.env.example
+IoT/PlantPrototype/wifi_config.h
+IoT/PlantPrototype/.https/
 
 # Node.js dependencies
 node_modules/

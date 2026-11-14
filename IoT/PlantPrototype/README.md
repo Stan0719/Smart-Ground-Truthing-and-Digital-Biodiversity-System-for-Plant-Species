@@ -1,5 +1,25 @@
 # USB sensor host
 
+## ESP32 Wi-Fi to laptop over HTTPS
+
+USB output remains enabled for the Serial Monitor. To also transmit readings over
+Wi-Fi, copy `wifi_config.example.h` to the ignored `wifi_config.h`, set the Wi-Fi
+name/password, laptop IP, ingress token and CA certificate, then upload the sketch.
+Set `PLANT_TRANSPORT_WIFI` to `0` in that local file to use USB-only mode.
+
+Run `wifi_receiver.py` on the laptop that is on the same Wi-Fi network. Configure
+`IOT_TLS_CERT` and `IOT_TLS_KEY` to the laptop's HTTPS server certificate and private
+key, and configure `IOT_INGRESS_TOKEN` to the same random token as the firmware.
+Also set `DEVICE_ID`, `DEVICE_KEY`, and `PLANT_API_ORIGIN` as described below. The
+certificate must be valid for the laptop IP in `LAPTOP_HOST`; put the issuing CA
+certificate in `LAPTOP_CA_CERT`. Do not disable certificate verification or share
+the private key. Allow inbound TCP port 8443 on the laptop's private network.
+
+The receiver accepts `POST /readings`, saves each accepted packet to the existing
+private outbox, and forwards it to the existing backend. A `202` response means the
+reading was durably queued on the laptop. The laptop must remain running and reachable.
+This first version does not persist unsent readings on the ESP32 while Wi-Fi is down.
+
 The Python serial bridge forwards ESP32 readings to the Node.js/PostgreSQL backend.
 It supports both the earlier sectioned dashboard and PlatformIO's flat dashboard
 labels, including `Raindrop Sensor` and `Movement Status`. Explicit `No movement`
