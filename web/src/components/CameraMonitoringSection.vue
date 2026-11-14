@@ -1,11 +1,22 @@
 <script setup lang="ts">
 import { Chart, registerables } from 'chart.js'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { monitoringDate, monitoringLabels } from '../utils/officerMonitoringDisplay'
 import MonitoringIdentifier from './conservation/MonitoringIdentifier.vue'
 import AppModal from './conservation/AppModal.vue'
 import type { CameraEvent, PlantCameraStatus } from '../types/cameraMonitoring'
+import CameraPlantConditions from './CameraPlantConditions.vue'
+import type { IoTDevice } from '../services/iotMonitoring'
+import { readPlantDetail, type DetailLocation } from '../services/plantDetail'
+import { cameraPlantId, latestCameraPlantReading } from '../utils/cameraPlantContext'
+import { formatPlantId } from '../utils/plantId'
+import { sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
+
+const props = withDefaults(defineProps<{ devices?: readonly IoTDevice[]; readingsBusy?: boolean; readingsError?: string }>(), {
+  devices: () => [], readingsBusy: false, readingsError: '',
+})
+const emit = defineEmits<{ 'refresh-readings': [] }>()
 
 Chart.register(...registerables)
 
@@ -14,9 +25,9 @@ interface CameraStatusResponse extends PlantCameraStatus {
 }
 
 const camera = ref<CameraStatusResponse>({
-  cameraId: 'CAM-001',
-  plantId: 'PL001',
-  name: 'Plant Monitoring Camera 01',
+  cameraId: '',
+  plantId: '',
+  name: 'Plant Monitoring Camera',
   status: 'Offline',
 })
 const cameraEvents = ref<CameraEvent[]>([])
@@ -30,6 +41,36 @@ const currentSystemTime = ref(new Date())
 let confidenceChart: Chart | null = null
 let clockInterval: ReturnType<typeof setInterval> | null = null
 let cameraPollInterval: ReturnType<typeof setInterval> | null = null
+const linkedPlantId = computed(() => cameraPlantId(camera.value.plantId))
+const linkedPlantLabel = computed(() => linkedPlantId.value ? formatPlantId(linkedPlantId.value) || linkedPlantId.value : '')
+const plantReading = computed(() => latestCameraPlantReading(props.devices, linkedPlantId.value))
+const plantLocation = ref<DetailLocation | null>(null)
+const locationLoading = ref(false)
+const locationError = ref('')
+let locationGeneration = 0, cameraGeneration = 0, disposed = false, cameraLoading = false
+const sessionKey = (user: AuthUser | null, pending: boolean) => !pending && user?.status === 'Active' &&
+  !user.mustChangePassword && ['Conservation Officer', 'Administrator'].includes(user.role) ? `${user.id}:${user.role}` : ''
+let identity = sessionKey(sessionSnapshot().user, sessionSnapshot().pending)
+const loadPlantLocation = async () => {
+  const generation = ++locationGeneration, id = linkedPlantId.value
+  plantLocation.value = null; locationError.value = ''; locationLoading.value = false
+  if (!identity || !id || disposed) return
+  locationLoading.value = true
+  try {
+    const detail = await readPlantDetail(id, true)
+    if (generation !== locationGeneration || disposed) return
+    plantLocation.value = detail.staff?.approved_location ?? null
+  } catch {
+    if (generation === locationGeneration && !disposed) locationError.value = 'Unable to load the saved plant location. Please refresh to try again.'
+  } finally {
+    if (generation === locationGeneration && !disposed) locationLoading.value = false
+  }
+}
+watch(linkedPlantId, loadPlantLocation, { flush: 'sync' })
+const refreshPlantContext = () => {
+  emit('refresh-readings')
+  void loadPlantLocation()
+}
 
 const localTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
@@ -120,22 +161,43 @@ const renderConfidenceChart = async () => {
 }
 
 const loadCameraData = async () => {
+  if (!identity || disposed || cameraLoading) return
+  const generation = cameraGeneration
+  cameraLoading = true
   try {
     const [statusResponse, eventsResponse] = await Promise.all([
       fetch('/camera-api/camera-status', { cache: 'no-store' }),
       fetch('/camera-api/camera-events', { cache: 'no-store' }),
     ])
     if (!statusResponse.ok || !eventsResponse.ok) throw new Error('Camera server unavailable.')
-    camera.value = (await statusResponse.json()) as CameraStatusResponse
+    const status = (await statusResponse.json()) as CameraStatusResponse
     const result = (await eventsResponse.json()) as { events?: CameraEvent[] }
+    if (generation !== cameraGeneration || disposed) return
+    if (!status || typeof status.cameraId !== 'string' || !status.cameraId ||
+        typeof status.name !== 'string' || typeof status.plantId !== 'string' || !cameraPlantId(status.plantId) ||
+        !['Online', 'Offline', 'Unavailable'].includes(status.status)) throw new Error('Camera configuration unavailable.')
+    camera.value = status
     cameraEvents.value = Array.isArray(result.events) ? result.events : []
     connectionError.value = camera.value.error ?? ''
     await renderConfidenceChart()
   } catch (error) {
+    if (generation !== cameraGeneration || disposed) return
     camera.value = { ...camera.value, status: 'Offline' }
     connectionError.value = error instanceof Error ? error.message : 'Camera server unavailable.'
+  } finally {
+    if (generation === cameraGeneration) cameraLoading = false
   }
 }
+const unsubscribeSession = subscribeSession((user, pending) => {
+  const next = sessionKey(user, pending)
+  if (next === identity) return
+  identity = next; cameraGeneration++; locationGeneration++; cameraLoading = false
+  camera.value = { cameraId: '', plantId: '', name: 'Plant Monitoring Camera', status: 'Offline' }
+  cameraEvents.value = []; plantLocation.value = null; locationLoading.value = false; locationError.value = ''
+  cameraExpanded.value = false; connectionError.value = ''
+  confidenceChart?.destroy(); confidenceChart = null
+  if (identity && !disposed) void loadCameraData()
+})
 
 onMounted(() => {
   void loadCameraData()
@@ -145,6 +207,7 @@ onMounted(() => {
   }, 1000)
 })
 onBeforeUnmount(() => {
+  disposed = true; cameraGeneration++; locationGeneration++; unsubscribeSession()
   confidenceChart?.destroy()
   if (clockInterval !== null) clearInterval(clockInterval)
   if (cameraPollInterval !== null) clearInterval(cameraPollInterval)
@@ -182,7 +245,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="preview-overlay preview-plant">
             <span>Related Plant</span>
-            <strong>{{ camera.plantId }}</strong>
+            <strong>{{ linkedPlantLabel || '—' }}</strong>
           </div>
           <button
             class="expand-camera-button"
@@ -194,6 +257,7 @@ onBeforeUnmount(() => {
             Expand Camera
           </button>
         </div>
+        <CameraPlantConditions :plant-id="linkedPlantId" :plant-label="linkedPlantLabel" :reading="plantReading" :location="plantLocation" :location-loading="locationLoading" :location-error="locationError" :readings-busy="readingsBusy" :readings-error="readingsError" @refresh="refreshPlantContext" />
       </article>
 
       <aside class="prototype-analytics" aria-label="Live camera analytics">
@@ -305,10 +369,11 @@ onBeforeUnmount(() => {
           <small>{{ connectionError || 'Waiting for camera frames' }}</small>
         </div>
       </div>
+      <CameraPlantConditions :plant-id="linkedPlantId" :plant-label="linkedPlantLabel" :reading="plantReading" :location="plantLocation" :location-loading="locationLoading" :location-error="locationError" :readings-busy="readingsBusy" :readings-error="readingsError" @refresh="refreshPlantContext" />
       <dl class="expanded-meta">
         <div>
           <dt>Related Plant</dt>
-          <dd>{{ camera.plantId }}</dd>
+          <dd>{{ linkedPlantLabel || '—' }}</dd>
         </div>
         <div>
           <dt>Camera Status</dt>

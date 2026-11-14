@@ -108,11 +108,11 @@
 }
 
 .officer-layout.officer-layout .officer-table-scroll .iot-reading-table {
-  min-width: 100rem;
+  min-width: 120rem;
 }
 
 .officer-layout.officer-layout .officer-table-scroll .iot-history-table {
-  min-width: 90rem;
+  min-width: 110rem;
 }
 
 .officer-layout.officer-layout .officer-table-scroll .camera-event-table {
@@ -147,7 +147,7 @@
 .officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(1),
 .officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(2),
 .officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(3),
-.officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(10),
+.officer-layout.officer-layout .officer-table-scroll .iot-reading-table td:nth-child(12),
 .officer-layout.officer-layout .officer-table-scroll .iot-history-table td:nth-child(1),
 .officer-layout.officer-layout .officer-table-scroll .iot-history-table td:nth-child(2),
 .officer-layout.officer-layout .officer-table-scroll .iot-history-table td:nth-child(3),

@@ -103,8 +103,11 @@ exits or raises an error.
 The feed shows the annotated scene. Events are published only when the existing
 contact-plus-movement rule and alert cooldown permit an alert. Confidence remains
 unavailable rather than inventing a combined detection score. Events are held in
-memory (up to 100), reset at restart, and are not written to PostgreSQL. MP4
-recordings remain local files. Region selection still uses P or dragging in the
+memory (up to 100) in the live feed and reset at restart. The optional saved-clip
+integration separately persists event metadata to PostgreSQL while MP4
+recordings remain local files. See [clip integration setup](../../../docs/camera-clips-integration.md)
+for the existing alert fields, Camera device credentials and protected playback.
+Region selection still uses P or dragging in the
 OpenCV window; browser region controls are not included in this connection.
 
 This proxy is for the local Vite development server. Hosted deployments need

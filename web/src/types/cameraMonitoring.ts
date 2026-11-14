@@ -13,6 +13,7 @@ export interface CameraEvent {
   recordingStartedAt?: string
   recordingEndedAt?: string
   durationSeconds?: number
+  recordingStatus?: 'recording' | 'processing' | 'ready' | 'failed' | 'unavailable'
   videoUrl?: string
   thumbnailUrl?: string
   status: 'New' | 'Reviewing' | 'Resolved'

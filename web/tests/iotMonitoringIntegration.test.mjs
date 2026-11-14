@@ -124,7 +124,7 @@ test('page uses canonical adapter without legacy fixtures, writes or visual rede
   assert.match(page, /loadCanonicalHistory/)
   assert.doesNotMatch(page, /\/api\/iot\/devices|\/api\/iot\/sensors/)
   assert.doesNotMatch(page, /fetch\(|devices\.push|Math\.random|POST|PATCH|DELETE/)
-  assert.match(page, /<CameraMonitoringSection\s*\/>/)
+  assert.match(page, /<CameraMonitoringSection\s+:devices="readingDevices"/)
   assert.match(page, /class="summary-grid"/)
   assert.match(page, /class="control-bar"/)
   assert.match(page, /class="history-charts"/)

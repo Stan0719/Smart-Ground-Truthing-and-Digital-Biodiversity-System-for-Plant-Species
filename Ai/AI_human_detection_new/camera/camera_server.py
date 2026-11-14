@@ -56,10 +56,10 @@ def publish_frame(frame):
         _condition.notify_all()
 
 
-def publish_event(event_type, title, description):
+def publish_event(event_type, title, description, *, event_id=None, reading_id=None):
     with _condition:
-        _events.appendleft({
-            "eventId": uuid4().hex,
+        event = {
+            "eventId": event_id or uuid4().hex,
             "cameraId": _camera["cameraId"],
             "plantId": _camera["plantId"],
             "eventType": event_type,
@@ -68,7 +68,11 @@ def publish_event(event_type, title, description):
             "confidence": None,
             "detectedAt": timestamp(),
             "status": "New",
-        })
+        }
+        if reading_id is not None:
+            event["readingId"] = reading_id
+        _events.appendleft(event)
+        return dict(event)
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -1,0 +1,2 @@
+# Optional bundled FFmpeg when ffmpeg is not already on PATH.
+imageio-ffmpeg==0.6.0
