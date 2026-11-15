@@ -42,6 +42,11 @@ function harness(file, { record, approved, species = false, locationDenied = fal
       getCurrentPositionAsync: async () => ({ coords: { latitude: 4.6, longitude: 113.8, altitude: 25.34, accuracy: 6.78 } }) },
     "expo-file-system/legacy": { readAsStringAsync: async () => "aGVsbG8=", EncodingType: { Base64: "base64" } },
     "@expo/vector-icons": { Ionicons: "Ionicons" },
+    "../components/OriginalUpdatedField": { default: ({ children, label, originalContent, originalValue }) =>
+      React.createElement("View", null,
+        label ? React.createElement("Text", null, label) : null,
+        React.createElement("Text", null, originalContent || String(originalValue ?? "")),
+        children) },
     "../utils/qrInventory": { normalizeQRCodes: (payload) => payload.qr_codes.map((qr) => ({ id: String(qr.qr_id), label: `QR-${String(qr.qr_id).padStart(4, "0")}`, plantId: qr.plant_id == null ? null : String(qr.plant_id), status: qr.status })) },
     "../utils/botanistRecords": species ? { fetchBotanistSpeciesRequest: async () => record }
       : { fetchBotanistPlant: async () => record },
@@ -54,11 +59,14 @@ function harness(file, { record, approved, species = false, locationDenied = fal
   const render = () => { stateIndex = 0; refIndex = 0; return component({ route, navigation }); };
   function walk(node, predicate) {
     if (!node || typeof node !== "object") return null;
+    if (typeof node.type === "function") return walk(node.type(node.props), predicate);
     if (predicate(node)) return node;
     for (const child of React.Children.toArray(node.props?.children)) { const found = walk(child, predicate); if (found) return found; }
     return null;
   }
-  const text = (node) => typeof node === "string" ? node : React.Children.toArray(node?.props?.children).map(text).join(" ");
+  const text = (node) => typeof node === "string" ? node
+    : typeof node?.type === "function" ? text(node.type(node.props))
+      : React.Children.toArray(node?.props?.children).map(text).join(" ");
   return { render, walk, text, get focus() { return focus; }, get alert() { return alert; }, calls };
 }
 const plant = (status) => ({ id: "8", speciesId: "6", scientificName: "Manual plant name", status, qrId: "2", qrCode: "QR-0002",

@@ -38,10 +38,12 @@ test("PostgreSQL backup passes passwords through child environment, validates ar
   assert.equal(calls[1][0], "pg_restore");
   assert.equal(calls[1][1][0], "--list");
 });
-test("failed PostgreSQL dump never reports a verified backup", () => {
+test("failed PostgreSQL dump never reports a verified backup", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "postgres-backup-failure-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
   assert.throws(
     () =>
-      backupPostgres("unused.dump", {
+      backupPostgres(join(folder, "unused.dump"), {
         settings: { DATABASE_URL: "postgresql://u:p@localhost/db" },
         run: () => ({ status: 1 }),
       }),

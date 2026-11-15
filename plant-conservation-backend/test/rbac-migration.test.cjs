@@ -2,7 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
+const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const {
   ROLE_NAMES,
@@ -237,25 +238,28 @@ test("concurrent invocations converge using the shared advisory lock", async (t)
   assert.equal(await verifyAssignments({ query: (...args) => pool.query(...args) }), true);
 });
 
-test("backup helper passes public to pg_dump and validates its output", () => {
+test("backup helper passes public to pg_dump and validates its output", (t) => {
   assert.deepEqual(RBAC_BACKUP_SCHEMAS, ["public"]);
-  let archiveExists = false;
+  const directory = mkdtempSync(join(tmpdir(), "rbac-backup-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
   const calls = [];
-  const result = backupPostgres("isolated/fake.dump", {
+  const destination = join(directory, "fake.dump");
+  const result = backupPostgres(destination, {
     settings: { PLANT_PG_SCHEMA: "plant_app" },
     connection: "postgresql://isolated-test@127.0.0.1/testdb",
     schemas: [...RBAC_BACKUP_SCHEMAS],
-    fileSystem: { existsSync: () => archiveExists, mkdirSync() {}, chmodSync() {} },
     run(binary, args) {
       calls.push({ binary, args });
-      if (binary === "pg_dump") archiveExists = true; // simulated output only
+      if (binary === "pg_dump")
+        writeFileSync(args[args.indexOf("--file") + 1], "mock archive");
       return { status: 0 };
     },
   });
   assert.equal(calls[0].binary, "pg_dump");
   assert.ok(calls[0].args.includes("--schema"));
   assert.ok(calls[0].args.includes("public"));
-  assert.deepEqual(calls[1].args, ["--list", resolve("isolated/fake.dump")]);
+  assert.deepEqual(calls[1].args, ["--list", calls[0].args[3]]);
+  assert.equal(existsSync(destination), true);
   assert.deepEqual(result.schemas, ["public"]);
 });
 
@@ -274,20 +278,26 @@ test("backup failure prevents connection and migration", async () => {
   assert.equal(applies, 0);
 });
 
-test("backup helper propagates dump and archive validation failures", () => {
-  const fileSystem = { existsSync: () => false, mkdirSync() {}, chmodSync() {} };
+test("backup helper propagates dump and archive validation failures", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "rbac-backup-failure-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
   const options = {
     settings: {}, connection: "postgresql://isolated-test@127.0.0.1/testdb",
-    schemas: ["public"], fileSystem,
+    schemas: ["public"],
   };
-  assert.throws(() => backupPostgres("fake.dump", { ...options, run: () => ({ status: 1 }) }), /PostgreSQL backup failed/);
-  let archiveExists = false;
-  assert.throws(() => backupPostgres("fake.dump", {
+  assert.throws(() => backupPostgres(join(directory, "dump-failure.dump"), {
     ...options,
-    fileSystem: { existsSync: () => archiveExists, mkdirSync() {}, chmodSync() {} },
-    run(binary) { if (binary === "pg_dump") archiveExists = true; return { status: binary === "pg_restore" ? 1 : 0 }; },
+    run: () => ({ status: 1 }),
+  }), /PostgreSQL backup failed/);
+  assert.throws(() => backupPostgres(join(directory, "restore-failure.dump"), {
+    ...options,
+    run(binary, args) {
+      if (binary === "pg_dump")
+        writeFileSync(args[args.indexOf("--file") + 1], "mock archive");
+      return { status: binary === "pg_restore" ? 1 : 0 };
+    },
   }), /archive validation failed/);
-  assert.throws(() => backupPostgres("missing.dump", {
+  assert.throws(() => backupPostgres(join(directory, "missing.dump"), {
     ...options, run: () => ({ status: 0 }),
   }), /archive file was not created/);
 });

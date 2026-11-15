@@ -16,7 +16,18 @@ const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
 const { mountStaffNotifications } = require("./staff-notifications.cjs");
 const { createOfficerNotificationDelivery } = require("./officer-notification-delivery.cjs");
-function createPlantApp({ auth, pool, origins = configuredOrigins(), officerNotifications = null }) {
+const {
+  normalizeQrPlantSchema,
+  qrPlantRecordRelation,
+} = require("./qr-plant-mode.cjs");
+function createPlantApp({
+  auth,
+  pool,
+  origins = configuredOrigins(),
+  officerNotifications = null,
+  qrPlantSchema = process.env.PLANT_QR_PLANT_SCHEMA || "plant_app",
+}) {
+  qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
   const app = express();
   app.disable("x-powered-by");
   // Do not generate ETags for uncached, authenticated JSON reads.
@@ -47,9 +58,9 @@ function createPlantApp({ auth, pool, origins = configuredOrigins(), officerNoti
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
   mountStaffNotifications(app, { pool });
-  mountDomain(app, { auth, pool, allow, officerNotifications });
-  mountPlantSubmissions(app, { pool, allow, officerNotifications });
-  mountRecordChanges(app, { pool, allow });
+  mountDomain(app, { auth, pool, allow, officerNotifications, qrPlantSchema });
+  mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
+  mountRecordChanges(app, { pool, allow, qrPlantSchema });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow });
   mountPlantGallery(app, { pool, allow });
@@ -113,6 +124,10 @@ async function start() {
   require("./environment.cjs");
   const { loadServerEnvironment } = await import("../web/server/postgres.mjs");
   loadServerEnvironment();
+  const qrPlantSchema = normalizeQrPlantSchema(
+    process.env.PLANT_QR_PLANT_SCHEMA || "plant_app",
+  );
+  const qrPlantRecord = qrPlantRecordRelation(qrPlantSchema);
   const { createAuth } = await import("../web/server/auth.mjs");
   const { poolFromEnvironment } = require("./database.cjs");
   const auth = await createAuth(),
@@ -122,7 +137,10 @@ async function start() {
       "SELECT plant_id,registered_subject,rbac_status,qr_token FROM plant_record LIMIT 0",
     );
     await pool.query("SELECT species_id,rbac_data FROM species LIMIT 0");
-    await pool.query("SELECT qr_id,qr_code,plant_id,status FROM public.qr_code LIMIT 0");
+    await pool.query(
+      `SELECT plant_id,species_id,rbac_status,scientific_name FROM ${qrPlantRecord} LIMIT 0`,
+    );
+    await pool.query("SELECT qr_id,qr_code,plant_id,status FROM plant_app.qr_code LIMIT 0");
     await pool.query(
       "SELECT id,owner_subject,revision FROM plant_observation LIMIT 0",
     );
@@ -131,7 +149,12 @@ async function start() {
     throw error;
   }
   const officerNotifications = createOfficerNotificationDelivery({ pool, auth });
-  const app = createPlantApp({ auth, pool, officerNotifications });
+  const app = createPlantApp({
+    auth,
+    pool,
+    officerNotifications,
+    qrPlantSchema,
+  });
   const server = createServer(app);
   const port = Number(process.env.PORT || 3000);
   server.once("listening", () => {

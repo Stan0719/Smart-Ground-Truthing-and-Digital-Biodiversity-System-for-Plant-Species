@@ -1,6 +1,60 @@
 "use strict";
 // Connections only: schema changes must be reviewed and applied separately.
 const { Pool } = require("pg");
+const LOCAL_POSTGRES_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const UNSUPPORTED_URL_TARGET_OPTIONS = new Set([
+  "host",
+  "hostaddr",
+  "service",
+  "port",
+  "database",
+  "dbname",
+  "user",
+  "password",
+]);
+
+function resolveLocalPostgresTarget(env) {
+  if (!env || typeof env !== "object")
+    throw Error("Invalid PostgreSQL migration target configuration.");
+  if (env.PGHOSTADDR || env.PGSERVICE)
+    throw Error("Unsupported PostgreSQL migration connection override.");
+
+  let host;
+  if (Object.prototype.hasOwnProperty.call(env, "DATABASE_URL")) {
+    if (
+      typeof env.DATABASE_URL !== "string" ||
+      env.DATABASE_URL.trim() === ""
+    )
+      throw Error("Invalid PostgreSQL migration URL.");
+    let url;
+    try {
+      url = new URL(env.DATABASE_URL);
+    } catch {
+      throw Error("Invalid PostgreSQL migration URL.");
+    }
+    if (!["postgres:", "postgresql:"].includes(url.protocol))
+      throw Error("Unsupported PostgreSQL migration URL protocol.");
+    if (env.DATABASE_URL.includes("#"))
+      throw Error("Unsupported PostgreSQL migration URL fragment.");
+    if ([...url.searchParams.keys()].some((key) =>
+      UNSUPPORTED_URL_TARGET_OPTIONS.has(key.toLowerCase()),
+    ))
+      throw Error("Unsupported PostgreSQL migration URL override.");
+    host = url.hostname;
+  } else {
+    host = env.DB_HOST || env.PGHOST;
+  }
+
+  if (typeof host !== "string")
+    throw Error("PostgreSQL migration host is required.");
+  host = host.toLowerCase();
+  if (host.startsWith("[") && host.endsWith("]"))
+    host = host.slice(1, -1);
+  if (!LOCAL_POSTGRES_HOSTS.has(host))
+    throw Error("PostgreSQL migrations are restricted to local hosts.");
+  return { host };
+}
+
 function configured(env = process.env) {
   return Boolean(
     env.DATABASE_URL ||
@@ -108,6 +162,7 @@ function connectionFailure() {
 module.exports = {
   configured,
   poolFromEnvironment,
+  resolveLocalPostgresTarget,
   connectionFailure,
   scopedPool,
 };

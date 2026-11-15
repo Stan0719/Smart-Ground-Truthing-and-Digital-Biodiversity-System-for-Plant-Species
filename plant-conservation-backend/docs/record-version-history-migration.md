@@ -4,7 +4,7 @@ Migration `009-record-version-history.sql` is required for complete edit history
 
 Before applying 009 to the configured `PLANT_PG_SCHEMA`:
 
-1. Take and verify a database backup, including the plant schema and `public.qr_code`.
+1. Take and verify a database backup, including the `plant_app` schema and current `plant_app.qr_code` inventory. The historical pre-migration table name was `public.qr_code`.
 2. Confirm migration 008 is present and inspect the schema search path.
 3. Apply 009 once in a transaction using the project's migration runner only after explicit approval. It creates one table and indexes, enables row-level security, and does not update existing rows or change visibility.
 4. Check `record_version_history` exists, row-level security is enabled, and existing plant, species, asset and QR counts are unchanged.

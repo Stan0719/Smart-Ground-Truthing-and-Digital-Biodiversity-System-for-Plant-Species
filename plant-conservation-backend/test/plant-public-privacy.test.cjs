@@ -6,7 +6,7 @@ const {createPlantApp}=require('../server.js');
 
 test('public plant, species, QR and assets use safe projections while staff/owners retain their contracts',async t=>{
  const pool=await createPlantDatabase();t.after(()=>pool.end());
- await pool.query("CREATE TABLE public.qr_code(qr_id integer,plant_id integer,qr_code text,status text)");
+ await pool.query("CREATE TABLE plant_app.qr_code(qr_id integer,plant_id integer,qr_code text,status text)");
  await pool.query(`INSERT INTO species(scientific_name,common_name,description,rbac_data) VALUES
  ('Public species','Public common','Description','{"habitat":"Habitat","culturalSignificance":"Culture"}'),
  ('Internal species','Internal common','Description','{}'),
@@ -21,7 +21,7 @@ test('public plant, species, QR and assets use safe projections while staff/owne
  VALUES('approved',1,'staff:bot','Approved','{"latitude":1,"longitude":2,"heightCm":10}','approved'),
  ('private',1,'staff:bot','Draft','{"heightCm":11}','private'),
  ('inconsistent',5,'staff:bot','Approved','{}','inconsistent');
- INSERT INTO public.qr_code(qr_id,plant_id,qr_code,status) SELECT plant_id,plant_id,qr_token,'active' FROM plant_record;`);
+ INSERT INTO plant_app.qr_code(qr_id,plant_id,qr_code,status) SELECT plant_id,plant_id,qr_token,'active' FROM plant_record;`);
  for(const [id,species,plant,approved,observation]of [['public-image',1,null,true,null],['pending-image',1,null,false,null],['pending-species-image',4,null,true,null],['private-photo',null,1,false,'private'],['unapproved-species-plant-photo',null,5,true,'inconsistent']])
   await pool.query("INSERT INTO plant_asset(id,species_id,plant_id,owner_subject,client_key,approved,content_type,content,observation_id) VALUES($1,$2,$3,'staff:bot',$1,$4,'image/jpeg',$5,$6)",[id,species,plant,approved,Buffer.from('test fixture'),observation]);
  const roles={officer:'Conservation Officer',bot:'Botanist',admin:'Administrator',visitor:'Visitor',other:'Botanist'};
