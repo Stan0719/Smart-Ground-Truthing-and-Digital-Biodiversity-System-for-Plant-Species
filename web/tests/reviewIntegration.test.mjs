@@ -10,6 +10,7 @@ import { parse, compileScript, compileTemplate, compileStyle } from '@vue/compil
 import ts from 'typescript'
 import * as vue from 'vue'
 import * as observationReview from '../src/services/observationReview.ts'
+import * as recordChanges from '../src/services/recordChanges.ts'
 import * as observationQueue from '../src/services/observationQueue.ts'
 import { formatObservationId } from '../src/utils/observationId.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
@@ -74,6 +75,7 @@ function fixtureResponse(url, rows) {
   return Response.json(url === '/api/observations' ? { observations: rows } : { observation: rows?.find(row => String(row?.id) === url.split('/').pop()) });
 }
 function harness(fetchHandler, query = {}, language = 'en', plantHandler = async url => Response.json({ plant: { plant_id: url.split('/').pop(), qr_token: null, qr_status: null } }), queueHandler = null, options = {}) {
+  const changeQueueHandler = options.recordChangesHandler
   const messages = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
   const scope = vue.effectScope()
   const cleanup = []
@@ -94,13 +96,15 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
     Error,
     AbortSignal,
     AbortController,
-    window: { setTimeout, clearTimeout, innerWidth: 1024, innerHeight: 768 },
+    window: { setTimeout, clearTimeout, innerWidth: 1024, innerHeight: 768, ...options.window },
     document: options.document || { activeElement: null },
     console,
     navigator: { clipboard: options.clipboard },
     HTMLElement: options.HTMLElement || class {},
+    URLSearchParams,
     fetch: async (url, options) => {
       calls.push({ url, options })
+      if (url.startsWith('/api/data/record-changes?')) return changeQueueHandler ? changeQueueHandler(url) : Response.json({ changes: [], page: { has_more: false, next_cursor: null } })
       if (url.startsWith('/api/plants/')) return plantHandler(url, options)
       if (url.startsWith('/api/observations?')) {
         if (queueHandler) return queueHandler(url, options)
@@ -138,6 +142,7 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
       if (name.endsWith('observationId')) return { formatObservationId }
       if (name.endsWith('observationReview')) return observationReview
       if (name.endsWith('observationQueue')) return observationQueue
+      if (name.endsWith('recordChanges')) return recordChanges
       if (name.endsWith('reviewSpeciesRequest')) return speciesRequestIntegration
       if (name.endsWith('plantId')) return { formatPlantId }
       if (name.endsWith('reviewSpeciesRequest')) return speciesRequestIntegration
@@ -177,6 +182,7 @@ test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery and sim
   try {
     assert.match(h.state.countValue(0), /Loading/)
     await h.state.loadObservations()
+    assert.equal(h.state.loadError.value, '', h.state.loadError.value)
     assert.equal(h.state.observations.value.length, 2)
     assert.equal(h.state.skippedRecords.value, 2)
     const observation = h.state.observations.value[0]
@@ -681,6 +687,7 @@ test('malformed list produces unavailable counts, while empty lists and missing 
 const requestFixture = (overrides = {}) => ({
   request_id: 'request-42',
   request_status: 'Pending Review',
+  review_cycle: 1, content_revision: 1,
   proposed_scientific_name: 'Proposed species',
   suggested_common_name: 'Proposed name',
   genus_name: 'Proposed genus',
@@ -752,7 +759,7 @@ test('review visibility cards start unselected and update the original explicit-
     assert.ok(selector)
     assert.equal(selector.props.modelValue, '')
     await h.state.decideSpecies('Approved')
-    assert.equal(h.state.speciesSaveError.value, 'Select visibility.')
+    assert.equal(h.state.speciesVisibilityError.value, 'Please select a visibility option before approving this species.')
     assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 0)
     for (const value of ['public', 'internal', 'protected']) {
       selector.props['onUpdate:modelValue'](value)
@@ -1023,7 +1030,7 @@ test('real species approval posts explicit visibility with decision/comment and 
     if (options.method === 'POST') {
       assert.equal(url, '/api/species-requests/1/review')
       assert.equal(options.credentials, 'same-origin')
-      assert.deepEqual(JSON.parse(options.body), { decision: 'Approved', comment: '', visibility: 'internal' })
+      assert.deepEqual(JSON.parse(options.body), { decision: 'Approved', comment: '', visibility: 'internal', expected_review_cycle: 1, expected_revision: 1 })
       return new Promise((resolve) => {
         releasePost = () =>
           resolve(Response.json({ reviewed: true, species_request: approved.species_request }))
@@ -1070,15 +1077,17 @@ test('real species approval posts explicit visibility with decision/comment and 
   }
 })
 
-test('species rejection/correction validate comments, refetch saved reasons, and never decide the plant', async () => {
+test('species rejection/correction validate comments, refetch saved reasons, and reflect server cascade without a separate plant decision', async () => {
   for (const decision of ['Rejected', 'Correction Required']) {
     let stored = fixture({ species_request: requestFixture({ request_id: '1' }) })
     const h = harness(async (url, options) => {
       if (url === '/api/observations') return Response.json({ observations: [stored] })
       if (options.method === 'POST') {
         assert.equal(url, '/api/species-requests/1/review')
-        assert.deepEqual(JSON.parse(options.body), { decision, comment: 'Species reason' })
+        assert.deepEqual(JSON.parse(options.body), { decision, comment: 'Species reason', expected_review_cycle: 1, expected_revision: 1 })
         stored = fixture({
+          status: decision === 'Rejected' ? 'Rejected' : 'Pending Review',
+          review_origin: decision === 'Rejected' ? 'species_dependency' : 'officer',
           species_request: requestFixture({
             request_id: '1',
             request_status: decision,
@@ -1096,14 +1105,14 @@ test('species rejection/correction validate comments, refetch saved reasons, and
         h.state.speciesReviewComment.value = invalid
         await h.state.decideSpecies(decision)
         assert.equal(h.calls.filter((c) => c.options.method === 'POST').length, 0)
-        assert.ok(h.state.speciesSaveError.value)
+        assert.ok(h.state.speciesCommentError.value)
       }
       h.state.speciesReviewComment.value = 'Species reason'
       await h.state.decideSpecies(decision)
       assert.equal(h.state.selectedSpeciesRequest.value.status, decision)
       assert.equal(h.state.selectedSpeciesRequest.value.reviewComment, 'Species reason')
       assert.equal(h.state.canReviewPlant.value, false)
-      assert.equal(h.state.selected.value.status, 'Pending Review')
+      assert.equal(h.state.selected.value.status, decision === 'Rejected' ? 'Rejected' : 'Pending Review')
       assert.equal(h.state.reviewMessage.value.variant, 'success')
     } finally {
       h.stop()
@@ -1323,7 +1332,7 @@ test('species approval requires an explicit visibility choice without a default'
     assert.equal(h.state.speciesVisibility.value, '')
     await h.state.decideSpecies('Approved')
     assert.equal(h.calls.filter(c => c.options.method === 'POST').length, 0)
-    assert.match(h.state.speciesSaveError.value, /visibility/i)
+    assert.match(h.state.speciesVisibilityError.value, /visibility/i)
   } finally { h.stop() }
 })
 
@@ -1338,7 +1347,7 @@ test('existing-species registration with null request metadata shows its selecte
     assert.equal(h.state.canReviewPlant.value, true)
     assert.equal(h.state.selected.value.speciesId, String(row.species_id))
     assert.ok(!nodes(h.render()).some(n => n.props?.class === 'species-request-card'))
-    assert.ok(!nodes(h.render()).some(n => n.props?.class === 'species-request-list'))
+    assert.ok(renderText(h).includes(messages.approvedChanges.originalRegistration))
   } finally { h.stop() }
 })
 const renderText = h => nodes(h.render()).map(node => typeof node.children === 'string' ? node.children : '').join(' ')
@@ -1629,10 +1638,10 @@ test('registration and legacy queues request authoritative origins, preserve all
   })
   try {
     await h.state.loadObservations()
-    assert.equal(h.state.filtered.value.length, 0); assert.equal(h.state.hasMore.value, true)
-    failMore = true; await h.state.loadObservations(true)
-    assert.ok(h.state.loadError.value); assert.equal(h.state.nextCursor.value, 'scan-next')
-    failMore = false; await h.state.loadObservations(true)
+    assert.equal(h.state.filtered.value.length, 2, 'all source pages are loaded before publishing the queue')
+    failMore = true; await h.state.loadObservations()
+    assert.ok(h.state.loadError.value); assert.equal(h.state.observations.value.length, 0, 'failed source is not presented as a complete queue')
+    failMore = false; await h.state.loadObservations()
     assert.equal(h.state.filtered.value.length, 2); assert.equal(h.state.hasMore.value, false)
     assert.equal(h.state.filtered.value[0].speciesRequest, null)
     assert.ok(h.state.filtered.value[1].speciesRequest)
@@ -1678,13 +1687,13 @@ test('legacy deep links select the explicit fallback; all queue labels render in
 const reviewTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'reviews-table')
 const reviewCopyButtons = h => nodes(reviewTable(h)).filter(node => node.type === 'button' && node.props?.class === 'identifier-copy')
 
-test('review queue retains nine headers, compact observation/subject labels and raw review identifiers', async () => {
+test('review queue retains the requested ten headers, compact observation/subject labels and raw review identifiers', async () => {
   const row = fixture({ owner_subject: 'staff:2ace382f-1111-4111-8111-111111111111' })
   const h = harness(url => fixtureResponse(url, [row]))
   try {
     await h.state.loadObservations()
     const headers = nodes(reviewTable(h)).filter(node => node.type === 'th')
-    assert.deepEqual(headers.map(node => node.children), ['Plant ID', 'Observation ID', 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
+    assert.deepEqual(headers.map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
     assert.ok(headers.every(node => node.props.scope === 'col'))
     assert.equal(h.state.observationLabel(row.id), 'OBS-AA3BD8BE')
     assert.equal(h.state.submitterLabel(row.owner_subject), 'Staff \u00b7 2ACE382F')
@@ -1738,7 +1747,7 @@ test('review copy controls copy full original identities and announce localized 
       const live = nodes(h.render()).find(node => String(node.props?.class).includes('copy-feedback'))
       assert.equal(live.props['aria-live'], 'polite')
       assert.equal(live.props.role, 'status')
-      assert.equal(h.calls.length, 1)
+      assert.equal(h.calls.length, 2)
     } finally { h.stop() }
   }
 })
@@ -1800,7 +1809,7 @@ test('review table preserves alignment/header and uses shared workflow colors wi
   const sharedHeader = /th\s*\{([^}]+)\}/.exec(shared)[1]
   assert.match(sharedHeader, /text-transform: uppercase/)
   assert.match(sharedHeader, /letter-spacing: 0.6px/)
-  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 96rem; table-layout: auto;[^}]*border-collapse: separate; border-spacing: 0/)
+  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 107rem; table-layout: auto;[^}]*border-collapse: separate; border-spacing: 0/)
   assert.match(css, /\.reviews-scroll\s*\{ min-width: 0; max-width: 100%; overflow-x: auto/)
   assert.match(css, /\.reviews-table \.badge\s*\{[^}]*display: inline-flex; align-items: center;[^}]*white-space: nowrap/)
   assert.match(css, /\.reviews-scroll \.reviews-table \.action-group\s*\{[^}]*flex-wrap: nowrap; align-items: center;[^}]*gap: 7px; width: max-content; min-width: max-content/)
@@ -1818,7 +1827,7 @@ test('review table preserves alignment/header and uses shared workflow colors wi
     const scroll = nodes(h.render()).find(node => String(node.props?.class).includes('reviews-scroll'))
     assert.equal(scroll.props.role, 'region'); assert.equal(scroll.props.tabindex, '0')
     assert.equal(nodes(scroll).filter(node => String(node.props?.class).includes('table-scroll')).length, 1)
-    const badge = nodes(reviewTable(h)).find(node => node.type === 'span' && String(node.props?.class).includes('badge'))
+    const badge = nodes(reviewTable(h)).find(node => node.type === 'span' && String(node.props?.class).includes('pending-review'))
     assert.ok(badge.props.class.includes('pending-review'))
     assert.equal(badge.children, 'Pending Review')
   } finally { h.stop() }
@@ -1841,7 +1850,7 @@ test('review summary omits loaded-submission notices from cards and table in eve
       assert.equal(summary.props['aria-describedby'], undefined)
       assert.equal(reviewSummaryCards(h).length, 5)
       assert.ok(reviewSummaryCards(h).every(card => !nodes(card).some(node => node.type === 'small')))
-      assert.equal(nodes(reviewTable(h)).filter(node => node.type === 'th').length, 9)
+      assert.equal(nodes(reviewTable(h)).filter(node => node.type === 'th').length, 10)
       assert.equal(reviewCopyButtons(h).length, 2)
       assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
     } finally { h.stop() }
@@ -1912,7 +1921,8 @@ test('registration introduction is localized and concise while legacy queue rema
       await h.state.loadObservations()
       const intro = nodes(h.render()).find(node => node.type === 'section' && String(node.props?.class).split(' ').includes('page-intro'))
       const text = nodes(intro).filter(node => typeof node.children === 'string').map(node => node.children)
-      assert.deepEqual(text, [labels.registrationEyebrow, labels.registrations, labels.registrationIntro])
+      assert.deepEqual(text.slice(0,3), [labels.registrationEyebrow, labels.registrations, labels.registrationIntro])
+      assert.ok(text.includes(JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url),'utf8')).approvedChanges.queueScope))
       assert.ok(!labels.registrationIntro.includes(labels.legacy))
       assert.ok(nodes(h.render()).some(node => node.type === 'option' && node.props?.value === 'unknown'))
       assert.equal(nodes(h.render()).filter(node => node.props?.id === 'review-summary-scope').length, 0)
@@ -1942,8 +1952,8 @@ test('Rejected counts deduplicated observation statuses, not rejected linked req
   const count = () => h.state.counts.value.find(([title]) => title === 'Rejected')[1]
   try {
     await h.state.loadObservations()
-    assert.equal(count(), 1)
-    assert.equal(h.state.observations.value.length, 2)
+    assert.equal(count(), 2)
+    assert.equal(h.state.observations.value.length, 3)
     assert.equal(h.state.observations.value.find(row => row.id === secondId).speciesRequest.state, 'rejected')
     await h.state.loadObservations(true)
     assert.equal(count(), 2)
@@ -1952,7 +1962,7 @@ test('Rejected counts deduplicated observation statuses, not rejected linked req
     assert.equal(count(), 1, 'queue switch replaces the loaded scope rather than adding the same ID twice')
     assert.equal(h.state.observations.value.length, 1)
     h.state.queueOrigin.value = 'initial_registration'; await h.state.loadObservations()
-    assert.equal(count(), 1)
+    assert.equal(count(), 2)
     assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
   } finally { h.stop() }
 })
@@ -1995,7 +2005,7 @@ test('review filters use five matching label/control wrappers with no stray text
 })
 
 test('date, search, status, species and queue filters retain independent and combined behavior', async () => {
-  const rows = [fixture(), fixture({ id: secondId, status: 'Approved', species_id: 9, scientific_name: 'Other species', created_at: '2026-10-02T12:00:00Z' }), fixture({ id: '123', created_at: '2026-10-02T12:00:00Z' })]
+  const rows = [fixture(), fixture({ id: secondId, status: 'Approved', species_id: 9, scientific_name: 'Other species', historical_review: { state: 'partial', fields: { species_id: 9, plant_scientific_name: 'Other species', scientific_name: 'Other species', content: {} }, assets: [] }, created_at: '2026-10-02T12:00:00Z' }), fixture({ id: '123', created_at: '2026-10-02T12:00:00Z' })]
   const h = harness(url => fixtureResponse(url, rows))
   const update = (index, value) => nodes(reviewFilterFields(h)[index]).find(node => ['input', 'select'].includes(node.type)).props['onUpdate:modelValue'](value)
   try {
@@ -2111,7 +2121,7 @@ test('submission information preserves field order, full submitter identity and 
     assert.equal(identifier.props['feedback-duration'], 3000)
     const list = all.find(node => node.type === 'dl' && nodes(node).includes(identifier))
     assert.equal(list.props.class, 'detail-list submission-information')
-    assert.deepEqual(nodes(list).filter(node => node.type === 'dt').map(node => node.children), ['Submitted By', 'Record created', 'Last updated', 'Reviewed at', 'Latest review decision', 'Status'])
+    assert.deepEqual(nodes(list).filter(node => node.type === 'dt').map(node => node.children), ['Submitted By', 'Record created', 'Last updated', 'Reviewed at', messages.approvedChanges.reviewedBy, 'Latest review decision', 'Status'])
     assert.deepEqual(nodes(list).filter(node => node.type === 'dd').slice(1, 4).map(node => node.children), ['4 Nov 2026, 21:28', '5 Nov 2026, 01:18', '5 Nov 2026, 01:18'])
     const badges = nodes(list).filter(node => String(node.props?.class).includes('submission-review-badge'))
     assert.deepEqual(badges.map(node => node.children), ['Rejected', 'Correction Required'])
@@ -2369,23 +2379,24 @@ test('redundant decision heading is absent while localized accessible group, com
   } finally { h.stop() }
 })
 
-test('Review Submissions headers, body cells and colgroup all put Plant ID first while full observation copying stays authoritative', async () => {
+test('Review Submissions retains exactly ten aligned columns while full observation copying stays authoritative', async () => {
   const row = fixture({ plant_id: 18 }), copied = []
   const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
   try {
     await h.state.loadObservations()
     const table = reviewTable(h)
-    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['plant-column', 'observation-column', 'species-column', 'submitter-column', 'zone-column', 'created-column', 'status-column', 'similarity-column', 'actions-column'])
-    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), ['Plant ID', 'Observation ID', 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
-    const renderedRow = nodes(table).find(node => node.type === 'tr' && node.key === row.id)
+    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['observation-column', 'plant-column', 'type-column', 'species-column', 'submitter-column', 'zone-column', 'created-column', 'status-column', 'similarity-column', 'actions-column'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
+    const renderedRow = nodes(table).find(node => node.type === 'tr' && node.key === 'observation:' + row.id)
     const cells = nodes(renderedRow).filter(node => node.type === 'td')
-    assert.equal(cells.length, 9)
-    assert.equal(cells[0].children, 'PL018')
-    assert.equal(cells[0].props.class, 'plant-id-cell')
+    assert.equal(cells.length, 10)
+    assert.equal(cells[1].props.class, 'plant-id-cell')
+    assert.equal(cells[1].children, 'PL018')
+    assert.equal(cells[0].props.class, 'identity-cell')
     assert.match(descriptor.styles[0].content, /\.reviews-table \.plant-id-cell\s*\{ color: #315749; font-weight: 700/)
     assert.match(descriptor.styles[0].content, /\.reviews-table \.identity-cell strong\s*\{ color: inherit; font-weight: 400/)
-    assert.equal(nodes(cells[1]).find(node => node.type === 'strong').children, 'OBS-AA3BD8BE')
-    const copy = nodes(cells[1]).find(node => node.type === 'button')
+    assert.equal(nodes(cells[0]).find(node => node.type === 'strong').children, 'OBS-AA3BD8BE')
+    const copy = nodes(cells[0]).find(node => node.type === 'button')
     await copy.props.onClick()
     assert.deepEqual(copied, [row.id])
     assert.equal(h.state.observations.value[0].id, row.id)
@@ -2423,14 +2434,14 @@ test('initial registration modal omits the history section while retaining curre
   }
 })
 
-const standaloneFixture=(changes={})=>({request_id:73,requested_by:'staff:bot',scientific_name:'Standalone original',suggested_common_name:'Original common',genus_name:'Shorea',family_name:'Dipterocarpaceae',conservation_status:'Least Concern',description:'Original description',habitat:'Original habitat',request_status:'Pending Review',submitted_at:'2026-11-09T01:00:00Z',review_comment:'',approved_species_id:null,...changes})
+const standaloneFixture=(changes={})=>({request_id:73,review_cycle:1,content_revision:1,requested_by:'staff:bot',scientific_name:'Standalone original',suggested_common_name:'Original common',genus_name:'Shorea',family_name:'Dipterocarpaceae',conservation_status:'Least Concern',description:'Original description',habitat:'Original habitat',request_status:'Pending Review',submitted_at:'2026-11-09T01:00:00Z',review_comment:'',approved_species_id:null,...changes})
 test('standalone species query opens the existing species panel without inventing a plant and reviews with existing rules',async()=>{
  for(const decision of ['Approved','Rejected','Correction Required']){
  let saved=false
  const h=harness(async(url,options)=>{
   if(url==='/api/observations')return Response.json({observations:[]})
   assert.ok(url.startsWith('/api/species-requests/73'))
-  if(options.method==='POST'){assert.equal(url,'/api/species-requests/73/review');assert.deepEqual(JSON.parse(options.body),{decision,comment:'Review reason',...(decision==='Approved'?{visibility:'protected'}:{})});saved=true;return Response.json({reviewed:true})}
+  if(options.method==='POST'){assert.equal(url,'/api/species-requests/73/review');assert.deepEqual(JSON.parse(options.body),{decision,comment:'Review reason',expected_review_cycle:1,expected_revision:1,...(decision==='Approved'?{visibility:'protected'}:{})});saved=true;return Response.json({reviewed:true})}
   return Response.json({species_request:standaloneFixture(saved?{request_status:decision,approved_species_id:decision==='Approved'?99:null}: {})})
  },{speciesRequest:'73'})
  try{
@@ -2466,9 +2477,9 @@ test('standalone stale responses and uncertain writes preserve privacy, comments
  },{speciesRequest:'73'})
  try{
   await h.state.loadObservations();await flush();h.state.speciesReviewComment.value='Keep this comment';h.state.speciesVisibility.value='public'
-  await h.state.decideSpecies('Approved');assert.equal(h.state.speciesNeedsReload.value,true);assert.equal(h.state.speciesReviewComment.value,'Keep this comment');assert.equal(h.state.canReviewSpecies.value,false)
+  await h.state.decideSpecies('Approved');assert.equal(h.state.speciesVersionConflict.value,false);assert.equal(h.state.speciesNeedsReload.value,true);assert.equal(h.state.speciesReviewComment.value,'Keep this comment');assert.equal(h.state.canReviewSpecies.value,false)
   await h.state.refreshSpeciesRequest();assert.equal(h.state.speciesNeedsReload.value,false)
-  mode='conflict';await h.state.decideSpecies('Approved');assert.equal(h.state.standaloneRequest.value.state,'approved');assert.equal(h.state.speciesReviewComment.value,'Keep this comment')
+  mode='conflict';h.state.speciesVisibility.value='public';await h.state.decideSpecies('Approved');assert.equal(h.state.standaloneRequest.value.state,'approved');assert.equal(h.state.speciesReviewComment.value,'Keep this comment')
   h.route.query.speciesRequest='74';await flush();h.emitSession(null);release(Response.json({species_request:standaloneFixture({request_id:74})}));await flush();assert.equal(h.state.standaloneRequest.value,null)
  }finally{h.stop()}
 })
@@ -2494,3 +2505,366 @@ test('Resubmitted is informational, localized and strictly limited to verified P
   }finally{h.stop()}
  }
 })
+
+test('linked and standalone species reviews keep the inspected revision and require explicit conflict reload', async () => {
+  for (const standalone of [false, true]) {
+    let revision = 1, posts = 0, saved = false
+    const raw = () => requestFixture({ request_id: '73', review_cycle: 1, content_revision: revision, request_status: saved ? 'Approved' : 'Pending Review', approved_species_id: saved ? 8 : null, proposed_scientific_name: revision === 1 ? 'Inspected name' : 'Changed name' })
+    const row = () => fixture({ species_request_id: '73', species_request: raw() })
+    const h = harness(async (url, options) => {
+      if (options.method === 'POST') {
+        posts++
+        const body = JSON.parse(options.body)
+        if (posts === 1) {
+          assert.equal(body.expected_revision, 1)
+          return Response.json({ code: 'SPECIES_REQUEST_VERSION_CONFLICT', error: 'Changed' }, { status: 409 })
+        }
+        assert.equal(body.expected_revision, 2)
+        saved = true
+        return Response.json({ reviewed: true })
+      }
+      if (url === '/api/species-requests/73') return Response.json({ species_request: { ...standaloneFixture({ review_cycle: 1, content_revision: revision, request_status: saved ? 'Approved' : 'Pending Review', approved_species_id: saved ? 8 : null }), scientific_name: raw().proposed_scientific_name } })
+      return fixtureResponse(url, [row()])
+    }, standalone ? { speciesRequest: '73' } : {})
+    try {
+      await h.state.loadObservations(); await flush()
+      if (!standalone) await h.state.open(h.state.observations.value[0])
+      h.state.speciesReviewComment.value = 'Inspected version one'
+      h.state.speciesVisibility.value = 'public'
+      revision = 2
+      await h.state.decideSpecies('Approved')
+      assert.equal(posts, 1)
+      assert.equal(h.state.selectedSpeciesRequest.value.contentRevision, 1)
+      assert.equal(h.state.speciesVersionConflict.value, true)
+      assert.equal(h.state.canReviewSpecies.value, false)
+      assert.equal(h.state.speciesVisibility.value, '')
+      await h.state.decideSpecies('Rejected'); assert.equal(posts, 1)
+      const warning = nodes(h.render()).find(node => node.props?.role === 'alert' && String(node.props?.class).includes('review-feedback'))
+      assert.ok(warning)
+      await h.state.refreshSpeciesRequest()
+      assert.equal(h.state.selectedSpeciesRequest.value.id, '73')
+      assert.equal(h.state.selectedSpeciesRequest.value.contentRevision, 2)
+      assert.equal(h.state.selectedSpeciesRequest.value.scientificName, 'Changed name')
+      assert.equal(h.state.selectedSpeciesRequest.value.updated, true)
+      assert.equal(h.state.speciesVersionConflict.value, false)
+      assert.equal(h.state.speciesReloaded.value, true)
+      assert.equal(h.state.speciesInspectionRequired.value, true)
+      assert.equal(h.state.canReviewSpecies.value, false)
+      const checkbox = nodes(h.render()).find(node => node.type === 'input' && node.props?.type === 'checkbox' && node.props?.onChange)
+      checkbox.props.onChange({ target: { checked: true } })
+      assert.equal(h.state.canReviewSpecies.value, true)
+      assert.equal(posts, 1)
+      h.state.speciesVisibility.value = 'internal'
+      await h.state.decideSpecies('Approved')
+      assert.equal(posts, 2)
+      assert.equal(h.state.selectedSpeciesRequest.value.state, 'approved')
+    } finally { h.stop() }
+  }
+})
+
+test('Updated reflects an authoritative positive content revision on pending species only', async () => {
+  for (const [revision, status, updated] of [[1,'Pending Review',false],[2,'Pending Review',true],[null,'Pending Review',false],[0,'Pending Review',false],[2,'Approved',false],[2.5,'Pending Review',false]]) {
+    const row = fixture({ species_request: requestFixture({ review_cycle: 1, content_revision: revision, request_status: status }) })
+    const h = harness(url => fixtureResponse(url, [row]))
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0])
+      assert.equal(h.state.selectedSpeciesRequest.value.updated, updated)
+      assert.equal(Boolean(nodes(h.render()).some(node => node.children === 'Updated')), updated)
+      if (!Number.isSafeInteger(revision) || revision < 1) assert.equal(h.state.canReviewSpecies.value, false)
+    } finally { h.stop() }
+  }
+})
+
+test('late species version conflicts after logout cannot restore an older request warning', async () => {
+  let release
+  const h = harness(async (url, options) => {
+    if (url === '/api/observations') return Response.json({ observations: [] })
+    if (options.method === 'POST') return new Promise(resolve => { release = resolve })
+    return Response.json({ species_request: standaloneFixture() })
+  }, { speciesRequest: '73' })
+  try {
+    await h.state.loadObservations(); await flush()
+    h.state.speciesVisibility.value = 'public'
+    const pending = h.state.decideSpecies('Approved')
+    await flush()
+    h.emitSession(null)
+    release(Response.json({ code: 'SPECIES_REQUEST_VERSION_CONFLICT' }, { status: 409 }))
+    await pending; await flush()
+    assert.equal(h.state.standaloneRequest.value, null)
+    assert.equal(h.state.speciesVersionConflict.value, false)
+  } finally { h.stop() }
+})
+
+
+test('species field validation focuses and scrolls only the modal and clears on valid input', async () => {
+  for (const decision of ['Approved', 'Rejected', 'Correction Required']) {
+    const row = fixture({ species_request: requestFixture({ review_comment: '' }) })
+    const scrolls = [], focuses = []
+    const modal = {
+      parentElement: null, scrollHeight: 1200, clientHeight: 400, scrollTop: 0, contains: () => true,
+      getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+      scrollTo: value => scrolls.push(value),
+    }
+    const control = { focus: value => focuses.push(value) }
+    const field = {
+      parentElement: modal, closest: () => modal, querySelector: selector => selector === '.visibility-error' ? null : control,
+      focus: control.focus,
+      getBoundingClientRect: () => ({ top: 800, bottom: 920 }),
+    }
+    const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, {
+      window: { getComputedStyle: () => ({ overflowY: 'auto' }), matchMedia: () => ({ matches: true }) },
+    })
+    try {
+      await h.state.open(h.state.mapObservation(row)); await flush()
+      if (decision === 'Approved') h.state.speciesVisibilityField.value = field
+      else h.state.speciesCommentField.value = field
+      const before = h.calls.length
+      await h.state.decideSpecies(decision)
+      assert.equal(h.calls.length, before, 'validation performs no HTTP request')
+      assert.equal(focuses.length, 1)
+      assert.equal(focuses[0].preventScroll, true)
+      assert.equal(scrolls.length, 1)
+      assert.equal(scrolls[0].top, 784)
+      assert.equal(scrolls[0].behavior, 'auto')
+      if (decision === 'Approved') {
+        const selector = nodes(h.render()).find(n => n.props?.id === 'species-review-visibility')
+        assert.equal(selector.props.invalid, true)
+        assert.match(selector.props.error, /Please select a visibility/)
+        assert.equal(h.state.speciesSaveError.value, '')
+        assert.equal(h.state.canReviewSpecies.value, true)
+        h.state.speciesVisibility.value = 'protected'
+        assert.equal(h.state.speciesVisibilityError.value, '')
+      } else {
+        assert.ok(nodes(h.render()).some(n => n.props?.id === 'species-request-comment-error'))
+        h.state.speciesReviewComment.value = 'Verified reason'
+        assert.equal(h.state.speciesCommentError.value, '')
+      }
+    } finally { h.stop() }
+  }
+})
+
+test('missing species revision and verification failures remain prominent blocking alerts', async () => {
+  const row = fixture({ species_request: requestFixture({ content_revision: null }) })
+  const h = harness(url => fixtureResponse(url, [row]))
+  try {
+    await h.state.open(h.state.mapObservation(row)); await flush()
+    assert.equal(h.state.canReviewSpecies.value, false)
+    assert.ok(nodes(h.render()).some(n => n.props?.role === 'alert' && nodes(n).some(child => child.children === 'Species revision could not be verified.')))
+    h.state.speciesLoadError.value = 'Request identity could not be verified'
+    const alert = nodes(h.render()).find(n => n.type === 'p' && n.children === h.state.speciesLoadError.value)
+    assert.equal(alert.props.role, 'alert')
+    assert.match(alert.props.class, /review-feedback error/)
+    const before = h.calls.length
+    await h.state.decideSpecies('Approved')
+    assert.equal(h.calls.length, before)
+  } finally { h.stop() }
+})
+
+
+test('species visibility error follows the choices with accessible associations and responsive styling', () => {
+  const selector = readFileSync(new URL('../src/components/conservation/VisibilitySelector.vue', import.meta.url), 'utf8')
+  assert.ok(selector.indexOf('v-if="error"') > selector.indexOf('class="visibility-options"'))
+  assert.match(selector, /:aria-invalid="Boolean\(invalid\)"/)
+  assert.match(selector, /aria-describedby/)
+  assert.match(selector, /max-width: 620px/)
+  assert.match(selector, /grid-template-columns: minmax\(0, 1fr\)/)
+  assert.match(descriptor.template.content, /class="species-visibility-validation" aria-live="polite" aria-atomic="true"/)
+  assert.match(descriptor.styles.map(s => s.content).join(' '), /textarea\[aria-invalid="true"\]/)
+})
+
+
+test('pending plant edits refresh explicit names and saved measurements while preserving the inspected revision precondition', async () => {
+  let revision = 1, posts = 0;
+  const row = () => fixture({ revision, plant_scientific_name: revision === 1 ? 'Inspected plant' : 'Edited plant',
+    species_scientific_name: 'Taxon name', scientific_name: 'Taxon name',
+    content: { heightCm: revision === 1 ? 12 : 18, healthStatus: 'Healthy', lifeStage: 'Mature', morphology: 'Leaves' },
+    submission_update: revision === 1 ? { state: 'unavailable' } : { state: 'updated', version: 2, updated_at: '2026-11-13T04:00:00Z', changes: [{ field: 'heightCm', before: 12, after: 18 }] } });
+  const h = harness((url, options) => {
+    if (options.method === 'POST') {
+      posts++; assert.equal(JSON.parse(options.body).revision, 1); revision = 2;
+      return Response.json({ error: 'Observation changed' }, { status: 409 });
+    }
+    return fixtureResponse(url, [row()]);
+  });
+  try {
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]);
+    assert.equal(h.state.selected.value.plantScientificName, 'Inspected plant');
+    assert.equal(h.state.selected.value.speciesScientificName, 'Taxon name');
+    h.state.comment.value = 'Retain this review comment';
+    await h.state.decide('Approved');
+    assert.equal(h.state.selected.value.height, '18 cm');
+    assert.equal(h.state.selected.value.plantScientificName, 'Edited plant');
+    assert.equal(h.state.selected.value.submissionUpdate.state, 'updated');
+    assert.equal(h.state.conflictAcknowledged.value, false);
+    assert.equal(h.state.comment.value, 'Retain this review comment');
+    await h.state.decide('Approved'); assert.equal(posts, 1);
+  } finally { h.stop(); }
+});
+
+
+test('linked and standalone review cycles stay tied to inspection through explicit reload and acknowledgement',async()=>{
+ for(const standalone of [false,true]){
+  let cycle=1,posts=0;
+  const row=()=>fixture({species_request_id:'73',species_request:requestFixture({request_id:'73',review_cycle:cycle})});
+  const h=harness((url,options)=>{
+   if(options.method==='POST'){posts++;assert.equal(JSON.parse(options.body).expected_review_cycle,1);return Response.json({code:'SPECIES_REQUEST_REVIEW_CYCLE_CONFLICT',error:'New correction cycle'},{status:409});}
+   if(url==='/api/species-requests/73')return Response.json({species_request:standaloneFixture({review_cycle:cycle})});
+   return fixtureResponse(url,[row()]);
+  },standalone?{speciesRequest:'73'}:{});
+  try{
+   await h.state.loadObservations();await flush();if(!standalone)await h.state.open(h.state.observations.value[0]);
+   h.state.speciesVisibility.value='public';cycle=2;await h.state.decideSpecies('Approved');
+   assert.equal(posts,1);assert.equal(h.state.speciesVersionConflict.value,true);assert.equal(h.state.speciesVisibility.value,'');
+   await h.state.refreshSpeciesRequest();assert.equal(h.state.selectedSpeciesRequest.value.reviewCycle,2);assert.equal(h.state.canReviewSpecies.value,false);
+   const checkbox=nodes(h.render()).find(node=>node.type==='input'&&node.props?.type==='checkbox'&&node.props?.onChange);checkbox.props.onChange({target:{checked:true}});
+   assert.equal(h.state.canReviewSpecies.value,true);assert.equal(posts,1);
+  }finally{h.stop();}
+ }
+});
+
+const changeFixture = (overrides = {}) => ({ id:'12345678-1234-1234-1234-123456789abc',plant_id:24,species_id:null,owner_subject:'staff:edit-owner',status:'Pending Review',created_at:'2026-11-14T01:00:00Z',reviewed_at:null,base_snapshot:{scientific_name:'Approved plant name',species_id:8,content:{heightCm:12,zone:'Existing zone'}},proposed_snapshot:{scientific_name:'Proposed plant name',species_id:8,content:{heightCm:18,zone:'Proposed zone'}},proposal_photo_count:0,...overrides })
+const changesResponse = changes => Response.json({changes,page:{has_more:false,next_cursor:null}})
+test('one original table integrates registration, linked species, plant edits and species edits in all three languages',async()=>{
+  for(const language of ['en','ms','zh-CN']) {
+    const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8')).approvedChanges
+    const plant=changeFixture(), speciesChange=changeFixture({id:'22345678-1234-1234-1234-123456789abc',plant_id:null,species_id:6,proposed_snapshot:{scientific_name:'Proposed species name'}})
+    const h=harness(url=>fixtureResponse(url,[fixture({species_request:requestFixture()})]),{},language,undefined,null,{recordChangesHandler:()=>changesResponse([plant,speciesChange])})
+    try {
+      await h.state.loadObservations();assert.equal(h.state.loadError.value,'')
+      const table=reviewTable(h),text=renderText(h)
+      assert.equal(nodes(h.render()).filter(n=>n.type==='table'&&n.props?.class==='reviews-table').length,1)
+      assert.equal(nodes(table).filter(n=>n.type==='th').length,10)
+      assert.equal(nodes(table).find(n=>n.type==='th').children,labels.submissionId)
+      assert.equal(nodes(table).filter(n=>n.type==='th')[1].children,labels.plantId)
+      for (const rendered of nodes(table).filter(n=>n.type==='tr' && n.key)) {
+        const cells=nodes(rendered).filter(n=>n.type==='td')
+        const expected=rendered.key === 'change:' + plant.id ? 'PL024' : rendered.key === 'change:' + speciesChange.id ? '\u2014' : 'PL001'
+        assert.equal(cells[1].children,expected)
+      }
+      assert.equal(nodes(table).filter(n=>n.type==='td').length,30)
+      assert.ok(text.includes(labels.plantEdit));assert.ok(text.includes(labels.speciesEdit))
+      const rows=h.state.allReviewRows.value
+      assert.deepEqual(new Set(rows.map(r=>r.kind)),new Set(['linked_species_request','approved_plant_change','approved_species_change']))
+      assert.equal(rows.find(r=>r.kind==='approved_plant_change').change.id,plant.id)
+      assert.equal(h.state.counts.value.find(([title])=>title==='Pending Review')[1],3)
+      const editRows=nodes(table).filter(n=>n.type==='tr'&&String(n.key).startsWith('change:'))
+      assert.ok(editRows.every(row=>!nodes(row).some(n=>n.props?.class==='similarity-badge-button')))
+      assert.ok(editRows.every(row=>nodes(row).some(n=>n.type==='button'&&n.props?.class==='action-button')))
+      await nodes(editRows[0]).find(n=>n.type==='button'&&n.props?.class==='action-button').props.onClick()
+      assert.equal(h.route.query.change,editRows[0].key.slice(7));assert.equal(h.state.selected.value,null)
+      assert.ok(!h.calls.some(c=>c.options?.method==='POST'))
+    } finally {h.stop()}
+  }
+})
+test('complete source pages produce global sorting, local pagination, counts and combined filters without losing later proposals',async()=>{
+  const observations=Array.from({length:105},(_,i)=>fixture({id:String(i+1),created_at:'2026-11-01T00:00:00Z'}))
+  const plant=changeFixture(),cancelled=changeFixture({id:'32345678-1234-1234-1234-123456789abc',plant_id:null,species_id:6,status:'Cancelled',created_at:'2026-11-13T00:00:00Z'})
+  const h=harness(url=>fixtureResponse(url,observations),{},'en',undefined,async url=>{
+    const more=new URL(url,'https://fixture.invalid').searchParams.has('cursor')
+    return Response.json({observations:more?observations.slice(100):observations.slice(0,100),page:{has_more:!more,next_cursor:more?null:'observations-next'}})
+  },{recordChangesHandler:url=>{const more=new URL(url,'https://fixture.invalid').searchParams.has('cursor');return Response.json({changes:more?[plant]:[cancelled],page:{has_more:!more,next_cursor:more?null:cancelled.id}})}})
+  try {
+    await h.state.loadObservations();assert.equal(h.state.loadError.value,'')
+    assert.equal(h.state.allReviewRows.value.length,107);assert.equal(h.state.reviewRows.value.length,100)
+    assert.equal(h.state.allReviewRows.value[0].change.id,plant.id,'later API page contains globally newest row')
+    assert.equal(h.state.counts.value.find(([title])=>title==='Pending Review')[1],106)
+    const requests=h.calls.length;await h.state.loadObservations(true);assert.equal(h.calls.length,requests);assert.equal(h.state.reviewRows.value.length,107)
+    h.state.status.value='Pending Review';assert.equal(h.state.allReviewRows.value.length,106)
+    h.state.search.value='Proposed plant name';assert.equal(h.state.allReviewRows.value.length,1)
+    h.state.species.value='8';h.state.date.value='2026-11-14';assert.equal(h.state.allReviewRows.value[0].change.id,plant.id)
+    h.state.species.value='6';assert.equal(h.state.allReviewRows.value.length,0)
+    h.route.query={change:cancelled.id};await flush();assert.equal(h.state.reviewRows.value[0].change.status,'Cancelled','notification selection bypasses ordinary filters honestly')
+  } finally {h.stop()}
+})
+test('a failed proposal source publishes no partial combined queue and no invented counts',async()=>{
+  const h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{recordChangesHandler:()=>Response.json({error:'Unavailable'},{status:503})})
+  try {await h.state.loadObservations();assert.ok(h.state.loadError.value);assert.equal(h.state.allReviewRows.value.length,0);assert.equal(h.state.countValue(0),messages.conservationPages.reviews.unavailable)}finally{h.stop()}
+})
+
+test('edit identifiers are emphasized, distinct badges preserve registration green, and copy retains canonical proposal IDs',async()=>{
+  const copied=[],plant=changeFixture(),speciesChange=changeFixture({id:'42345678-1234-1234-1234-123456789abc',plant_id:null,species_id:6})
+  const h=harness(url=>fixtureResponse(url,[fixture({species_request:requestFixture()})]),{},'en',undefined,null,{clipboard:{writeText:async value=>copied.push(value)},recordChangesHandler:()=>changesResponse([plant,speciesChange])})
+  try {
+    await h.state.loadObservations()
+    const editRows=nodes(reviewTable(h)).filter(row=>row.type==='tr'&&String(row.key).startsWith('change:'))
+    for(const row of editRows) {
+      const identity=nodes(row).find(n=>n.type==='td'&&String(n.props?.class).includes('edit-identity'))
+      assert.ok(identity);await nodes(identity).find(n=>n.type==='button').props.onClick()
+      assert.equal(copied.at(-1),row.key.slice(7));assert.ok(h.state.copyFeedback.value)
+    }
+    const badges=nodes(reviewTable(h)).filter(n=>n.type==='span'&&String(n.props?.class).includes('edit-type-badge'))
+    assert.ok(badges.some(n=>n.props.class.includes('plant-edit')));assert.ok(badges.some(n=>n.props.class.includes('species-edit')))
+    assert.ok(nodes(reviewTable(h)).some(n=>n.type==='span'&&n.props?.class==='species-request-badge'),'new species request badge is unchanged')
+    assert.match(descriptor.styles[0].content,/\.reviews-table \.edit-identity strong\s*\{[^}]*font-weight: 700/)
+    assert.match(descriptor.styles[0].content,/\.species-request-badge\.plant-edit\s*\{ background: #e5f2f7/)
+    assert.match(descriptor.styles[0].content,/\.species-request-badge\.species-edit\s*\{ background: #f0eaf7/)
+  } finally {h.stop()}
+})
+
+
+test('submission type owns all four badges, leaving Species with scientific names only', async () => {
+  const original=fixture({plant_id:24,plant_scientific_name:'Original registration name'});
+  const linked=fixture({id:secondId,species_request:requestFixture()});
+  const plant=changeFixture(), speciesEdit=changeFixture({id:'52345678-1234-1234-1234-123456789abc',plant_id:null,species_id:6});
+  const h=harness(url=>fixtureResponse(url,[original,linked]),{},'en',undefined,null,{recordChangesHandler:()=>changesResponse([plant,speciesEdit])});
+  try {
+    await h.state.loadObservations();
+    const table=reviewTable(h), headers=nodes(table).filter(n=>n.type==='th');
+    assert.equal(headers.length,10);assert.equal(headers[2].children,messages.approvedChanges.submissionType);
+    for (const row of nodes(table).filter(n=>n.type==='tr'&&n.key)) {
+      const cells=nodes(row).filter(n=>n.type==='td');assert.equal(cells.length,10);
+      assert.equal(nodes(cells[2]).filter(n=>String(n.props?.class).includes('species-request-badge')).length,1);
+      assert.equal(nodes(cells[3]).filter(n=>String(n.props?.class).includes('badge')).length,0);
+      assert.ok(nodes(cells[3]).some(n=>n.type==='em'));
+    }
+    for(const label of [messages.approvedChanges.originalRegistration,messages.conservationPages.reviews.speciesRequest.title,messages.approvedChanges.plantEdit,messages.approvedChanges.speciesEdit]) assert.ok(renderText(h).includes(label));
+    assert.equal(nodes(table).filter(n=>n.type==='td').some(n=>/Edit \d/.test(String(n.children))),false);
+  } finally {h.stop()}
+});
+
+test('approved original review uses verified fields and assets rather than mutable live values', async () => {
+  const historical={state:'partial',fields:{species_id:8,plant_scientific_name:'Original scientific name',species_scientific_name:null,scientific_name:null,common_name:null,content:{heightCm:12,morphology:'Original morphology',zone:'Original zone',notes:'Original notes'}},assets:[{id:'original-photo',content_type:'image/jpeg'}]};
+  const original=fixture({plant_id:24,status:'Approved',review_decision:'Approved',reviewed_by:'staff:original-officer',review_comment:'Original decision',reviewed_at:'2026-11-01T00:00:00Z',plant_scientific_name:'EDITED LIVE NAME',scientific_name:'EDITED CATALOGUE',content:{heightCm:99,morphology:'EDITED LIVE CONTENT'},assets:[{id:'edit-photo',content_type:'image/jpeg'}],historical_review:historical});
+  const edit=changeFixture({status:'Approved'});
+  const h=harness(url=>fixtureResponse(url,[original]),{},'en',undefined,null,{recordChangesHandler:()=>changesResponse([edit])});
+  try {
+    await h.state.loadObservations();
+    assert.equal(h.state.allReviewRows.value.length,2);
+    assert.equal(new Set(h.state.allReviewRows.value.map(r=>r.key)).size,2);
+    h.state.status.value='Approved';assert.equal(h.state.allReviewRows.value.length,2);
+    h.state.status.value='Pending Review';assert.equal(h.state.allReviewRows.value.length,0);
+    h.state.status.value='';await h.state.open(h.state.observations.value[0]);await flush();
+    assert.equal(h.state.selected.value.plantScientificName,'Original scientific name');
+    assert.equal(h.state.selected.value.height,'12 cm');assert.equal(h.state.selected.value.morphology,'Original morphology');
+    assert.equal(h.state.selected.value.speciesScientificName,'');assert.equal(h.state.selected.value.reviewedBy,'staff:original-officer');
+    assert.deepEqual(Array.from(h.state.selected.value.assets,a=>a.id),['original-photo']);
+    assert.ok(renderText(h).includes(messages.approvedChanges.historicalPartial));
+    assert.ok(!renderText(h).includes('EDITED LIVE'));assert.ok(!renderText(h).includes('EDITED CATALOGUE'));
+  } finally {h.stop()}
+});
+
+test('missing historical projection fails closed in the row and original review dialog', async () => {
+  const original=fixture({status:'Approved',review_decision:'Approved',plant_scientific_name:'Unverified current name',scientific_name:'Unverified current catalogue'});
+  const h=harness(url=>fixtureResponse(url,[original]));
+  try {
+    await h.state.loadObservations();await h.state.open(h.state.observations.value[0]);await flush();
+    const row=h.state.selected.value;
+    assert.equal(row.status,'Approved');assert.equal(row.height,'');assert.equal(row.zone,'');assert.equal(row.plantScientificName,'');assert.equal(row.assets.length,0);
+    assert.ok(renderText(h).includes(messages.approvedChanges.historicalUnavailable));
+    assert.ok(renderText(h).includes(messages.approvedChanges.historicalPhotosUnavailable));
+    assert.ok(!renderText(h).includes('Unverified current'));
+  } finally {h.stop()}
+});
+
+test('historical species mapping is opt-in and uses event-linked fields and authenticated photo URLs', async () => {
+  const request=requestFixture({request_status:'Approved',proposed_scientific_name:'Current species',historical_review:{state:'available',fields:{scientific_name:'Original species',common_name:'Original common'},assets:[{id:'historical-species-version-id',content_type:'image/jpeg'}]}});
+  const input={species_request:request};
+  assert.equal(speciesRequestIntegration.mapLinkedSpeciesRequest(input).scientificName,'Current species');
+  const history=speciesRequestIntegration.mapLinkedSpeciesRequest(input,true);
+  assert.equal(history.scientificName,'Original species');assert.equal(history.commonName,'Original common');
+  const h=harness(url=>fixtureResponse(url,[fixture()]));
+  try {assert.equal(h.state.assetUrl(history.assets[0].id),'/api/data/record-versions/version-id/photo');} finally {h.stop()}
+  delete request.historical_review;
+  const missing=speciesRequestIntegration.mapLinkedSpeciesRequest(input,true);
+  assert.equal(missing.scientificName,'');assert.equal(missing.historicalState,'unavailable');assert.equal(missing.assets.length,0);
+});

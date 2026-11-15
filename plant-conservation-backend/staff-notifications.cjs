@@ -85,6 +85,7 @@ function mountStaffNotifications(app, { pool }) {
       const rows=(await db.query(`SELECT n.id,n.created_at,n.read_at,n.delivery_seq::text AS seq,e.event_type,e.priority,e.occurred_at,
         CASE WHEN e.audience_role='Conservation Officer' AND e.event_type='registration_submitted'
           THEN e.metadata->'species_review_required' ELSE NULL END AS species_review_required,
+        CASE WHEN e.resource_kind='record_change' THEN (SELECT CASE WHEN r.plant_id IS NOT NULL THEN 'plant' ELSE 'species' END FROM plant_app.record_change_submission r WHERE r.id=e.record_change_id) ELSE NULL END AS change_target_type,
         e.resource_kind,COALESCE(e.observation_id,e.species_request_id::text,e.record_change_id) AS resource_id
         FROM ${joined} WHERE ${visible} AND n.delivery_seq<=$7::bigint AND ($8::bigint IS NULL OR n.delivery_seq<$8::bigint)
         ORDER BY n.delivery_seq DESC LIMIT $9`,[...args,cap,cursor?.before??null,limit+1])).rows;

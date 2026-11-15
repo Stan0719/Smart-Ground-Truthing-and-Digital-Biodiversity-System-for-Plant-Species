@@ -469,7 +469,7 @@ test('dashboard refresh uses actual sensor/alert data and does not fetch protect
     await page.getByRole('button', { name: 'Refresh dashboard', exact: true }).click()
     await expect(page.getByText('Isolated Dashboard Sensor', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'View All Alerts →', exact: true }).click()
-    await expect(page).toHaveURL(origin + '/admin/alerts')
+    await expect(page).toHaveURL(origin + '/admin/iot')
     // The profile-menu sign-out must also revoke the server cookie/session.
     await page.locator('.profile-button').click()
     await page.getByRole('menuitem', { name: 'Sign out', exact: true }).click()

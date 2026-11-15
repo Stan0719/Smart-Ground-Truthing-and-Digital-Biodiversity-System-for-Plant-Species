@@ -457,6 +457,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       </View>
     );
   }
+  if (edit && route.params?.observation?.status === "Rejected") return <View><Text accessibilityRole="alert">{t("recordEdits.finalRejected")}</Text></View>;
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
@@ -638,7 +639,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             <TouchableOpacity style={styles.secondaryButton} onPress={() => showQr(row)}>
               <Text>{t("fieldCollection.viewPersistentQrCode")}</Text>
             </TouchableOpacity>
-            {["Draft", "Correction Required", "Rejected"].includes(
+            {["Draft", "Correction Required"].includes(
               row.status,
             ) && (
               <TouchableOpacity

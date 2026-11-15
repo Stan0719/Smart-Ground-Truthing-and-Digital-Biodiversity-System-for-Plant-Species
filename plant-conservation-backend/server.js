@@ -8,6 +8,7 @@ const {
   requirePermission,
 } = require("./authorization.cjs");
 const { mountDomain } = require("./domain.cjs");
+const { mountObservationReviewHistory } = require("./observation-review-history.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
 const { mountUploads } = require("./uploads.cjs");
 const { mountPlantGallery } = require("./plant-gallery.cjs");
@@ -67,6 +68,7 @@ function createPlantApp({
   mountDomain(app, { auth, pool, allow, officerNotifications, qrPlantSchema });
   mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
+  mountObservationReviewHistory(app, { pool, allow });
   require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
@@ -113,6 +115,7 @@ function createPlantApp({
     if (status >= 500)
       console.error("Plant API request failed:", error.code ?? error.name);
     res.status(status).json({
+      ...(["SUBMISSION_REJECTED", "SPECIES_REQUEST_LINK_CONFLICT", "SPECIES_REQUEST_REVIEW_BUSY"].includes(error.code) ? { code: error.code } : {}),
       error:
         status >= 500
           ? "Service unavailable. Please try again."

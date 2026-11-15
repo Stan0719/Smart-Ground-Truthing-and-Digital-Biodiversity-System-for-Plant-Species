@@ -25,8 +25,7 @@ const expected = {
     ['iot-history-table', ['Reading ID', 'Recorded Time', 'Related Plant', 'Temperature', 'Humidity', 'Soil Moisture', 'Rainfall', 'Motion', 'GPS']],
   ],
   ThreatAlertsView: [
-    ['camera-event-table', ['Event ID', 'Event Type', 'Plant ID', 'Camera ID', 'Detection Confidence', 'Status', 'Detected At', 'Recording', 'Actions']],
-    ['threat-alert-table', ['Alert ID', 'Alert Type', 'Plant ID', 'Species', 'Reading Reference', 'Device', 'Detection Confidence', 'Severity', 'Status', 'Detected At', 'Actions']],
+    ['threat-alert-table', ['Alert ID', 'Alert Type', 'Reading Reference', 'Device', 'Status', 'Detected At', 'Actions']],
   ],
   ReportsView: [['report-summary-table', ['scientificName', 'commonName', 'approvedPlants']]],
 }
@@ -98,7 +97,7 @@ test('header styling is isolated from cards/charts/other roles and leaves status
     assert.ok(!properties['font-family'])
   }
   const alerts = read('views/conservation/ThreatAlertsView.vue')
-  assert.match(alerts, /class="badge unavailable"/)
+  assert.doesNotMatch(alerts, /class="badge unavailable"/)
   assert.match(alerts, /:class="alert.status\?\.toLowerCase\(\)"/)
   assert.match(alerts, /@click="openAlert\(alert\)"/)
   const iot = read('views/conservation/IoTMonitoringView.vue')

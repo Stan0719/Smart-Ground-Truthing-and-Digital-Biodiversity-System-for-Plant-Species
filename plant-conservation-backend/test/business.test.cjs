@@ -589,7 +589,6 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   );
   await pool.query("INSERT INTO plant_app.qr_code(plant_id,qr_code,status) SELECT plant_id,qr_token,'active' FROM plant_record WHERE qr_token='protected-test-qr'");
   for (const role of [undefined, "visitor", "bot", "other", "admin"]) {
-    const expected = role === "admin" ? 403 : 404;
     for (const path of [
       "/species/3",
       `/assets/${protectedImage.data.id}`,
@@ -597,7 +596,7 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
     ])
       assert.equal(
         (await call(path, role)).status,
-        expected,
+        role === "admin" ? (path.startsWith('/qr/') ? 403 : 200) : 404,
         path + ":" + role,
       );
     const search = await call("/species?q=Protected", role);

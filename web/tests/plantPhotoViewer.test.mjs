@@ -14,7 +14,7 @@ function text(value) { return typeof value === 'string' ? value : Array.isArray(
 function component(name, props = {}) {
   const source=readFileSync(new URL('../src/components/'+name+'.vue',import.meta.url),'utf8'),{descriptor}=parse(source)
   const script=compileScript(descriptor,{id:name}),template=compileTemplate({source:descriptor.template.content,filename:name+'.vue',id:name,compilerOptions:{bindingMetadata:script.bindings}})
-  const scope=vue.effectScope(),exports={},events=[],document={body:{style:{overflow:'auto'}}},cleanup=[]
+  const scope=vue.effectScope(),exports={},events=[],document={body:{style:{overflow:'auto'}},documentElement:{style:{overflow:'auto'},scrollTop:0},activeElement:null},cleanup=[]
   const context={exports,document,require(name) {
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
     if(name==='vue')return {...vue,onBeforeUnmount:fn=>cleanup.push(fn)}
@@ -108,5 +108,63 @@ test('history dates, review dates and enlargement captions share Malaysia format
     h.props.observations=[{...row,date:null,review:{...row.review,created_at:'invalid'}}];await vue.nextTick()
     assert.ok(h.render().some(n=>n.type==='strong'&&n.children==='Unavailable'))
     assert.ok(h.render().some(n=>n.type==='strong'&&n.children==='Rejected · Unavailable'))
+  } finally {h.stop()}
+})
+
+
+test('lightbox refresh keeps its stable active photo through reorder and closes on removal or URL revocation', async () => {
+  const h = component('PlantPhotoLightbox')
+  h.state.dialog.value = { open: false, showModal() { this.open = true }, close() { this.open = false } }
+  try {
+    await h.state.open([{ id: 'one', url: '/one' }, { id: 'two', url: '/two' }], 1, 'Photo', { isConnected: false })
+    h.state.reconcile([{ id: 'two', url: '/two' }, { id: 'one', url: '/one' }])
+    assert.equal(h.state.active.value.id, 'two'); assert.equal(h.state.dialog.value.open, true)
+    h.state.reconcile([{ id: 'one', url: '/one' }])
+    assert.equal(h.state.dialog.value.open, false); assert.equal(h.state.photos.value.length, 0)
+    await h.state.open([{ id: 'one', url: '/one' }], 0, 'Photo', { isConnected: false })
+    h.state.reconcile([{ id: 'one', url: '/different-authority' }])
+    assert.equal(h.state.dialog.value.open, false)
+  } finally { h.stop() }
+})
+
+test('shared zoom presentation copies the unchanged Species Detail reference without changing its page-local viewer',()=>{
+  const reference=readFileSync(new URL('../src/views/SpeciesDetailView.vue',import.meta.url),'utf8')
+  const shared=readFileSync(new URL('../src/components/PlantPhotoLightbox.vue',import.meta.url),'utf8')
+  assert.ok(!reference.includes('PlantPhotoLightbox'),'reference remains page-local, not replaced by the shared component')
+  const declaration=(source,selector)=>source.split('\n').find(line=>line.startsWith(selector+' {'))
+  for(const selector of ['.portrait-dialog','.portrait-dialog::backdrop','.zoom-content','.zoom-photo-frame','.zoom-content img','.zoom-close','.zoom-close svg','.zoom-close:hover','.zoom-close:focus-visible','.image-nav','.image-nav svg','.image-nav:hover','.image-nav:focus-visible','.zoom-photo-frame .previous-photo','.zoom-photo-frame .next-photo','.zoom-photo-frame .gallery-counter']) {
+    assert.ok(shared.includes(declaration(reference,selector).replaceAll('.portrait-dialog','.photo-lightbox')),selector+' matches the reference declaration')
+  }
+  assert.match(shared,/width: auto; height: auto; object-fit: contain/)
+  assert.ok(!shared.includes('class="lightbox-content"'));assert.ok(!shared.includes('<footer>'));assert.ok(!shared.includes('<header>'))
+  assert.ok(shared.includes('background: transparent; box-shadow: none; overflow: hidden;'))
+})
+test('multi-photo zoom shows reference circular controls and accurate counter while single-photo zoom hides navigation',async()=>{
+  const h=component('PlantPhotoLightbox')
+  h.state.dialog.value={open:false,showModal(){this.open=true},close(){this.open=false}}
+  try {
+    await h.state.open([{id:'one',url:'/authorized/one'},{id:'two',url:'/authorized/two'}],1,'Evidence',{isConnected:false})
+    let tree=h.render();assert.ok(tree.some(n=>n.props?.class==='image-nav previous-photo'));assert.ok(tree.some(n=>n.props?.class==='image-nav next-photo'))
+    assert.equal(text(tree.find(n=>n.props?.class==='gallery-counter')).replaceAll(' ','').startsWith('2/2'),true)
+    let stopped=0;tree.find(n=>n.props?.class==='image-nav previous-photo').props.onClick({stopPropagation(){stopped++}})
+    assert.equal(h.state.active.value.url,'/authorized/one');assert.equal(stopped,1)
+    await h.state.open([{id:'one',url:'/authorized/one'}],0,'Evidence',{isConnected:false})
+    tree=h.render();assert.ok(!tree.some(n=>String(n.props?.class).includes('image-nav')))
+    assert.ok(!tree.some(n=>n.props?.class==='gallery-counter'));assert.equal(tree.find(n=>n.type==='img').props.src,'/authorized/one')
+    assert.ok(tree.filter(n=>n.type==='button').every(n=>n.props.type==='button'))
+  } finally {h.stop()}
+})
+test('nested zoom Escape preserves parent root scroll lock, restores thumbnail focus and contains keyboard/click interaction',async()=>{
+  const h=component('PlantPhotoLightbox',{rootScrollLock:true})
+  h.document.documentElement.style.overflow='hidden';h.document.documentElement.scrollTop=315
+  let focused=0,stopped=0
+  h.state.dialog.value={open:false,showModal(){this.open=true},close(){this.open=false}}
+  try {
+    await h.state.open([{id:'approved',url:'/api/data/assets/approved'}],0,'Approved baseline',{isConnected:true,focus(options){assert.equal(options.preventScroll,true);focused++}})
+    assert.equal(h.document.body.style.overflow,'auto')
+    h.state.keydown({key:'Escape',preventDefault(){},stopPropagation(){stopped++}})
+    assert.equal(h.state.dialog.value.open,false);assert.equal(h.document.documentElement.style.overflow,'hidden')
+    assert.equal(h.document.documentElement.scrollTop,315);assert.equal(focused,1);assert.equal(stopped,1)
+    assert.deepEqual(h.events,[])
   } finally {h.stop()}
 })

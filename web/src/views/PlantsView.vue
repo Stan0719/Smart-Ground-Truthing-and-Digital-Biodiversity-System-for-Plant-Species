@@ -78,7 +78,7 @@ const loadSpecies = async () => {
 
 const canViewConservationStatus = computed(
   () =>
-    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer' || userRole.value === 'admin'),
 )
 
 const translatedOr = (key: string, fallback: string) => (te(key) ? t(key) : fallback)

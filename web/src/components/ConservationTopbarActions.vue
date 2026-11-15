@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch, computed } from 'vue'
+import { onBeforeUnmount, onMounted, nextTick, ref, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { logout, sessionSnapshot, subscribeSession } from '../services/auth'
 import { createOfficerInbox, type OfficerNotice } from '../services/officerNotifications'
+import { createOfficerNotificationRefresh } from '../services/officerNotificationRefresh'
 import { conservationProfile } from '../data/conservationProfile'
 import { monitoringLabels } from '../utils/officerMonitoringDisplay'
 import { formatObservationId } from '../utils/observationId'
@@ -51,6 +52,7 @@ const router = useRouter()
 const { t, locale } = useI18n()
 const actionsWrap = ref<HTMLElement | null>(null)
 const notificationsOpen = ref(false)
+const notificationList = ref<HTMLElement | null>(null)
 const profileOpen = ref(false)
 const notificationButton = ref<HTMLButtonElement | null>(null)
 const inbox = createOfficerInbox({ transport: (...args) => fetch(...args), navigate: async destination => {
@@ -60,12 +62,13 @@ const inbox = createOfficerInbox({ transport: (...args) => fetch(...args), navig
 } })
 const notificationState = inbox.state
 const nt = (key: string) => t('dashboardNotifications.officerLive.' + key)
-const noticeTitle = (notice: OfficerNotice) => nt(notice.event_type === 'species_request_submitted' ? 'speciesTitle' : notice.event_type === 'observation_resubmitted' ? 'correctionTitle' : notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
+const noticeTitle = (notice: OfficerNotice) => notice.event_type === 'record_change_submitted' ? (notice.change_target_type === 'plant' ? 'Approved Plant Change Submitted' : notice.change_target_type === 'species' ? 'Approved Species Change Submitted' : 'Approved-record Change Submitted') : nt(notice.event_type === 'species_request_submitted' ? 'speciesTitle' : notice.event_type === 'observation_resubmitted' ? 'correctionTitle' : notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
 // Labels are display-only. Navigation and acknowledgement retain the raw resource.
 const observationLabels = computed(() => monitoringLabels(notificationState.items
   .filter(item => item.resource.kind === 'observation').map(item => item.resource.id)))
 const noticeReference = (notice: OfficerNotice) => {
   const id = notice.resource.id
+  if (notice.resource.kind === 'record_change') return 'CHANGE-' + id.slice(0, 8).toUpperCase()
   if (notice.resource.kind === 'species_request') return formatSpeciesRequestId(id)
   const numeric = formatObservationId(id)
   if (numeric) return numeric
@@ -76,15 +79,30 @@ const noticeReference = (notice: OfficerNotice) => {
   const group = [...observationLabels.value.keys()].filter(value => value.replaceAll('-', '').slice(0, 8).toUpperCase() === prefix).sort()
   return `OBS-${prefix} ? ${group.indexOf(id) + 1}`
 }
-const noticeTime = (notice: OfficerNotice) => new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(notice.created_at))
+const noticeTime = (notice: OfficerNotice) => new Intl.DateTimeFormat(locale.value.startsWith('en') ? 'en-GB' : locale.value, {
+  day: 'numeric', month: 'long', year: 'numeric',
+  hour: 'numeric', minute: '2-digit', hour12: true,
+}).format(new Date(notice.created_at))
 let mounted = false
-let poll: ReturnType<typeof setInterval> | null = null
+let refreshLoop: ReturnType<typeof createOfficerNotificationRefresh> | null = null
+async function refreshNotifications() {
+  const list = notificationList.value
+  const originalScroll = list?.scrollTop
+  const top = list?.getBoundingClientRect().top || 0
+  const anchor = list && Array.from(list.querySelectorAll<HTMLElement>('[data-notification-id]'))
+    .find(item => item.getBoundingClientRect().bottom > top)
+  const anchorId = anchor?.dataset.notificationId
+  const offset = anchor ? anchor.getBoundingClientRect().top - top : 0
+  await inbox.refresh()
+  await nextTick()
+  if (!list?.isConnected || notificationList.value !== list || list.scrollTop !== originalScroll || !originalScroll || !anchorId) return
+  const updated = Array.from(list.querySelectorAll<HTMLElement>('[data-notification-id]'))
+    .find(item => item.dataset.notificationId === anchorId)
+  if (updated) list.scrollTop += updated.getBoundingClientRect().top - list.getBoundingClientRect().top - offset
+}
 const syncPolling = () => {
-  if (poll) clearInterval(poll)
-  poll = null
-  if (mounted && notificationState.ready) poll = setInterval(() => {
-    if (document.visibilityState === 'visible' && !notificationsOpen.value) void inbox.refreshCount()
-  }, 60000)
+  if (mounted && notificationState.ready) refreshLoop?.start()
+  else refreshLoop?.stop()
 }
 watch(() => notificationState.ready, syncPolling)
 const initialSession = sessionSnapshot()
@@ -92,7 +110,8 @@ inbox.setSession(initialSession.user, initialSession.pending)
 const unsubscribe = subscribeSession((user, pending) => {
   if (inbox.setSession(user, pending)) {
     closeMenus()
-    if (mounted && notificationState.ready) void inbox.load()
+    refreshLoop?.stop()
+    syncPolling()
   }
 })
 const onKeydown = (event: KeyboardEvent) => {
@@ -140,12 +159,17 @@ onMounted(() => {
   mounted = true
   document.addEventListener('click', handleOutsideClick)
   document.addEventListener('keydown', onKeydown)
-  void inbox.load()
+  refreshLoop = createOfficerNotificationRefresh({
+    refresh: refreshNotifications,
+    ready: () => notificationState.ready,
+    window,
+    document,
+  })
   syncPolling()
 })
 onBeforeUnmount(() => {
   mounted = false; unsubscribe(); inbox.dispose()
-  if (poll) clearInterval(poll)
+  refreshLoop?.stop()
   document.removeEventListener('click', handleOutsideClick)
   document.removeEventListener('keydown', onKeydown)
 })
@@ -193,10 +217,11 @@ onBeforeUnmount(() => {
           <p>{{ nt(notificationState.error) }}</p>
           <button type="button" :disabled="notificationState.loading || notificationState.busy || !notificationState.ready" @click="inbox.load(notificationState.error === 'loadFailed' && Boolean(notificationState.cursor))">{{ nt('retry') }}</button>
         </div>
-        <div v-if="notificationState.items.length || notificationState.hasMore" class="notification-list">
+        <div v-if="notificationState.items.length || notificationState.hasMore" ref="notificationList" class="notification-list">
           <button
             v-for="notification in notificationState.items"
             :key="notification.id"
+            :data-notification-id="notification.id"
             class="notification-item"
             :class="{ unread: notification.read_at === null }"
             :disabled="notificationState.busy || !notificationState.ready"

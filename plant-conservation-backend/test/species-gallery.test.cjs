@@ -27,6 +27,8 @@ const migrate = async (pool) => {
     "008-record-change-submissions.sql",
     "009-record-version-history.sql",
     "014-species-image-gallery.sql",
+    "016-species-request-content-revision.sql",
+    "017-species-review-cycle.sql",
   ])
     await pool.query(
       readFileSync(join(__dirname, "../migrations", name), "utf8"),
@@ -272,7 +274,7 @@ test("species gallery foundation: migration, service, public readers and evidenc
       assert.equal((await call("/assets/pending")).status, 404);
       assert.equal(
         (await call("/assets/a", "GET", "2".repeat(64))).status,
-        403,
+        404,
       );
     },
   );
@@ -403,6 +405,8 @@ test("species gallery foundation: migration, service, public readers and evidenc
 
 test("HTTP review paths preserve Officer images, request-photo history and retry safety", async (t) => {
   const pool = await createReadySpeciesPhotoDatabase();
+  await pool.query(readFileSync(join(__dirname, "../migrations/016-species-request-content-revision.sql"), "utf8"));
+  await pool.query(readFileSync(join(__dirname, "../migrations/017-species-review-cycle.sql"), "utf8"));
   t.after(() => pool.end());
   const sharp = require("sharp");
   const photo = await sharp({
@@ -472,6 +476,11 @@ test("HTTP review paths preserve Officer images, request-photo history and retry
       }),
   );
   const call = async (path, role, method, data) => {
+    if (/^\/species-requests\/\d+\/review$/.test(path) && data && !Object.hasOwn(data, 'expected_revision')) {
+      const row = (await pool.query('SELECT content_revision,review_cycle FROM species_request_submission WHERE request_id::text=$1', [path.split('/')[2]])).rows[0];
+      data = { ...data, expected_review_cycle: row?.review_cycle || 1, expected_revision: row?.content_revision || 1 };
+    }
+
     const r = await fetch(
       `http://127.0.0.1:${server.address().port}/api${path}`,
       {
@@ -496,7 +505,7 @@ test("HTTP review paths preserve Officer images, request-photo history and retry
     `/my-species-requests/${request.request_id}`,
     "bot",
     "PATCH",
-    patch,
+    { ...patch, expected_revision: request.content_revision || 1 },
   );
   assert.equal(corrected.status, 200, JSON.stringify(corrected.data));
   assert.equal(

@@ -119,7 +119,8 @@ test("detail visibility, observation ownership, latest readings and bounded devi
   const botanistMinePlant = await call("/plants/1?scope=mine", "bot");
   const visitorPlant = await call("/plants/1", "visitor");
   const officerPlant = await call("/plants/1", "officer");
-  assert.equal(adminPlant.status, 403);
+  assert.equal(adminPlant.status, 200);
+  assert.deepEqual(adminPlant.data, officerPlant.data);
   assert.equal(botanistPlant.data.plant.latitude, 11);
   assert.equal(botanistPlant.data.plant.longitude, 22);
   assert.equal(botanistPlant.data.plant.accuracy_m, 8);

@@ -18,7 +18,7 @@ const { t, te } = useI18n()
 const { isLoggedIn, userRole } = usePrototypeSession()
 const canViewStaffPlantData = computed(
   () =>
-    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer' || userRole.value === 'admin'),
 )
 const searchQuery = ref('')
 const healthFilter = ref('All')
@@ -128,7 +128,7 @@ const loadPlants = async () => {
       significance: prototype?.significance || '',
     }
 
-    const plantsResponse = await fetch('/api/plants')
+    const plantsResponse = await fetch(isLoggedIn.value ? '/api/plants' : '/api/plants?scope=public-web')
     if (!plantsResponse.ok) throw new Error('Unable to load plant records.')
 
     const plantsResult: PlantsResponse = await plantsResponse.json()

@@ -8,6 +8,8 @@ const { replaceRequestPhoto } = require("./species-photo-provenance.cjs");
 const { assertSpeciesReassignment } = require("./species-requests.cjs");
 const { assertQrAssignmentAllowed, normalizeQrPlantSchema } = require("./qr-plant-mode.cjs");
 
+const { requireReviewCycle } = require("./species-review-cycle.cjs");
+const { finalRejection } = require("./final-rejection.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const numericId = (value) => id(String(value));
@@ -191,11 +193,13 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
     const proposal = await normalized(plantProposal(edit), "plant");
     const result = await transaction(pool, async (c) => {
       const plant = await ownedPlant(c, numericId(req.params.id), req.user, true);
-      if (!["Pending Review", "Rejected", "Correction Required"].includes(plant.rbac_status))
+      if (plant.rbac_status === "Rejected") finalRejection();
+      if (!["Pending Review", "Correction Required"].includes(plant.rbac_status))
         fail(409, "Approved plants require a reviewed change submission.");
       const observation = (await c.query("SELECT * FROM plant_observation WHERE plant_id=$1 AND owner_subject=$2 ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE",
         [plant.plant_id, subject(req.user)])).rows[0];
-      if (!observation || !["Pending Review", "Rejected", "Correction Required"].includes(observation.status))
+      if (observation?.status === "Rejected") finalRejection();
+      if (!observation || !["Pending Review", "Correction Required"].includes(observation.status))
         fail(409, "Plant observation is unavailable for correction.");
       if (observation.revision !== expectedRevision) fail(409, "Plant changed. Reload its latest version before saving.");
       const before = await pendingPlantSnapshot(c, plant, observation, qrPlantSchema);
@@ -232,11 +236,18 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
   });
 
   app.patch("/api/my-species-requests/:id", allow("plants.create"), async (req, res) => {
-    const proposal = await normalized(speciesProposal(req.body), "species");
+    const { expected_revision: expectedRevision, ...edit } = req.body || {};
+    const proposal = await normalized(speciesProposal(edit), "species");
     const result = await transaction(pool, async (c) => {
       const row = await ownedSpeciesRequest(c, numericId(req.params.id), req.user, true);
-      if (!["Pending Review", "Rejected", "Correction Required"].includes(row.request_status))
+      if (row.request_status === "Rejected") finalRejection();
+      if (!["Pending Review", "Correction Required"].includes(row.request_status))
         fail(409, "Approved species require a reviewed change submission.");
+      await requireReviewCycle(c, fail);
+      if (!Number.isSafeInteger(row.content_revision) || row.content_revision < 1)
+        fail(503, "Species editing is unavailable until content revision metadata is installed.");
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision !== row.content_revision)
+        return { version_conflict: true };
       const before = { request_id: row.request_id, species_id: row.proposed_species_id,
         ...speciesSnapshot(row) };
       if (row.proposed_species_id) {
@@ -267,6 +278,10 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
         baselineAt: row.submitted_at, baselineReview: row });
       await audit(c, req.user, "pending_species_updated", row.request_id);
       return { request_id: row.request_id, status: "Pending Review" };
+    });
+    if (result.version_conflict) return res.status(409).json({
+      code: "SPECIES_REQUEST_EDIT_VERSION_CONFLICT",
+      error: "This species request changed. Load and inspect the latest version before saving.",
     });
     res.json(result);
   });
@@ -342,6 +357,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
           proposedPhoto: proposal.photo ? Buffer.from(proposal.photo.base64, "base64") : original.photo,
           changeId, baselineAt: original.submitted_at, baselineReview: original });
       }
+      if (officerNotifications) await officerNotifications.enqueueRecordChange(c, changeId);
       await audit(c, req.user, "record_change_submitted", changeId);
       return { id: changeId, status: "Pending Review" };
     });
@@ -351,9 +367,18 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
   const read = (req, res, next) => allow(permitted(req.user, "species.manage") ? "species.manage" : "plants.create")(req, res, next);
   app.get("/api/record-changes", read, async (req, res) => {
     const officer = permitted(req.user, "species.manage");
-    const rows = (await pool.query("SELECT id,plant_id,species_id,owner_subject,status,revision,base_snapshot,proposed_snapshot - 'photos' - 'photo' AS proposed_snapshot,CASE WHEN jsonb_typeof(proposed_snapshot->'photos')='array' THEN jsonb_array_length(proposed_snapshot->'photos') WHEN proposed_snapshot ? 'photo' THEN 1 ELSE 0 END AS proposal_photo_count,review_comment,reviewed_by,reviewed_at,created_at FROM record_change_submission WHERE ($1 OR owner_subject=$2) ORDER BY created_at DESC LIMIT 500",
-      [officer, subject(req.user)])).rows;
-    res.json({ changes: rows });
+    const limit = req.query.limit === undefined ? 500 : Number(req.query.limit);
+    const status = req.query.status || '', search = req.query.search || '', cursor = req.query.cursor || '';
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500 ||
+      !['','Pending Review','Approved','Rejected'].includes(status) || typeof search !== 'string' || search.length > 200 ||
+      typeof cursor !== 'string' || (cursor && !/^[a-f0-9-]{36}$/i.test(cursor))) fail(400, 'Invalid change queue filters.');
+    const rows = (await pool.query(`SELECT id,plant_id,species_id,owner_subject,status,revision,base_snapshot,proposed_snapshot - 'photos' - 'photo' AS proposed_snapshot,CASE WHEN jsonb_typeof(proposed_snapshot->'photos')='array' THEN jsonb_array_length(proposed_snapshot->'photos') WHEN proposed_snapshot ? 'photo' THEN 1 ELSE 0 END AS proposal_photo_count,review_comment,reviewed_by,reviewed_at,created_at
+      FROM record_change_submission WHERE ($1 OR owner_subject=$2) AND ($3='' OR status=$3)
+      AND ($4='' OR concat_ws(' ',id,plant_id::text,species_id::text,owner_subject,base_snapshot->>'scientific_name',proposed_snapshot->>'scientific_name') ILIKE '%' || $4 || '%')
+      AND ($5='' OR (created_at,id)<(SELECT created_at,id FROM record_change_submission WHERE id=$5))
+      ORDER BY created_at DESC,id DESC LIMIT $6`, [officer, subject(req.user),status,search,cursor,limit+1])).rows;
+    const more = rows.length > limit, changes = rows.slice(0,limit);
+    res.json({ changes, page: { has_more: more, next_cursor: more ? changes.at(-1).id : null } });
   });
   app.get("/api/record-changes/:id", read, async (req, res) => {
     const row = (await pool.query("SELECT id,plant_id,species_id,owner_subject,status,revision,base_snapshot,proposed_snapshot - 'photos' - 'photo' AS proposed_snapshot,CASE WHEN jsonb_typeof(proposed_snapshot->'photos')='array' THEN jsonb_array_length(proposed_snapshot->'photos') WHEN proposed_snapshot ? 'photo' THEN 1 ELSE 0 END AS proposal_photo_count,review_comment,reviewed_by,reviewed_at,created_at FROM record_change_submission WHERE id=$1 AND ($2 OR owner_subject=$3)",

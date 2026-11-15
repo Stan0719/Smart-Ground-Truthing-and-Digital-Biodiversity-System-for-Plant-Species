@@ -21,10 +21,11 @@ async function createReadySpeciesPhotoDatabase() {
   const { join } = require("node:path");
   const pool = await createPlantDatabase();
   try {
-    await pool.query("CREATE SCHEMA plant_app; SET search_path TO plant_app,pg_catalog;");
+    await pool.query("CREATE SCHEMA IF NOT EXISTS plant_app; SET search_path TO plant_app,pg_catalog;");
     await pool.query(readFileSync(join(__dirname, "../schema.postgres.sql"), "utf8"));
     for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql",
-      "008-record-change-submissions.sql", "009-record-version-history.sql"])
+      "008-record-change-submissions.sql", "009-record-version-history.sql",
+      "016-species-request-content-revision.sql", "017-species-review-cycle.sql"])
       await pool.query(readFileSync(join(__dirname, "../migrations", name), "utf8"));
     await useVerifiedPhotoKeyTypes(pool);
     for (const name of ["014-species-image-gallery.sql", "015-species-photo-roles.sql"])

@@ -1,7 +1,9 @@
 "use strict";
 const roles = ["Visitor", "Botanist", "Conservation Officer", "Administrator"];
 const grants = Object.freeze({
-  // Page-scoped reads only; Administrator does not gain scientific or write APIs.
+  // Catalogue capabilities are used only by Plant/Species/asset GET handlers.
+  "plants.catalogue.read": ["Guest", "Visitor", "Botanist", "Conservation Officer", "Administrator"],
+  "plants.catalogue.scientific.read": ["Administrator"],
   "plants.detail.public.read": ["Guest", "Visitor", "Botanist", "Conservation Officer", "Administrator"],
   "plants.detail.read": ["Conservation Officer", "Administrator"],
   "accounts.manage": ["Administrator"],
@@ -106,6 +108,13 @@ function visibilityFor(user) {
   if (permitted(user, "plants.scientific.read")) return ["public", "internal"];
   return permitted(user, "plants.public.read") ? ["public"] : [];
 }
+function canReadScientificCatalogue(user) {
+  return permitted(user, "plants.scientific.read") || permitted(user, "plants.catalogue.scientific.read");
+}
+function catalogueVisibilityFor(user) {
+  return permitted(user, "plants.catalogue.scientific.read")
+    ? ["public", "internal", "protected"] : visibilityFor(user);
+}
 function projectSpecies(row, scientific = false) {
   const data = row.rbac_data || {};
   const result = {
@@ -137,7 +146,7 @@ function assertEdit(user, observation) {
     observation.owner_subject !== `staff:${user.id}`
   )
     return 403;
-  return ["Draft", "Correction Required", "Rejected"].includes(
+  return ["Draft", "Correction Required"].includes(
     observation.status,
   )
     ? 0
@@ -164,6 +173,8 @@ function assertReview(user, observation, next, comment) {
   return 0;
 }
 module.exports = {
+  canReadScientificCatalogue,
+  catalogueVisibilityFor,
   roles,
   grants,
   permitted,

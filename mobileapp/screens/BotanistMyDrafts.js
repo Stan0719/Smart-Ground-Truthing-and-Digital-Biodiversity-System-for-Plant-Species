@@ -118,6 +118,7 @@ export default function BotanistMyDrafts({ route, navigation }) {
   const categories = ["all", "plant-records", "species-requests", "observations", "corrections"];
 
   return <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
+    <Text accessibilityRole="text">{t("recordEdits.draftFinal")}</Text>
     <ScrollView contentContainerStyle={[styles.content, tablet && styles.tabletContent]}
       refreshControl={<RefreshControl refreshing={state.loading} onRefresh={() => { void load(); }} tintColor="#2F6B4F" />}>
       <View style={styles.header}>

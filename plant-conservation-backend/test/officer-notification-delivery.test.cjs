@@ -8,7 +8,7 @@ test('Officer real notifications: isolated committed workflows and durable deliv
   const {testPool}=await import('../../web/server/test-postgres.mjs');const database=await testPool();t.after(()=>database.end());
   await database.query('CREATE SCHEMA plant_app; SET search_path=plant_app,pg_catalog');
   await database.query(readFileSync(join(__dirname,'../schema.postgres.sql'),'utf8'));
-  for(const file of ['004-species-requests.sql','006-atomic-plant-submissions.sql','008-record-change-submissions.sql','009-record-version-history.sql','013-staff-notification-foundation.sql'])
+  for(const file of ['004-species-requests.sql','006-atomic-plant-submissions.sql','008-record-change-submissions.sql','009-record-version-history.sql','013-staff-notification-foundation.sql','016-species-request-content-revision.sql','017-species-review-cycle.sql'])
     await database.query(readFileSync(join(__dirname,'../migrations',file),'utf8'));
   await database.query(`CREATE TABLE plant_app.qr_code(qr_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,plant_id INTEGER UNIQUE,qr_code TEXT UNIQUE,status TEXT,assigned_at timestamptz,activated_at timestamptz,retired_at timestamptz);
     INSERT INTO plant_app.qr_code(qr_code,status) VALUES('one','generated'),('two','generated'),('three','generated');
@@ -183,8 +183,8 @@ test('Officer real notifications: isolated committed workflows and durable deliv
   });
 
   await t.test('authorized read evidence verifies initial correction versions and fails closed after an ordinary edit',async()=>{
-    await database.query("INSERT INTO public.qr_code(qr_code,status) VALUES('evidence','generated')");
-    const qr=(await database.query("SELECT qr_id FROM public.qr_code WHERE qr_code='evidence'")).rows[0].qr_id;
+    await database.query("INSERT INTO plant_app.qr_code(qr_code,status) VALUES('evidence','generated')");
+    const qr=(await database.query("SELECT qr_id FROM plant_app.qr_code WHERE qr_code='evidence'")).rows[0].qr_id;
     const created=await call('/plant-submissions','POST',registration(qr,'read-evidence'));assert.equal(created.status,201);const row=created.data;
     const read=async user=>(await call(`/observations/${row.id}`,'GET',undefined,user)).data.observation;
     assert.equal((await read('one')).is_correction_resubmission,null);

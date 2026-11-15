@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import SubmissionChanges from '../../components/conservation/SubmissionChanges.vue'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Directive } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { currentUser, sessionSnapshot, subscribeSession } from '../../services/auth'
 import { ReviewApiError, createReviewRequest, performObservationReview, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions, type ReviewDecision } from '../../services/observationReview'
 import { mapLinkedSpeciesRequest, type LinkedSpeciesRequest } from '../../services/reviewSpeciesRequest'
 import AppModal from '../../components/conservation/AppModal.vue'
+import ActionFeedback from '../../components/ActionFeedback.vue'
+import ObservationReviewHistory from '../../components/conservation/ObservationReviewHistory.vue'
+import { formatReviewTimestamp } from '../../services/observationReviewHistory'
 import { formatPlantId } from '../../utils/plantId'
 import { observationOrigin, observationQueueUrl, readQueuePage, type ObservationOrigin, type ObservationQueue } from '../../services/observationQueue'
 
@@ -24,6 +28,9 @@ interface ObservationView {
   createdAt: string
   updatedAt: string
   speciesId: string
+  plantScientificName: string
+  speciesScientificName: string
+  submissionUpdate: unknown
   scientificName: string
   commonName: string
   height: string
@@ -81,6 +88,41 @@ const status = ref('')
 const species = ref('')
 const owner = ref('')
 const date = ref('')
+const modalText = (key: string) => t('observationModal.' + key)
+const modalDate = (value: string) => formatReviewTimestamp(value, locale.value)
+const modalHeaders = new WeakMap<HTMLElement, { observer: ResizeObserver; observationId: string; measure: () => void }>()
+const vObservationDialog: Directive<HTMLElement, string> = {
+  mounted(root, binding) {
+    const header = root.querySelector<HTMLElement>('.modal-header')
+    const card = root.querySelector<HTMLElement>('.modal-card')
+    if (!header || !card) return
+    const measure = () => {
+      card.style.setProperty('--observation-header-height', `${header.offsetHeight}px`)
+      const actionsHeight = root.querySelector<HTMLElement>('.observation-decision-actions')?.offsetHeight || 0
+      card.style.setProperty('--observation-review-height', `${Math.max(0, card.clientHeight - header.offsetHeight - actionsHeight - 56)}px`)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(header)
+    observer.observe(card)
+    const actions = root.querySelector<HTMLElement>('.observation-decision-actions')
+    if (actions) observer.observe(actions)
+    measure()
+    modalHeaders.set(root, { observer, observationId: binding.value, measure })
+  },
+  updated(root, binding) {
+    const current = modalHeaders.get(root)
+    if (!current) return
+    current.measure()
+    if (current.observationId === binding.value) return
+    current.observationId = binding.value
+    const card = root.querySelector<HTMLElement>('.modal-card')
+    if (card) card.scrollTop = 0
+    root.querySelector<HTMLButtonElement>('.close-button')?.focus({ preventScroll: true })
+  },
+  unmounted(root) { modalHeaders.get(root)?.observer.disconnect(); modalHeaders.delete(root) },
+}
+
+const reviewHistoryRefresh = ref(0)
 const reviewMode = ref(false)
 const reviewComment = ref('')
 const reviewSaving = ref(false)
@@ -88,6 +130,12 @@ const reviewNeedsReload = ref(false)
 const reviewAcknowledged = ref(true)
 const reviewFeedback = ref('')
 const reviewSuccess = ref(false)
+const commentFeedbackId = ref<number | null>(null)
+let commentFeedbackSequence = 0
+const reviewCommentError = computed(() => !reviewSuccess.value && reviewFeedback.value === rt('feedback.commentRequired'))
+function dismissCommentFeedback(id: number) {
+  if (commentFeedbackId.value === id) commentFeedbackId.value = null
+}
 const rt = (key: string, params?: Record<string, string | number>) => t('conservationPages.reviews.' + key, params || {})
 const reviewRequest = createReviewRequest(rt, (...args) => fetch(...args))
 let detailRequest = 0
@@ -189,6 +237,9 @@ const mapObservation = (value: unknown): ObservationView | null => {
     createdAt: stringValue(item.created_at),
     updatedAt: stringValue(item.updated_at),
     speciesId: stringValue(item.species_id),
+    plantScientificName: typeof item.plant_scientific_name === 'string' ? item.plant_scientific_name : '',
+    speciesScientificName: typeof item.species_scientific_name === 'string' ? item.species_scientific_name : (typeof item.scientific_name === 'string' ? item.scientific_name : ''),
+    submissionUpdate: item.submission_update,
     scientificName: stringValue(item.scientific_name),
     commonName: stringValue(item.common_name),
     height: height ? `${height} cm` : '',
@@ -301,11 +352,13 @@ async function loadObservations(append = false) {
 
 async function open(item: ObservationView, reviewing = false, expectedOrigin?: ObservationOrigin) {
   if (reviewSaving.value || (reviewing && !authorizedOfficer.value)) return
+  reviewHistoryRefresh.value = 0
   reviewMode.value = reviewing
   reviewComment.value = item.reviewComment
   reviewNeedsReload.value = false
   reviewAcknowledged.value = true
   reviewFeedback.value = ''
+  commentFeedbackId.value = null
   reviewSuccess.value = false
   const requestId = ++detailRequest
   selected.value = item
@@ -348,6 +401,7 @@ function closeModal(force = false) {
   reviewMode.value = false
   reviewComment.value = ''
   reviewFeedback.value = ''
+  commentFeedbackId.value = null
   reviewNeedsReload.value = false
   detailRequest++
   selected.value = null
@@ -384,7 +438,13 @@ async function reloadReview() {
 }
 async function decide(decision: ReviewDecision) {
   if (!reviewAllowed.value || !selected.value || !reviewDecisions.value.includes(decision) || !positiveRevision(selected.value.revision)) return
-  if (!reviewCommentValid(decision, reviewComment.value)) { reviewFeedback.value = rt('feedback.commentRequired'); return }
+  if (!reviewCommentValid(decision, reviewComment.value)) {
+    reviewSuccess.value = false
+    reviewFeedback.value = rt('feedback.commentRequired')
+    commentFeedbackId.value = ++commentFeedbackSequence
+    return
+  }
+  commentFeedbackId.value = null
   const { id, revision } = selected.value
   const typedComment = reviewComment.value, token = detailRequest
   reviewSaving.value = true; reviewFeedback.value = ''; reviewSuccess.value = false
@@ -400,6 +460,7 @@ async function decide(decision: ReviewDecision) {
     const result = await performObservationReview({ id, revision, decision, comment: typedComment, request: reviewRequest, read: readReviewObservation,
       current: () => !disposed && token === detailRequest && selected.value?.id === id && authorizedOfficer.value, invalidResponse: rt('feedback.invalidResponse') })
     if (!result) return
+    if (result.committed) reviewHistoryRefresh.value++
     if (result.observation) updateObservation(result.observation)
     reviewNeedsReload.value = result.needsReload || (result.error instanceof ReviewApiError && [401, 403].includes(result.error.status))
     if (result.kind === 'saved') { reviewSuccess.value = true; reviewComment.value = selected.value?.reviewComment || ''; reviewFeedback.value = rt('feedback.saved') }
@@ -439,7 +500,7 @@ function compactIdentifierTokens(values: readonly string[], part: (value: string
   }))
 }
 const observationLabels = computed(() => compactIdentifierTokens(observations.value.map(item => item.id)))
-const observationLabel = (id: string) => `OBS-${observationLabels.value.get(id) || id}`
+const observationLabel = (id: string) => `OBS-${observationLabels.value.get(id) || compactIdentifierTokens([id]).get(id) || id}`
 const subjectPart = (subject: string) => /^(staff|visitor):/.test(subject) ? subject.slice(subject.indexOf(':') + 1) : subject
 const subjectTokens = computed(() => compactIdentifierTokens(observations.value.map(item => item.ownerSubject).filter(Boolean), subjectPart))
 const submitterLabel = (subject: string) => {
@@ -449,10 +510,14 @@ const submitterLabel = (subject: string) => {
   // Other submitters have no authorized name/directory mapping on this page.
   if (authorizedOfficer.value && account && subject === `staff:${account.id}` && account.name?.trim()) return account.name.trim()
   const key = subject.startsWith('staff:') ? 'staffIdentifier' : subject.startsWith('visitor:') ? 'visitorIdentifier' : 'submitterIdentifier'
-  return t('conservationPages.observations.' + key, { id: subjectTokens.value.get(subject) || subjectPart(subject) })
+  return t('conservationPages.observations.' + key, { id: subjectTokens.value.get(subject) || compactIdentifierTokens([subject], subjectPart).get(subject) || subjectPart(subject) })
 }
-async function copyIdentifier(value: string, kind: 'observation' | 'subject') {
-  if (!authorizedOfficer.value || copyPending.value || !observations.value.some(item => (kind === 'observation' ? item.id : item.ownerSubject) === value) || !value) return
+async function copyIdentifier(value: string, kind: 'observation' | 'subject', reviewSubject = false) {
+  if (!authorizedOfficer.value || copyPending.value || !value) return
+  const listed = observations.value.some(item => (kind === 'observation' ? item.id : item.ownerSubject) === value)
+  const detail = selected.value
+  const displayedInModal = detail && (kind === 'observation' ? detail.id === value : detail.ownerSubject === value || reviewSubject)
+  if (!listed && !displayedInModal) return
   const attempt = ++copyAttempt, actor = session.value.user?.id
   const current = () => !disposed && attempt === copyAttempt && authorizedOfficer.value && actor === session.value.user?.id
   copyPending.value = true; copiedKey.value = ''; copyFeedback.value = ''; copyFailed.value = false
@@ -594,38 +659,97 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
     <button v-if="hasMore || loadError" class="action-button" :disabled="isLoading" @click="loadObservations(Boolean(nextCursor))">{{ rt('queues.loadMore') }}</button>
   </section>
 
-  <AppModal v-if="selected && !historyModal" :title="t('conservationPages.observations.observationTitle', { id: selected.id })" :subtitle="`${selected.plantDisplayId} · ${speciesName(selected)}`" wide @close="closeModal()">
-    <p v-if="selected.origin === 'unknown'" role="status">{{ rt('queues.originUnverified') }}</p>
-    <p v-if="detailLoading" class="detail-state">{{ t('conservationPages.observations.loadingDetails') }}</p><p v-if="detailError" class="detail-state error-state">{{ detailError }}</p>
-    <template v-if="!reviewNeedsReload">
-    <dl class="detail-list">
-      <div><dt>{{ t('conservationPages.observations.observationId') }}</dt><dd class="full-identifier">{{ selected.id }}</dd></div>
-      <div><dt>{{ t('conservationPages.observations.submittedBy') }}</dt><dd class="full-identifier">{{ textOrUnavailable(selected.ownerSubject) }}</dd></div><div><dt>{{ t('conservationPages.observations.status') }}</dt><dd>{{ label(selected.status) }}</dd></div>
-      <div><dt>{{ t('conservationPages.observations.created') }}</dt><dd>{{ formatDate(selected.createdAt) }}</dd></div><div><dt>{{ t('conservationPages.observations.lastUpdated') }}</dt><dd>{{ formatDate(selected.updatedAt) }}</dd></div>
-      <div><dt>{{ t('conservationPages.observations.height') }}</dt><dd>{{ textOrUnavailable(selected.height) }}</dd></div><div><dt>{{ t('conservationPages.observations.growthStage') }}</dt><dd>{{ label(selected.lifeStage) }}</dd></div><div><dt>{{ t('conservationPages.observations.healthStatus') }}</dt><dd>{{ label(selected.healthStatus) }}</dd></div>
-      <div><dt>{{ t('conservationPages.observations.morphology') }}</dt><dd>{{ textOrUnavailable(selected.morphology) }}</dd></div><div><dt>{{ t('conservationPages.observations.notes') }}</dt><dd>{{ textOrUnavailable(selected.notes) }}</dd></div>
-      <div><dt>{{ t('conservationPages.observations.coordinates') }}</dt><dd>{{ selected.latitude !== '' && selected.longitude !== '' ? `${selected.latitude}, ${selected.longitude}` : '—' }}</dd></div><div><dt>{{ t('conservationPages.observations.gpsAccuracy') }}</dt><dd>{{ selected.gpsAccuracy !== '' ? `${selected.gpsAccuracy} m` : '—' }}</dd></div>
-      <div><dt>{{ t('conservationPages.observations.reviewState') }}</dt><dd>{{ label(selected.reviewDecision || selected.status) }}</dd></div><div><dt>{{ t('conservationPages.observations.reviewedAt') }}</dt><dd>{{ formatDate(selected.reviewedAt) }}</dd></div><div><dt>{{ t('conservationPages.observations.reviewComments') }}</dt><dd>{{ textOrUnavailable(selected.reviewComment) }}</dd></div>
-    </dl>
-    <template v-if="Object.keys(selected.taxonomy).length"><h3>{{ t('conservationPages.observations.taxonomy') }}</h3><dl class="detail-list"><div v-for="(value, key) in selected.taxonomy" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div></dl></template>
-    <h3>{{ t('conservationPages.observations.media') }}</h3><p v-if="!selected.assets.length">{{ t('conservationPages.observations.noAssets') }}</p>
-    <div v-else class="submission-image-grid"><article v-for="asset in selected.assets" :key="asset.id" class="submitted-image-item"><div class="submitted-image-preview"><img v-if="asset.contentType.startsWith('image/') && !failedAssets.has(asset.id)" :src="assetUrl(asset.id)" :alt="t('conservationPages.observations.imageAlt', { observation: selected.id, asset: asset.id })" loading="lazy" @error="imageFailed(asset.id)" /><span v-else>{{ t(asset.contentType.startsWith('image/') ? 'conservationPages.observations.imageUnavailable' : 'conservationPages.observations.attachment') }}</span></div><div class="asset-caption"><strong :title="asset.id">{{ asset.id }}</strong><small>{{ asset.contentType }}</small></div></article></div>
+  <AppModal v-if="selected && !historyModal" v-observation-dialog="selected.id" class="observation-dialog" :title="modalText('title')" wide accessible @close="closeModal()">
+    <template #title>
+      <span class="observation-title-layout">
+        <span class="observation-title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 2 21 2c0 4-1 11-5 15-2 2-4 3-5 3ZM2 22l12-12" /></svg></span>
+        <span class="observation-title-copy"><span>{{ modalText('title') }}</span><span class="observation-title-subtitle"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation')"><svg v-if="copiedKey !== `observation:${selected.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></span></span></span>
+      </span>
     </template>
-    <section v-if="reviewMode" class="officer-review" :aria-busy="reviewSaving || detailLoading">
-      <h3>{{ rt('officerReview') }}</h3>
-      <p>{{ t('conservationPages.observations.status') }}: {{ reviewNeedsReload ? rt('unavailable') : label(selected.status) }}</p>
+    <ActionFeedback v-if="commentFeedbackId !== null" :key="commentFeedbackId" :feedback-id="commentFeedbackId" variant="error" :message="rt('feedback.commentRequired')" @dismiss="dismissCommentFeedback" />
+    <div class="observation-dialog-content"><p class="copy-feedback" :class="{ warning: copyFailed }" role="status" aria-live="polite" aria-atomic="true">{{ copyFeedback }}</p>
+      <p v-if="selected.origin === 'unknown'" role="status">{{ rt('queues.originUnverified') }}</p>
+      <p v-if="detailLoading" class="detail-state" role="status">{{ t('conservationPages.observations.loadingDetails') }}</p>
+      <p v-if="detailError" class="detail-state error-state" role="alert">{{ detailError }}</p>
+      <p v-if="selected.status === 'Rejected'" class="review-feedback error" role="status">{{ t('submissionChanges.finalRejected') }}</p>
+      <SubmissionChanges v-if="selected.status === 'Pending Review'" :update="selected.submissionUpdate" :revision="selected.revision" :busy="reviewSaving || detailLoading" @reload="reloadReview" />
+      <div v-if="!reviewAcknowledged || reviewNeedsReload" class="review-feedback error" role="alert"><p>{{ t('submissionChanges.conflict') }}</p><button type="button" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ t('submissionChanges.reload') }}</button></div>
+      <div class="observation-dialog-columns">
+        <div class="observation-information-column">
+          <template v-if="!reviewNeedsReload">
+            <section class="observation-information-section">
+              <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg>{{ modalText('details') }}</h3>
+              <dl class="detail-list observation-details">
+                <div><dt>{{ t('conservationPages.observations.observationId') }}</dt><dd class="full-identifier"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation')"><svg v-if="copiedKey !== `observation:${selected.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></span></dd></div>
+                <div><dt>{{ t('conservationPages.observations.status') }}</dt><dd><span class="badge" :style="workflowBadgeStyle(selected.status)">{{ label(selected.status) }}</span></dd></div>
+                <div><dt>{{ t('conservationPages.observations.submittedBy') }}</dt><dd class="full-identifier"><span class="identifier-line"><span :title="selected.ownerSubject">{{ submitterLabel(selected.ownerSubject) }}</span><template v-if="selected.ownerSubject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" @click="copyIdentifier(selected.ownerSubject, 'subject')"><svg v-if="copiedKey !== `subject:${selected.ownerSubject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></span></dd></div>
+                <div><dt>{{ t('conservationPages.observations.created') }}</dt><dd>{{ modalDate(selected.createdAt) }}</dd></div>
+                <div><dt>{{ t('conservationPages.observations.lastUpdated') }}</dt><dd>{{ modalDate(selected.updatedAt) }}</dd></div>
+                <div><dt>{{ t('conservationPages.observations.reviewedAt') }}</dt><dd>{{ modalDate(selected.reviewedAt) }}</dd></div>
+              </dl>
+            </section>
+            <section class="observation-information-section">
+              <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 2 21 2c0 4-1 11-5 15-2 2-4 3-5 3ZM2 22l12-12" /></svg>{{ modalText('plantSpecies') }}</h3>
+              <dl class="detail-list">
+                <div><dt>{{ t('conservationPages.observations.plantId') }}</dt><dd>{{ selected.plantDisplayId }}</dd></div>
+                <div><dt>{{ t('submissionChanges.plantName') }}</dt><dd><em>{{ textOrUnavailable(selected.plantScientificName) }}</em></dd></div>
+                <div><dt>{{ modalText('scientificName') }}</dt><dd><em>{{ textOrUnavailable(selected.speciesScientificName) }}</em></dd></div>
+                <div><dt>{{ modalText('commonName') }}</dt><dd>{{ textOrUnavailable(selected.commonName) }}</dd></div>
+                <div><dt>{{ modalText('speciesId') }}</dt><dd>{{ textOrUnavailable(selected.speciesId) }}</dd></div>
+              </dl>
+            </section>
+            <section class="observation-information-section">
+              <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-9M12 13C5 13 3 9 3 5c6 0 9 3 9 8ZM12 17c0-6 3-9 9-9 0 6-3 9-9 9Z" /></svg>{{ modalText('observationInformation') }}</h3>
+              <dl class="detail-list">
+                <div><dt>{{ t('conservationPages.observations.height') }}</dt><dd>{{ textOrUnavailable(selected.height) }}</dd></div>
+                <div><dt>{{ t('conservationPages.observations.growthStage') }}</dt><dd>{{ label(selected.lifeStage) }}</dd></div>
+                <div><dt>{{ t('conservationPages.observations.healthStatus') }}</dt><dd>{{ label(selected.healthStatus) }}</dd></div>
+                <div><dt>{{ t('conservationPages.observations.morphology') }}</dt><dd>{{ textOrUnavailable(selected.morphology) }}</dd></div>
+                <div class="observation-field-wide"><dt>{{ t('conservationPages.observations.notes') }}</dt><dd>{{ textOrUnavailable(selected.notes) }}</dd></div>
+              </dl>
+              <template v-if="Object.keys(selected.taxonomy).length"><h4>{{ t('conservationPages.observations.taxonomy') }}</h4><dl class="detail-list"><div v-for="(value, key) in selected.taxonomy" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div></dl></template>
+            </section>
+            <section class="observation-information-section">
+              <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>{{ modalText('location') }}</h3>
+              <dl class="detail-list">
+                <div><dt>{{ t('conservationPages.observations.coordinates') }}</dt><dd>{{ selected.latitude !== '' && selected.longitude !== '' ? `${selected.latitude}, ${selected.longitude}` : '—' }}</dd></div>
+                <div><dt>{{ t('conservationPages.observations.gpsAccuracy') }}</dt><dd>{{ selected.gpsAccuracy !== '' ? `${selected.gpsAccuracy} m` : '—' }}</dd></div>
+              </dl>
+            </section>
+          </template>
+        </div>
+        <div class="observation-review-column" :class="{ 'observation-review-mode': reviewMode }">
+          <div class="observation-review-content" :tabindex="reviewMode ? 0 : undefined" :role="reviewMode ? 'region' : undefined" :aria-label="reviewMode ? modalText('officerReview') : undefined">
+          <section v-if="!reviewNeedsReload" class="observation-side-section observation-media">
+            <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8" cy="8" r="1" /><path d="m21 15-5-5L5 21" /></svg>{{ modalText('media') }}</h3>
+            <div class="observation-section-content">
+              <p v-if="!selected.assets.length">{{ t('conservationPages.observations.noAssets') }}</p>
+              <div v-else class="submission-image-grid"><article v-for="asset in selected.assets" :key="asset.id" class="submitted-image-item"><div class="submitted-image-preview"><img v-if="asset.contentType.startsWith('image/') && !failedAssets.has(asset.id)" :src="assetUrl(asset.id)" :alt="t('conservationPages.observations.imageAlt', { observation: selected.id, asset: asset.id })" loading="lazy" @error="imageFailed(asset.id)" /><span v-else>{{ t(asset.contentType.startsWith('image/') ? 'conservationPages.observations.imageUnavailable' : 'conservationPages.observations.attachment') }}</span></div><div class="asset-caption"><strong :title="asset.id">{{ asset.id }}</strong><small>{{ asset.contentType }}</small></div></article></div>
+            </div>
+          </section>
+          <section v-if="reviewMode" class="officer-review" :aria-busy="reviewSaving || detailLoading">
+            <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="17" rx="2" /><rect x="9" y="2" width="6" height="5" rx="1" /><path d="m9 14 2 2 4-4" /></svg>{{ modalText('officerReview') }}</h3>
+            <div class="observation-section-content">
       <p v-if="!reviewAllowed && !detailLoading && !reviewSaving && !reviewNeedsReload" role="status">{{ rt('reviewUnavailable') }}</p>
-      <label class="field" for="observation-review-comment"><span>{{ rt('reviewComment') }}</span><textarea id="observation-review-comment" v-model="reviewComment" maxlength="4000" rows="3" :disabled="reviewSaving || detailLoading" /></label>
-      <p v-if="reviewFeedback" :role="reviewSuccess ? 'status' : 'alert'">{{ reviewFeedback }}</p>
+      <label class="field" for="observation-review-comment"><span>{{ rt('reviewComment') }}</span><textarea id="observation-review-comment" v-model="reviewComment" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :aria-invalid="reviewCommentError || undefined" :aria-describedby="reviewCommentError ? 'observation-review-comment-error' : undefined" maxlength="4000" rows="5" :disabled="reviewSaving || detailLoading" /></label>
+      <p v-if="reviewFeedback" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="{ error: !reviewSuccess, success: reviewSuccess, 'observation-comment-validation': reviewCommentError }"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
       <button v-if="reviewNeedsReload" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ rt('reloadLatest') }}</button>
       <label v-if="!reviewAcknowledged && !reviewNeedsReload"><input v-model="reviewAcknowledged" type="checkbox" :disabled="reviewSaving" /> {{ rt('acknowledgeLatest') }}</label>
       <p v-if="reviewSaving" role="status">{{ rt('saving') }}</p>
-      <div class="modal-actions">
-        <button v-for="decision in reviewDecisions" :key="decision" :class="decision === 'Approved' ? 'primary-button' : decision === 'Rejected' ? 'danger-button' : 'secondary-button'" :disabled="!reviewAllowed" @click="decide(decision)">{{ rt('decisions.' + (decision === 'Correction Required' ? 'correction' : decision.toLowerCase())) }}</button>
-      </div>
-    </section>
+
+            </div>
+          </section>
+          <ObservationReviewHistory v-if="authorizedOfficer" :observation-id="selected.id" :refresh-key="reviewHistoryRefresh"><template #reviewer="{ subject }"><span class="identifier-line"><span :title="subject">{{ submitterLabel(subject) }}</span><template v-if="subject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" @click="copyIdentifier(subject, 'subject', true)"><svg v-if="copiedKey !== `subject:${subject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></span></template></ObservationReviewHistory>
     <div v-if="canOpenReview" class="modal-actions observation-review-actions">
       <RouterLink class="action-button modal-review-link" :to="{ name: 'conservation-reviews', query: { review: selected.id } }" @click="closeModal()">{{ t('conservationPages.observations.reviewSubmission') }}</RouterLink>
+    </div>
+          </div>
+
+        </div>
+      </div>
+      <div v-if="reviewMode" class="modal-actions observation-decision-actions" role="group" :aria-label="rt('speciesRequest.plantDecision')" :aria-busy="reviewSaving || detailLoading">
+        <button v-for="decision in reviewDecisions" :key="decision" :class="decision === 'Approved' ? 'primary-button' : decision === 'Rejected' ? 'danger-button' : 'secondary-button'" :disabled="!reviewAllowed" @click="decide(decision)">{{ rt('decisions.' + (decision === 'Correction Required' ? 'correction' : decision.toLowerCase())) }}</button>
+      </div>
     </div>
   </AppModal>
 
@@ -707,3 +831,5 @@ a.action-button { text-decoration: none; }
 .submitted-image-preview img { width: 100%; height: 190px; object-fit: cover; }
 .asset-caption { padding: 12px; overflow-wrap: anywhere; }
 </style>
+
+<style src="../../styles/observation-dialog.css"></style>

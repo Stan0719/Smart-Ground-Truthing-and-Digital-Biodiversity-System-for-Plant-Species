@@ -66,8 +66,11 @@ function mountPlantDetail(app, { pool, allow, auth }) {
   app.get('/api/plants/:plantId/detail', allow('plants.detail.public.read'), async (req, res) => {
     const result = await snapshot(pool, async c => {
       const p = await detailParent(c, req.params.plantId, req.user);
-      const information = { plant_id: String(p.plant_id), scientific_name: p.scientific_name || p.species_name,
-        common_name: p.common_name, genus_name: p.genus_name, family_name: p.family_name, description: p.description };
+      const information = { plant_id: String(p.plant_id),
+        ...(permitted(req.user, 'plants.detail.read') ? { plant_scientific_name: p.scientific_name, species_scientific_name: p.species_name } : {}),
+        scientific_name: p.scientific_name || p.species_name,
+        common_name: p.common_name, genus_name: p.genus_name, family_name: p.family_name, description: p.description,
+        ...(!req.user ? { habitat: string(p.rbac_data?.habitat) } : {}) };
       if (!permitted(req.user, 'plants.detail.read')) return { information, staff: null };
       const approved = (await c.query(`SELECT content FROM plant_observation WHERE plant_id=$1 AND status='Approved'
         AND jsonb_typeof(content->'latitude')='number' AND jsonb_typeof(content->'longitude')='number'

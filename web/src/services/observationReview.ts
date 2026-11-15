@@ -15,9 +15,14 @@ export function reviewEligible(user: AuthUser | null, pending: boolean, row: { r
 }
 export class ReviewApiError extends Error {
   readonly status: number
-  constructor(message: string, status = 0) { super(message); this.status = status }
+  readonly code?: string
+  constructor(message: string, status = 0, code?: string) {
+    super(message)
+    this.status = status
+    this.code = code
+  }
 }
-export type ReviewRequest = (url: string, body?: { decision: ReviewDecision; comment: string; revision?: number }) => Promise<Record<string, unknown>>
+export type ReviewRequest = (url: string, body?: { decision: ReviewDecision; comment: string; revision?: number; expected_revision?: number; expected_review_cycle?: number }) => Promise<Record<string, unknown>>
 export function createReviewRequest(message: (key: string, params?: Record<string, string | number>) => string, transport: typeof fetch): ReviewRequest {
   return async (url, body) => {
     let response: Response
@@ -28,7 +33,7 @@ export function createReviewRequest(message: (key: string, params?: Record<strin
     catch { throw new ReviewApiError(message('feedback.invalidResponse'), response.status) }
     if (!response.ok) {
       const detail = [result?.message, result?.error].find((v): v is string => typeof v === 'string' && Boolean(v.trim()))
-      throw new ReviewApiError(detail || message(response.status === 401 ? 'feedback.session' : response.status === 403 ? 'feedback.forbidden' : 'feedback.requestFailed', { status: response.status }), response.status)
+      throw new ReviewApiError(detail || message(response.status === 401 ? 'feedback.session' : response.status === 403 ? 'feedback.forbidden' : 'feedback.requestFailed', { status: response.status }), response.status, typeof result?.code === 'string' ? result.code : undefined)
     }
     if (!result) throw new ReviewApiError(message('feedback.invalidResponse'), response.status)
     return result

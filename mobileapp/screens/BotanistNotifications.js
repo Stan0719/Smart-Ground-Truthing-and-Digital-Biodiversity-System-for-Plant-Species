@@ -37,7 +37,7 @@ export default function BotanistNotifications({ navigation, user }) {
       if (item.observationId) {
         const observation = await ownedNotificationObservation(accountId, item.observationId);
         if (["correction_requested", "observation_rejected"].includes(item.type) &&
-            ["Draft", "Correction Required", "Rejected"].includes(observation.status)) {
+            ["Draft", "Correction Required"].includes(observation.status)) {
           navigation.navigate("FieldCollectionEdit", { observation, plantId: observation.plant_id });
         } else navigation.navigate("NotificationObservation", { observationId: observation.id });
       } else if (item.type === "sync_failed") {

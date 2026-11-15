@@ -10,10 +10,14 @@ const { createPlantApp } = require("../server.js");
 
 test("owned pending edits and reviewed approved proposals preserve record IDs and approval boundary", async (t) => {
   const pool = await createPlantDatabase();
+  await pool.query("CREATE SCHEMA IF NOT EXISTS plant_app; SET search_path=plant_app,pg_catalog");
+  await pool.query(readFileSync(join(__dirname, "../schema.postgres.sql"), "utf8"));
   t.after(() => pool.end());
   const migration = (name) => readFileSync(join(__dirname, `../migrations/${name}`), "utf8");
   await pool.query(migration("004-species-requests.sql"));
   await pool.query(migration("006-atomic-plant-submissions.sql"));
+  await pool.query(migration("016-species-request-content-revision.sql"));
+  await pool.query(migration("017-species-review-cycle.sql"));
   // This isolated test schema is disposable. No production migration is run.
   await pool.query(migration("008-record-change-submissions.sql"));
   await pool.query(migration("009-record-version-history.sql"));
@@ -49,6 +53,15 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
   t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); });
   const base = `http://127.0.0.1:${server.address().port}/api`;
   async function call(path, role = "bot", method = "GET", body) {
+    if (path.startsWith('/my-species-requests/') && method === 'PATCH' && body && !Object.hasOwn(body, 'expected_revision')) {
+      const current = (await pool.query('SELECT content_revision,review_cycle FROM species_request_submission WHERE request_id::text=$1', [path.split('/')[2]])).rows[0];
+      body = { ...body, expected_revision: current?.content_revision };
+    }
+    if (/^\/species-requests\/\d+\/review$/.test(path) && body && !Object.hasOwn(body, 'expected_revision')) {
+      const row = (await pool.query('SELECT content_revision,review_cycle FROM species_request_submission WHERE request_id::text=$1', [path.split('/')[2]])).rows[0];
+      body = { ...body, expected_review_cycle: row?.review_cycle || 1, expected_revision: row?.content_revision || 1 };
+    }
+
     const response = await fetch(base + path, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokens[role]}` }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, data: await response.json() };
   }
@@ -69,6 +82,14 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal((await pool.query("SELECT content->>'taxonomy' AS taxonomy FROM plant_observation WHERE id='pending-observation'")).rows[0].taxonomy, "Existing taxonomy");
     assert.equal((await pool.query("SELECT count(*)::integer AS count FROM plant_record")).rows[0].count, 2);
     assert.equal((await call(`/my-plants/${pendingPlant}`, "bot", "PATCH", patch)).status, 409);
+    const detail = (await call('/observations', 'officer')).data.observations.find(row => row.id === 'pending-observation');
+    assert.equal(detail.plant_scientific_name, 'Plant Corrected');
+    assert.equal(detail.species_scientific_name, detail.scientific_name);
+    assert.equal(detail.submission_update.state, 'updated');
+    assert.deepEqual(detail.submission_update.changes.find(change => change.field === 'heightCm'), { field: 'heightCm', before: 20, after: 30 });
+    const stale = await call('/observations/pending-observation/review', 'officer', 'POST', { revision: 1, decision: 'Approved', comment: '' });
+    assert.equal(stale.status, 409);
+
   });
   await t.test("approved plant proposal stays separate, rejection retains original", async () => {
     const body = { kind: "plant", target_id: approvedPlant, proposed: { ...plant("Plant Proposed", 45.5, 115.7), qr_id: 3 }, client_key: "approved-edit-1" };
@@ -143,7 +164,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal((await pool.query("SELECT visibility FROM rbac_species_visibility WHERE species_id=$1", [species])).rows[0].visibility, "public");
     assert.equal((await pool.query("SELECT count(*)::integer AS count FROM species")).rows[0].count, 1);
   });
-  await t.test("pending and rejected species requests are corrected in place", async () => {
+  await t.test("pending and correction-required species requests are corrected in place", async () => {
     const original = speciesData("Unreviewed species");
     const created = await call("/species-requests", "bot", "POST", { ...original,
       photo: { content_type: "image/jpeg", base64: photo.toString("base64") }, client_key: "pending-species-key" });
@@ -153,7 +174,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal((await call(`/my-species-requests/${id}`, "bot", "PATCH", speciesData("Corrected species"))).status, 200);
     let row = (await pool.query("SELECT scientific_name,request_status FROM species_request_submission WHERE request_id=$1", [id])).rows[0];
     assert.deepEqual(row, { scientific_name: "Corrected species", request_status: "Pending Review" });
-    assert.equal((await call(`/species-requests/${id}/review`, "officer", "POST", { decision: "Rejected", comment: "Need clearer traits" })).status, 200);
+    assert.equal((await call(`/species-requests/${id}/review`, "officer", "POST", { decision: "Correction Required", comment: "Need clearer traits" })).status, 200);
     assert.equal((await call(`/my-species-requests/${id}`, "bot", "PATCH", speciesData("Resubmitted species"))).status, 200);
     row = (await pool.query("SELECT scientific_name,request_status,review_comment FROM species_request_submission WHERE request_id=$1", [id])).rows[0];
     assert.equal(row.scientific_name, "Resubmitted species");
@@ -162,7 +183,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal((await pool.query("SELECT count(*)::integer AS count FROM species")).rows[0].count, 1);
     const history = await call(`/record-versions?kind=species&id=${id}`);
     assert.equal(history.status, 200);
-    assert.deepEqual(history.data.versions.map((v) => v.status), ["Pending Review", "Rejected", "Superseded"]);
+    assert.deepEqual(history.data.versions.map((v) => v.status), ["Pending Review", "Correction Required", "Superseded"]);
     assert.equal(history.data.versions[2].snapshot.scientific_name, "Unreviewed species");
     const historicalPhoto = await fetch(`${base}/record-versions/${history.data.versions[2].id}/photo`,
       { headers: { Authorization: `Bearer ${tokens.bot}` } });

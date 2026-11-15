@@ -1,0 +1,111 @@
+/* Scoped by the Observation View/Review modal's opt-in root class. */
+.officer-layout.officer-layout .observation-dialog .modal-card {
+  width: min(1180px, 100%);
+  padding: 0;
+  scroll-padding-block-start: calc(var(--observation-header-height, 120px) + 12px);
+  overscroll-behavior: contain;
+}
+.officer-layout .observation-dialog .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 24px;
+  background: #fff;
+  border-bottom: 1px solid #edf0ed;
+  border-radius: 16px 16px 0 0;
+  align-items: flex-start;
+}
+.observation-dialog .observation-title-layout { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.observation-dialog .observation-title-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 52px; width: 52px; height: 52px; border-radius: 10px; background: #edf5ee; color: #245443; }
+.observation-dialog .observation-title-icon svg { width: 30px; height: 30px; }
+.observation-dialog .observation-title-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.officer-layout.officer-layout.officer-layout .observation-dialog .observation-title-subtitle { font-size: .875rem; line-height: 1.5; font-weight: 400; overflow-wrap: anywhere; }
+.observation-dialog .observation-dialog-content { padding: 24px; }
+.observation-dialog .observation-dialog-columns { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.observation-dialog .observation-information-column, .observation-dialog .observation-review-column { min-width: 0; }
+.observation-dialog .observation-review-column { display: grid; gap: 24px; border-left: 1px solid #edf0ed; padding-left: 24px; }
+.observation-dialog .observation-information-section + .observation-information-section { margin-top: 24px; }
+.officer-layout.officer-layout.officer-layout .observation-dialog :is(.observation-section-heading, .history-heading) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #edf5ee;
+  color: #245443;
+  font-size: .9375rem;
+  line-height: 1.4;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.observation-dialog :is(.observation-section-heading, .history-heading) svg { flex: 0 0 21px; width: 21px; height: 21px; }
+.observation-dialog .detail-list { margin: 4px 0 0; gap: 0 20px; }
+.observation-dialog .detail-list > div { min-width: 0; padding: 14px 8px; border-bottom: 1px solid #edf0ed; }
+.officer-layout.officer-layout.officer-layout .observation-dialog .detail-list dt { font-size: .8125rem; }
+.observation-dialog .detail-list dd { overflow-wrap: anywhere; white-space: pre-wrap; }
+.observation-dialog .observation-field-wide { grid-column: 1 / -1; }
+.observation-dialog .observation-side-section, .observation-dialog .officer-review, .observation-dialog .observation-review-history { min-width: 0; margin: 0; padding: 0; border: 1px solid #e4eae5; border-radius: 10px; }
+.observation-dialog .observation-section-content { padding: 16px; }
+.observation-dialog .observation-section-content > p:first-child { margin-top: 0; }
+.observation-dialog .observation-section-content > p:last-child { margin-bottom: 0; }
+.observation-dialog .officer-review textarea { border: 1px solid #cdd8d0; border-radius: 8px; padding: 10px 12px; min-height: 128px; }
+.observation-dialog .observation-review-content { display: contents; }
+.observation-dialog .observation-decision-actions { justify-content: flex-end; margin: 20px 0 0; gap: 8px; padding: 16px 0 0; background: #fff; }
+.observation-dialog .observation-review-feedback { padding: 12px; border-radius: 8px; }
+.observation-dialog .observation-review-feedback.error { color: #8a2929; background: #fff0ed; }
+.observation-dialog .observation-review-feedback.success { color: #245b3d; background: #e8f3ec; }
+.observation-dialog .observation-comment-validation { display: flex; align-items: flex-start; gap: 8px; }
+.observation-dialog .observation-comment-validation svg { flex: 0 0 18px; margin-top: 2px; }
+.observation-dialog .observation-comment-validation span { min-width: 0; overflow-wrap: anywhere; }
+.observation-dialog .observation-decision-actions > button { flex: 0 0 auto; }
+.observation-dialog .observation-media .submission-image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.observation-dialog :is(input, textarea, button, [tabindex]) { scroll-margin-block-start: 12px; }
+@media (max-width: 900px) {
+  .observation-dialog .observation-dialog-columns { grid-template-columns: minmax(0, 1fr); }
+  .observation-dialog .observation-review-column { border-left: 0; padding-left: 0; }
+}
+@media (max-width: 620px) {
+  .officer-layout .observation-dialog .modal-header { padding: 16px; }
+  .observation-dialog .observation-dialog-content { padding: 16px; }
+  .observation-dialog .observation-title-layout { gap: 10px; align-items: flex-start; }
+  .observation-dialog .observation-title-icon { flex-basis: 40px; width: 40px; height: 40px; }
+  .observation-dialog .observation-title-icon svg { width: 25px; height: 25px; }
+  .officer-layout.officer-layout.officer-layout .observation-dialog .modal-header h2 { font-size: 1.25rem; }
+  .officer-layout.officer-layout.officer-layout .observation-dialog .observation-title-subtitle { font-size: .8125rem; }
+  .observation-dialog .detail-list { grid-template-columns: minmax(0, 1fr); }
+  .observation-dialog .observation-dialog-columns, .observation-dialog .observation-review-column { gap: 20px; }
+  .observation-dialog .observation-decision-actions > button { flex: 1 1 110px; }
+}
+
+/* One scroll area keeps the composition together while its footer stays reachable. */
+@media (min-width: 901px) and (min-height: 401px) {
+  .observation-dialog .observation-review-mode {
+    position: sticky;
+    top: calc(var(--observation-header-height, 120px) + 12px);
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    height: var(--observation-review-height);
+    max-height: var(--observation-review-height);
+    box-sizing: border-box;
+    min-height: 0;
+    z-index: 1;
+    background: #fff;
+  }
+  .observation-dialog .observation-review-mode .observation-review-content {
+    display: grid;
+    align-content: start;
+    gap: 24px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scroll-padding-block: 12px;
+    padding: 4px;
+  }
+  .observation-dialog .observation-decision-actions { position: sticky; bottom: 24px; z-index: 2; }
+}

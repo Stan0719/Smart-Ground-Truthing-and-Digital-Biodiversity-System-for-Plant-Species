@@ -17,20 +17,22 @@ const template = compileTemplate({ source: descriptor.template.content, filename
 assert.equal(template.errors.length, 0)
 const js = s => ts.transpileModule(s, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const officer = { id: 'officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }
-const species = { species_id: '201', common_name: 'API common', scientific_name: 'API scientific', genus_name: 'API genus', family_name: 'API family', description: 'API description', habitat: 'Restricted habitat', conservation_status: 'Vulnerable', image_url: '/api/assets/portrait', image_asset_id: 'other' }
+const species = { species_id: '201', common_name: 'API common', scientific_name: 'API scientific', genus_name: 'API genus', family_name: 'API family', description: 'API description', habitat: 'Tropical lowland rainforest', conservation_status: 'Vulnerable', image_url: '/api/assets/portrait', image_asset_id: 'other' }
 const flush = async () => { for (let i = 0; i < 8; i++) { await vue.nextTick(); await new Promise(setImmediate) } }
 function nodes(value) { const out = []; function walk(n) { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; out.push(n); if (Array.isArray(n.children)) walk(n.children); else if (n.children?.default) walk(n.children.default()) } walk(value); return out }
 function harness({ slug = '201', initial = null, handler, locale = 'en' } = {}) {
   const scope = vue.effectScope(), exports = {}, route = vue.reactive({ params: { slug } }), calls = [], listeners = new Set(), unmount = []
   let user = initial, pending = false
+  let verificationFailure = 0
+  const mounted = [], events = {}, timers = []
   const messages = JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`, import.meta.url), 'utf8'))
   const t = createI18n({ legacy: false, locale, messages: { [locale]: messages } }).global.t
   const body = { style: { overflow: 'auto' } }
-  const context = { exports, document: { body }, window: { removeEventListener() {} }, clearInterval, require(name) {
-    if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount(fn) { unmount.push(fn) }, resolveComponent: n => n }
+  const context = { exports, document: { body, visibilityState: 'visible', addEventListener: (name, fn) => { events[name] = fn } }, window: { addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, setInterval: (fn, delay) => { timers.push({ fn, delay }); return 1 }, clearInterval() {}, require(name) {
+    if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount(fn) { unmount.push(fn) }, resolveComponent: n => n }
     if (name === 'vue-router') return { useRoute: () => route }
     if (name === 'vue-i18n') return { useI18n: () => ({ t }) }
-    if (name.endsWith('/auth')) return { currentUser: async () => user, sessionSnapshot: () => ({ user, pending }), subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
+    if (name.endsWith('/auth')) return { currentUser: async () => user, api: async () => { if (verificationFailure) throw Object.assign(Error('Session check failed'), { status: verificationFailure }); if (!user) throw Object.assign(Error('Guest'), { status: 401 }); return { user: user } }, sessionSnapshot: () => ({ user, pending }), subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
     if (name.endsWith('/assetImages')) return assets
     if (name.endsWith('/plantCardMapping')) return cards
     if (name.endsWith('/plantId')) return { formatPlantId }
@@ -43,7 +45,7 @@ function harness({ slug = '201', initial = null, handler, locale = 'en' } = {}) 
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
-  return { state, calls, route, body, t, change(next, checking = false) { user = next; pending = checking; for (const fn of listeners) fn(user, pending) }, render: () => nodes(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})), stop() { for (const fn of unmount) fn(); scope.stop() } }
+  return { state, calls, route, body, t, events, timers, failVerification: status => { verificationFailure = status }, mount: () => mounted.forEach(fn => fn()), change(next, checking = false) { user = next; pending = checking; for (const fn of listeners) fn(user, pending) }, render: () => nodes(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})), stop() { for (const fn of unmount) fn(); scope.stop() } }
 }
 
 test('Species Detail conservation badges use the shared palette and retain existing role visibility', async () => {
@@ -62,14 +64,15 @@ test('Species Detail conservation badges use the shared palette and retain exist
 test('numeric IDs bypass capped catalogue; real fields render once without prototype or restricted facts', async () => {
   const h = harness(); try { await flush()
     assert.equal(h.calls[0], '/api/data/species/201'); assert.ok(!h.calls.includes('/api/data/species'))
+    assert.ok(h.calls.includes('/api/data/plants?scope=public-web'))
     const tree = h.render()
     for (const value of ['API common', 'API scientific', 'API family', 'API genus', 'API description']) assert.equal(tree.filter(n => n.children === value).length, 1, value)
-    for (const value of ['Restricted habitat', 'Vulnerable', 'Uncategorized']) assert.ok(!tree.some(n => n.children === value))
+    for (const value of ['Vulnerable', 'Uncategorized']) assert.ok(!tree.some(n => n.children === value))
     assert.equal(h.state.primaryImage.value, '/api/data/assets/portrait')
     assert.equal(h.state.linkedPlants.value.length, 1); assert.equal(h.state.linkedPlants.value[0].speciesId, '201')
     assert.ok(tree.some(n => n.props?.to === '/species/201/plants'))
     assert.ok(tree.some(n => n.props?.to === '/species'))
-    assert.ok(tree.some(n => String(n.children).includes('plant record found in loaded results')))
+    assert.ok(!tree.some(n => String(n.children).includes('plant record found in loaded results')))
   } finally { h.stop() }
 })
 
@@ -84,9 +87,9 @@ test('missing optional fields stay absent and scientific name supplies heading f
   try { await flush(); assert.equal(h.state.displayName.value, 'Only scientific'); assert.equal(h.state.selectedSpecies.value.description, ''); assert.equal(h.state.primaryImage.value, ''); assert.ok(!h.render().some(n => n.type === 'button' && String(n.props?.class).includes('portrait-trigger'))) } finally { h.stop() }
 })
 
-test('scientific facts require active authorized role AND supplied API values; administrator gets no grant', async () => {
+test('scientific facts require active authorized role AND supplied API values; Administrator receives read access', async () => {
   for (const initial of [officer, { ...officer, role: 'Botanist' }, { ...officer, role: 'Administrator' }, { ...officer, mustChangePassword: true }]) {
-    const h = harness({ initial }); try { await flush(); const allowed = ['Conservation Officer','Botanist'].includes(initial.role) && !initial.mustChangePassword; assert.equal(h.state.selectedSpecies.value.habitat, allowed ? 'Restricted habitat' : ''); assert.equal(h.render().some(n => n.children === 'Vulnerable'), allowed) } finally { h.stop() }
+    const h = harness({ initial }); try { await flush(); const allowed = ['Conservation Officer','Botanist','Administrator'].includes(initial.role) && !initial.mustChangePassword; assert.equal(h.state.selectedSpecies.value.habitat, allowed ? 'Tropical lowland rainforest' : ''); assert.equal(h.render().some(n => n.children === 'Vulnerable'), allowed) } finally { h.stop() }
   }
 })
 
@@ -96,7 +99,7 @@ test('logout clears facts and zoom immediately and stale staff responses cannot 
   try { await flush(); delayed = true; void h.state.loadSpecies(); await flush(); h.state.zoomImage.value = '/api/data/assets/portrait'; h.change(null, true)
     assert.equal(h.state.selectedSpecies.value, null); assert.equal(h.state.zoomImage.value, '')
     release({ species }); await flush(); assert.equal(h.state.selectedSpecies.value, null)
-    delayed = false; h.change(null); await flush(); assert.equal(h.state.selectedSpecies.value.habitat, '')
+    delayed = false; h.change(null); await flush(); assert.equal(h.state.selectedSpecies.value.habitat, species.habitat)
   } finally { h.stop() }
 })
 
@@ -212,7 +215,7 @@ test('profile badge precedes H1; decorative taxonomy icons stay small and access
   try {
     await flush()
     const tree = h.render(), icons = tree.filter(n => n.type === 'svg' && n.props?.class === 'taxonomy-icon')
-    assert.equal(icons.length, 2)
+    assert.equal(icons.length, 3)
     for (const icon of icons) { assert.equal(icon.props['aria-hidden'], 'true'); assert.equal(icon.props.focusable, 'false') }
     assert.ok(tree.findIndex(n => n.props?.class === 'profile-heading-line') < tree.findIndex(n => n.type === 'h1'))
     assert.ok(tree.some(n => n.type === 'p' && n.props?.class === 'scientific-name'))
@@ -228,14 +231,14 @@ test('scientific-name fallback heading is not duplicated as a secondary line', a
 })
 
 
-test('documented plant copy counts loaded matches separately from preview cards in every locale', async () => {
+test('documented plant section omits the loaded-record sentence and retains preview cards in every locale', async () => {
   for (const locale of ['en', 'ms', 'zh-CN']) {
     for (const count of [1, 6]) {
       const h = harness({ locale, handler: async p => p.includes('/species/') ? { species } : p.includes('/plants') ? { plants: [...Array.from({ length: count }, (_, i) => ({ plant_id: i + 1, species_id: 201 })), { plant_id: 90, species_id: 202 }, { plant_id: 91, species_id: 201, rbac_status: 'Pending Review' }] } : { assets: [] } })
       try {
         await flush()
         const tree = h.render(), expected = h.t('species.detail.loadedRecords', { count }, count)
-        assert.ok(tree.some(n => n.children === expected))
+        assert.ok(!tree.some(n => n.children === expected))
         assert.ok(tree.some(n => n.children === h.t('species.detail.linkedDescription')))
         assert.ok(tree.some(n => n.type === 'h2' && n.children === h.t('species.detail.linkedTitle')))
         assert.equal(h.state.linkedPlants.value.length, count)
@@ -680,14 +683,14 @@ test('Species Profile orders identity, taxonomy, authorized Habitat, divider and
   } finally { h.stop() }
 })
 
-test('Habitat remains restricted to eligible scientific roles even when the response supplies it to other users', async () => {
+test('Habitat is available to Guests and eligible scientific roles while other authenticated roles retain their restrictions', async () => {
   const accounts = [null, { ...officer, role: 'Visitor' }, { ...officer, role: 'Administrator' },
     { ...officer, status: 'Inactive' }, { ...officer, mustChangePassword: true }, officer, { ...officer, role: 'Botanist' }]
   for (const initial of accounts) {
     const h = harness({ initial })
     try {
       await flush()
-      const allowed = Boolean(initial && ['Conservation Officer', 'Botanist'].includes(initial.role) && initial.status === 'Active' && !initial.mustChangePassword)
+      const allowed = initial === null || Boolean(initial && ['Conservation Officer', 'Botanist', 'Administrator'].includes(initial.role) && initial.status === 'Active' && !initial.mustChangePassword)
       const tree = h.render()
       assert.equal(tree.some(node => node.props?.class === 'profile-habitat'), allowed)
       assert.equal(tree.some(node => node.props?.class === 'profile-divider'), allowed)
@@ -732,4 +735,56 @@ test('Habitat matches taxonomy styling, Description has no nested card, and head
       assert.ok(h.render().some(node => node.type === 'span' && node.children === h.t('speciesLabels.habitat')))
     } finally { h.stop() }
   }
+})
+
+
+test('same-species background refresh coalesces events and preserves selected/zoomed URLs across reorder, errors and revocation', async () => {
+  for (const account of [null, officer]) {
+    let refs = ['one', 'two'], hold = false, release, failure = 0
+    const h = harness({ initial: account, handler: async path => {
+      if (path.includes('/species/')) {
+        if (hold) await new Promise(resolve => { release = resolve })
+        if (failure) throw Object.assign(Error('Refresh failed'), { status: failure })
+        return { species: { ...species, image_url: '', image_asset_id: '' } }
+      }
+      return path.includes('/plants') ? { plants: [] } : { assets: refs.map(id => ({ id, content_type: 'image/jpeg' })) }
+    } })
+    try {
+      await flush(); h.mount(); h.state.selectImage('/api/data/assets/two')
+      h.state.dialog.value = { open: true, close() { this.open = false } }; h.state.zoomImage.value = '/api/data/assets/two'
+      const before = h.state.selectedSpecies.value, count = h.calls.length
+      hold = true; h.events.focus(); h.events.visibilitychange(); await flush()
+      assert.equal(h.calls.length, count + 1); assert.equal(h.state.selectedSpecies.value, before); assert.equal(h.state.isLoading.value, false)
+      refs = ['two', 'one']; hold = false; release(); await flush()
+      assert.equal(h.state.primaryImage.value, '/api/data/assets/two'); assert.equal(h.state.zoomImage.value, '/api/data/assets/two')
+      assert.equal(h.state.selectedSpecies.value, before)
+      assert.equal(h.timers[0].delay, 60000); await h.timers[0].fn(); await flush()
+      assert.equal(h.state.primaryImage.value, '/api/data/assets/two')
+      h.failVerification(500); await h.state.verifySession()
+      assert.equal(h.state.selectedSpecies.value, before); assert.equal(h.state.zoomImage.value, '/api/data/assets/two')
+      h.failVerification(0)
+      failure = 500; await h.state.verifySession(); assert.equal(h.state.selectedSpecies.value, before); assert.ok(h.state.refreshError.value)
+      failure = 0; refs = ['one']; await h.state.verifySession(); await flush()
+      assert.equal(h.state.primaryImage.value, '/api/data/assets/one'); assert.equal(h.state.zoomImage.value, '')
+      failure = 404; await h.state.verifySession(); await flush()
+      assert.equal(h.state.selectedSpecies.value, null); assert.equal(h.state.images.value.length, 0)
+    } finally { h.stop() }
+  }
+})
+
+
+test('Administrator Species Detail uses Officer scientific fields, gallery URLs and related plants with read-only navigation', async () => {
+  const h = harness({ initial: { ...officer, role: 'Administrator' } })
+  try {
+    await flush(); const tree = h.render()
+    assert.equal(h.state.scientific.value, true)
+    for (const value of [species.habitat, species.description, species.conservation_status]) assert.ok(tree.some(n => n.children === value))
+    assert.equal(h.state.primaryImage.value, '/api/data/assets/portrait')
+    assert.equal(h.state.linkedPlants.value.length, 1)
+    assert.ok(h.calls.includes('/api/data/plants'))
+    assert.ok(!h.calls.some(path => path.includes('scope=public-web')))
+    assert.ok(tree.some(n => n.props?.to === '/species/201/plants'))
+    assert.ok(!tree.some(n => n.props?.to?.startsWith('/conservation/')))
+    await h.state.verifySession(); assert.equal(h.state.primaryImage.value, '/api/data/assets/portrait')
+  } finally { h.stop() }
 })

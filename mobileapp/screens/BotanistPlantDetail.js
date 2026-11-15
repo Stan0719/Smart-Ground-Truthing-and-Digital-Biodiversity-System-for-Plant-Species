@@ -40,7 +40,7 @@ const COLORS = {
 
 const PLANT_FIELDS = [
   {
-    label: "Scientific Name",
+    label: "Plant Scientific Name",
     field: "scientificName",
   },
   {
@@ -144,6 +144,7 @@ function getPlantFieldValue(plant, field) {
 
   switch (field) {
     case "scientificName":
+      if (Object.hasOwn(plant, "plantScientificNameValue")) return plant.plantScientificNameValue;
       return (
         plant.scientificName ||
         plant.speciesName ||
@@ -447,7 +448,7 @@ function findPlant() {
 
   function handleEdit() {
     if (plant?.isServerRecord) {
-      if ((!plant.speciesRequest || plant.speciesRequest.request_status === "Approved") && ["Draft", "Correction Required", "Rejected"].includes(plant.latestObservation?.status))
+      if ((!plant.speciesRequest || plant.speciesRequest.request_status === "Approved") && ["Draft", "Correction Required"].includes(plant.latestObservation?.status))
         navigation.navigate("FieldCollectionEdit", { observation: plant.latestObservation, plantId: plant.id });
       return;
     }
@@ -619,7 +620,7 @@ function findPlant() {
       <View style={styles.field} key={field}>
         {isEditing ? (
           <OriginalUpdatedField
-            label={translateLabel(label)}
+            label={label === "Plant Scientific Name" ? t("recordEdits.plantScientificName") : translateLabel(label)}
             originalValue={displayValue}
           >
             <TextInput
@@ -635,7 +636,7 @@ function findPlant() {
           </OriginalUpdatedField>
         ) : (
           <>
-            <Text style={styles.label}>{translateLabel(label)}</Text>
+            <Text style={styles.label}>{label === "Plant Scientific Name" ? t("recordEdits.plantScientificName") : translateLabel(label)}</Text>
             <Text style={styles.value}>{displayValue}</Text>
           </>
         )}
@@ -697,9 +698,9 @@ function findPlant() {
 
   const species = plant.isHistoricalVersion ? plant.historicalSpeciesDetails : getSpeciesDetails(plant);
 
-  const speciesScientificName = species?.scientific_name ?? species?.scientificName ?? species?.speciesScientificName;
+  const speciesScientificName = (plant.isHistoricalVersion ? null : plant.speciesScientificName) ?? species?.scientific_name ?? species?.scientificName ?? species?.speciesScientificName;
   const speciesEntries = species ? [
-    ["species", speciesScientificName || (plant.isHistoricalVersion ? t("recordEdits.historicalSpeciesUnavailable") : t("plant.notRecorded"))],
+    ["speciesScientificName", speciesScientificName || (plant.isHistoricalVersion ? t("recordEdits.historicalSpeciesUnavailable") : t("plant.notRecorded"))],
     ["commonName", species.common_name ?? species.commonName ?? species.name],
     ["genus", species.genus_name ?? species.genus],
     ["family", species.family_name ?? species.family],
@@ -755,7 +756,7 @@ const rawPhotos = Array.isArray(plant.photos)
           <Text style={styles.title}>
             {isEditing ? t("botanistPlantDetail.editPlantRecord") : t("botanistPlantDetail.plantRecord")}
           </Text>
-          {!plant.isHistoricalVersion && plant.isServerRecord && ["Approved", "Pending Review", "Rejected", "Correction Required"].includes(plant.status) &&
+          {!plant.isHistoricalVersion && (plant.status === "Approved" || plant.latestObservation?.status !== "Rejected") && plant.isServerRecord && ["Approved", "Pending Review", "Correction Required"].includes(plant.status) &&
             <EditAction testID="edit-own-plant" disabled={plant.status === "Approved" && editAvailability !== "clear"}
               labelKey={plant.status === "Approved" && editAvailability !== "clear" ? "recordEdits.editUnavailable" : undefined}
               onPress={() => navigation.navigate("EditPlant", { plantId: plant.id, botanist })} />}
@@ -821,7 +822,7 @@ const rawPhotos = Array.isArray(plant.photos)
               speciesEntries.map(([key, value]) => (
                 <View style={styles.speciesField} key={key}>
                   <Text style={styles.label}>
-                    {key === "species" ? t("plantDetail.species") : translateLabel(formatLabel(key))}
+                    {key === "speciesScientificName" ? t("recordEdits.associatedSpeciesName") : key === "species" ? t("plantDetail.species") : translateLabel(formatLabel(key))}
                   </Text>
 
                   <Text style={styles.value}>
@@ -856,6 +857,7 @@ const rawPhotos = Array.isArray(plant.photos)
             "Details observed during the field survey"
           )}
 
+          {(plant.status === "Rejected" || plant.latestObservation?.status === "Rejected") && <Text accessibilityRole="alert" style={styles.value}>{t("recordEdits.finalRejected")}</Text>}
           {PLANT_FIELDS.map((field) =>
             renderField(field)
           )}

@@ -1,6 +1,7 @@
 import { requestPlantApi } from './plantIntegration.ts'
 export interface PlantInformation {
-  plant_id: string; scientific_name: string | null; common_name: string | null; genus_name: string | null; family_name: string | null; description: string | null
+  habitat?: string | null
+  plant_scientific_name?: string | null; species_scientific_name?: string | null; plant_id: string; scientific_name: string | null; common_name: string | null; genus_name: string | null; family_name: string | null; description: string | null
 }
 export interface DetailLocation { latitude: number | null; longitude: number | null; accuracy_m: number | null; altitude_m: number | null; zone: string | null }
 export interface DetailObservationContent extends DetailLocation {
@@ -20,6 +21,9 @@ export async function readPlantDetail(id: string, staff: boolean, request = requ
   const result = await request(`/api/data/plants/${id}/detail`)
   const information = result.information as PlantInformation | undefined
   const keys = ['plant_id', 'scientific_name', 'common_name', 'genus_name', 'family_name', 'description']
+  for (const field of ['plant_scientific_name', 'species_scientific_name'])
+    if (information && Object.hasOwn(information, field)) keys.push(field)
+  if (!staff && information && Object.hasOwn(information, 'habitat')) keys.push('habitat')
   if (!information || information.plant_id !== id || Object.keys(information).length !== keys.length ||
     keys.some(key => !Object.hasOwn(information, key)) ||
     Object.values(information).some(value => value !== null && typeof value !== 'string') ||

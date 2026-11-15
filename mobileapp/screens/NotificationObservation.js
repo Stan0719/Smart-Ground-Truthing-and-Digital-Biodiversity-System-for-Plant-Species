@@ -38,7 +38,8 @@ export default function NotificationObservation({ route, navigation, user }) {
         ["Height (cm)", row.content?.heightCm], ["Health", row.content?.healthStatus],
         ["Life stage", row.content?.lifeStage], ["Morphology", row.content?.morphology], ["Notes", row.content?.notes],
       ].map(([label, value]) => value != null && value !== "" ? <View key={label} style={styles.field}><Text style={styles.label}>{translateLabel(label)}</Text><Text style={styles.text}>{translateFieldValue(label, String(value))}</Text></View> : null)}
-      {["Draft", "Correction Required", "Rejected"].includes(row.status) && <TouchableOpacity
+      {row.status === "Rejected" && <Text accessibilityRole="alert" style={styles.text}>{t("recordEdits.finalRejected")}</Text>}
+      {["Draft", "Correction Required"].includes(row.status) && <TouchableOpacity
         style={styles.button}
         onPress={() => navigation.navigate("FieldCollectionEdit", { observation: row, plantId: row.plant_id })}
         accessibilityRole="button"

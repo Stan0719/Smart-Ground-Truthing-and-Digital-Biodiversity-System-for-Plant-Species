@@ -27,18 +27,20 @@ function text(value) { return typeof value === 'string' ? value : Array.isArray(
 function harness(initial = null, handler = null, photoHandler = null, historyHandler = null, previous = '/species') {
   const scope = vue.effectScope(), route = vue.reactive({ params: { plantId: '1' } }), listeners = new Set(), calls = [], photoCalls = [], historyCalls = []
   let verified = initial, pending = false
-  const exports = {}, context = { exports, console, require(name) {
+  let verificationFailure = 0
+  const mounted = [], events = {}, timers = []
+  const exports = {}, context = { exports, console, window: { addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, document: { visibilityState: 'visible', addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, setInterval: (fn, delay) => { timers.push({ fn, delay }); return 1 }, clearInterval() {}, require(name) {
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
-    if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount() {}, resolveComponent: name => name }
+    if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount() {}, resolveComponent: name => name }
     if (name === 'vue-router') return { useRoute: () => route, useRouter: () => ({ options: { history: { state: { back: previous } } }, resolve(path) { return { name: path.startsWith('/conservation/') ? 'conservation-map' : path === '/species' ? 'species' : undefined, fullPath: path } } }) }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key === 'speciesLabels.habitat' ? 'Natural habitat' : key }) }
     if (name.endsWith('useConservationText')) return { useConservationText: () => ({ ct: x => String(x), dt: x => x }) }
-    if (name.endsWith('/auth')) return { currentUser: async () => verified, sessionSnapshot: () => ({ user: verified, pending }), subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
+    if (name.endsWith('/auth')) return { currentUser: async () => verified, api: async () => { if (verificationFailure) throw Object.assign(Error('Session check failed'), { status: verificationFailure }); if (!verified) throw Object.assign(Error('Guest'), { status: 401 }); return { user: verified } }, sessionSnapshot: () => ({ user: verified, pending }), subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
     if (name.endsWith('plantIntegration')) return integration
     if (name.endsWith('plantId')) return { formatPlantId }
     if (name.endsWith('plantDateTime')) return { formatPlantDateTime }
     if (name.endsWith('plantDetail')) return { ...detailService, readPlantDetail: (id, allowed) => detailService.readPlantDetail(id, allowed, async url => { calls.push(url); return handler ? handler(url) : { information: { ...information, plant_id: id }, staff: detailService.canReadPlantDetail(verified) ? staff : null } }) }
-    if (name.endsWith('plantGallery')) return { ...galleryService, createPlantGallery: options => galleryService.createPlantGallery({ ...options, transport: async (url, options) => { photoCalls.push(url); return photoHandler ? photoHandler(url, options) : Response.json({ plant_id: url.match(/plants\/(\d+)/)[1], assets: [], page: { limit: 20, has_more: false, next_cursor: null } }) } }) }
+    if (name.endsWith('plantGallery')) return { ...galleryService, createPlantGallery: options => galleryService.createPlantGallery({ ...options, transport: async (url, options) => { photoCalls.push(url); return photoHandler ? photoHandler(url, options) : url.includes('/assets?') ? Response.json({ assets: [] }) : Response.json({ plant_id: url.match(/plants\/(\d+)/)[1], assets: [], page: { limit: 20, has_more: false, next_cursor: null } }) } }) }
     if (name.endsWith('plantHistory')) return { ...historyService, createPlantHistory: () => historyService.createPlantHistory({ transport: async (url, options) => { historyCalls.push(url); return historyHandler ? historyHandler(url, options) : Response.json({ plant_id: url.match(/plants\/(\d+)/)[1], observations: [], page: { limit: 20, has_more: false, next_cursor: null } }) } }) }
     if (name.endsWith('conservationBadge')) return { conservationBadgeStyle }
     if (name.endsWith('.vue')) return { name }
@@ -47,24 +49,47 @@ function harness(initial = null, handler = null, photoHandler = null, historyHan
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
-  return { state, calls, photoCalls, historyCalls, route, change(user, checking = false) { verified = user; pending = checking; for (const fn of listeners) fn(user, checking) }, render: () => nodes(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})), stop() { state.clearRecord(); scope.stop() } }
+  return { state, calls, photoCalls, historyCalls, route, events, timers, failVerification: status => { verificationFailure = status }, mount: () => mounted.forEach(fn => fn()), change(user, checking = false) { verified = user; pending = checking; for (const fn of listeners) fn(user, checking) }, render: () => nodes(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})), stop() { state.clearRecord(); scope.stop() } }
 }
-test('Visitor renders exactly six facts, no images, private DOM or evidence requests', async () => {
+test('Guest adds only public photos to the existing upper layout; authenticated Visitor/Botanist behavior stays unchanged', async () => {
   for (const user of [null, { ...officer, role: 'Visitor' }, { ...officer, role: 'Botanist' }]) {
     const h = harness(user)
     try {
       await flush(); const tree = h.render()
-      assert.equal(tree.filter(n => n.type === 'dt').length, 5)
-      assert.deepEqual(tree.filter(n => n.type === 'dt').map(text), ['Common name','Scientific name','Plant ID','Family','Genus'])
+      assert.equal(tree.filter(n => n.type === 'dt').length, user === null ? 4 : 5)
+      assert.deepEqual(tree.filter(n => n.type === 'dt').map(text), ['Common name','Scientific name',...(user === null ? [] : ['Plant ID']),'Family','Genus'])
+      assert.equal(tree.some(n => n.props?.class === 'plant-id'), user !== null)
+      assert.equal(h.state.plant.value.information.plant_id, '1')
       assert.equal(tree.filter(n => n.props?.id === 'plant-description-title').length, 1)
       assert.equal(tree.find(n => n.type === 'h1').children, information.common_name)
       for (const cls of ['profile-badges', 'profile-habitat', 'approved-location']) assert.ok(!tree.some(n => n.props?.class === cls))
-      assert.ok(!tree.some(n => n.type === 'img' || n.props?.class === 'staff-panel' || n.type?.name?.includes('PlantPhoto') || n.type?.name?.includes('PlantObservation')))
-      assert.deepEqual(h.photoCalls, []); assert.deepEqual(h.historyCalls, [])
+      assert.ok(!tree.some(n => n.type === 'img' || n.props?.class === 'staff-panel' || n.type?.name?.includes('PlantObservation')))
+      const gallery = tree.find(n => n.type?.name?.includes('PlantPhotoGallery'))
+      assert.equal(Boolean(gallery), user === null)
+      if (gallery) { assert.equal(gallery.props['public-photos'], true); assert.equal(gallery.props['registration-only'], '') }
+      assert.deepEqual(h.photoCalls, user === null ? ['/api/data/assets?plant_id=1'] : []); assert.deepEqual(h.historyCalls, [])
       assert.deepEqual(h.calls, ['/api/data/plants/1/detail'])
       assert.equal(h.state.plant.value.staff, null)
     } finally { h.stop() }
   }
+})
+
+test('Guest upper gallery shares Officer layout and only uses public bytes; failed public access never starts evidence reads', async () => {
+  const h = harness(null, null, async url => {
+    assert.equal(url, '/api/data/assets?plant_id=1')
+    return Response.json({ assets: [{ id: 'public-one', content_type: 'image/jpeg' }, { id: 'public-two', content_type: 'image/png' }] })
+  })
+  try {
+    await flush()
+    assert.equal(h.state.galleryGroups.value.length, 1)
+    assert.deepEqual(h.state.publicGallery.state.assets.map(a => a.url), ['/api/data/assets/public-one','/api/data/assets/public-two'])
+    assert.ok(h.render().some(n => String(n.props?.class).includes('staff-hero')))
+    assert.ok(!h.render().some(n => String(n.props?.class).includes('visitor-grid')))
+    assert.deepEqual(h.historyCalls, [])
+    h.change(officer); assert.equal(h.state.publicGallery.state.assets.length, 0)
+  } finally { h.stop() }
+  const denied = harness(null, async () => { throw Object.assign(Error('Plant unavailable.'), { status: 404 }) })
+  try { await flush(); assert.deepEqual(denied.photoCalls, []); assert.deepEqual(denied.historyCalls, []); assert.equal(denied.state.errorStatus.value, 404) } finally { denied.stop() }
 })
 
 test('Officer/Admin information follows Species identity, taxonomy, habitat and description without duplicate record fields', async () => {
@@ -243,4 +268,73 @@ test('session checks coalesce and cannot verify an old cookie while logout is pe
  const out=exports.logout();assert.equal(exports.sessionSnapshot().user,null)
  assert.equal(await exports.currentUser(),null);assert.equal(calls.filter(x=>x==='/api/auth/me').length,1)
  resolveLogout(Response.json({}));await out;assert.equal(exports.sessionSnapshot().user,null)
+})
+
+
+test('same-record focus/visibility/timer refresh keeps Guest and staff records and gallery epochs; errors distinguish denial', async () => {
+  for (const account of [null, officer, { ...officer, role: 'Administrator' }]) {
+    let release, hold = false, failure = 0, reads = 0
+    const h = harness(account, async () => {
+      reads++
+      if (hold) await new Promise(resolve => { release = resolve })
+      if (failure) throw Object.assign(Error('Refresh failed'), { status: failure })
+      return { information, staff: account ? staff : null }
+    })
+    try {
+      await flush(); h.mount()
+      const before = h.state.plant.value, epoch = h.state.visibleGallery.value.state.epoch
+      hold = true; const count = reads
+      h.events.focus(); h.events.visibilitychange(); await flush()
+      assert.equal(reads, count + 1); assert.equal(h.state.plant.value, before); assert.equal(h.state.isLoading.value, false)
+      hold = false; release(); await flush()
+      assert.equal(h.state.plant.value, before); assert.equal(h.state.visibleGallery.value.state.epoch, epoch)
+      assert.equal(h.timers[0].delay, 60000); await h.timers[0].fn(); await flush()
+      assert.equal(h.state.visibleGallery.value.state.epoch, epoch)
+      h.failVerification(500); await h.state.verifySession()
+      assert.equal(h.state.plant.value, before); assert.ok(h.state.refreshError.value)
+      h.failVerification(0)
+      failure = 500; await h.state.verifySession(); await flush()
+      assert.equal(h.state.plant.value, before); assert.ok(h.state.refreshError.value)
+      failure = 403; await h.state.verifySession(); await flush()
+      assert.equal(h.state.plant.value, null); assert.equal(h.state.gallery.state.assets.length, 0)
+    } finally { h.stop() }
+  }
+})
+
+
+test('route changes invalidate an in-flight background refresh without blocking the next record', async () => {
+  let held = false, release
+  const h = harness(null, async url => {
+    const id = url.match(/plants\/(\d+)/)[1]
+    if (held && id === '1') await new Promise(resolve => { release = resolve })
+    return { information: { ...information, plant_id: id }, staff: null }
+  })
+  try {
+    await flush(); held = true
+    const work = h.state.verifySession(); await flush()
+    h.route.params.plantId = '2'; await flush()
+    assert.equal(h.state.plant.value.information.plant_id, '2')
+    release(); await work; await flush()
+    assert.equal(h.state.plant.value.information.plant_id, '2')
+  } finally { h.stop() }
+})
+
+
+test('Guest habitat uses the existing Officer field between taxonomy and description without staff projection', async () => {
+  for (const value of ['Tropical lowland rainforest', '', null]) {
+    const h = harness(null, async () => ({ information: { ...information, habitat: value }, staff: null }))
+    try {
+      await flush(); const tree = h.render(), card = nodes(tree.find(n => n.props?.class === 'record-panel'))
+      const habitat = card.find(n => n.props?.class === 'profile-habitat')
+      assert.equal(Boolean(habitat), Boolean(value))
+      if (value) {
+        assert.ok(nodes(habitat).some(n => n.children === value))
+        assert.ok(card.findIndex(n => n.props?.class === 'profile-taxonomy') < card.indexOf(habitat))
+        assert.ok(card.indexOf(habitat) < card.findIndex(n => n.props?.class === 'profile-description'))
+      }
+      assert.ok(!tree.some(n => n.props?.class === 'profile-badges' || n.props?.class === 'staff-panel' || n.type?.name?.includes('PlantObservationHistory')))
+      assert.deepEqual(h.historyCalls, []); assert.equal(h.state.plant.value.staff, null)
+      await h.state.verifySession(); assert.equal(h.state.habitat.value, value)
+    } finally { h.stop() }
+  }
 })

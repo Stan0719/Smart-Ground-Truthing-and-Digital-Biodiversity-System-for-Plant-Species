@@ -17,7 +17,7 @@ const validDraft = (extra = {}) => ({
     notes: "", taxonomy: "", latitude: "", longitude: "", accuracy_m: "",
   } }, ...extra,
 });
-async function fixture({ fail = false, owner = "owner", notificationFailure = false, drafts, plantStatus = "Approved" } = {}) {
+async function fixture({ fail = false, owner = "owner", notificationFailure = false, drafts, plantStatus = "Approved", observationStatus } = {}) {
   const calls = [],
     removed = [], notifications = [];
   const factory = new Function(
@@ -39,8 +39,9 @@ async function fixture({ fail = false, owner = "owner", notificationFailure = fa
       calls.push({ path, options });
       if (path === "/plants/7/qr") return { plant_id: 7, rbac_status: plantStatus };
       if (path === "/observations/observation/submit") return { submitted: true };
+      if (observationStatus && path === "/observations") return { observations: [{ id: "observation", plant_id: 1, status: observationStatus, revision: 1, content: validDraft().body.content }] };
       if (fail) throw Error("offline");
-      return { id: "observation", plant_id: 1 };
+      return { id: "observation", plant_id: 1, ...(observationStatus ? { status: observationStatus } : {}) };
     },
     { restore: async () => ({ id: owner, role: "botanist" }) },
     { recordSync: async (accountId, event) => {
@@ -298,4 +299,14 @@ test("invalid coordinates and correction revision metadata fail validation witho
   assert.equal(checked.body.content.taxonomy, "Observation line 1\nObservation line 2");
   correction.body.revision = 0;
   assert.throws(() => validate(correction), /target or revision/);
+});
+
+
+test('rejected targets retain local drafts and stop before edits, uploads or submission',async()=>{
+ for(const correction of [false,true]){
+  const drafts=correction?[validDraft({method:'PATCH',path:'/observations/observation',body:{content:validDraft().body.content,revision:1}})]:undefined;
+  const f=await fixture({observationStatus:'Rejected',drafts});
+  await assert.rejects(f.sync('owner'),error=>error.code==='SUBMISSION_REJECTED');
+  assert.equal(f.removed.length,0);assert.equal(f.calls.some(call=>call.path==='/assets'||call.path.endsWith('/submit')||call.options?.method==='PATCH'),false);
+ }
 });

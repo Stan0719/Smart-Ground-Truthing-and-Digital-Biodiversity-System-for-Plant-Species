@@ -22,12 +22,15 @@ export default function EditSpeciesRequest({ route, navigation }) {
   const [form, setForm] = useState(null), [photo, setPhoto] = useState(null), [reuseOriginalPhoto, setReuseOriginalPhoto] = useState(false), [originalPhotoUnavailable, setOriginalPhotoUnavailable] = useState(false), [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false), [draftMessage, setDraftMessage] = useState(""), [draftError, setDraftError] = useState(""), [draftConflict, setDraftConflict] = useState(false), [offlineDraft, setOfflineDraft] = useState(false);
+  const [versionConflict, setVersionConflict] = useState(false);
+  const [inspectionRequired, setInspectionRequired] = useState(false);
+  const editBlocked = useRef(false);
   const [reload, setReload] = useState(0);
   const [editAvailability, setEditAvailability] = useState("checking");
   const [recoveryResolved, setRecoveryResolved] = useState(Boolean(route.params?.formDraftKey)), [autoSaveState, setAutoSaveState] = useState("");
   const busy = useRef(false), clientKey = useRef(makeKey()), formDraftKey = useRef(route.params?.formDraftKey || `edit-species-${accountId}-${requestId}`), restoredDraftRef = useRef(null), recoveryPromptedRef = useRef(false), initialFormRef = useRef(null);
-  const activeFormDraftKey = route.params?.formDraftKey || formDraftKey.current;
-  const signature = (request) => JSON.stringify({ request_status: request.request_status, submitted_at: request.submitted_at,
+  const activeFormDraftKey = formDraftKey.current;
+  const signature = (request) => JSON.stringify({ request_status: request.request_status, content_revision: request.content_revision, submitted_at: request.submitted_at,
     ...Object.fromEntries(fields.map((field) => [field, request[field] ?? ""])) });
   const restoreDraft = (draft) => {
     restoredDraftRef.current = draft; clientKey.current = draft.submission_client_key || clientKey.current;
@@ -36,6 +39,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
   };
   useFocusEffect(useCallback(() => {
     let active = true;
+    if (editBlocked.current) return () => { active = false; };
     (async () => {
       try {
         const [request, capabilities] = await Promise.all([fetchBotanistSpeciesRequest(accountId, requestId),
@@ -113,7 +117,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
     setDraftSaving(true); setDraftError(""); setDraftMessage("");
     try {
       const request = state.request;
-      const baseline = { request: { request_id: request.request_id, request_status: request.request_status, submitted_at: request.submitted_at,
+      const baseline = { request: { request_id: request.request_id, request_status: request.request_status, content_revision: request.content_revision, submitted_at: request.submitted_at,
         ...Object.fromEntries(fields.map((field) => [field, request[field] ?? ""])) } };
       const draft = await saveBotanistFormDraft(accountId, { client_key: activeFormDraftKey, form_type: "edit-species", target_id: requestId,
         title: form.scientific_name || request.scientific_name || "", base_signature: restoredDraftRef.current?.base_signature || signature(request), baseline,
@@ -130,7 +134,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
   }
   const makeDraftInput = (autoSaved = false) => {
     const request = state.request;
-    const baseline = { request: { request_id: request.request_id, request_status: request.request_status, submitted_at: request.submitted_at,
+    const baseline = { request: { request_id: request.request_id, request_status: request.request_status, content_revision: request.content_revision, submitted_at: request.submitted_at,
       ...Object.fromEntries(fields.map((field) => [field, request[field] ?? ""])) } };
     return { client_key: activeFormDraftKey, form_type: "edit-species", target_id: requestId, title: form.scientific_name || request.scientific_name || "",
       base_signature: restoredDraftRef.current?.base_signature || signature(request), baseline, submission_client_key: clientKey.current,
@@ -149,13 +153,39 @@ export default function EditSpeciesRequest({ route, navigation }) {
       { text: t("botanistDrafts.leaveForm"), style: "destructive", onPress: () => navigation.goBack() },
     ]);
   }
+  async function loadLatestVersion() {
+    if (busy.current) return;
+    busy.current = true; setSaving(true);
+    try {
+      const request = await fetchBotanistSpeciesRequest(accountId, requestId);
+      await autosave.stop();
+      // Replacing local selections is explicit and occurs only after a successful read.
+      restoredDraftRef.current = null;
+      formDraftKey.current = makeKey();
+      navigation.setParams({ formDraftKey: undefined });
+      initialFormRef.current = Object.fromEntries(fields.map(field => [field, String(request[field] ?? "")]));
+      setForm(initialFormRef.current); setPhoto(null); setReuseOriginalPhoto(false); setOriginalPhotoUnavailable(false);
+      setState(old => ({ ...old, request }));
+      setDraftConflict(false); setOfflineDraft(false); setVersionConflict(false); setInspectionRequired(true);
+    } catch { Alert.alert(t("common.error"), t("recordEdits.latestLoadFailed")); }
+    finally { busy.current = false; setSaving(false); }
+  }
+  function confirmLoadLatest() {
+    Alert.alert(t("recordEdits.reloadLatest"), t("recordEdits.replaceUnsaved"), [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("recordEdits.reloadLatest"), onPress: loadLatestVersion },
+    ]);
+  }
   function submit() {
-    if (busy.current || submitted) return;
+    if (state.request.request_status === "Rejected") return Alert.alert(t("common.error"), t("recordEdits.finalRejected"));
+    if (busy.current || submitted || editBlocked.current) return;
     if (offlineDraft || draftConflict) return Alert.alert(t("common.error"), t("botanistDrafts.editConflict"));
     if (fields.some((field) => !form[field].trim() || form[field].length > (["description", "habitat"].includes(field) ? 4000 : 200)))
       return Alert.alert(t("common.error"), t("recordEdits.speciesFieldsRequired"));
     if (state.request.request_status === "Approved" && !state.available)
       return Alert.alert(t("common.error"), t("recordEdits.migrationRequired"));
+    if (state.request.request_status !== "Approved" && (!Number.isSafeInteger(state.request.content_revision) || state.request.content_revision < 1))
+      return Alert.alert(t("common.error"), t("recordEdits.revisionUnavailable"));
     showSubmitConfirmation();
   }
   function showSubmitConfirmation() {
@@ -174,7 +204,8 @@ export default function EditSpeciesRequest({ route, navigation }) {
     } catch { setEditAvailability("unavailable"); return "unavailable"; }
   }
   async function save() {
-    if (busy.current) return;
+    if (state.request.request_status === "Rejected") return Alert.alert(t("common.error"), t("recordEdits.finalRejected"));
+    if (busy.current || editBlocked.current) return;
     busy.current = true; setSaving(true);
     let reusedFile;
     try {
@@ -203,8 +234,12 @@ export default function EditSpeciesRequest({ route, navigation }) {
       if (state.request.request_status === "Approved") {
         const response = await plantApi("/record-changes", { method: "POST", expectedAccountId: accountId,
           body: { kind: "species", target_id: Number(requestId), proposed, client_key: clientKey.current } });
-        changeId = response?.change?.id ?? null;
-      } else await plantApi(`/my-species-requests/${encodeURIComponent(requestId)}`, { method: "PATCH", expectedAccountId: accountId, body: proposed });
+        const receipt = response?.change;
+        if (!receipt || typeof receipt.id !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(receipt.id) ||
+          (receipt.status !== undefined && receipt.status !== "Pending Review"))
+          throw Error("The server did not confirm a pending change proposal. Refresh your submissions before trying again.");
+        changeId = receipt.id;
+      } else await plantApi(`/my-species-requests/${encodeURIComponent(requestId)}`, { method: "PATCH", expectedAccountId: accountId, body: { ...proposed, expected_revision: state.request.content_revision } });
       await autosave.stop();
       if (restoredDraftRef.current) {
         try {
@@ -217,12 +252,21 @@ export default function EditSpeciesRequest({ route, navigation }) {
         botanist: route.params?.botanist, openTarget: { kind: "species", recordId: requestId, ...(changeId ? { changeId } : {}) },
       }) }]);
     } catch (error) {
+      if (error.code === "SUBMISSION_REJECTED") {
+        setState(old => ({ ...old, request: { ...old.request, request_status: "Rejected" } }));
+        Alert.alert(t("common.error"), t("recordEdits.finalRejected"));
+        return;
+      }
+      if (error.code === "SPECIES_REQUEST_EDIT_VERSION_CONFLICT") {
+        editBlocked.current = true; setVersionConflict(true);
+        return;
+      }
       if (error.status === 409 && /already pending review/i.test(error.message || "")) setEditAvailability("pending");
       const reuseMessages = { PHOTO_REUSE_UNAVAILABLE: "recordEdits.photoReuseUnavailable", PHOTO_REUSE_DOWNLOAD_FAILED: "recordEdits.photoReuseDownloadFailed",
         PHOTO_REUSE_UNSUPPORTED_FORMAT: "recordEdits.photoReuseUnsupportedFormat", PHOTO_REUSE_TOO_LARGE: "recordEdits.photoReuseTooLarge" };
       Alert.alert(t("common.error"), error.code === "EDIT_PENDING" || (error.status === 409 && /already pending review/i.test(error.message || ""))
         ? t("recordEdits.pendingEditExplanation") : error.code === "EDIT_AVAILABILITY_UNKNOWN" ? t("recordEdits.editAvailabilityUnavailable")
-          : reuseMessages[error.code] ? t(reuseMessages[error.code]) : translateUIMessage(error.message));
+          : reuseMessages[error.code] ? t(reuseMessages[error.code]) : error.status >= 500 ? t("recordEdits.saveUnavailable") : translateUIMessage(error.message));
     }
     finally { await reusedFile?.cleanup().catch(() => {}); busy.current = false; setSaving(false); }
   }
@@ -232,8 +276,17 @@ export default function EditSpeciesRequest({ route, navigation }) {
   if (state.error || !form) return <View style={styles.center}><Text style={styles.error}>{translateUIMessage(state.error)}</Text>
     <TouchableOpacity style={styles.secondary} onPress={() => { setState((old) => ({ ...old, loading: true, error: "" })); setReload((old) => old + 1); }}>
       <Text style={styles.secondaryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>;
+  if (state.request.request_status === "Rejected") return <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{t("recordEdits.finalRejected")}</Text><TouchableOpacity style={styles.secondary} onPress={() => navigation.goBack()}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity></View>;
   return <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <Text style={styles.title}>{t("recordEdits.editSpecies")}</Text>
+    {(versionConflict || (draftConflict && state.request.request_status !== "Approved")) && <View style={styles.conflict} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+      <Text style={styles.error}>{t("recordEdits.versionConflict")}</Text>
+      <TouchableOpacity style={styles.secondary} disabled={saving} onPress={confirmLoadLatest} accessibilityRole="button"><Text style={styles.secondaryText}>{t("recordEdits.reloadLatest")}</Text></TouchableOpacity>
+    </View>}
+    {inspectionRequired && <View style={styles.conflict}>
+      <Text style={styles.note}>{t("recordEdits.inspectLatest")}</Text>
+      <TouchableOpacity style={styles.secondary} onPress={() => { editBlocked.current = false; setInspectionRequired(false); }} accessibilityRole="button"><Text style={styles.secondaryText}>{t("recordEdits.acknowledgeLatest")}</Text></TouchableOpacity>
+    </View>}
     <Text style={styles.note}>{state.request.request_status === "Approved" ? t("recordEdits.approvedNotice") : t("recordEdits.pendingNotice")}</Text>
     {state.request.request_status === "Approved" && editAvailability === "pending" && <View style={styles.pendingEditNote}><Text style={styles.pendingEditLabel}>{t("recordEdits.pendingEdit")}</Text><Text style={styles.note}>{t("recordEdits.pendingEditExplanation")}</Text></View>}
     {state.request.request_status === "Approved" && editAvailability === "checking" && <Text style={styles.note}>{t("recordEdits.checkingEditAvailability")}</Text>}
@@ -268,13 +321,14 @@ export default function EditSpeciesRequest({ route, navigation }) {
     </View>
     <View style={styles.formActionRow}>
       <TouchableOpacity style={[styles.secondary, (draftSaving || saving || submitted) && styles.disabled]} onPress={saveLocalDraft} disabled={draftSaving || saving || submitted} accessibilityRole="button" accessibilityState={{ disabled: draftSaving || saving || submitted }}><Text style={styles.secondaryText}>{draftSaving ? t("botanistDrafts.saving") : t("botanistDrafts.saveDraft")}</Text></TouchableOpacity>
-      <TouchableOpacity style={[styles.primary, (saving || submitted || offlineDraft || draftConflict) && styles.disabled]} onPress={submit} disabled={saving || submitted || offlineDraft || draftConflict} accessibilityRole="button" accessibilityState={{ disabled: saving || submitted || offlineDraft || draftConflict }}><Text style={styles.primaryText}>{saving ? t("recordEdits.saving") : t("recordEdits.submitChanges")}</Text></TouchableOpacity>
+      <TouchableOpacity style={[styles.primary, (saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired) && styles.disabled]} onPress={submit} disabled={saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired} accessibilityRole="button" accessibilityState={{ disabled: saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired }}><Text style={styles.primaryText}>{saving ? t("recordEdits.saving") : t("recordEdits.submitChanges")}</Text></TouchableOpacity>
     </View>
     <TouchableOpacity style={styles.secondary} onPress={confirmLeave} disabled={saving}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity>
   </ScrollView>;
 }
 
 const styles = StyleSheet.create({
+  conflict: { padding: 16, gap: 12, borderWidth: 1, borderColor: "#B43C32", borderRadius: 12, backgroundColor: "#FFF0EE" },
   page: { flex: 1, backgroundColor: "#F7FBF4" }, content: { padding: 20, paddingBottom: 50, gap: 16, width: "100%", maxWidth: 820, alignSelf: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#F7FBF4" },
   title: { color: "#234B3A", fontSize: 26, fontWeight: "800" }, note: { color: "#52665A", lineHeight: 21 },

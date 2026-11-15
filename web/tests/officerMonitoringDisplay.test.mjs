@@ -228,7 +228,7 @@ test('pages wire display-only labels and dates while actions, keys and filters r
   assert.match(iot, /:key="String\(reading.reading_id\)"/)
   assert.match(alerts, /const id = selectedAlert.value.id/)
   assert.match(alerts, /await saveAlertResponse\(id, responseNote.value, responseStatus.value\)/)
-  assert.match(alerts, /alert.createdAt.slice\(0, 10\) === date.value/)
+  assert.match(alerts, /detectionDate\(alert.detectedAt\) === date.value/)
   assert.match(alerts, /alert.deviceId === deviceQuery/)
   for (const [value, labels] of [['alert.readingId', 'readingLabels'], ['selectedAlert.readingId', 'readingLabels'], ['selectedAlert.cameraId', 'cameraLabels']]) assert.ok(alerts.includes(`:value="${value}" :labels="${labels}"`))
   assert.match(read('components/CameraMonitoringSection.vue'), /monitoringDate\(value, locale.value\)/)

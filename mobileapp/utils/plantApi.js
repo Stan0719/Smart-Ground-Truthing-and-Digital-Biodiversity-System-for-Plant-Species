@@ -21,7 +21,7 @@ export async function plantApi(path,{method='GET',body,expectedAccountId,account
  try{result=responseText?JSON.parse(responseText):{}}catch{
  throw Object.assign(Error(`Plant API returned a non-JSON response (HTTP ${response.status}) for ${method} ${path}. Check that the backend and tunnel are running the current code.`),{code:'API_NOT_JSON',status:response.status,transient:[502,503,504].includes(response.status)});
  }
- if(!response.ok)throw Object.assign(Error(result.error||`Plant request failed (HTTP ${response.status}).`),{status:response.status,code:response.status===401?'API_AUTH_REQUIRED':response.status===403?'API_ACCESS_DENIED':'PLANT_API_ERROR',transient:[502,503,504].includes(response.status)});
+ if(!response.ok)throw Object.assign(Error(result.error||`Plant request failed (HTTP ${response.status}).`),{status:response.status,code:response.status===401?'API_AUTH_REQUIRED':response.status===403?'API_ACCESS_DENIED':typeof result.code==='string'?result.code:'PLANT_API_ERROR',transient:[502,503,504].includes(response.status)});
  if(Array.isArray(result.plants))logPlantRequest({phase:'records_received',endpoint:API_URL+'/api'+path,status:response.status,recordCount:result.plants.length,ownedRecordCount:result.plants.filter(row=>row.registered_subject===`staff:${user.id}`).length});
  return result;
  });}catch(error){logPlantRequest({phase:'request_failed',endpoint,method,code:error.code||'PLANT_API_ERROR',...(error.status?{status:error.status}:{}),...(error.code==='SESSION_REQUIRED'?{credentialsIncluded:false}: {})});throw error;}
@@ -200,7 +200,7 @@ export function mapBackendPlant(record, speciesById = new Map()) {
   const species = speciesById.get(speciesId) || (record.species_details ? {
     ...mapBackendSpecies(record.species_details), habitat: record.species_details.habitat || "",
   } : undefined);
-  const plantScientificName = record.scientific_name || record.scientificName ||
+  const plantScientificName = record.plant_scientific_name || record.scientific_name || record.scientificName ||
     observationName?.scientific_name || observationName?.scientificName || species?.scientificName || "";
   const registeredAt = record.registered_at ?? record.registeredAt ?? null;
   const plantId = String(record.plant_id ?? record.plantId ?? record.id ?? "");
@@ -214,6 +214,8 @@ export function mapBackendPlant(record, speciesById = new Map()) {
     // The schema stores a plant-level scientific_name but has no
     // plant-level common_name column. Keep that distinction explicit.
     plantScientificName,
+    plantScientificNameValue: Object.hasOwn(record, "plant_scientific_name") ? record.plant_scientific_name : record.scientific_name ?? record.scientificName ?? null,
+    speciesScientificName: record.species_scientific_name ?? record.species_details?.scientific_name ?? species?.scientificName ?? null,
     plantCommonName: record.plant_common_name ?? record.plantCommonName ?? null,
     commonName: record.common_name ?? record.commonName ?? species?.name ?? "Unknown species",
     scientificName: plantScientificName,
