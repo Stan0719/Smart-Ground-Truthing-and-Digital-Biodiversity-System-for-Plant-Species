@@ -7,6 +7,9 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <time.h>
+#include <esp_sntp.h>
+#include <sys/time.h>
 
 // Create wifi_config.h from wifi_config.example.h. It is ignored by Git.
 #if __has_include("wifi_config.h")
@@ -117,11 +120,17 @@ const unsigned long DASHBOARD_INTERVAL = 2000;
 
 #if PLANT_TRANSPORT_WIFI
 WiFiClientSecure wifiTls;
+volatile bool wifiNtpSynced = false;
 unsigned long lastWifiAttempt = 0;
 const unsigned long WIFI_RETRY_INTERVAL = 10000;
 
+void onWifiTimeSync(struct timeval *tv) {
+    (void)tv;
+    wifiNtpSynced = true;
+}
+
 void sendReadingsOverWifi() {
-    if (WiFi.status() != WL_CONNECTED) return;
+    if (WiFi.status() != WL_CONNECTED || !wifiNtpSynced) return;
     wifiTls.setCACert(LAPTOP_CA_CERT);
     HTTPClient https;
     String url = String("https://") + LAPTOP_HOST + ":" + LAPTOP_PORT + "/readings";
@@ -894,6 +903,26 @@ void setup() {
 
     lastDashboardRefresh = now;
     lastMPUHealthCheck = now;
+
+#if PLANT_TRANSPORT_WIFI
+    const unsigned long wifiWaitStarted = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - wifiWaitStarted < 15000) delay(250);
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiNtpSynced = false;
+        sntp_set_time_sync_notification_cb(onWifiTimeSync);
+        configTime(0, 0, "pool.ntp.org", "time.cloudflare.com");
+        const unsigned long syncStarted = millis();
+        while (!wifiNtpSynced && millis() - syncStarted < 20000) delay(250);
+    }
+    time_t utcNow = time(nullptr);
+    struct tm utcTime;
+    if (gmtime_r(&utcNow, &utcTime)) {
+        Serial.printf("ESP UTC: %04d-%02d-%02d %02d:%02d:%02d\r\n",
+            utcTime.tm_year + 1900, utcTime.tm_mon + 1, utcTime.tm_mday,
+            utcTime.tm_hour, utcTime.tm_min, utcTime.tm_sec);
+    }
+    Serial.printf("Clock sync: %s\r\n", wifiNtpSynced ? "ready" : "failed");
+#endif
 }
 
 // ==================== MAIN LOOP ====================

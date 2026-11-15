@@ -72,7 +72,10 @@ def main():
             {'Content-Type': 'application/json', 'Authorization': 'Device ' + api_key}, method='POST')
         with opener.open(req, timeout=10) as response:
             return response.status
-    outbox = Outbox(os.environ.get('IOT_OUTBOX', str(Path(__file__).parent / '.private' / 'outbox.sqlite')))
+    outbox = Outbox(
+        os.environ.get('IOT_OUTBOX', str(Path(__file__).parent / '.private' / 'outbox.sqlite')),
+        cross_thread=True,
+    )
     server = Receiver((host, port), Handler, outbox, device, token, send)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert, key)

@@ -154,11 +154,11 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Outbox:
-    def __init__(self, filename):
+    def __init__(self, filename, *, cross_thread=False):
         path = Path(filename)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.last_status = None
-        self.db = sqlite3.connect(path)
+        self.db = sqlite3.connect(path, check_same_thread=not cross_thread)
         os.chmod(path, 0o600)
         self.db.execute('CREATE TABLE IF NOT EXISTS queue (id INTEGER PRIMARY KEY, body TEXT NOT NULL)')
         self.db.commit()

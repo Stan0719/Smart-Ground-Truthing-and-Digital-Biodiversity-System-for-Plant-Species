@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
 import { monitoringLabels } from '../../utils/officerMonitoringDisplay'
-import { iotDate, deviceDisplayTitle } from '../../utils/iotDisplay'
+import { iotDate, deviceDisplayTitle, soilCondition, surfaceCondition } from '../../utils/iotDisplay'
 import { sessionSnapshot, subscribeSession, type AuthUser } from '../../services/auth'
 import AppModal from '../../components/conservation/AppModal.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
@@ -61,6 +61,7 @@ const dismissDeviceAlertFeedback = (id: number) => {
 watch(() => selectedDevice.value?.sensor_id, invalidateDeviceAlerts, { flush: 'sync' })
 let generation = 0, disposed = false
 let initialRequest: AbortController | null = null, refreshRequest: AbortController | null = null
+let readingsPollTimer: ReturnType<typeof setInterval> | null = null
 const sessionKey = (user: AuthUser | null, pending: boolean) => !pending && user?.status === 'Active' &&
   user.mustChangePassword === false && ['Conservation Officer', 'Administrator'].includes(user.role) ? `${user.id}:${user.role}` : ''
 let identity = sessionKey(sessionSnapshot().user, sessionSnapshot().pending)
@@ -103,6 +104,22 @@ const refreshReadings = async () => {
     const result = await loadLatestReadings(devices.value, controller.signal)
     if (version !== generation || disposed) return
     readingDevices.value = result
+    const latestByDevice = new Map(result.map(device => [String(device.sensor_id), device.latest_reading]))
+    devices.value = devices.value.map(device => {
+      const key = String(device.sensor_id)
+      return latestByDevice.has(key)
+        ? { ...device, latest_reading: latestByDevice.get(key) ?? null }
+        : device
+    })
+    if (selectedDevice.value) {
+      const key = String(selectedDevice.value.sensor_id)
+      if (latestByDevice.has(key)) {
+        selectedDevice.value = {
+          ...selectedDevice.value,
+          latest_reading: latestByDevice.get(key) ?? null,
+        }
+      }
+    }
   } catch (error) {
     controller.abort()
     if (version !== generation || disposed) return
@@ -120,8 +137,19 @@ const unsubscribe = subscribeSession((user, pending) => {
   initialRequest = null; refreshRequest = null
   if (identity) void loadDevices()
 })
-onBeforeUnmount(() => { disposed = true; unsubscribe(); clearSessionData() })
-onMounted(loadDevices)
+onBeforeUnmount(() => {
+  disposed = true
+  if (readingsPollTimer) clearInterval(readingsPollTimer)
+  readingsPollTimer = null
+  unsubscribe()
+  clearSessionData()
+})
+onMounted(() => {
+  void loadDevices()
+  readingsPollTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') void refreshReadings()
+  }, 1000)
+})
 
 const filteredDevices = computed(() =>
   devices.value.filter((device) => {
@@ -288,7 +316,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
     </article>
   </section>
 
-  <CameraMonitoringSection />
+  <CameraMonitoringSection :devices="readingDevices" :readings-busy="isLoading || isRefreshing" :readings-error="errorMessage || refreshError" @refresh-readings="errorMessage ? loadDevices() : refreshReadings()" />
 
   <div class="control-bar">
     <label class="field search-field">
@@ -395,7 +423,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       </div>
       <p v-if="!latestReadings.length" class="state-message">No sensor readings available.</p>
       <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="t('conservationPages.iot.recentReadings')" tabindex="0">
-        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
+        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-metric" /><col class="column-status" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
           <thead>
             <tr>
               <th scope="col">Reading ID</th>
@@ -403,8 +431,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <th scope="col">Plant ID</th>
               <th scope="col">Temperature</th>
               <th scope="col">Humidity</th>
-              <th scope="col">Soil Moisture</th>
-              <th scope="col">Rainfall</th>
+              <th scope="col">Soil Raw (ADC)</th>
+              <th scope="col">Soil Condition</th>
+              <th scope="col">Rain Raw (ADC)</th>
+              <th scope="col">Surface Condition</th>
               <th scope="col">Motion</th>
               <th scope="col">GPS</th>
               <th scope="col">Recorded At</th>
@@ -420,8 +450,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <td>{{ plantDisplayId(item.reading) }}</td>
               <td>{{ valueOrDash(item.reading.temperature_c, ' °C') }}</td>
               <td>{{ valueOrDash(item.reading.humidity, '%') }}</td>
-              <td>{{ valueOrDash(item.reading.soil_moisture, '%') }}</td>
-              <td>{{ valueOrDash(item.reading.rainfall_mm, ' mm') }}</td>
+              <td>{{ valueOrDash(item.reading.soil_moisture) }}</td>
+              <td>{{ soilCondition(item.reading.soil_moisture) }}</td>
+              <td>{{ valueOrDash(item.reading.rainfall_mm) }}</td>
+              <td>{{ surfaceCondition(item.reading.rainfall_mm) }}</td>
               <td>
                 <span class="badge" :class="item.reading.motion_detected ? 'high' : 'approved'">{{
                   motionValue(item.reading)
@@ -546,21 +578,21 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
           :points="humidityChartPoints"
         />
         <SensorHistoryChart
-          title="Soil moisture over time"
-          unit="%"
-          empty-message="No soil moisture history available."
+          title="Soil raw readings over time"
+          unit="ADC"
+          empty-message="No soil sensor history available."
           :points="soilMoistureChartPoints"
         />
         <SensorHistoryChart
-          title="Rainfall over time"
-          unit="mm"
+          title="Rain raw readings over time"
+          unit="ADC"
           type="bar"
-          empty-message="No rainfall history available."
+          empty-message="No rain sensor history available."
           :points="rainfallChartPoints"
         />
       </section>
       <div class="table-scroll officer-table-scroll history-table" role="region" :aria-label="`Reading History · ${historyDevice.device_name}`" tabindex="0">
-        <table class="officer-data-table iot-history-table"><colgroup><col class="column-id" /><col class="column-time" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-coordinates" /></colgroup>
+        <table class="officer-data-table iot-history-table"><colgroup><col class="column-id" /><col class="column-time" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-metric" /><col class="column-status" /><col class="column-status" /><col class="column-coordinates" /></colgroup>
           <thead>
             <tr>
               <th scope="col">Reading ID</th>
@@ -568,8 +600,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <th scope="col">Related Plant</th>
               <th scope="col">Temperature</th>
               <th scope="col">Humidity</th>
-              <th scope="col">Soil Moisture</th>
-              <th scope="col">Rainfall</th>
+              <th scope="col">Soil Raw (ADC)</th>
+              <th scope="col">Soil Condition</th>
+              <th scope="col">Rain Raw (ADC)</th>
+              <th scope="col">Surface Condition</th>
               <th scope="col">Motion</th>
               <th scope="col">GPS</th>
             </tr>
@@ -583,8 +617,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <td>{{ plantDisplayId(reading) }}</td>
               <td>{{ valueOrDash(reading.temperature_c, ' °C') }}</td>
               <td>{{ valueOrDash(reading.humidity, '%') }}</td>
-              <td>{{ valueOrDash(reading.soil_moisture, '%') }}</td>
-              <td>{{ valueOrDash(reading.rainfall_mm, ' mm') }}</td>
+              <td>{{ valueOrDash(reading.soil_moisture) }}</td>
+              <td>{{ soilCondition(reading.soil_moisture) }}</td>
+              <td>{{ valueOrDash(reading.rainfall_mm) }}</td>
+              <td>{{ surfaceCondition(reading.rainfall_mm) }}</td>
               <td>{{ motionValue(reading) }}</td>
               <td>{{ gpsValue(reading) }}</td>
             </tr>
@@ -623,12 +659,20 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         <dd>{{ valueOrDash(selectedReading.humidity, '%') }}</dd>
       </div>
       <div class="reading-measurement">
-        <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19c5-5 13-5 18 0 M12 16V9 M12 10C6 11 5 5 5 5s7-1 7 5Z M12 9c0-5 7-5 7-5s0 6-7 5Z M6 22h.01 M12 21h.01 M18 22h.01" /></svg></span>Soil Moisture</dt>
-        <dd>{{ valueOrDash(selectedReading.soil_moisture, '%') }}</dd>
+        <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19c5-5 13-5 18 0 M12 16V9 M12 10C6 11 5 5 5 5s7-1 7 5Z M12 9c0-5 7-5 7-5s0 6-7 5Z M6 22h.01 M12 21h.01 M18 22h.01" /></svg></span>Soil Raw (ADC)</dt>
+        <dd>{{ valueOrDash(selectedReading.soil_moisture) }}</dd>
       </div>
       <div class="reading-measurement">
-        <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15a4 4 0 0 1-1-7 6 6 0 0 1 11-3 5 5 0 1 1 3 10Z M7 18l-2 4 M13 18l-2 4 M19 18l-2 4" /></svg></span>Rainfall</dt>
-        <dd>{{ valueOrDash(selectedReading.rainfall_mm, ' mm') }}</dd>
+        <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15a4 4 0 0 1-1-7 6 6 0 0 1 11-3 5 5 0 1 1 3 10Z M7 18l-2 4 M13 18l-2 4 M19 18l-2 4" /></svg></span>Rain Raw (ADC)</dt>
+        <dd>{{ valueOrDash(selectedReading.rainfall_mm) }}</dd>
+      </div>
+      <div class="reading-measurement">
+        <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19c5-5 13-5 18 0 M12 16V9 M12 10C6 11 5 5 5 5s7-1 7 5Z M12 9c0-5 7-5 7-5s0 6-7 5Z M6 22h.01 M12 21h.01 M18 22h.01" /></svg></span>Soil Condition</dt>
+        <dd>{{ soilCondition(selectedReading.soil_moisture) }}</dd>
+      </div>
+      <div class="reading-measurement">
+        <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15a4 4 0 0 1-1-7 6 6 0 0 1 11-3 5 5 0 1 1 3 10Z M7 18l-2 4 M13 18l-2 4 M19 18l-2 4" /></svg></span>Surface Condition</dt>
+        <dd>{{ surfaceCondition(selectedReading.rainfall_mm) }}</dd>
       </div>
       <div class="reading-measurement">
         <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 4.9a10 10 0 0 0 0 14.2 M19.1 4.9a10 10 0 0 1 0 14.2 M8 8a5.7 5.7 0 0 0 0 8 M16 8a5.7 5.7 0 0 1 0 8 M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z" /></svg></span>Motion</dt>
