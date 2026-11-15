@@ -6,7 +6,10 @@ const { transaction, audit, subject, fail, text, id, fieldContent, speciesRow } 
 const { historyAvailable, appendVersion, plantPhotoRefs, plantProposedSnapshot } = require("./record-version-history.cjs");
 const { replaceRequestPhoto } = require("./species-photo-provenance.cjs");
 const { assertSpeciesReassignment } = require("./species-requests.cjs");
+const { assertQrAssignmentAllowed, normalizeQrPlantSchema } = require("./qr-plant-mode.cjs");
 
+const { requireReviewCycle } = require("./species-review-cycle.cjs");
+const { finalRejection } = require("./final-rejection.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const numericId = (value) => id(String(value));
@@ -98,21 +101,21 @@ async function ownedSpeciesRequest(c, requestId, user, lock = false) {
   }
   return row;
 }
-async function approvedPlantSnapshot(c, row) {
+async function approvedPlantSnapshot(c, row, qrPlantSchema) {
   const observation = (await c.query("SELECT id,content,revision FROM plant_observation WHERE plant_id=$1 AND status='Approved' ORDER BY updated_at DESC,id DESC LIMIT 1",
     [row.plant_id])).rows[0];
   if (!observation) fail(409, "Approve the plant observation before editing its public information.");
   const photoIds = (await c.query("SELECT id FROM plant_asset WHERE observation_id=$1 AND approved=TRUE AND content_type='image/jpeg' ORDER BY created_at,id",
     [observation.id])).rows.map((asset) => asset.id);
-  const qr = (await c.query("SELECT qr_id FROM public.qr_code WHERE plant_id=$1 AND qr_code=$2", [row.plant_id, row.qr_token])).rows[0];
+  const qr = (await c.query("SELECT qr_id FROM plant_app.qr_code WHERE plant_id=$1 AND qr_code=$2", [row.plant_id, row.qr_token])).rows[0];
   return { plant_id: row.plant_id, species_id: row.species_id, scientific_name: row.scientific_name,
     qr_token: row.qr_token, qr_id: qr?.qr_id ?? null,
     observation_id: observation.id, observation_revision: observation.revision, photo_ids: photoIds,
     photo_refs: plantPhotoRefs(photoIds), content: observation.content };
 }
-async function pendingPlantSnapshot(c, row, observation) {
+async function pendingPlantSnapshot(c, row, observation, qrPlantSchema) {
   const photoIds = await currentPhotoIds(c, observation.id, false);
-  const qr = (await c.query("SELECT qr_id FROM public.qr_code WHERE plant_id=$1 AND qr_code=$2", [row.plant_id, row.qr_token])).rows[0];
+  const qr = (await c.query("SELECT qr_id FROM plant_app.qr_code WHERE plant_id=$1 AND qr_code=$2", [row.plant_id, row.qr_token])).rows[0];
   return { plant_id: row.plant_id, species_id: row.species_id, scientific_name: row.scientific_name,
     qr_token: row.qr_token, qr_id: qr?.qr_id ?? null, observation_id: observation.id,
     observation_revision: observation.revision, photo_ids: photoIds, photo_refs: plantPhotoRefs(photoIds), content: observation.content };
@@ -121,18 +124,19 @@ async function plantReview(c, observationId) {
   return (await c.query(`SELECT reviewer_subject AS reviewed_by,created_at AS reviewed_at,comment AS review_comment
     FROM observation_review WHERE observation_id=$1 ORDER BY created_at DESC LIMIT 1`, [observationId])).rows[0] || null;
 }
-async function applyQrChange(c, plant, qrId) {
+async function applyQrChange(c, plant, qrId, qrPlantSchema) {
   if (qrId === undefined) return;
-  const current = (await c.query("SELECT qr_id FROM public.qr_code WHERE plant_id=$1 AND qr_code=$2 FOR UPDATE",
+  assertQrAssignmentAllowed(qrPlantSchema);
+  const current = (await c.query("SELECT qr_id FROM plant_app.qr_code WHERE plant_id=$1 AND qr_code=$2 FOR UPDATE",
     [plant.plant_id, plant.qr_token])).rows[0];
   if (current && String(current.qr_id) === String(qrId)) return;
-  const next = (await c.query("SELECT qr_id,qr_code FROM public.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE",
+  const next = (await c.query("SELECT qr_id,qr_code FROM plant_app.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE",
     [qrId])).rows[0];
   if (!next) fail(409, "Selected QR code is no longer available. Refresh the QR list.");
   if ((await c.query("SELECT plant_id FROM plant_record WHERE qr_token=$1 AND plant_id<>$2", [next.qr_code, plant.plant_id])).rows.length)
     fail(409, "Selected QR code is already used by another plant.");
-  if (current) await c.query("UPDATE public.qr_code SET plant_id=NULL,status='retired',retired_at=CURRENT_TIMESTAMP WHERE qr_id=$1", [current.qr_id]);
-  await c.query("UPDATE public.qr_code SET plant_id=$1,status=$2,assigned_at=CURRENT_TIMESTAMP,activated_at=CASE WHEN $2='active' THEN CURRENT_TIMESTAMP ELSE NULL END,retired_at=NULL WHERE qr_id=$3",
+  if (current) await c.query("UPDATE plant_app.qr_code SET plant_id=NULL,status='retired',retired_at=CURRENT_TIMESTAMP WHERE qr_id=$1", [current.qr_id]);
+  await c.query("UPDATE plant_app.qr_code SET plant_id=$1,status=$2,assigned_at=CURRENT_TIMESTAMP,activated_at=CASE WHEN $2='active' THEN CURRENT_TIMESTAMP ELSE NULL END,retired_at=NULL WHERE qr_id=$3",
     [plant.plant_id, plant.rbac_status === "Approved" ? "active" : "assigned", next.qr_id]);
   await c.query("UPDATE plant_record SET qr_token=$1 WHERE plant_id=$2", [next.qr_code, plant.plant_id]);
 }
@@ -180,7 +184,8 @@ async function uniqueName(c, name, speciesId) {
     [name, speciesId])).rows.length) fail(409, "This scientific name belongs to another species.");
 }
 
-function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
+function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrPlantSchema = "plant_app" }) {
+  qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
   // Pending records are private. The same record and observation IDs are retained.
   app.patch("/api/my-plants/:id", allow("plants.create"), async (req, res) => {
     const { expected_revision: expectedRevision, ...edit } = req.body || {};
@@ -188,21 +193,26 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
     const proposal = await normalized(plantProposal(edit), "plant");
     const result = await transaction(pool, async (c) => {
       const plant = await ownedPlant(c, numericId(req.params.id), req.user, true);
-      if (!["Pending Review", "Rejected", "Correction Required"].includes(plant.rbac_status))
+      if (plant.rbac_status === "Rejected") finalRejection();
+      if (!["Pending Review", "Correction Required"].includes(plant.rbac_status))
         fail(409, "Approved plants require a reviewed change submission.");
       const observation = (await c.query("SELECT * FROM plant_observation WHERE plant_id=$1 AND owner_subject=$2 ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE",
         [plant.plant_id, subject(req.user)])).rows[0];
-      if (!observation || !["Pending Review", "Rejected", "Correction Required"].includes(observation.status))
+      if (observation?.status === "Rejected") finalRejection();
+      if (!observation || !["Pending Review", "Correction Required"].includes(observation.status))
         fail(409, "Plant observation is unavailable for correction.");
       if (observation.revision !== expectedRevision) fail(409, "Plant changed. Reload its latest version before saving.");
-      const before = await pendingPlantSnapshot(c, plant, observation);
+      const before = await pendingPlantSnapshot(c, plant, observation, qrPlantSchema);
+      if (proposal.qr_id !== undefined &&
+          String(proposal.qr_id) !== String(before.qr_id))
+        assertQrAssignmentAllowed(qrPlantSchema);
       if ((plant.species_data?.approvalStatus || "Approved") !== "Approved" && proposal.species_id !== String(plant.species_id))
         fail(409, "Finish the linked species request before changing this plant's species.");
       if (proposal.species_id !== String(plant.species_id)) {
         await assertSpeciesReassignment(c, plant.plant_id, plant, fail);
         await speciesRow(c, proposal.species_id, req.user);
       }
-      await applyQrChange(c, plant, proposal.qr_id);
+      await applyQrChange(c, plant, proposal.qr_id, qrPlantSchema);
       await c.query("UPDATE plant_record SET species_id=$1,scientific_name=$2,rbac_status='Pending Review' WHERE plant_id=$3",
         [proposal.species_id, proposal.scientific_name, plant.plant_id]);
       await c.query("UPDATE plant_observation SET content=$1,status='Pending Review',revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=$2",
@@ -213,7 +223,8 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
         approved: false, proposal, keyPrefix: `plant-edit:${randomUUID()}` });
       const updated = (await c.query("SELECT plant_id,species_id,scientific_name,qr_token FROM plant_record WHERE plant_id=$1", [plant.plant_id])).rows[0];
       const after = await pendingPlantSnapshot(c, updated,
-        { ...observation, content: { ...observation.content, ...proposal.content }, revision: observation.revision + 1 });
+        { ...observation, content: { ...observation.content, ...proposal.content }, revision: observation.revision + 1 },
+        qrPlantSchema);
       await appendVersion(c, { kind: "plant", targetId: plant.plant_id, owner: subject(req.user), editor: subject(req.user),
         base: before, baseStatus: observation.status, proposed: after, baselineAt: observation.created_at,
         baselineReview: await plantReview(c, observation.id) });
@@ -225,11 +236,18 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
   });
 
   app.patch("/api/my-species-requests/:id", allow("plants.create"), async (req, res) => {
-    const proposal = await normalized(speciesProposal(req.body), "species");
+    const { expected_revision: expectedRevision, ...edit } = req.body || {};
+    const proposal = await normalized(speciesProposal(edit), "species");
     const result = await transaction(pool, async (c) => {
       const row = await ownedSpeciesRequest(c, numericId(req.params.id), req.user, true);
-      if (!["Pending Review", "Rejected", "Correction Required"].includes(row.request_status))
+      if (row.request_status === "Rejected") finalRejection();
+      if (!["Pending Review", "Correction Required"].includes(row.request_status))
         fail(409, "Approved species require a reviewed change submission.");
+      await requireReviewCycle(c, fail);
+      if (!Number.isSafeInteger(row.content_revision) || row.content_revision < 1)
+        fail(503, "Species editing is unavailable until content revision metadata is installed.");
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision !== row.content_revision)
+        return { version_conflict: true };
       const before = { request_id: row.request_id, species_id: row.proposed_species_id,
         ...speciesSnapshot(row) };
       if (row.proposed_species_id) {
@@ -261,6 +279,10 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
       await audit(c, req.user, "pending_species_updated", row.request_id);
       return { request_id: row.request_id, status: "Pending Review" };
     });
+    if (result.version_conflict) return res.status(409).json({
+      code: "SPECIES_REQUEST_EDIT_VERSION_CONFLICT",
+      error: "This species request changed. Load and inspect the latest version before saving.",
+    });
     res.json(result);
   });
 
@@ -290,7 +312,10 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
         if (row.rbac_status !== "Approved") fail(409, "Pending plants must be edited directly.");
         if (proposal.species_id !== String(row.species_id)) await speciesRow(c, proposal.species_id, req.user);
         plantId = row.plant_id;
-        base = await approvedPlantSnapshot(c, row);
+        base = await approvedPlantSnapshot(c, row, qrPlantSchema);
+        if (proposal.qr_id !== undefined &&
+            String(proposal.qr_id) !== String(base.qr_id))
+          assertQrAssignmentAllowed(qrPlantSchema);
         if (proposal.photo_ids !== undefined || proposal.photos !== undefined) {
           const retained = proposal.photo_ids || [];
           if (retained.some((photoId) => !base.photo_ids.includes(photoId)) ||
@@ -299,7 +324,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
             fail(409, "Plant photos changed or the proposed photo count is invalid. Reload before saving.");
         }
         if (proposal.qr_id !== undefined && String(proposal.qr_id) !== String(base.qr_id)) {
-          if (!(await c.query("SELECT qr_id FROM public.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated'",
+          if (!(await c.query("SELECT qr_id FROM plant_app.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated'",
             [proposal.qr_id])).rows.length) fail(409, "Selected QR code is no longer available. Refresh the QR list.");
         }
       } else {
@@ -318,7 +343,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
         [changeId, plantId, speciesId, subject(req.user), base, proposal, digest(base), clientKey, payloadHash]);
       if (plantId) {
         const proposedQr = proposal.qr_id === undefined || String(proposal.qr_id) === String(base.qr_id)
-          ? base.qr_token : (await c.query("SELECT qr_code FROM public.qr_code WHERE qr_id=$1", [proposal.qr_id])).rows[0]?.qr_code;
+          ? base.qr_token : (await c.query("SELECT qr_code FROM plant_app.qr_code WHERE qr_id=$1", [proposal.qr_id])).rows[0]?.qr_code;
         const original = (await c.query("SELECT registered_at FROM plant_record WHERE plant_id=$1", [plantId])).rows[0];
         await appendVersion(c, { kind: "plant", targetId: plantId, owner: subject(req.user), editor: subject(req.user),
           base, baseStatus: "Approved", proposed: plantProposedSnapshot(base, proposal, changeId, proposedQr),
@@ -332,6 +357,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
           proposedPhoto: proposal.photo ? Buffer.from(proposal.photo.base64, "base64") : original.photo,
           changeId, baselineAt: original.submitted_at, baselineReview: original });
       }
+      if (officerNotifications) await officerNotifications.enqueueRecordChange(c, changeId);
       await audit(c, req.user, "record_change_submitted", changeId);
       return { id: changeId, status: "Pending Review" };
     });
@@ -341,9 +367,18 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
   const read = (req, res, next) => allow(permitted(req.user, "species.manage") ? "species.manage" : "plants.create")(req, res, next);
   app.get("/api/record-changes", read, async (req, res) => {
     const officer = permitted(req.user, "species.manage");
-    const rows = (await pool.query("SELECT id,plant_id,species_id,owner_subject,status,revision,base_snapshot,proposed_snapshot - 'photos' - 'photo' AS proposed_snapshot,CASE WHEN jsonb_typeof(proposed_snapshot->'photos')='array' THEN jsonb_array_length(proposed_snapshot->'photos') WHEN proposed_snapshot ? 'photo' THEN 1 ELSE 0 END AS proposal_photo_count,review_comment,reviewed_by,reviewed_at,created_at FROM record_change_submission WHERE ($1 OR owner_subject=$2) ORDER BY created_at DESC LIMIT 500",
-      [officer, subject(req.user)])).rows;
-    res.json({ changes: rows });
+    const limit = req.query.limit === undefined ? 500 : Number(req.query.limit);
+    const status = req.query.status || '', search = req.query.search || '', cursor = req.query.cursor || '';
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500 ||
+      !['','Pending Review','Approved','Rejected'].includes(status) || typeof search !== 'string' || search.length > 200 ||
+      typeof cursor !== 'string' || (cursor && !/^[a-f0-9-]{36}$/i.test(cursor))) fail(400, 'Invalid change queue filters.');
+    const rows = (await pool.query(`SELECT id,plant_id,species_id,owner_subject,status,revision,base_snapshot,proposed_snapshot - 'photos' - 'photo' AS proposed_snapshot,CASE WHEN jsonb_typeof(proposed_snapshot->'photos')='array' THEN jsonb_array_length(proposed_snapshot->'photos') WHEN proposed_snapshot ? 'photo' THEN 1 ELSE 0 END AS proposal_photo_count,review_comment,reviewed_by,reviewed_at,created_at
+      FROM record_change_submission WHERE ($1 OR owner_subject=$2) AND ($3='' OR status=$3)
+      AND ($4='' OR concat_ws(' ',id,plant_id::text,species_id::text,owner_subject,base_snapshot->>'scientific_name',proposed_snapshot->>'scientific_name') ILIKE '%' || $4 || '%')
+      AND ($5='' OR (created_at,id)<(SELECT created_at,id FROM record_change_submission WHERE id=$5))
+      ORDER BY created_at DESC,id DESC LIMIT $6`, [officer, subject(req.user),status,search,cursor,limit+1])).rows;
+    const more = rows.length > limit, changes = rows.slice(0,limit);
+    res.json({ changes, page: { has_more: more, next_cursor: more ? changes.at(-1).id : null } });
   });
   app.get("/api/record-changes/:id", read, async (req, res) => {
     const row = (await pool.query("SELECT id,plant_id,species_id,owner_subject,status,revision,base_snapshot,proposed_snapshot - 'photos' - 'photo' AS proposed_snapshot,CASE WHEN jsonb_typeof(proposed_snapshot->'photos')='array' THEN jsonb_array_length(proposed_snapshot->'photos') WHEN proposed_snapshot ? 'photo' THEN 1 ELSE 0 END AS proposal_photo_count,review_comment,reviewed_by,reviewed_at,created_at FROM record_change_submission WHERE id=$1 AND ($2 OR owner_subject=$3)",
@@ -376,13 +411,13 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null }) {
         if (change.plant_id) {
           const plant = (await c.query("SELECT * FROM plant_record WHERE plant_id=$1 FOR UPDATE", [change.plant_id])).rows[0];
           if (!plant || plant.rbac_status !== "Approved") fail(409, "Approved plant has changed.");
-          const base = await approvedPlantSnapshot(c, plant);
+          const base = await approvedPlantSnapshot(c, plant, qrPlantSchema);
           if (digest(base) !== change.base_fingerprint) fail(409, "Approved plant changed since this proposal. Review a fresh version.");
           const proposal = change.proposed_snapshot;
           await speciesRow(c, proposal.species_id, req.user);
           await c.query("UPDATE plant_record SET species_id=$1,scientific_name=$2 WHERE plant_id=$3",
             [proposal.species_id, proposal.scientific_name, plant.plant_id]);
-          await applyQrChange(c, plant, proposal.qr_id);
+          await applyQrChange(c, plant, proposal.qr_id, qrPlantSchema);
           await c.query("UPDATE plant_observation SET content=$1,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=$2",
             [{ ...base.content, ...proposal.content }, base.observation_id]);
           await c.query("INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES($1,$2,$3,$4)",

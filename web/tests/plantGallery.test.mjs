@@ -13,6 +13,49 @@ const asset = (id, observation = 'initial', origin = 'initial_registration', ord
 const page = (assets, next = null, plant = '18') => Response.json({ plant_id: plant, assets, page: { limit: 20, has_more: next !== null, next_cursor: next } })
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 
+test('public gallery uses only the existing authorized asset list and bytes, never staff metadata or guessed origins', async () => {
+  const calls = [], gallery = createPlantGallery({ publicOnly: true, transport: async url => {
+    calls.push(url); return Response.json({ assets: ['a', 'b', 'c'].map(id => ({ id, content_type: 'image/jpeg' })) })
+  } })
+  await gallery.load('18', false)
+  assert.deepEqual(calls, ['/api/data/assets?plant_id=18'])
+  assert.equal(gallery.state.complete, true); assert.equal(gallery.state.hasMore, false)
+  assert.deepEqual(gallery.state.assets.map(a => a.url), ['/api/data/assets/a', '/api/data/assets/b', '/api/data/assets/c'])
+  assert.ok(gallery.state.assets.every(a => a.observationId === null && a.origin === 'unknown' && a.status === null && a.date === null && a.revision === null))
+  const h = component(groupGallery(gallery.state.assets), { registrationOnly: true, publicPhotos: true })
+  try {
+    const nav = label => h.render().find(n => n.type === 'button' && n.props?.['aria-label'] === label)
+    assert.equal(h.render().filter(n => n.props?.class === 'photo-thumbnail').length, 3)
+    nav('Next photo').props.onClick({ stopPropagation() {} }); await vue.nextTick()
+    assert.equal(h.state.active(h.props.groups[0]).id, 'b')
+    assert.match(text(h.render().find(n => n.props?.class === 'gallery-counter')), /2 \/ 3/)
+    const opened = []; h.state.lightbox.value = { open: (...args) => opened.push(args) }
+    nav('Enlarge plant photo').props.onClick({ currentTarget: {} })
+    assert.equal(opened[0][1], 1); assert.equal(opened[0][2], 'Plant Photos')
+    assert.ok(!h.render().some(n => n.props?.class === 'group-heading' || n.props?.class === 'observation-reference'))
+    h.props.groups[0].assets.forEach(a => h.state.imageFailed({ currentTarget: { getAttribute: () => a.url } }, a))
+    await vue.nextTick(); assert.ok(h.render().some(n => n.props?.class === 'photo-placeholder'))
+  } finally { h.stop() }
+})
+
+test('public gallery rejects private metadata/unsafe assets and invalidates late requests without falling back to evidence', async () => {
+  for (const assets of [[{ id: '../private', content_type: 'image/jpeg' }], [{ id: 'a', content_type: 'application/pdf' }],
+    [{ id: 'a', content_type: 'image/jpeg', observation_id: 'private' }]]) {
+    const gallery = createPlantGallery({ publicOnly: true, transport: async () => Response.json({ assets }) })
+    await gallery.load('18', false); assert.equal(gallery.state.assets.length, 0); assert.ok(gallery.state.error)
+  }
+  for (const status of [401, 403, 404, 500]) {
+    const gallery = createPlantGallery({ publicOnly: true, transport: async () => new Response('', { status }) })
+    await gallery.load('18', false); assert.ok(gallery.state.error); assert.equal(gallery.state.complete, false)
+  }
+  const held = deferred(); let signal
+  const gallery = createPlantGallery({ publicOnly: true, transport: async (_url, options) => { signal = options.signal; return held.promise } })
+  const work = gallery.load('18', false); gallery.reset(); assert.equal(signal.aborted, true)
+  held.resolve(Response.json({ assets: [{ id: 'old', content_type: 'image/jpeg' }] })); await work
+  assert.equal(gallery.state.assets.length, 0); assert.equal(gallery.state.complete, false)
+  assert.throws(() => createPlantGallery({ detail: true, publicOnly: true }))
+})
+
 test('multiple pages merge split registration/field groups, deduplicate assets and preserve numeric order', async () => {
   const calls = [], first = asset('two', 'initial', 'initial_registration', '2')
   const pages = [page([asset('ten', 'initial', 'initial_registration', '10'), first], 'nextPage'), page([
@@ -291,4 +334,35 @@ test('registration frame, controls, counter and thumbnails match Species Detail 
   const view = readFileSync(new URL('../src/views/PlantDetailView.vue', import.meta.url), 'utf8')
   assert.match(view, /max-width: 1080px/)
   assert.match(view, /grid-template-columns: minmax\(0, 0\.44fr\) minmax\(0, 0\.56fr\)/)
+})
+
+
+test('background gallery refresh preserves epoch and selection by asset ID and reconciles removed lightbox images', async () => {
+  for (const publicOnly of [false, true]) {
+    let ids = ['one', 'two'], status = 200
+    const gallery = createPlantGallery({ publicOnly, transport: async () => status !== 200 ? new Response('', { status }) : publicOnly
+      ? Response.json({ assets: ids.map(id => ({ id, content_type: 'image/jpeg' })) })
+      : page(ids.map((id, index) => asset(id, 'initial', 'initial_registration', String(index)))) })
+    await gallery.load('18', false)
+    const epoch = gallery.state.epoch, original = gallery.state.assets
+    const h = component(groupGallery(gallery.state.assets), { registrationOnly: true, publicPhotos: publicOnly })
+    const reconciled = []; h.state.lightbox.value = { reconcile: items => reconciled.push(items.map(a => a.id)) }
+    try {
+      h.state.selected[h.props.groups[0].key] = 'two'
+      h.state.zoomGroupKey.value = h.props.groups[0].key
+      await gallery.refresh('18', false)
+      assert.equal(gallery.state.assets, original); assert.equal(gallery.state.epoch, epoch)
+      ids = ['two', 'one']; await gallery.refresh('18', false)
+      h.props.groups = groupGallery(gallery.state.assets); await vue.nextTick()
+      assert.equal(h.state.active(h.props.groups[0]).id, 'two')
+      assert.deepEqual(Array.from(reconciled.at(-1)), ['two', 'one'])
+      status = 500; await gallery.refresh('18', false)
+      assert.equal(gallery.state.assets.length, 2); assert.equal(gallery.state.epoch, epoch); assert.ok(gallery.state.error)
+      status = 200; ids = ['one']; await gallery.refresh('18', false)
+      h.props.groups = groupGallery(gallery.state.assets); await vue.nextTick()
+      assert.equal(h.state.active(h.props.groups[0]).id, 'one'); assert.deepEqual(Array.from(reconciled.at(-1)), ['one'])
+      status = 403; await gallery.refresh('18', false)
+      assert.equal(gallery.state.assets.length, 0); assert.equal(gallery.state.denied, true)
+    } finally { h.stop() }
+  }
 })

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import { useConservationText } from '../../composables/useConservationText'
 import 'leaflet/dist/leaflet.css'
 import * as L from 'leaflet'
@@ -257,9 +258,9 @@ onBeforeUnmount(() => {
   <section class="page-intro"><div><p class="page-kicker">{{ ct('SPATIAL RECORDS') }}</p><h2>{{ ct('Biodiversity Map') }}</h2><p>{{ ct('Visualise up to 500 authorised plant records using current plant locations.') }}</p></div></section>
   <div class="control-bar">
     <label class="field search-field"><span>{{ ct('Search loaded plants') }}</span><input v-model="search" :placeholder="ct('Plant ID, species ID, species name or status')" /></label>
-    <label class="field"><span>{{ ct('Species') }}</span><select v-model="speciesFilter"><option value="">{{ ct('All species') }}</option><option v-for="item in speciesOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-    <label class="field"><span>{{ ct('Conservation status') }}</span><select v-model="conservationFilter"><option value="">{{ ct('All statuses') }}</option><option v-for="item in conservationStatuses" :key="item" :value="item">{{ item }}</option></select></label>
-    <label class="field"><span>{{ ct('Plant status') }}</span><select v-model="statusFilter"><option value="">{{ ct('All statuses') }}</option><option v-for="item in plantStatuses" :key="item" :value="item">{{ ct(item) }}</option></select></label>
+    <label class="field"><span>{{ ct('Species') }}</span><select v-officer-dropdown v-model="speciesFilter"><option value="">{{ ct('All species') }}</option><option v-for="item in speciesOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+    <label class="field"><span>{{ ct('Conservation status') }}</span><select v-officer-dropdown v-model="conservationFilter"><option value="">{{ ct('All statuses') }}</option><option v-for="item in conservationStatuses" :key="item" :value="item">{{ item }}</option></select></label>
+    <label class="field"><span>{{ ct('Plant status') }}</span><select v-officer-dropdown v-model="statusFilter"><option value="">{{ ct('All statuses') }}</option><option v-for="item in plantStatuses" :key="item" :value="item">{{ ct(item) }}</option></select></label>
   </div>
 
   <section class="panel map-card">

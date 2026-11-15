@@ -1,0 +1,60 @@
+/* Opt-in Administrator tables. Account Directory retains its approved local rules. */
+.admin-shell.admin-shell.admin-shell .admin-table-title {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 12px; padding: 12px 14px; margin-bottom: 19px;
+  background: #245443; color: #fff; border-radius: 10px;
+}
+.admin-shell.admin-shell.admin-shell .admin-table-title :is(h2, h3) { margin: 0; color: #fff; font-size: 1.25rem; line-height: 1.3; }
+.admin-shell.admin-shell.admin-shell .admin-table-title:is(h2, h3) { font-size: 1.25rem; line-height: 1.3; }
+.admin-shell.admin-shell.admin-shell .admin-table-title > div > p { margin: 0 0 5px; color: #fff; font-size: .75rem; line-height: 1.5; }
+.admin-shell.admin-shell.admin-shell .admin-table-title .live { color: #fff !important; }
+.admin-shell.admin-shell.admin-shell .admin-table-title > span { color: #fff; font-size: .8125rem; }
+.admin-shell.admin-shell.admin-shell .admin-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
+.admin-shell.admin-shell.admin-shell .admin-table-scroll:focus-visible { outline: 2px solid #468585; outline-offset: 3px; }
+.admin-shell.admin-shell.admin-shell .admin-data-table {
+  width: 100%; min-width: 48rem; table-layout: auto; border-collapse: separate; border-spacing: 0;
+  font-size: .875rem; white-space: normal;
+}
+.admin-shell.admin-shell.admin-shell .admin-data-table :is(th, td) {
+  padding: 12px 14px; text-align: left; vertical-align: middle; line-height: 1.5;
+  border-bottom: 1px solid #edf0ed; overflow-wrap: anywhere;
+}
+.admin-shell.admin-shell.admin-shell .admin-data-table thead th {
+  background: #245443; color: #fff; border-bottom-color: #245443;
+  font-size: .75rem; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+}
+.admin-shell.admin-shell.admin-shell .admin-data-table thead th:first-child { border-top-left-radius: 10px; }
+.admin-shell.admin-shell.admin-shell .admin-data-table thead th:last-child { border-top-right-radius: 10px; }
+.admin-shell.admin-shell.admin-shell .admin-data-table tbody :is(th, td) { font-size: .875rem; color: #617169; }
+.admin-shell.admin-shell.admin-shell .admin-data-table tbody th { background: transparent; text-transform: none; letter-spacing: normal; }
+.admin-shell.admin-shell.admin-shell .admin-data-table tbody tr:hover { background: #fbfcfa; }
+.admin-shell.admin-shell.admin-shell .admin-data-table tbody tr:last-child > :is(th, td) { border-bottom: 0; }
+.admin-shell.admin-shell.admin-shell .admin-data-table :is(td.empty, td.state-cell) { padding: 30px 14px; text-align: center; }
+.admin-shell.admin-shell.admin-shell .admin-data-table .badge { display: inline-flex; align-items: center; width: max-content; border-radius: 999px; padding: 5px 8px; font-size: .75rem; line-height: 1.5; white-space: nowrap; font-style: normal; }
+.admin-shell.admin-shell.admin-shell .admin-data-table :is(.actions, .action-group) { display: flex; align-items: center; flex-wrap: nowrap; gap: 7px; width: max-content; }
+.admin-shell.admin-shell.admin-shell .admin-data-table :is(button, a):not(.admin-table-id-copy) {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  box-sizing: border-box; height: 32px; min-height: 32px; padding: 2px 11px;
+  border-radius: 9px; font-size: .8125rem; font-weight: 800; line-height: 1.5; white-space: nowrap;
+}
+.admin-shell.admin-shell.admin-shell .admin-data-table td:has(:is(.actions, .table-action, .view-button)) { width: 1%; white-space: nowrap; }
+.admin-shell.admin-shell.admin-shell .admin-data-table td:has(.badge) { white-space: nowrap; }
+.admin-shell.admin-shell.admin-shell .admin-overview-table { min-width: 64rem; }
+.admin-shell.admin-shell.admin-shell .admin-permission-table { min-width: 60rem; }
+.admin-shell.admin-shell.admin-shell .admin-permission-table th:first-child { width: 40%; }
+.admin-shell.admin-shell.admin-shell .admin-activity-table { min-width: 60rem; }
+.admin-shell.admin-shell.admin-shell .admin-activity-table td:last-child { min-width: 18rem; }
+.admin-shell.admin-shell.admin-shell .admin-reading-table { min-width: 96rem; }
+.admin-shell.admin-shell.admin-shell .admin-alert-table { min-width: 70rem; }
+.admin-shell.admin-shell.admin-shell .admin-device-table { min-width: 72rem; }
+.admin-shell.admin-shell.admin-shell .admin-device-table td:first-child { min-width: 15rem; }
+.admin-shell.admin-shell.admin-shell .admin-device-table td:nth-child(4) { min-width: 16rem; }
+.admin-shell.admin-shell.admin-shell .admin-table-id { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; vertical-align: middle; }
+.admin-shell.admin-shell.admin-shell .admin-table-id code { padding: 4px 7px; border-radius: 5px; background: #eff3ef; color: #49675b; font-family: inherit; font-size: .75rem; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
+.admin-shell.admin-shell.admin-shell .admin-table-id.is-short { white-space: nowrap; }
+.admin-shell.admin-shell.admin-shell .admin-table-id-copy { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #315b49; cursor: pointer; }
+.admin-shell.admin-shell.admin-shell .admin-table-id-copy svg { width: 17px; height: 17px; flex: 0 0 17px; }
+.admin-shell.admin-shell.admin-shell .admin-table-id-copy:focus-visible { outline: 2px solid #245443; outline-offset: 2px; }
+@media (max-width: 767px) {
+  .admin-shell.admin-shell.admin-shell .admin-data-table :is(button, a):not(.admin-table-id-copy) { height: 44px; min-height: 44px; }
+}

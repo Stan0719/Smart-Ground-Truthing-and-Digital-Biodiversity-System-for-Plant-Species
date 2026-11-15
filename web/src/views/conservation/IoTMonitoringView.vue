@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -325,14 +326,14 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
     </label>
     <label class="field">
       <span>{{ t('conservationPages.iot.deviceStatus') }}</span>
-      <select v-model="status">
+      <select v-officer-dropdown v-model="status">
         <option value="">{{ t('common.allStatuses') }}</option>
         <option v-for="item in statusOptions" :key="item" :value="item">{{ ct(item) }}</option>
       </select>
     </label>
     <label class="field">
       <span>{{ t('conservationPages.iot.deviceType') }}</span>
-      <select v-model="type">
+      <select v-officer-dropdown v-model="type">
         <option value="">{{ t('conservationPages.iot.allTypes') }}</option>
         <option v-for="item in typeOptions" :key="item" :value="item">{{ ct(item) }}</option>
       </select>

@@ -107,14 +107,16 @@ test('layout declares 4/3/2 columns, wrapping long text and original mobile acti
   const h = harness()
   try {
     h.state.isLoading.value = false
-    for (const status of [...Object.keys(conservationBadgePalette), 'Unknown', null]) {
-      h.state.species.value = [{ ...fixture('test', 'Family'), conservationStatus: status }]
-      h.loggedIn.value = true; h.role.value = 'conservation-officer'
-      const badge = flat(h.render()).find(n => n.props?.class === 'status-badge')
-      if (status) { assert.deepEqual(badge.props.style, conservationBadgeStyle(status)); assert.equal(badge.children, status) }
-      else assert.equal(badge, undefined)
-      h.loggedIn.value = false; h.role.value = null
-      assert.ok(!flat(h.render()).some(n => n.props?.class === 'status-badge'))
+    for (const role of ['conservation-officer', 'admin']) {
+      for (const status of [...Object.keys(conservationBadgePalette), 'Unknown', null]) {
+        h.state.species.value = [{ ...fixture('test', 'Family'), conservationStatus: status }]
+        h.loggedIn.value = true; h.role.value = role
+        const badge = flat(h.render()).find(n => n.props?.class === 'status-badge')
+        if (status) { assert.deepEqual(badge.props.style, conservationBadgeStyle(status)); assert.equal(badge.children, status) }
+        else assert.equal(badge, undefined)
+        h.loggedIn.value = false; h.role.value = null
+        assert.ok(!flat(h.render()).some(n => n.props?.class === 'status-badge'))
+      }
     }
   } finally { h.stop() }
 })

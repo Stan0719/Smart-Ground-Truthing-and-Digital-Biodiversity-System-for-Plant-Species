@@ -9,9 +9,9 @@ test("Phase 2: authoritative observation origin across creation, history and rev
   // In-memory PGlite only; never opens an application database connection.
   const pool = await createPlantDatabase();
   t.after(() => pool.end());
-  for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql"])
+  for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql", "016-species-request-content-revision.sql", "017-species-review-cycle.sql"])
     await pool.query(readFileSync(join(__dirname, "../migrations", name), "utf8"));
-  await pool.query(`CREATE TABLE public.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  await pool.query(`CREATE TABLE plant_app.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     plant_id integer UNIQUE,qr_code text UNIQUE,status text,assigned_at timestamptz,activated_at timestamptz,retired_at timestamptz)`);
   await pool.query(`INSERT INTO species(scientific_name,common_name,rbac_data) VALUES
     ('Species A','A','{}'),('Species B','B','{}'),('Unapproved','U','{"approvalStatus":"Pending Review"}'),('Protected','P','{}');
@@ -26,6 +26,11 @@ test("Phase 2: authoritative observation origin across creation, history and rev
   await once(server, "listening");
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
   async function call(path, method = "GET", body, role = "bot") {
+    if (/^\/species-requests\/\d+\/review$/.test(path) && body && !Object.hasOwn(body, 'expected_revision')) {
+      const row = (await pool.query('SELECT content_revision,review_cycle FROM species_request_submission WHERE request_id::text=$1', [path.split('/')[2]])).rows[0];
+      body = { ...body, expected_review_cycle: row?.review_cycle || 1, expected_revision: row?.content_revision || 1 };
+    }
+
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api${path}`, {
       method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokens[role]}` },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -37,7 +42,7 @@ test("Phase 2: authoritative observation origin across creation, history and rev
   let serial = 0;
   async function create(proposal = false) {
     const n = ++serial;
-    const qr = (await pool.query("INSERT INTO public.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id", [`phase1-${n}`])).rows[0];
+    const qr = (await pool.query("INSERT INTO plant_app.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id", [`phase1-${n}`])).rows[0];
     const body = { scientific_name: `Individual ${n}`, latitude: 4, longitude: 113, content, photos: [photo, photo, photo], qr_id: qr.qr_id, client_key: `phase1-${n}`,
       ...(proposal ? { new_species: { scientific_name: `Proposal ${n}`, common_name: "New", genus_name: "Genus", family_name: "Family", conservation_status: "Least Concern", description: "Description", habitat: "Forest", photo } } : { species_id: 1 }) };
     const r = await call("/plant-submissions", "POST", body);
@@ -140,7 +145,7 @@ test("Phase 2: authoritative observation origin across creation, history and rev
     const f = await create();
     assert.equal((await call('/plant-submissions', 'POST', { ...f.body, origin_type: 'subsequent_observation' })).status, 400);
     assert.equal((await call(`/observations/${f.id}`, 'PATCH', { revision: 1, content: { ...content, origin_type: 'subsequent_observation' } })).status, 400);
-    assert.equal((await call(`/my-plants/${f.plant_id}`, 'PATCH', { species_id: 1, scientific_name: 'Plant', content, expected_revision: 1, origin_type: 'subsequent_observation' })).status, 400);
+    assert.equal((await call(`/my-plants/${f.plant_id}`, 'PATCH', { species_id: 1, scientific_name: 'Plant', content, origin_type: 'subsequent_observation' })).status, 400);
     assert.equal((await call(`/observations/${f.id}/review`, 'POST', { decision: 'Approved', revision: 1, origin_type: 'subsequent_observation' }, 'officer')).status, 200);
     assert.equal((await stored(f)).origin_type, 'initial_registration');
     assert.equal((await call('/record-changes', 'POST', { kind: 'plant', target_id: f.plant_id, proposed: { species_id: 1, scientific_name: 'New', content, origin_type: 'subsequent_observation' }, client_key: 'spoof-change' })).status, 400);
@@ -166,7 +171,7 @@ test("Phase 2: authoritative observation origin across creation, history and rev
   });
   await t.test('atomic asset failure rolls back provenance together with plant, receipt, assets and QR assignment', async () => {
     const f = await create();
-    const qr = (await pool.query("INSERT INTO public.qr_code(qr_code,status) VALUES('rollback-origin-qr','generated') RETURNING qr_id")).rows[0];
+    const qr = (await pool.query("INSERT INTO plant_app.qr_code(qr_code,status) VALUES('rollback-origin-qr','generated') RETURNING qr_id")).rows[0];
     const counts = async () => (await pool.query(`SELECT (SELECT count(*) FROM plant_record)::int AS plants,
       (SELECT count(*) FROM plant_observation)::int AS observations,(SELECT count(*) FROM plant_submission_receipt)::int AS receipts,
       (SELECT count(*) FROM plant_asset)::int AS assets`)).rows[0];
@@ -176,7 +181,7 @@ test("Phase 2: authoritative observation origin across creation, history and rev
     try {
       assert.equal((await call('/plant-submissions', 'POST', { ...f.body, qr_id: qr.qr_id, client_key: 'origin-rollback' })).status, 503);
       assert.deepEqual(await counts(), before);
-      assert.equal((await pool.query('SELECT status FROM public.qr_code WHERE qr_id=$1', [qr.qr_id])).rows[0].status, 'generated');
+      assert.equal((await pool.query('SELECT status FROM plant_app.qr_code WHERE qr_id=$1', [qr.qr_id])).rows[0].status, 'generated');
     } finally { await pool.query('DROP TRIGGER fail_origin_asset ON plant_asset; DROP FUNCTION fail_origin_asset()'); }
   });
   await t.test('old schema stays operational; additive migration is repeatable, defaults unknown and constrains new values', async () => {

@@ -86,8 +86,9 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
         {historicalDetail && !request.photo && <Text style={styles.missingPhoto}>{t("recordEdits.noPhotos")}</Text>}
         <View style={styles.heroText}>
           <Text style={styles.reference}>{t("submissions.requestId")} {request.request_id}</Text>
+          {request.request_status === "Rejected" && <Text accessibilityRole="alert" style={styles.value}>{t("recordEdits.finalRejected")}</Text>}
           <View style={styles.titleRow}><Text style={styles.title}>{request.scientific_name || t("recordEdits.historicalFieldUnavailable")}</Text>
-            {!historicalDetail && ["Approved", "Pending Review", "Rejected", "Correction Required"].includes(request.request_status) &&
+            {!historicalDetail && ["Approved", "Pending Review", "Correction Required"].includes(request.request_status) &&
               <EditAction testID="edit-own-species" disabled={request.request_status === "Approved" && editAvailability !== "clear"}
                 labelKey={request.request_status === "Approved" && editAvailability !== "clear" ? "recordEdits.editUnavailable" : undefined}
                 onPress={() => navigation.navigate("EditSpeciesRequest", { requestId, botanist: route.params?.botanist })} />}

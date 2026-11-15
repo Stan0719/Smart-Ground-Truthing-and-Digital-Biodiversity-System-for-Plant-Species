@@ -64,7 +64,7 @@ function mountRecordVersionHistory(app, { pool, allow }) {
     }
   }
   const select = `SELECT id,record_type,plant_id,request_id,version_number,owner_subject,edited_by,status,snapshot,previous_snapshot,
-    species_photo IS NOT NULL AS has_species_photo,change_id,reviewed_by,reviewed_at,review_comment,created_at FROM record_version_history`;
+    species_photo IS NOT NULL AS has_species_photo,encode(sha256(species_photo),'hex') AS species_photo_fingerprint,change_id,reviewed_by,reviewed_at,review_comment,created_at FROM record_version_history`;
   app.get("/api/record-versions/capabilities", read, async (_req, res) => {
     res.json({ history_available: await historyAvailable(pool) });
   });

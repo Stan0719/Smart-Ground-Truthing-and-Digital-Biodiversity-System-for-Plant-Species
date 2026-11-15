@@ -76,6 +76,7 @@ function harness(category, responder = async selected => fixture(selected), lang
     document:{createElement:()=>({click(){},toDataURL:()=> 'data:image/png;base64,offline',getContext:()=>({fillRect(){},drawImage(){},beginPath(){},roundRect(){},fill(){},stroke(){},strokeRect(){},fillText:value=>drawn.push(value),measureText:value=>({width:Array.from(value).length*11})})})},
     URL:{createObjectURL:blob=>{blobs.push(blob);return'blob:offline'},revokeObjectURL(){}},
     require(name){
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if(name.includes('reportExport')){if(!exportUtilities){const helper={...context,exports:{}};vm.runInNewContext(transpile(read('utils/reportExport.ts')),helper);exportUtilities=helper.exports}return exportUtilities}
       if(name==='vue')return{...vue,onBeforeUnmount:fn=>{cleanup=fn},resolveComponent:name=>name,withDirectives:node=>node}
       if(name==='vue-i18n')return{useI18n:()=>({t:key=>resolve(key)||key,te:key=>typeof resolve(key)==='string',locale})}

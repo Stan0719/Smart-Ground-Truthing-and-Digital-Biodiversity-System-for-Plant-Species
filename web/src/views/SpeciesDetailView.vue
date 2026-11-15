@@ -10,7 +10,7 @@ import { mapPlantCardMetadata } from '../services/plantCardMapping'
 import { requestPlantApi } from '../services/plantIntegration'
 import { formatPlantId } from '../utils/plantId'
 import { conservationBadgeStyle } from '../utils/conservationBadge'
-import { currentUser, sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
+import { api, sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
 
 interface SpeciesProfile {
   id: string; commonName: string; scientificName: string; genus: string; family: string
@@ -29,7 +29,7 @@ const plantsLoading = ref(false)
 const imagesError = ref('')
 const user = ref<AuthUser | null>(null)
 const scientific = computed(() => Boolean(user.value && user.value.status === 'Active' && !user.value.mustChangePassword &&
-  ['Botanist', 'Conservation Officer'].includes(user.value.role)))
+  ['Botanist', 'Conservation Officer', 'Administrator'].includes(user.value.role)))
 const text = (v: unknown) => typeof v === 'string' ? v.trim() : ''
 const object = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const validId = (v: unknown) => /^(?:[1-9][0-9]*)$/.test(String(v ?? '')) && BigInt(String(v)) <= 2147483647n
@@ -44,6 +44,10 @@ const canNavigate = computed(() => galleryImages.value.length > 1)
 const imagePosition = computed(() => ({ current: galleryImages.value.indexOf(primaryImage.value) + 1, total: galleryImages.value.length }))
 const previewPlants = computed(() => linkedPlants.value.slice(0, 3))
 let generation = 0, verification = 0, disposed = false
+let refreshWork: Promise<void> | null = null
+const refreshError = ref('')
+const identity = (value: AuthUser | null) => value ? `${value.id}:${value.role}:${value.status}:${value.mustChangePassword}` : ''
+const denied = (error: unknown) => [401, 403, 404].includes((error as { status?: number })?.status || 0)
 const portraitTrigger = ref<HTMLButtonElement | null>(null)
 const dialog = ref<HTMLDialogElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
@@ -111,11 +115,12 @@ function clearPage() {
   selectedImage.value = ''; selectedSpecies.value = null; linkedPlants.value = []; images.value = []; failedImages.value = []
   loadError.value = ''; plantsError.value = ''; imagesError.value = ''; plantsLoading.value = false
 }
-async function loadSpecies() {
-  clearPage()
-  const attempt = generation
+async function loadSpecies(background = false) {
+  if (!background) clearPage()
+  const attempt = ++generation
   const current = () => !disposed && generation === attempt
-  isLoading.value = true
+  if (!background) isLoading.value = true
+  refreshError.value = ''; plantsError.value = ''; imagesError.value = ''
   if (sessionSnapshot().pending) { isLoading.value = false; loadError.value = t('species.detail.verifySession'); return }
   try {
     const slug = typeof route.params.slug === 'string' ? route.params.slug : ''
@@ -136,23 +141,23 @@ async function loadSpecies() {
     const item = object(result.species)
     if (!item || String(item.species_id) !== id || !text(item.scientific_name) || (!validId(slug) && generatedSlug(item) !== slug))
       throw Error(t('species.detail.unresolvedSlug'))
-    selectedSpecies.value = {
+    const nextProfile: SpeciesProfile = {
       id, commonName: text(item.common_name), scientificName: text(item.scientific_name), genus: text(item.genus_name), family: text(item.family_name),
-      description: text(item.description), habitat: scientific.value ? text(item.habitat) : '',
+      description: text(item.description), habitat: scientific.value || user.value === null ? text(item.habitat) : '',
       conservationStatus: scientific.value ? text(item.conservation_status) : '',
       image: webAssetUrl(item.image_url) || assetUrlFromId(item.image_asset_id),
     }
-    isLoading.value = false
-    const profile = selectedSpecies.value
-    plantsLoading.value = true
+    const profile = nextProfile
+    if (!background) { selectedSpecies.value = nextProfile; isLoading.value = false; plantsLoading.value = true }
+    let nextImages: string[] | null = null
     // Independent failures must not hide an otherwise valid species profile.
     await Promise.all([
       (async () => {
         try {
-          const result = await requestPlantApi('/api/data/plants')
+          const result = await requestPlantApi(user.value ? '/api/data/plants' : '/api/data/plants?scope=public-web')
           if (!current()) return
           if (!Array.isArray(result.plants)) throw Error()
-          linkedPlants.value = result.plants.flatMap(value => {
+          const nextPlants = result.plants.flatMap(value => {
             const row = object(value)
             if (!row || String(row.species_id) !== id || (row.rbac_status !== undefined && row.rbac_status !== 'Approved')) return []
             const plantId = validId(row.plant_id) ? formatPlantId(String(row.plant_id)) : null
@@ -162,6 +167,7 @@ async function loadSpecies() {
               qr: { code: '', status: '' }, registeredBy: '', registeredAt: '',
               images: plantThumbnailImages(row), observations: [] }]
           })
+          if (JSON.stringify(linkedPlants.value) !== JSON.stringify(nextPlants)) linkedPlants.value = nextPlants
         } catch { if (current()) plantsError.value = t('species.detail.plantsFailed') }
         finally { if (current()) plantsLoading.value = false }
       })(),
@@ -170,29 +176,84 @@ async function loadSpecies() {
           const result = await requestPlantApi(`/api/data/assets?species_id=${id}`)
           if (!current()) return
           if (!Array.isArray(result.assets)) throw Error()
-          images.value = [...new Set(result.assets.flatMap(value => {
+          nextImages = [...new Set(result.assets.flatMap(value => {
             const a = object(value), path = a && assetUrlFromId(a.id)
             return a && path && ['image/jpeg', 'image/png'].includes(String(a.content_type)) ? [path] : []
           }))]
-        } catch { if (current()) imagesError.value = t('species.detail.imagesFailed') }
+        } catch (error) {
+          if (current()) {
+            imagesError.value = t('species.detail.imagesFailed')
+            if (denied(error)) {
+              closeZoom(); nextProfile.image = ''; nextImages = []; images.value = []
+              if (selectedSpecies.value) selectedSpecies.value = { ...selectedSpecies.value, image: '' }
+            }
+          }
+        }
       })(),
     ])
-  } catch (error) { if (current()) loadError.value = error instanceof Error ? error.message : t('species.detail.loadFailed') }
+    if (!current()) return
+    if (nextImages !== null) {
+      const allowed = [...new Set([nextProfile.image, ...nextImages].filter(Boolean))]
+      if (zoomImage.value && !allowed.includes(zoomImage.value)) closeZoom()
+      if (selectedImage.value && !allowed.includes(selectedImage.value)) selectedImage.value = ''
+      if (JSON.stringify(images.value) !== JSON.stringify(nextImages)) images.value = nextImages
+      const remainingFailures = failedImages.value.filter(path => allowed.includes(path))
+      if (JSON.stringify(failedImages.value) !== JSON.stringify(remainingFailures)) failedImages.value = remainingFailures
+      if (JSON.stringify(selectedSpecies.value) !== JSON.stringify(nextProfile)) selectedSpecies.value = nextProfile
+    } else if (!background) selectedSpecies.value = nextProfile
+  } catch (error) {
+    if (current()) {
+      if (background && !denied(error)) refreshError.value = error instanceof Error ? error.message : t('species.detail.loadFailed')
+      else { clearPage(); loadError.value = error instanceof Error ? error.message : t('species.detail.loadFailed'); isLoading.value = false }
+    }
+  }
   finally { if (current()) isLoading.value = false }
 }
 const unsubscribe = subscribeSession((verifiedUser, pending) => {
-  verification++; user.value = pending ? null : verifiedUser
+  if (pending) {
+    verification++; refreshWork = null; clearPage(); user.value = null
+    return
+  }
+  if (identity(user.value) === identity(verifiedUser) && selectedSpecies.value) return
+  verification++; refreshWork = null; clearPage()
+  user.value = verifiedUser
   void loadSpecies()
 })
-async function verifySession() {
+function verifySession() {
+  if (refreshWork) return refreshWork
   const attempt = ++verification
-  clearPage(); user.value = null; isLoading.value = true
-  await currentUser()
-  if (disposed || verification !== attempt) return
-  user.value = sessionSnapshot().user
-  await loadSpecies()
+  const work = (async () => {
+    const existing = selectedSpecies.value !== null
+    if (!existing) isLoading.value = true
+    let verified: AuthUser | null
+    try {
+      verified = (await api<{ user: AuthUser }>('/auth/me')).user
+      if (!verified || typeof verified.id !== 'string' || !['Administrator', 'Conservation Officer', 'Botanist', 'Visitor'].includes(verified.role) ||
+          !['Active', 'Inactive', 'Suspended'].includes(verified.status) || typeof verified.mustChangePassword !== 'boolean') throw Error('Invalid session response.')
+    } catch (error) {
+      if (disposed || verification !== attempt) return
+      if ((error as { status?: number })?.status === 401) verified = null
+      else {
+        refreshError.value = t('species.detail.verifySession')
+        if (!existing) { isLoading.value = false; loadError.value = refreshError.value }
+        return
+      }
+    }
+    if (disposed || verification !== attempt) return
+    if (identity(user.value) !== identity(verified)) {
+      clearPage()
+      user.value = verified
+      await loadSpecies()
+      return
+    }
+    user.value = verified
+    await loadSpecies(existing)
+  })()
+  refreshWork = work
+  void work.finally(() => { if (refreshWork === work) refreshWork = null })
+  return work
 }
-watch(() => route.params.slug, verifySession, { immediate: true, flush: 'sync' })
+watch(() => route.params.slug, () => { verification++; refreshWork = null; clearPage(); void verifySession() }, { immediate: true, flush: 'sync' })
 const onVisible = () => { if (document.visibilityState === 'visible') void verifySession() }
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
@@ -210,6 +271,7 @@ onBeforeUnmount(() => {
   <NavigationBar />
   <main v-if="isLoading" class="not-found" role="status"><p>{{ t('species.detail.loading') }}</p></main>
   <main v-else-if="selectedSpecies" class="detail-page">
+    <p v-if="refreshError" role="status">{{ refreshError }}</p>
     <section class="detail-hero">
       <div class="detail-container">
         <RouterLink to="/species" class="back-link"><svg class="back-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14" /></svg><span>{{ t('conservationText.back') }}</span></RouterLink>
@@ -254,11 +316,11 @@ onBeforeUnmount(() => {
                 <dd>{{ selectedSpecies.genus }}</dd>
               </div>
             </dl>
-            <section v-if="scientific && selectedSpecies.habitat" class="profile-habitat" aria-labelledby="species-habitat-title">
+            <section v-if="(scientific || user === null) && selectedSpecies.habitat" class="profile-habitat" aria-labelledby="species-habitat-title">
               <h2 id="species-habitat-title"><svg class="taxonomy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 22v-7M12 2l7 9h-4l6 6H3l6-6H5Z" /></svg><span>{{ t('speciesLabels.habitat') }}</span></h2>
               <p>{{ selectedSpecies.habitat }}</p>
             </section>
-            <hr v-if="scientific && selectedSpecies.habitat && selectedSpecies.description" class="profile-divider" />
+            <hr v-if="(scientific || user === null) && selectedSpecies.habitat && selectedSpecies.description" class="profile-divider" />
             <section v-if="selectedSpecies.description" class="profile-description" aria-labelledby="species-description-title">
               <h2 id="species-description-title">{{ t('conservationText.description') }}</h2>
               <p class="summary">{{ selectedSpecies.description }}</p>
@@ -276,7 +338,6 @@ onBeforeUnmount(() => {
             <RouterLink v-if="linkedPlants.length" class="view-all-plants" :to="`/species/${selectedSpecies.id}/plants`"><span>{{ t('species.detail.viewAll') }}</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></RouterLink>
           </div>
           <p>{{ t('species.detail.linkedDescription') }}</p>
-          <p v-if="!plantsError && !plantsLoading && linkedPlants.length">{{ t('species.detail.loadedRecords', { count: linkedPlants.length }, linkedPlants.length) }}</p>
           <p v-if="!plantsError && !plantsLoading && previewPlants.length < linkedPlants.length">{{ t('species.detail.previewRecords', { count: previewPlants.length, loaded: linkedPlants.length }) }}</p>
         </div>
         <p v-if="plantsLoading" role="status">{{ t('species.detail.loadingRecords') }}</p>

@@ -4,6 +4,8 @@ const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { once } = require("node:events");
 const sharp = require("sharp");
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
 const { createPlantDatabase } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 
@@ -34,7 +36,10 @@ test("reconciled species requests: authoritative linkage and dependency guards",
     proposed_species_id bigint REFERENCES species(species_id),
     UNIQUE(owner_subject,client_key),CHECK((request_status='Approved')=(approved_species_id IS NOT NULL))
   )`);
+  await pool.query(readFileSync(join(__dirname, "../migrations/016-species-request-content-revision.sql"), "utf8"));
+  await pool.query(readFileSync(join(__dirname, "../migrations/017-species-review-cycle.sql"), "utf8"));
   await pool.query("CREATE TABLE plant_submission_receipt(owner_subject text NOT NULL,client_key text NOT NULL,payload_hash text NOT NULL,result jsonb NOT NULL,PRIMARY KEY(owner_subject,client_key))");
+  await pool.query(`CREATE TABLE botanist_notification(id text PRIMARY KEY,recipient_subject text,type text,source_key text,observation_id text,review_id text,plant_id integer,metadata jsonb,created_at timestamptz DEFAULT CURRENT_TIMESTAMP,read_at timestamptz,UNIQUE(recipient_subject,source_key))`);
   const roles = { officer: "Conservation Officer", second: "Conservation Officer", bot: "Botanist", admin: "Administrator" };
   const tokens = Object.fromEntries(Object.keys(roles).map((key, i) => [key, String(i + 1).repeat(64)]));
   const auth = {
@@ -48,6 +53,10 @@ test("reconciled species requests: authoritative linkage and dependency guards",
   await once(server, "listening");
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
   const call = async (path, role = "officer", body) => {
+    if (/^\/species-requests\/\d+\/review$/.test(path) && body && !Object.hasOwn(body, 'expected_revision')) {
+      const row = (await pool.query('SELECT content_revision,review_cycle FROM species_request_submission WHERE request_id::text=$1', [path.split('/')[2]])).rows[0];
+      body = { ...body, expected_review_cycle: row?.review_cycle || 1, expected_revision: row?.content_revision || 1 };
+    }
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: { ...(tokens[role] ? { Authorization: `Bearer ${tokens[role]}` } : {}), "Content-Type": "application/json" },

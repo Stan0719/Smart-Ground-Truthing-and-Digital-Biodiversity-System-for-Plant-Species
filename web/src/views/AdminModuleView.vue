@@ -5,6 +5,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import ActionFeedback from '../components/ActionFeedback.vue'
 import AdminPageShell from '../components/AdminPageShell.vue'
+import AdminTableIdentifier from '../components/AdminTableIdentifier.vue'
 import {api} from '../services/auth'
 import { plantApi } from '../services/plantApi'
 
@@ -1021,7 +1022,7 @@ const confirmDeleteSensor = () => {
 <template>
   <AdminPageShell :title="page.title" :eyebrow="page.eyebrow" :active="page.active">
 <template v-if="['roles','activity','settings'].includes(section)">
-<h2>{{page.title}}</h2><form v-if="section==='settings'&&!serverLoading" @submit.prevent="saveSecurity"><label>Session hours<input v-model.number="security.session_hours" type="number" min="1" max="24" required></label><label>Login attempts per 15 minutes<input v-model.number="security.login_limit" type="number" min="5" max="100" required></label><p>Saving revokes all existing sessions.</p><button :disabled="securitySaving">Save security settings</button><p role="status">{{securityMessage}}</p></form><p v-if="serverError" role="alert">{{serverError}}</p><p v-if="serverLoading">Loading?</p>
+<h2 :class="{ 'admin-table-title': section === 'activity' }">{{page.title}}</h2><form v-if="section==='settings'&&!serverLoading" @submit.prevent="saveSecurity"><label>Session hours<input v-model.number="security.session_hours" type="number" min="1" max="24" required></label><label>Login attempts per 15 minutes<input v-model.number="security.login_limit" type="number" min="5" max="100" required></label><p>Saving revokes all existing sessions.</p><button :disabled="securitySaving">Save security settings</button><p role="status">{{securityMessage}}</p></form><p v-if="serverError" role="alert">{{serverError}}</p><p v-if="serverLoading">Loading?</p>
 <template v-if="section==='roles'&&!serverLoading&&!serverError">
   <section class="stat-grid three" aria-label="Role summary">
     <article><span>R</span><div><p>{{ t('adminRoles.systemRoles') }}</p><strong>4</strong><small>{{ t('adminRoles.predefinedGroups') }}</small></div></article>
@@ -1037,11 +1038,11 @@ const confirmDeleteSensor = () => {
   </section>
   <p class="read-only-note">{{ t('adminRoles.readOnlyNotice') }}</p>
   <section class="panel permission-panel">
-    <div class="panel-head"><div><p>{{ t('adminRoles.matrixEyebrow') }}</p><h2>{{ t('adminRoles.modulePermissions') }}</h2></div><span>{{ t('adminRoles.allowedRestricted') }}</span></div>
-    <div class="table-scroll"><table><thead><tr><th>{{ t('adminRoles.systemModule') }}</th><th v-for="item in roleSummaries" :key="item.role">{{ t(`adminRoles.roles.${item.key}.name`) }}</th></tr></thead><tbody><tr v-for="(roles,permission) in enforced" :key="permission"><th>{{ permission }}</th><td v-for="item in roleSummaries" :key="item.role"><span :class="roles.includes(item.role)?'allowed':'restricted'">{{ roles.includes(item.role)?'✓':'—' }}</span></td></tr></tbody></table></div>
+    <div class="panel-head admin-table-title"><div><p>{{ t('adminRoles.matrixEyebrow') }}</p><h2>{{ t('adminRoles.modulePermissions') }}</h2></div><span>{{ t('adminRoles.allowedRestricted') }}</span></div>
+    <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="Role permissions"><table class="admin-data-table admin-permission-table"><thead><tr><th>{{ t('adminRoles.systemModule') }}</th><th v-for="item in roleSummaries" :key="item.role">{{ t(`adminRoles.roles.${item.key}.name`) }}</th></tr></thead><tbody><tr v-for="(roles,permission) in enforced" :key="permission"><th>{{ permission }}</th><td v-for="item in roleSummaries" :key="item.role"><span :class="roles.includes(item.role)?'allowed':'restricted'">{{ roles.includes(item.role)?'✓':'—' }}</span></td></tr></tbody></table></div>
   </section>
 </template>
-<template v-if="section==='activity'&&!serverLoading&&!serverError"><p v-if="!persistedEvents.length">No account activity recorded.</p><table v-else><thead><tr><th>Time</th><th>Account</th><th>Actor</th><th>Action</th></tr></thead><tbody><tr v-for="event in persistedEvents" :key="event.id"><td>{{new Date(Number(event.created_at)).toLocaleString()}}</td><td>{{event.user_id||'Anonymous'}}</td><td>{{event.actor_id||'Self'}}</td><td>{{event.reason}}</td></tr></tbody></table></template>
+<template v-if="section==='activity'&&!serverLoading&&!serverError"><p v-if="!persistedEvents.length">No account activity recorded.</p><div v-else class="admin-table-scroll" tabindex="0" role="region" aria-label="Account activity"><table class="admin-data-table admin-activity-table"><thead><tr><th>Time</th><th>Account</th><th>Actor</th><th>Action</th></tr></thead><tbody><tr v-for="event in persistedEvents" :key="event.id"><td>{{new Date(Number(event.created_at)).toLocaleString()}}</td><td><AdminTableIdentifier :value="event.user_id||'Anonymous'" /></td><td><AdminTableIdentifier :value="event.actor_id||'Self'" /></td><td>{{event.reason}}</td></tr></tbody></table></div></template>
 </template><template v-else>
 
     <section class="page-intro">
@@ -1250,7 +1251,7 @@ const confirmDeleteSensor = () => {
         </div>
       </section>
       <section class="panel">
-        <div class="panel-head">
+        <div class="panel-head admin-table-title">
           <div>
             <p>{{ t('adminModules.iot.liveFeed') }}</p>
             <h2>Latest Available Readings</h2>
@@ -1268,11 +1269,11 @@ const confirmDeleteSensor = () => {
             <option v-for="status in iotStatusOptions" :key="status" :value="status">{{ status }}</option>
           </select>
         </div>
-        <div class="table-scroll">
+        <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="IoT records">
           <p v-if="readingsError" role="alert">Reading data unavailable: {{ readingsError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></p>
           <p v-else-if="iotLoading && !readingsLoaded">Loading readings…</p>
           <p v-else-if="readingsLoaded && !liveReadings.length">No readings received yet.</p>
-          <table>
+          <table class="admin-data-table admin-reading-table">
             <thead>
               <tr>
                 <th>Sensor</th>
@@ -1295,7 +1296,7 @@ const confirmDeleteSensor = () => {
               <tr v-else-if="!filteredIoTSensors.length"><td colspan="11">No sensors match these filters.</td></tr>
               <tr v-for="s in filteredIoTSensors" :key="s.id">
                 <td>
-                  <strong>{{ s.id }}</strong>
+                  <strong><AdminTableIdentifier :value="s.id" copy-label="Copy full Sensor ID" /></strong>
                 </td>
                 <td>{{ dataLabel(s.deviceName) }}</td>
                 <td>{{ s.plant }}</td>
@@ -1319,15 +1320,15 @@ const confirmDeleteSensor = () => {
         </div>
       </section>
       <section class="panel">
-        <div class="panel-head">
+        <div class="panel-head admin-table-title">
           <div>
             <p>{{ t('adminModules.iot.recentAlerts') }}</p>
             <h2>Latest Alerts</h2>
           </div>
-          <RouterLink class="secondary panel-link" to="/admin/alerts">View All Alerts</RouterLink>
+          <RouterLink class="secondary panel-link" to="/admin/iot">View All Alerts</RouterLink>
         </div>
-        <div class="table-scroll">
-          <table>
+        <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="IoT records">
+          <table class="admin-data-table admin-alert-table">
             <thead>
               <tr>
                 <th>Alert ID</th>
@@ -1345,9 +1346,9 @@ const confirmDeleteSensor = () => {
               <tr v-else-if="!liveAlerts.length"><td colspan="7">No threat alerts recorded.</td></tr>
               <tr v-for="alert in recentAlerts" :key="alert.id">
                 <td>
-                  <strong>{{ alert.id }}</strong>
+                  <strong><AdminTableIdentifier :value="alert.id" copy-label="Copy full Alert ID" /></strong>
                 </td>
-                <td>{{ alert.device_id }}</td>
+                <td><AdminTableIdentifier :value="alert.device_id" copy-label="Copy full Device ID" /></td>
                 <td>{{ dataLabel(alert.metric) }}</td>
                 <td>{{ alert.value }}</td>
                 <td>
@@ -1355,7 +1356,7 @@ const confirmDeleteSensor = () => {
                 </td>
                 <td>{{ formattedTimestamp(alert.created_at) }}</td>
                 <td>
-                  <RouterLink class="table-action action-link" to="/admin/alerts">View</RouterLink>
+                  <RouterLink class="table-action action-link" to="/admin/iot">View</RouterLink>
                 </td>
               </tr>
             </tbody>

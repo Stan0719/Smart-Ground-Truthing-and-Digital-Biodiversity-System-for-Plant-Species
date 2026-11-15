@@ -8,6 +8,7 @@ const {
   requirePermission,
 } = require("./authorization.cjs");
 const { mountDomain } = require("./domain.cjs");
+const { mountObservationReviewHistory } = require("./observation-review-history.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
 const { mountCameraIngestion, mountCameraEvents } = require("./camera-events.cjs");
 const { mountUploads } = require("./uploads.cjs");
@@ -19,18 +20,23 @@ const { mountRecordVersionHistory } = require("./record-version-history.cjs");
 const { mountPlantSimilarity } = require("./plant-similarity.cjs");
 const { mountStaffNotifications } = require("./staff-notifications.cjs");
 const { createOfficerNotificationDelivery } = require("./officer-notification-delivery.cjs");
+const {
+  normalizeQrPlantSchema,
+  qrPlantRecordRelation,
+} = require("./qr-plant-mode.cjs");
 const { mountSpeciesPhotoLibrary } = require("./species-photo-library.cjs");
 const { speciesPhotoWritesRequested } = require("./species-photo-activation.cjs");
-
 function createPlantApp({
   auth,
   pool,
   origins = configuredOrigins(),
-  similaritySearch,
   officerNotifications = null,
+  qrPlantSchema = process.env.PLANT_QR_PLANT_SCHEMA || "plant_app",
+  similaritySearch,
   speciesPhotoWritesEnabled = false,
   recordingsRoot,
 }) {
+  qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
   const app = express();
   app.disable("x-powered-by");
   // Do not generate ETags for uncached, authenticated JSON reads.
@@ -62,10 +68,11 @@ function createPlantApp({
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
   mountStaffNotifications(app, { pool });
-  mountDomain(app, { auth, pool, allow, officerNotifications });
+  mountDomain(app, { auth, pool, allow, officerNotifications, qrPlantSchema });
+  mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
+  mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
+  mountObservationReviewHistory(app, { pool, allow });
   require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
-  mountPlantSubmissions(app, { pool, allow, officerNotifications });
-  mountRecordChanges(app, { pool, allow, officerNotifications });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
   mountSpeciesPhotoLibrary(app, { pool, allow, writesEnabled: speciesPhotoWritesEnabled });
@@ -112,6 +119,7 @@ function createPlantApp({
     if (status >= 500)
       console.error("Plant API request failed:", error.code ?? error.name);
     res.status(status).json({
+      ...(["SUBMISSION_REJECTED", "SPECIES_REQUEST_LINK_CONFLICT", "SPECIES_REQUEST_REVIEW_BUSY"].includes(error.code) ? { code: error.code } : {}),
       error:
         status >= 500
           ? "Service unavailable. Please try again."
@@ -133,6 +141,10 @@ async function start() {
   require("./environment.cjs");
   const { loadServerEnvironment } = await import("../web/server/postgres.mjs");
   loadServerEnvironment();
+  const qrPlantSchema = normalizeQrPlantSchema(
+    process.env.PLANT_QR_PLANT_SCHEMA || "plant_app",
+  );
+  const qrPlantRecord = qrPlantRecordRelation(qrPlantSchema);
   const { createAuth } = await import("../web/server/auth.mjs");
   const { poolFromEnvironment } = require("./database.cjs");
   const auth = await createAuth(),
@@ -149,7 +161,10 @@ async function start() {
       "SELECT plant_id,registered_subject,rbac_status,qr_token FROM plant_record LIMIT 0",
     );
     await pool.query("SELECT species_id,rbac_data FROM species LIMIT 0");
-    await pool.query("SELECT qr_id,qr_code,plant_id,status FROM public.qr_code LIMIT 0");
+    await pool.query(
+      `SELECT plant_id,species_id,rbac_status,scientific_name FROM ${qrPlantRecord} LIMIT 0`,
+    );
+    await pool.query("SELECT qr_id,qr_code,plant_id,status FROM plant_app.qr_code LIMIT 0");
     await pool.query(
       "SELECT id,owner_subject,revision FROM plant_observation LIMIT 0",
     );
@@ -158,7 +173,13 @@ async function start() {
     throw error;
   }
   const officerNotifications = createOfficerNotificationDelivery({ pool, auth });
-  const app = createPlantApp({ auth, pool, officerNotifications, speciesPhotoWritesEnabled });
+  const app = createPlantApp({
+    auth,
+    pool,
+    officerNotifications,
+    qrPlantSchema,
+    speciesPhotoWritesEnabled,
+  });
   const server = createServer(app);
   const port = Number(process.env.PORT || 3000);
   server.once("listening", () => {

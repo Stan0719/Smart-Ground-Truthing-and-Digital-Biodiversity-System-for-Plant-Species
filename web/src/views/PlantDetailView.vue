@@ -15,7 +15,7 @@ import { conservationBadgeStyle } from '../utils/conservationBadge'
 import { useConservationText } from '../composables/useConservationText'
 import { rawPlantIdFromRoute } from '../services/plantIntegration'
 
-import { currentUser, sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
+import { api, sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -39,51 +39,76 @@ const errorStatus = ref(0)
 let loadRequest = 0
 let disposed = false
 let sessionRequest = 0
+let refreshWork: Promise<void> | null = null
+const refreshError = ref('')
+const identity = (value: AuthUser | null) => value ? `${value.id}:${value.role}:${value.status}:${value.mustChangePassword}` : ''
 const user = ref<AuthUser | null>(null)
 const canReadStaff = computed(() => canReadPlantDetail(user.value) && plant.value?.staff != null)
 const gallery = createPlantGallery({ detail: true })
+const publicGallery = createPlantGallery({ publicOnly: true })
+const isGuest = computed(() => user.value === null)
+const visibleGallery = computed(() => canReadStaff.value ? gallery : publicGallery)
 const history = createPlantHistory()
-const galleryGroups = computed(() => groupGallery(gallery.state.assets).filter(group => group.origin === 'initial_registration'))
+const galleryGroups = computed(() => canReadStaff.value
+  ? groupGallery(gallery.state.assets).filter(group => group.origin === 'initial_registration')
+  : groupGallery(publicGallery.state.assets))
 function loadPhotos(append = false) {
-  if (!plant.value || !canReadStaff.value || sessionSnapshot().pending) return
-  void gallery.load(plant.value.information.plant_id, true, append)
+  if (!plant.value || sessionSnapshot().pending) return
+  if (canReadStaff.value) void gallery.load(plant.value.information.plant_id, true, append)
+  else if (isGuest.value) void publicGallery.load(plant.value.information.plant_id, false, append)
 }
 function loadHistory(append = false) {
   if (!plant.value || !canReadStaff.value || sessionSnapshot().pending) return
   void history.load(plant.value.information.plant_id, append)
 }
 function clearRecord() {
-  gallery.reset(); history.reset()
+  gallery.reset(); publicGallery.reset(); history.reset()
   loadRequest++
   plant.value = null
 }
 const unsubscribe = subscribeSession((verifiedUser, pending) => {
-  sessionRequest++
-  clearRecord()
-  user.value = null
   if (pending) {
-    isLoading.value = false
-    loadError.value = ct('Verify your session to view this plant.')
+    sessionRequest++; refreshWork = null; clearRecord(); user.value = null
     return
   }
-  user.value = verifiedUser
+  if (identity(user.value) === identity(verifiedUser) && plant.value) return
+  sessionRequest++; refreshWork = null
+  clearRecord(); user.value = verifiedUser
   void loadPlant()
 })
-async function verifySession() {
+function verifySession() {
+  if (refreshWork) return refreshWork
   const request = ++sessionRequest
-  clearRecord()
-  user.value = null
-  isLoading.value = true
-  await currentUser()
-  if (disposed || request !== sessionRequest) return
-  const state = sessionSnapshot()
-  if (state.pending) {
-    isLoading.value = false
-    loadError.value = ct('Verify your session to view this plant.')
-    return
-  }
-  user.value = state.user
-  await loadPlant()
+  const work = (async () => {
+    const existing = plant.value !== null
+    if (!existing) isLoading.value = true
+    let verified: AuthUser | null
+    try {
+      verified = (await api<{ user: AuthUser }>('/auth/me')).user
+      if (!verified || typeof verified.id !== 'string' || !['Administrator', 'Conservation Officer', 'Botanist', 'Visitor'].includes(verified.role) ||
+          !['Active', 'Inactive', 'Suspended'].includes(verified.status) || typeof verified.mustChangePassword !== 'boolean') throw Error('Invalid session response.')
+    } catch (error) {
+      if (disposed || request !== sessionRequest) return
+      if ((error as { status?: number })?.status === 401) verified = null
+      else {
+        refreshError.value = ct('Verify your session to view this plant.')
+        if (!existing) { isLoading.value = false; loadError.value = refreshError.value }
+        return
+      }
+    }
+    if (disposed || request !== sessionRequest) return
+    if (identity(user.value) !== identity(verified)) {
+      clearRecord()
+      user.value = verified
+      await loadPlant()
+      return
+    }
+    user.value = verified
+    await loadPlant(existing)
+  })()
+  refreshWork = work
+  void work.finally(() => { if (refreshWork === work) refreshWork = null })
+  return work
 }
 const onVisible = () => { if (document.visibilityState === 'visible') void verifySession() }
 let sessionTimer: ReturnType<typeof setInterval> | undefined
@@ -101,16 +126,19 @@ onBeforeUnmount(() => {
 
 const display = (value: string | null | undefined) => value || ct('Unavailable')
 const location = computed(() => plant.value?.staff?.approved_location || null)
+const latestObservation = computed(() => plant.value?.staff?.latest_observation || null)
+const latestApprovedObservation = computed(() => plant.value?.staff?.latest_approved_observation || null)
+const habitat = computed(() => canReadStaff.value ? plant.value?.staff?.habitat : isGuest.value ? plant.value?.information.habitat : null)
 const accuracy = (value: number | null | undefined) => value == null ? ct('Unavailable') : `${value} m`
 const badgeKey = (value: string | null | undefined) => (value || '').toLowerCase().replace(/[^a-z]/g, '')
 
-async function loadPlant() {
+async function loadPlant(background = false) {
   const requestId = ++loadRequest
-  gallery.reset(); history.reset()
-  plant.value = null
+  if (!background) { gallery.reset(); publicGallery.reset(); history.reset(); plant.value = null }
   loadError.value = ''
   errorStatus.value = 0
-  isLoading.value = true
+  if (!background) isLoading.value = true
+  refreshError.value = ''
   const rawId = rawPlantIdFromRoute(route.params.plantId)
   if (!rawId) {
     loadError.value = ct('Invalid plant identifier.')
@@ -121,10 +149,23 @@ async function loadPlant() {
   try {
     const detail = await readPlantDetail(rawId, canReadPlantDetail(user.value))
     if (disposed || requestId !== loadRequest) return
-    plant.value = detail
-    if (canReadStaff.value) { loadPhotos(); loadHistory() }
+    if (JSON.stringify(plant.value) !== JSON.stringify(detail)) plant.value = detail
+    if (background) {
+      if (canReadStaff.value || isGuest.value) await visibleGallery.value.refresh(rawId, canReadStaff.value)
+      if (disposed || requestId !== loadRequest) return
+      if (visibleGallery.value.state.denied) {
+        clearRecord(); loadError.value = ct('Plant record unavailable'); isLoading.value = false
+      }
+    } else {
+      if (canReadStaff.value || isGuest.value) loadPhotos()
+      if (canReadStaff.value) loadHistory()
+    }
   } catch (error) {
     if (requestId !== loadRequest) return
+    const status = (error as { status?: number })?.status
+    if (background && ![401, 403, 404].includes(status || 0)) { refreshError.value = error instanceof Error ? error.message : ct('Unable to load this plant record.'); return }
+    clearRecord()
+    isLoading.value = false
     loadError.value = error instanceof Error ? error.message : ct('Unable to load this plant record.')
     errorStatus.value = typeof error === 'object' && error && 'status' in error && typeof error.status === 'number'
       ? error.status : 0
@@ -133,7 +174,7 @@ async function loadPlant() {
   }
 }
 
-watch(() => route.params.plantId, verifySession, { immediate: true })
+watch(() => route.params.plantId, () => { sessionRequest++; refreshWork = null; clearRecord(); void verifySession() }, { immediate: true, flush: 'sync' })
 </script>
 
 <template>
@@ -153,11 +194,12 @@ watch(() => route.params.plantId, verifySession, { immediate: true })
   </main>
 
   <main v-else-if="plant" class="plant-detail-page">
+    <p v-if="refreshError" class="availability-note" role="status">{{ refreshError }}</p>
     <section class="plant-hero">
-      <div class="container" :class="{ 'staff-hero': canReadStaff }">
+      <div class="container" :class="{ 'staff-hero': canReadStaff || isGuest }">
         <RouterLink :to="backTarget" class="back-link"><svg class="back-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14" /></svg><span>{{ ct('Back') }}</span></RouterLink>
-        <div class="hero-grid" :class="{ 'visitor-grid': !canReadStaff }">
-          <PlantPhotoGallery v-if="canReadStaff" :key="gallery.state.epoch" registration-only :groups="galleryGroups" :loading="gallery.state.loading" :error="gallery.state.error" :complete="gallery.state.complete" :has-more="gallery.state.hasMore" @retry="loadPhotos()" @more="loadPhotos(true)" />
+        <div class="hero-grid" :class="{ 'visitor-grid': !canReadStaff && !isGuest }">
+          <PlantPhotoGallery v-if="canReadStaff || isGuest" :key="`${isGuest}:${visibleGallery.state.epoch}`" registration-only :public-photos="isGuest" :groups="galleryGroups" :loading="visibleGallery.state.loading" :error="visibleGallery.state.error" :complete="visibleGallery.state.complete" :has-more="visibleGallery.state.hasMore" @retry="loadPhotos()" @more="loadPhotos(true)" />
           <div class="record-panel">
             <div class="profile-heading-line">
               <p class="section-label">{{ ct('Plant Information') }}</p>
@@ -169,17 +211,17 @@ watch(() => route.params.plantId, verifySession, { immediate: true })
             <dl class="plant-identity">
               <div><dt class="visually-hidden">{{ ct('Common name') }}</dt><dd><h1>{{ display(plant.information.common_name) }}</h1></dd></div>
               <div><dt class="visually-hidden">{{ ct('Scientific name') }}</dt><dd class="scientific-name"><em>{{ display(plant.information.scientific_name) }}</em></dd></div>
-              <div class="plant-id"><dt>{{ ct('Plant ID') }}</dt><dd>{{ formatPlantId(plant.information.plant_id) || plant.information.plant_id }}</dd></div>
+              <div v-if="!isGuest" class="plant-id"><dt>{{ ct('Plant ID') }}</dt><dd>{{ formatPlantId(plant.information.plant_id) || plant.information.plant_id }}</dd></div>
             </dl>
             <dl class="profile-taxonomy">
               <div><dt><svg class="taxonomy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 4c-8-1-15 2-15 9a6 6 0 0 0 6 6c7 0 10-7 9-15Z" /><path d="M4 21 15 10" /></svg><span>{{ ct('Family') }}</span></dt><dd>{{ display(plant.information.family_name) }}</dd></div>
               <div><dt><svg class="taxonomy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 21v-9M12 15C5 15 3 11 3 6c6 0 9 3 9 9ZM12 11c0-6 3-9 9-9 0 6-3 9-9 9Z" /></svg><span>{{ ct('Genus') }}</span></dt><dd>{{ display(plant.information.genus_name) }}</dd></div>
             </dl>
-            <section v-if="canReadStaff && plant.staff?.habitat" class="profile-habitat" aria-labelledby="plant-habitat-title">
+            <section v-if="habitat" class="profile-habitat" aria-labelledby="plant-habitat-title">
               <h2 id="plant-habitat-title"><svg class="taxonomy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 22v-7M12 2l7 9h-4l6 6H3l6-6H5Z" /></svg><span>{{ t('speciesLabels.habitat') }}</span></h2>
-              <p>{{ plant.staff.habitat }}</p>
+              <p>{{ habitat }}</p>
             </section>
-            <hr v-if="canReadStaff && plant.staff?.habitat" class="profile-divider" />
+            <hr v-if="habitat" class="profile-divider" />
             <section class="profile-description" aria-labelledby="plant-description-title"><h2 id="plant-description-title">{{ ct('Description') }}</h2><p class="summary">{{ display(plant.information.description) }}</p></section>
           </div>
         </div>
@@ -199,6 +241,39 @@ watch(() => route.params.plantId, verifySession, { immediate: true })
           <div><dt>{{ ct('Zone') }}</dt><dd>{{ display(location.zone) }}</dd></div>
         </dl><p v-else class="availability-note">{{ ct('No approved plant location is available.') }}</p></section>
       </aside>
+    </div></section>
+    <section v-if="canReadStaff && plant.staff" class="latest-section"><div class="container">
+      <article class="observation-summary-panel">
+        <h2>{{ ct('Latest approved observation') }}</h2>
+        <template v-if="latestApprovedObservation">
+          <p class="observation-date-line">{{ dateTime(latestApprovedObservation.created_at) }}</p>
+          <dl class="observation-summary">
+            <div><dt>{{ ct('Height') }}</dt><dd>{{ latestApprovedObservation.content.heightCm == null ? ct('Unavailable') : `${latestApprovedObservation.content.heightCm} cm` }}</dd></div>
+            <div><dt>{{ ct('Health status') }}</dt><dd>{{ display(latestApprovedObservation.content.healthStatus) }}</dd></div>
+            <div><dt>{{ ct('Life stage') }}</dt><dd>{{ display(latestApprovedObservation.content.lifeStage) }}</dd></div>
+            <div class="wide"><dt>{{ ct('Morphology') }}</dt><dd>{{ display(latestApprovedObservation.content.morphology) }}</dd></div>
+            <div class="wide"><dt>{{ ct('Notes') }}</dt><dd>{{ display(latestApprovedObservation.content.notes) }}</dd></div>
+          </dl>
+          <dl v-if="Object.keys(latestApprovedObservation.content.taxonomy).length" class="taxonomy-list">
+            <div v-for="(value, key) in latestApprovedObservation.content.taxonomy" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
+          </dl>
+        </template>
+        <p v-else class="availability-note">{{ ct('The plant has no latest approved observation content.') }}</p>
+        <section class="submitted-gps"><h3>{{ ct('Submitted GPS Evidence') }}</h3>
+          <p>{{ ct('From the latest linked observation. Submitted evidence is separate from the approved plant location.') }}</p>
+          <template v-if="latestObservation">
+            <p class="observation-date-line">{{ ct(latestObservation.status) }} · {{ dateTime(latestObservation.created_at) }}</p>
+            <dl class="observation-summary gps-summary">
+              <div><dt>{{ ct('Latitude') }}</dt><dd>{{ latestObservation.content.latitude ?? ct('Unavailable') }}</dd></div>
+              <div><dt>{{ ct('Longitude') }}</dt><dd>{{ latestObservation.content.longitude ?? ct('Unavailable') }}</dd></div>
+              <div><dt>{{ ct('GPS Accuracy') }}</dt><dd>{{ accuracy(latestObservation.content.accuracy_m) }}</dd></div>
+              <div><dt>{{ ct('Altitude') }}</dt><dd>{{ latestObservation.content.altitude_m == null ? ct('Unavailable') : `${latestObservation.content.altitude_m} m` }}</dd></div>
+              <div><dt>{{ ct('Zone') }}</dt><dd>{{ display(latestObservation.content.zone) }}</dd></div>
+            </dl>
+          </template>
+          <p v-else class="availability-note">{{ ct('No linked observation GPS evidence is available.') }}</p>
+        </section>
+      </article>
     </div></section>
     <section v-if="canReadStaff" class="history-section"><div class="container">
       <PlantObservationHistory :key="history.state.epoch" :observations="history.state.observations" :loading="history.state.loading" :error="history.state.error" :complete="history.state.complete" :has-more="history.state.hasMore" @retry="loadHistory()" @more="loadHistory(true)" />
@@ -254,12 +329,24 @@ watch(() => route.params.plantId, verifySession, { immediate: true })
 .staff-panel dl > div { min-width: 0; padding: 12px 14px; border-radius: 12px; background: #f4f6f1; }
 .staff-panel dt { color: #63776d; font-size: 11px; }
 .staff-panel dd { margin: 6px 0 0; color: #315447; font-size: 14px; font-weight: 600; }
+.latest-section { padding: 24px 0 0; }
+.observation-summary-panel { padding: clamp(22px, 2.8vw, 36px); border: 1px solid rgba(58, 96, 70, 0.12); border-radius: 26px; background: #fff; box-shadow: 0 12px 36px rgba(37, 75, 58, 0.09); }
+.observation-summary-panel h2 { margin: 0 0 12px; color: #234a3c; font-size: 22px; font-weight: 600; }
+.observation-date-line, .submitted-gps > p { color: #63776d; font-size: 12px; }
+.observation-summary, .taxonomy-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.observation-summary > div, .taxonomy-list > div { min-width: 0; padding: 12px 14px; border-radius: 12px; background: #f4f6f1; }
+.observation-summary dt, .taxonomy-list dt { color: #63776d; font-size: 11px; }
+.observation-summary dd, .taxonomy-list dd { margin: 6px 0 0; color: #315447; font-size: 14px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.taxonomy-list { margin-top: 12px; }
+.submitted-gps { margin-top: 22px; padding-top: 18px; border-top: 1px solid #dfe7df; }
+.submitted-gps h3 { margin: 0; color: #315447; font-size: 14px; }
+.gps-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .primary-link { display: inline-block; padding: 11px 17px; border: 0; border-radius: 99px; background: #315f4e; color: #fff; font: inherit; text-decoration: none; cursor: pointer; }
 .state-page { min-height: calc(100vh - 76px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 30px; background: #f4f3e9; color: #50675d; text-align: center; }
 .state-page .state-icon { font-size: 48px; }
 .state-page a { color: #315f4e; }
-@media (max-width: 850px) { .hero-grid { grid-template-columns: 1fr; } .location-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .location-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 420px) { .profile-taxonomy, .location-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 850px) { .hero-grid { grid-template-columns: 1fr; } .location-grid, .gps-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .location-grid, .gps-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .profile-taxonomy, .location-grid, .gps-summary, .observation-summary, .taxonomy-list { grid-template-columns: minmax(0, 1fr); } }
 </style>

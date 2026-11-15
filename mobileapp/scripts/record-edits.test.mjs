@@ -17,7 +17,7 @@ function screen(file, dependencies) {
   }, module, module.exports);
   return module.exports.default;
 }
-function harness(file, { record, approved, species = false, locationDenied = false, failReuseOnce = false, pendingEdit = false, editAvailabilityError = false, conflictOnChange = false, draftSaveError = false, savedDraft = null, speciesRequestId = null, speciesRequest = null, catalog = [{ id: "6", scientificName: "Species name", commonName: "Common name" }] }) {
+function harness(file, { record, approved, species = false, locationDenied = false, failReuseOnce = false, pendingEdit = false, editAvailabilityError = false, conflictOnChange = false, draftSaveError = false, savedDraft = null, speciesRequestId = null, speciesRequest = null, acknowledgement = undefined, catalog = [{ id: "6", scientificName: "Species name", commonName: "Common name" }] }) {
   let stateIndex = 0, refIndex = 0, states = [], refs = [], focus, alert, calls = [], draftSaves = [], navigations = [], photoReads = 0;
   const hooks = { ...React, useCallback: (fn) => fn, useRef: (initial) => {
     const index = refIndex++; if (!(index in refs)) refs[index] = { current: initial }; return refs[index];
@@ -27,13 +27,15 @@ function harness(file, { record, approved, species = false, locationDenied = fal
   } };
   const native = { StyleSheet: { create: (value) => value }, Alert: { alert: (...args) => { alert = args; } } };
   for (const name of ["ActivityIndicator", "Image", "ScrollView", "Text", "TextInput", "TouchableOpacity", "View"]) native[name] = name;
+  let speciesEditCount = 0, speciesFetchCount = 0;
   const api = async (path, options) => {
     calls.push([path, options]);
+    if (path.startsWith("/my-species-requests/") && record.editConflict && speciesEditCount++ === 0) throw Object.assign(Error("internal error detail"), { status: 409, code: "SPECIES_REQUEST_EDIT_VERSION_CONFLICT" });
     if (path.startsWith("/species-requests/")) return { species_request: speciesRequest || {} };
     if (path === "/record-changes/capabilities") return { approved_edits_available: true };
     if (path === "/record-changes" && options?.method === "POST" && conflictOnChange)
       throw Object.assign(Error("Changes are already pending review for this record."), { status: 409 });
-    if (path === "/record-changes" && options?.method === "POST") return { change: { id: "change-12", status: "Pending Review" } };
+    if (path === "/record-changes" && options?.method === "POST") return acknowledgement === undefined ? { change: { id: "change-12", status: "Pending Review" } } : acknowledgement;
     if (path === "/qr-codes") return { qr_codes: [{ qr_id: 2, qr_code: "current-token", plant_id: 8, status: "assigned" },
       { qr_id: 3, qr_code: "free-token", plant_id: null, status: "generated" }] };
     return {};
@@ -50,8 +52,13 @@ function harness(file, { record, approved, species = false, locationDenied = fal
       getCurrentPositionAsync: async () => ({ coords: { latitude: 4.6, longitude: 113.8, altitude: 25.34, accuracy: 6.78 } }) },
     "expo-file-system/legacy": { readAsStringAsync: async () => { photoReads++; return "aGVsbG8="; }, EncodingType: { Base64: "base64" } },
     "@expo/vector-icons": { Ionicons: "Ionicons" },
+    "../components/OriginalUpdatedField": { default: ({ children, label, originalContent, originalValue }) =>
+      React.createElement("View", null,
+        label ? React.createElement("Text", null, label) : null,
+        React.createElement("Text", null, originalContent || String(originalValue ?? "")),
+        children) },
     "../utils/qrInventory": { normalizeQRCodes: (payload) => payload.qr_codes.map((qr) => ({ id: String(qr.qr_id), label: `QR-${String(qr.qr_id).padStart(4, "0")}`, plantId: qr.plant_id == null ? null : String(qr.plant_id), status: qr.status })) },
-    "../utils/botanistRecords": { ...(species ? { fetchBotanistSpeciesRequest: async () => record } : { fetchBotanistPlant: async () => record }),
+    "../utils/botanistRecords": { ...(species ? { fetchBotanistSpeciesRequest: async () => { if (speciesFetchCount++ > 0 && record.failReload) throw Error("offline"); return { ...record }; } } : { fetchBotanistPlant: async () => record }),
       fetchBotanistRecordChangeStatus: async () => {
         if (editAvailabilityError) throw Error("offline");
         return { available: true, pending: pendingEdit ? { status: "Pending Review" } : null, latest: null };
@@ -91,7 +98,7 @@ const plant = (status) => ({ id: "8", speciesId: "6", scientificName: "Manual pl
   latestObservation: { revision: 1, assets: [{ id: "photo-1" }, { id: "photo-2" }, { id: "photo-3" }], content: { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Leaves", notes: "", latitude: 4.5, longitude: 113.7 } },
   observations: [{ status: "Approved", content: { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Leaves", notes: "", latitude: 4.5, longitude: 113.7 } }],
   photos: [1, 2, 3].map((index) => ({ uri: `https://example.invalid/existing-${index}` })) });
-const request = (status) => ({ request_id: 1, request_status: status, scientific_name: "Species A", common_name: "Common A",
+const request = (status) => ({ request_id: 1, content_revision: 1, request_status: status, scientific_name: "Species A", common_name: "Common A",
   genus_name: "Genus A", family_name: "Family A", conservation_status: "Least Concern", description: "Original", habitat: "Forest",
   photo: { uri: "https://example.invalid/species" } });
 
@@ -541,3 +548,67 @@ test("My Submissions version rows open a direct read-only snapshot view", async 
   assert.match(text(detail), /Add a clearer location\./);
   assert.doesNotMatch(text(detail), /recordEdits\.versionHistory/);
 });
+
+
+test("species conflict retains text and photo until explicit reload and latest-version inspection", async () => {
+  const record = { ...request("Pending Review"), editConflict: true };
+  const h = harness("screens/EditSpeciesRequest.js", { record, species: true });
+  h.render(); h.focus(); await new Promise(resolve => setImmediate(resolve));
+  let tree = h.render();
+  const textField = h.walk(tree, node => node.type === 'TextInput' && node.props.value === 'Species A');
+  textField.props.onChangeText('Unsaved proposal');
+  await h.walk(h.render(), node => node.props?.accessibilityLabel === 'recordEdits.addGallery').props.onPress();
+  const submit = () => h.walk(h.render(), node => node.type === 'TouchableOpacity' && h.text(node) === 'recordEdits.submitChanges');
+  submit().props.onPress(); await h.alert[2][1].onPress();
+  assert.ok(h.walk(h.render(), node => node.type === 'TextInput' && node.props.value === 'Unsaved proposal'));
+  assert.equal(submit().props.disabled, true);
+  assert.ok(h.walk(h.render(), node => node.props?.accessibilityRole === 'alert'));
+  assert.ok(h.walk(h.render(), node => node.type === 'Image' && node.props.source?.uri === 'file://gallery.jpg'));
+  assert.equal(h.calls.find(([path]) => path === '/my-species-requests/1')[1].body.expected_revision, 1);
+  record.content_revision = 2; record.scientific_name = 'Latest content';
+  record.failReload = true;
+  const reload = h.walk(h.render(), node => node.type === 'TouchableOpacity' && h.text(node) === 'recordEdits.reloadLatest');
+  reload.props.onPress(); await h.alert[2][1].onPress();
+  assert.equal(h.alert[1], 'recordEdits.latestLoadFailed');
+  assert.equal(submit().props.disabled, true);
+  assert.ok(h.walk(h.render(), node => node.type === 'TextInput' && node.props.value === 'Unsaved proposal'));
+  record.failReload = false;
+  reload.props.onPress(); await h.alert[2][1].onPress();
+  assert.ok(h.walk(h.render(), node => node.type === 'TextInput' && node.props.value === 'Latest content'));
+  assert.equal(submit().props.disabled, true);
+  h.walk(h.render(), node => node.type === 'TouchableOpacity' && h.text(node) === 'recordEdits.acknowledgeLatest').props.onPress();
+  submit().props.onPress(); await h.alert[2][1].onPress();
+  const saved = h.calls.filter(([path]) => path === '/my-species-requests/1').at(-1);
+  assert.equal(saved[1].body.expected_revision, 2);
+});
+
+
+test('deep linked final species and plant records show a read-only outcome without save actions',async()=>{
+ for(const species of [false,true]){
+  const h=harness(species?'screens/EditSpeciesRequest.js':'screens/EditPlantRecord.js',{record:species?request('Rejected'):plant('Rejected'),species});
+  h.render();h.focus();await new Promise(resolve=>setImmediate(resolve));
+  const tree=h.render();assert.ok(h.text(tree).includes('recordEdits.finalRejected'));
+  assert.equal(h.walk(tree,node=>node.type==='TouchableOpacity'&&h.text(node)==='recordEdits.submitChanges'),null);
+  assert.equal(h.calls.filter(([,options])=>['PATCH','POST'].includes(options?.method)).length,0);
+  assert.equal(h.photoReads,0);
+ }
+});
+
+
+test('a rejected subsequent observation does not block approved plant change proposals',async()=>{
+ const record=plant('Approved');record.latestObservation={...record.latestObservation,status:'Rejected'};
+ const h=harness('screens/EditPlantRecord.js',{record});h.render();h.focus();await new Promise(resolve=>setImmediate(resolve));
+ const submit=h.walk(h.render(),node=>node.type==='TouchableOpacity'&&h.text(node)==='recordEdits.submitChanges');assert.ok(submit);
+ submit.props.onPress();await h.alert[2][1].onPress();assert.ok(h.calls.some(([path])=>path==='/record-changes'));
+});
+
+for (const species of [false,true]) for (const acknowledgement of [{}, {change:{}}, {change:{id:'bad/path',status:'Pending Review'}}, {change:{id:'change-12',status:'Approved'}}]) {
+  test(`malformed approved ${species?'species':'plant'} receipt preserves form and never reports submitted: ${JSON.stringify(acknowledgement)}`,async()=>{
+    const h=harness(species?'screens/EditSpeciesRequest.js':'screens/EditPlantRecord.js',{record:species?request('Approved'):plant('Approved'),species,acknowledgement});
+    h.render();h.focus();await new Promise(resolve=>setImmediate(resolve));
+    const tree=h.render(),button=h.walk(tree,node=>node.type==='TouchableOpacity'&&h.text(node)==='recordEdits.submitChanges');
+    button.props.onPress();await h.alert[2][1].onPress();
+    assert.notEqual(h.alert[0],'recordEdits.savedTitle');assert.equal(h.navigations.length,0);
+    assert.ok(h.walk(h.render(),node=>node.type==='TextInput'&&Boolean(node.props.value)));
+  });
+}

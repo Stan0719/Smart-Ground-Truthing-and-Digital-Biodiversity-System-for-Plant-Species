@@ -51,13 +51,35 @@ export function groupGallery(assets: GalleryAsset[]): GalleryGroup[] {
   let index = 0
   return ordered.map(g => g.date === null ? g : dated[index++]!)
 }
-export function createPlantGallery({ transport = fetch, detail = false }: { transport?: typeof fetch; detail?: boolean } = {}) {
-  const state = reactive({ plantId: '', epoch: 0, assets: [] as GalleryAsset[], loading: false, error: '', hasMore: false, complete: false })
+export function createPlantGallery({ transport = fetch, detail = false, publicOnly = false }: { transport?: typeof fetch; detail?: boolean; publicOnly?: boolean } = {}) {
+  if (detail && publicOnly) throw new Error('Public photos cannot use staff detail access.')
+  const state = reactive({ plantId: '', epoch: 0, assets: [] as GalleryAsset[], loading: false, error: '', hasMore: false, complete: false, denied: false })
   let generation = 0, cursor: string | null = null, controller: AbortController | null = null
   const seen = new Set<string>()
   function reset() {
     generation++; state.epoch++; controller?.abort(); controller = null; cursor = null; seen.clear()
-    state.plantId = ''; state.assets = []; state.loading = false; state.error = ''; state.hasMore = false; state.complete = false
+    state.plantId = ''; state.assets = []; state.loading = false; state.error = ''; state.hasMore = false; state.complete = false; state.denied = false
+  }
+  async function refresh(plantId: string, scientific: boolean) {
+    if (state.loading) return
+    const token = generation
+    const snapshot = createPlantGallery({ transport, detail, publicOnly })
+    const previousIds = state.assets.map(asset => asset.id)
+    await snapshot.load(plantId, scientific)
+    while (!snapshot.state.error && snapshot.state.hasMore && previousIds.some(id => !snapshot.state.assets.some(asset => asset.id === id))) {
+      if (token !== generation) return
+      await snapshot.load(plantId, scientific, true)
+      if (token !== generation) return
+    }
+    if (token !== generation) return
+    if (snapshot.state.error) {
+      state.error = snapshot.state.error
+      if (snapshot.state.denied) { reset(); state.denied = true; state.error = snapshot.state.error }
+      return
+    }
+    if (JSON.stringify(state.assets) !== JSON.stringify(snapshot.state.assets)) state.assets = snapshot.state.assets
+    state.error = ''; state.complete = snapshot.state.complete; state.hasMore = snapshot.state.hasMore
+    cursor = snapshot.continuation(); seen.clear(); if (cursor) seen.add(cursor)
   }
   async function load(plantId: string, scientific: boolean, append = false) {
     if (append && (state.loading || !state.hasMore || state.plantId !== plantId)) return
@@ -68,12 +90,27 @@ export function createPlantGallery({ transport = fetch, detail = false }: { tran
     const current = () => token === generation && !abort.signal.aborted
     try {
       const query = new URLSearchParams({ limit: '20' }); if (after) query.set('cursor', after)
-      const response = await transport(`/api/data/plants/${plantId}/${detail ? 'detail/' : ''}gallery?${query}`, {
+      // The existing public asset list returns only authorized image IDs/types,
+      // without observation identities, origins, review metadata or timestamps.
+      const url = publicOnly ? `/api/data/assets?plant_id=${plantId}` : `/api/data/plants/${plantId}/${detail ? 'detail/' : ''}gallery?${query}`
+      const response = await transport(url, {
         credentials: 'same-origin', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]),
       })
       if (!current()) return
-      if (!response.ok) throw new Error(response.status === 404 ? 'Photo gallery unavailable for this plant. Please retry later.' : `Photos could not be loaded (HTTP ${response.status}).`)
+      if (!response.ok) { state.denied = [401, 403, 404].includes(response.status); throw new Error(response.status === 404 ? 'Photo gallery unavailable for this plant. Please retry later.' : `Photos could not be loaded (HTTP ${response.status}).`) }
       const result = object(await response.json()); if (!current()) return
+      if (publicOnly) {
+        if (!result || Object.keys(result).length !== 1 || !Array.isArray(result.assets)) return invalid()
+        const photos = new Map<string, GalleryAsset>()
+        for (const value of result.assets) {
+          const a = object(value)
+          if (!a || Object.keys(a).length !== 2 || !id(a.id) || !['image/jpeg', 'image/png'].includes(String(a.content_type))) return invalid()
+          photos.set(a.id, { id: a.id, url: assetUrlFromId(a.id), observationId: null, origin: 'unknown',
+            date: null, status: null, revision: null, photoOrder: null })
+        }
+        state.assets = [...photos.values()]; state.hasMore = false; state.complete = true
+        return
+      }
       const page = object(result?.page)
       if (!result || result.plant_id !== plantId || !Array.isArray(result.assets) || result.assets.length > 20 || !page || page.limit !== 20 ||
         typeof page.has_more !== 'boolean' || (page.has_more ? typeof page.next_cursor !== 'string' || !/^[A-Za-z0-9_-]{1,2000}$/.test(page.next_cursor) : page.next_cursor !== null)) return invalid()
@@ -98,5 +135,5 @@ export function createPlantGallery({ transport = fetch, detail = false }: { tran
         ? error.message : 'Photos could not be loaded. Please retry.'
     } finally { if (token === generation) { state.loading = false; if (controller === abort) controller = null } }
   }
-  return { state, load, reset }
+  return { state, load, reset, refresh, continuation: () => cursor }
 }

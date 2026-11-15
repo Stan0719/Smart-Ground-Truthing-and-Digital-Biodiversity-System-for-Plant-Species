@@ -85,7 +85,7 @@ test('knowledge refresh retains plant thumbnails and separates preview fallback 
         { species_id: '1', scientific_name: 'Fixture one', image_url: '/api/assets/preview' },
         { species_id: '2', scientific_name: 'Fixture two', image_asset_id: 'fallback' },
       ] }
-      if (path === '/plants') return { plants: [
+      if (path === '/plants?scope=public-web') return { plants: [
         { plant_id: '1', species_id: '1', plant_image_asset_id: 'plant-photo', rbac_status: 'Approved', observed_at: '2026-11-05T03:00:00Z', zone: 'Approved zone', latest_approved: { heightCm: 42, lifeStage: 'Mature' } },
         { plant_id: '2', species_id: '2', rbac_status: 'Pending Review', latitude: null, longitude: null, registered_at: '2026-11-05' },
       ] }
@@ -137,7 +137,9 @@ test('plant card replaces missing/broken images with a placeholder and accepts a
     const state = scope.run(() => exports.default.setup(props, { expose() {} }))
     vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
     const render = () => nodes(exports.render({}, [], props, vue.proxyRefs(state), {}, {}))
-    assert.equal(render().filter(n => n.type === 'h3' && n.children === '1').length, 1)
+    assert.equal(render().filter(n => n.type === 'h3' && n.children === '1').length, 0)
+    assert.ok(!render().some(n => n.props?.class === 'record-heading'))
+    assert.equal(props.plant.plantId, '1')
     assert.ok(!render().some(n => n.type === 'span' && n.children === '1'))
     assert.equal(render().find(n => n.props?.class === 'learn-more').props.to, '/plant/1')
     assert.equal(render().filter(n => n.props?.class === 'learn-more').length, 1)
@@ -147,6 +149,13 @@ test('plant card replaces missing/broken images with a placeholder and accepts a
     assert.match(descriptor.styles[0].content, /\.learn-more\s*\{[^}]*max-width: 100%;[^}]*flex-shrink: 0;[^}]*margin: auto auto 0/)
 
     assert.ok(!render().some(n => n.type === 'span' && String(n.props?.class).includes('review-status')))
+    props.plant.reviewStatus = 'Approved'
+    Object.assign(props.plant, { genus: 'Public genus', location: { zone: 'Private zone' }, latestApproved: { heightCm: 42, lifeStage: 'Mature', date: '2026-11-05' } })
+    await vue.nextTick()
+    assert.ok(!render().some(n => n.props?.class === 'review-status' || n.children === 'Private zone' || n.children === '42 cm' || n.children === 'Mature' || n.children === '—'))
+    assert.deepEqual(render().filter(n => n.type === 'dt').map(n => n.children), ['speciesLabels.genus'])
+    loggedIn.value = true; role.value = 'conservation-officer'; await vue.nextTick()
+    assert.equal(render().filter(n => n.type === 'h3' && n.children === '1').length, 1)
     for (const status of cardMapping.plantReviewStatuses) {
       props.plant.reviewStatus = status; await vue.nextTick()
       assert.deepEqual(render().find(n => n.type === 'span' && n.children === status).props.style, workflowBadgeStyle(status))
@@ -162,29 +171,32 @@ test('plant card replaces missing/broken images with a placeholder and accepts a
     assert.equal(state.canViewStaffPlantData.value, true)
     for (const value of ['42 cm', 'Mature', 'Approved zone']) assert.ok(render().some(n => n.children === value))
     role.value = 'admin'; await vue.nextTick()
-    assert.equal(state.canViewStaffPlantData.value, false)
-    assert.ok(!render().some(n => n.children === 'Approved zone'))
+    assert.equal(render().filter(n => n.type === 'h3' && n.children === '1').length, 1)
+    assert.equal(state.canViewStaffPlantData.value, true)
+    assert.ok(render().some(n => n.children === 'Approved zone'))
+    assert.equal(render().find(n => n.props?.class === 'learn-more').props.to, '/plant/1')
     loggedIn.value = false; role.value = null; await vue.nextTick()
     Object.assign(props.plant, { location: {}, latestApproved: {} })
-    assert.ok(render().some(n => n.children === '—'))
+    assert.ok(!render().some(n => n.children === '—'))
     assert.match(descriptor.styles[0].content, /flex-wrap:\s*wrap/)
     assert.match(descriptor.styles[0].content, /overflow-wrap:\s*anywhere/)
     assert.match(descriptor.styles[0].content, /\.record-image\s*\{[^}]*position:\s*relative/s)
     assert.match(descriptor.styles[0].content, /\.review-status\s*\{[^}]*position:\s*absolute;[^}]*top:\s*10px;[^}]*right:\s*10px;[^}]*max-width:\s*calc\(100% - 20px\)/s)
     props.plant.reviewStatus = 'Pending Review'; await vue.nextTick()
     assert.ok(render().some(n => n.props?.class === 'record-placeholder'))
-    assert.ok(nodes(render().find(n => n.props?.class === 'record-image')).some(n => n.children === 'Pending Review'))
+    assert.ok(!nodes(render().find(n => n.props?.class === 'record-image')).some(n => n.children === 'Pending Review'))
     props.plant.images = [{ path: '/api/data/assets/first' }]; await vue.nextTick()
     const img = render().find(n => n.type === 'img'); assert.equal(img.props.src, '/api/data/assets/first')
     img.props.onError({ currentTarget: { getAttribute: () => img.props.src } }); await vue.nextTick()
     assert.ok(!render().some(n => n.type === 'img')); assert.ok(render().some(n => n.props?.class === 'record-placeholder'))
-    assert.ok(nodes(render().find(n => n.props?.class === 'record-image')).some(n => n.children === 'Pending Review'))
+    assert.ok(!nodes(render().find(n => n.props?.class === 'record-image')).some(n => n.children === 'Pending Review'))
     props.plant.images = [{ path: '/api/assets/new' }]; await vue.nextTick()
     assert.equal(render().find(n => n.type === 'img').props.src, '/api/data/assets/new')
   } finally { scope.stop() }
 })
 
 test('direct species-plants navigation maps actual API thumbnails without a preloaded knowledge catalogue', async () => {
+  for (const role of [null, 'conservation-officer', 'admin']) {
   const { descriptor } = parse(load('../src/views/SpeciesPlantsView.vue'))
   const script = compileScript(descriptor, { id: 'species-thumbnails' })
   const exports = {}, scope = vue.effectScope(), calls = []
@@ -205,7 +217,7 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
     if (name.endsWith('/plantCardMapping')) return cardMapping
     if (name.endsWith('/plants')) return { plants: [] }
     if (name.endsWith('/plantId')) return { formatPlantId: id => `PL${String(id).padStart(3, '0')}` }
-    if (name.includes('usePrototypeSession')) return { usePrototypeSession: () => ({ isLoggedIn: vue.ref(false), userRole: vue.ref(null) }) }
+    if (name.includes('usePrototypeSession')) return { usePrototypeSession: () => ({ isLoggedIn: vue.ref(Boolean(role)), userRole: vue.ref(role) }) }
     if (name.endsWith('.vue')) return {}
     throw Error(name)
   } }
@@ -226,8 +238,10 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
     assert.equal(state.speciesPlants.value[1].latestApproved.date, '')
     assert.ok(Number.isNaN(state.speciesPlants.value[1].latestApproved.heightCm))
     assert.ok(Number.isNaN(state.speciesPlants.value[1].location.latitude))
-    assert.deepEqual(calls, ['/api/species', '/api/plants'])
+    assert.deepEqual(calls, ['/api/species', role ? '/api/plants' : '/api/plants?scope=public-web'])
+    assert.equal(state.canViewStaffPlantData.value, Boolean(role))
   } finally { scope.stop() }
+  }
 })
 
 
@@ -238,4 +252,31 @@ test('catalogue portrait URL, ID and safe gallery fallback have explicit priorit
   assert.equal(images.speciesImageSelection(refs, 'https://unsafe.test/photo', '../invalid').image, '/api/data/assets/gallery')
   assert.equal(images.speciesImageSelection([], 'https://unsafe.test/photo', '../invalid').image, undefined)
   assert.equal(images.speciesImageSelection([{ id: 'document', content_type: 'application/pdf' }], undefined).image, undefined)
+})
+
+
+test('Administrator shared knowledge loader requests scientific catalogue and maps protected names, status and authorized photos', async () => {
+  const plants = vue.reactive([]), records = vue.reactive([]), calls = [], exports = {}
+  vm.runInNewContext(js(load('../src/services/knowledge.ts')), { exports, require(name) {
+    if (name === 'vue') return vue
+    if (name.endsWith('/assetImages')) return images
+    if (name.endsWith('/plantCardMapping')) return cardMapping
+    if (name.endsWith('/plants')) return { plants }
+    if (name.endsWith('/plantRecords')) return { plantRecords: records }
+    if (name.includes('usePrototypeSession')) return { refreshSession: async () => ({ role: 'Administrator', mustChangePassword: false }) }
+    if (name.endsWith('/plantApi')) return { plantApi: async path => {
+      calls.push(path)
+      if (path.startsWith('/species?')) return { species: [{ species_id: '3', scientific_name: 'Protected name', common_name: 'Common', habitat: 'Rainforest', conservation_status: 'Vulnerable', sensitivity: 'protected' }] }
+      if (path === '/plants') return { plants: [{ plant_id: '8', species_id: '3', rbac_status: 'Approved', plant_image_asset_id: 'plant-photo', zone: 'Approved zone', latest_approved: { heightCm: 42, lifeStage: 'Mature' } }] }
+      return { assets: [{ id: 'species-photo', content_type: 'image/jpeg' }] }
+    } }
+    throw Error(name)
+  } })
+  await exports.refreshKnowledge()
+  assert.equal(exports.knowledgeError.value, '')
+  assert.deepEqual(calls.slice(0, 2), ['/species?scope=scientific', '/plants'])
+  assert.equal(plants[0].sensitivityLevel, 'protected'); assert.equal(plants[0].conservationStatus, 'Vulnerable')
+  assert.equal(plants[0].image, '/api/data/assets/species-photo')
+  assert.equal(records[0].images[0].path, '/api/data/assets/plant-photo')
+  assert.equal(records[0].latestApproved.heightCm, 42); assert.equal(records[0].location.zone, 'Approved zone')
 })

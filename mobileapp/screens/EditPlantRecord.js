@@ -82,7 +82,7 @@ export default function EditPlantRecord({ route, navigation }) {
         const content = (plant.status === "Approved"
           ? plant.observations?.find((observation) => observation.status === "Approved")?.content
           : plant.latestObservation?.content) || plant.latest_submission || plant.latest_approved || {};
-        const initialForm = { scientific_name: str(plant.scientificName), species_id: str(plant.speciesId), qr_id: str(plant.qrId),
+        const initialForm = { scientific_name: str(Object.hasOwn(plant, "plantScientificNameValue") ? plant.plantScientificNameValue : plant.scientificName), species_id: str(plant.speciesId), qr_id: str(plant.qrId),
           ...Object.fromEntries(fields.slice(1).map((field) => [field, str(content[field] ??
             ({ latitude: plant.location?.latitude, longitude: plant.location?.longitude,
               accuracy_m: plant.location?.accuracyM, altitudeM: plant.location?.altitudeM })[field])])) };
@@ -266,6 +266,7 @@ export default function EditPlantRecord({ route, navigation }) {
     navigation.navigate("AddSpeciesRequest", { botanist: route.params?.botanist, returnToPlantId: plantId, returnPlantDraftKey: activeFormDraftKey });
   }
   function submit() {
+    if (state.plant.status === "Rejected" || (state.plant.status !== "Approved" && state.plant.latestObservation?.status === "Rejected")) return Alert.alert(t("common.error"), t("recordEdits.finalRejected"));
     if (busy.current || submitted) return;
     if (draftConflict || state.offlineDraft) return Alert.alert(t("common.error"), t("botanistDrafts.editConflict"));
     const error = validate();
@@ -295,6 +296,7 @@ export default function EditPlantRecord({ route, navigation }) {
     ]);
   }
   async function save() {
+    if (state.plant.status === "Rejected" || (state.plant.status !== "Approved" && state.plant.latestObservation?.status === "Rejected")) return Alert.alert(t("common.error"), t("recordEdits.finalRejected"));
     if (busy.current) return;
     busy.current = true; setSaving(true);
     try {
@@ -331,7 +333,11 @@ export default function EditPlantRecord({ route, navigation }) {
       if (state.plant.status === "Approved") {
         const response = await plantApi("/record-changes", { method: "POST", expectedAccountId: accountId,
           body: { kind: "plant", target_id: Number(plantId), proposed, client_key: clientKey.current } });
-        changeId = response?.change?.id ?? null;
+        const receipt = response?.change;
+        if (!receipt || typeof receipt.id !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(receipt.id) ||
+          (receipt.status !== undefined && receipt.status !== "Pending Review"))
+          throw Error("The server did not confirm a pending change proposal. Refresh your submissions before trying again.");
+        changeId = receipt.id;
       } else await plantApi(`/my-plants/${encodeURIComponent(plantId)}`, { method: "PATCH", expectedAccountId: accountId,
         body: { ...proposed, expected_revision: state.plant.latestObservation?.revision } });
       await autosave.stop();
@@ -347,6 +353,11 @@ export default function EditPlantRecord({ route, navigation }) {
         botanist: route.params?.botanist, openTarget: { kind: "plant", recordId: plantId, ...(changeId ? { changeId } : {}) },
       }) }]);
     } catch (error) {
+      if (error.code === "SUBMISSION_REJECTED") {
+        setState(old => ({ ...old, plant: { ...old.plant, status: "Rejected" } }));
+        Alert.alert(t("common.error"), t("recordEdits.finalRejected"));
+        return;
+      }
       if (error.status === 409 && /already pending review/i.test(error.message || "")) setEditAvailability("pending");
       Alert.alert(t("common.error"), error.code === "EDIT_PENDING" || (error.status === 409 && /already pending review/i.test(error.message || ""))
         ? t("recordEdits.pendingEditExplanation") : error.code === "EDIT_AVAILABILITY_UNKNOWN" ? t("recordEdits.editAvailabilityUnavailable") : translateUIMessage(error.message));
@@ -359,6 +370,7 @@ export default function EditPlantRecord({ route, navigation }) {
   if (state.error || !form) return <View style={styles.center}><Text style={styles.error}>{translateUIMessage(state.error)}</Text>
     <TouchableOpacity style={styles.secondary} onPress={() => { setState((old) => ({ ...old, loading: true, error: "" })); setReload((old) => old + 1); }}>
       <Text style={styles.secondaryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>;
+  if (state.plant.status === "Rejected" || (state.plant.status !== "Approved" && state.plant.latestObservation?.status === "Rejected")) return <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{t("recordEdits.finalRejected")}</Text><TouchableOpacity style={styles.secondary} onPress={() => navigation.goBack()}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity></View>;
   return <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <Text style={styles.title}>{t("recordEdits.editPlant")}</Text>
     <Text style={styles.note}>{state.plant.status === "Approved" ? t("recordEdits.approvedNotice") : t("recordEdits.pendingNotice")}</Text>
@@ -395,7 +407,8 @@ export default function EditPlantRecord({ route, navigation }) {
       {(state.catalogSpecies || []).map((item) => <TouchableOpacity key={item.id} style={[styles.speciesOption, form.species_id === String(item.id) && styles.selected]} onPress={() => change("species_id", String(item.id))}>
         <Text style={styles.optionText}>{item.scientificName} · {item.commonName}</Text></TouchableOpacity>)}
       </OriginalUpdatedField>}
-      {fields.map((field) => <OriginalUpdatedField key={field} label={t(`recordEdits.${field}`)} originalValue={originalFieldValue(field)}>
+      <Text style={styles.note}>{t("recordEdits.associatedSpeciesName")} ? {state.plant.speciesScientificName || state.plant.speciesDetails?.scientificName || t("recordEdits.informationNotAvailable")}</Text>
+      {fields.map((field) => <OriginalUpdatedField key={field} label={t(field === "scientific_name" ? "recordEdits.plantScientificName" : `recordEdits.${field}`)} originalValue={originalFieldValue(field)}>
         {field === "latitude" && <TouchableOpacity style={styles.secondary} onPress={detectLocation} disabled={locating} accessibilityRole="button" accessibilityLabel={t("addPlant.getCurrentLocation")}>
           {locating ? <ActivityIndicator color="#28665E" /> : <Text style={styles.secondaryText}>{t("addPlant.getCurrentLocation")}</Text>}
         </TouchableOpacity>}

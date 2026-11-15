@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vOfficerDropdown } from './officerDropdown'
 import { computed, nextTick, onMounted, onScopeDispose, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { assetUrlFromId } from '../../services/assetImages'
@@ -460,7 +461,7 @@ onScopeDispose(() => {
         </template>
         <button type="button" class="photo-button library-toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ pt(expanded ? 'collapseLibrary' : 'expandLibrary') }}</button>
         <template v-if="expanded">
-          <h4>{{ pt('libraryTitle') }}</h4><label>{{ pt('sourceFilter') }}<select v-model="sourceFilter" @change="loadLibrary(null)"><option value="all">{{ pt('allPhotos') }}</option><option value="reference">{{ pt('referencePhotos') }}</option><option value="plant">{{ pt('plantPhotos') }}</option></select></label><p v-if="sourceFilter !== 'reference'" class="section-guidance">{{ pt('plantEligibility') }}</p>
+          <h4>{{ pt('libraryTitle') }}</h4><label>{{ pt('sourceFilter') }}<select v-officer-dropdown v-model="sourceFilter" @change="loadLibrary(null)"><option value="all">{{ pt('allPhotos') }}</option><option value="reference">{{ pt('referencePhotos') }}</option><option value="plant">{{ pt('plantPhotos') }}</option></select></label><p v-if="sourceFilter !== 'reference'" class="section-guidance">{{ pt('plantEligibility') }}</p>
           <p v-if="displayedImages.length" class="section-guidance">{{ pt('loadedPhotos', { count: displayedImages.length }) }}</p>
           <p v-else-if="!loading" class="empty-gallery">{{ pt('emptyGallery') }}</p>
           <ul class="library-grid"><li v-for="(image, index) in displayedImages" :key="image.assetId" class="library-photo"><img v-if="!failedImages.has(image.url)" :src="image.url" loading="lazy" :alt="pt('photoAlt', { number: index + 1 })" @error="failImage(image.url)" /><div v-else class="image-placeholder">{{ pt('noImage') }}</div><span>{{ pt(image.source === 'plant' ? 'plantSource' : 'referenceSource') }}</span><p v-if="image.source === 'plant'">{{ pt('plantMainUnavailable') }}</p></li></ul>

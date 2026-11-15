@@ -1,3 +1,5 @@
+-- Legacy-only repair for installations that have not run 014; this migration
+-- intentionally never targets plant_app.qr_code.
 -- Repair only the QR parent reference. No rows are inserted, updated or deleted.
 -- Run with an authorized migration role after reviewing the target database.
 BEGIN;

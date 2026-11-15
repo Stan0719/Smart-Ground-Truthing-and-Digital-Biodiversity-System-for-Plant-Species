@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
@@ -191,8 +192,8 @@ onMounted(() => loadReport())
   <section class="panel reports-panel">
     <form class="control-bar report-filters" :class="{ 'custom-period': pendingPeriod === 'custom' }" aria-labelledby="report-filters-title" @submit.prevent="applyFilters">
       <h3 id="report-filters-title" class="filter-heading">{{ rt('filters') }}</h3>
-      <label class="field category-field" for="report-category"><span>{{ rt('reportCategory') }}</span><select id="report-category" v-model="reportType"><option value="species-approved">{{ rt('speciesApprovedSummary') }}</option><option value="observations">{{ rt('observationSummary') }}</option><option value="threats">{{ rt('threatIncidentReport') }}</option><option value="iot">{{ rt('iotMonitoringReport') }}</option></select></label>
-      <label class="field" for="report-period"><span>{{ rt('reportingPeriod') }}</span><select id="report-period" v-model="pendingPeriod"><option value="all-time">{{ rt('periodAllTime') }}</option><option value="this-month">{{ rt('periodThisMonth') }}</option><option value="last-month">{{ rt('periodLastMonth') }}</option><option value="custom">{{ rt('periodCustom') }}</option></select></label>
+      <label class="field category-field" for="report-category"><span>{{ rt('reportCategory') }}</span><select v-officer-dropdown id="report-category" v-model="reportType"><option value="species-approved">{{ rt('speciesApprovedSummary') }}</option><option value="observations">{{ rt('observationSummary') }}</option><option value="threats">{{ rt('threatIncidentReport') }}</option><option value="iot">{{ rt('iotMonitoringReport') }}</option></select></label>
+      <label class="field" for="report-period"><span>{{ rt('reportingPeriod') }}</span><select v-officer-dropdown id="report-period" v-model="pendingPeriod"><option value="all-time">{{ rt('periodAllTime') }}</option><option value="this-month">{{ rt('periodThisMonth') }}</option><option value="last-month">{{ rt('periodLastMonth') }}</option><option value="custom">{{ rt('periodCustom') }}</option></select></label>
       <template v-if="pendingPeriod === 'custom'">
         <label class="field" for="report-start"><span>{{ rt('startDate') }}</span><input id="report-start" v-model="pendingStart" type="date" required :aria-invalid="Boolean(filterError)" aria-describedby="report-filter-error" /></label>
         <label class="field" for="report-end"><span>{{ rt('endDate') }}</span><input id="report-end" v-model="pendingEnd" type="date" required :aria-invalid="Boolean(filterError)" aria-describedby="report-filter-error" /></label>
@@ -205,7 +206,7 @@ onMounted(() => loadReport())
     <template v-else>
     <div class="control-bar report-controls">
       <label class="field search-field"><span>{{ rt('search') }}</span><input v-model="search" :placeholder="rt('searchPlaceholder')" :disabled="!report" /></label>
-      <label class="field"><span>{{ rt('sort') }}</span><select v-model="sort" :disabled="!report"><option value="scientific-asc">{{ rt('sortScientific') }}</option><option value="approved-desc">{{ rt('sortApprovedDesc') }}</option><option value="approved-asc">{{ rt('sortApprovedAsc') }}</option></select></label>
+      <label class="field"><span>{{ rt('sort') }}</span><select v-officer-dropdown v-model="sort" :disabled="!report"><option value="scientific-asc">{{ rt('sortScientific') }}</option><option value="approved-desc">{{ rt('sortApprovedDesc') }}</option><option value="approved-asc">{{ rt('sortApprovedAsc') }}</option></select></label>
       <button class="secondary-button report-toolbar-button" type="button" :disabled="isLoading" @click="loadReport()">{{ rt('refresh') }}</button>
     </div>
 

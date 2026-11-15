@@ -37,13 +37,12 @@ export async function refreshKnowledge() {
   try {
     const user = await refreshSession()
     if (attempt !== generation) return
-    // These sessions cannot read plant data under RBAC. Do not issue forbidden
-    // background requests from the public homepage or password-change screen.
-    if (user?.role === 'Administrator' || user?.mustChangePassword) return
-    const scientific = ['Botanist', 'Conservation Officer'].includes(user?.role || '')
+    // Password-change sessions cannot read the scientific catalogue.
+    if (user?.mustChangePassword) return
+    const scientific = ['Botanist', 'Conservation Officer', 'Administrator'].includes(user?.role || '')
     const [catalog, records] = await Promise.all([
       plantApi<{ species: Species[] }>(`/species?scope=${scientific ? 'scientific' : 'public'}`),
-      plantApi<{ plants: RecordRow[] }>('/plants'),
+      plantApi<{ plants: RecordRow[] }>(user ? '/plants' : '/plants?scope=public-web'),
     ])
     if (attempt !== generation) return
     plants.push(
@@ -104,7 +103,7 @@ export async function refreshKnowledge() {
     if (e instanceof Error && e.message === 'Access denied.') {
       const current = await refreshSession()
       if (attempt !== generation) return
-      if (current?.role === 'Administrator' || current?.mustChangePassword) return
+      if (current?.mustChangePassword) return
     }
     if (attempt === generation) {
       plants.splice(0)

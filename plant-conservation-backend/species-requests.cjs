@@ -1,13 +1,16 @@
 "use strict";
 const { createHash, randomUUID } = require("node:crypto");
 const sharp = require("sharp");
+const { speciesHistory, captureApprovedReview } = require("./historical-reviews.cjs");
 const {proposedPhoto}=require("./species-photo-library.cjs");
 const {approveRequestPhoto,setPointer}=require("./species-photo-provenance.cjs");
 const { permitted } = require("../shared/rbac.cjs");
 
+const { requireReviewCycle } = require("./species-review-cycle.cjs");
+const { rejectLinkedRegistration } = require("./linked-species-rejection.cjs");
 const fields = ["scientific_name", "common_name", "genus_name", "family_name",
   "conservation_status", "description", "habitat"];
-const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id";
+const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id,(to_jsonb(species_request_submission)->>'content_revision')::integer AS content_revision,to_jsonb(species_request_submission)->>'content_updated_at' AS content_updated_at,(to_jsonb(species_request_submission)->>'review_cycle')::integer AS review_cycle";
 const project = (row) => ({ ...row, photo_url: `/api/species-requests/${row.request_id}/photo`, proposed_photo_url: `/api/species-requests/${row.request_id}/proposed-photo` });
 
 // The deployed table predates this API. Older installations without it retain
@@ -22,6 +25,8 @@ function projection(alias) {
   return `jsonb_build_object(
     'request_id',${alias}.request_id::text,
     'request_status',${alias}.request_status,
+    'review_cycle',(to_jsonb(${alias})->>'review_cycle')::integer,
+    'content_revision',(to_jsonb(${alias})->>'content_revision')::integer,'content_updated_at',to_jsonb(${alias})->>'content_updated_at',
     'proposed_species_id',${alias}.proposed_species_id::text,
     'approved_species_id',${alias}.approved_species_id::text,
     'proposed_scientific_name',${alias}.scientific_name,
@@ -229,7 +234,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       WHERE request_id=$1 AND ($2 OR owner_subject=$3)`,
       [requestId(req.params.id), permitted(req.user, "species.manage"), subject(req.user)])).rows[0];
     if (!row) fail(404, "Species request unavailable.");
-    res.json({ species_request: project(row) });
+    res.json({ species_request: project(permitted(req.user, "species.manage") ? await speciesHistory(pool,row) : row) });
   });
   app.get("/api/species-requests/:id/photo", read, async (req, res) => {
     const row = (await pool.query("SELECT photo FROM species_request_submission WHERE request_id=$1 AND ($2 OR owner_subject=$3)",
@@ -240,7 +245,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
   app.post("/api/species-requests/:id/review", allow("species.manage"), async (req, res) => {
     const requestKey = requestId(req.params.id);
     const b = req.body;
-    if (!b || Array.isArray(b) || Object.keys(b).some(key => !["decision", "comment", "visibility"].includes(key)) || !["Approved", "Rejected", "Correction Required"].includes(b.decision)) fail(400, "Invalid review decision.");
+    if (!b || Array.isArray(b) || Object.keys(b).some(key => !["decision", "comment", "visibility", "expected_revision", "expected_review_cycle"].includes(key)) || !["Approved", "Rejected", "Correction Required"].includes(b.decision)) fail(400, "Invalid review decision.");
     if (b.comment !== undefined && (typeof b.comment !== "string" || b.comment.length > 4000))
       fail(400, "Invalid review comment.");
     const comment = b.decision === "Approved" ? (b.comment || "").trim() : text(b.comment);
@@ -249,9 +254,20 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       const row = (await c.query("SELECT * FROM species_request_submission WHERE request_id=$1 FOR UPDATE", [requestKey])).rows[0];
       if (!row) fail(404, "Species request unavailable.");
       if (row.owner_subject === subject(req.user)) fail(403, "You cannot review your own species request.");
+      if (!Number.isSafeInteger(row.content_revision) || row.content_revision < 1)
+        fail(503, "Apply species-request content revision migration 016 before reviewing requests.");
+      if (!Number.isSafeInteger(b.expected_revision) || b.expected_revision < 1 || row.content_revision !== b.expected_revision)
+        return { version_conflict: true };
+      await requireReviewCycle(c, fail);
+      if (!Number.isSafeInteger(row.review_cycle) || row.review_cycle < 1)
+        fail(503, "Species review cycle metadata requires migration 017.");
+      if (!Number.isSafeInteger(b.expected_review_cycle) || b.expected_review_cycle < 1 || b.expected_review_cycle !== row.review_cycle)
+        return { cycle_conflict: true };
       if (row.request_status !== "Pending Review") fail(409, "Species request has already been reviewed.");
       if (b.decision === "Approved" && fields.some(key => typeof row[key] !== "string" || !row[key].trim()))
         fail(409, "Species request is incomplete.");
+      const decisionId = randomUUID();
+      if (b.decision === 'Rejected') await rejectLinkedRegistration(c, row, req.user, comment, decisionId, audit);
       let speciesId = null;
       if (row.proposed_species_id) {
         const linked = (await c.query("SELECT request_id FROM species_request_submission WHERE proposed_species_id=$1 OR approved_species_id=$1 ORDER BY request_id", [row.proposed_species_id])).rows;
@@ -285,14 +301,25 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
           [photoId, speciesId, row.owner_subject, `species-request:${row.request_id}`, row.photo]);
         await setPointer(c,row.request_id,photoId);
       }
-      const reviewed = (await c.query(`UPDATE species_request_submission SET request_status=$1,review_comment=$2,reviewed_by=$3,reviewed_at=CURRENT_TIMESTAMP,approved_species_id=$4 WHERE request_id=$5 RETURNING ${columns}`,
-        [b.decision, comment, subject(req.user), speciesId, row.request_id])).rows[0];
-      if ((await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available)
-        await c.query(`UPDATE record_version_history SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
-          WHERE id=(SELECT id FROM record_version_history WHERE request_id=$4 AND status='Pending Review' ORDER BY version_number DESC LIMIT 1)`,
+      const reviewed = (await c.query(`UPDATE species_request_submission SET request_status=$1,review_comment=$2,reviewed_by=$3,reviewed_at=CURRENT_TIMESTAMP,approved_species_id=$4,review_decision_id=$6 WHERE request_id=$5 RETURNING ${columns}`,
+        [b.decision, comment, subject(req.user), speciesId, row.request_id, decisionId])).rows[0];
+      let reviewedVersionId = null;
+      if ((await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available) {
+        const reviewedVersion = await c.query(`UPDATE record_version_history SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
+          WHERE id=(SELECT id FROM record_version_history WHERE request_id=$4 AND status='Pending Review' ORDER BY version_number DESC LIMIT 1) RETURNING id`,
           [b.decision, subject(req.user), comment, row.request_id]);
+        reviewedVersionId = reviewedVersion.rows[0]?.id ?? null;
+      }
+      if (b.decision === "Approved") await captureApprovedReview(c, {
+        kind: "species", submissionId: row.request_id, reviewId: decisionId, reviewer: subject(req.user), versionId: reviewedVersionId,
+      });
       await audit(c, req.user, "species_request_reviewed", row.request_id);
       return reviewed;
+    });
+    if (result.cycle_conflict) return res.status(409).json({ code: "SPECIES_REQUEST_REVIEW_CYCLE_CONFLICT", error: "This request entered a new review cycle. Reload and inspect the latest submission." });
+    if (result.version_conflict) return res.status(409).json({
+      code: "SPECIES_REQUEST_VERSION_CONFLICT",
+      error: "This species request was updated after you opened it. Reload the latest submission before making a decision.",
     });
     res.json({ reviewed: true, species_request: project(result) });
   });

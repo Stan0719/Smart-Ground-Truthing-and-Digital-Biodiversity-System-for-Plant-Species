@@ -28,9 +28,10 @@ const selectedSpecies = computed(() =>
   species.find((item) => item.slug === props.plant.speciesSlug),
 )
 const { isLoggedIn, userRole } = usePrototypeSession()
+const isGuest = computed(() => !isLoggedIn.value)
 const canViewStaffPlantData = computed(
   () =>
-    isLoggedIn.value && userRole.value === 'conservation-officer',
+    isLoggedIn.value && (userRole.value === 'conservation-officer' || userRole.value === 'admin'),
 )
 const reviewStatus = computed(() => plantReviewStatuses.find(status => status === props.plant.reviewStatus) || '')
 const statusKey = computed(() => reviewStatus.value.toLowerCase().replace(/\s+/g, ''))
@@ -89,11 +90,11 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
         @error="imageFailed"
       />
       <div v-else class="record-placeholder" aria-hidden="true">🌿</div>
-      <span v-if="reviewStatus" class="review-status" :style="workflowBadgeStyle(reviewStatus)" :class="`status-${statusKey}`">{{ statusLabel }}</span>
+      <span v-if="!isGuest && reviewStatus" class="review-status" :style="workflowBadgeStyle(reviewStatus)" :class="`status-${statusKey}`">{{ statusLabel }}</span>
     </div>
 
     <div class="record-copy">
-      <div class="record-heading">
+      <div v-if="!isGuest" class="record-heading">
         <h3>{{ plant.plantId }}</h3>
       </div>
       <p class="record-common-name">{{ displayName }}</p>
@@ -116,7 +117,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
           <dd>{{ formatDate(plant.latestApproved.date) }}</dd>
         </div>
       </dl>
-      <dl v-else>
+      <dl v-else-if="!isGuest">
         <div>
           <dt>{{ t('common.height') }}</dt>
           <dd>{{ displayHeight }}</dd>
@@ -133,6 +134,10 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
           <dt>{{ compact ? t('common.verified') : t('common.lastVerified') }}</dt>
           <dd>{{ formatDate(plant.latestApproved.date) }}</dd>
         </div>
+      </dl>
+
+      <dl v-else-if="translatedGenus !== '—'">
+        <div><dt>{{ t('speciesLabels.genus') }}</dt><dd>{{ translatedGenus }}</dd></div>
       </dl>
 
       <RouterLink

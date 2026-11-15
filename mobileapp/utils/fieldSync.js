@@ -223,6 +223,7 @@ export function syncDrafts(accountId, { onSubmitted } = {}) {
           saved = result.observations.find(
             (row) => row.id === draft.path.split("/").pop(),
           );
+          if (saved?.status === "Rejected") throw Object.assign(Error("Rejected is final. This draft is retained and cannot be submitted."), { code: "SUBMISSION_REJECTED" });
           if (!saved)
             throw Error(
               "The owned observation is unavailable. Its correction remains saved locally.",
@@ -245,6 +246,7 @@ export function syncDrafts(accountId, { onSubmitted } = {}) {
             body: draft.body,
             expectedAccountId: accountId,
           });
+          if (saved.status === "Rejected") throw Object.assign(Error("Rejected is final. This draft is retained and cannot be submitted."), { code: "SUBMISSION_REJECTED" });
           if (changed(saved)) {
             if (saved.status !== "Draft")
               throw Error(

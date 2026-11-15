@@ -101,12 +101,6 @@ const router = createRouter({
       meta: { requiresAdmin: true },
     },
     {
-      path: '/admin/alerts',
-      name: 'admin-alerts',
-      component: AdminOperationsView,
-      meta: { requiresAdmin: true },
-    },
-    {
       path: '/admin/activity',
       name: 'admin-activity',
       component: AdminModuleView,

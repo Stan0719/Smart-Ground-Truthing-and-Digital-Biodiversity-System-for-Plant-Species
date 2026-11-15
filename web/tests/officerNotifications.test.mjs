@@ -7,6 +7,7 @@ import { formatObservationId } from '../src/utils/observationId.ts'
 import { formatSpeciesRequestId } from '../src/utils/speciesRequestId.ts'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createOfficerNotificationRefresh } from '../src/services/officerNotificationRefresh.ts'
 import { createOfficerInbox } from '../src/services/officerNotifications.ts'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 const officer = { id: 'one', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }
@@ -42,7 +43,7 @@ test('errors are not empty success; append retry preserves records and expired c
   let status = 200
   const h = setup(async url => status !== 200 ? Response.json({}, { status }) : page([notice()], true, 'next'))
   await h.client.load(); status = 503; await h.client.load(true)
-  assert.equal(h.client.state.items.length, 1); assert.equal(h.client.state.unread, null); assert.equal(h.client.state.error, 'loadFailed')
+  assert.equal(h.client.state.items.length, 1); assert.equal(h.client.state.unread, 1); assert.equal(h.client.state.error, 'loadFailed')
   status = 400; await h.client.load(true); assert.equal(h.client.state.cursor, null)
   status = 200; await h.client.load(); assert.equal(h.client.state.error, '')
   status = 403; await h.client.refreshCount(); assert.equal(h.client.state.ready, false); assert.equal(h.client.state.items.length, 0)
@@ -100,7 +101,7 @@ test('Officer component preserves dimensions and renders real-state controls wit
   await h.client.load(); countStatus=200; await h.client.refreshCount()
   assert.equal(h.client.state.unread,4); assert.equal(h.client.state.listError,'loadFailed'); assert.equal(h.client.state.error,'loadFailed')
   listStatus=200; await h.client.load(); assert.equal(h.client.state.error,'')
-  countStatus=503; await h.client.refreshCount(); assert.equal(h.client.state.unread,null)
+  countStatus=503; await h.client.refreshCount(); assert.equal(h.client.state.unread,1)
   countStatus=200; await h.client.refreshCount(); assert.equal(h.client.state.error,''); assert.equal(h.client.state.unread,4)
   h.client.dispose()
   const pending=[];const race=setup(()=>new Promise(resolve=>pending.push(resolve)))
@@ -241,19 +242,20 @@ test('field-observation messages describe the specific record in all supported l
  }
 })
 
-function dropdownHarness(lang='en', transport=null) {
+function dropdownHarness(lang='en', transport=null, browser=null) {
  const source=readFileSync(new URL('../src/components/ConservationTopbarActions.vue',import.meta.url),'utf8')
  const {descriptor}=parse(source),script=compileScript(descriptor,{id:'compact-notification'})
  const template=compileTemplate({source:descriptor.template.content,filename:'ConservationTopbarActions.vue',id:'compact-notification',compilerOptions:{bindingMetadata:script.bindings}})
  assert.deepEqual(template.errors,[])
- const scope=vue.effectScope(),cleanup=[],exports={},calls=[]
+ const scope=vue.effectScope(),cleanup=[],mounted=[],exports={},calls=[]
  const labels=JSON.parse(readFileSync(new URL(`../src/locales/${lang}.json`,import.meta.url),'utf8'))
- const context={exports,Intl,AbortSignal,document:{removeEventListener(){}},fetch:async(url,options)=>{calls.push({url,options});if(transport)return transport(url,options);if(url.includes('unread-count'))return Response.json({unread_count:0});if(options.method==='POST')return Response.json({notification:{id:notice().id,read_at:'2026-11-02T00:00:00Z'}});const id=decodeURIComponent(url.split('/').pop());return Response.json({observation:{id,revision:1,origin_type:'subsequent_observation'}})},
+ const context={exports,Intl,AbortSignal,document:browser?.document || {removeEventListener(){}},window:browser?.window,fetch:async(url,options)=>{calls.push({url,options});if(transport)return transport(url,options);if(url.includes('unread-count'))return Response.json({unread_count:0});if(options.method==='POST')return Response.json({notification:{id:notice().id,read_at:'2026-11-02T00:00:00Z'}});const id=decodeURIComponent(url.split('/').pop());return Response.json({observation:{id,revision:1,origin_type:'subsequent_observation'}})},
  require(name){
-  if(name==='vue')return {...vue,onMounted(){},withDirectives:node=>node,onBeforeUnmount(fn){cleanup.push(fn)},resolveComponent:name=>name}
+  if(name==='vue')return {...vue,onMounted(fn){mounted.push(fn)},withDirectives:node=>node,onBeforeUnmount(fn){cleanup.push(fn)},resolveComponent:name=>name}
   if(name==='vue-i18n')return {useI18n:()=>({locale:vue.ref(lang),t:key=>key.split('.').reduce((o,k)=>o?.[k],labels)||key})}
   if(name==='vue-router'){const currentRoute=vue.ref({name:'conservation-dashboard',query:{}});return {useRouter:()=>({currentRoute,push:async target=>{currentRoute.value=target}})}}
   if(name.endsWith('/auth'))return {sessionSnapshot:()=>({user:officer,pending:false}),subscribeSession:()=>()=>{},logout:async()=>{}}
+  if(name.endsWith('/officerNotificationRefresh'))return {createOfficerNotificationRefresh: options=>createOfficerNotificationRefresh({...options,...(browser?.now?{now:browser.now}:{})})}
   if(name.endsWith('/officerNotifications'))return {createOfficerInbox}
   if(name.endsWith('/conservationProfile'))return {conservationProfile:{}}
   if(name.endsWith('/officerMonitoringDisplay'))return {monitoringLabels}
@@ -268,7 +270,7 @@ function dropdownHarness(lang='en', transport=null) {
  vm.runInNewContext(`(function(){${transpile(template.code)}})()`,context)
  state.notificationsOpen.value=true
  const render=()=>exports.render({},[],{},vue.proxyRefs(state),{},{})
- return {state,calls,render,stop(){cleanup.forEach(fn=>fn());scope.stop()}}
+ return {state,calls,render,mount(){mounted.forEach(fn=>fn())},stop(){cleanup.forEach(fn=>fn());scope.stop()}}
 }
 function dropdownNodes(node){
  if(Array.isArray(node))return node.flatMap(dropdownNodes)
@@ -296,7 +298,7 @@ test('compact dropdown renders titles, friendly references and localized timesta
    const buttons=tree.filter(n=>n.type==='button'&&n.props?.class?.includes('notification-item'))
    assert.equal(buttons.length,4);assert.equal(tree.filter(n=>n.type==='time').length,4)
    assert.equal(tree.filter(n=>n.type==='time')[0].props.datetime,items[0].created_at)
-   assert.equal(tree.filter(n=>n.type==='time')[0].children,new Intl.DateTimeFormat(lang,{dateStyle:'medium',timeStyle:'short'}).format(new Date(items[0].created_at)))
+   assert.equal(tree.filter(n=>n.type==='time')[0].children,new Intl.DateTimeFormat(lang.startsWith('en') ? 'en-GB' : lang,{day:'numeric',month:'long',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}).format(new Date(items[0].created_at)))
    assert.equal(tree.filter(n=>n.props?.class==='notification-type review').every(n=>dropdownNodes(n).some(child=>child.type==='svg')),true)
    assert.equal(tree.filter(n=>n.props?.class==='notification-unread-label').length,3)
    assert.equal(h.state.notificationState.items[0].resource.id,raw);assert.equal(h.calls.length,0)
@@ -371,4 +373,44 @@ test('mark-all refetches persisted states and preserves unread deliveries beyond
   h.state.inbox.setSession(officer,true);h.state.inbox.setSession(officer,false);await h.state.inbox.load();assert.equal(unreadDots(h).length,1)
   assert.equal(h.calls.filter(c=>c.options.method==='POST').length,1)
  }finally{h.stop()}
+})
+
+test('record-change notifications accept both target types and open the exact completed or pending proposal before read acknowledgement', async()=>{
+  for(const status of ['Pending Review','Approved','Rejected','Cancelled']) {
+    const id='12345678-1234-1234-1234-123456789abc';
+    const item=notice(1,{event_type:'record_change_submitted',change_target_type:'plant',resource:{kind:'record_change',id}});
+    const h=setup(async(url,options)=>url.startsWith('/api/data/record-changes/')?Response.json({change:{id,status}}):options.method==='POST'?Response.json({notification:{id:item.id,read_at:'2026-11-02T00:00:00Z'}}):page([item]));
+    await h.client.load();assert.equal(h.client.state.items[0].change_target_type,'plant');
+    assert.equal(await h.client.open(h.client.state.items[0]),true);
+    assert.deepEqual(h.destinations[0],{name:'conservation-reviews',query:{change:id}});
+    assert.ok(h.client.state.items[0].read_at);
+  }
+});
+
+test('mounted Officer header updates badge and open/closed dropdown automatically and preserves scrolled content',async()=>{
+  const flush=()=>new Promise(resolve=>setImmediate(resolve))
+  let now=0, sequence=0, items=[notice(1)], unread=2
+  const timers=new Map(),listeners=new Map()
+  const events=scope=>({addEventListener(name,listener){listeners.set(scope+name,listener)},removeEventListener(name){listeners.delete(scope+name)}})
+  const browser={now:()=>now,document:{visibilityState:'visible',...events('document')},window:{navigator:{onLine:true},...events('window'),setTimeout(callback,delay){const id=++sequence;timers.set(id,{callback,at:now+delay});return id},clearTimeout(id){timers.delete(id)}}}
+  const h=dropdownHarness('en',()=>Response.json({notifications:items,unread_count:unread,page:{has_more:false,next_cursor:null},read_through:'boundary'}),browser)
+  async function interval(){const [id,timer]=[...timers].sort((a,b)=>a[1].at-b[1].at)[0];timers.delete(id);now=timer.at;timer.callback();await flush()}
+  try {
+    h.state.notificationsOpen.value=false;h.mount();await flush()
+    assert.equal(h.state.notificationState.unread,2)
+    items=[notice(2),notice(1)];unread=3;await interval()
+    assert.equal(h.state.notificationsOpen.value,false);assert.equal(h.state.notificationState.unread,3)
+    assert.equal(dropdownNodes(h.render()).find(n=>n.props?.class==='notification-count').children,'3')
+    h.state.notificationsOpen.value=true
+    let anchorTop=90
+    const anchor={dataset:{notificationId:notice(1).id},getBoundingClientRect:()=>({top:anchorTop,bottom:anchorTop+40})}
+    h.state.notificationList.value={isConnected:true,scrollTop:40,getBoundingClientRect:()=>({top:80}),querySelectorAll:()=>[anchor]}
+    items=[notice(3),notice(2),notice(1)];unread=4
+    await interval()
+    assert.equal(h.state.notificationsOpen.value,true);assert.equal(h.state.notificationState.unread,4)
+    assert.equal(h.state.notificationList.value.scrollTop,40)
+    assert.equal(dropdownNodes(h.render()).filter(n=>n.props?.class?.includes?.('notification-item')&&n.props?.['data-notification-id']).length,3)
+    assert.equal(h.calls.length,3,'one refresh per interval, independent of dropdown visibility')
+  } finally {h.stop()}
+  assert.equal(timers.size,0);assert.equal(listeners.size,0)
 })

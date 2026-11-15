@@ -6,6 +6,7 @@ const { createPlantApp } = require('../server.js');
 const { permitted } = require('../../shared/rbac.cjs');
 test('Plant Detail page reads are scoped, paginated and private', async t => {
   const pool = await createPlantDatabase(); t.after(() => pool.end());
+  await pool.query('CREATE TABLE plant_app.qr_code(qr_id integer,plant_id integer,qr_code text,status text)');
   for (const name of ['004-species-requests.sql', '006-atomic-plant-submissions.sql']) await pool.query(readFileSync(join(__dirname, '../migrations', name), 'utf8'));
   await pool.query(`INSERT INTO family(family_id,family_name) VALUES(1,'Family');
     INSERT INTO genus(genus_id,family_id,genus_name) VALUES(1,1,'Genus');
@@ -27,7 +28,7 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
   }
   await pool.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,origin_type) VALUES
     ('foreign',2,'staff:other','Pending Review','{}','foreign','subsequent_observation'),
-    ('new-approved',1,'staff:bot','Approved','{"latitude":5,"longitude":114,"zone":"Approved"}','new','subsequent_observation');
+    ('new-approved',1,'staff:bot','Approved','{"heightCm":21,"healthStatus":"Healthy","lifeStage":"Mature","morphology":"New leaves","notes":"latest approved notes","taxonomy":{"leaf":"Broad"},"latitude":5,"longitude":114,"accuracy_m":4,"altitudeM":20,"zone":"Approved"}','new','subsequent_observation');
     INSERT INTO observation_review(id,observation_id,reviewer_subject,decision,comment) VALUES('review','obs-2','staff:officer','Rejected','Please correct');`);
   await pool.query(`INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES('staff:bot','obs-0',$1,$2)`,
     ['a'.repeat(64),{plant_id:1,id:'obs-0',species_id:1,qr_token:'fixture',status:'Pending Review',species_request_id:null}]);
@@ -47,26 +48,34 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
     const r = await fetch(`http://127.0.0.1:${server.address().port}/api${path}`,{method,headers:{...(role ? {Authorization:`Bearer ${tokens[role]}`} : {}),...(body ? {'Content-Type':'application/json'} : {})},...(body ? {body:JSON.stringify(body)} : {})});
     return { status:r.status, data:r.headers.get('content-type')?.includes('json') ? await r.json() : await r.text() };
   };
-  await t.test('visitors receive exactly six information fields and no preloaded staff evidence', async () => {
+  await t.test('Guest habitat extends basic information while authenticated projections and evidence restrictions stay intact', async () => {
     for (const role of [undefined,'visitor','bot']) {
       const r = await call('/plants/1/detail',role); assert.equal(r.status,200); assert.equal(r.data.staff,null);
-      assert.deepEqual(Object.keys(r.data.information).sort(),['plant_id','scientific_name','common_name','genus_name','family_name','description'].sort());
+      assert.deepEqual(Object.keys(r.data.information).sort(),['plant_id',...(['officer','admin'].includes(role) ? ['plant_scientific_name','species_scientific_name'] : []),'scientific_name','common_name','genus_name','family_name','description',...(!role ? ['habitat'] : [])].sort());
       assert.equal(r.data.information.scientific_name,'Individual name');
+      if (['officer','admin'].includes(role)) {
+        assert.equal(r.data.information.plant_scientific_name,'Individual name');
+        assert.equal(r.data.information.species_scientific_name,'Species name');
+      }
       assert.ok(!JSON.stringify(r.data).includes('staff:'));
       for (const suffix of ['history','gallery','assets/photo-0']) assert.equal((await call('/plants/1/detail/'+suffix,role)).status, role ? 403 : 401);
       assert.equal((await call('/plants/2/detail',role)).status,404);
       assert.equal((await call('/plants/3/detail',role)).status,404);
     }
   });
-  await t.test('Officer and Admin read protected records without write or general Admin access', async () => {
+  await t.test('Officer and Admin read protected records while catalogue reads retain independent write gates', async () => {
     for (const role of ['officer','admin']) {
       const r = await call('/plants/1/detail',role); assert.equal(r.status,200); assert.equal(r.data.staff.approved_location.zone,'Approved');
+      assert.equal(r.data.staff.latest_observation.status, 'Approved');
+      assert.equal(r.data.staff.latest_approved_observation.content.notes, 'latest approved notes');
+      assert.deepEqual(r.data.staff.latest_approved_observation.content.taxonomy, { leaf: 'Broad' });
+      assert.equal(r.data.staff.latest_observation.content.latitude, 5);
       assert.equal((await call('/plants/2/detail',role)).status,200);
       assert.equal((await call('/plants/3/detail',role)).status,200);
       for (const permission of ['plants.create','observations.create','observations.edit.own']) assert.equal(permitted(users[role],permission),false);
     }
     for (const permission of ['observations.review','species.manage','plants.scientific.read','plants.public.read']) assert.equal(permitted(users.admin,permission),false);
-    assert.equal((await call('/plants','admin')).status,403);
+    assert.equal((await call('/plants','admin')).status,200);
     assert.equal((await call('/plants','admin','POST',{})).status,403);
     assert.equal((await call('/assets','admin','POST',{})).status,403);
     assert.equal((await call('/observations/obs-1/review','admin','POST',{})).status,403);

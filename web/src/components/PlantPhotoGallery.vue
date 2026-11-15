@@ -1,28 +1,37 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import PlantPhotoLightbox from './PlantPhotoLightbox.vue'
 import { useConservationText } from '../composables/useConservationText'
 import type { GalleryAsset, GalleryGroup } from '../services/plantGallery'
-const props = defineProps<{ groups: GalleryGroup[]; loading: boolean; error: string; complete: boolean; hasMore: boolean; registrationOnly?: boolean }>()
+const props = defineProps<{ groups: GalleryGroup[]; loading: boolean; error: string; complete: boolean; hasMore: boolean; registrationOnly?: boolean; publicPhotos?: boolean }>()
 defineEmits<{ retry: []; more: [] }>()
 const { ct } = useConservationText()
 const selected = reactive<Record<string, string>>({})
 const failed = reactive(new Set<string>())
 const loaded = reactive(new Set<string>())
 const lightbox = ref<InstanceType<typeof PlantPhotoLightbox> | null>(null)
+const zoomGroupKey = ref('')
 function enlarge(group: GalleryGroup, event: MouseEvent) {
-  void lightbox.value?.open(group.assets, group.assets.indexOf(active(group)), ct('Initial Registration Photos'), event.currentTarget as HTMLElement)
+  zoomGroupKey.value = group.key
+  void lightbox.value?.open(group.assets, group.assets.indexOf(active(group)), ct(props.publicPhotos ? 'Plant Photos' : 'Initial Registration Photos'), event.currentTarget as HTMLElement)
 }
 const sections = computed(() => props.registrationOnly ? [
-  { title: 'Initial Registration Photos', groups: props.groups.filter(g => g.origin === 'initial_registration') },
+  { title: props.publicPhotos ? 'Plant Photos' : 'Initial Registration Photos', groups: props.publicPhotos ? props.groups : props.groups.filter(g => g.origin === 'initial_registration') },
 ] : [
   { title: 'Initial Registration Photos', groups: props.groups.filter(g => g.origin === 'initial_registration') },
   { title: 'Subsequent Observations', groups: props.groups.filter(g => g.origin === 'subsequent_observation') },
   { title: 'Other Plant Photos', groups: props.groups.filter(g => g.origin === 'unknown') },
 ])
 const count = computed(() => sections.value.reduce((n, section) => n + section.groups.reduce((total, g) => total + g.assets.length, 0), 0))
+watch(() => props.groups, () => {
+  const groups = sections.value.flatMap(section => section.groups)
+  for (const group of groups) {
+    if (selected[group.key] && !group.assets.some(asset => asset.id === selected[group.key])) selected[group.key] = group.assets[0]?.id || ''
+  }
+  lightbox.value?.reconcile(groups.find(group => group.key === zoomGroupKey.value)?.assets || [])
+}, { flush: 'sync' })
 const active = (group: GalleryGroup) => group.assets.find(a => a.id === selected[group.key]) || group.assets[0]!
-const label = (group: GalleryGroup, index: number) => `${ct('Photo')} ${index + 1} / ${group.assets.length} · ${group.observationId || ct('Unlinked plant photos')}`
+const label = (group: GalleryGroup, index: number) => `${ct('Photo')} ${index + 1} / ${group.assets.length}${props.publicPhotos ? '' : ` · ${group.observationId || ct('Unlinked plant photos')}`}`
 function move(group: GalleryGroup, offset: number) {
   const at = group.assets.findIndex(a => a.id === active(group).id)
   const next = props.registrationOnly ? (at + offset + group.assets.length) % group.assets.length : at + offset

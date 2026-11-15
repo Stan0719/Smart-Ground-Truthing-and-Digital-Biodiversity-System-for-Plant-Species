@@ -90,6 +90,7 @@ function harness(fetchHandler, query = {}, authUser = { id: 'officer', role: 'Co
       return fetchHandler(url, options)
     },
     require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return {
         ...vue,
         onMounted() {},

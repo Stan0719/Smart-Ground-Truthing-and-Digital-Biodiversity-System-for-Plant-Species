@@ -8,6 +8,10 @@ export const speciesRequestCanDecide = (request: LinkedSpeciesRequest | null) =>
 export type SpeciesRequestState =
   'pending' | 'approved' | 'rejected' | 'correction' | 'unavailable' | 'error' | 'unknown'
 export interface LinkedSpeciesRequest {
+  reviewedBy?: string
+  reviewedAt?: string
+  historicalState?: string
+  historicalPhotosUnavailable?: boolean
   id: string
   status: string
   state: SpeciesRequestState
@@ -19,6 +23,10 @@ export interface LinkedSpeciesRequest {
   description: string
   habitat: string
   requestedBy: string
+  reviewCycle: number | null
+  contentRevision: number | null
+  contentUpdatedAt: string
+  updated: boolean
   submittedAt: string
   reviewComment: string
   approvedSpeciesId: string
@@ -37,6 +45,7 @@ const text = (value: unknown) =>
 
 export function mapLinkedSpeciesRequest(
   observation: Record<string, unknown>,
+  historicalReview = false,
 ): LinkedSpeciesRequest | null {
   const reference = observation.species_request_id
   const embedded = observation.species_request
@@ -45,7 +54,16 @@ export function mapLinkedSpeciesRequest(
     (embedded === undefined || embedded === null)
   )
     return null
-  const data = object(embedded)
+  let data = object(embedded)
+  const historical = object(data?.historical_review)
+  const historicalState = historicalReview && data?.request_status === 'Approved' ? text(historical?.state) || 'unavailable' : ''
+  if (historicalState) {
+    const fields = object(historical?.fields) || {}
+    data = { ...data, ...fields, proposed_scientific_name: fields.scientific_name ?? '',
+      suggested_common_name: fields.common_name ?? '', genus_name: fields.genus_name ?? '',
+      family_name: fields.family_name ?? '', conservation_status: fields.conservation_status ?? '',
+      description: fields.description ?? '', habitat: fields.habitat ?? '', assets: historical?.assets || [] }
+  }
   const referenceId = text(reference)
   const embeddedId = text(data?.request_id)
   const status = text(data?.request_status)
@@ -62,7 +80,13 @@ export function mapLinkedSpeciesRequest(
     Boolean(data && !embeddedId) ||
     Boolean(referenceId && embeddedId && referenceId !== embeddedId) ||
     Boolean(embedded !== undefined && embedded !== null && !data)
+  const revision = data?.content_revision
+  const contentRevision = typeof revision === 'number' && Number.isSafeInteger(revision) && revision > 0 ? revision : null
   return {
+    reviewedBy: text(historical?.reviewed_by) || text(data?.reviewed_by),
+    reviewedAt: text(historical?.reviewed_at) || text(data?.reviewed_at),
+    historicalState,
+    historicalPhotosUnavailable: historicalState === 'unavailable' || historical?.photos_unavailable === true,
     id: referenceId || embeddedId,
     status,
     state: invalid ? 'error' : !data ? 'unavailable' : states[normalized] || 'unknown',
@@ -74,6 +98,10 @@ export function mapLinkedSpeciesRequest(
     description: text(data?.description),
     habitat: text(data?.habitat),
     requestedBy: text(data?.requested_by),
+    reviewCycle: typeof data?.review_cycle === 'number' && Number.isSafeInteger(data.review_cycle) && data.review_cycle > 0 ? data.review_cycle : null,
+    contentRevision: contentRevision,
+    contentUpdatedAt: text(data?.content_updated_at),
+    updated: states[normalized] === 'pending' && contentRevision !== null && contentRevision > 1,
     submittedAt: text(data?.submitted_at),
     reviewComment: text(data?.review_comment),
     approvedSpeciesId: text(data?.approved_species_id),

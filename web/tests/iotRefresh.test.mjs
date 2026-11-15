@@ -30,6 +30,7 @@ function harness() {
   const scope = vue.effectScope(), exports = {}, cleanup = [], destinations = []
   let listener, session = { user: officer, pending: false }
   const context = { exports, AbortController, Error, require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name === 'vue') return { ...vue, onMounted() {}, withDirectives: n => n, onBeforeUnmount: fn => cleanup.push(fn), resolveComponent: name => ({ name }) }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
     if (name === 'vue-router') return { useRouter: () => ({ push: target => destinations.push(target) }) }
@@ -177,6 +178,7 @@ test('shared modal title slot is optional and keeps the existing fallback title,
   for (const custom of [false, true]) {
     const exports = {}, emitted = []
     const context = { exports, require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount() {}, renderSlot: (slots, name, _props, fallback) => slots[name]?.() ?? fallback?.() }
       if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
       throw Error(name)
@@ -213,6 +215,7 @@ test('accessible modal locks the root without changing body/sticky layout, traps
     const document = { body, documentElement: root, activeElement: opener }
     root.style.overflow = 'auto'
     const context = { exports, HTMLElement: Element, document, require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => cleanup.push(fn) }
       if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
       throw Error(name)
@@ -362,6 +365,7 @@ test('shared feedback adds an accessible info icon/title and preserves existing 
     const exports = {}, mounted = [], cleanup = [], timers = [], cleared = [], emitted = []
     const props = { feedbackId: 7, variant, title: variant === 'info' ? 'No threat alerts found' : undefined, message: 'Message' }
     const context = { exports, setTimeout: (callback, duration) => { timers.push({ callback, duration }); return 1 }, clearTimeout: id => cleared.push(id), require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => cleanup.push(fn) }
       throw Error(name)
     } }

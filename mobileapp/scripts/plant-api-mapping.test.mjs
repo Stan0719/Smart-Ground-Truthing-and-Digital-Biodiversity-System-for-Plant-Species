@@ -588,3 +588,19 @@ test('plant catalog visibility includes approved records and only the signed-in 
   assert.match(speciesDetail, /filter\(\(record\) => isPlantVisibleInRoleCatalog/)
   assert.match(map, /isPlantVisibleInRoleCatalog\(record, user\.role, user\.id\)/)
 })
+
+
+test('explicit plant and taxonomic names remain separate while legacy name fallbacks stay compatible', () => {
+  const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8').replace(/^import .*;\r?\n/gm, '').replace(/export /g, '');
+  const context = vm.createContext({ mobileApiUrl: () => 'https://example.invalid', faceSession: {} });
+  vm.runInContext(source, context);
+  const rows = vm.runInContext(`[
+    mapBackendPlant({ plant_id: 1, species_id: 2, scientific_name: 'Legacy value', plant_scientific_name: 'Individual name', species_scientific_name: 'Taxon name' }),
+    mapBackendPlant({ plant_id: 2, species_id: 2, scientific_name: 'Same name', plant_scientific_name: 'Same name', species_scientific_name: 'Same name' }),
+    mapBackendPlant({ plant_id: 3, species_id: 2, scientific_name: 'Legacy plant', species_details: { scientific_name: 'Taxon name' } })
+  ]`, context);
+  assert.equal(rows[0].scientificName, 'Individual name');
+  assert.equal(rows[0].speciesScientificName, 'Taxon name');
+  assert.equal(rows[1].scientificName, rows[1].speciesScientificName);
+  assert.equal(rows[2].scientificName, 'Legacy plant');
+});

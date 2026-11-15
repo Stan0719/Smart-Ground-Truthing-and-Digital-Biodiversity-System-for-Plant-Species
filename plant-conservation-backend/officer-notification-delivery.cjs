@@ -47,6 +47,13 @@ function createOfficerNotificationDelivery({pool,auth}){
       [randomUUID(),`officer:species_request_submitted:${id}`,id]);
     return true;
   }
+  async function enqueueRecordChange(c,id){
+    const ready=(await c.query("SELECT to_regclass('plant_app.staff_notification_event') IS NOT NULL AND to_regclass('plant_app.staff_notification') IS NOT NULL AS available")).rows[0];
+    if(!ready?.available)throw Object.assign(Error('Officer notification storage requires migration 013.'),{status:503});
+    await c.query(`INSERT INTO plant_app.staff_notification_event(id,source_key,event_type,audience_role,resource_kind,record_change_id)
+      VALUES($1,$2,'record_change_submitted','Conservation Officer','record_change',$3) ON CONFLICT(source_key) DO NOTHING`,
+      [randomUUID(),`officer:record_change_submitted:${id}`,id]);
+  }
   async function enqueueFieldSubmission(c,draft){
     const row=(await classifyObservations(c,[draft]))[0];
     if(row.origin_type!=='subsequent_observation')return enqueue(c,draft.id);
@@ -71,18 +78,18 @@ function createOfficerNotificationDelivery({pool,auth}){
       const officers=directory.map(u=>({...u,mustChangePassword:Boolean(u.must_change_password)}))
         .filter(u=>typeof u.id==='string'&&/^[A-Za-z0-9_-]{1,200}$/.test(u.id)&&permitted(u,'observations.review'));
       const events=(await pool.query(`SELECT id FROM plant_app.staff_notification_event WHERE audience_role='Conservation Officer'
-        AND event_type IN ('registration_submitted','field_observation_submitted','observation_resubmitted','species_request_submitted') AND delivery_state IN ('pending','failed')
+        AND event_type IN ('registration_submitted','field_observation_submitted','observation_resubmitted','species_request_submitted','record_change_submitted') AND delivery_state IN ('pending','failed')
         AND next_attempt_at<=clock_timestamp() ORDER BY next_attempt_at,id LIMIT 20`)).rows;
       for(const event of events){
         try{await transaction(pool,async c=>{
           const row=(await c.query(`SELECT * FROM plant_app.staff_notification_event WHERE id=$1 AND delivery_state IN ('pending','failed')
             AND next_attempt_at<=clock_timestamp() FOR UPDATE SKIP LOCKED`,[event.id])).rows[0];
           if(!row)return;
-          const resource=row.resource_kind==='species_request' ? (await c.query('SELECT owner_subject FROM plant_app.species_request_submission WHERE request_id=$1',[row.species_request_id])).rows[0] : (await c.query(`SELECT o.owner_subject,COALESCE(v.visibility,'protected') AS visibility
+          const resource=row.resource_kind==='record_change' ? (await c.query(`SELECT r.owner_subject,COALESCE(v.visibility,'protected') AS visibility FROM plant_app.record_change_submission r LEFT JOIN plant_app.plant_record p ON p.plant_id=r.plant_id LEFT JOIN plant_app.rbac_species_visibility v ON v.species_id=COALESCE(p.species_id,r.species_id) WHERE r.id=$1`,[row.record_change_id])).rows[0] : row.resource_kind==='species_request' ? (await c.query('SELECT owner_subject FROM plant_app.species_request_submission WHERE request_id=$1',[row.species_request_id])).rows[0] : (await c.query(`SELECT o.owner_subject,COALESCE(v.visibility,'protected') AS visibility
             FROM plant_app.plant_observation o JOIN plant_app.plant_record p ON p.plant_id=o.plant_id
             JOIN plant_app.species s ON s.species_id=p.species_id LEFT JOIN plant_app.rbac_species_visibility v ON v.species_id=s.species_id
             WHERE o.id=$1`,[row.observation_id])).rows[0];
-          const recipients=resource?officers.filter(u=>`staff:${u.id}`!==resource.owner_subject&&(row.resource_kind==='species_request'?permitted(u,'species.manage'):visibilityFor(u).includes(resource.visibility))):[];
+          const recipients=resource?officers.filter(u=>`staff:${u.id}`!==resource.owner_subject&&(row.resource_kind==='record_change'?permitted(u,'species.manage')&&visibilityFor(u).includes(resource.visibility):row.resource_kind==='species_request'?permitted(u,'species.manage'):visibilityFor(u).includes(resource.visibility))):[];
           if(!recipients.length){
             await c.query(`UPDATE plant_app.staff_notification_event SET delivery_state='failed',attempts=attempts+1,
               next_attempt_at=clock_timestamp()+interval '60 seconds',last_error_code=$2 WHERE id=$1`,[row.id,resource?'NO_ELIGIBLE_OFFICERS':'RESOURCE_UNAVAILABLE']);return;
@@ -108,6 +115,6 @@ function createOfficerNotificationDelivery({pool,auth}){
     timer=setInterval(tick,30000);timer.unref();tick();
   }
   async function stop(){stopped=true;if(timer)clearInterval(timer);timer=null;await running?.catch(()=>{});}
-  return {enqueue,enqueueCorrection,enqueueSpeciesRequest,enqueueFieldSubmission,deliverBatch,start,stop};
+  return {enqueue,enqueueCorrection,enqueueSpeciesRequest,enqueueRecordChange,enqueueFieldSubmission,deliverBatch,start,stop};
 }
 module.exports={createOfficerNotificationDelivery,officerEventIdentity};

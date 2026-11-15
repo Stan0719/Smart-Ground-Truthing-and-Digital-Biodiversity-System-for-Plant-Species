@@ -8,6 +8,7 @@ import ts from 'typescript'
 import * as vue from 'vue'
 import * as observationReview from '../src/services/observationReview.ts'
 import * as observationQueue from '../src/services/observationQueue.ts'
+import { formatReviewTimestamp } from '../src/services/observationReviewHistory.ts'
 import * as speciesRequestIntegration from '../src/services/reviewSpeciesRequest.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
 import postcss from 'postcss'
@@ -170,6 +171,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
       return fetchHandler(url, options)
     },
     require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
       if (name === 'vue') return {
         ...vue,
@@ -183,6 +185,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
       if (name.endsWith('/auth')) return { currentUser: async () => session.user, sessionSnapshot: () => session, subscribeSession: fn => { sessionListeners.add(fn); return () => sessionListeners.delete(fn) } }
       if (name.endsWith('observationReview')) return observationReview
       if (name.endsWith('observationQueue')) return observationQueue
+      if (name.endsWith('observationReviewHistory')) return { formatReviewTimestamp }
       if (name.endsWith('reviewSpeciesRequest')) return speciesRequestIntegration
       if (name.endsWith('plantId')) return { formatPlantId }
       if (name.endsWith('.vue')) return { name }
@@ -418,6 +421,63 @@ test('review requires feedback for non-approval decisions and denies self-review
   }
 })
 
+test('modal-wide bottom-right decision footer follows history and preserves all four submission handlers', async () => {
+  for (const decision of ['Approved', 'Rejected', 'Correction Required', 'Flagged']) {
+    const { h } = reviewHarness(fixture(), (_url, _options, set) => {
+      set(fixture({ status: decision, revision: 5 }))
+      return Response.json({ reviewed: true })
+    })
+    try {
+      await h.state.loadObservations()
+      await h.state.open(h.state.observations.value[0], true)
+      h.state.reviewComment.value = 'Verified with field evidence'
+      const rendered = nodes(h.render())
+      const footer = rendered.find(node => String(node.props?.class).includes('observation-decision-actions'))
+      const form = rendered.find(node => node.props?.class === 'officer-review')
+      const history = rendered.find(node => node.type === 'ObservationReviewHistory')
+      assert.ok(footer)
+      assert.ok(!nodes(form).includes(footer))
+      const columns = rendered.find(node => node.props?.class === 'observation-dialog-columns')
+      assert.ok(!nodes(columns).includes(footer))
+      assert.ok(rendered.indexOf(history) < rendered.indexOf(footer))
+      const buttons = nodes(footer).filter(node => node.type === 'button')
+      assert.equal(buttons.length, 4)
+      const button = buttons.find(node => node.key === decision)
+      assert.equal(button.props.disabled, false)
+      await button.props.onClick()
+      const posts = h.calls.filter(call => call.options?.method === 'POST')
+      assert.equal(posts.length, 1)
+      assert.equal(posts[0].url, '/api/observations/' + uuid + '/review')
+      assert.deepEqual(JSON.parse(posts[0].options.body), { decision, comment: 'Verified with field evidence', revision: 4 })
+      assert.equal(h.state.reviewHistoryRefresh.value, 1)
+    } finally { h.stop() }
+  }
+})
+
+test('missing comments show inline validation and the reference error toast for rejection and correction', async () => {
+  const { h } = reviewHarness()
+  try {
+    await h.state.open(h.state.mapObservation(fixture()), true)
+    for (const decision of ['Rejected', 'Correction Required', 'Flagged']) {
+      h.state.reviewComment.value = ' '
+      await h.state.decide(decision)
+      const rendered = nodes(h.render())
+      const field = rendered.find(node => node.props?.id === 'observation-review-comment')
+      assert.equal(field.props.placeholder, 'Record the observation decision or required action')
+      assert.equal(field.props['aria-invalid'], true)
+      assert.equal(field.props['aria-describedby'], 'observation-review-comment-error')
+      const error = rendered.find(node => node.props?.id === 'observation-review-comment-error')
+      assert.equal(error.props.role, 'alert')
+      const toast = rendered.find(node => node.props?.['feedback-id'] === h.state.commentFeedbackId.value)
+      assert.equal(toast.props.variant, 'error')
+      assert.equal(toast.props.message, h.state.rt('feedback.commentRequired'))
+      assert.ok(!h.calls.some(call => call.options?.method === 'POST'))
+    }
+    h.state.closeModal()
+    assert.equal(h.state.commentFeedbackId.value, null)
+  } finally { h.stop() }
+})
+
 test('review submits one exact decision and refetches persisted content into modal, row and filters', async () => {
   let complete
   const { h } = reviewHarness(fixture(), (url, options, set) => new Promise(resolve => { complete = () => { set(fixture({ status: 'Approved', revision: 5, content: { ...fixture().content, heightCm: 25 } })); resolve(Response.json({ reviewed: true })) } }))
@@ -431,6 +491,7 @@ test('review submits one exact decision and refetches persisted content into mod
     complete(); await saving
     assert.equal(h.state.selected.value.status, 'Approved'); assert.equal(h.state.selected.value.height, '25 cm')
     assert.equal(h.state.observations.value[0].status, 'Approved'); assert.equal(h.state.reviewAllowed.value, false)
+    assert.equal(h.state.reviewHistoryRefresh.value, 1)
     h.state.status.value = 'Pending Review'; assert.equal(h.state.filtered.value.length, 0)
   } finally { h.stop() }
 })
@@ -835,7 +896,7 @@ test('copy buttons write the exact full UUID and subject and give accessible suc
   } finally { h.stop() }
 })
 
-test('clipboard unavailable/denied leaves full identity available in refreshed observation details', async () => {
+test('clipboard unavailable/denied leaves full identity available in compact observation detail tooltips', async () => {
   for (const clipboard of [undefined, { writeText: async () => { throw Error('Denied') } }]) {
     const h = harness(identityHandler([fixture()]), officer, false, null, 'en', { clipboard })
     try {
@@ -843,12 +904,28 @@ test('clipboard unavailable/denied leaves full identity available in refreshed o
       assert.equal(h.state.copyFailed.value, true)
       assert.match(h.state.copyFeedback.value, /Open observation details/)
       await h.state.open(h.state.observations.value[0])
-      const fullValues = nodes(h.render()).filter(node => node.props?.class === 'full-identifier').map(node => node.children)
+      const fullValues = nodes(h.render()).map(node => node.props?.title)
       assert.ok(fullValues.includes(uuid)); assert.ok(fullValues.includes(fixture().owner_subject))
       assert.ok(h.calls.some(call => call.url === `/api/observations/${uuid}`))
       assert.ok(h.calls.every(call => !call.options.method || call.options.method === 'GET'))
     } finally { h.stop() }
   }
+})
+
+test('modal identifiers match table labels and copy canonical observation and staff identities', async () => {
+  const owner = 'staff:2ace382f-1010-4010-8010-101010101010', writes = []
+  const h = harness(identityHandler([fixture({ owner_subject: owner })]), officer, false, null, 'en', { clipboard: { writeText: async value => { writes.push(value) } } })
+  try {
+    await h.state.loadObservations()
+    const tableLabels = copyButtons(h).map(button => button.props['aria-label'])
+    await h.state.open(h.state.observations.value[0], true)
+    const buttons = copyButtons(h).slice(2)
+    assert.equal(buttons.length, 2)
+    assert.deepEqual(buttons.map(button => button.props['aria-label']), tableLabels)
+    for (const button of buttons) await button.props.onClick()
+    assert.deepEqual(writes, [uuid, owner])
+    assert.ok(h.calls.every(call => !call.options.method || call.options.method === 'GET'))
+  } finally { h.stop() }
 })
 
 test('search accepts canonical IDs, compact observation labels, plants, species and submitters while filters retain raw subjects', async () => {
@@ -992,7 +1069,7 @@ test('main table has seven matching columns with one Status, full action access 
   } finally { h.stop() }
 })
 
-test('latest review timestamp, decision and rejection reason remain in refreshed Details and History stays available', async () => {
+test('review details use the dedicated history section and Observation History stays available', async () => {
   const row = fixture({ status: 'Rejected', review_decision: 'Rejected', review_comment: 'Please verify the recorded measurements.' })
   const h = harness(identityHandler([row]))
   try {
@@ -1002,10 +1079,10 @@ test('latest review timestamp, decision and rejection reason remain in refreshed
     assert.equal(h.state.selected.value.reviewedAt, row.reviewed_at)
     assert.equal(h.state.selected.value.reviewComment, row.review_comment)
     const details = nodes(h.render()).find(node => node.type === 'dl' && node.props?.class === 'detail-list')
-    const assertDetail = (title, value) => assert.ok(nodes(details).filter(node => node.type === 'div').some(node => nodes(node).some(child => child.type === 'dt' && child.children === title) && nodes(node).some(child => child.type === 'dd' && child.children === value)), title)
-    assertDetail(messages.conservationPages.observations.reviewedAt, h.state.formatDate(row.reviewed_at))
-    assertDetail(messages.conservationPages.observations.reviewState, 'Rejected')
-    assertDetail(messages.conservationPages.observations.reviewComments, row.review_comment)
+    const historySection = nodes(h.render()).find(node => node.type?.name?.endsWith('ObservationReviewHistory.vue'))
+    assert.ok(historySection)
+    assert.equal(historySection.props['observation-id'], uuid)
+    assert.ok(!nodes(details).some(node => node.type === 'dt' && node.children === messages.conservationPages.observations.reviewComments))
     h.state.closeModal()
     const history = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.children === 'History')
     history.props.onClick(); await flush()
@@ -1020,6 +1097,32 @@ test('latest review timestamp, decision and rejection reason remain in refreshed
     assert.ok(skipped.children.includes('2'))
     assert.ok(h.calls.every(call => !call.options.method || call.options.method === 'GET'))
     assert.ok(h.calls.every(call => !call.url.includes('OBS-')))
+  } finally { h.stop() }
+})
+
+test('Observation modal opts into accessibility and its own two-column theme with explicit Kuching dates', async () => {
+  const h = harness(identityHandler([fixture()]))
+  try {
+    await h.state.loadObservations()
+    await h.state.open(h.state.observations.value[0])
+    const modal = nodes(h.render()).find(node => node.props?.class === 'observation-dialog')
+    assert.ok(modal)
+    assert.equal(modal.props.accessible, '')
+    assert.equal(modal.props.title, 'Plant Observation')
+    assert.equal(h.state.modalDate('2026-11-07T06:20:00Z'), '7 Nov 2026, 14:20')
+    assert.equal(h.state.modalDate('bad'), '\u2014')
+    assert.ok(nodes(modal).some(node => node.props?.class === 'observation-information-column'))
+    assert.ok(nodes(modal).some(node => String(node.props?.class).includes('observation-review-column')))
+    assert.equal(nodes(modal).filter(node => node.type === 'h3' && node.props?.class === 'observation-section-heading').length, 5)
+    assert.ok(!nodes(modal).some(node => node.props?.class === 'officer-review'))
+    h.state.reviewMode.value = true
+    assert.equal(nodes(h.render()).filter(node => node.type === 'h3' && node.props?.class === 'observation-section-heading').length, 6)
+    const style = readFileSync(new URL('../src/styles/observation-dialog.css', import.meta.url), 'utf8')
+    assert.match(style, /position: sticky/)
+    assert.match(style, /scroll-padding-block-start/)
+    const source = readFileSync(filename, 'utf8')
+    const observationHistoryModal = source.slice(source.indexOf('<AppModal v-if="selected && historyModal"'))
+    assert.doesNotMatch(observationHistoryModal.split('</AppModal>')[0], /\baccessible\b|observation-dialog/)
   } finally { h.stop() }
 })
 

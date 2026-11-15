@@ -228,7 +228,7 @@ test('pages wire display-only labels and dates while actions, keys and filters r
   assert.match(iot, /:key="String\(reading.reading_id\)"/)
   assert.match(alerts, /const id = selectedAlert.value.id/)
   assert.match(alerts, /await saveAlertResponse\(id, responseNote.value, responseStatus.value\)/)
-  assert.match(alerts, /alert.createdAt.slice\(0, 10\) === date.value/)
+  assert.match(alerts, /detectionDate\(alert.detectedAt\) === date.value/)
   assert.match(alerts, /alert.deviceId === deviceQuery/)
   for (const [value, labels] of [['alert.readingId', 'readingLabels'], ['selectedAlert.readingId', 'readingLabels'], ['selectedAlert.cameraId', 'cameraLabels']]) assert.ok(alerts.includes(`:value="${value}" :labels="${labels}"`))
   assert.match(read('components/CameraMonitoringSection.vue'), /monitoringDate\(value, locale.value\)/)
@@ -251,3 +251,30 @@ test('copy control keeps accessible labels, focus ring, inline spacing and respo
     assert.doesNotMatch(entries.copy, /\?\?/)
   }
 })
+
+
+test('Reviewed By copy renders compact staff ID with full hover text, copies the original and expires feedback', async () => {
+  const id='staff:7f6e5d4c-1111-4111-8111-111111111111',copied=[];
+  const h=identifierHarness({clipboard:{writeText:async value=>copied.push(value)}});
+  h.props.value=id;h.props.labels=submitterIdentifierLabels([id]);h.props.copyLabel='Copy full staff ID';h.props.feedbackDuration=3000;
+  await Vue.nextTick();
+  const {descriptor}=parse(read('components/conservation/MonitoringIdentifier.vue'));
+  const script=compileScript(descriptor,{id:'reviewer-copy'});
+  const template=compileTemplate({source:descriptor.template.content,filename:'MonitoringIdentifier.vue',id:'reviewer-copy',compilerOptions:{bindingMetadata:script.bindings}});
+  const context={exports:{},require:name=>{if(name==='vue')return Vue;throw Error(name)}};
+  vm.runInNewContext(ts.transpileModule(template.code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
+  const nodes=value=>{const result=[];const walk=n=>{if(Array.isArray(n))return n.forEach(walk);if(!n||typeof n!=='object')return;result.push(n);if(Array.isArray(n.children))walk(n.children)};walk(value);return result};
+  const render=()=>nodes(context.exports.render({},[],h.props,Vue.proxyRefs(h.state),{},{}));
+  try {
+    assert.ok(render().some(n=>n.type==='span'&&n.children==='staff:7f6e5d4c\u2026'&&n.props.title===id));
+    const button=render().find(n=>n.type==='button');assert.equal(button.props['aria-label'],'Copy full staff ID');
+    await button.props.onClick({stopPropagation(){}});
+    assert.deepEqual(copied,[id]);assert.equal(h.state.feedback.value,'monitoringDisplay.copied');
+    const timer=[...h.timers.values()][0];assert.equal(timer.delay,3000);timer.callback();assert.equal(h.state.feedback.value,'');
+    for(const value of ['staff:42','',null,undefined]) {
+      h.props.value=value;h.props.labels=submitterIdentifierLabels([value]);await Vue.nextTick();
+      assert.equal(h.state.label.value,value||'\u2014');assert.equal(render().some(n=>n.type==='button'),false);
+    }
+    assert.deepEqual(copied,[id]);
+  } finally {h.cleanup()}
+});

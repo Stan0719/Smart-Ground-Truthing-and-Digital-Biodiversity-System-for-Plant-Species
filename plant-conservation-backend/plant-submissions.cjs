@@ -5,6 +5,7 @@ const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { originColumnAvailable } = require("./observation-origin.cjs");
 const { transaction, audit, subject, fail, text, id, fieldContent, assertNewSpecies, speciesRow } = require("./domain.cjs");
+const { assertQrAssignmentAllowed, normalizeQrPlantSchema } = require("./qr-plant-mode.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const canonical = (value) => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
@@ -39,7 +40,8 @@ async function createSpecies(c, data, user) {
   await c.query("INSERT INTO rbac_species_visibility(species_id,visibility) VALUES($1,'protected')", [row.species_id]);
   return row.species_id;
 }
-function mountPlantSubmissions(app, { pool, allow, officerNotifications = null }) {
+function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, qrPlantSchema = "plant_app" }) {
+  qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
   app.get("/api/plant-submissions/capabilities",allow("plants.create"),async(_req,res)=>res.json({semantic_photo_roles_available:await rolesAvailable(pool),photo_roles:["whole_plant","leaf_close_up","stem_bark","flower_fruit","additional"]}));
   app.post("/api/plant-submissions", allow("plants.create"), async (req, res) => {
     const b = req.body;
@@ -49,6 +51,7 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null }
     if ((b.species_id !== undefined) === (b.new_species !== undefined)) fail(400, "Select an existing species or provide new species details.");
     const clientKey = text(b.client_key, 100), name = text(b.scientific_name, 200);
     id(String(b.qr_id));
+    assertQrAssignmentAllowed(qrPlantSchema);
     const content = fieldContent({ ...b.content, latitude: b.latitude, longitude: b.longitude,
       ...(b.accuracy_m === undefined ? {} : { accuracy_m: b.accuracy_m }) });
     if (!Number.isFinite(b.latitude) || !Number.isFinite(b.longitude)) fail(400, "Plant GPS coordinates are required.");
@@ -76,10 +79,10 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null }
       if (speciesData) speciesId = await createSpecies(c, speciesData, req.user);
       else { await speciesRow(c, b.species_id, req.user); speciesId = b.species_id; }
       // Same inventory lock and assignment contract as existing plant registration.
-      const qr = (await c.query("SELECT qr_id,qr_code FROM public.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE", [b.qr_id])).rows[0];
+      const qr = (await c.query("SELECT qr_id,qr_code FROM plant_app.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE", [b.qr_id])).rows[0];
       if (!qr) fail(409, "The selected QR code is no longer available.");
       const plant = (await c.query("INSERT INTO plant_record(species_id,registered_subject,qr_token,scientific_name) VALUES($1,$2,$3,$4) RETURNING plant_id", [speciesId, subject(req.user), qr.qr_code, name])).rows[0];
-      await c.query("UPDATE public.qr_code SET plant_id=$1,status='assigned',assigned_at=CURRENT_TIMESTAMP WHERE qr_id=$2 AND plant_id IS NULL", [plant.plant_id, qr.qr_id]);
+      await c.query("UPDATE plant_app.qr_code SET plant_id=$1,status='assigned',assigned_at=CURRENT_TIMESTAMP WHERE qr_id=$2 AND plant_id IS NULL", [plant.plant_id, qr.qr_id]);
       await c.query("INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES($1,$2,$3,$4)", [plant.plant_id, b.latitude, b.longitude, b.accuracy_m ?? null]);
       const observationId = randomUUID();
       const withOrigin = await originColumnAvailable(c);

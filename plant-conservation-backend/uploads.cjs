@@ -1,7 +1,7 @@
 "use strict";
 const { randomUUID } = require("node:crypto");
 const sharp = require("sharp");
-const { permitted, visibilityFor } = require("../shared/rbac.cjs");
+const { permitted, visibilityFor, catalogueVisibilityFor, canReadScientificCatalogue } = require("../shared/rbac.cjs");
 const { transaction, audit, subject, fail, id } = require("./domain.cjs");
 const {available: galleryAvailable,membershipSql,appendAsset}=require('./species-gallery.cjs');
 const { requireSpeciesPhotoWrites } = require("./species-photo-activation.cjs");
@@ -135,7 +135,7 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
       res.status(201).json({ id: assetId });
     },
   );
-  app.get("/api/assets", allow("plants.public.read"), async (req, res) => {
+  app.get("/api/assets", allow("plants.catalogue.read"), async (req, res) => {
     if (req.query.plant_id !== undefined) {
       const plantId = id(String(req.query.plant_id));
       const ownPreview = req.query.scope === "mine" && permitted(req.user, "plants.create");
@@ -167,7 +167,7 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
               ))
            )
          ORDER BY a.created_at,a.id`,
-        [plantId, visibilityFor(req.user), ownPreview, req.user ? subject(req.user) : ""],
+        [plantId, catalogueVisibilityFor(req.user), ownPreview, req.user ? subject(req.user) : ""],
       )).rows;
       return res.json({ assets: rows });
     }
@@ -184,16 +184,16 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
         ORDER BY ${managed ? 'COALESCE(r.is_primary,FALSE) DESC,r.position ASC NULLS LAST,' : ''}a.created_at DESC,a.id ASC`,
         [
           speciesId,
-          visibilityFor(req.user),
-          permitted(req.user, "plants.scientific.read"),
-          permitted(req.user, "species.manage"),
+          catalogueVisibilityFor(req.user),
+          canReadScientificCatalogue(req.user),
+          (permitted(req.user, "species.manage") || permitted(req.user, "plants.catalogue.scientific.read")),
           req.user ? subject(req.user) : "",
         ],
       )
     ).rows;
     res.json({ assets: rows });
   });
-  app.get("/api/assets/:id", allow("plants.public.read"), async (req, res) => {
+  app.get("/api/assets/:id", allow("plants.catalogue.read"), async (req, res) => {
     const row = (
       await pool.query(
         `SELECT a.*,p.species_id AS plant_species,p.registered_subject,p.rbac_status,
@@ -238,22 +238,22 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
           row.observation_id === row.latest_approved_observation_id
         : row.approved)
       : row.approved;
-    if (!visibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto && !ownObservationPhoto)
+    if (!catalogueVisibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto && !ownObservationPhoto)
       fail(404, "Asset unavailable.");
     if (!classification) fail(404, "Asset unavailable.");
     if (row.species_id && (!row.approved || (classification.rbac_data?.approvalStatus || "Approved") !== "Approved") &&
-        !permitted(req.user, "species.manage") &&
-        !(permitted(req.user, "plants.scientific.read") && row.owner_subject === owner))
+        !(permitted(req.user, "species.manage") || permitted(req.user, "plants.catalogue.scientific.read")) &&
+        !(canReadScientificCatalogue(req.user) && row.owner_subject === owner))
       fail(404, "Asset unavailable.");
-    if (!permitted(req.user, "plants.scientific.read") &&
+    if (!canReadScientificCatalogue(req.user) &&
         (classification.rbac_data?.approvalStatus || "Approved") !== "Approved")
       fail(404, "Asset unavailable.");
     if (!classification) fail(404, "Asset unavailable.");
     if (row.species_id && (!row.approved || (classification.rbac_data?.approvalStatus || "Approved") !== "Approved") &&
-        !permitted(req.user, "species.manage") &&
-        !(permitted(req.user, "plants.scientific.read") && row.owner_subject === owner))
+        !(permitted(req.user, "species.manage") || permitted(req.user, "plants.catalogue.scientific.read")) &&
+        !(canReadScientificCatalogue(req.user) && row.owner_subject === owner))
       fail(404, "Asset unavailable.");
-    if (!permitted(req.user, "plants.scientific.read") &&
+    if (!canReadScientificCatalogue(req.user) &&
         (classification.rbac_data?.approvalStatus || "Approved") !== "Approved")
       fail(404, "Asset unavailable.");
     if (
@@ -262,12 +262,12 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
       !ownProposalPhoto &&
       !ownSubmissionPhoto &&
        !ownObservationPhoto &&
-      req.user?.role !== "Conservation Officer"
+      req.user?.role !== "Conservation Officer" && !permitted(req.user, "plants.catalogue.scientific.read")
     )
       fail(404, "Asset unavailable.");
     if (
       row.content_type === "application/pdf" &&
-      !permitted(req.user, "plants.scientific.read")
+      !canReadScientificCatalogue(req.user)
     )
       fail(403, "Scientific access required.");
     res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");

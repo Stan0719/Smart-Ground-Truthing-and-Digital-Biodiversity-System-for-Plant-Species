@@ -54,6 +54,7 @@ function harness(language = 'en', options = {}) {
     ResizeObserver: class { observe() {} disconnect() {} },
     requestAnimationFrame: fn => { fn(); return 1 }, cancelAnimationFrame() {}, setTimeout: () => 1, clearTimeout() {},
     require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => cleanup.push(fn), resolveComponent: name => name, withDirectives: node => node }
       if (name === 'vue-router') return { useRoute: () => route, useRouter: () => ({ push: async destination => destinations.push(destination) }) }
       if (name.endsWith('useConservationText')) return { useConservationText: () => ({ ct, dt: value => value, locale }) }

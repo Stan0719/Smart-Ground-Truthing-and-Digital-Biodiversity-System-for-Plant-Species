@@ -31,8 +31,10 @@ function location(content = {}) {
     accuracy_m: number(content.accuracy_m, 0), altitude_m: number(content.altitudeM ?? content.altitude_m), zone: string(content.zone) };
 }
 function observationContent(content = {}) {
+  const taxonomy = content.taxonomy && typeof content.taxonomy === 'object' && !Array.isArray(content.taxonomy)
+    ? Object.fromEntries(Object.entries(content.taxonomy).filter(([, value]) => typeof value === 'string')) : {};
   return { heightCm: number(content.heightCm, 0), healthStatus: string(content.healthStatus), lifeStage: string(content.lifeStage),
-    morphology: string(content.morphology), notes: string(content.notes), ...location(content) };
+    morphology: string(content.morphology), notes: string(content.notes), taxonomy, ...location(content) };
 }
 async function snapshot(pool, work) {
   const c = await pool.connect();
@@ -64,17 +66,27 @@ function mountPlantDetail(app, { pool, allow, auth }) {
   app.get('/api/plants/:plantId/detail', allow('plants.detail.public.read'), async (req, res) => {
     const result = await snapshot(pool, async c => {
       const p = await detailParent(c, req.params.plantId, req.user);
-      const information = { plant_id: String(p.plant_id), scientific_name: p.scientific_name || p.species_name,
-        common_name: p.common_name, genus_name: p.genus_name, family_name: p.family_name, description: p.description };
+      const information = { plant_id: String(p.plant_id),
+        ...(permitted(req.user, 'plants.detail.read') ? { plant_scientific_name: p.scientific_name, species_scientific_name: p.species_name } : {}),
+        scientific_name: p.scientific_name || p.species_name,
+        common_name: p.common_name, genus_name: p.genus_name, family_name: p.family_name, description: p.description,
+        ...(!req.user ? { habitat: string(p.rbac_data?.habitat) } : {}) };
       if (!permitted(req.user, 'plants.detail.read')) return { information, staff: null };
       const approved = (await c.query(`SELECT content FROM plant_observation WHERE plant_id=$1 AND status='Approved'
         AND jsonb_typeof(content->'latitude')='number' AND jsonb_typeof(content->'longitude')='number'
         AND (CASE WHEN jsonb_typeof(content->'latitude')='number' THEN (content->>'latitude')::numeric END) BETWEEN -90 AND 90
         AND (CASE WHEN jsonb_typeof(content->'longitude')='number' THEN (content->>'longitude')::numeric END) BETWEEN -180 AND 180
         ORDER BY updated_at DESC,id DESC LIMIT 1`, [p.plant_id])).rows[0];
+      const latest = (await c.query(`SELECT status,content,created_at FROM plant_observation
+        WHERE plant_id=$1 ORDER BY updated_at DESC,id DESC LIMIT 1`, [p.plant_id])).rows[0];
+      const latestApproved = (await c.query(`SELECT status,content,created_at FROM plant_observation
+        WHERE plant_id=$1 AND status='Approved' ORDER BY updated_at DESC,id DESC LIMIT 1`, [p.plant_id])).rows[0];
+      const detailObservation = row => row ? { status: row.status, created_at: row.created_at,
+        content: observationContent(row.content) } : null;
       return { information, staff: { status: p.rbac_status, registered_at: p.registered_at,
         conservation_status: p.conservation_status, habitat: string(p.rbac_data?.habitat),
-        approved_location: approved ? location(approved.content) : null } };
+        approved_location: approved ? location(approved.content) : null,
+        latest_observation: detailObservation(latest), latest_approved_observation: detailObservation(latestApproved) } };
     });
     res.json(result);
   });
