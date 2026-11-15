@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { workflowBadgeStyle } from '../utils/workflowBadge'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PlantRecord } from '../data/plantRecords'
@@ -88,7 +89,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
         @error="imageFailed"
       />
       <div v-else class="record-placeholder" aria-hidden="true">🌿</div>
-      <span v-if="reviewStatus" class="review-status" :class="`status-${statusKey}`">{{ statusLabel }}</span>
+      <span v-if="reviewStatus" class="review-status" :style="workflowBadgeStyle(reviewStatus)" :class="`status-${statusKey}`">{{ statusLabel }}</span>
     </div>
 
     <div class="record-copy">
@@ -149,6 +150,8 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
 
 <style scoped>
 .plant-record-card {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
   border: 1px solid rgba(58, 96, 70, 0.12);
@@ -164,6 +167,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   box-shadow: 0 18px 38px rgba(33, 57, 44, 0.14);
 }
 .record-image {
+  flex-shrink: 0;
   position: relative;
   height: 210px;
 }
@@ -183,12 +187,11 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
 .record-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
 .record-heading h3 { min-width: 0; overflow-wrap: anywhere; }
 .review-status { position: absolute; top: 10px; right: 10px; max-width: calc(100% - 20px); box-sizing: border-box; padding: 5px 9px; border-radius: 8px; background: #eef1ed; color: #374c42; font-size: 11px; font-weight: 700; line-height: 1.4; text-align: right; white-space: normal; overflow-wrap: anywhere; }
-.status-approved { background: #e1eedf; color: #285331; }
-.status-pendingreview { background: #fff0ce; color: #735014; }
-.status-rejected { background: #f9e3e2; color: #87352f; }
-.status-correctionrequired { background: #fbe9d6; color: #7a451c; }
-.status-flagged { background: #eee4f6; color: #654179; }
 .record-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
   padding: 21px;
 }
 .record-copy h3 {
@@ -243,8 +246,10 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
 .learn-more {
   position: relative;
   width: 170px;
-  height: 42px;
-  margin: 0 auto;
+  max-width: 100%;
+  min-height: 42px;
+  flex-shrink: 0;
+  margin: auto auto 0;
   display: block;
   padding: 0;
   border: 0;
@@ -289,8 +294,10 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   transform: rotate(45deg);
 }
 .learn-more .button-text {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
   padding: 11px 8px 11px 34px;
   color: #805020;
   font-weight: 700;

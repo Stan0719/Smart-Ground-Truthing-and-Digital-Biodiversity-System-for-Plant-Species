@@ -115,18 +115,69 @@ const { descriptor } = parse(source), script = compileScript(descriptor, { id: '
 const template = compileTemplate({ source: descriptor.template.content, filename: 'PlantPhotoGallery.vue', id: 'gallery', compilerOptions: { bindingMetadata: script.bindings } })
 const js = value => ts.transpileModule(value, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 function nodes(value) { const out = []; function walk(n) { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; out.push(n); if (Array.isArray(n.children)) walk(n.children) } walk(value); return out }
-function component(groups = []) {
-  const exports = {}, events = [], scope = vue.effectScope(), props = vue.reactive({ groups, loading: false, error: '', complete: true, hasMore: false })
+function component(groups = [], options = {}) {
+  const exports = {}, events = [], scope = vue.effectScope(), props = vue.reactive({ groups, loading: false, error: '', complete: true, hasMore: false, ...options })
   const context = { exports, require(name) {
     if (name === 'vue') return { ...vue, withDirectives: n => n }
     if (name.endsWith('useConservationText')) return { useConservationText: () => ({ ct: x => x }) }
+    if (name.endsWith('.vue')) return { name }
     throw Error(name)
   } }
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
   const state = scope.run(() => exports.default.setup(props, { expose() {}, emit: e => events.push(e) }))
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
-  return { props, events, render: () => nodes(exports.render({ $emit: e => events.push(e) }, [], props, vue.proxyRefs(state), {}, {})), stop: () => scope.stop() }
+  return { props, events, state, render: () => nodes(exports.render({ $emit: e => events.push(e) }, [], props, vue.proxyRefs(state), {}, {})), stop: () => scope.stop() }
 }
+
+test('page registration mode uses scoped plant images and omits subsequent or species photos', async () => {
+  const calls = [], gallery = createPlantGallery({ detail: true, transport: async url => { calls.push(url); return page([asset('one'), asset('two', 'initial', 'initial_registration', '2'), asset('three', 'initial', 'initial_registration', '3'), asset('field', 'later', 'subsequent_observation')]) } })
+  await gallery.load('18', true)
+  assert.match(calls[0], /^\/api\/data\/plants\/18\/detail\/gallery/)
+  assert.equal(gallery.state.assets[0].url, '/api/data/plants/18/detail/assets/one')
+  const h = component(groupGallery(gallery.state.assets), { registrationOnly: true })
+  try {
+    assert.equal(h.render().filter(n => n.type === 'article').length, 1)
+    assert.equal(h.render().filter(n => n.type === 'button' && n.props?.['aria-pressed'] !== undefined).length, 3)
+    assert.ok(h.render().some(n => n.type === 'button' && n.props?.['aria-label'] === 'Enlarge plant photo'))
+    assert.ok(!h.render().some(n => n.type === 'img' && n.props.src.endsWith('/field')))
+  } finally { h.stop() }
+})
+
+test('registration controls and counter overlay the image; thumbnail selection, wrapping and enlargement retain the same photo set', async () => {
+  const gallery = createPlantGallery({ transport: async () => page([asset('one'), asset('two', 'initial', 'initial_registration', '2'), asset('three', 'initial', 'initial_registration', '3')]) })
+  await gallery.load('18', false)
+  const h = component(groupGallery(gallery.state.assets), { registrationOnly: true })
+  const nav = label => h.render().find(n => n.type === 'button' && n.props?.['aria-label'] === label)
+  try {
+    const figure = h.render().find(n => n.type === 'figure')
+    const inside = nodes(figure)
+    assert.equal(inside.filter(n => n.props?.class?.includes('image-nav')).length, 2)
+    assert.ok(inside.some(n => n.props?.class === 'gallery-counter'))
+    assert.ok(!h.render().some(n => n.props?.class === 'photo-navigation' || n.props?.class === 'registration-heading'))
+    assert.ok(h.render().some(n => n.type === 'h2' && n.props.class === 'visually-hidden'))
+    assert.equal(nav('Previous photo').props.disabled, undefined)
+    nav('Previous photo').props.onClick({ stopPropagation() {} }); await vue.nextTick()
+    assert.match(text(h.render().find(n => n.props?.class === 'gallery-counter')), /3 \/ 3/)
+    nav('Next photo').props.onClick({ stopPropagation() {} }); await vue.nextTick()
+    assert.equal(h.render().find(n => n.type === 'figure').children.find(n => n.type === 'img').props.src, '/api/data/assets/one')
+    h.render().filter(n => n.type === 'button' && n.props?.['aria-pressed'] !== undefined)[1].props.onClick(); await vue.nextTick()
+    const opened = [], trigger = {}
+    h.state.lightbox.value = { open: (...args) => opened.push(args) }
+    nav('Enlarge plant photo').props.onClick({ currentTarget: trigger })
+    assert.deepEqual(opened[0][0].map(a => a.id), ['one', 'two', 'three'])
+    assert.equal(opened[0][1], 1); assert.equal(opened[0][3], trigger)
+    assert.ok(!h.render().some(n => n.props?.class === 'photo-placeholder'))
+  } finally { h.stop() }
+})
+
+test('single registration photo omits navigation and thumbnails like Species Detail', async () => {
+  const gallery = createPlantGallery({ transport: async () => page([asset('one')]) })
+  await gallery.load('18', false); const h = component(groupGallery(gallery.state.assets), { registrationOnly: true })
+  try {
+    assert.ok(!h.render().some(n => n.props?.class?.includes('image-nav') || n.props?.class === 'photo-thumbnails'))
+    assert.match(text(h.render().find(n => n.props?.class === 'gallery-counter')), /1 \/ 1/)
+  } finally { h.stop() }
+})
 test('gallery renders three registration photos, accessible selection/navigation and broken-image placeholders', async () => {
   const gallery = createPlantGallery({ transport: async () => page([asset('one'), asset('two', 'initial', 'initial_registration', '2'), asset('three', 'initial', 'initial_registration', '3')]) })
   await gallery.load('18', false); const h = component(groupGallery(gallery.state.assets))
@@ -214,7 +265,7 @@ test('gallery layout bounds previews, keeps thumbnails internally scrollable and
   const css = descriptor.styles[0].content
   assert.match(css, /max-width:\s*960px/)
   assert.match(css, /object-fit:\s*contain/)
-  assert.doesNotMatch(css, /object-fit:\s*cover/)
+  assert.match(css, /\.registration-gallery \.large-photo > img\s*\{\s*object-fit:\s*cover/)
   assert.match(css, /overflow-x:\s*auto/)
   assert.match(css, /flex:\s*0 0 80px/)
   assert.match(css, /min-height:\s*44px/)
@@ -223,4 +274,21 @@ test('gallery layout bounds previews, keeps thumbnails internally scrollable and
   assert.match(css, /:focus-visible/)
   assert.match(css, /\.large-photo\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0/)
   assert.doesNotMatch(source, /class="nav-label"/)
+})
+
+test('registration frame, controls, counter and thumbnails match Species Detail design tokens', () => {
+  const css = descriptor.styles[0].content
+  const species = readFileSync(new URL('../src/views/SpeciesDetailView.vue', import.meta.url), 'utf8')
+  const rule = (source, selector) => source.slice(source.indexOf(selector + ' {')).split('}')[0]
+  const value = (source, property) => source.match(new RegExp(`(?:[;{]\\s*)${property}:\\s*([^;]+)`))?.[1]
+  for (const [plant, reference, properties] of [
+    ['.registration-gallery .large-photo', '.main-image-frame', ['aspect-ratio','border-radius']],
+    ['.registration-gallery .image-nav', '.image-nav', ['width','height','top','transform','border','border-radius','background','color','box-shadow']],
+    ['.registration-gallery .gallery-counter', '.gallery-counter', ['right','bottom','padding','border-radius','background','color','font-size']],
+    ['.registration-gallery .photo-thumbnail', '.photo-thumbnail', ['flex','width','height','padding','border','border-radius','background']],
+  ]) for (const property of properties) assert.equal(value(rule(css, plant), property), value(rule(species, reference), property), `${plant}: ${property}`)
+  assert.match(rule(css, '.plant-photo-gallery.registration-gallery'), /padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none/)
+  const view = readFileSync(new URL('../src/views/PlantDetailView.vue', import.meta.url), 'utf8')
+  assert.match(view, /max-width: 1080px/)
+  assert.match(view, /grid-template-columns: minmax\(0, 0\.44fr\) minmax\(0, 0\.56fr\)/)
 })

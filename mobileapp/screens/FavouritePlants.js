@@ -6,10 +6,12 @@ import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
 import FavouriteHeart from "../components/FavouriteHeart";
 import RefreshButton from "../components/RefreshButton";
+import BackButton from "../components/BackButton";
 
 export default function FavouritePlantsScreen({ navigation, user }) {
   useAppTranslation();
   const [tab, setTab] = useState("plants");
+  const [failedPlantImageUris, setFailedPlantImageUris] = useState(() => new Set());
   const favourites = useVisitorFavourites(user);
   const items = favourites.data[tab];
   const isSpecies = tab === "species";
@@ -27,9 +29,7 @@ export default function FavouritePlantsScreen({ navigation, user }) {
         refreshControl={<RefreshControl refreshing={favourites.refreshing} onRefresh={() => void favourites.refresh(true)} tintColor="#468585" colors={["#468585"]} />}
       >
         <View style={styles.header}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("common.goBack")} style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={22} color="#468585" />
-          </TouchableOpacity>
+          <BackButton accessibilityLabel={t("common.goBack")} onPress={() => navigation.goBack()} />
           <Text style={styles.title}>{t("navigation.favouritePlants")}</Text>
           <RefreshButton onPress={() => void favourites.refresh(true)} loading={favourites.loading || favourites.refreshing} label={t("common.refresh")} />
         </View>
@@ -61,7 +61,14 @@ export default function FavouritePlantsScreen({ navigation, user }) {
               <View key={`${tab}:${id}`} style={styles.card}>
                 <TouchableOpacity accessibilityRole="button" style={styles.cardMain} activeOpacity={0.8} onPress={() => openItem(item)}>
                   <View style={styles.imageFrame}>
-                    {item.image ? <Image source={item.image} style={styles.image} resizeMode="cover" /> : <Ionicons name="leaf" size={28} color="#4F8065" />}
+                    {item.image && (isSpecies || !failedPlantImageUris.has(item.image.uri))
+                      ? <Image
+                        source={item.image}
+                        style={styles.image}
+                        resizeMode="cover"
+                        onError={isSpecies ? undefined : () => setFailedPlantImageUris((current) => new Set(current).add(item.image.uri))}
+                      />
+                      : <Ionicons name="leaf" size={28} color="#4F8065" />}
                   </View>
                   <View style={styles.copy}>
                     <Text style={styles.commonName} numberOfLines={2}>{commonName || scientificName || t("favourites.unnamedRecord")}</Text>
@@ -83,7 +90,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F7FBF4" },
   content: { width: "100%", maxWidth: 900, alignSelf: "center", padding: 18, paddingBottom: 34 },
   header: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 18 },
-  backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: "#E7F2E2", alignItems: "center", justifyContent: "center" },
   title: { flex: 1, color: "#234B3A", fontSize: 23, fontWeight: "700" },
   tabs: { flexDirection: "row", padding: 4, borderRadius: 14, backgroundColor: "#E7F2E2", marginBottom: 16 },
   tab: { flex: 1, minHeight: 44, borderRadius: 11, alignItems: "center", justifyContent: "center" },

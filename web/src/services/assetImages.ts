@@ -14,12 +14,12 @@ export function plantThumbnailImages(row: { plant_image_asset_id?: unknown; rbac
   const path = assetUrlFromId(row.plant_image_asset_id)
   return path ? [{ path }] : []
 }
-export function speciesImageSelection(assets: { id: string; content_type: string }[], preview: unknown) {
+export function speciesImageSelection(assets: { id: string; content_type: string }[], preview: unknown, portraitAssetId?: unknown) {
   const images = assets.flatMap(asset => {
     const path = assetUrlFromId(asset.id)
     return path && ['image/jpeg', 'image/png'].includes(asset.content_type)
       ? [{ path, caption: 'Official species photo' }] : []
   })
   // A preview may originate from plant evidence. Keep it out of the reference gallery.
-  return { images, image: images[0]?.path || webAssetUrl(preview) || undefined }
+  return { images, image: webAssetUrl(preview) || assetUrlFromId(portraitAssetId) || images[0]?.path || undefined }
 }

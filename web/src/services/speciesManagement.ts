@@ -1,4 +1,159 @@
+import { assetUrlFromId, webAssetUrl } from './assetImages.ts'
+import type { AuthUser } from './auth.ts'
+
 export type SpeciesVisibility = 'public' | 'internal' | 'protected'
+
+// Only a versioned server decision backed by runtime metadata can enable writes.
+// Missing fields, old responses and successful public reads all fail closed.
+export function speciesPhotoWritesAvailable(value: unknown): boolean {
+  const cap = record(value)
+  return cap?.version === 1 && cap.activationRequested === true && cap.writesEnabled === true &&
+    cap.schemaReady === true && cap.galleryAvailable === true && cap.semanticRolesAvailable === true &&
+    cap.migration014 === 'verified-applied' && cap.migration015 === 'verified-applied'
+}
+export const canManageSpeciesPhotos = (user: AuthUser | null, pending: boolean) =>
+  !pending && user?.role === 'Conservation Officer' && user.status === 'Active' && !user.mustChangePassword
+
+export interface SpeciesGalleryImage {
+  assetId: string
+  url: string
+  contentType: 'image/jpeg' | 'image/png'
+  position: number
+  eligible: boolean
+}
+export interface SpeciesGallerySnapshot {
+  speciesId: number
+  revision: number
+  primaryAssetId: string | null
+  images: SpeciesGalleryImage[]
+  managed?: boolean
+}
+export interface SpeciesPhotoUpload {
+  id: string
+  clientKey: string
+  file: File
+  url: string
+  status: 'queued' | 'uploading' | 'uploaded' | 'failed'
+  assetId?: string
+  error?: string
+  removed?: boolean // Keep successful receipts until their gallery removal is committed.
+}
+export type SpeciesPhotoOrder = ({ assetId: string } | { queueId: string })[]
+export async function readSpeciesGallery(id: string): Promise<SpeciesGallerySnapshot> {
+  const value = await requestSpeciesApi(`/api/species/${encodeURIComponent(id)}/images`)
+  if (value.speciesId !== Number(id) || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !Array.isArray(value.images)) throw new Error('Invalid gallery response.')
+  const images: SpeciesGalleryImage[] = value.images.map((entry: unknown) => {
+    const row = record(entry), url = webAssetUrl(row?.url)
+    if (!row || !url || assetUrlFromId(row.assetId) !== url || !['image/jpeg', 'image/png'].includes(String(row.contentType)) || !Number.isInteger(row.position) || typeof row.eligible !== 'boolean') throw new Error('Invalid gallery image.')
+    return { assetId: String(row.assetId), url, contentType: row.contentType as SpeciesGalleryImage['contentType'], position: Number(row.position), eligible: row.eligible }
+  })
+  const primary = value.primaryAssetId
+  if (primary !== null && (typeof primary !== 'string' || !images.some(image => image.assetId === primary))) throw new Error('Invalid primary image.')
+  return { speciesId: Number(id), revision: Number(value.revision), primaryAssetId: primary, images, managed: value.managed === true }
+}
+async function photoWrite(url: string, method: 'POST' | 'PUT', body: unknown) {
+  const response = await fetch(url, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) })
+  const result = await response.json()
+  if (!response.ok) throw new SpeciesApiError(result.error || 'Photo save failed.', response.status)
+  return result
+}
+// Called only after the form's explicit frontend gate AND server capabilities pass.
+// Separate commits are intentional. Receipts remain attached to files across retries.
+export async function persistSpeciesPhotoBatch(id: string, baseline: SpeciesGallerySnapshot, files: SpeciesPhotoUpload[], primaryFile: string | null, arrangement: SpeciesGalleryDraft | null, current: () => boolean = () => true, photoOrder?: SpeciesPhotoOrder) {
+  const assertCurrent = () => { if (!current()) throw new SpeciesApiError('The photo editing session changed.', 409) }
+  assertCurrent()
+  if (baseline.speciesId !== Number(id)) throw new SpeciesApiError('Gallery belongs to another species.', 409)
+  const capabilities = await requestSpeciesApi('/api/species/photos/capabilities')
+  assertCurrent()
+  if (!speciesPhotoWritesAvailable(capabilities)) throw new SpeciesApiError('Photo management is unavailable.', 503)
+  for (const entry of files) {
+    assertCurrent()
+    if (entry.assetId) continue
+    const invalid = await validateSpeciesPhoto(entry.file)
+    assertCurrent()
+    if (invalid) { entry.status = 'failed'; entry.error = invalid; continue }
+    entry.status = 'uploading'; entry.error = undefined
+    try {
+      const bytes = new Uint8Array(await entry.file.arrayBuffer())
+      let binary = ''
+      for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768))
+      assertCurrent()
+      const result = await photoWrite('/api/assets', 'POST', { species_id: Number(id), client_key: entry.clientKey, content_type: entry.file.type, base64: btoa(binary) })
+      if (!assetUrlFromId(result.id)) throw new Error('Invalid upload receipt.')
+      entry.assetId = result.id; entry.status = 'uploaded'
+    } catch (error) { entry.status = 'failed'; entry.error = error instanceof Error ? error.message : 'Upload failed.' }
+  }
+  if (files.some(file => !file.assetId)) return { complete: false, snapshot: baseline }
+  assertCurrent()
+  const latest = await readSpeciesGallery(id)
+  assertCurrent()
+  const uploaded = files.map(file => file.assetId!)
+  const expectedIds = new Set([...baseline.images.map(image => image.assetId), ...uploaded])
+  const expectedRevision = baseline.revision + (baseline.managed ? uploaded.filter(asset => !baseline.images.some(image => image.assetId === asset)).length : 0)
+  if (latest.revision !== expectedRevision || latest.images.length !== expectedIds.size || latest.images.some(image => !expectedIds.has(image.assetId))) throw new SpeciesApiError('Gallery changed. Your draft and upload receipts have been preserved.', 409)
+  const removedAssetIds = [...new Set([...(arrangement?.removedAssetIds || []), ...files.filter(file => file.removed && file.assetId).map(file => file.assetId!)])]
+  const orderedAssetIds = photoOrder
+    ? photoOrder.map(item => 'assetId' in item ? item.assetId : files.find(file => file.id === item.queueId)?.assetId).filter((asset): asset is string => Boolean(asset))
+    : [...new Set([...(arrangement?.orderedAssetIds || baseline.images.map(image => image.assetId)), ...uploaded])].filter(id => !removedAssetIds.includes(id))
+  // Explicit grid order must account for every active member, including retry receipts.
+  if (photoOrder && (new Set(orderedAssetIds).size !== orderedAssetIds.length || orderedAssetIds.length + removedAssetIds.length !== expectedIds.size || [...orderedAssetIds, ...removedAssetIds].some(asset => !expectedIds.has(asset)) || orderedAssetIds.some(asset => removedAssetIds.includes(asset)))) throw new SpeciesApiError('Photo order no longer matches the gallery.', 409)
+  const primaryAssetId = photoOrder
+    ? orderedAssetIds.find(asset => latest.images.some(image => image.assetId === asset && image.eligible)) ?? null
+    : primaryFile ? files.find(file => file.id === primaryFile)?.assetId ?? null : arrangement ? arrangement.primaryAssetId : baseline.primaryAssetId
+  await photoWrite(`/api/species/${encodeURIComponent(id)}/images`, 'PUT', { expectedRevision: latest.revision, orderedAssetIds, primaryAssetId, removedAssetIds })
+  return { complete: true, snapshot: await readSpeciesGallery(id) }
+}
+export interface SpeciesGallerySave {
+  expectedRevision: number
+  orderedAssetIds: string[]
+  primaryAssetId: string | null
+  removedAssetIds: string[]
+}
+export interface SpeciesGalleryDraft extends SpeciesGallerySave { speciesId: number }
+export function reconcileSpeciesPhotoDraft(latest: SpeciesGallerySnapshot, local: SpeciesGalleryDraft | null, files: SpeciesPhotoUpload[], keepDraft: boolean): SpeciesGalleryDraft {
+  const base = createSpeciesGalleryDraft(latest)
+  const active = new Set(base.orderedAssetIds), own = new Set(files.flatMap(file => file.assetId ? [file.assetId] : []))
+  const removed = keepDraft ? (local?.removedAssetIds || []).filter(id => active.has(id)) : []
+  const ordered = keepDraft ? (local?.orderedAssetIds || []).filter(id => active.has(id) && !removed.includes(id) && !own.has(id)) : []
+  for (const id of base.orderedAssetIds) if (!ordered.includes(id) && !removed.includes(id) && !own.has(id)) ordered.push(id)
+  const proposed = keepDraft ? local?.primaryAssetId : base.primaryAssetId
+  const primary = proposed && !removed.includes(proposed) && latest.images.some(image => image.assetId === proposed && image.eligible) ? proposed : null
+  return { ...base, orderedAssetIds: ordered, primaryAssetId: primary, removedAssetIds: removed }
+}
+export const createSpeciesGalleryDraft = (snapshot: SpeciesGallerySnapshot): SpeciesGalleryDraft => ({
+  speciesId: snapshot.speciesId,
+  expectedRevision: snapshot.revision,
+  orderedAssetIds: [...snapshot.images].sort((a, b) => a.position - b.position).map(image => image.assetId),
+  primaryAssetId: snapshot.primaryAssetId,
+  removedAssetIds: [],
+})
+export function moveSpeciesPhoto(draft: SpeciesGalleryDraft, id: string, direction: -1 | 1): SpeciesGalleryDraft {
+  const ids = [...draft.orderedAssetIds], index = ids.indexOf(id), target = index + direction
+  if (index < 0 || target < 0 || target >= ids.length) return draft
+  const adjacent = ids[target]
+  if (!adjacent) return draft
+  ids[index] = adjacent; ids[target] = id
+  return { ...draft, orderedAssetIds: ids }
+}
+export const removeSpeciesPhoto = (draft: SpeciesGalleryDraft, id: string): SpeciesGalleryDraft =>
+  !draft.orderedAssetIds.includes(id) ? draft : ({ ...draft,
+    orderedAssetIds: draft.orderedAssetIds.filter(asset => asset !== id),
+    primaryAssetId: draft.primaryAssetId === id ? null : draft.primaryAssetId,
+    removedAssetIds: [...draft.removedAssetIds, id],
+  })
+
+export const SPECIES_PHOTO_MAX_BYTES = 4194304
+export type SpeciesPhotoValidationError = 'emptyFile' | 'unsupportedType' | 'tooLarge' | 'invalidImage'
+export async function validateSpeciesPhoto(file: File): Promise<SpeciesPhotoValidationError | null> {
+  if (!file.size) return 'emptyFile'
+  if (file.size > SPECIES_PHOTO_MAX_BYTES) return 'tooLarge'
+  if (!['image/jpeg', 'image/png'].includes(file.type)) return 'unsupportedType'
+  try {
+    const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer())
+    const signature = file.type === 'image/jpeg' ? [255, 216, 255] : [137, 80, 78, 71, 13, 10, 26, 10]
+    return signature.every((byte, index) => bytes[index] === byte) ? null : 'invalidImage'
+  } catch { return 'invalidImage' }
+}
 
 export interface ManagedSpecies {
   id: string
@@ -13,6 +168,7 @@ export interface ManagedSpecies {
   description: string
   habitat: string
   culturalSignificance: string
+  portraitUrl: string
 }
 
 export interface TaxonomyGenus {
@@ -29,7 +185,6 @@ export interface SpeciesForm {
   visibility: SpeciesVisibility | ''
   description: string
   habitat: string
-  culturalSignificance: string
 }
 
 export interface SpeciesPayload {
@@ -40,7 +195,6 @@ export interface SpeciesPayload {
   genus_id: number | null
   conservation_status: string
   habitat: string
-  culturalSignificance: string
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -73,6 +227,7 @@ export const mapManagedSpecies = (value: unknown): ManagedSpecies | null => {
     description: text(item.description),
     habitat: text(item.habitat),
     culturalSignificance: text(item.culturalSignificance),
+    portraitUrl: webAssetUrl(item.image_url) || assetUrlFromId(item.image_asset_id),
   }
 }
 
@@ -106,8 +261,7 @@ export const validateSpeciesForm = (
     !knownStatuses.some((item) => item.toLowerCase() === form.conservationStatus.toLowerCase())
   )
     errors.conservationStatus = 'Select a conservation status from the loaded species data.'
-  for (const field of ['habitat', 'culturalSignificance'] as const)
-    if (form[field].length > 4000) errors[field] = 'Text must not exceed 4000 characters.'
+  if (form.habitat.length > 4000) errors.habitat = 'Text must not exceed 4000 characters.'
   return errors
 }
 
@@ -119,7 +273,6 @@ export const speciesPayload = (form: SpeciesForm): SpeciesPayload => ({
   genus_id: form.genusId ? Number(form.genusId) : null,
   conservation_status: form.conservationStatus.trim(),
   habitat: form.habitat.trim(),
-  culturalSignificance: form.culturalSignificance.trim(),
 })
 
 export class SpeciesApiError extends Error {

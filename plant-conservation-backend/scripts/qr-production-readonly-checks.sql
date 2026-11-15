@@ -165,4 +165,3 @@ UNION ALL
 
 SELECT 'public.qr_scan_history', count(*)
 FROM public.qr_scan_history;
-

@@ -59,7 +59,7 @@ function browserBoundary(origins) {
       if (!origin) return res.status(403).end();
       res.setHeader(
         "Access-Control-Allow-Methods",
-        "GET, POST, PATCH, DELETE, OPTIONS",
+        "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       );
       res.setHeader(
         "Access-Control-Allow-Headers",

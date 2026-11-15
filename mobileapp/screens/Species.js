@@ -2,7 +2,7 @@ import { t, translateLabel, translateUIMessage, useAppTranslation } from "../tra
 // screens/Plant.js
 import LanguageSelector from "../components/LanguageSelector";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 
 import {
   View,
@@ -48,20 +48,17 @@ function SpeciesCardImage({ species }) {
 export default function Species({ navigation, user }) {
   useAppTranslation();
   const isBotanist = user?.role?.toLowerCase() === "botanist";
-
-  const { species: plants, counts: plantCounts, loading, error: errorMessage, refresh } = useSpeciesCatalog(user?.id);
-  const favourites = useVisitorFavourites(user);
   const isVisitor = user?.role?.toLowerCase() === "visitor";
-  const refreshAll = useCallback(() => Promise.all([refresh(), favourites.refresh(true)]), [refresh, favourites.refresh]);
+
+  const { species: plants, counts: plantCounts, loading, error: errorMessage, refresh } = useSpeciesCatalog(user?.id, { publicOnly: !user || isVisitor });
+  const favourites = useVisitorFavourites(user);
+  const refreshFavourites = favourites.refresh;
+  const refreshAll = useCallback(() => Promise.all([refresh(), refreshFavourites(true)]), [refresh, refreshFavourites]);
 
   const [activeFamily, setActiveFamily] = useState(null);
 
   const familyOptions = useMemo(() => getSpeciesFamilyOptions(plants), [plants]);
-
-  useEffect(() => {
-    const nextFamily = resetMissingSpeciesFamily(activeFamily, familyOptions);
-    if (nextFamily !== activeFamily) setActiveFamily(nextFamily);
-  }, [activeFamily, familyOptions]);
+  const selectedFamily = resetMissingSpeciesFamily(activeFamily, familyOptions);
 
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -75,10 +72,10 @@ export default function Species({ navigation, user }) {
   // =====================================================
 
   const filteredSpecies = useMemo(() => filterAndSortSpecies(plants, {
-    family: activeFamily,
+    family: selectedFamily,
     query: searchQuery,
     sortOption,
-  }), [plants, activeFamily, searchQuery, sortOption]);
+  }), [plants, selectedFamily, searchQuery, sortOption]);
 
   // =====================================================
   // SPECIES CARD
@@ -188,19 +185,11 @@ export default function Species({ navigation, user }) {
 
             <View style={styles.libraryHeader}>
               <View style={styles.libraryHeaderRow}>
-              <View style={styles.libraryHeading}>
-                <Text style={styles.sectionLabel}>{t("species.exploreTheCollection")}</Text>
-                <View style={styles.libraryTitleRow}>
+                <View style={styles.libraryHeading}>
+                  <Text style={styles.sectionLabel}>{t("species.exploreTheCollection")}</Text>
                   <Text style={styles.sectionTitle}>{t("species.discoverNiahSFlora")}</Text>
-                  <RefreshButton
-                    onPress={refreshAll}
-                    loading={loading || favourites.refreshing}
-                    label={t("species.refreshSpecies")}
-                    testID="catalogue-species-refresh"
-                  />
                 </View>
-              </View>
-              <LanguageSelector />
+                <LanguageSelector />
               </View>
 
               <Text style={styles.speciesCount}>
@@ -238,6 +227,13 @@ export default function Species({ navigation, user }) {
                 placeholder={t("species.searchByName")}
                 placeholderTextColor="#8A968F"
                 style={styles.searchInput}
+              />
+
+              <RefreshButton
+                onPress={refreshAll}
+                loading={loading || favourites.refreshing}
+                label={t("species.refreshSpecies")}
+                testID="catalogue-species-refresh"
               />
 
               <TouchableOpacity
@@ -300,7 +296,7 @@ export default function Species({ navigation, user }) {
                 <TouchableOpacity
                   style={[
                     styles.categoryButton,
-                    activeFamily === item &&
+                    selectedFamily === item &&
                       styles.categoryButtonActive,
                   ]}
                   onPress={() => setActiveFamily(item)}
@@ -308,7 +304,7 @@ export default function Species({ navigation, user }) {
                   <Text
                     style={[
                       styles.categoryText,
-                      activeFamily === item &&
+                      selectedFamily === item &&
                         styles.categoryTextActive,
                     ]}
                   >
@@ -332,7 +328,7 @@ export default function Species({ navigation, user }) {
                 style={styles.clearButton}
                 onPress={() => {
                   setSearchQuery("");
-                  setActiveCategory("All");
+                  setActiveFamily(null);
                 }}
               >
                 <Text style={styles.clearButtonText}>{t("map.clearFilters")}</Text>
@@ -400,7 +396,6 @@ const styles = StyleSheet.create({
 
   libraryHeaderRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   libraryHeading: { flex: 1, minWidth: 0 },
-  libraryTitleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
 
   sectionLabel: {
     color: "#468585",
@@ -454,7 +449,7 @@ const styles = StyleSheet.create({
     paddingVertical: SCREEN_WIDTH < 500 ? 10 : 13,
     borderWidth: 1,
     borderColor: "#E2EDE0",
-    borderRadius: 12,
+    borderRadius: 13,
     backgroundColor: "#FFFFFF",
     color: "#234B3A",
     fontSize: 14,
@@ -468,7 +463,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: "#E2EDE0",
-    borderRadius: 12,
+    borderRadius: 13,
     backgroundColor: "#FFFFFF",
   },
 

@@ -1,6 +1,7 @@
 "use strict";
 const {permitted,visibilityFor}=require('../shared/rbac.cjs');
 const {classifyObservations}=require('./observation-origin.cjs');
+const {detailParent}=require('./plant-detail.cjs');
 const bad=()=>{throw Object.assign(Error('Invalid gallery pagination.'),{status:400});};
 function options(query,plantId){
   if(Object.keys(query).some(k=>!['limit','cursor','scope'].includes(k)))bad();
@@ -19,18 +20,28 @@ function options(query,plantId){
   return {limit,scope,cursor};
 }
 function mountPlantGallery(app,{pool,allow}){
-  app.get('/api/plants/:plantId/gallery',allow('plants.public.read'),async(req,res)=>{
+  const read = (detail = false) => async(req,res)=>{
     const plantId=req.params.plantId;
     if(!/^[1-9][0-9]{0,9}$/.test(plantId)||Number(plantId)>2147483647)bad();
     const {limit,scope,cursor}=options(req.query,plantId);
     if(scope==='mine'&&!permitted(req.user,'plants.create'))throw Object.assign(Error('Botanist access required.'),{status:403});
-    const owner=req.user?`staff:${req.user.id}`:'',scientific=permitted(req.user,'plants.scientific.read');
-    const officer=permitted(req.user,'observations.review');
-    const args=[plantId,visibilityFor(req.user),owner,officer,scientific,scope==='mine'];
+    if(detail && scope)bad();
+    const owner=req.user?`staff:${req.user.id}`:'',scientific=detail||permitted(req.user,'plants.scientific.read');
+    const officer=detail||permitted(req.user,'observations.review');
+    const args=[plantId,detail?['public','internal','protected']:visibilityFor(req.user),owner,officer,scientific,scope==='mine'];
     const c=await pool.connect();
     try{
       await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       await c.query("SET LOCAL statement_timeout='5000ms'");
+      if(detail)await detailParent(c,plantId,req.user);
+      let registrationIds=[];
+      if(detail && (await c.query("SELECT to_regclass('plant_submission_receipt') IS NOT NULL AS available")).rows[0]?.available){
+        // Use receipt-backed provenance before pagination so registration photos
+        // never hide behind pages of subsequent observations or guessed origins.
+        const candidates=(await c.query(`SELECT o.* FROM plant_observation o WHERE o.plant_id=$1 AND o.id IN
+          (SELECT result->>'id' FROM plant_submission_receipt WHERE result->>'plant_id'=$1::text)`,[plantId])).rows;
+        registrationIds=(await classifyObservations(c,candidates)).filter(o=>o.origin_type==='initial_registration').map(o=>o.id);
+      }
       // Same parent visibility/status contract as readPlants; no hidden-asset
       // totals or cursor is issued when the plant itself is unavailable.
       const plant=(await c.query(`SELECT p.plant_id FROM plant_record p JOIN species s ON s.species_id=p.species_id
@@ -64,10 +75,29 @@ function mountPlantGallery(app,{pool,allow}){
           AND ($5 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
           AND ((p.rbac_status='Approved' AND (CASE WHEN a.observation_id IS NULL THEN a.approved ELSE o.status='Approved' END))
             OR a.owner_subject=$3 OR $4)
+          ${detail ? 'AND o.id=ANY($12::text[])' : `
+          -- Match the existing byte endpoint exactly: historical approved images
+          -- remain staff evidence; ordinary reads use the latest approved set.
+          AND ($4 OR
+            (p.rbac_status='Approved' AND (CASE WHEN a.observation_id IS NULL THEN a.approved ELSE
+              o.status='Approved' AND o.id=(SELECT current.id FROM plant_observation current
+                WHERE current.plant_id=p.plant_id AND current.status='Approved' ORDER BY current.updated_at DESC,current.id DESC LIMIT 1) END))
+            OR (a.owner_subject=$3 AND o.owner_subject=$3 AND o.status IN ('Draft','Pending Review','Correction Required'))
+            OR (a.owner_subject=$3 AND p.registered_subject=$3 AND p.rbac_status<>'Approved'
+              AND o.status IN ('Pending Review','Approved')
+              AND (o.status<>'Approved' OR o.id=(SELECT current.id FROM plant_observation current
+                WHERE current.plant_id=p.plant_id AND current.status='Approved' ORDER BY current.updated_at DESC,current.id DESC LIMIT 1))
+              AND ($6 OR (s.rbac_data->>'submittedBy'=$3 AND s.rbac_data->>'approvalStatus'='Pending Review'))))
+          AND (COALESCE(v.visibility,'protected')=ANY($2::text[]) OR
+            (a.owner_subject=$3 AND o.owner_subject=$3 AND o.status IN ('Draft','Pending Review','Correction Required')) OR
+            (a.owner_subject=$3 AND p.registered_subject=$3 AND p.rbac_status<>'Approved' AND o.status IN ('Pending Review','Approved')
+              AND (o.status<>'Approved' OR o.id=(SELECT current.id FROM plant_observation current
+                WHERE current.plant_id=p.plant_id AND current.status='Approved' ORDER BY current.updated_at DESC,current.id DESC LIMIT 1))
+              AND ($6 OR (s.rbac_data->>'submittedBy'=$3 AND s.rbac_data->>'approvalStatus'='Pending Review'))))`}
         ) eligible
         WHERE ($7::text IS NULL OR (group_key,order_kind,order_value,id)>($7::text,$8::integer,$9::numeric,$10::text))
         ORDER BY group_key,order_kind,order_value,id LIMIT $11`,
-      [...args,cursor?.group??null,cursor?.kind??0,cursor?.order??'0',cursor?.id??'',limit+1])).rows;
+      [...args,cursor?.group??null,cursor?.kind??0,cursor?.order??'0',cursor?.id??'',limit+1,...(detail?[registrationIds]:[])])).rows;
       const page=rows.slice(0,limit),observations=[...new Map(page.filter(r=>r.observation).map(r=>[r.observation.id,r.observation])).values()];
       const classified=new Map((await classifyObservations(c,observations)).map(o=>[o.id,o]));
       const assets=page.map(row=>{
@@ -84,6 +114,8 @@ function mountPlantGallery(app,{pool,allow}){
       await c.query('COMMIT');
       res.json({plant_id:plantId,assets,page:{limit,has_more:more,next_cursor:next}});
     }catch(error){await c.query('ROLLBACK').catch(()=>{});throw error;}finally{c.release();}
-  });
+  };
+  app.get('/api/plants/:plantId/gallery',allow('plants.public.read'),read());
+  app.get('/api/plants/:plantId/detail/gallery',allow('plants.detail.read'),read(true));
 }
 module.exports={mountPlantGallery};

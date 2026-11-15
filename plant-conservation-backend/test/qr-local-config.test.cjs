@@ -58,6 +58,8 @@ test("QR lookup joins plant_app QR inventory to plant_app plant records", async 
             scientific_name: "Local plant",
           }],
         };
+      if (sql.includes("species_image_collection"))
+        return { rows: [{ available: false }] };
       if (sql.includes("FROM species s"))
         return {
           rows: [{

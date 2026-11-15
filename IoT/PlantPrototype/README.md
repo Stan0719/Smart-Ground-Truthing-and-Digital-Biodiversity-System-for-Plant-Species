@@ -1,6 +1,17 @@
-> Historical instructions: project Python files and launchers were removed at the user's request. Python commands below are no longer runnable. The active website uses Vue, Node.js and PostgreSQL.
-
 # USB sensor host
+
+The Python serial bridge forwards ESP32 readings to the Node.js/PostgreSQL backend.
+It supports both the earlier sectioned dashboard and PlatformIO's flat dashboard
+labels, including `Raindrop Sensor` and `Movement Status`. Explicit `No movement`
+is uploaded as `movement: 0`; `DETECTED` is uploaded as `movement: 1`. Waiting or
+unknown movement states are omitted rather than guessed.
+
+Each uploaded frame now includes its original capture time and explicit MPU6050
+connection status. The backend stores this small metadata object with the
+reading's JSON values, so no schema migration is needed. Retries retain the
+original timestamp. Old queued readings and frames without known MPU health
+remain usable as history but cannot confirm live camera movement. Restart the
+bridge and backend after updating them to enable this metadata.
 
 Run the bridge on the computer physically attached to the board. A remote
 Codespace cannot see a USB board connected to Windows. Windows Python works
@@ -42,8 +53,20 @@ port shown; do not assume a COM number. Close the Arduino Serial Monitor before
 starting the bridge because it may already own the port.
 
 In the Administrator website, register the actual device and retain its one-time
-provisioning key privately. Set `PLANT_API_ORIGIN` to the verified reachable HTTPS
-gateway and `DEVICE_ID` to the registered ID using the host's environment settings.
+provisioning key privately. Use a device registered as **Sensor**, with the ID and
+key belonging to that same device. For a backend running on the same computer:
+
+```powershell
+$env:PLANT_API_ORIGIN = 'http://127.0.0.1:3000'
+$env:DEVICE_ID = (Read-Host 'Registered Sensor device ID').Trim()
+```
+
+Cloudflare is not required for this local connection. HTTP is accepted only for
+the exact hosts `localhost`, `127.0.0.1` and `[::1]`. Remote servers, including LAN
+addresses, still require HTTPS. For a remote backend, set `PLANT_API_ORIGIN` to
+its verified HTTPS origin without an `/api` path. Credentials in URLs, redirects,
+query strings and fragments are not accepted.
+
 To enter the key without putting it literally into shell history:
 
 ```powershell

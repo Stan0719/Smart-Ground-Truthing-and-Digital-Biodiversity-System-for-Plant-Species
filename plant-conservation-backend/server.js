@@ -11,21 +11,27 @@ const { mountDomain } = require("./domain.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
 const { mountUploads } = require("./uploads.cjs");
 const { mountPlantGallery } = require("./plant-gallery.cjs");
+const { mountPlantDetail } = require("./plant-detail.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
+const { mountPlantSimilarity } = require("./plant-similarity.cjs");
 const { mountStaffNotifications } = require("./staff-notifications.cjs");
 const { createOfficerNotificationDelivery } = require("./officer-notification-delivery.cjs");
 const {
   normalizeQrPlantSchema,
   qrPlantRecordRelation,
 } = require("./qr-plant-mode.cjs");
+const { mountSpeciesPhotoLibrary } = require("./species-photo-library.cjs");
+const { speciesPhotoWritesRequested } = require("./species-photo-activation.cjs");
 function createPlantApp({
   auth,
   pool,
   origins = configuredOrigins(),
   officerNotifications = null,
   qrPlantSchema = process.env.PLANT_QR_PLANT_SCHEMA || "plant_app",
+  similaritySearch,
+  speciesPhotoWritesEnabled = false,
 }) {
   qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
   const app = express();
@@ -60,11 +66,15 @@ function createPlantApp({
   mountStaffNotifications(app, { pool });
   mountDomain(app, { auth, pool, allow, officerNotifications, qrPlantSchema });
   mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
-  mountRecordChanges(app, { pool, allow, qrPlantSchema });
+  mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
+  require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
-  mountUploads(app, { pool, allow });
+  mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
+  mountSpeciesPhotoLibrary(app, { pool, allow, writesEnabled: speciesPhotoWritesEnabled });
   mountPlantGallery(app, { pool, allow });
+  mountPlantDetail(app, { pool, allow, auth });
   mountIoT(app, { pool, allow });
+  mountPlantSimilarity(app, { pool, allow, search: similaritySearch });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {
     await pool.query("SELECT 1");
     res.json({ connected: true, database: "postgresql" });
@@ -132,7 +142,14 @@ async function start() {
   const { poolFromEnvironment } = require("./database.cjs");
   const auth = await createAuth(),
     pool = poolFromEnvironment();
+  const speciesPhotoWritesEnabled = speciesPhotoWritesRequested();
   try {
+    if (process.argv.includes("--verify-species-photo-startup")) {
+      const { verifySpeciesPhotoStartup } = require("./species-photo-startup.cjs");
+      await verifySpeciesPhotoStartup({
+        enabled: true, pool, writesEnabled: speciesPhotoWritesEnabled,
+      });
+    }
     await pool.query(
       "SELECT plant_id,registered_subject,rbac_status,qr_token FROM plant_record LIMIT 0",
     );
@@ -154,6 +171,7 @@ async function start() {
     pool,
     officerNotifications,
     qrPlantSchema,
+    speciesPhotoWritesEnabled,
   });
   const server = createServer(app);
   const port = Number(process.env.PORT || 3000);

@@ -12,18 +12,21 @@ import {
   Image,
   RefreshControl,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   getSpeciesBySlug,
 } from "../data/mockData";
 import { useFocusEffect } from "@react-navigation/native";
 import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantRecords, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords } from "../utils/plantApi";
+import BackButton from "../components/BackButton";
+import { fetchPlantRecords, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords, isPlantVisibleInRoleCatalog } from "../utils/plantApi";
 
 import PlantCard from "../components/PlantCard";
 import RefreshButton from "../components/RefreshButton";
 import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
+import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 
 export default function SpeciesDetail({
   route,
@@ -35,6 +38,7 @@ export default function SpeciesDetail({
   const { slug, speciesId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isVisitor = user?.role?.toLowerCase() === "visitor";
+  const publicOnly = !user || isVisitor;
   const favourites = useVisitorFavourites(user);
 
   const [selectedSpecies, setSelectedSpecies] = useState(
@@ -55,12 +59,13 @@ export default function SpeciesDetail({
     const request = (async () => {
       try {
         const [backendSpecies, records] = await Promise.all([
-          fetchSpeciesDetail(speciesId, slug, { accountId: user?.id }),
-          fetchPlantRecords([], { accountId: user?.id }),
+          fetchSpeciesDetail(speciesId, slug, { accountId: user?.id, publicOnly }),
+          fetchPlantRecords([], { accountId: user?.id, publicOnly }),
         ]);
         const resolvedSpecies = backendSpecies || route.params?.species || getSpeciesBySlug(slug) || null;
         const resolvedId = resolvedSpecies?.id ?? speciesId;
-        const recordsForSpecies = filterUniqueSpeciesPlantRecords(records, resolvedId, slug);
+        const recordsForSpecies = filterUniqueSpeciesPlantRecords(records, resolvedId, slug)
+          .filter((record) => isPlantVisibleInRoleCatalog(record, user?.role, user?.id));
 
         setSelectedSpecies(resolvedSpecies);
         setSpeciesPlants(recordsForSpecies);
@@ -74,7 +79,7 @@ export default function SpeciesDetail({
     })();
     requestRef.current = request;
     return request;
-  }, [slug, speciesId, route.params?.species, user?.id]);
+  }, [route.params, user, slug, speciesId, publicOnly]);
 
   useFocusEffect(useCallback(() => {
     void loadSpeciesDetails(false);
@@ -82,38 +87,77 @@ export default function SpeciesDetail({
 
   const primaryImageSource = getSpeciesImageSource(selectedSpecies);
   const primaryImageKey = typeof primaryImageSource === "number" ? `local:${primaryImageSource}` : primaryImageSource?.uri || null;
+  const backButton = <BackButton
+    label={t("plant.back")}
+    variant="plain"
+    style={styles.backButton}
+    onPress={() => navigation.goBack()}
+  />;
+
+  const header = (
+    <View style={styles.stateHeader}>
+      {backButton}
+      <View style={styles.headerActions}>
+        <RefreshButton
+          style={styles.headerButton}
+          onPress={() => { void loadSpeciesDetails(true); void favourites.refresh(true); }}
+          loading={loading || refreshing || favourites.refreshing}
+          label={t("common.refresh")}
+          testID="species-detail-refresh"
+        />
+        {isVisitor && selectedSpecies && <FavouriteHeart
+          style={styles.headerButton}
+          active={favourites.isFavourite("species", selectedSpecies.id ?? speciesId)}
+          pending={favourites.isPending("species", selectedSpecies.id ?? speciesId)}
+          disabled={favourites.loading}
+          onPress={() => void favourites.toggle("species", selectedSpecies.id ?? speciesId)}
+        />}
+      </View>
+    </View>
+  );
 
   if (!selectedSpecies) {
+    if (loading) return (
+      <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
+        {header}
+        <ScrollView style={styles.stateContent} contentContainerStyle={{ flexGrow: 1 }}>
+          <DetailSkeletonContent label={t("plant.loadingSpecies")} sections={2} />
+        </ScrollView>
+      </SafeAreaView>
+    );
     return (
-      <View style={styles.notFound}>
+      <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
+        {header}
+        <View style={styles.notFound}>
 
         <Text style={styles.notFoundIcon}>
           🌿
         </Text>
 
         <Text style={styles.notFoundTitle}>
-          {loading ? t("plant.loadingSpecies") : t("plant.speciesNotFound")}
+          {errorMessage ? t("plant.speciesDetailsUnavailable") : t("plant.speciesNotFound")}
         </Text>
 
         <Text style={styles.notFoundText}>
           {errorMessage || t("speciesDetail.theSpeciesYouAreLookingForIsNotInThe")}
         </Text>
 
-        <TouchableOpacity
-          style={styles.notFoundButton}
-          onPress={() =>
-            navigation.navigate("Plants")
-          }
-        >
+        {!!errorMessage && <TouchableOpacity style={styles.notFoundButton} onPress={() => { void loadSpeciesDetails(false); }}>
+          <Text style={styles.notFoundButtonText}>{t("common.tryAgain")}</Text>
+        </TouchableOpacity>}
+        <TouchableOpacity style={styles.notFoundButton} onPress={() => navigation.navigate("Plants")}>
           <Text style={styles.notFoundButtonText}>{t("plant.returnToSpecies")}</Text>
         </TouchableOpacity>
 
-      </View>
+        </View>
+      </SafeAreaView>
     );
   }
 
 
   return (
+    <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
+    {header}
     <ScrollView
       style={styles.page}
       showsVerticalScrollIndicator={false}
@@ -131,28 +175,6 @@ export default function SpeciesDetail({
 
       <View style={styles.hero}>
 
-        <View style={styles.heroToolbar}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() =>
-            navigation.goBack()
-          }
-        >
-          <Text style={styles.backText}>{t("plant.back")}</Text>
-        </TouchableOpacity>
-        <RefreshButton
-          onPress={() => { void loadSpeciesDetails(true); void favourites.refresh(true); }}
-          loading={loading || refreshing || favourites.refreshing}
-          label={t("common.refresh")}
-          testID="species-detail-refresh"
-        />
-        {isVisitor && <FavouriteHeart
-          active={favourites.isFavourite("species", selectedSpecies.id ?? speciesId)}
-          pending={favourites.isPending("species", selectedSpecies.id ?? speciesId)}
-          disabled={favourites.loading}
-          onPress={() => void favourites.toggle("species", selectedSpecies.id ?? speciesId)}
-        />}
-        </View>
         {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.refreshError}>{translateUIMessage(favourites.mutationError)}</Text>}
 
 
@@ -223,7 +245,6 @@ export default function SpeciesDetail({
         <Text style={styles.paragraph}>
           {selectedSpecies.overview || selectedSpecies.description || t("speciesDetail.noOverviewHasBeenRecorded")}
         </Text>
-
 
         <Text style={styles.subTitle}>{t("speciesDetail.naturalHabitat")}</Text>
 
@@ -379,6 +400,7 @@ export default function SpeciesDetail({
                   plant={plant}
                   navigation={navigation}
                 user={user}
+                  speciesDetailCard
                 />
               ))}
 
@@ -457,6 +479,7 @@ export default function SpeciesDetail({
 
 
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -495,29 +518,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#F7FBF4",
   },
 
+  stateHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8, backgroundColor: "#F7FBF4" },
+  backButton: { alignSelf: "flex-start", maxWidth: "100%" },
+  stateContent: { flex: 1 },
+
   hero: {
     padding: 20,
-    paddingTop: 50,
+    paddingTop: 20,
     backgroundColor: "#E7F2E2",
   },
 
   refreshError: { color: "#A52A3A", fontSize: 12, marginBottom: 10 },
 
-  heroToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
-
-  backButton: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: "#FFFFFFAA",
-  },
-
-  backText: {
-    color: "#468585",
-    fontSize: 12,
-    fontWeight: "700",
-  },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 },
+  headerButton: { minWidth: 44, minHeight: 44, height: 44, borderRadius: 13, borderWidth: 1, borderColor: "#CDE3DC", backgroundColor: "#EFF8F4" },
 
   heroImage: {
     width: "100%",

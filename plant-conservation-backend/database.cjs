@@ -125,6 +125,7 @@ function scopedPool(pool, schema) {
   const setPath = (client) =>
     client.query(`SET LOCAL search_path TO "${schema}",pg_catalog`);
   return {
+    get schema() { return schema; },
     async query(sql, values = []) {
       const client = await pool.connect();
       try {

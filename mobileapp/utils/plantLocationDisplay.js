@@ -4,6 +4,12 @@ export function getPlantLocationDisplay(location, role) {
     return { status: "restricted" };
   if (location?.restricted) return { status: "restricted" };
 
+  // Zone is descriptive location data and can be available even when GPS
+  // coordinates are absent. Restricted roles and records return above.
+  const zone = typeof location?.zone === "string" && location.zone.trim() && location.zone !== "Not recorded"
+    ? location.zone
+    : null;
+
   const latitude = location?.latitude;
   const longitude = location?.longitude;
   const hasPair = latitude !== null && latitude !== undefined && latitude !== "" &&
@@ -18,7 +24,7 @@ export function getPlantLocationDisplay(location, role) {
         longitude: Number(longitude),
         accuracyM: location?.accuracyM ?? null,
         altitudeM: location?.altitudeM ?? null,
-        zone: location?.zone && location.zone !== "Not recorded" ? location.zone : null,
+        zone,
       }
-    : { status: "not_recorded" };
+    : { status: "not_recorded", ...(zone ? { zone } : {}) };
 }

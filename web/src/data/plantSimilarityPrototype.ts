@@ -2,6 +2,8 @@ export type PlantSimilarityCandidate = {
   rank: number
   plantId: string
   observationId?: string
+  rawObservationId?: string
+  assetId?: string
   scientificName?: string
   commonName?: string
   similarity: number
@@ -10,6 +12,8 @@ export type PlantSimilarityCandidate = {
 
 export type PlantSimilarityAnalysis = {
   observationId: string
+  rawObservationId?: string
+  sourceAssetId?: string
   plantId: string
   highestSimilarity: number
   status: 'available' | 'unavailable'

@@ -1,3 +1,4 @@
+import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
@@ -32,14 +33,14 @@ test('plant thumbnails use only supplied preview IDs and exclude pending/private
   assert.deepEqual(images.plantThumbnailImages({ plant_image_asset_id: '../private' }), [])
 })
 
-test('species fallback stays outside reference galleries and reference images take priority', () => {
+test('backend portrait takes priority and stays outside reference galleries when sourced from plant evidence', () => {
   const fallback = images.speciesImageSelection([], '/api/assets/plant-preview')
   assert.equal(fallback.image, '/api/data/assets/plant-preview'); assert.deepEqual(fallback.images, [])
   const selected = images.speciesImageSelection([
     { id: 'reference', content_type: 'image/jpeg' }, { id: 'second', content_type: 'image/png' },
     { id: 'document', content_type: 'application/pdf' }, { id: '../invalid', content_type: 'image/jpeg' },
   ], '/api/assets/plant-preview')
-  assert.equal(selected.image, '/api/data/assets/reference')
+  assert.equal(selected.image, '/api/data/assets/plant-preview')
   assert.deepEqual(selected.images.map(x => x.path), ['/api/data/assets/reference', '/api/data/assets/second'])
   assert.equal(images.speciesImageSelection([], 'https://external.invalid/a').image, undefined)
 })
@@ -48,6 +49,7 @@ test('actual Vite configuration routes asset paths to Plant API while preserving
   const exports = {}
   const source = load('../vite.config.ts').replaceAll('import.meta.url', JSON.stringify(new URL('../vite.config.ts', import.meta.url).href))
   vm.runInNewContext(js(source), { exports, require(name) {
+    if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'node:url') return { URL, fileURLToPath: value => new URL(value).pathname }
     if (name === 'vite') return { defineConfig: value => value }
     return () => ({})
@@ -70,6 +72,7 @@ test('actual Vite configuration routes asset paths to Plant API while preserving
 test('knowledge refresh retains plant thumbnails and separates preview fallback from reference galleries', async () => {
   const plants = vue.reactive([]), records = vue.reactive([]), calls = [], exports = {}
   vm.runInNewContext(js(load('../src/services/knowledge.ts')), { exports, require(name) {
+    if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return vue
     if (name.endsWith('/assetImages')) return images
     if (name.endsWith('/plantCardMapping')) return cardMapping
@@ -80,7 +83,7 @@ test('knowledge refresh retains plant thumbnails and separates preview fallback 
       calls.push(path)
       if (path.startsWith('/species?')) return { species: [
         { species_id: '1', scientific_name: 'Fixture one', image_url: '/api/assets/preview' },
-        { species_id: '2', scientific_name: 'Fixture two', image_url: '/api/assets/fallback' },
+        { species_id: '2', scientific_name: 'Fixture two', image_asset_id: 'fallback' },
       ] }
       if (path === '/plants') return { plants: [
         { plant_id: '1', species_id: '1', plant_image_asset_id: 'plant-photo', rbac_status: 'Approved', observed_at: '2026-11-05T03:00:00Z', zone: 'Approved zone', latest_approved: { heightCm: 42, lifeStage: 'Mature' } },
@@ -93,7 +96,7 @@ test('knowledge refresh retains plant thumbnails and separates preview fallback 
   await exports.refreshKnowledge()
   assert.equal(exports.knowledgeError.value, '')
   assert.equal(plants[0].image, '/api/data/assets/preview'); assert.equal(plants[0].images.length, 0)
-  assert.equal(plants[1].image, '/api/data/assets/official')
+  assert.equal(plants[1].image, '/api/data/assets/fallback')
   assert.equal(records[0].images[0].path, '/api/data/assets/plant-photo')
   assert.equal(records[1].images.length, 0)
   assert.equal(records[0].latestApproved.heightCm, 42)
@@ -118,8 +121,9 @@ test('plant card replaces missing/broken images with a placeholder and accepts a
   const template = compileTemplate({ source: descriptor.template.content, filename: 'PlantRecordCard.vue', id: 'image-card', compilerOptions: { bindingMetadata: script.bindings } })
   const scope = vue.effectScope(), exports = {}
   const loggedIn = vue.ref(false), role = vue.ref(null)
-  const props = vue.reactive({ compact: false, plant: { plantId: '1', speciesSlug: '1', images: [], location: {}, latestApproved: {}, qr: {} } })
+  const props = vue.reactive({ compact: false, plant: { plantId: '1', speciesSlug: '1', description: 'Private preview description fixture', images: [], location: {}, latestApproved: {}, qr: {} } })
   const context = { exports, require(name) {
+    if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return { ...vue, resolveComponent: value => value }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x, te: () => false, locale: vue.ref('en') }) }
     if (name.endsWith('/assetImages')) return images
@@ -136,10 +140,16 @@ test('plant card replaces missing/broken images with a placeholder and accepts a
     assert.equal(render().filter(n => n.type === 'h3' && n.children === '1').length, 1)
     assert.ok(!render().some(n => n.type === 'span' && n.children === '1'))
     assert.equal(render().find(n => n.props?.class === 'learn-more').props.to, '/plant/1')
+    assert.equal(render().filter(n => n.props?.class === 'learn-more').length, 1)
+    assert.match(descriptor.styles[0].content, /\.learn-more \.button-text\s*\{[^}]*position: relative;[^}]*display: block;[^}]*overflow-wrap: anywhere/)
+    assert.ok(!render().some(n => n.children === 'Private preview description fixture'))
+    assert.match(descriptor.styles[0].content, /\.record-copy\s*\{[^}]*display: flex;[^}]*flex-direction: column;[^}]*flex: 1/)
+    assert.match(descriptor.styles[0].content, /\.learn-more\s*\{[^}]*max-width: 100%;[^}]*flex-shrink: 0;[^}]*margin: auto auto 0/)
+
     assert.ok(!render().some(n => n.type === 'span' && String(n.props?.class).includes('review-status')))
     for (const status of cardMapping.plantReviewStatuses) {
       props.plant.reviewStatus = status; await vue.nextTick()
-      assert.ok(render().some(n => n.type === 'span' && n.children === status))
+      assert.deepEqual(render().find(n => n.type === 'span' && n.children === status).props.style, workflowBadgeStyle(status))
       const image = render().find(n => n.props?.class === 'record-image')
       assert.ok(nodes(image).some(n => n.type === 'span' && n.children === status))
       const heading = render().find(n => n.props?.class === 'record-heading')
@@ -187,6 +197,7 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
       { plant_id: '2', species_id: '1', rbac_status: 'Pending Review', registered_at: '2026-11-05', latitude: null, latest_submission: { heightCm: 99, lifeStage: 'Young', zone: 'Pending zone' } },
     ] })
   }, require(name) {
+    if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return vue
     if (name === 'vue-router') return { useRoute: () => vue.reactive({ params: { slug: '1' } }) }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x, te: () => false }) }
@@ -217,4 +228,14 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
     assert.ok(Number.isNaN(state.speciesPlants.value[1].location.latitude))
     assert.deepEqual(calls, ['/api/species', '/api/plants'])
   } finally { scope.stop() }
+})
+
+
+test('catalogue portrait URL, ID and safe gallery fallback have explicit priority', () => {
+  const refs = [{ id: 'gallery', content_type: 'image/png' }, { id: 'document', content_type: 'application/pdf' }]
+  assert.equal(images.speciesImageSelection(refs, '/api/assets/portrait', 'id-fallback').image, '/api/data/assets/portrait')
+  assert.equal(images.speciesImageSelection(refs, undefined, 'id-fallback').image, '/api/data/assets/id-fallback')
+  assert.equal(images.speciesImageSelection(refs, 'https://unsafe.test/photo', '../invalid').image, '/api/data/assets/gallery')
+  assert.equal(images.speciesImageSelection([], 'https://unsafe.test/photo', '../invalid').image, undefined)
+  assert.equal(images.speciesImageSelection([{ id: 'document', content_type: 'application/pdf' }], undefined).image, undefined)
 })

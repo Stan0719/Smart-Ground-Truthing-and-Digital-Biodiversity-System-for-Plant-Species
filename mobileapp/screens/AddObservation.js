@@ -16,6 +16,7 @@ import {
   getPlantById,
   getSpeciesBySlug,
 } from "../data/mockData";
+import BackButton from "../components/BackButton";
 
 const HEALTH_STATUSES = ["Healthy", "Monitoring", "Poor"];
 const LIFE_STAGES = ["Seedling", "Juvenile", "Mature", "Flowering"];
@@ -120,9 +121,7 @@ export default function AddObservation({ route, navigation, user }) {
             ? t("addObservation.theSelectedPlantRecordCouldNotBeFound")
             : t("addObservation.onlyBotanistsCanAddObservations")}
         </Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backButtonText}>{t("common.goBack")}</Text>
-        </TouchableOpacity>
+        <BackButton label={t("common.goBack")} onPress={() => navigation.goBack()} style={styles.backButton} />
       </View>
     );
   }
@@ -264,6 +263,5 @@ const styles = StyleSheet.create({
   unavailable: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, backgroundColor: "#F8F6EE" },
   unavailableTitle: { color: "#234A3C", fontSize: 22, fontWeight: "700" },
   unavailableText: { marginTop: 8, color: "#63736A", fontSize: 12, lineHeight: 18, textAlign: "center" },
-  backButton: { minHeight: 44, marginTop: 18, justifyContent: "center", paddingHorizontal: 18, borderRadius: 999, backgroundColor: "#315B49" },
-  backButtonText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
+  backButton: { marginTop: 18 },
 });

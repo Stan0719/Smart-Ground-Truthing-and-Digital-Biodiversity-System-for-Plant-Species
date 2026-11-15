@@ -11,6 +11,11 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/camera-api': {
+        target: 'http://127.0.0.1:8001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/camera-api/, ''),
+      },
       '/api/data': {
         target: 'http://127.0.0.1:3000',
         changeOrigin: false,
@@ -32,6 +37,10 @@ export default defineConfig({
       '/api/species': {
         target: 'http://localhost:3000',
         changeOrigin: true,
+      },
+      '/api/taxonomy': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: false,
       },
       '/api/tables': {
         target: 'http://localhost:3000',

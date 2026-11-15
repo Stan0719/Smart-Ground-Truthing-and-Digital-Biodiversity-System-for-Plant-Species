@@ -85,3 +85,16 @@ test("captured base64 survives local URI loss and valid zero GPS coordinates are
   f.coords({ latitude: 1, longitude: 1, accuracy: -1 });
   await assert.rejects(f.capture.coordinates(), /invalid GPS/);
 });
+
+test("web Knowledge Map never imports react-native-maps while native builds retain MapView and markers", () => {
+  const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  const screen = read("../screens/PersistentKnowledge.js");
+  const webMap = read("../screens/PersistentKnowledgeMap.web.js");
+  const nativeMap = read("../screens/PersistentKnowledgeMap.native.js");
+  assert.match(screen, /from ["']\.\/PersistentKnowledgeMap["']/);
+  assert.doesNotMatch(screen, /react-native-maps/);
+  assert.doesNotMatch(webMap, /react-native-maps/);
+  assert.match(nativeMap, /from ["']react-native-maps["']/);
+  assert.match(nativeMap, /<MapView/);
+  assert.match(nativeMap, /<Marker/);
+});

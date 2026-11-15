@@ -164,7 +164,7 @@ BEGIN
   ) <> 8 THEN
     RAISE EXCEPTION 'public.qr_code has unexpected columns; manual review required';
   END IF;
-  
+
   IF scan_history_qr_id_attnum IS NULL THEN
     RAISE EXCEPTION 'public.qr_scan_history.qr_id is required; manual dependency review required';
   END IF;

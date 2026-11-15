@@ -11,6 +11,7 @@ export interface GalleryGroup {
 }
 const object = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(v)
+export const detailPhotoUrl = (plantId: string, assetId: string) => `/api/data/plants/${encodeURIComponent(plantId)}/detail/assets/${encodeURIComponent(assetId)}`
 function invalid(): never { throw new Error('The photo gallery returned invalid metadata. Reload photos.') }
 function mapAsset(value: unknown, scientific: boolean): GalleryAsset {
   const a = object(value)
@@ -50,7 +51,7 @@ export function groupGallery(assets: GalleryAsset[]): GalleryGroup[] {
   let index = 0
   return ordered.map(g => g.date === null ? g : dated[index++]!)
 }
-export function createPlantGallery({ transport = fetch }: { transport?: typeof fetch } = {}) {
+export function createPlantGallery({ transport = fetch, detail = false }: { transport?: typeof fetch; detail?: boolean } = {}) {
   const state = reactive({ plantId: '', epoch: 0, assets: [] as GalleryAsset[], loading: false, error: '', hasMore: false, complete: false })
   let generation = 0, cursor: string | null = null, controller: AbortController | null = null
   const seen = new Set<string>()
@@ -67,7 +68,7 @@ export function createPlantGallery({ transport = fetch }: { transport?: typeof f
     const current = () => token === generation && !abort.signal.aborted
     try {
       const query = new URLSearchParams({ limit: '20' }); if (after) query.set('cursor', after)
-      const response = await transport(`/api/data/plants/${plantId}/gallery?${query}`, {
+      const response = await transport(`/api/data/plants/${plantId}/${detail ? 'detail/' : ''}gallery?${query}`, {
         credentials: 'same-origin', signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]),
       })
       if (!current()) return
@@ -82,6 +83,7 @@ export function createPlantGallery({ transport = fetch }: { transport?: typeof f
       const groups = new Map([...merged.values()].map(a => [a.observationId ?? 'unlinked', signature(a)]))
       for (const value of result.assets) {
         const a = mapAsset(value, scientific), previous = merged.get(a.id), key = a.observationId ?? 'unlinked'
+        if (detail) a.url = detailPhotoUrl(plantId, a.id)
         if ((previous && JSON.stringify(previous) !== JSON.stringify(a)) || (groups.has(key) && groups.get(key) !== signature(a)))
           throw new Error('Photo metadata changed between pages. Reload photos.')
         groups.set(key, signature(a)); merged.set(a.id, a)

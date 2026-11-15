@@ -1,15 +1,18 @@
+import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
+import { similarityBadgeStyle } from '../src/utils/similarityBadge.ts'
+import { assetUrlFromId } from '../src/services/assetImages.ts'
+import { reviewDateTime, submitterIdentifierLabels } from '../src/utils/officerMonitoringDisplay.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
-import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+import { parse, compileScript, compileTemplate, compileStyle } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
 import * as observationReview from '../src/services/observationReview.ts'
 import * as observationQueue from '../src/services/observationQueue.ts'
 import { formatObservationId } from '../src/utils/observationId.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
-import { plantSimilarityByObservation } from '../src/data/plantSimilarityPrototype.ts'
 import * as speciesRequestIntegration from '../src/services/reviewSpeciesRequest.ts'
 
 // Execute the actual SFC setup/render code with an in-memory HTTP boundary.
@@ -70,7 +73,7 @@ const flush = async () => {
 function fixtureResponse(url, rows) {
   return Response.json(url === '/api/observations' ? { observations: rows } : { observation: rows?.find(row => String(row?.id) === url.split('/').pop()) });
 }
-function harness(fetchHandler, query = {}, language = 'en', plantHandler = async url => Response.json({ plant: { plant_id: url.split('/').pop(), qr_token: null, qr_status: null } }), queueHandler = null) {
+function harness(fetchHandler, query = {}, language = 'en', plantHandler = async url => Response.json({ plant: { plant_id: url.split('/').pop(), qr_token: null, qr_status: null } }), queueHandler = null, options = {}) {
   const messages = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
   const scope = vue.effectScope()
   const cleanup = []
@@ -90,8 +93,12 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
     exports,
     Error,
     AbortSignal,
+    AbortController,
+    window: { setTimeout, clearTimeout, innerWidth: 1024, innerHeight: 768 },
+    document: options.document || { activeElement: null },
     console,
-    HTMLElement: class {},
+    navigator: { clipboard: options.clipboard },
+    HTMLElement: options.HTMLElement || class {},
     fetch: async (url, options) => {
       calls.push({ url, options })
       if (url.startsWith('/api/plants/')) return plantHandler(url, options)
@@ -105,6 +112,10 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
       return fetchHandler(url, options)
     },
     require(name) {
+    if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
+    if (name.endsWith('similarityBadge')) return { similarityBadgeStyle }
+    if (name.endsWith('assetImages')) return { assetUrlFromId }
+    if (name.endsWith('officerMonitoringDisplay')) return { reviewDateTime, submitterIdentifierLabels }
       // DOM directives are not mounted by this VNode-only render harness.
       if (name === 'vue')
         return { ...vue, onMounted() {}, onBeforeUnmount(fn) { cleanup.push(fn) }, resolveComponent: name => name, withDirectives: (node) => node }
@@ -121,7 +132,7 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
       if (name === 'vue-i18n') return { useI18n: () => ({ t }) }
       if (name.endsWith('useConservationText'))
         return {
-          useConservationText: () => ({ ct: (value) => String(value), locale: vue.ref('en') }),
+          useConservationText: () => ({ ct: (value, params = {}) => Object.entries(params).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), String(value)), locale: vue.ref('en') }),
         }
       if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { sessionListener = fn; return () => { sessionListener = null } } }
       if (name.endsWith('observationId')) return { formatObservationId }
@@ -129,7 +140,6 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
       if (name.endsWith('observationQueue')) return observationQueue
       if (name.endsWith('reviewSpeciesRequest')) return speciesRequestIntegration
       if (name.endsWith('plantId')) return { formatPlantId }
-      if (name.endsWith('plantSimilarityPrototype')) return { plantSimilarityByObservation }
       if (name.endsWith('reviewSpeciesRequest')) return speciesRequestIntegration
       if (name.endsWith('.vue')) return { name }
       throw Error(`Unexpected import: ${name}`)
@@ -181,7 +191,7 @@ test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery and sim
     for (const key of ['latitude', 'longitude', 'gpsAccuracy']) assert.equal(observation[key], '0')
     assert.equal(observation.createdAt, row.created_at)
     assert.equal(h.state.similarityFor(observation.displayId), undefined)
-    assert.ok(h.state.similarityFor(h.state.observations.value[1].displayId))
+    assert.equal(h.state.similarityFor(h.state.observations.value[1].id), undefined)
     await h.state.open(observation)
     await flush()
     assert.equal(h.route.query.review, firstId)
@@ -196,6 +206,203 @@ test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery and sim
   } finally {
     h.stop()
   }
+})
+
+test('similarity loads real UUID results through the plant proxy, preserves missing distance and clears on refresh', async () => {
+  const h = harness(async (url, options) => {
+    if (url.endsWith('/similarity')) {
+      assert.equal(url, `/api/data/observations/${firstId}/similarity`)
+      assert.equal(options.credentials, 'same-origin')
+      return Response.json({ observationId: firstId, plantId: 'PL001', status: 'available',
+        highestSimilarity: 0.92, candidates: [
+          { rank: 1, plantId: 'PL008', observationId: secondId, similarity: 0.92, distanceMeters: 0 },
+          { rank: 2, plantId: 'PL009', observationId: '2', similarity: 0.8 },
+        ] })
+    }
+    return Response.json({ observations: [fixture()] })
+  })
+  try {
+    await h.state.loadObservations()
+    const observation = h.state.observations.value[0]
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    const analysis = h.state.similarityFor(firstId)
+    assert.equal(analysis.candidates[0].plantId, 'PL008')
+    assert.equal(analysis.candidates[0].observationId, secondId)
+    assert.equal(analysis.candidates[0].distanceMeters, 0)
+    assert.equal(analysis.candidates[1].distanceMeters, undefined)
+    assert.equal(analysis.candidates[1].observationId, 'OBS002')
+    assert.equal(h.state.similarityAnalysis.value, analysis)
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.equal(h.calls.filter((call) => call.url.endsWith('/similarity')).length, 1)
+    await h.state.loadObservations()
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
+  } finally { h.stop() }
+})
+
+test('similarity table colors use raw score boundaries without changing display, requests or result navigation', async () => {
+  let score = 0
+  const h = harness(async url => url.endsWith('/similarity')
+    ? Response.json({ observationId: firstId, plantId: 'PL001', status: 'available', highestSimilarity: score,
+      candidates: [{ rank: 1, plantId: 'PL008', similarity: score }] })
+    : Response.json({ observations: [fixture()] }))
+  const button = () => nodes(h.render()).find(node => node.props?.class === 'similarity-badge-button')
+  try {
+    await h.state.loadObservations()
+    assert.equal(button().props.style, undefined)
+    assert.equal(nodes(button()).find(node => node.type === 'strong').children, 'Check similarity')
+    assert.equal(nodes(button()).find(node => node.type === 'span').children, 'BioCLIP 2')
+    const row = h.state.observations.value[0]
+    assert.ok(nodes(h.render()).some(node => node.type === 'td' && node.children === '1 Oct 2026, 18:00'))
+    for (const [value, background, text] of [
+      ...[0, 0.55, 0.69, 0.699].map(value => [value, '#DCFCE7', '#166534']),
+      ...[0.70, 0.78, 0.89, 0.899].map(value => [value, '#FEF9C3', '#854D0E']),
+      ...[0.90, 0.92, 1].map(value => [value, '#FEE2E2', '#B91C1C']),
+    ]) {
+      score = value
+      delete h.state.similarityResults.value[firstId]
+      await button().props.onClick({ currentTarget: null })
+      const calls = h.calls.length
+      const result = button()
+      assert.deepEqual({ ...result.props.style }, { '--similarity-background': background, '--similarity-text': text })
+      assert.equal(nodes(result).find(node => node.type === 'strong').children, `${Math.round(value * 100)}%`)
+      assert.equal(nodes(result).some(node => node.type === 'span' && node.children === 'BioCLIP 2'), false)
+      assert.equal(result.props.disabled, false)
+      h.state.closeSimilarity()
+      await result.props.onClick({ currentTarget: null })
+      assert.equal(h.state.similarityAnalysis.value, h.state.similarityFor(row.id))
+      assert.ok(nodes(h.render()).some(node => node.type?.name?.endsWith('PlantSimilarityDrawer.vue')))
+      h.render(); h.render()
+      assert.equal(h.calls.length, calls)
+    }
+    for (const value of [undefined, null, NaN, Infinity, -Infinity, 1.01, -1.01, '0.92', {}]) assert.equal(h.state.similarityBadgeStyle(value), undefined)
+    assert.deepEqual({ ...h.state.similarityBadgeStyle(-0.2) }, { '--similarity-background': '#DCFCE7', '--similarity-text': '#166534' })
+    assert.match(descriptor.styles[0].content, /background: var\(--similarity-background, #e8f3ec\)/)
+    assert.match(descriptor.styles[0].content, /\.similarity-badge-button:hover\s*\{\s*border-color: #73a68e;\s*background: var\(--similarity-background, #dceee3\)/)
+  } finally { h.stop() }
+})
+
+test('comparison photo IDs are optional, safely retained and never replaced by gallery photos; raw numeric IDs remain copyable', async () => {
+  const h = harness(() => Response.json({ observations: [fixture()] }))
+  try {
+    const observation = h.state.mapObservation(fixture({ id: '15' }))
+    const base = { observationId: '15', plantId: 'PL001', status: 'available', highestSimilarity: .8,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: '8', similarity: .8 }] }
+    for (const value of [undefined, null, '', '../private', 'https://example.invalid/photo', {}, 1]) {
+      const result = h.state.parseSimilarity({ ...base, sourceAssetId: value, candidates: [{ ...base.candidates[0], assetId: value }] }, observation)
+      assert.equal(result.sourceAssetId, undefined)
+      assert.equal(result.candidates[0].assetId, undefined)
+      assert.equal(result.rawObservationId, '15')
+      assert.equal(result.candidates[0].rawObservationId, '8')
+      assert.equal(result.observationId, 'OBS015')
+    }
+    const result = h.state.parseSimilarity({ ...base, sourceAssetId: 'source-selected', candidates: [{ ...base.candidates[0], assetId: 'reference-selected' }] }, observation)
+    assert.equal(result.sourceAssetId, 'source-selected')
+    assert.equal(result.candidates[0].assetId, 'reference-selected')
+    assert.equal(h.calls.length, 0)
+    let focused = 0
+    h.state.similarityAnalysis.value = result
+    h.state.similarityTrigger.value = { focus() { focused++ } }
+    h.state.closeSimilarity(); await flush()
+    assert.equal(h.state.similarityAnalysis.value, null)
+    assert.equal(focused, 1)
+  } finally { h.stop() }
+})
+
+test('similarity session changes clear cached evidence and invalidate pending responses', async () => {
+  for (const action of ['logout', 'account', 'pending']) {
+    const rows = [fixture(), fixture({ id: secondId, plant_id: 2 })]
+    const analysis = (id) => ({ observationId: id, plantId: id === firstId ? 'PL001' : 'PL002',
+      status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: '8', similarity: 0.9 }] })
+    let release
+    const h = harness(async url => {
+      if (url === `/api/data/observations/${firstId}/similarity`) return Response.json(analysis(firstId))
+      if (url === `/api/data/observations/${secondId}/similarity`)
+        return new Promise(resolve => { release = () => resolve(Response.json(analysis(secondId))) })
+      return fixtureResponse(url, rows)
+    })
+    try {
+      await h.state.loadObservations()
+      const [first, second] = h.state.observations.value
+      await h.state.checkSimilarity(first, { currentTarget: null })
+      assert.ok(h.state.similarityFor(firstId))
+      const pending = h.state.checkSimilarity(second, { currentTarget: null })
+      await flush()
+      if (action === 'account') h.emitSession({ id: 'another-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false })
+      else h.emitSession(null, action === 'pending')
+      // Let a late server response finish even if the HTTP mock ignores abort.
+      release()
+      await pending
+      assert.equal(h.calls.find(call => call.url.endsWith(`${secondId}/similarity`)).options.signal.aborted, true)
+      assert.equal(h.state.similarityFor(firstId), undefined)
+      assert.equal(h.state.similarityFor(secondId), undefined)
+      assert.equal(h.state.similarityAnalysis.value, null)
+      assert.equal(h.state.similarityLoading.value, '')
+      if (action !== 'account') {
+        const before = h.calls.length
+        await h.state.checkSimilarity(first, { currentTarget: null })
+        assert.equal(h.calls.length, before)
+      }
+    } finally { h.stop() }
+  }
+})
+
+test('loading another queue page preserves BioCLIP results while a full refresh clears them', async () => {
+  const rows = [fixture(), fixture({ id: secondId, plant_id: 2 })]
+  const h = harness(async url => url.endsWith('/similarity')
+    ? Response.json({ observationId: firstId, plantId: 'PL001', status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: '8', similarity: 0.9 }] })
+    : fixtureResponse(url, rows), {}, 'en', undefined, async url => {
+      const more = new URL(url, 'https://fixture.invalid').searchParams.has('cursor')
+      return Response.json({ observations: [rows[more ? 1 : 0]],
+        page: { has_more: !more, next_cursor: more ? null : 'next-page' } })
+    })
+  try {
+    await h.state.loadObservations()
+    await h.state.checkSimilarity(h.state.observations.value[0], { currentTarget: null })
+    const cached = h.state.similarityFor(firstId)
+    await h.state.loadObservations(true)
+    assert.equal(h.state.observations.value.length, 2)
+    assert.equal(h.state.similarityFor(firstId), cached)
+    await h.state.loadObservations()
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
+  } finally { h.stop() }
+})
+
+test('similarity failures and mismatched observations never display demo results; stale requests are ignored', async () => {
+  let mode = 'offline', release
+  const h = harness(async (url) => {
+    if (!url.endsWith('/similarity')) return Response.json({ observations: [fixture()] })
+    if (mode === 'offline') return Response.json({ error: 'BioCLIP unavailable' }, { status: 503 })
+    if (mode === 'invalid') return Response.json({ observationId: secondId })
+    return new Promise((resolve) => { release = () => resolve(Response.json({
+      observationId: firstId, plantId: 'PL001', status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: secondId, similarity: 0.9 }],
+    })) })
+  })
+  try {
+    await h.state.loadObservations()
+    const observation = h.state.observations.value[0]
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.match(h.state.similarityErrors.value[firstId], /BioCLIP unavailable/)
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    mode = 'invalid'
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.match(h.state.similarityErrors.value[firstId], /invalid result/)
+    assert.equal(h.state.similarityAnalysis.value, null)
+    mode = 'delayed'
+    const pending = h.state.checkSimilarity(observation, { currentTarget: null })
+    await flush()
+    assert.equal(h.state.similarityLoading.value, firstId)
+    await h.state.loadObservations()
+    release()
+    await pending
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
+    assert.equal(h.state.similarityLoading.value, '')
+  } finally { h.stop() }
 })
 
 test('UUID deep links outside list cap and reactive query changes load detail; stale responses are ignored', async () => {
@@ -487,6 +694,136 @@ const requestFixture = (overrides = {}) => ({
   ...overrides,
 })
 
+test('species panel preserves metadata and decision guards, moves the same refresh handler and opens exact authorized thumbnails', async () => {
+  class Element {}
+  const row = fixture({ species_request: requestFixture({ requested_by: 'staff:2ace382f-1737-463a-aff1-8e4b88308d04', assets: [
+    { id: 'species-first', content_type: 'image/jpeg' }, { id: 'species-second', content_type: 'image/png' }, { id: 'species-document', content_type: 'application/pdf' },
+  ] }) })
+  const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { HTMLElement: Element })
+  try {
+    await h.state.open(h.state.mapObservation(row)); await flush()
+    const panel = () => nodes(reviewModal(h)).find(n => n.props?.class === 'species-request-card')
+    const all = nodes(panel()), header = all.find(n => n.props?.class === 'species-request-header')
+    const refresh = nodes(header).find(n => n.props?.class === 'species-refresh-button')
+    assert.equal(refresh.props.onClick, h.state.refreshSpeciesRequest)
+    assert.equal(refresh.props.disabled, false)
+    assert.equal(all.filter(n => n.props?.onClick === h.state.refreshSpeciesRequest).length, 1)
+    assert.equal(refresh.props['aria-label'], 'Refresh submission and species resolution')
+    const help = all.find(n => n.props?.id === 'species-refresh-help')
+    assert.equal(help.children, 'Refresh submission and species resolution')
+    assert.equal(help.props.popover, 'auto')
+    let opened = 0
+    const popup = { style: {}, showPopover() { opened++ }, getBoundingClientRect: () => ({ width: 240, height: 40 }) }
+    h.state.speciesRefreshHelp.value = popup
+    for (const event of ['onMouseenter', 'onFocus', 'onPointerdown']) refresh.props[event]({ currentTarget: { getBoundingClientRect: () => ({ right: 1000, top: 100, bottom: 136 }) } })
+    assert.equal(opened, 3)
+    const fields = all.filter(n => n.type === 'dt').map(n => n.children)
+    for (const name of ['Species Request ID', 'Scientific Name', 'Common Name', 'Genus', 'Family', 'Conservation Status', 'Description', 'Habitat / Ecological Information', 'Submitted By', 'Submitted At']) assert.ok(fields.includes(name), name)
+    const identifier = all.find(n => n.type?.name?.endsWith('MonitoringIdentifier.vue'))
+    assert.equal(identifier.props.value, row.species_request.requested_by)
+    assert.equal(identifier.props.labels.get(identifier.props.value), 'staff:2ace382f\u2026')
+    const images = all.filter(n => n.type === 'img')
+    assert.deepEqual(images.map(n => n.props.src), ['/api/data/assets/species-first', '/api/data/assets/species-second'])
+    assert.equal(h.state.speciesRequestImages.value.length, 2)
+    let preview
+    h.state.speciesPhotoPreview.value = { open: (...args) => { preview = args } }
+    const trigger = new Element()
+    all.find(n => n.props?.class === 'species-thumbnail-button').props.onClick({ currentTarget: trigger })
+    assert.deepEqual(Array.from(preview[0], item => item.url), images.map(n => n.props.src))
+    assert.equal(preview[1], 0); assert.equal(preview[3], trigger)
+    images[0].props.onError()
+    assert.equal(nodes(panel()).filter(n => n.type === 'img').length, 1)
+    assert.ok(nodes(panel()).some(n => n.props?.class === 'species-photo-placeholder'))
+    const actions = all.find(n => n.props?.class === 'species-request-actions')
+    assert.equal(nodes(actions).filter(n => n.type === 'button').length, 3)
+    assert.equal(h.state.canReviewPlant.value, false)
+    assert.equal(h.state.speciesReviewComment.value, 'Species-specific comment')
+    h.state.speciesRefreshing.value = true
+    assert.equal(nodes(panel()).find(n => n.props?.class === 'species-refresh-button').props.disabled, true)
+    assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 0)
+  } finally { h.stop() }
+})
+
+test('review visibility cards start unselected and update the original explicit-choice model', async () => {
+  const row = fixture({ species_request: requestFixture() }), h = harness(url => fixtureResponse(url, [row]))
+  try {
+    await h.state.open(h.state.mapObservation(row)); await flush()
+    const selector = nodes(reviewModal(h)).find(n => n.type?.name?.endsWith('VisibilitySelector.vue'))
+    assert.ok(selector)
+    assert.equal(selector.props.modelValue, '')
+    await h.state.decideSpecies('Approved')
+    assert.equal(h.state.speciesSaveError.value, 'Select visibility.')
+    assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 0)
+    for (const value of ['public', 'internal', 'protected']) {
+      selector.props['onUpdate:modelValue'](value)
+      assert.equal(h.state.speciesVisibility.value, value)
+    }
+    assert.equal(h.state.speciesReviewComment.value, 'Species-specific comment')
+  } finally { h.stop() }
+})
+
+test('species comment feedback is attempt-driven, field-associated and clears visually after correction', async () => {
+  for (const decision of ['Rejected', 'Correction Required']) {
+    const row = fixture({ species_request: requestFixture({ review_comment: '' }) }), h = harness(url => fixtureResponse(url, [row]))
+    try {
+      await h.state.open(h.state.mapObservation(row)); await flush()
+      const field = () => nodes(reviewModal(h)).find(n => n.type === 'textarea' && n.props.maxlength === '4000')
+      const error = () => nodes(reviewModal(h)).filter(n => n.props?.id === 'species-request-comment-error')
+      assert.equal(error().length, 0)
+      assert.equal(field().props['aria-invalid'], undefined)
+      assert.ok(!nodes(reviewModal(h)).some(n => n.props?.id === 'species-request-comment-help'))
+      await h.state.decideSpecies(decision)
+      assert.equal(error().length, 1)
+      assert.equal(error()[0].props.role, 'alert')
+      assert.ok(nodes(error()[0]).some(n => n.type === 'span' && n.children === 'Enter a review comment for rejection or correction.'))
+      const icon = nodes(error()[0]).find(n => n.type === 'svg')
+      assert.equal(icon.props.width, '18'); assert.equal(icon.props['aria-hidden'], 'true')
+      assert.equal(field().props['aria-invalid'], 'true')
+      assert.equal(field().props['aria-describedby'], 'species-request-comment-error')
+      assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 0)
+      field().props['onUpdate:modelValue']('Valid review reason')
+      assert.equal(error().length, 0)
+      assert.equal(field().props['aria-invalid'], undefined)
+      assert.equal(h.state.speciesVisibility.value, '')
+      h.state.speciesReviewComment.value = 'x'.repeat(4001)
+      await h.state.decideSpecies(decision)
+      assert.equal(h.state.speciesCommentError.value, 'The species review comment must be 4,000 characters or fewer.')
+      assert.equal(error().length, 1)
+      h.state.speciesReviewComment.value = 'Valid length'
+      assert.equal(error().length, 0)
+      h.state.speciesReviewComment.value = ''
+      h.state.speciesSaveError.value = 'Enter a review comment for rejection or correction.'
+      h.state.reviewMessage.value = { variant: 'error', message: h.state.speciesSaveError.value }
+      assert.equal(error().length, 0, 'an existing backend alert is not duplicated')
+      h.state.reviewMessage.value = null
+      h.state.speciesSaveError.value = 'Unrelated backend failure'
+      assert.equal(error().length, 0)
+      assert.ok(nodes(reviewModal(h)).some(n => n.type === 'p' && n.children === 'Unrelated backend failure'))
+    } finally { h.stop() }
+  }
+})
+
+test('species approval still allows an empty comment after explicit visibility selection', async () => {
+  let row = fixture({ species_request: requestFixture({ request_id: '1', review_comment: '' }) })
+  const h = harness((url, options) => {
+    if (options.method === 'POST') {
+      const body = JSON.parse(options.body)
+      assert.equal(body.decision, 'Approved'); assert.equal(body.comment, ''); assert.equal(body.visibility, 'internal')
+      row = fixture({ species_request: requestFixture({ request_id: '1', request_status: 'Approved', approved_species_id: 8, review_comment: '' }) })
+      return Response.json({ reviewed: true })
+    }
+    return fixtureResponse(url, [row])
+  })
+  try {
+    await h.state.open(h.state.mapObservation(row)); await flush()
+    h.state.speciesVisibility.value = 'internal'
+    await h.state.decideSpecies('Approved')
+    assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 1)
+    assert.equal(h.state.speciesCommentError.value, '')
+    assert.equal(h.state.speciesSaveError.value, '')
+  } finally { h.stop() }
+})
+
 test('pending linked request appears before observation details and blocks every plant decision', async () => {
   const h = harness(async (url) => fixtureResponse(url, [
         fixture({ species_request_id: 'request-42', species_request: requestFixture() }),
@@ -545,10 +882,17 @@ test('only backend-approved request with matching resulting species and real nam
       assert.equal(h.state.speciesRequestState.value, unlocked ? 'approved' : 'incomplete')
       if (unlocked) {
         assert.ok(
-          nodes(h.render()).some(
+          !nodes(h.render()).some(
             (node) => node.type === 'h4' && node.children === 'Approved Species',
           ),
         )
+        assert.equal(h.state.speciesResolved.value, true)
+        const all = nodes(h.render())
+        assert.ok(all.some(n => n.props?.class === 'form-field species-review-comment'))
+        assert.ok(all.some(n => String(n.props?.class || '').includes('species-request-badge') && n.children === messages.conservationPages.reviews.speciesRequest.states.approved))
+        const lower = all.find(n => n.props?.class === 'review-observation-evidence')
+        assert.ok(nodes(lower).some(n => n.type === 'dd' && n.children === h.state.selected.value.speciesId))
+        assert.ok(nodes(lower).some(n => n.type === 'dd' && n.children === h.state.selected.value.scientificName))
         h.state.selected.value.scientificName = ''
         assert.equal(h.state.canDecide('Approved'), false)
       }
@@ -719,7 +1063,7 @@ test('real species approval posts explicit visibility with decision/comment and 
     assert.equal(h.state.canReviewSpecies.value, false)
     assert.equal(h.state.comment.value, 'Independent plant comment')
     assert.equal(h.state.selected.value.status, 'Pending Review')
-    assert.ok(nodes(h.render()).some((n) => n.type === 'h4' && n.children === 'Approved Species'))
+    assert.ok(!nodes(h.render()).some((n) => n.type === 'h4' && n.children === 'Approved Species'))
     assert.equal(h.state.reviewMessage.value.variant, 'success')
   } finally {
     h.stop()
@@ -1190,7 +1534,7 @@ test('QR uses only validated current plant fields after fresh observation and ne
     assert.equal(h.state.selected.value.latitude, '0'); assert.equal(h.state.selected.value.longitude, '0'); assert.equal(h.state.selected.value.gpsAccuracy, '0')
     assert.equal(h.state.selected.value.height, '12 cm'); assert.equal(h.state.selected.value.assets.length, 3)
     assert.match(renderText(h), /Current Plant QR Information/)
-    assert.ok(renderText(h).includes('actual-current-token')); assert.ok(renderText(h).includes('retired'))
+    assert.ok(renderText(h).includes(h.state.qrLabel('actual-current-token'))); assert.ok(renderText(h).includes('retired'))
     assert.ok(!renderText(h).includes('old-token')); assert.equal(h.state.canDecide('Approved'), true)
   } finally { h.stop() }
 })
@@ -1262,7 +1606,7 @@ test('zone altitude and QR loading/error labels use natural localized values wit
       await h.state.retrySelection(); await flush()
       assert.ok(renderText(h).includes(labels.qrIdentity))
       assert.ok(renderText(h).includes(labels.qrStatus))
-      assert.ok(renderText(h).includes('localized-token'))
+      assert.ok(renderText(h).includes(h.state.qrLabel('localized-token')))
       for (const key of ['currentPlantQr', 'qrIdentity', 'qrStatus', 'notRecorded', 'qrLoading', 'qrLoadFailed']) assert.equal(typeof labels[key], 'string')
     } finally { h.stop() }
   }
@@ -1299,7 +1643,7 @@ test('registration and legacy queues request authoritative origins, preserve all
     await h.state.open(h.state.filtered.value[0]); await flush()
     assert.equal(h.state.selected.value.origin, 'unknown'); assert.equal(h.state.canDecide('Approved'), true)
     assert.match(renderText(h), /Origin not verified/)
-    assert.match(renderText(h), /Loaded records only/)
+    assert.doesNotMatch(renderText(h), /Showing loaded submissions only/)
   } finally { h.stop() }
 })
 
@@ -1329,4 +1673,824 @@ test('legacy deep links select the explicit fallback; all queue labels render in
       assert.ok(renderText(h).includes(labels.originUnverified))
     } finally { h.stop() }
   }
+})
+
+const reviewTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'reviews-table')
+const reviewCopyButtons = h => nodes(reviewTable(h)).filter(node => node.type === 'button' && node.props?.class === 'identifier-copy')
+
+test('review queue retains nine headers, compact observation/subject labels and raw review identifiers', async () => {
+  const row = fixture({ owner_subject: 'staff:2ace382f-1111-4111-8111-111111111111' })
+  const h = harness(url => fixtureResponse(url, [row]))
+  try {
+    await h.state.loadObservations()
+    const headers = nodes(reviewTable(h)).filter(node => node.type === 'th')
+    assert.deepEqual(headers.map(node => node.children), ['Plant ID', 'Observation ID', 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
+    assert.ok(headers.every(node => node.props.scope === 'col'))
+    assert.equal(h.state.observationLabel(row.id), 'OBS-AA3BD8BE')
+    assert.equal(h.state.submitterLabel(row.owner_subject), 'Staff \u00b7 2ACE382F')
+    assert.equal(reviewCopyButtons(h).length, 2)
+    const review = nodes(reviewTable(h)).find(node => node.type === 'button' && node.children.trim?.() === 'Review')
+    await review.props.onClick(); await flush()
+    assert.equal(h.state.selected.value.id, row.id)
+    assert.equal(h.state.selected.value.recordedBy, row.owner_subject)
+    assert.equal(h.route.query.review, row.id)
+    assert.ok(h.calls.some(call => call.url === `/api/observations/${row.id}`))
+    assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+  } finally { h.stop() }
+})
+
+test('loaded identifier collisions extend independently of search and original filters remain authoritative', async () => {
+  const rows = [
+    fixture({ id: 'aa3bd8be-1111-4111-8111-111111111111', owner_subject: 'staff:2ace382f-1111-4111-8111-111111111111' }),
+    fixture({ id: 'aa3bd8be-2222-4222-8222-222222222222', owner_subject: 'staff:2ace382f-2222-4222-8222-222222222222' }),
+  ]
+  const h = harness(url => fixtureResponse(url, rows))
+  try {
+    await h.state.loadObservations()
+    assert.equal(h.state.observationLabel(rows[0].id), 'OBS-AA3BD8BE1111')
+    assert.equal(h.state.observationLabel(rows[1].id), 'OBS-AA3BD8BE2222')
+    assert.notEqual(h.state.submitterLabel(rows[0].owner_subject), h.state.submitterLabel(rows[1].owner_subject))
+    for (const query of [rows[0].id, h.state.observationLabel(rows[0].id), rows[0].owner_subject, h.state.submitterLabel(rows[0].owner_subject)]) {
+      h.state.search.value = query
+      assert.equal(h.state.filtered.value.length, 1)
+      assert.equal(h.state.filtered.value[0].id, rows[0].id)
+      assert.equal(h.state.observationLabel(rows[0].id), 'OBS-AA3BD8BE1111')
+    }
+    h.state.search.value = ''; h.state.species.value = '999'
+    assert.equal(h.state.filtered.value.length, 0)
+    assert.ok(h.calls.every(call => !call.url.includes('OBS-')))
+  } finally { h.stop() }
+})
+
+test('review copy controls copy full original identities and announce localized feedback without HTTP writes', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const row = fixture(), copied = []
+    const h = harness(url => fixtureResponse(url, [row]), {}, language, undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
+    try {
+      await h.state.loadObservations()
+      for (const [index, value] of [row.id, row.owner_subject].entries()) {
+        const button = reviewCopyButtons(h)[index]
+        assert.ok(button.props['aria-label'] && !button.props['aria-label'].startsWith('conservationPages.'))
+        await button.props.onClick()
+        assert.equal(copied[index], value)
+        assert.ok(h.state.copyFeedback.value && !h.state.copyFailed.value)
+      }
+      const live = nodes(h.render()).find(node => String(node.props?.class).includes('copy-feedback'))
+      assert.equal(live.props['aria-live'], 'polite')
+      assert.equal(live.props.role, 'status')
+      assert.equal(h.calls.length, 1)
+    } finally { h.stop() }
+  }
+})
+
+test('submitter names use only exact authorized session identity; copy remains role guarded', async () => {
+  const row = fixture({ owner_subject: 'staff:verified-officer' }), copied = []
+  const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
+  try {
+    await h.state.loadObservations()
+    h.emitSession({ id: 'verified-officer', name: 'Verified Officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false })
+    assert.equal(h.state.submitterLabel(row.owner_subject), 'Verified Officer')
+    assert.notEqual(h.state.submitterLabel('staff:someone-else'), 'Verified Officer')
+    for (const role of ['Admin', 'Botanist']) {
+      h.emitSession({ id: 'verified-officer', name: 'Unauthorized', role, status: 'Active', mustChangePassword: false })
+      await h.state.copyIdentifier(row.id, 'observation')
+      assert.equal(copied.length, 0)
+      assert.notEqual(h.state.submitterLabel(row.owner_subject), 'Unauthorized')
+      assert.equal(h.state.observations.value.length, 0)
+    }
+    assert.ok(h.calls.every(call => !call.url.includes('staff') && !call.url.includes('account')))
+  } finally { h.stop() }
+})
+
+test('failed clipboard keeps full IDs in details and stale copy completion cannot restore feedback after logout', async () => {
+  const row = fixture(), pending = deferred()
+  const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { clipboard: { writeText: () => pending.promise } })
+  try {
+    await h.state.loadObservations()
+    const copy = h.state.copyIdentifier(row.id, 'observation')
+    await h.state.copyIdentifier(row.owner_subject, 'subject')
+    h.emitSession(null)
+    pending.resolve(); await copy
+    assert.equal(h.state.copyFeedback.value, '')
+    assert.equal(h.state.copiedKey.value, '')
+  } finally { h.stop() }
+  const unavailable = harness(url => fixtureResponse(url, [row]))
+  try {
+    await unavailable.state.loadObservations()
+    await unavailable.state.copyIdentifier(row.id, 'observation')
+    assert.equal(unavailable.state.copyFailed.value, true)
+    await unavailable.state.open(unavailable.state.observations.value[0]); await flush()
+    const modal = nodes(unavailable.render()).find(node => node.type?.name?.endsWith('AppModal.vue'))
+    assert.ok(modal)
+    assert.equal(unavailable.state.selected.value.id, row.id)
+    assert.equal(modal.props.title, 'Review OBS-AA3BD8BE')
+    assert.ok(nodes(modal).some(node => node.type === 'dd' && node.children === row.id))
+    assert.ok(nodes(modal).some(node => node.type?.name?.endsWith('MonitoringIdentifier.vue') && node.props.value === row.owner_subject))
+  } finally { unavailable.stop() }
+})
+
+test('review table preserves alignment/header and uses shared workflow colors with scoped scrolling and nowrap controls', async () => {
+  const css = descriptor.styles[0].content
+  const shared = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
+  const observationSource = readFileSync(new URL('../src/views/conservation/ObservationsView.vue', import.meta.url), 'utf8')
+  assert.match(css, /\.reviews-table th, \.reviews-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)
+  assert.match(css, /\.reviews-table \.species-column\s*\{ width: 13rem/)
+  const header = /\.reviews-table th\s*\{([^}]+)\}/.exec(css)[1]
+  assert.equal(header.replace('font-size: 12px', 'font-size: 10px'), /\.observations-table th\s*\{([^}]+)\}/.exec(observationSource)[1])
+  const sharedHeader = /th\s*\{([^}]+)\}/.exec(shared)[1]
+  assert.match(sharedHeader, /text-transform: uppercase/)
+  assert.match(sharedHeader, /letter-spacing: 0.6px/)
+  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 96rem; table-layout: auto;[^}]*border-collapse: separate; border-spacing: 0/)
+  assert.match(css, /\.reviews-scroll\s*\{ min-width: 0; max-width: 100%; overflow-x: auto/)
+  assert.match(css, /\.reviews-table \.badge\s*\{[^}]*display: inline-flex; align-items: center;[^}]*white-space: nowrap/)
+  assert.match(css, /\.reviews-scroll \.reviews-table \.action-group\s*\{[^}]*flex-wrap: nowrap; align-items: center;[^}]*gap: 7px; width: max-content; min-width: max-content/)
+  assert.match(css, /\.identifier-line\s*\{[^}]*align-items: center;[^}]*gap: 7px;[^}]*vertical-align: middle/)
+  assert.match(css, /\.identifier-copy:focus-visible\s*\{ outline: 3px solid/)
+  assert.match(css, /@media \(max-width: 767px\)[^\n]*min-height: 44px/)
+  assert.ok(descriptor.template.content.includes(':style="workflowBadgeStyle(observation.status)"'))
+  assert.deepEqual(workflowBadgeStyle('Pending Review'), { backgroundColor: '#FEF9C3', color: '#854D0E' })
+  const compiled = compileStyle({ source: css, id: 'data-v-review-integration', scoped: true })
+  assert.equal(compiled.errors.length, 0)
+  assert.match(compiled.code, /\.reviews-scroll \.reviews-table \.identifier-copy\[data-v-review-integration\]/)
+  const h = harness(url => fixtureResponse(url, [fixture()]))
+  try {
+    await h.state.loadObservations()
+    const scroll = nodes(h.render()).find(node => String(node.props?.class).includes('reviews-scroll'))
+    assert.equal(scroll.props.role, 'region'); assert.equal(scroll.props.tabindex, '0')
+    assert.equal(nodes(scroll).filter(node => String(node.props?.class).includes('table-scroll')).length, 1)
+    const badge = nodes(reviewTable(h)).find(node => node.type === 'span' && String(node.props?.class).includes('badge'))
+    assert.ok(badge.props.class.includes('pending-review'))
+    assert.equal(badge.children, 'Pending Review')
+  } finally { h.stop() }
+})
+
+const reviewSummaryCards = h => nodes(h.render()).filter(node => node.type === 'article' && String(node.props?.class).includes('review-summary-card'))
+
+test('review summary omits loaded-submission notices from cards and table in every locale', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const h = harness(url => fixtureResponse(url, [fixture()]), {}, language)
+    try {
+      await h.state.loadObservations()
+      const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews.queues
+      assert.equal(typeof labels.summaryScope, 'string')
+      const scope = nodes(h.render()).filter(node => node.props?.id === 'review-summary-scope')
+      assert.equal(scope.length, 0)
+      assert.ok(!renderText(h).includes(labels.summaryScope))
+      assert.ok(!renderText(h).includes(labels.loadedScope))
+      const summary = nodes(h.render()).find(node => String(node.props?.class).includes('review-summary-grid'))
+      assert.equal(summary.props['aria-describedby'], undefined)
+      assert.equal(reviewSummaryCards(h).length, 5)
+      assert.ok(reviewSummaryCards(h).every(card => !nodes(card).some(node => node.type === 'small')))
+      assert.equal(nodes(reviewTable(h)).filter(node => node.type === 'th').length, 9)
+      assert.equal(reviewCopyButtons(h).length, 2)
+      assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+    } finally { h.stop() }
+  }
+})
+
+test('summary titles and counts retain loaded data, loading, unavailable and empty behavior', async () => {
+  const rows = [
+    ...Array.from({ length: 12 }, (_, index) => fixture({ id: index + 1 })),
+    fixture({ id: 13, status: 'Correction Required' }), fixture({ id: 14, status: 'Flagged' }),
+    fixture({ id: 15, status: 'Approved', reviewed_at: new Date().toISOString() }),
+    fixture({ id: 16, status: 'Approved', reviewed_at: '2000-01-01T12:00:00Z' }),
+    fixture({ id: 17, status: 'Rejected' }), fixture({ id: 18, status: ' rejected ' }),
+  ]
+  const h = harness(url => fixtureResponse(url, rows))
+  const values = () => reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children)
+  try {
+    assert.ok(values().every(value => value === messages.conservationPages.reviews.loading))
+    await h.state.loadObservations()
+    assert.deepEqual(values(), ['12', '1', '1', '2', '1'])
+    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'p').children), ['Pending Review', 'Correction Required', 'Flagged', 'Rejected', 'Approved Today'])
+    h.state.search.value = 'no matching result'
+    assert.equal(h.state.filtered.value.length, 0)
+    assert.deepEqual(values(), ['12', '1', '1', '2', '1'], 'counters keep their existing loaded-record semantics')
+    h.state.loadError.value = 'Offline failure'
+    assert.ok(values().every(value => value === messages.conservationPages.reviews.unavailable))
+    h.state.loadError.value = ''; h.state.observations.value = []
+    assert.deepEqual(values(), ['0', '0', '0', '0', '0'])
+  } finally { h.stop() }
+})
+
+test('summary palette has readable contrast and five/three/two/one-column layout; request badges resist grid stretching', () => {
+  const css = descriptor.styles[0].content
+  assert.match(css, /\.review-summary-card\s*\{[^}]*border: 1px solid currentColor;[^}]*color: var\(--review-summary-ink\)/)
+  const palette = {
+    'pending-review': ['#e8f0f5', '#315d78'],
+    'correction-required': ['#fff1db', '#926119'],
+    flagged: ['#f0eaf8', '#69459a'],
+    rejected: ['#fbe8e5', '#a33f35'],
+    'approved-today': ['#e7f3e9', '#287347'],
+  }
+  const luminance = hex => {
+    const channels = hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
+    return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722
+  }
+  for (const [key, [background, foreground]] of Object.entries(palette)) {
+    const rule = new RegExp(`\\.review-summary-${key}\\s*\\{([^}]+)\\}`).exec(css)[1]
+    assert.ok(rule.includes(`--review-summary-background: ${background}`))
+    assert.ok(rule.includes(`--review-summary-ink: ${foreground}`))
+    assert.ok((luminance(background) + .05) / (luminance(foreground) + .05) >= 4.5, `${key} text contrast`)
+  }
+  assert.match(css, /\.review-summary-grid\s*\{ grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/)
+  assert.match(css, /@media \(max-width: 1280px\)\s*\{ \.review-summary-grid\s*\{ grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/)
+  assert.match(css, /@media \(max-width: 900px\)\s*\{ \.review-summary-grid\s*\{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
+  assert.match(css, /@media \(max-width: 480px\)\s*\{ \.review-summary-grid\s*\{ grid-template-columns: minmax\(0, 1fr\)/)
+  assert.match(css, /\.review-summary-card strong\s*\{[^}]*font-variant-numeric: tabular-nums; overflow-wrap: anywhere/)
+  const badge = /\.reviews-table \.species-request-badge\s*\{([^}]+)\}/.exec(css)[1]
+  for (const declaration of ['display: inline-flex', 'align-self: flex-start', 'justify-self: start', 'width: fit-content', 'max-width: 100%', 'white-space: normal']) assert.ok(badge.includes(declaration))
+  assert.match(css, /\.species-request-badge\s*\{[^}]*padding: 5px 8px;[^}]*background: #e7f1e7/)
+  assert.equal(compileStyle({ source: css, id: 'data-v-review-summary', scoped: true }).errors.length, 0)
+})
+
+test('registration introduction is localized and concise while legacy queue remains available', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews.queues
+    const h = harness(url => fixtureResponse(url, []), {}, language)
+    try {
+      await h.state.loadObservations()
+      const intro = nodes(h.render()).find(node => node.type === 'section' && String(node.props?.class).split(' ').includes('page-intro'))
+      const text = nodes(intro).filter(node => typeof node.children === 'string').map(node => node.children)
+      assert.deepEqual(text, [labels.registrationEyebrow, labels.registrations, labels.registrationIntro])
+      assert.ok(!labels.registrationIntro.includes(labels.legacy))
+      assert.ok(nodes(h.render()).some(node => node.type === 'option' && node.props?.value === 'unknown'))
+      assert.equal(nodes(h.render()).filter(node => node.props?.id === 'review-summary-scope').length, 0)
+      assert.equal(reviewSummaryCards(h).length, 5)
+      assert.ok(nodes(reviewSummaryCards(h)[3]).some(node => node.type === 'svg' && node.props?.['aria-hidden'] === 'true'))
+    } finally { h.stop() }
+  }
+  const labels = messages.conservationPages.reviews.queues
+  assert.equal(labels.registrationEyebrow, 'Verification Workflow')
+  assert.equal(labels.registrations, 'New Plant Registrations')
+  assert.equal(labels.registrationIntro, 'Review and approve or reject new plant registrations and associated species requests.')
+  assert.ok(!labels.registrationIntro.includes('Unclassified records remain available'))
+  assert.equal(labels.summaryScope, 'Showing loaded submissions only')
+})
+
+test('Rejected counts deduplicated observation statuses, not rejected linked requests or cumulative queue visits', async () => {
+  const rejected = fixture({ status: 'rejected' })
+  const pending = fixture({ id: secondId, species_request: requestFixture({ request_status: 'Rejected' }) })
+  const extra = fixture({ id: '123', status: 'Rejected' })
+  const legacy = { ...rejected, origin_type: 'unknown' }
+  const h = harness(url => fixtureResponse(url, [rejected, pending, extra]), {}, 'en', undefined, async url => {
+    const query = new URL(url, 'https://fixture.invalid').searchParams
+    if (query.get('origin_type') === 'unknown') return Response.json({ observations: [legacy, legacy], page: { has_more: false, next_cursor: null } })
+    if (query.has('cursor')) return Response.json({ observations: [rejected, extra], page: { has_more: false, next_cursor: null } })
+    return Response.json({ observations: [rejected, rejected, pending], page: { has_more: true, next_cursor: 'more-rejected' } })
+  })
+  const count = () => h.state.counts.value.find(([title]) => title === 'Rejected')[1]
+  try {
+    await h.state.loadObservations()
+    assert.equal(count(), 1)
+    assert.equal(h.state.observations.value.length, 2)
+    assert.equal(h.state.observations.value.find(row => row.id === secondId).speciesRequest.state, 'rejected')
+    await h.state.loadObservations(true)
+    assert.equal(count(), 2)
+    assert.equal(h.state.observations.value.length, 3)
+    h.state.queueOrigin.value = 'unknown'; await h.state.loadObservations()
+    assert.equal(count(), 1, 'queue switch replaces the loaded scope rather than adding the same ID twice')
+    assert.equal(h.state.observations.value.length, 1)
+    h.state.queueOrigin.value = 'initial_registration'; await h.state.loadObservations()
+    assert.equal(count(), 1)
+    assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+  } finally { h.stop() }
+})
+
+const reviewFilterFields = h => {
+  const toolbar = nodes(h.render()).find(node => node.type === 'div' && String(node.props?.class).includes('reviews-filters'))
+  return nodes(toolbar).filter(node => node.type === 'label')
+}
+
+test('review filters use five matching label/control wrappers with no stray text and retain the native calendar', async () => {
+  const h = harness(url => fixtureResponse(url, [fixture()]))
+  try {
+    await h.state.loadObservations()
+    const fields = reviewFilterFields(h)
+    assert.equal(fields.length, 5)
+    assert.deepEqual(fields.map(field => nodes(field).find(node => node.type === 'span').children), ['Review Queue', 'Search', 'Review status', 'Species', messages.conservationPages.reviews.recordCreated])
+    for (const field of fields) {
+      assert.equal(nodes(field).filter(node => node.type === 'span').length, 1)
+      assert.equal(nodes(field).filter(node => ['input', 'select'].includes(node.type)).length, 1)
+      const directText = field.children.filter(child => typeof child === 'string' || child?.type === vue.Text).map(child => typeof child === 'string' ? child : child.children).join('')
+      assert.equal(directText.trim(), '', 'no anonymous text grid row')
+    }
+    const date = nodes(fields[4]).find(node => node.type === 'input')
+    assert.equal(date.props.type, 'date')
+    assert.equal(typeof date.props['onUpdate:modelValue'], 'function')
+    date.props['onUpdate:modelValue']('2026-10-01')
+    assert.equal(h.state.date.value, '2026-10-01')
+    assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+  } finally { h.stop() }
+  const css = descriptor.styles[0].content
+  assert.match(css, /\.reviews-filters\s*\{ align-items: stretch/)
+  assert.match(css, /\.reviews-filters > \.field\s*\{ grid-template-rows: 1fr 44px/)
+  assert.match(css, /\.reviews-filters > \.field > span\s*\{ align-self: end; font-size: 12px; line-height: 1.4/)
+  assert.match(css, /\.reviews-filters > \.field > input, \.reviews-filters > \.field > select\s*\{ box-sizing: border-box; height: 44px; padding: 9px 10px/)
+  assert.doesNotMatch(css, /calendar-picker-indicator|appearance:\s*none/)
+  const shared = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
+  assert.match(shared, /\.control-bar\s*\{[^}]*display: flex;[^}]*flex-wrap: wrap/)
+  assert.match(shared, /\.search-field\s*\{[^}]*min-width: 240px;[^}]*flex: 2/)
+  assert.match(shared, /@media \(max-width: 620px\)[\s\S]*\.control-bar\s*\{[^}]*flex-direction: column/)
+})
+
+test('date, search, status, species and queue filters retain independent and combined behavior', async () => {
+  const rows = [fixture(), fixture({ id: secondId, status: 'Approved', species_id: 9, scientific_name: 'Other species', created_at: '2026-10-02T12:00:00Z' }), fixture({ id: '123', created_at: '2026-10-02T12:00:00Z' })]
+  const h = harness(url => fixtureResponse(url, rows))
+  const update = (index, value) => nodes(reviewFilterFields(h)[index]).find(node => ['input', 'select'].includes(node.type)).props['onUpdate:modelValue'](value)
+  try {
+    await h.state.loadObservations()
+    const ids = () => Array.from(h.state.filtered.value, row => row.id)
+    assert.deepEqual(ids(), [firstId, secondId, '123'])
+    update(4, h.state.dateKey(rows[0].created_at)); assert.deepEqual(ids(), [firstId])
+    update(4, ''); update(3, '9'); assert.deepEqual(ids(), [secondId])
+    update(3, ''); update(2, 'Pending Review'); assert.deepEqual(ids(), [firstId, '123'])
+    update(2, ''); update(1, 'Other species'); assert.deepEqual(ids(), [secondId])
+    update(1, firstId); update(2, 'Pending Review'); update(3, '8'); update(4, h.state.dateKey(rows[0].created_at))
+    assert.deepEqual(ids(), [firstId])
+    update(4, h.state.dateKey(rows[1].created_at)); assert.deepEqual(ids(), [])
+    update(4, ''); update(1, ''); update(2, ''); update(3, ''); update(0, 'unknown')
+    assert.deepEqual(ids(), [])
+    update(0, 'initial_registration'); assert.equal(ids().length, 3)
+    assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+  } finally { h.stop() }
+})
+
+test('review typography uses a readable hierarchy without squeezing identifiers, badges, filters or actions', () => {
+  const css = descriptor.styles[0].content
+  for (const [selector, size] of [
+    ['.reviews-intro h2', 28], ['.reviews-intro p', 14], ['.reviews-intro .page-kicker', 12],
+    ['.review-summary-title p', 14], ['.review-summary-card strong', 30],
+    ['.reviews-filters > .field > span', 12], ['.reviews-table th', 12], ['.reviews-table td', 14],
+    ['.reviews-table .badge', 12], ['.reviews-table .action-group > .action-button', 13],
+    ['.reviews-table .species-request-badge', 12], ['.similarity-unavailable', 12],
+  ]) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const rule = new RegExp(`^(?:\\.submission-review-badge, )?${escaped}\\s*\\{([^}]+)\\}`, 'm').exec(css)?.[1]
+    assert.ok(rule?.includes(`font-size: ${size}px`), selector)
+  }
+  assert.match(css, /\.reviews-filters > \.field > input, \.reviews-filters > \.field > select\s*\{[^}]*height: 44px;[^}]*font-size: 14px; line-height: 1.4/)
+  assert.match(css, /\.identifier-line > strong, \.identifier-line > span\s*\{[^}]*font-size: 14px; line-height: 1.5/)
+  assert.match(css, /\.reviews-table \.observation-column\s*\{ width: 12rem/)
+  assert.match(css, /\.reviews-table \.created-column\s*\{ width: 12rem/)
+  assert.match(css, /\.reviews-table \.badge\s*\{[^}]*white-space: nowrap/)
+  assert.match(css, /\.reviews-table \.action-group > \.action-button\s*\{[^}]*white-space: nowrap/)
+  assert.match(css, /\.review-summary-title p\s*\{[^}]*line-height: 1.5/)
+  assert.doesNotMatch(css, /text-overflow:\s*ellipsis/)
+  assert.equal(compileStyle({ source: css, id: 'data-v-review-type', scoped: true }).errors.length, 0)
+})
+
+const reviewModal = h => nodes(h.render()).find(node => node.type?.name?.endsWith('AppModal.vue'))
+
+test('missing review comment gets a decorative Lucide circle-alert without changing other feedback', async () => {
+  const row = fixture(), h = harness(url => fixtureResponse(url, [row]))
+  try {
+    await h.state.open(h.state.mapObservation(row)); await flush()
+    h.state.comment.value = ''
+    await h.state.decide('Rejected')
+    const expected = 'Enter a review comment for rejection, correction, or flagging.'
+    assert.equal(h.state.reviewMessage.value.message, expected)
+    const all = nodes(reviewModal(h)), icon = all.find(n => String(n.props?.class).includes('lucide-circle-alert'))
+    assert.ok(icon)
+    assert.equal(icon.props.width, '18'); assert.equal(icon.props.height, '18')
+    assert.equal(icon.props['aria-hidden'], 'true')
+    assert.equal(icon.props.stroke, 'currentColor')
+    assert.ok(all.some(n => n.type === 'span' && n.children === expected))
+    assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 0)
+    h.state.reviewMessage.value = { variant: 'error', message: 'Different backend error' }
+    assert.ok(!nodes(reviewModal(h)).some(n => String(n.props?.class).includes('lucide-circle-alert')))
+    assert.match(descriptor.styles[0].content, /\.review-comment-validation \{ display: flex; align-items: flex-start; gap: 8px/)
+    assert.match(descriptor.styles[0].content, /\.review-comment-alert-icon \{[^}]*flex: 0 0 18px/)
+  } finally { h.stop() }
+})
+
+test('similarity explanation is a top-layer help tooltip with hover, focus and tap access, without changing comparison', async () => {
+  const row = fixture(), document = { activeElement: null }
+  const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { document })
+  try {
+    await h.state.open(h.state.mapObservation(row)); await flush()
+    const all = nodes(reviewModal(h)), help = all.find(n => n.props?.class === 'similarity-info-button')
+    const tooltip = all.find(n => n.props?.id === 'review-similarity-info')
+    const description = 'Compare this submission with approved plant photos.'
+    assert.equal(tooltip.children, description)
+    assert.equal(tooltip.props.popover, 'auto')
+    assert.equal(tooltip.props.role, 'tooltip')
+    assert.ok(!all.some(n => n.type === 'p' && n.children === description))
+    assert.equal(help.props['aria-describedby'], tooltip.props.id)
+    assert.equal(help.props.type, 'button')
+    let shows = 0, hides = 0
+    const popup = { style: {}, showPopover() { shows++ }, hidePopover() { hides++ }, getBoundingClientRect: () => ({ width: 280, height: 54 }) }
+    h.state.similarityInfo.value = popup
+    const target = { getBoundingClientRect: () => ({ left: 950, top: 10, bottom: 38 }) }
+    for (const handler of ['onMouseenter', 'onFocus', 'onClick']) help.props[handler]({ currentTarget: target, stopPropagation() {}, preventDefault() {} })
+    assert.equal(shows, 3)
+    assert.equal(popup.style.left, '736px')
+    assert.equal(popup.style.top, '46px')
+    document.activeElement = target
+    help.props.onMouseleave({ type: 'mouseleave', currentTarget: target })
+    assert.equal(hides, 0)
+    help.props.onBlur({ type: 'blur', currentTarget: target })
+    assert.equal(hides, 1)
+    assert.ok(all.some(n => n.type === 'button' && n.children === 'Check similarity'))
+    assert.equal(h.calls.filter(call => call.url.endsWith('/similarity')).length, 0)
+    assert.match(descriptor.styles[0].content, /\.similarity-info-tooltip \{ position: fixed; inset: auto/)
+  } finally { h.stop() }
+})
+
+test('submission information preserves field order, full submitter identity and day-first Malaysia timestamps', async () => {
+  const id = 'staff:2ace382f-1737-463a-aff1-8e4b88308d04'
+  const row = fixture({ owner_subject: id, created_at: '2026-11-04T13:28:00Z', updated_at: '2026-11-04T17:18:00Z', reviewed_at: '2026-11-05T01:18:00+08:00', review_decision: 'Rejected', status: 'Correction Required' })
+  const h = harness(url => fixtureResponse(url, [row]))
+  try {
+    await h.state.open(h.state.mapObservation(row)); await flush()
+    const all = nodes(reviewModal(h))
+    const identifier = all.find(node => node.type?.name?.endsWith('MonitoringIdentifier.vue'))
+    assert.equal(identifier.props.value, id)
+    assert.equal(identifier.props.labels.get(id), 'staff:2ace382f\u2026')
+    assert.equal(identifier.props['copy-label'], 'Copy full submitter ID')
+    assert.equal(identifier.props['feedback-duration'], 3000)
+    const list = all.find(node => node.type === 'dl' && nodes(node).includes(identifier))
+    assert.equal(list.props.class, 'detail-list submission-information')
+    assert.deepEqual(nodes(list).filter(node => node.type === 'dt').map(node => node.children), ['Submitted By', 'Record created', 'Last updated', 'Reviewed at', 'Latest review decision', 'Status'])
+    assert.deepEqual(nodes(list).filter(node => node.type === 'dd').slice(1, 4).map(node => node.children), ['4 Nov 2026, 21:28', '5 Nov 2026, 01:18', '5 Nov 2026, 01:18'])
+    const badges = nodes(list).filter(node => String(node.props?.class).includes('submission-review-badge'))
+    assert.deepEqual(badges.map(node => node.children), ['Rejected', 'Correction Required'])
+    assert.deepEqual(badges.map(node => node.props.style), [workflowBadgeStyle('Rejected'), workflowBadgeStyle('Correction Required')])
+    assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 0)
+  } finally { h.stop() }
+})
+
+test('submission status badges reuse table styles independently for every workflow value and safe fallback', async () => {
+  const h = harness(url => fixtureResponse(url, [fixture()]))
+  try {
+    await h.state.open(h.state.mapObservation(fixture())); await flush()
+    for (const value of ['Approved', 'Pending Review', 'Correction Required', 'Rejected', 'Flagged', 'Draft', '', 'Unrecognized']) {
+      // Render the already mapped view model: presentation must not classify statuses.
+      h.state.selected.value.reviewDecision = value
+      h.state.selected.value.status = 'Pending Review'
+      const badges = nodes(reviewModal(h)).filter(node => String(node.props?.class).includes('submission-review-badge'))
+      assert.equal(badges.length, 2)
+      assert.equal(badges[0].children, value || '\u2014')
+      assert.deepEqual(badges[0].props.style, workflowBadgeStyle(value))
+      assert.equal(badges[1].children, 'Pending Review')
+      assert.deepEqual(badges[1].props.style, workflowBadgeStyle('Pending Review'))
+    }
+    const mapped = h.state.mapObservation(fixture({ status: null, review_decision: null, owner_subject: null, created_at: 'invalid', updated_at: null, reviewed_at: null }))
+    h.state.selected.value = mapped
+    const all = nodes(reviewModal(h))
+    const identifier = all.find(node => node.type?.name?.endsWith('MonitoringIdentifier.vue'))
+    assert.equal(identifier.props.value, '')
+    const list = all.find(node => node.type === 'dl' && nodes(node).includes(identifier))
+    assert.deepEqual(nodes(list).filter(node => node.type === 'dd').slice(1, 4).map(node => node.children), ['\u2014', '\u2014', '\u2014'])
+    assert.match(descriptor.styles[0].content, /\.submission-review-badge, \.reviews-table \.badge\s*\{/)
+  } finally { h.stop() }
+})
+
+test('whole decision panel keeps similarity, comment and feedback together for registration and subsequent layouts', async () => {
+  for (const origin of ['initial_registration', 'subsequent_observation']) {
+    const row = fixture({ origin_type: origin })
+    const h = harness(url => fixtureResponse(url, [row]))
+    try {
+      await h.state.open(h.state.mapObservation(row)); await flush()
+      h.state.comment.value = 'Unsaved Officer comment'
+      h.state.reviewMessage.value = { variant: 'error', message: 'Existing validation feedback' }
+      const modal = reviewModal(h), all = nodes(modal)
+      const panel = all.find(node => node.type === 'aside' && node.props?.class === 'review-decision-panel')
+      assert.ok(panel)
+      assert.equal(panel.props.tabindex, '0')
+      assert.equal(panel.props['aria-labelledby'], 'review-decision-heading')
+      assert.ok(nodes(panel).some(node => node.props?.class === 'review-similarity-summary'))
+      assert.ok(nodes(panel).some(node => node.props?.id === 'review-decision-heading'))
+      assert.ok(nodes(panel).some(node => node.children === 'Existing validation feedback'))
+      const textarea = nodes(panel).filter(node => node.type === 'textarea')
+      assert.equal(textarea.length, 1)
+      textarea[0].props['onUpdate:modelValue']('Officer comment retained while scrolling')
+      h.render(); h.render()
+      assert.equal(h.state.comment.value, 'Officer comment retained while scrolling')
+      const footer = all.filter(node => node.props?.class === 'modal-actions plant-review-actions')
+      assert.equal(footer.length, 1)
+      assert.ok(!nodes(panel).includes(footer[0]))
+      assert.deepEqual(nodes(footer[0]).filter(node => node.type === 'button').map(node => node.children), ['Approve', 'Reject', 'Request Correction', 'Flag'])
+      assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 0)
+    } finally { h.stop() }
+  }
+})
+
+test('decision panel sticks only on desktop within the existing modal scroller and caps only oversized content', () => {
+  const css = descriptor.styles[0].content
+  assert.match(css, /\.review-observation-columns\s*\{ align-items: start/)
+  assert.match(css, /@media \(min-width: 921px\)\s*\{\s*\.review-decision-panel\s*\{[^}]*position: sticky;[^}]*top: 16px;[^}]*max-height: calc\(100dvh - 104px\);[^}]*overflow: auto;[^}]*scrollbar-gutter: stable/s)
+  assert.match(css, /\.review-decision-panel:focus-visible/)
+  assert.match(css, /\.review-decision-panel \.review-similarity-summary\s*\{ flex-wrap: wrap/)
+  const shared = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
+  assert.match(shared, /\.officer-layout \.modal-card\s*\{[^}]*max-height: calc\(100vh - 40px\);[^}]*overflow: auto/)
+  assert.match(shared, /@media \(max-width: 920px\)[\s\S]*\.two-column\s*\{\s*grid-template-columns: 1fr/)
+  assert.deepEqual(compileStyle({ source: css, id: 'data-v-review', scoped: true }).errors, [])
+})
+
+test('major review section headings use eight themed outline icons without decorating the fields', async () => {
+  for (const origin of ['initial_registration', 'subsequent_observation']) {
+    const row = fixture({ origin_type: origin })
+    const h = harness(url => fixtureResponse(url, [row]))
+    try {
+      await h.state.open(h.state.mapObservation(row)); await flush()
+      const modal = reviewModal(h), all = nodes(modal)
+      const headings = all.filter(node => String(node.props?.class || '').split(' ').includes('review-section-heading'))
+      assert.equal(headings.length, 8)
+      assert.deepEqual(headings.map(heading => nodes(heading).find(node => node.type === 'svg').props['data-section-icon']), ['leaf', 'sprout', 'pin', 'qr', 'image', 'file', 'clipboard', 'comment'])
+      for (const heading of headings) {
+        const icons = nodes(heading).filter(node => node.type === 'svg')
+        assert.equal(icons.length, 1)
+        assert.equal(icons[0].props['aria-hidden'], 'true')
+        assert.equal(icons[0].props.focusable, 'false')
+        assert.equal(icons[0].props.fill, 'none')
+        assert.ok(nodes(heading).some(node => node.type === 'span' && typeof node.children === 'string' && node.children.trim()))
+      }
+      const section = all.find(node => node.props?.class === 'review-section')
+      assert.ok(nodes(section).some(node => node.props?.class === 'detail-list'))
+      assert.ok(nodes(section).some(node => node.props?.class === 'two-column review-observation-columns'))
+      assert.equal(nodes(section).filter(node => node.type === 'table').length, 0)
+      for (const label of nodes(section).filter(node => node.type === 'dt')) assert.equal(nodes(label).filter(node => node.type === 'svg').length, 0)
+      const panel = all.find(node => node.props?.class === 'review-decision-panel')
+      assert.ok(nodes(panel).some(node => node.props?.id === 'review-decision-heading'))
+      assert.ok(nodes(panel).some(node => node.props?.class === 'review-similarity-summary'))
+      assert.equal(nodes(panel).filter(node => node.type === 'textarea').length, 1)
+    } finally { h.stop() }
+  }
+  const css = descriptor.styles[0].content
+  assert.match(css, /\.review-section-heading\s*\{[^}]*min-height: 40px;[^}]*border-radius: 8px;[^}]*background: #eaf3e9;[^}]*color: var\(--forest, #173f34\)/)
+  assert.match(css, /\.review-section-icon\s*\{[^}]*width: 20px;[^}]*height: 20px;[^}]*color: var\(--green, #33745d\)/)
+  assert.match(css, /\.review-section-heading > span\s*\{[^}]*overflow-wrap: anywhere/)
+})
+const qrCopyButton = h => nodes(reviewModal(h)).find(node => node.type === 'button' && node.props?.onClick === h.state.copyQrIdentity)
+
+test('modal thumbnails retain protected raw-asset URLs and error handling without visible asset/MIME captions', async () => {
+  const row = fixture({ species_request: requestFixture({ assets: [{ id: 'request-photo-uuid', content_type: 'image/jpeg' }] }) })
+  const h = harness(url => fixtureResponse(url, [row]))
+  try {
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+    const modal = reviewModal(h)
+    assert.ok(!nodes(modal).some(node => node.props?.class === 'submitted-image-caption'))
+    const text = nodes(modal).map(node => typeof node.children === 'string' ? node.children : '').join(' ')
+    for (const hidden of ['image-one', 'image-two', 'request-photo-uuid', 'image/jpeg', 'image/png', 'application/pdf']) assert.ok(!text.includes(hidden), hidden)
+    const images = nodes(modal).filter(node => node.type === 'img')
+    assert.ok(images.some(node => node.props.src === '/api/data/assets/request-photo-uuid'))
+    assert.ok(images.some(node => node.props.src === '/api/data/assets/image-one'))
+    assert.ok(images.every(node => node.props.loading === 'lazy'))
+    images.find(node => node.props.src.endsWith('/image-one')).props.onError()
+    assert.ok(!nodes(reviewModal(h)).some(node => node.type === 'img' && node.props.src.endsWith('/image-one')))
+    assert.equal(h.state.selected.value.assets.length, 3)
+    assert.ok(renderText(h).includes(messages.conservationPages.reviews.imageUnavailable))
+    assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+  } finally { h.stop() }
+})
+
+test('modal titles and subtitles reuse compact identities, include off-page collisions and preserve numeric IDs exactly', async () => {
+  const a = fixture({ id: 'aa3bd8be-1111-4111-8111-111111111111', owner_subject: 'staff:2ace382f-1111-4111-8111-111111111111' })
+  const b = fixture({ id: 'aa3bd8be-2222-4222-8222-222222222222', owner_subject: 'staff:2ace382f-2222-4222-8222-222222222222' })
+  const h = harness(url => fixtureResponse(url, [a, b]))
+  try {
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+    assert.equal(reviewModal(h).props.title, 'Review OBS-AA3BD8BE1111')
+    assert.ok(reviewModal(h).props.subtitle.includes('Staff \u00b7 2ACE382F1111'))
+    assert.ok(!reviewModal(h).props.subtitle.includes(a.owner_subject))
+    assert.equal(h.route.query.review, a.id)
+    assert.equal(h.state.selected.value.id, a.id)
+    h.state.observations.value = [h.state.mapObservation(a)]
+    h.state.selected.value = h.state.mapObservation(b)
+    assert.equal(reviewModal(h).props.title, 'Review OBS-AA3BD8BE2222', 'deep-linked detail participates in loaded collision handling')
+    assert.equal(h.state.observationLabel('1234567890123456789'), 'OBS-1234567890123456789')
+    assert.equal(h.state.observationLabel('7'), 'OBS-7')
+    h.emitSession({ id: 'verified-officer', role: 'Conservation Officer', name: 'Verified Officer', status: 'Active', mustChangePassword: false })
+    h.state.selected.value = h.state.mapObservation(fixture({ owner_subject: 'staff:verified-officer' }))
+    assert.ok(reviewModal(h).props.subtitle.includes('Verified Officer'))
+  } finally { h.stop() }
+})
+
+test('QR display handles UUID, opaque hex and arbitrary tokens, extends known prefix collisions and copies the exact full token', async () => {
+  for (const token of ['4451e4cb-5623-4570-995f-1a9b02fd704f', 'a'.repeat(48), 'QR-CODE:arbitrary-token/with-punctuation', 'QR-0001']) {
+    const copied = []
+    const h = harness(url => fixtureResponse(url, [fixture()]), {}, 'en', async () => Response.json({ plant: { plant_id: 1, qr_token: token, qr_status: 'assigned' } }), null, { clipboard: { writeText: async value => copied.push(value) } })
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+      assert.equal(h.state.plantQr.value.identity, token)
+      const button = qrCopyButton(h)
+      assert.equal(button.props['aria-label'], 'Copy full QR Code ID')
+      await button.props.onClick()
+      assert.deepEqual(copied, [token])
+      assert.equal(h.state.qrCopyFeedback.value, 'Full QR Code ID copied.')
+      assert.equal(h.state.qrCopied.value, true)
+      assert.equal(h.state.plantQr.value.status, 'assigned')
+      if (token === 'QR-0001') assert.equal(h.state.qrLabel(token), token)
+      else assert.ok(h.state.qrLabel(token).length < token.length)
+      h.state.knownQrIdentities.value = new Set(['same-prefix-111111', 'same-prefix-222222'])
+      assert.notEqual(h.state.qrLabel('same-prefix-111111'), h.state.qrLabel('same-prefix-222222'))
+      assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+    } finally { h.stop() }
+  }
+})
+
+test('QR copy is localized, exposes the full token on clipboard failure and discards late results after modal/session changes', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const token = 'long-qr-token-with-a-real-identity'
+    const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews
+    const h = harness(url => fixtureResponse(url, [fixture()]), {}, language, async () => Response.json({ plant: { plant_id: 1, qr_token: token, qr_status: 'active' } }))
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+      await qrCopyButton(h).props.onClick()
+      assert.equal(h.state.qrCopyFailed.value, true)
+      assert.equal(h.state.qrCopyFeedback.value, labels.qrCopyUnavailable)
+      assert.ok(nodes(reviewModal(h)).some(node => node.props?.class?.includes('qr-copy-fallback') && node.children === token))
+      assert.ok(renderText(h).includes(labels.qrIdentity))
+      assert.ok(!renderText(h).includes(labels.loadedHistory))
+      assert.ok(!renderText(h).includes(labels.historyLimit))
+      const live = nodes(reviewModal(h)).find(node => node.props?.class === 'qr-copy-feedback')
+      assert.equal(live.props.role, 'status'); assert.equal(live.props['aria-live'], 'polite')
+    } finally { h.stop() }
+  }
+  for (const action of ['close', 'logout', 'role', 'switch']) {
+    const wait = deferred(), copied = []
+    const h = harness(url => fixtureResponse(url, [fixture()]), {}, 'en', async () => Response.json({ plant: { plant_id: 1, qr_token: 'private-full-qr-token', qr_status: 'active' } }), null, { clipboard: { writeText: value => { copied.push(value); return wait.promise } } })
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+      const copy = h.state.copyQrIdentity()
+      await h.state.copyQrIdentity()
+      assert.equal(copied.length, 1)
+      if (action === 'close') h.state.closeReview()
+      if (action === 'logout') h.emitSession(null)
+      if (action === 'role') h.emitSession({ id: 'verified-officer', role: 'Admin', status: 'Active', mustChangePassword: false })
+      if (action === 'switch') h.state.clearPlantQr()
+      wait.resolve(); await copy
+      assert.equal(h.state.qrCopyFeedback.value, '')
+      assert.equal(h.state.qrCopied.value, false)
+      await h.state.copyQrIdentity(); assert.equal(copied.length, 1)
+    } finally { h.stop() }
+  }
+})
+
+test('legacy review history retains loaded array order, compact IDs and accurate dates/health/height without fabricating missing data', async () => {
+  const rows = [fixture({ origin_type: 'unknown', id: firstId, created_at: '2026-09-01T10:00:00Z' }), fixture({ id: secondId, created_at: '2026-11-01T10:00:00Z', content: { heightCm: 0, healthStatus: 'Needs Attention' } }), fixture({ id: '123', content: {} }), fixture({ id: '124', plant_id: 2 })]
+  const h = harness(url => fixtureResponse(url, rows))
+  try {
+    h.state.queueOrigin.value = 'unknown'
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+    const items = nodes(reviewModal(h)).filter(node => node.props?.class === 'history-item')
+    assert.deepEqual(items.map(item => item.key), [firstId, secondId, '123'])
+    assert.deepEqual(items.map(item => nodes(item).find(node => node.type === 'strong').children), ['OBS-AA3BD8BE', 'OBS-BB3BD8BE', 'OBS-123'])
+    assert.equal(nodes(items[0]).find(node => node.props?.class === 'history-date').children, reviewDateTime(rows[0].created_at))
+    const text = item => nodes(item).map(node => typeof node.children === 'string' ? node.children : '').join(' ')
+    assert.ok(text(items[0]).includes('Health Status: Healthy'))
+    assert.ok(text(items[0]).includes('Height: 12 cm'))
+    assert.ok(text(items[1]).includes('Height: 0 cm'))
+    assert.ok(text(items[1]).includes('Needs Attention'))
+    assert.ok(!text(items[2]).includes('Height:'))
+    assert.ok(!text(items[2]).includes('Health Status:'))
+    assert.ok(renderText(h).includes('Showing loaded observations only.'))
+    assert.ok(!renderText(h).includes('Record creation order; limited'))
+  } finally { h.stop() }
+})
+
+test('redundant decision heading is absent while localized accessible group, comment validation and all four handlers remain', async () => {
+  const h = harness(url => fixtureResponse(url, [fixture()]))
+  try {
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+    const modal = reviewModal(h)
+    assert.ok(!nodes(modal).some(node => node.type === 'h3' && node.children === 'Plant Review Decision'))
+    const group = nodes(modal).find(node => node.props?.class === 'modal-actions plant-review-actions')
+    assert.equal(group.props.role, 'group'); assert.equal(group.props['aria-label'], 'Plant Review Decision')
+    assert.deepEqual(nodes(group).filter(node => node.type === 'button').map(node => node.children), ['Approve', 'Reject', 'Request Correction', 'Flag'])
+    assert.equal(h.state.canDecide('Approved'), true)
+    h.state.comment.value = ''
+    await h.state.decide('Rejected')
+    assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+    assert.match(descriptor.styles[0].content, /\.plant-review-actions\s*\{ margin-top: 20px/)
+    assert.match(descriptor.styles[0].content, /\.history-details\s*\{[^}]*flex-wrap: wrap/)
+    assert.match(descriptor.styles[0].content, /\.qr-copy-feedback, \.qr-copy-fallback\s*\{[^}]*overflow-wrap: anywhere/)
+  } finally { h.stop() }
+})
+
+test('Review Submissions headers, body cells and colgroup all put Plant ID first while full observation copying stays authoritative', async () => {
+  const row = fixture({ plant_id: 18 }), copied = []
+  const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
+  try {
+    await h.state.loadObservations()
+    const table = reviewTable(h)
+    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['plant-column', 'observation-column', 'species-column', 'submitter-column', 'zone-column', 'created-column', 'status-column', 'similarity-column', 'actions-column'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), ['Plant ID', 'Observation ID', 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
+    const renderedRow = nodes(table).find(node => node.type === 'tr' && node.key === row.id)
+    const cells = nodes(renderedRow).filter(node => node.type === 'td')
+    assert.equal(cells.length, 9)
+    assert.equal(cells[0].children, 'PL018')
+    assert.equal(cells[0].props.class, 'plant-id-cell')
+    assert.match(descriptor.styles[0].content, /\.reviews-table \.plant-id-cell\s*\{ color: #315749; font-weight: 700/)
+    assert.match(descriptor.styles[0].content, /\.reviews-table \.identity-cell strong\s*\{ color: inherit; font-weight: 400/)
+    assert.equal(nodes(cells[1]).find(node => node.type === 'strong').children, 'OBS-AA3BD8BE')
+    const copy = nodes(cells[1]).find(node => node.type === 'button')
+    await copy.props.onClick()
+    assert.deepEqual(copied, [row.id])
+    assert.equal(h.state.observations.value[0].id, row.id)
+    assert.equal(h.state.observations.value[0].plantRawId, '18')
+    assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+  } finally { h.stop() }
+})
+
+test('initial registration modal omits the history section while retaining current submission evidence, comment and review actions', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const row = fixture({ content: { ...fixture().content, zone: 'Submitted site', altitudeM: 0 } })
+    const h = harness(url => fixtureResponse(url, [row, fixture({ id: secondId })]), {}, language)
+    const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
+      const modal = reviewModal(h), all = nodes(modal)
+      assert.equal(h.state.selected.value.origin, 'initial_registration')
+      assert.ok(!all.some(node => node.props?.class === 'history-item' || node.props?.class === 'history-date' || node.props?.class === 'history-details'))
+      assert.ok(!renderText(h).includes(labels.loadedHistory))
+      assert.ok(!renderText(h).includes(labels.historyLimit))
+      const details = all.filter(node => node.type === 'dd').map(node => typeof node.children === 'string' ? node.children : '')
+      for (const value of ['12 cm', 'Healthy', 'Submitted morphology', 'Submitted notes', 'Submitted site', '0', '0 m']) assert.ok(details.includes(value), value)
+      assert.ok(all.some(node => node.type === 'img' && node.props.src === '/api/data/assets/image-one'))
+      assert.equal(h.state.selected.value.assets.length, 3)
+      assert.equal(h.state.observations.value.length, 2, 'only history presentation is removed')
+      const comment = all.find(node => node.type === 'label' && node.props?.class === 'form-field officer-comment')
+      assert.ok(comment)
+      nodes(comment).find(node => node.type === 'textarea').props['onUpdate:modelValue']('Retained review comment')
+      assert.equal(h.state.comment.value, 'Retained review comment')
+      const group = all.find(node => node.props?.class === 'modal-actions plant-review-actions')
+      assert.equal(nodes(group).filter(node => node.type === 'button').length, 4)
+      assert.equal(h.state.canDecide('Approved'), true)
+      assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
+    } finally { h.stop() }
+  }
+})
+
+const standaloneFixture=(changes={})=>({request_id:73,requested_by:'staff:bot',scientific_name:'Standalone original',suggested_common_name:'Original common',genus_name:'Shorea',family_name:'Dipterocarpaceae',conservation_status:'Least Concern',description:'Original description',habitat:'Original habitat',request_status:'Pending Review',submitted_at:'2026-11-09T01:00:00Z',review_comment:'',approved_species_id:null,...changes})
+test('standalone species query opens the existing species panel without inventing a plant and reviews with existing rules',async()=>{
+ for(const decision of ['Approved','Rejected','Correction Required']){
+ let saved=false
+ const h=harness(async(url,options)=>{
+  if(url==='/api/observations')return Response.json({observations:[]})
+  assert.ok(url.startsWith('/api/species-requests/73'))
+  if(options.method==='POST'){assert.equal(url,'/api/species-requests/73/review');assert.deepEqual(JSON.parse(options.body),{decision,comment:'Review reason',...(decision==='Approved'?{visibility:'protected'}:{})});saved=true;return Response.json({reviewed:true})}
+  return Response.json({species_request:standaloneFixture(saved?{request_status:decision,approved_species_id:decision==='Approved'?99:null}: {})})
+ },{speciesRequest:'73'})
+ try{
+  await h.state.loadObservations();await flush()
+  assert.equal(h.state.selected.value,null);assert.equal(h.state.standaloneRequest.value.scientificName,'Standalone original');assert.equal(h.state.canReviewSpecies.value,true)
+  const rendered=nodes(h.render());assert.equal(rendered.filter(n=>String(n.props?.class||'').includes('plant-review-actions')).length,0)
+  assert.equal(rendered.filter(n=>String(n.props?.class||'')==='species-request-card').length,1)
+  await h.state.decideSpecies(decision);assert.equal(h.calls.filter(c=>c.options.method==='POST').length,0)
+  h.state.speciesReviewComment.value='Review reason';h.state.speciesVisibility.value='protected';await h.state.decideSpecies(decision)
+  assert.equal(h.calls.filter(c=>c.options.method==='POST').length,1);assert.equal(h.state.standaloneRequest.value.status,decision);assert.equal(h.state.canReviewSpecies.value,false)
+  h.state.closeReview();await flush();assert.equal(h.state.standaloneRequest.value,null);assert.equal(h.route.query.speciesRequest,undefined)
+ }finally{h.stop()}
+ }
+})
+test('standalone query handles mounted navigation, self-review, completed, invalid and inaccessible requests',async()=>{
+ const h=harness(async url=>url==='/api/observations'?Response.json({observations:[]}):url.endsWith('/74')?Response.json({error:'Unavailable'},{status:404}):Response.json({species_request:standaloneFixture({requested_by:'staff:verified-officer'})}))
+ try{
+  await h.state.loadObservations();h.route.query.speciesRequest='73';await flush();assert.equal(h.state.canReviewSpecies.value,false)
+  const count=h.calls.length;h.route.query.unrelated='retained';await flush();assert.equal(h.calls.length,count)
+  h.route.query.speciesRequest='74';await flush();assert.equal(h.state.standaloneRequest.value,null);assert.ok(h.state.selectionError.value)
+  h.route.query.speciesRequest='not-an-id';await flush();assert.ok(h.state.selectionError.value)
+  h.emitSession(null);await flush();assert.equal(h.state.standaloneRequest.value,null);assert.ok(h.calls.every(c=>c.options.method==='GET'))
+ }finally{h.stop()}
+})
+
+test('standalone stale responses and uncertain writes preserve privacy, comments and reload safeguards',async()=>{
+ let release,mode='pending'
+ const h=harness(async(url,options)=>{
+  if(url==='/api/observations')return Response.json({observations:[]})
+  if(url.endsWith('/74'))return new Promise(resolve=>{release=resolve})
+  if(options.method==='POST'){if(mode==='conflict')return Response.json({error:'Changed'},{status:409});throw Error('uncertain network')}
+  return Response.json({species_request:standaloneFixture(mode==='conflict'?{request_status:'Approved',approved_species_id:99}:{})})
+ },{speciesRequest:'73'})
+ try{
+  await h.state.loadObservations();await flush();h.state.speciesReviewComment.value='Keep this comment';h.state.speciesVisibility.value='public'
+  await h.state.decideSpecies('Approved');assert.equal(h.state.speciesNeedsReload.value,true);assert.equal(h.state.speciesReviewComment.value,'Keep this comment');assert.equal(h.state.canReviewSpecies.value,false)
+  await h.state.refreshSpeciesRequest();assert.equal(h.state.speciesNeedsReload.value,false)
+  mode='conflict';await h.state.decideSpecies('Approved');assert.equal(h.state.standaloneRequest.value.state,'approved');assert.equal(h.state.speciesReviewComment.value,'Keep this comment')
+  h.route.query.speciesRequest='74';await flush();h.emitSession(null);release(Response.json({species_request:standaloneFixture({request_id:74})}));await flush();assert.equal(h.state.standaloneRequest.value,null)
+ }finally{h.stop()}
+})
+
+test('Resubmitted is informational, localized and strictly limited to verified Pending Review rows',async()=>{
+ for(const language of ['en','ms','zh-CN'])for(const row of [
+  {},{revision:9,review_decision:'Correction Required'},{is_correction_resubmission:false},{is_correction_resubmission:null},
+  {is_correction_resubmission:'true'},{is_correction_resubmission:true},
+  ...['Draft','Approved','Rejected','Correction Required','Flagged'].map(status=>({status,is_correction_resubmission:true})),
+  {origin_type:'unknown',is_correction_resubmission:true}
+ ]){
+  const h=harness(async()=>Response.json({observations:[fixture(row)]}),{},language)
+  try{
+   await h.state.loadObservations();const tree=nodes(h.render())
+   const tags=tree.filter(n=>n.type==='span'&&n.props?.class==='badge resubmission-tag')
+   const expected=row.is_correction_resubmission===true&&(!row.status||row.status==='Pending Review')&&row.origin_type!=='unknown'
+   assert.equal(tags.length,expected?1:0)
+   if(expected){const messages=JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`,import.meta.url),'utf8'));assert.equal(tags[0].children,messages.conservationPages.observations.resubmitted);assert.ok(tree.some(n=>n.type==='span'&&n.children==='Pending Review')||language!=='en')}
+   assert.ok(h.calls.every(call=>!call.options?.method||call.options.method==='GET'))
+   const styles=descriptor.styles.map(style=>style.content).join(' ')
+   assert.match(styles,/display: inline-flex; align-items: center; gap: 7px; white-space: nowrap/)
+   assert.match(styles,/background: #FFF1DB; color: #926119/)
+  }finally{h.stop()}
+ }
 })

@@ -19,7 +19,12 @@ export function projectBotanistRecords(accountId, rows, observations, requests) 
     const history = ownedObservations.filter((o) => String(o.plant_id) === String(row.plant_id))
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     const latest = history[0];
-    const content = latest?.content || row.latest_submission || row.latest_approved || {};
+    const latestApproved = history.find((observation) => observation.status === "Approved") || mapped.latestApproved;
+    // A pending edit must not replace the live, approved values on Plant Details.
+    // For an unapproved initial registration, show the owner's latest submitted data.
+    const content = mapped.currentStatus === "Approved"
+      ? latestApproved?.content || latestApproved || {}
+      : latest?.content || row.latest_submission || row.latest_approved || {};
     const request = ownedRequests.find((r) => String(r.proposed_species_id ?? r.approved_species_id) === String(row.species_id));
     // For a restricted catalogue entry, use only the botanist's own submitted request snapshot.
     const submittedSpecies = request ? { id: String(row.species_id), scientificName: request.scientific_name,
@@ -91,17 +96,50 @@ export async function fetchBotanistPlant(accountId, plantId) {
   const result = await fetchRecords(accountId, String(plantId));
   const plant = result.plants[0];
   if (!plant) throw Error("Plant record unavailable for this account.");
-  plant.photos = await plantAssetSources(plant.latestObservation?.assets || [], accountId, { ownSubmission: true });
+  try {
+    const payload = await plantApi(`/assets?plant_id=${encodeURIComponent(plantId)}&scope=mine`, { expectedAccountId: accountId });
+    const assets = Array.isArray(payload?.assets) ? payload.assets.filter((asset) => asset?.id) : [];
+    const ownSubmission = plant.currentStatus !== "Approved" && plant.registeredBy === `staff:${accountId}`;
+    plant.photos = await plantAssetSources(assets, accountId, { ownSubmission });
+  } catch {
+    // Keep record details visible if the authorized photo listing is unavailable.
+    plant.photos = [];
+    plant.photoLoadError = true;
+  }
   return plant;
 }
 
 export async function fetchBotanistRecordChanges(accountId) {
+  return (await loadBotanistRecordChanges(accountId)).changes;
+}
+
+function findPendingReviewedChange(changes, kind, targetId) {
+  const target = String(targetId);
+  return changes.find((change) => {
+    if (String(change.status || "").trim().toLowerCase() !== "pending review") return false;
+    return kind === "plant"
+      ? change.plant_id != null && String(change.plant_id) === target
+      : change.base_snapshot?.request_id != null && String(change.base_snapshot.request_id) === target;
+  }) || null;
+}
+
+async function loadBotanistRecordChanges(accountId) {
+  if (!accountId) throw Error("Sign in with the Botanist account that owns this record.");
   const options = { expectedAccountId: accountId };
   const capabilities = await plantApi("/record-changes/capabilities", options);
-  if (!capabilities.approved_edits_available) return [];
+  if (!capabilities.approved_edits_available) return { available: false, changes: [] };
   const payload = await plantApi("/record-changes", options);
   if (!Array.isArray(payload.changes)) throw Error("The backend returned an invalid record changes response.");
-  return payload.changes.filter((change) => change.owner_subject === `staff:${accountId}`);
+  return { available: true, changes: payload.changes.filter((change) => change.owner_subject === `staff:${accountId}`) };
+}
+
+export async function fetchBotanistRecordChangeStatus(accountId, kind, targetId) {
+  const { available, changes } = await loadBotanistRecordChanges(accountId);
+  const matching = changes.filter((change) => kind === "plant"
+    ? change.plant_id != null && String(change.plant_id) === String(targetId)
+    : change.base_snapshot?.request_id != null && String(change.base_snapshot.request_id) === String(targetId));
+  return { available, pending: available ? findPendingReviewedChange(matching, kind, targetId) : null,
+    latest: matching[0] || null };
 }
 
 export function createBotanistRecordsLoader(load, changed) {

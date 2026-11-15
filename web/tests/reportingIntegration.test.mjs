@@ -5,10 +5,35 @@ import vm from 'node:vm'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
+import postcss from 'postcss'
 import * as integration from '../src/services/reporting.ts'
 
 const filename = new URL('../src/views/conservation/ReportsView.vue', import.meta.url)
 const source = readFileSync(filename, 'utf8')
+
+test('only Reports Apply/Reset/Refresh opt into compact, aligned toolbar buttons', () => {
+  const buttons = [...source.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)]
+    .filter(([, attrs]) => attrs.includes('report-toolbar-button'))
+  assert.equal(buttons.length, 3)
+  assert.deepEqual(buttons.map(([, , text]) => text.trim()), ["{{ rt('apply') }}", "{{ rt('reset') }}", "{{ rt('refresh') }}"])
+  assert.match(buttons[0][1], /type="submit" :disabled="isLoading \|\| operationalBusy"/)
+  assert.match(buttons[1][1], /@click="resetFilters"/)
+  assert.match(buttons[2][1], /:disabled="isLoading" @click="loadReport\(\)"/)
+  assert.match(source, /@submit.prevent="applyFilters"/)
+  const { descriptor } = parse(source)
+  const sheet = postcss.parse(descriptor.styles.find(style => !style.src).content)
+  const rules = []; sheet.walkRules(rule => rules.push(rule))
+  const selector = '.officer-layout.officer-layout.officer-layout .reports-panel .control-bar .report-toolbar-button'
+  const rule = rules.find(rule => rule.selector === selector && rule.parent.type === 'root')
+  const declarations = Object.fromEntries(rule.nodes.map(node => [node.prop, node.value]))
+  for (const [key, value] of Object.entries({ height: '40px', 'min-height': '40px', padding: '0 15px', 'border-radius': '9px', 'font-size': '14px', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center', 'align-self': 'flex-end', flex: '0 0 auto', width: 'auto', 'white-space': 'nowrap' })) assert.equal(declarations[key], value, key)
+  assert.equal(declarations.background, undefined)
+  assert.equal(declarations.color, undefined)
+  assert.ok(rules.some(rule => rule.selector === '.filter-actions' && rule.nodes.some(node => node.prop === 'gap' && node.value === '8px')))
+  assert.ok(rules.some(rule => rule.selector.endsWith('.report-toolbar-button::after') && rule.nodes.some(node => node.prop === 'inset' && node.value === '-2px 0')))
+  assert.ok(rules.some(rule => rule.selector === selector && rule.parent.params === '(max-width: 620px)' && rule.nodes.some(node => node.prop === 'align-self' && node.value === 'flex-start')))
+  assert.doesNotMatch(rule.toString(), /:hover|:disabled|outline:/)
+})
 const viteSource = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
 const script = compileScript(descriptor, { id: 'reporting-integration' })
@@ -58,12 +83,14 @@ function harness(fetchHandler) {
     save(name) { this.saved = name }
   }
   const exports = {}
+  let exportUtilities
   const context = {
     exports,
     AbortSignal,
     Blob,
+    Image: class { naturalWidth = 1000; naturalHeight = 400; async decode() {} },
     console,
-    document: { createElement: () => ({ click() {}, remove() {}, toDataURL: () => 'data:chart', getContext: () => ({fillRect() {}, fillText: value => drawn.push(value)}) }), body: { appendChild() {} } },
+    document: { createElement: () => ({ click() {}, remove() {}, toDataURL: () => 'data:chart', getContext: () => ({fillRect() {}, beginPath() {}, roundRect() {}, fill() {}, stroke() {}, strokeRect() {}, drawImage() {}, measureText: value => ({width: Array.from(String(value)).length * 12}), fillText: value => drawn.push(value)}) }), body: { appendChild() {} } },
     window: { setTimeout },
     URL: { createObjectURL: blob => { blobs.push(blob); return 'blob:test' }, revokeObjectURL() {} },
     fetch: async (url, options) => {
@@ -71,6 +98,10 @@ function harness(fetchHandler) {
       return fetchHandler(url, options)
     },
     require(name) {
+      if (name.includes('reportExport')) {
+        if (!exportUtilities) { const helper = { ...context, exports: {} }; vm.runInNewContext(transpile(readFileSync(new URL('../src/utils/reportExport.ts', import.meta.url), 'utf8')), helper); exportUtilities = helper.exports }
+        return { ...exportUtilities, renderReportPdf: (model, ...args) => { tables.push({ options: { body: model.rows }, model }); return exportUtilities.renderReportPdf(model, ...args) } }
+      }
       if (name === 'vue') return {
         ...vue,
         onMounted() {},
@@ -104,6 +135,7 @@ function harness(fetchHandler) {
   }
   vm.runInNewContext(`(function () { ${transpile(script.content)} })()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
+  state.reportChart.value = { toPrintDataUrl: async () => 'data:image/png;base64,offline' }
   vm.runInNewContext(`(function () { ${transpile(template.code)} })()`, context)
   return { state, calls, pdfs, tables, drawn, blobs, locale, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => scope.stop() }
 }
@@ -176,14 +208,14 @@ test('network failures are distinguished by the real report API helper', async (
   } finally { globalThis.fetch = originalFetch }
 })
 
-test('category selector exposes only the supported report with explicit filter actions', async () => {
+test('category selector exposes all four implemented reports with explicit filter actions', async () => {
   const h = harness(async () => Response.json(reportFixture()))
   try {
     await h.state.loadReport()
     const tree = nodes(h.render())
     const category = tree.find(n => n.type === 'select' && n.props.id === 'report-category')
     assert.ok(category)
-    assert.equal(nodes(category).filter(n => n.type === 'option').length, 1)
+    assert.deepEqual(nodes(category).filter(n => n.type === 'option').map(n => n.props.value), ['species-approved', 'observations', 'threats', 'iot'])
     assert.ok(!tree.some(n => n.props?.type === 'radio'))
     assert.ok(tree.some(n => n.type === 'label' && n.props.for === 'report-category'))
     assert.ok(tree.some(n => n.type === 'button' && n.props.type === 'submit' && n.children === 'Apply'))
@@ -195,6 +227,28 @@ test('category selector exposes only the supported report with explicit filter a
       assert.ok(custom.some(n => n.type === 'label' && n.props.for === id))
     }
     assert.equal(h.calls.length, 1)
+  } finally { h.stop() }
+})
+
+test('new categories use their own report component and shared applied dates; resetting returns once to the original report', async () => {
+  const h = harness(async () => Response.json(reportFixture()))
+  try {
+    await h.state.loadReport()
+    for (const category of ['observations','threats','iot']) {
+      h.state.reportType.value = category; await vue.nextTick()
+      const child = nodes(h.render()).find(node => node.props?.category === category)
+      assert.ok(child)
+      assert.ok(!nodes(h.render()).some(node => node.props?.class === 'report-preview'))
+      h.state.pendingPeriod.value = 'custom'; h.state.pendingStart.value = '2026-11-01'; h.state.pendingEnd.value = '2026-11-05'
+      await h.state.applyFilters()
+      assert.equal(h.state.operationalFilters.value.period, 'custom')
+      assert.equal(h.state.operationalFilters.value.start, '2026-11-01')
+    }
+    const before = h.calls.length
+    await h.state.resetFilters(); await new Promise(resolve => setImmediate(resolve))
+    assert.equal(h.calls.length, before + 1)
+    assert.equal(h.calls.at(-1).url, '/api/data/reports')
+    assert.equal(h.state.reportType.value, 'species-approved')
   } finally { h.stop() }
 })
 
@@ -210,7 +264,7 @@ test('CSV and PDF export receive only real report rows and backend generation ti
   const report = integration.mapApprovedPlantReport(reportFixture())
   assert.ok(report)
   const csv = integration.buildReportCsv(report, report.rows)
-  assert.match(csv, /2026-11-03T12:00:00.000Z/)
+  assert.ok(csv.startsWith('\uFEFFScientific Name,Common Name,Approved Plants\r\n'));assert.doesNotMatch(csv, /2026-11-03T12:00:00.000Z/)
   assert.match(csv, /Shorea alpha,Alpha meranti,3/)
   assert.doesNotMatch(csv, /Observation ID|Alert ID|September/)
   const h = harness(async () => Response.json(reportFixture()))
@@ -219,8 +273,21 @@ test('CSV and PDF export receive only real report rows and backend generation ti
     await h.state.exportPdf()
     assert.equal(h.tables.length, 1)
     assert.deepEqual(Array.from(h.tables[0].options.body[0]), ['Hopea beta', 'Beta hopea', 1])
-    assert.ok(h.pdfs[0].saved.startsWith('niah-species-approved-plants-2026-11-03'))
+    assert.ok(h.pdfs[0].saved.startsWith('niah-species-approved-'))
   } finally { h.stop() }
+})
+
+test('species PDF cancels when search changes during print rendering and retains full export scope beyond chart limits', async () => {
+  const result=reportFixture({rows:Array.from({length:20},(_,index)=>({scientific_name:`Species ${index}`,common_name:`Name ${index}`,approved_plants:index}))})
+  const h=harness(async()=>Response.json(result));let resolve
+  try{
+    await h.state.loadReport()
+    assert.equal(h.state.exportDocument().rows.length,20);assert.equal(h.state.exportDocument().chart.length,12)
+    h.state.reportChart.value={toPrintDataUrl:()=>new Promise(done=>{resolve=done})}
+    const pending=h.state.exportPdf();await new Promise(done=>setImmediate(done));assert.equal(typeof resolve,'function')
+    h.state.search.value='Species 1';resolve('data:image/png;base64,old');await pending
+    assert.equal(h.pdfs.length,0);assert.equal(h.blobs.length,0)
+  }finally{h.stop()}
 })
 
 test('production report source has no conservationStore, fake dates, or persistence claims', () => {
@@ -284,9 +351,9 @@ test('search drives metrics, top chart, CSV and both PDF paths from matching row
     assert.equal(h.state.filteredRows.value.length,1);assert.equal(h.state.totalApprovedPlants.value,1)
     assert.deepEqual(Array.from(h.state.chartRows.value,r=>r.scientificName),['Hopea beta'])
     h.state.exportCsv();const csv=await h.blobs[0].text()
-    assert.match(csv,/All Species in Scope,2/);assert.match(csv,/Matching Species,1/)
-    assert.match(csv,/Total Approved Plants,1/);assert.doesNotMatch(csv,/Shorea alpha/)
-    assert.match(csv,/Asia\/Kuala_Lumpur/);assert.match(csv,/Search,beta/)
+    assert.equal(h.state.exportDocument().statistics[0].value,2);assert.equal(h.state.exportDocument().statistics[2].value,1)
+    assert.equal(h.state.exportDocument().statistics[1].value,1);assert.doesNotMatch(csv,/Shorea alpha/)
+    assert.doesNotMatch(csv,/Malaysia Time|Search Species/);assert.equal(csv.split('\r\n').length,2);assert.match(csv,/"Hopea beta","Beta hopea","1"/)
     await h.state.exportPdf();assert.equal(h.tables[0].options.body.length,1)
     h.locale.value='zh-CN';await h.state.exportPdf()
     assert.equal(h.pdfs.length,2);assert.ok(h.pdfs[1].saved.endsWith('.pdf'))
@@ -296,11 +363,11 @@ test('search drives metrics, top chart, CSV and both PDF paths from matching row
   } finally {h.stop()}
 })
 
-test('CSV keeps BOM, quotes and formula protection; period metadata is applied data', () => {
+test('CSV keeps BOM, quotes and formula protection without adding period metadata', () => {
   const report={generatedAt:'2026-11-04T00:00:00Z',scope:{period:'custom',timezone:'Asia/Kuala_Lumpur',startDate:'2026-11-01',endDate:'2026-11-03'},rows:[{scientificName:'=SUM(A1)',commonName:'A,"B"',approvedPlants:2}]}
   const csv=integration.buildReportCsv(report,report.rows)
   assert.equal(csv.charCodeAt(0),0xfeff);assert.match(csv,/'=SUM/);assert.match(csv,/"A,""B"""/)
-  assert.match(csv,/2026-11-01 to 2026-11-03/)
+  assert.doesNotMatch(csv,/2026-11-01 to 2026-11-03/);assert.equal(csv.split('\r\n').length,2)
 })
 
 

@@ -223,19 +223,21 @@ const closeControl = () =>
     ></button>
     <div class="main-area">
       <header class="topbar">
-        <button
-          class="menu-button"
-          type="button"
-          :aria-label="t('dashboardNav.toggleNavigation')"
-          @click="toggle"
-        >
-          <span></span><span></span><span></span>
-        </button>
-        <div class="page-heading">
-          <p>{{ section }}</p>
-          <h1>{{ title }}</h1>
+        <div class="officer-header-content">
+          <button
+            class="menu-button"
+            type="button"
+            :aria-label="t('dashboardNav.toggleNavigation')"
+            @click="toggle"
+          >
+            <span></span><span></span><span></span>
+          </button>
+          <div class="page-heading">
+            <p>{{ section }}</p>
+            <h1>{{ title }}</h1>
+          </div>
+          <ConservationTopbarActions />
         </div>
-        <ConservationTopbarActions />
       </header>
       <main class="conservation-page">
         <RouterView v-slot="{ Component, route }">
@@ -247,3 +249,5 @@ const closeControl = () =>
 </template>
 
 <style src="../styles/conservation.css"></style>
+<style src="../styles/officer-typography.css"></style>
+<style src="../styles/officer-header.css"></style>
