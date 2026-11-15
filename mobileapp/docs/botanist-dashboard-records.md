@@ -10,8 +10,9 @@ submission receipt exists. No duplicate or replacement record was needed.
 
 Plant identity is in plant_record; species classification is in species; field
 content is in plant_observation; the request is in species_request_submission.
-Location, QR assignment and photos use the existing plant_location, public.qr_code
-and plant_asset relationships.
+Location, QR assignment and photos use the existing plant_location,
+plant_app.qr_code and plant_asset relationships. The former `public.qr_code`
+name refers to the historical pre-migration schema.
 
 ## Root causes
 

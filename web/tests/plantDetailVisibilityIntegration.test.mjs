@@ -19,7 +19,8 @@ const template = compileTemplate({ source: descriptor.template.content, filename
 const js = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const officer = { id: 'officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }
 const information = { plant_id: '1', scientific_name: 'Individual name', common_name: 'Common', genus_name: 'Genus', family_name: 'Family', description: 'Description' }
-const staff = { status: 'Approved', registered_at: '2026-11-01', conservation_status: 'Vulnerable', habitat: 'Staff habitat', approved_location: { latitude: 4, longitude: 113, accuracy_m: 5, altitude_m: 18, zone: 'Approved zone' } }
+const detailObservation = { status: 'Approved', created_at: '2026-11-02T08:00:00.000Z', content: { heightCm: 21, healthStatus: 'Healthy', lifeStage: 'Mature', morphology: 'Broad leaves', notes: 'Latest notes', latitude: 4.5, longitude: 113.5, accuracy_m: 6, altitude_m: 18, zone: 'Submitted zone', taxonomy: { leaf: 'Broad' } } }
+const staff = { status: 'Approved', registered_at: '2026-11-01', conservation_status: 'Vulnerable', habitat: 'Staff habitat', approved_location: { latitude: 4, longitude: 113, accuracy_m: 5, altitude_m: 18, zone: 'Approved zone' }, latest_observation: { ...detailObservation, status: 'Pending Review' }, latest_approved_observation: detailObservation }
 const flush = async () => { for (let i = 0; i < 8; i++) { await vue.nextTick(); await new Promise(setImmediate) } }
 function nodes(value) { const out = []; function walk(n) { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; out.push(n); if (Array.isArray(n.children)) walk(n.children) } walk(value); return out }
 function text(value) { return typeof value === 'string' ? value : Array.isArray(value) ? value.map(text).join('') : value && typeof value === 'object' ? text(value.children) : '' }
@@ -86,6 +87,21 @@ test('Officer/Admin information follows Species identity, taxonomy, habitat and 
       assert.ok(tree.findIndex(n => n.props?.class === 'staff-panel') < tree.findIndex(n => n.type?.name?.includes('PlantObservationHistory')))
     } finally { h.stop() }
   }
+})
+
+test('Officer/Admin see latest approved observation details and separate latest submitted GPS evidence', async () => {
+  const h = harness(officer)
+  try {
+    await flush(); const tree = h.render()
+    const details = nodes(tree.find(n => n.props?.class === 'observation-summary-panel'))
+    assert.ok(details.some(n => n.children === 'Latest approved observation'))
+    assert.ok(details.some(n => n.children === 'Latest notes'))
+    assert.ok(details.some(n => n.children === 'Submitted GPS Evidence'))
+    assert.ok(text(details).includes('Pending Review'))
+    assert.ok(details.some(n => n.children === 'Submitted zone'))
+    assert.ok(details.some(n => n.children === 'Broad'))
+    assert.ok(tree.some(n => n.type?.name?.includes('PlantObservationHistory')))
+  } finally { h.stop() }
 })
 
 test('missing values remain honest; optional habitat/badges and unavailable official location never invent data', async () => {

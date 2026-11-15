@@ -7,8 +7,8 @@ DECLARE
   existing_name TEXT;
 BEGIN
   IF to_regclass('plant_app.plant_record') IS NULL OR to_regclass('plant_app.species') IS NULL
-     OR to_regclass('public.qr_code') IS NULL THEN
-    RAISE EXCEPTION 'Expected plant, species, and public QR tables are required; no changes made';
+     OR to_regclass('plant_app.qr_code') IS NULL THEN
+    RAISE EXCEPTION 'Expected plant, species, and plant_app QR tables are required; no changes made';
   END IF;
 
   SELECT table_name INTO existing_name
@@ -46,7 +46,7 @@ CREATE TABLE plant_app.visitor_scan_history (
   visitor_subject TEXT NOT NULL CHECK (visitor_subject LIKE 'visitor:%'),
   plant_id BIGINT REFERENCES plant_app.plant_record(plant_id) ON DELETE SET NULL,
   plant_reference BIGINT NOT NULL,
-  qr_id BIGINT REFERENCES public.qr_code(qr_id) ON DELETE SET NULL,
+  qr_id BIGINT REFERENCES plant_app.qr_code(qr_id) ON DELETE SET NULL,
   qr_identifier TEXT NOT NULL,
   scanned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

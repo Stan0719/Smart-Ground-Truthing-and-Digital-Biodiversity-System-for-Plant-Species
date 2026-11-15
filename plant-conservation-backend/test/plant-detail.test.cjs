@@ -27,7 +27,7 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
   }
   await pool.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,origin_type) VALUES
     ('foreign',2,'staff:other','Pending Review','{}','foreign','subsequent_observation'),
-    ('new-approved',1,'staff:bot','Approved','{"latitude":5,"longitude":114,"zone":"Approved"}','new','subsequent_observation');
+    ('new-approved',1,'staff:bot','Approved','{"heightCm":21,"healthStatus":"Healthy","lifeStage":"Mature","morphology":"New leaves","notes":"latest approved notes","taxonomy":{"leaf":"Broad"},"latitude":5,"longitude":114,"accuracy_m":4,"altitudeM":20,"zone":"Approved"}','new','subsequent_observation');
     INSERT INTO observation_review(id,observation_id,reviewer_subject,decision,comment) VALUES('review','obs-2','staff:officer','Rejected','Please correct');`);
   await pool.query(`INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES('staff:bot','obs-0',$1,$2)`,
     ['a'.repeat(64),{plant_id:1,id:'obs-0',species_id:1,qr_token:'fixture',status:'Pending Review',species_request_id:null}]);
@@ -61,6 +61,10 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
   await t.test('Officer and Admin read protected records without write or general Admin access', async () => {
     for (const role of ['officer','admin']) {
       const r = await call('/plants/1/detail',role); assert.equal(r.status,200); assert.equal(r.data.staff.approved_location.zone,'Approved');
+      assert.equal(r.data.staff.latest_observation.status, 'Approved');
+      assert.equal(r.data.staff.latest_approved_observation.content.notes, 'latest approved notes');
+      assert.deepEqual(r.data.staff.latest_approved_observation.content.taxonomy, { leaf: 'Broad' });
+      assert.equal(r.data.staff.latest_observation.content.latitude, 5);
       assert.equal((await call('/plants/2/detail',role)).status,200);
       assert.equal((await call('/plants/3/detail',role)).status,200);
       for (const permission of ['plants.create','observations.create','observations.edit.own']) assert.equal(permitted(users[role],permission),false);

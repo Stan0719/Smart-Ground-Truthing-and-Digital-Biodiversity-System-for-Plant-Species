@@ -101,6 +101,8 @@ onBeforeUnmount(() => {
 
 const display = (value: string | null | undefined) => value || ct('Unavailable')
 const location = computed(() => plant.value?.staff?.approved_location || null)
+const latestObservation = computed(() => plant.value?.staff?.latest_observation || null)
+const latestApprovedObservation = computed(() => plant.value?.staff?.latest_approved_observation || null)
 const accuracy = (value: number | null | undefined) => value == null ? ct('Unavailable') : `${value} m`
 const badgeKey = (value: string | null | undefined) => (value || '').toLowerCase().replace(/[^a-z]/g, '')
 
@@ -200,6 +202,39 @@ watch(() => route.params.plantId, verifySession, { immediate: true })
         </dl><p v-else class="availability-note">{{ ct('No approved plant location is available.') }}</p></section>
       </aside>
     </div></section>
+    <section v-if="canReadStaff && plant.staff" class="latest-section"><div class="container">
+      <article class="observation-summary-panel">
+        <h2>{{ ct('Latest approved observation') }}</h2>
+        <template v-if="latestApprovedObservation">
+          <p class="observation-date-line">{{ dateTime(latestApprovedObservation.created_at) }}</p>
+          <dl class="observation-summary">
+            <div><dt>{{ ct('Height') }}</dt><dd>{{ latestApprovedObservation.content.heightCm == null ? ct('Unavailable') : `${latestApprovedObservation.content.heightCm} cm` }}</dd></div>
+            <div><dt>{{ ct('Health status') }}</dt><dd>{{ display(latestApprovedObservation.content.healthStatus) }}</dd></div>
+            <div><dt>{{ ct('Life stage') }}</dt><dd>{{ display(latestApprovedObservation.content.lifeStage) }}</dd></div>
+            <div class="wide"><dt>{{ ct('Morphology') }}</dt><dd>{{ display(latestApprovedObservation.content.morphology) }}</dd></div>
+            <div class="wide"><dt>{{ ct('Notes') }}</dt><dd>{{ display(latestApprovedObservation.content.notes) }}</dd></div>
+          </dl>
+          <dl v-if="Object.keys(latestApprovedObservation.content.taxonomy).length" class="taxonomy-list">
+            <div v-for="(value, key) in latestApprovedObservation.content.taxonomy" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
+          </dl>
+        </template>
+        <p v-else class="availability-note">{{ ct('The plant has no latest approved observation content.') }}</p>
+        <section class="submitted-gps"><h3>{{ ct('Submitted GPS Evidence') }}</h3>
+          <p>{{ ct('From the latest linked observation. Submitted evidence is separate from the approved plant location.') }}</p>
+          <template v-if="latestObservation">
+            <p class="observation-date-line">{{ ct(latestObservation.status) }} · {{ dateTime(latestObservation.created_at) }}</p>
+            <dl class="observation-summary gps-summary">
+              <div><dt>{{ ct('Latitude') }}</dt><dd>{{ latestObservation.content.latitude ?? ct('Unavailable') }}</dd></div>
+              <div><dt>{{ ct('Longitude') }}</dt><dd>{{ latestObservation.content.longitude ?? ct('Unavailable') }}</dd></div>
+              <div><dt>{{ ct('GPS Accuracy') }}</dt><dd>{{ accuracy(latestObservation.content.accuracy_m) }}</dd></div>
+              <div><dt>{{ ct('Altitude') }}</dt><dd>{{ latestObservation.content.altitude_m == null ? ct('Unavailable') : `${latestObservation.content.altitude_m} m` }}</dd></div>
+              <div><dt>{{ ct('Zone') }}</dt><dd>{{ display(latestObservation.content.zone) }}</dd></div>
+            </dl>
+          </template>
+          <p v-else class="availability-note">{{ ct('No linked observation GPS evidence is available.') }}</p>
+        </section>
+      </article>
+    </div></section>
     <section v-if="canReadStaff" class="history-section"><div class="container">
       <PlantObservationHistory :key="history.state.epoch" :observations="history.state.observations" :loading="history.state.loading" :error="history.state.error" :complete="history.state.complete" :has-more="history.state.hasMore" @retry="loadHistory()" @more="loadHistory(true)" />
     </div></section>
@@ -254,12 +289,24 @@ watch(() => route.params.plantId, verifySession, { immediate: true })
 .staff-panel dl > div { min-width: 0; padding: 12px 14px; border-radius: 12px; background: #f4f6f1; }
 .staff-panel dt { color: #63776d; font-size: 11px; }
 .staff-panel dd { margin: 6px 0 0; color: #315447; font-size: 14px; font-weight: 600; }
+.latest-section { padding: 24px 0 0; }
+.observation-summary-panel { padding: clamp(22px, 2.8vw, 36px); border: 1px solid rgba(58, 96, 70, 0.12); border-radius: 26px; background: #fff; box-shadow: 0 12px 36px rgba(37, 75, 58, 0.09); }
+.observation-summary-panel h2 { margin: 0 0 12px; color: #234a3c; font-size: 22px; font-weight: 600; }
+.observation-date-line, .submitted-gps > p { color: #63776d; font-size: 12px; }
+.observation-summary, .taxonomy-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.observation-summary > div, .taxonomy-list > div { min-width: 0; padding: 12px 14px; border-radius: 12px; background: #f4f6f1; }
+.observation-summary dt, .taxonomy-list dt { color: #63776d; font-size: 11px; }
+.observation-summary dd, .taxonomy-list dd { margin: 6px 0 0; color: #315447; font-size: 14px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.taxonomy-list { margin-top: 12px; }
+.submitted-gps { margin-top: 22px; padding-top: 18px; border-top: 1px solid #dfe7df; }
+.submitted-gps h3 { margin: 0; color: #315447; font-size: 14px; }
+.gps-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .primary-link { display: inline-block; padding: 11px 17px; border: 0; border-radius: 99px; background: #315f4e; color: #fff; font: inherit; text-decoration: none; cursor: pointer; }
 .state-page { min-height: calc(100vh - 76px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 30px; background: #f4f3e9; color: #50675d; text-align: center; }
 .state-page .state-icon { font-size: 48px; }
 .state-page a { color: #315f4e; }
-@media (max-width: 850px) { .hero-grid { grid-template-columns: 1fr; } .location-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .location-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 420px) { .profile-taxonomy, .location-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 850px) { .hero-grid { grid-template-columns: 1fr; } .location-grid, .gps-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .location-grid, .gps-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 420px) { .profile-taxonomy, .location-grid, .gps-summary, .observation-summary, .taxonomy-list { grid-template-columns: minmax(0, 1fr); } }
 </style>

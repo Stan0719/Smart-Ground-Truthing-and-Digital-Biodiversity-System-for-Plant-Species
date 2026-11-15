@@ -14,6 +14,11 @@ const {
 } = require("../shared/rbac.cjs");
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const { requestsAvailable, provenanceAvailable, observationRequestSql, assertSpeciesResolved, mountSpeciesRequests } = require("./species-requests.cjs");
+const {
+  assertQrAssignmentAllowed,
+  normalizeQrPlantSchema,
+  qrPlantRecordRelation,
+} = require("./qr-plant-mode.cjs");
 const fail = (status, message) => {
   throw Object.assign(Error(message), { status });
 };
@@ -214,17 +219,20 @@ async function assertNewSpecies(c, scientificName) {
   if ((await c.query("SELECT species_id FROM species WHERE lower(btrim(scientific_name))=lower(btrim($1)) LIMIT 1", [scientificName])).rows.length)
     fail(409, "This scientific name already exists. Select the existing species.");
 }
-function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
+function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPlantSchema = "plant_app" }) {
+  qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
+  const qrPlantRecord = qrPlantRecordRelation(qrPlantSchema);
+  const qrPlantAssociation = "qr.plant_id=p.plant_id AND qr.qr_code=p.qr_token";
   app.get("/api/qr-codes", allow("plants.create"), async (_req, res) => {
     const qrCodes = (
       await pool.query(
         `SELECT q.qr_id,q.plant_id,q.qr_code,q.status,
           CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) THEN p.scientific_name END AS plant_name,
           q.generated_at,q.assigned_at,q.activated_at,q.retired_at
-          FROM public.qr_code q LEFT JOIN plant_record p ON p.plant_id=q.plant_id
+          FROM plant_app.qr_code q LEFT JOIN ${qrPlantRecord} p ON p.plant_id=q.plant_id
           LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
           WHERE q.status='retired' OR q.qr_id IN (
-            SELECT qr_id FROM public.qr_code ORDER BY qr_id DESC LIMIT 500
+             SELECT qr_id FROM plant_app.qr_code ORDER BY qr_id DESC LIMIT 500
           )
           ORDER BY q.qr_id DESC`,
         [visibilityFor(_req.user)],
@@ -236,14 +244,14 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
     const qrId = id(String(req.params.id));
     const retired = await transaction(pool, async (c) => {
       const qr = (await c.query(
-        "SELECT qr_id,plant_id,status FROM public.qr_code WHERE qr_id=$1 FOR UPDATE",
+        "SELECT qr_id,plant_id,status FROM plant_app.qr_code WHERE qr_id=$1 FOR UPDATE",
         [qrId],
       )).rows[0];
       if (!qr) fail(404, "QR code not found.");
       if (qr.plant_id != null || qr.status !== "generated")
         fail(409, "Only unused QR codes can be retired.");
       const result = (await c.query(
-        "UPDATE public.qr_code SET status='retired',retired_at=CURRENT_TIMESTAMP WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' RETURNING qr_id",
+        "UPDATE plant_app.qr_code SET status='retired',retired_at=CURRENT_TIMESTAMP WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' RETURNING qr_id",
         [qrId],
       )).rows[0];
       if (!result) fail(409, "QR code is no longer available.");
@@ -264,7 +272,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
         const code = randomBytes(24).toString("hex");
         const row = (
           await c.query(
-            "INSERT INTO public.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id,plant_id,qr_code,status,generated_at,assigned_at,activated_at,retired_at",
+            "INSERT INTO plant_app.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id,plant_id,qr_code,status,generated_at,assigned_at,activated_at,retired_at",
             [code],
           )
         ).rows[0];
@@ -336,7 +344,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
             'description',s.description,'habitat',s.rbac_data->>'habitat','genus_name',g.genus_name,
             'family_name',f.family_name,'conservation_status',cs.status_name) END AS species_details
           FROM plant_record p JOIN species s ON s.species_id=p.species_id
-          LEFT JOIN public.qr_code qr ON qr.plant_id=p.plant_id AND qr.qr_code=p.qr_token
+          LEFT JOIN plant_app.qr_code qr ON ${qrPlantAssociation}
           LEFT JOIN LATERAL (
             SELECT a.id
             FROM plant_asset a
@@ -506,6 +514,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
     text(b.client_key, 100);
     id(String(b.species_id));
     id(String(b.qr_id));
+    assertQrAssignmentAllowed(qrPlantSchema);
     // Older API clients omit this field; never substitute the species name.
     // Add Plant always sends it and requires manual entry before submission.
     const hasPlantScientificName = Object.hasOwn(b, "scientific_name");
@@ -529,7 +538,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
       await speciesRow(c, b.species_id, req.user);
       const qr = (
         await c.query(
-          "SELECT qr_id,qr_code FROM public.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE",
+          "SELECT qr_id,qr_code FROM plant_app.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE",
           [b.qr_id],
         )
       ).rows[0];
@@ -541,7 +550,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
         )
       ).rows[0];
       await c.query(
-        "UPDATE public.qr_code SET plant_id=$1,status='assigned',assigned_at=CURRENT_TIMESTAMP WHERE qr_id=$2 AND plant_id IS NULL",
+        "UPDATE plant_app.qr_code SET plant_id=$1,status='assigned',assigned_at=CURRENT_TIMESTAMP WHERE qr_id=$2 AND plant_id IS NULL",
         [plant.plant_id, qr.qr_id],
       );
       await c.query(
@@ -933,6 +942,17 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
             "UPDATE plant_record SET rbac_status='Approved' WHERE plant_id=$1",
             [row.plant_id],
           );
+          // Keep inventory lifecycle state in sync with the plant approval.
+          // The initial registration assigned the code while the record was
+          // pending, so approval is the point at which it becomes scannable.
+          const activatedQr = await c.query(
+            `UPDATE plant_app.qr_code
+             SET status='active', activated_at=COALESCE(activated_at,CURRENT_TIMESTAMP), retired_at=NULL
+             WHERE plant_id=$1 AND qr_code=(SELECT qr_token FROM plant_record WHERE plant_id=$1)`,
+            [row.plant_id],
+          );
+          if (activatedQr.rowCount !== 1)
+            fail(409, "The plant QR inventory mapping is missing or inconsistent; reconcile it before approval.");
           const content = row.content;
           if (content.latitude !== undefined)
             await c.query(
@@ -959,14 +979,16 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
   app.get("/api/qr/:token", allow("plants.public.read"), async (req, res) => {
     const row = (
       await pool.query(
-        `SELECT q.qr_id,q.plant_id,p.species_id,p.rbac_status,p.scientific_name
-         FROM public.qr_code q LEFT JOIN plant_record p ON p.plant_id=q.plant_id
+        `SELECT q.qr_id,q.plant_id,q.status,p.species_id,p.rbac_status,p.scientific_name
+         FROM plant_app.qr_code q LEFT JOIN ${qrPlantRecord} p ON p.plant_id=q.plant_id
          WHERE q.qr_code=$1`,
         [req.params.token],
       )
     ).rows[0];
     if (!row) fail(404, "QR code not found.");
-    if (row.plant_id == null) return res.json({ assigned: false });
+    if (row.plant_id == null || row.status === "generated" || row.status === "retired")
+      return res.json({ assigned: false });
+    if (row.status !== "active") fail(404, "Plant information is not available.");
     if (row.rbac_status !== "Approved") fail(404, "Plant information is not available.");
     const species = await speciesRow(pool, row.species_id, req.user);
     res.json({
@@ -1111,7 +1133,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
       const row = (await client.query(
         `SELECT q.qr_id,q.plant_id,p.scientific_name AS plant_scientific_name,
           p.registered_at,p.species_id,s.*,plant_preview.id AS image_asset_id
-          FROM public.qr_code q JOIN plant_record p ON p.plant_id=q.plant_id
+          FROM plant_app.qr_code q JOIN ${qrPlantRecord} p ON p.plant_id=q.plant_id
           JOIN species s ON s.species_id=p.species_id
           LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id
           LEFT JOIN LATERAL (
@@ -1137,9 +1159,15 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
       const qrIdentifier = `QR-${String(row.qr_id).padStart(4, "0")}`;
       const scan = (await client.query(
         `INSERT INTO visitor_scan_history(visitor_subject,plant_id,plant_reference,qr_id,qr_identifier)
-          VALUES($1,$2,$2,$3,$4)
+          VALUES($1,$2,$3,$4,$5)
           RETURNING scan_id,qr_identifier,scanned_at`,
-        [owner, row.plant_id, row.qr_id, qrIdentifier],
+        [
+          owner,
+          row.plant_id,
+          row.plant_id,
+          row.qr_id,
+          qrIdentifier,
+        ],
       )).rows[0];
       return { row, scan };
     });
@@ -1167,7 +1195,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null }) {
         p.scientific_name AS plant_scientific_name,p.registered_at,p.species_id,
         s.*,plant_preview.id AS image_asset_id
         FROM visitor_scan_history h
-        LEFT JOIN plant_record p ON p.plant_id=h.plant_id
+        LEFT JOIN ${qrPlantRecord} p ON p.plant_id=h.plant_reference
         LEFT JOIN species s ON s.species_id=p.species_id
         LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id
         LEFT JOIN LATERAL (
