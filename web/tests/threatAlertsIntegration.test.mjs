@@ -167,6 +167,7 @@ function pageHarness({ dev = false, hostname = 'localhost' } = {}) {
   let session = { pending: false, user: { id: 'test-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false } }
   const listeners = new Set(), cleanup = []
   const context = { exports, Error, URL, window: { location: { hostname } }, __previewModule: previewModule, require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount(fn) { cleanup.push(fn) }, withDirectives: n => n, resolveComponent: name => ({ name }) }
     if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
     if (name === 'vue-router') return { useRoute: () => route }

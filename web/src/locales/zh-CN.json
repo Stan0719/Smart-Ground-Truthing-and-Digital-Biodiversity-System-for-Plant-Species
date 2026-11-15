@@ -1,5 +1,7 @@
 {
   "approvedChanges": {
+    "allTypes": "所有类型",
+    "searchPlaceholder": "提交编号、植物编号、名称、提交人、类型或区域",
     "historicalAvailable": "显示审批时记录的已审核值。",
     "submissionType": "提交类型",
     "originalRegistration": "原始登记",
@@ -88,6 +90,8 @@
     }
   },
   "submissionChanges": {
+    "upToDate": "提交记录已是最新。您的审核评论已保留。",
+    "reloadRequired": "无法验证最新提交记录。请重新加载后再审核。",
     "cycleChanged": "此物种申请已进入新的审核轮次。请重新加载并检查最新提交后再做决定。",
     "finalRejected": "拒绝为最终决定。此提交仅供查看，无法编辑或重新提交。",
     "automaticRejection": "因物种审核决定而自动拒绝关联植株登记",
@@ -96,7 +100,7 @@
     "edited": "植物学家内容编辑 · 快照 {version} · {date}",
     "unavailable": "暂无",
     "historyUnavailable": "无法核实此提交的早期字段值，变更历史不可用。",
-    "loadedRevision": "已加载观察修订版 {revision}。重新加载以检查最新内容。",
+    "loadedRevision": "已加载观察修订版 {revision}。",
     "reload": "重新加载最新提交",
     "conflict": "此提交在打开后已更改或已被审核。请加载并检查最新提交后再做决定。",
     "plantName": "植株学名",
@@ -1884,6 +1888,9 @@
         "registrations": "新植株登记",
         "registrationEyebrow": "核验流程",
         "registrationIntro": "审核并批准或拒绝新植株登记及关联的物种申请。",
+        "submissionView": "提交记录视图",
+        "allSubmissions": "全部提交记录",
+        "unverifiedOriginSubmissions": "来源未确认的提交记录",
         "reviewQueue": "审核队列",
         "legacy": "未分类 / 历史观察记录",
         "originUnverified": "记录来源未经核实",
@@ -1946,6 +1953,7 @@
         "loadFailed": "无法核实关联的物种申请。植株审核仍被锁定。",
         "imageAlt": "提交的物种申请图片{id}",
         "states": {
+          "verified": "已批准 — 物种关联已验证",
           "loading": "正在加载物种处理状态",
           "pending": "待审核",
           "approved": "物种申请已批准",
@@ -1958,6 +1966,7 @@
           "saving": "正在保存物种审核决定…"
         },
         "notices": {
+          "approvedReadOnly": "已验证获批物种的关联。此已批准的提交记录为只读。",
           "loading": "正在刷新提交记录以核实关联的物种申请。植株审核暂时锁定。",
           "pending": "此记录提出了新物种。请先审核并处理物种申请，再对植株观察作出决定。",
           "approved": "返回的申请已批准，且生成的物种与此提交记录相符。可按观察记录状态继续审核植株。",

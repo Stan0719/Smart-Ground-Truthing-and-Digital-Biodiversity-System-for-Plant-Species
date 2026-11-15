@@ -13,6 +13,35 @@ export function reviewEligible(user: AuthUser | null, pending: boolean, row: { r
     row.owner !== 'staff:' + user.id && positiveRevision(row.revision) && Boolean(reviewTransitions[row.status]?.length) &&
     hasResolvedSpecies(row.speciesRequest, row.speciesId, row.scientificName)
 }
+// Compare review-relevant response data, not display history or timestamp formatting.
+export function observationReviewSnapshot(observation: Record<string, unknown>) {
+  const object = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+  const id = (value: unknown) => value == null ? '' : String(value)
+  const status = (value: unknown) => typeof value === 'string' ? value.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ') : ''
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : object(value)
+    ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value
+  const serialize = (value: unknown) => JSON.stringify(canonical(value))
+  const assets = (value: unknown) => Array.isArray(value) ? value.map(item => {
+    const asset = object(item)
+    return [id(asset?.id), id(asset?.content_type)]
+  }).sort((a, b) => a.join('\0').localeCompare(b.join('\0'))) : []
+  const request = object(observation.species_request)
+  const species = serialize({ reference: id(observation.species_request_id ?? request?.request_id), request: request ? {
+    id: id(request.request_id), status: status(request.request_status),
+    revision: request.content_revision ?? null, cycle: request.review_cycle ?? null,
+    approved: id(request.approved_species_id), proposed: id(request.proposed_species_id),
+    owner: request.requested_by ?? null,
+    fields: Object.fromEntries(['proposed_scientific_name', 'suggested_common_name', 'genus_name', 'family_name', 'conservation_status', 'description', 'habitat'].map(key => [key, request[key] ?? null])),
+    assets: assets(request.assets),
+  } : null })
+  return { species, observation: serialize({
+    id: id(observation.id), revision: observation.revision, status: status(observation.status),
+    owner: observation.owner_subject ?? null, origin: observation.origin_type ?? null,
+    plant: id(observation.plant_id), species: id(observation.species_id),
+    scientificName: observation.scientific_name ?? null, plantName: observation.plant_scientific_name ?? null,
+    content: observation.content ?? null, assets: assets(observation.assets), request: species,
+  }) }
+}
 export class ReviewApiError extends Error {
   readonly status: number
   readonly code?: string

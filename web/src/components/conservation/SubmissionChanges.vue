@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { reviewDateTime } from '../../utils/officerMonitoringDisplay'
-const props = defineProps<{ update: unknown; revision: number | null; busy?: boolean }>()
+const props = defineProps<{ update: unknown; revision: number | null; initialSubmission?: boolean; busy?: boolean; hideReload?: boolean }>()
 defineEmits<{ reload: [] }>()
 const { t } = useI18n()
 interface Change { field: string; before: string | number | null; after: string | number | null }
@@ -30,9 +30,9 @@ const valueText = (value: string | number | null) => {
         </li>
       </ul>
     </template>
-    <p v-else-if="(update as { state?: string } | null)?.state !== 'unchanged'">{{ t('submissionChanges.historyUnavailable') }}</p>
+    <p v-else-if="!initialSubmission && (update as { state?: string } | null)?.state !== 'unchanged'">{{ t('submissionChanges.historyUnavailable') }}</p>
     <p>{{ t('submissionChanges.loadedRevision', { revision: revision ?? '—' }) }}</p>
-    <button type="button" class="secondary-button" :disabled="busy" @click="$emit('reload')">{{ t('submissionChanges.reload') }}</button>
+    <button v-if="!hideReload" type="button" class="secondary-button" :disabled="busy" @click="$emit('reload')">{{ t('submissionChanges.reload') }}</button>
   </section>
 </template>
 

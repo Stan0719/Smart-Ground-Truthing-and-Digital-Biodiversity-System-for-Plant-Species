@@ -1,3 +1,4 @@
+import { formatPlantId } from '../utils/plantId.ts'
 export interface RecordChange {
   id: string; plant_id: number | null; species_id: number | null; owner_subject: string
   status: 'Pending Review' | 'Approved' | 'Rejected' | 'Cancelled'; created_at: string
@@ -63,10 +64,20 @@ export function changeZone(change: RecordChange): string {
   const zone = proposed && Object.hasOwn(proposed, 'zone') ? proposed.zone : base?.zone
   return typeof zone === 'string' ? zone : ''
 }
-export function changeMatches(change: RecordChange, filter: { search: string; status: string; species: string; date: string }, dateKey: (value: string) => string) {
-  const searchable = [change.id,change.plant_id,change.species_id,changeSpeciesId(change),change.owner_subject,change.base_snapshot.scientific_name,change.proposed_snapshot.scientific_name,change.base_snapshot.species_scientific_name,change.proposed_snapshot.species_scientific_name,change.status].join(' ').toLowerCase()
-  const query = filter.search.trim().toLowerCase()
-  const matchesSearch = searchable.includes(query) || (query.startsWith('change-') && change.id.replaceAll('-','').toLowerCase().startsWith(query.slice(7).replaceAll('-','')))
+// Numeric queries match complete identifiers, never incidental UUID/name substrings.
+export function submissionSearchMatches(query: string, numericIds: unknown[], identifiers: unknown[], text: unknown[]) {
+  const normalize = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const needle = normalize(query)
+  if (!needle) return true
+  if (/^\d+$/.test(needle)) return numericIds.some(value => /^\d+$/.test(String(value ?? '')) && String(value).replace(/^0+(?=\d)/, '') === needle.replace(/^0+(?=\d)/, ''))
+  if (/^pl\d+$/.test(needle)) return identifiers.some(value => normalize(value) === needle)
+  const compact = /^(obs|change)-/.test(needle) ? needle.replaceAll('-', '') : ''
+  return identifiers.some(value => normalize(value).includes(needle) || (compact && normalize(value).replaceAll('-', '').includes(compact))) || text.some(value => normalize(value).includes(needle))
+}
+export function changeMatches(change: RecordChange, filter: { search: string; status: string; species: string; date: string }, dateKey: (value: string) => string, display: { identifiers?: unknown[]; text?: unknown[] } = {}) {
+  const matchesSearch = submissionSearchMatches(filter.search, [change.plant_id, change.id],
+    [change.id, `CHANGE-${change.id}`, change.plant_id ? formatPlantId(change.plant_id) : '', change.owner_subject, ...(display.identifiers || [])],
+    [change.base_snapshot.scientific_name, change.proposed_snapshot.scientific_name, change.base_snapshot.species_scientific_name, change.proposed_snapshot.species_scientific_name, change.status, change.plant_id ? 'Plant Edit' : 'Species Edit', changeZone(change), ...(display.text || [])])
   return matchesSearch && (!filter.status || change.status === filter.status) &&
     (!filter.species || changeSpeciesId(change) === filter.species) && (!filter.date || dateKey(change.created_at) === filter.date)
 }

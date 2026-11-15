@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import SubmissionChanges from '../../components/conservation/SubmissionChanges.vue'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
 import { computed, onBeforeUnmount, onMounted, ref, watch, type Directive } from 'vue'
@@ -617,15 +618,15 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
   </section>
 
   <div class="control-bar">
-    <label class="field"><span>{{ rt('queues.reviewQueue') }}</span><select v-model="queueOrigin" :disabled="reviewSaving" @change="changeQueue">
+    <label class="field"><span>{{ rt('queues.reviewQueue') }}</span><select v-officer-dropdown v-model="queueOrigin" :disabled="reviewSaving" @change="changeQueue">
       <option value="subsequent_observation">{{ rt('queues.fieldObservations') }}</option>
       <option value="all">{{ rt('queues.allOrigins') }} · {{ rt('queues.history') }}</option>
       <option value="unknown">{{ rt('queues.legacy') }}</option>
     </select></label>
     <label class="field search-field"><span>{{ t('conservationPages.observations.search') }}</span><input v-model="search" :placeholder="t('conservationPages.observations.searchPlaceholder')" /></label>
-    <label class="field"><span>{{ t('conservationPages.observations.status') }}</span><select v-model="status" @change="loadObservations()"><option value="">{{ t('conservationPages.observations.allStatuses') }}</option><option v-for="item in supportedStatuses" :key="item" :value="item">{{ label(item) }}</option></select></label>
-    <label class="field"><span>{{ t('conservationPages.observations.species') }}</span><select v-model="species"><option value="">{{ t('conservationPages.observations.allSpecies') }}</option><option v-for="item in speciesOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-    <label class="field"><span>{{ t('conservationPages.observations.submittedBy') }}</span><select v-model="owner"><option value="">{{ t('conservationPages.observations.allSubmitters') }}</option><option v-for="item in ownerOptions" :key="item" :value="item" :title="item">{{ submitterLabel(item) }}</option></select></label>
+    <label class="field"><span>{{ t('conservationPages.observations.status') }}</span><select v-officer-dropdown v-model="status" @change="loadObservations()"><option value="">{{ t('conservationPages.observations.allStatuses') }}</option><option v-for="item in supportedStatuses" :key="item" :value="item">{{ label(item) }}</option></select></label>
+    <label class="field"><span>{{ t('conservationPages.observations.species') }}</span><select v-officer-dropdown v-model="species"><option value="">{{ t('conservationPages.observations.allSpecies') }}</option><option v-for="item in speciesOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+    <label class="field"><span>{{ t('conservationPages.observations.submittedBy') }}</span><select v-officer-dropdown v-model="owner"><option value="">{{ t('conservationPages.observations.allSubmitters') }}</option><option v-for="item in ownerOptions" :key="item" :value="item" :title="item">{{ submitterLabel(item) }}</option></select></label>
     <label class="field"><span>{{ t('conservationPages.observations.created') }}</span><input v-model="date" type="date" /></label>
   </div>
 

@@ -98,6 +98,7 @@ function harness(fetchHandler) {
       return fetchHandler(url, options)
     },
     require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name.includes('reportExport')) {
         if (!exportUtilities) { const helper = { ...context, exports: {} }; vm.runInNewContext(transpile(readFileSync(new URL('../src/utils/reportExport.ts', import.meta.url), 'utf8')), helper); exportUtilities = helper.exports }
         return { ...exportUtilities, renderReportPdf: (model, ...args) => { tables.push({ options: { body: model.rows }, model }); return exportUtilities.renderReportPdf(model, ...args) } }

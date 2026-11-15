@@ -1,5 +1,7 @@
 {
   "approvedChanges": {
+    "allTypes": "Semua Jenis",
+    "searchPlaceholder": "ID penyerahan, ID tumbuhan, nama, pengirim, jenis atau zon",
     "historicalAvailable": "Nilai yang disemak direkodkan semasa kelulusan.",
     "submissionType": "Jenis Penyerahan",
     "originalRegistration": "Pendaftaran Asal",
@@ -88,6 +90,8 @@
     }
   },
   "submissionChanges": {
+    "upToDate": "Penyerahan adalah terkini. Komen semakan anda dikekalkan.",
+    "reloadRequired": "Penyerahan terkini tidak dapat disahkan. Muat semula sebelum menyemak.",
     "cycleChanged": "Permintaan spesies memasuki kitaran semakan baharu. Muat semula dan periksa penyerahan terkini sebelum membuat keputusan.",
     "finalRejected": "Penolakan adalah muktamad. Penyerahan ini hanya boleh dibaca dan tidak boleh disunting atau dihantar semula.",
     "automaticRejection": "Penolakan pendaftaran berkaitan secara automatik akibat keputusan spesies",
@@ -96,7 +100,7 @@
     "edited": "Suntingan kandungan ahli botani - petikan {version} - {date}",
     "unavailable": "Tidak tersedia",
     "historyUnavailable": "Nilai medan terdahulu tidak dapat disahkan. Sejarah perubahan tidak tersedia.",
-    "loadedRevision": "Semakan pemerhatian dimuatkan {revision}. Muat semula untuk kandungan terkini.",
+    "loadedRevision": "Semakan pemerhatian dimuatkan {revision}.",
     "reload": "Muat Semula Penyerahan Terkini",
     "conflict": "Penyerahan ini berubah atau telah disemak selepas dibuka. Muat dan periksa penyerahan terkini sebelum membuat keputusan.",
     "plantName": "Nama Saintifik Tumbuhan",
@@ -1891,6 +1895,9 @@
         "registrations": "Pendaftaran Tumbuhan Baharu",
         "registrationEyebrow": "Aliran Kerja Pengesahan",
         "registrationIntro": "Semak dan luluskan atau tolak pendaftaran tumbuhan baharu serta permohonan spesies berkaitan.",
+        "submissionView": "Paparan Penyerahan",
+        "allSubmissions": "Semua Penyerahan",
+        "unverifiedOriginSubmissions": "Penyerahan dengan Asal Belum Disahkan",
         "reviewQueue": "Baris Gilir Semakan",
         "legacy": "Pemerhatian Belum Dikelaskan / Legasi",
         "originUnverified": "Asal rekod belum disahkan",
@@ -1953,6 +1960,7 @@
         "loadFailed": "Permohonan spesies berkaitan tidak dapat disahkan. Semakan tumbuhan kekal dikunci.",
         "imageAlt": "Imej permohonan spesies yang dihantar {id}",
         "states": {
+          "verified": "Diluluskan — kaitan spesies disahkan",
           "loading": "Memuatkan penyelesaian spesies",
           "pending": "Menunggu Semakan",
           "approved": "Permohonan Spesies Diluluskan",
@@ -1965,6 +1973,7 @@
           "saving": "Menyimpan keputusan spesies…"
         },
         "notices": {
+          "approvedReadOnly": "Kaitan spesies yang diluluskan telah disahkan. Penyerahan yang diluluskan ini adalah baca sahaja.",
           "loading": "Memuat semula penyerahan untuk mengesahkan permohonan spesies berkaitan. Semakan tumbuhan dikunci sementara.",
           "pending": "Penyerahan ini mencadangkan spesies baharu. Semak dan selesaikan permohonan spesies sebelum membuat keputusan pemerhatian tumbuhan.",
           "approved": "Permohonan yang diterima telah diluluskan dan spesies yang terhasil sepadan dengan penyerahan ini. Semakan tumbuhan boleh diteruskan mengikut status pemerhatian.",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import ReviewFilterDropdown from '../../components/conservation/ReviewFilterDropdown.vue'
 import ApprovedRecordChanges from '../../components/conservation/ApprovedRecordChanges.vue'
-import { readCompleteQueue, changeMatches, changeSpeciesId, changeZone, unifiedReviewRows, type RecordChange } from '../../services/recordChanges'
+import { readCompleteQueue, submissionSearchMatches, changeMatches, changeSpeciesId, changeZone, unifiedReviewRows, type RecordChange } from '../../services/recordChanges'
 const objectValue = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const changeProposals = ref<RecordChange[]>([])
 const changeDialog = ref<InstanceType<typeof ApprovedRecordChanges> | null>(null)
@@ -18,7 +19,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
-import { ReviewApiError, createReviewRequest, performObservationReview, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions as transitions, type ReviewDecision } from '../../services/observationReview'
+import { ReviewApiError, createReviewRequest, performObservationReview, observationReviewSnapshot, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions as transitions, type ReviewDecision } from '../../services/observationReview'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import PlantSimilarityDrawer from '../../components/conservation/PlantSimilarityDrawer.vue'
@@ -39,6 +40,8 @@ import type { ObservationStatus } from '../../data/conservation'
 import type { PlantSimilarityAnalysis } from '../../data/plantSimilarityPrototype'
 
 interface ReviewObservation {
+  reviewSnapshot: ReturnType<typeof observationReviewSnapshot>
+  speciesAssociation: { speciesId: string; scientificName: string }
   historicalState: string
   historicalPhotosUnavailable: boolean
   reviewedBy: string
@@ -91,6 +94,14 @@ function clearCopyState() {
   copyFeedback.value = ''; copiedKey.value = ''; copyFailed.value = false; copyPending.value = false
 }
 const search = ref('')
+const submissionType = ref('')
+const submissionTypes = ['initial_registration', 'linked_species_request', 'approved_plant_change', 'approved_species_change'] as const
+const reviewStatuses = ['Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged', 'Cancelled'] as const
+const typeFilterOptions = computed(() => [{ value: '', label: t('approvedChanges.allTypes') }, ...submissionTypes.map(value => ({ value, label: typeLabel(value) }))])
+const statusFilterOptions = computed(() => [{ value: '', label: ct('All statuses') }, ...reviewStatuses.map(value => ({ value, label: value === 'Cancelled' ? t('approvedChanges.cancelled') : ct(value) }))])
+const speciesFilterOptions = computed(() => [{ value: '', label: ct('All species') }, ...speciesOptions.value.map(item => ({ value: item.id, label: item.name }))])
+const typeLabel = (kind: string) => kind === 'initial_registration' ? t('approvedChanges.originalRegistration') : kind === 'linked_species_request' ? rt('speciesRequest.title') : kind === 'approved_plant_change' ? t('approvedChanges.plantEdit') : kind === 'approved_species_change' ? t('approvedChanges.speciesEdit') : rt('queues.unverifiedOriginSubmissions')
+function clearFilters() { search.value = ''; submissionType.value = ''; status.value = ''; species.value = ''; date.value = ''; visibleLimit.value = 100 }
 const status = ref('')
 const species = ref('')
 const date = ref('')
@@ -188,8 +199,8 @@ function requireLatestSpecies(cycleConflict = false) {
 
 const reviewBusy = computed(() => isSaving.value || speciesSaving.value)
 const skippedRecords = ref(0)
-const reviewMessage = ref<{ variant: 'success' | 'error'; message: string } | null>(null)
-const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
+const reviewMessage = ref<{ variant: 'success' | 'error' | 'info'; message: string } | null>(null)
+const feedback = ref<{ id: number; variant: 'success' | 'error' | 'info'; message: string } | null>(null)
 const similarityAnalysis = ref<PlantSimilarityAnalysis | null>(null)
 const similarityTrigger = ref<HTMLElement | null>(null)
 const similarityResults = ref<Record<string, PlantSimilarityAnalysis>>({})
@@ -218,7 +229,7 @@ let disposed = false
 const rt = (key: string, params: Record<string, string | number> = {}) =>
   t(`conservationPages.reviews.${key}`, params)
 
-const showFeedback = (message: string, variant: 'success' | 'error' = 'error') => {
+const showFeedback = (message: string, variant: 'success' | 'error' | 'info' = 'error') => {
   reviewMessage.value = { variant, message }
   feedback.value = { id: ++feedbackId, variant, message }
 }
@@ -267,6 +278,12 @@ const formatDate = reviewDateTime
 const mapObservation = (value: unknown): ReviewObservation | null => {
   let item = record(value)
   if (!item) return null
+  const reviewSnapshot = observationReviewSnapshot(item)
+  // Eligibility uses the authoritative response, independently of historical display.
+  const speciesAssociation = {
+    speciesId: stringValue(item.species_id),
+    scientificName: typeof item.scientific_name === 'string' ? item.scientific_name : '',
+  }
   const historical = record(item.historical_review)
   const historicalState = item.status === 'Approved' ? stringValue(historical?.state) || 'unavailable' : ''
   if (historicalState) {
@@ -290,6 +307,8 @@ const mapObservation = (value: unknown): ReviewObservation | null => {
     return null
   const height = numericValue(content.heightCm, 0)
   return {
+    reviewSnapshot,
+    speciesAssociation,
     historicalState,
     historicalPhotosUnavailable: historicalState === 'unavailable' || historical?.photos_unavailable === true,
     reviewedBy: stringValue(item.reviewed_by),
@@ -341,7 +360,7 @@ const mapObservation = (value: unknown): ReviewObservation | null => {
 
 const countRecords = computed(() => [
   ...observations.value.map(row => ({ status: row.status, reviewedAt: row.reviewedAt })),
-  ...(queueOrigin.value === 'initial_registration' ? changeProposals.value.map(row => ({ status: row.status, reviewedAt: row.reviewed_at || undefined })) : []),
+  ...changeProposals.value.map(row => ({ status: row.status, reviewedAt: row.reviewed_at || undefined })),
 ])
 const counts = computed(() => [
   ...['Pending Review','Correction Required','Flagged','Rejected'].map(status => [status,countRecords.value.filter(row => row.status === status).length]),
@@ -408,11 +427,14 @@ async function copyIdentifier(value: string, kind: 'observation' | 'subject' | '
 
 const filtered = computed(() =>
   observations.value.filter((observation) => {
-    if (observation.origin !== queueOrigin.value) return false
-    const searchable = `${observation.id} ${observation.plantId} ${observation.speciesId} ${observation.scientificName} ${observation.commonName} ${observation.recordedBy} ${observation.status} ${observationLabel(observation.id)} ${submitterLabel(observation.recordedBy)}`
+    if (observation.origin === 'subsequent_observation') return false
+    const kind = observation.origin === 'unknown' ? 'legacy_observation' : observation.speciesRequest ? 'linked_species_request' : 'initial_registration'
+    const matchesSearch = submissionSearchMatches(search.value, [observation.plantRawId, observation.id],
+      [observation.id, observationLabel(observation.id), observation.plantId, observation.recordedBy, submitterLabel(observation.recordedBy)],
+      [observation.scientificName, observation.commonName, observation.plantScientificName, observation.speciesScientificName, observation.speciesRequest?.scientificName, observation.zone, observation.status, ct(observation.status), typeLabel(kind), kind === 'linked_species_request' ? 'New Species Request' : kind === 'initial_registration' ? 'Original Registration' : 'Unverified Origin Submissions'])
     const matchesDate = !date.value || dateKey(observation.createdAt) === date.value
     return (
-      searchable.toLowerCase().includes(search.value.toLowerCase()) &&
+      matchesSearch &&
       (!status.value || observation.status === status.value) &&
       (!species.value || observation.speciesId === species.value) &&
       matchesDate
@@ -420,11 +442,12 @@ const filtered = computed(() =>
   }),
 )
 
-const matchingChanges = computed(() => queueOrigin.value === 'initial_registration' ? changeProposals.value.filter(change => changeMatches(change,
-  { search: search.value, status: status.value, species: species.value, date: date.value }, value => dateKey(value))) : [])
+const matchingChanges = computed(() => changeProposals.value.filter(change => changeMatches(change,
+  { search: search.value, status: status.value, species: species.value, date: date.value }, value => dateKey(value),
+  { identifiers: [proposalLabel(change.id), submitterLabel(change.owner_subject)], text: [typeLabel(change.plant_id ? 'approved_plant_change' : 'approved_species_change'), ct(change.status)] })))
 const notificationChange = computed(() => changeProposals.value.find(row => row.id === route.query.change))
 const allReviewRows = computed(() => {
-  const rows = unifiedReviewRows(filtered.value, matchingChanges.value)
+  const rows = unifiedReviewRows(filtered.value, matchingChanges.value).filter(row => !submissionType.value || row.kind === submissionType.value)
   const pinned = notificationChange.value
   if (!pinned) return rows
   const [selection] = unifiedReviewRows<ReviewObservation>([], [pinned])
@@ -439,11 +462,12 @@ async function openChange(change: RecordChange) {
   await router.replace({ query: { ...route.query, review: undefined, speciesRequest: undefined, change: change.id } })
   if (alreadySelected) await changeDialog.value?.open(change.id)
 }
-watch([search,status,species,date], () => { visibleLimit.value = 100 })
+watch([search,submissionType,status,species,date], () => { visibleLimit.value = 100 })
 
 const selectedSpecies = computed(() => selected.value)
 const selectedSpeciesRequest = computed(() => standaloneRequest.value || selected.value?.speciesRequest || null)
 const speciesSubmitterLabels = computed(() => submitterIdentifierLabels([selectedSpeciesRequest.value?.requestedBy]))
+const reviewerLabels = computed(() => submitterIdentifierLabels([selected.value?.reviewedBy, selectedSpeciesRequest.value?.reviewedBy]))
 const speciesRequestImages = computed(() => selectedSpeciesRequest.value?.assets.filter(asset => asset.contentType.startsWith('image/')) || [])
 const speciesPhotoPreview = ref<InstanceType<typeof PlantPhotoLightbox> | null>(null)
 function enlargeSpeciesPhoto(assetId: string, event: Event) {
@@ -470,8 +494,8 @@ const speciesResolved = computed(() =>
     selected.value &&
     hasResolvedSpecies(
       selectedSpeciesRequest.value,
-      selected.value.speciesId,
-      selected.value.scientificName,
+      selected.value.speciesAssociation.speciesId,
+      selected.value.speciesAssociation.scientificName,
     ),
   ),
 )
@@ -484,7 +508,7 @@ const speciesRequestState = computed(() => {
     ? 'incomplete'
     : request?.state || 'unavailable'
 })
-const speciesNotice = computed(() => rt(`speciesRequest.notices.${speciesRequestState.value}`))
+const speciesNotice = computed(() => rt(`speciesRequest.notices.${speciesRequestState.value === 'approved' && selected.value?.status === 'Approved' ? 'approvedReadOnly' : speciesRequestState.value}`))
 const reviewSession = ref(sessionSnapshot())
 const officerSessionReady = computed(() => !reviewSession.value.pending && reviewSession.value.user?.role === 'Conservation Officer' &&
   reviewSession.value.user.status === 'Active' && reviewSession.value.user.mustChangePassword === false)
@@ -518,7 +542,7 @@ const canReviewPlant = computed(
     !speciesLoadError.value &&
     !speciesNeedsReload.value &&
     speciesResolved.value &&
-    Boolean(selected.value && reviewEligible(reviewSession.value.user, reviewSession.value.pending, { ...selected.value, owner: selected.value.recordedBy })),
+    Boolean(selected.value && reviewEligible(reviewSession.value.user, reviewSession.value.pending, { ...selected.value, ...selected.value.speciesAssociation, owner: selected.value.recordedBy })),
 )
 const canReviewSpecies = computed(
   () =>
@@ -568,6 +592,7 @@ async function open(observation: ReviewObservation) {
   similarityAbort?.abort()
   similarityLoading.value = ''
   const token = ++selectionRequest
+  if (observation.origin !== 'subsequent_observation') queueOrigin.value = observation.origin
   selected.value = observation
   comment.value = observation.reviewComment || ''
   reviewMessage.value = null
@@ -801,8 +826,7 @@ function updateObservation(observation: ReviewObservation) {
     item.id === observation.id ? observation : item,
   )
   if (observation.origin !== queueOrigin.value) {
-    observations.value = observations.value.filter(item => item.id !== observation.id)
-    void loadObservations()
+    if (observation.origin === 'subsequent_observation') observations.value = observations.value.filter(item => item.id !== observation.id)
   }
   selected.value = observation
   void loadPlantQr(observation)
@@ -1044,10 +1068,7 @@ async function resolveQuery() {
     const observation = await fetchObservation(id)
     if (disposed || token !== selectionRequest) return
     selected.value = observation
-    if (observation.origin === 'unknown' && queueOrigin.value !== 'unknown') {
-      queueOrigin.value = 'unknown'
-      void loadObservations()
-    }
+    if (observation.origin !== 'subsequent_observation') queueOrigin.value = observation.origin
     void loadPlantQr(observation)
     comment.value = observation.reviewComment || ''
     reviewMessage.value = null
@@ -1071,13 +1092,27 @@ async function reloadSelected() {
   try {
     const fresh = await fetchObservation(id)
     if (disposed || token !== selectionRequest || selected.value?.id !== id) return
+    const changed = fresh.reviewSnapshot.observation !== selected.value.reviewSnapshot.observation
+    const speciesChanged = fresh.reviewSnapshot.species !== selected.value.reviewSnapshot.species
+    const mustInspect = !conflictAcknowledged.value
+    const draftComment = comment.value
+    const draftSpeciesComment = speciesReviewComment.value
+    const visibility = speciesVisibility.value
+    const mustInspectSpecies = speciesInspectionRequired.value
     updateObservation(fresh)
+    comment.value = draftComment
+    speciesReviewComment.value = draftSpeciesComment
+    speciesInspectionRequired.value = mustInspectSpecies || speciesChanged
+    if (!speciesChanged && !mustInspectSpecies) speciesVisibility.value = visibility
     needsReload.value = false
-    conflictAcknowledged.value = false
-    showFeedback(rt('feedback.reloaded'))
+    conflictAcknowledged.value = !mustInspect && !changed
+    failedAssets.value = new Set()
+    showFeedback(changed || mustInspect ? rt('feedback.reloaded') : t('submissionChanges.upToDate'), changed || mustInspect ? 'error' : 'info')
   } catch (error) {
-    if (!disposed && token === selectionRequest)
+    if (!disposed && token === selectionRequest) {
+      needsReload.value = true
       showFeedback(error instanceof Error ? error.message : rt('feedback.loadFailed'))
+    }
   } finally {
     isSaving.value = false
     if (!disposed && token === selectionRequest && route.query.review !== id) void resolveQuery()
@@ -1121,14 +1156,9 @@ async function decide(decision: ReviewDecision) {
 
 }
 
-function changeQueue() {
-  closeReview()
-  void loadObservations()
-}
 async function loadObservations(append = false) {
   if (append) { visibleLimit.value += 100; return }
   const token = ++listRequest
-  const origin = queueOrigin.value
   const current = () => !disposed && token === listRequest
   similarityRequest++; similarityAbort?.abort(); similarityLoading.value = ''; similarityResults.value = {}; similarityErrors.value = {}; similarityAnalysis.value = null; similarityTrigger.value = null
   observations.value = []; changeProposals.value = []; visibleLimit.value = 100
@@ -1137,12 +1167,12 @@ async function loadObservations(append = false) {
   try {
     const [rawObservations, changes] = await Promise.all([
       readCompleteQueue(async cursor => {
-        const result = await request(observationQueueUrl(origin, '', cursor))
+        const result = await request(observationQueueUrl('all', '', cursor))
         const page = readQueuePage(result.page)
         if (!Array.isArray(result.observations) || !page) throw new ReviewApiError(rt('feedback.invalidResponse'))
         return { rows: result.observations, more: page.hasMore, cursor: page.cursor }
       }, current),
-      origin === 'initial_registration' ? readCompleteQueue<RecordChange>(async cursor => {
+      readCompleteQueue<RecordChange>(async cursor => {
         const query = new URLSearchParams({ limit: '100' }); if (cursor) query.set('cursor',cursor)
         const result = await request('/api/data/record-changes?' + query)
         const page = readQueuePage(result.page)
@@ -1151,13 +1181,13 @@ async function loadObservations(append = false) {
           return !row || typeof row.id !== 'string' || typeof row.status !== 'string' || typeof row.created_at !== 'string' || !Number.isFinite(Date.parse(row.created_at)) || typeof row.owner_subject !== 'string' || Boolean(row.plant_id) === Boolean(row.species_id) || !objectValue(row.base_snapshot) || !objectValue(row.proposed_snapshot)
         })) throw new ReviewApiError(rt('feedback.invalidResponse'))
         return { rows: result.changes as RecordChange[], more: page.hasMore, cursor: page.cursor }
-      }, current) : Promise.resolve([]),
+      }, current),
     ])
     if (!current()) return
-    const mapped = rawObservations.map(mapObservation).filter((item): item is ReviewObservation => item !== null)
+    const mapped = rawObservations.map(mapObservation).filter((item): item is ReviewObservation => item !== null && item.origin !== 'subsequent_observation')
     observations.value = [...new Map(mapped.map(item => [item.id,item])).values()]
     changeProposals.value = [...new Map(changes.map(item => [item.id,item])).values()]
-    skippedRecords.value = rawObservations.length - mapped.length
+    skippedRecords.value = rawObservations.filter(item => mapObservation(item) === null).length
   } catch (failure) {
     if (current()) { observations.value = []; changeProposals.value = []; loadError.value = failure instanceof Error ? failure.message : rt('feedback.loadFailed') }
   } finally { if (current()) { isLoading.value = false; void resolveQuery() } }
@@ -1214,48 +1244,19 @@ onBeforeUnmount(() => {
     </article>
   </section>
   <div class="control-bar reviews-filters">
-    <label class="field"><span>{{ rt('queues.reviewQueue') }}</span><select v-model="queueOrigin" :disabled="reviewBusy" @change="changeQueue">
-      <option value="initial_registration">{{ t('approvedChanges.unifiedQueue') }}</option>
-      <option value="unknown">{{ rt('queues.legacy') }}</option>
-    </select></label>
+    <label class="field" for="review-type-filter"><span id="review-type-filter-label">{{ t('approvedChanges.submissionType') }}</span><ReviewFilterDropdown id="review-type-filter" v-model="submissionType" labelled-by="review-type-filter-label" :options="typeFilterOptions" /></label>
     <label class="field search-field"
       ><span>{{ ct('Search') }}</span
-      ><input v-model="search" :placeholder="ct('Observation ID, Plant ID, species or botanist')"
+      ><input v-model="search" :placeholder="t('approvedChanges.searchPlaceholder')"
     /></label>
-    <label class="field"
-      ><span>{{ ct('Review status') }}</span
-      ><select v-model="status" @change="loadObservations()">
-        <option value="">{{ ct('All statuses') }}</option>
-        <option
-          v-for="reviewStatus in [
-            'Pending Review',
-            'Approved',
-            'Rejected',
-            'Correction Required',
-            'Flagged',
-            'Cancelled',
-          ]"
-          :key="reviewStatus"
-          :value="reviewStatus"
-        >
-          {{ reviewStatus === 'Cancelled' ? t('approvedChanges.cancelled') : ct(reviewStatus) }}
-        </option>
-      </select></label
-    >
-    <label class="field"
-      ><span>{{ ct('Species') }}</span
-      ><select v-model="species">
-        <option value="">{{ ct('All species') }}</option>
-        <option v-for="item in speciesOptions" :key="item.id" :value="item.id">
-          {{ item.name }}
-        </option>
-      </select></label
-    >
+    <label class="field" for="review-status-filter"><span id="review-status-filter-label">{{ ct('Review status') }}</span><ReviewFilterDropdown id="review-status-filter" v-model="status" labelled-by="review-status-filter-label" :options="statusFilterOptions" /></label>
+    <label class="field" for="review-species-filter"><span id="review-species-filter-label">{{ ct('Species') }}</span><ReviewFilterDropdown id="review-species-filter" v-model="species" labelled-by="review-species-filter-label" :options="speciesFilterOptions" /></label>
     <label class="field">
       <span>{{ rt('recordCreated') }}</span>
       <input v-model="date" type="date" />
     </label>
   </div>
+  <button type="button" class="secondary-button clear-review-filters" @click="clearFilters"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2.6 8.4 M3 4v6h6" /></svg><span>{{ t('common.clearFilters') }}</span></button>
   <p v-if="notificationChange" role="status">{{ t('approvedChanges.notificationSelection') }}</p>
   <p v-if="selectionLoading" role="status">{{ rt('loadingDetail') }}</p>
   <p v-if="skippedRecords" role="status">{{ rt('skippedRecords', { count: skippedRecords }) }}</p>
@@ -1285,7 +1286,7 @@ onBeforeUnmount(() => {
           <td class="identity-cell"><div class="identifier-line"><strong :title="observation.id">{{ observationLabel(observation.id) }}</strong><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" @click="copyIdentifier(observation.id, 'observation')"><svg v-if="copiedKey !== `observation:${observation.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></div></td>
             <td class="plant-id-cell">{{ observation.plantId }}</td>
             <td class="submission-type-cell"><div class="species-request-list">
-              <span class="species-request-badge">{{ observation.speciesRequest ? rt('speciesRequest.title') : t('approvedChanges.originalRegistration') }}</span>
+              <span class="species-request-badge">{{ observation.origin === 'unknown' ? rt('queues.unverifiedOriginSubmissions') : observation.speciesRequest ? rt('speciesRequest.title') : t('approvedChanges.originalRegistration') }}</span>
               <span v-if="observation.speciesRequest?.updated" class="badge species-updated-badge">{{ rt('speciesRequest.updated') }}</span>
             </div></td>
             <td><em v-if="observation.speciesRequest?.scientificName || observation.plantScientificName || observation.scientificName">{{ observation.speciesRequest ? observation.speciesRequest.scientificName || ct('Species unavailable') : observation.plantScientificName || observation.scientificName }}</em><span v-else>{{ ct('Species unavailable') }}</span></td>
@@ -1357,14 +1358,25 @@ onBeforeUnmount(() => {
     wide
     @close="closeReview"
   >
+    <template v-if="selected" #title>
+      <span class="submission-modal-title">
+        <span>{{ ct('Review {id}', { id: observationLabel(selected.id) }) }}</span>
+        <span class="submission-refresh-control">
+        <button class="submission-refresh-button" type="button" :aria-label="t('submissionChanges.reload')" aria-describedby="submission-refresh-tooltip" :disabled="reviewBusy || selectionLoading || !!selectionError" :aria-busy="isSaving" @click="reloadSelected">
+          <svg class="lucide lucide-refresh-cw" :class="{ 'species-refresh-spinning': isSaving }" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.4L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-15.5 6.4L3 16 M8 16H3v5" /></svg>
+        </button>
+        <span id="submission-refresh-tooltip" class="submission-refresh-tooltip" role="tooltip">{{ t('submissionChanges.reload') }}</span>
+        </span>
+      </span>
+    </template>
     <template v-if="selected">
     <dl v-if="copyFailed" class="detail-list">
       <div><dt>{{ ct('Observation ID') }}</dt><dd class="full-identifier">{{ selected.id }}</dd></div>
     </dl>
     <p v-if="selected.reviewOrigin === 'species_dependency'" class="review-feedback error" role="status">{{ t('submissionChanges.automaticRejection') }}</p>
     <p v-if="selected.status === 'Rejected'" class="review-feedback error" role="status">{{ t('submissionChanges.finalRejected') }}</p>
-    <SubmissionChanges v-if="selected.status === 'Pending Review'" :update="selected.submissionUpdate" :revision="selected.revision" :busy="reviewBusy || selectionLoading" @reload="reloadSelected" />
-    <div v-if="!conflictAcknowledged || needsReload" class="review-feedback error" role="alert"><p>{{ t('submissionChanges.conflict') }}</p><button type="button" class="secondary-button" :disabled="reviewBusy" @click="reloadSelected">{{ t('submissionChanges.reload') }}</button></div>
+    <SubmissionChanges v-if="selected.status === 'Pending Review'" :update="selected.submissionUpdate" :revision="selected.revision" :initial-submission="selected.origin === 'initial_registration' && selected.revision === 1" :busy="reviewBusy || selectionLoading" hide-reload @reload="reloadSelected" />
+    <div v-if="!conflictAcknowledged || needsReload" class="review-feedback error" role="alert"><p>{{ t(!conflictAcknowledged ? 'submissionChanges.conflict' : 'submissionChanges.reloadRequired') }}</p></div>
     <p v-if="selected.origin === 'unknown'" role="status">{{ rt('queues.originUnverified') }}</p>
     <p v-if="selected.origin !== queueOrigin" role="status">{{ rt('queues.originMoved') }} <RouterLink :to="{ name: 'conservation-observations' }">{{ rt('queues.fieldObservations') }}</RouterLink></p>
     <p v-if="selectionLoading" role="status">{{ rt('loadingLatestObservation') }}</p>
@@ -1381,17 +1393,17 @@ onBeforeUnmount(() => {
     >
       <header class="species-request-header">
         <div>
-          <p v-if="!standaloneRequest" class="section-kicker species-prerequisite"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4c0 9-4 15-10 15a6 6 0 0 1-6-6C4 7 11 4 20 4Z M4 21 15 10" /></svg>{{ rt('speciesRequest.requiredFirst') }}</p>
+          <p v-if="!standaloneRequest && !speciesResolved" class="section-kicker species-prerequisite"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 4c0 9-4 15-10 15a6 6 0 0 1-6-6C4 7 11 4 20 4Z M4 21 15 10" /></svg>{{ rt('speciesRequest.requiredFirst') }}</p>
           <h3 id="species-request-heading">{{ rt('speciesRequest.title') }}</h3>
         </div>
         <div class="species-header-controls">
-          <span class="species-request-badge" :style="workflowBadgeStyle(speciesRequestState === 'pending' ? 'Pending Review' : speciesRequestState === 'approved' ? 'Approved' : speciesRequestState === 'rejected' ? 'Rejected' : speciesRequestState === 'correction' ? 'Correction Required' : '')">{{ rt(`speciesRequest.states.${speciesRequestState}`) }}</span>
+          <span class="species-request-badge" :style="workflowBadgeStyle(speciesRequestState === 'pending' ? 'Pending Review' : speciesRequestState === 'approved' ? 'Approved' : speciesRequestState === 'rejected' ? 'Rejected' : speciesRequestState === 'correction' ? 'Correction Required' : '')">{{ rt(`speciesRequest.states.${!standaloneRequest && speciesRequestState === 'approved' ? 'verified' : speciesRequestState}`) }}</span>
           <span v-if="selectedSpeciesRequest.updated" class="badge species-updated-badge">{{ rt('speciesRequest.updated') }}</span>
           <button class="species-refresh-button" type="button" aria-label="Refresh submission and species resolution" aria-describedby="species-refresh-help" :disabled="reviewBusy || speciesRefreshing" :aria-busy="speciesRefreshing" @click="refreshSpeciesRequest" @mouseenter="showSpeciesRefreshHelp" @mouseleave="hideSpeciesRefreshHelp" @focus="showSpeciesRefreshHelp" @blur="hideSpeciesRefreshHelp" @pointerdown="showSpeciesRefreshHelp" @keydown.esc.stop.prevent="hideSpeciesRefreshHelp"><svg class="lucide lucide-refresh-cw" :class="{ 'species-refresh-spinning': speciesRefreshing }" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.4L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-15.5 6.4L3 16 M8 16H3v5" /></svg></button>
           <div id="species-refresh-help" ref="speciesRefreshHelp" popover="auto" role="tooltip" class="species-refresh-help">Refresh submission and species resolution</div>
         </div>
       </header>
-      <p :class="{ 'review-feedback error': ['error', 'unknown', 'unavailable'].includes(speciesRequestState) }" :role="['error', 'unknown', 'unavailable'].includes(speciesRequestState) ? 'alert' : 'status'" id="species-request-notice">
+      <p v-if="standaloneRequest || speciesRequestState !== 'pending'" :class="{ 'review-feedback error': ['error', 'unknown', 'unavailable'].includes(speciesRequestState) }" :role="['error', 'unknown', 'unavailable'].includes(speciesRequestState) ? 'alert' : 'status'" id="species-request-notice">
         {{ standaloneRequest ? rt(`speciesRequest.states.${speciesRequestState}`) : speciesNotice }}
       </p>
       <div v-if="speciesVersionConflict" class="review-feedback error" role="alert">
@@ -1459,7 +1471,7 @@ onBeforeUnmount(() => {
           <dd>{{ selectedSpeciesRequest.reviewComment || '—' }}</dd>
         </div>
         <div v-if="selectedSpeciesRequest.reviewedAt"><dt>{{ rt('reviewedAt') }}</dt><dd>{{ reviewDateTime(selectedSpeciesRequest.reviewedAt) }}</dd></div>
-        <div v-if="selectedSpeciesRequest.reviewedBy"><dt>{{ t('approvedChanges.reviewedBy') }}</dt><dd><MonitoringIdentifier :value="selectedSpeciesRequest.reviewedBy" :labels="speciesSubmitterLabels" copy-label="Copy full reviewer ID" /></dd>
+        <div v-if="selectedSpeciesRequest.reviewedBy"><dt>{{ t('approvedChanges.reviewedBy') }}</dt><dd><MonitoringIdentifier :value="selectedSpeciesRequest.reviewedBy" :labels="reviewerLabels" copy-label="Copy full staff ID" :feedback-duration="3000" /></dd>
         </div>
       </dl>
         </section>
@@ -1674,7 +1686,7 @@ onBeforeUnmount(() => {
             </div>
             <div>
               <dt>{{ t('approvedChanges.reviewedBy') }}</dt>
-              <dd><MonitoringIdentifier v-if="selected.reviewedBy" :value="selected.reviewedBy" :labels="speciesSubmitterLabels" copy-label="Copy full reviewer ID" /><span v-else>&#8212;</span></dd>
+              <dd><MonitoringIdentifier v-if="selected.reviewedBy" :value="selected.reviewedBy" :labels="reviewerLabels" copy-label="Copy full staff ID" :feedback-duration="3000" /><span v-else>&#8212;</span></dd>
             </div>
             <div>
               <dt>{{ rt('reviewDecision') }}</dt>
@@ -1774,7 +1786,8 @@ onBeforeUnmount(() => {
       class="species-gate-notice"
       role="status"
     >
-      {{ rt('speciesRequest.resolveFirst') }}
+      <svg class="species-gate-info-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6" /><circle cx="12" cy="8" r="1" fill="currentColor" stroke="none" /></svg>
+      <span>{{ rt('speciesRequest.resolveFirst') }}</span>
     </p>
     <div
       class="modal-actions plant-review-actions"
@@ -1868,6 +1881,10 @@ onBeforeUnmount(() => {
 .reviews-panel > .action-button { font-size: 13px; }
 
 .reviews-filters { align-items: stretch; }
+.clear-review-filters { display: flex; align-items: center; gap: 5px; width: fit-content; margin: 0 0 18px; padding: 4px 12px; border: 1px solid #d5d9d6; border-radius: 999px; background: #fff; color: #5b635e; font-size: 12px; font-weight: 500; line-height: 1.4; }
+.clear-review-filters svg { flex: 0 0 15px; }
+.clear-review-filters:hover { background: #f3f6f3; border-color: #aebbb3; }
+.clear-review-filters:focus-visible { outline: 2px solid var(--green, #33745d); outline-offset: 3px; }
 .reviews-filters > .field { grid-template-rows: 1fr 44px; }
 .reviews-filters > .field > span { align-self: end; font-size: 12px; line-height: 1.4; }
 .reviews-filters > .field > input, .reviews-filters > .field > select { box-sizing: border-box; height: 44px; padding: 9px 10px; font-size: 14px; line-height: 1.4; }
@@ -2032,12 +2049,23 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .species-gate-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 14px 0;
-  padding: 12px;
-  border: 1px solid #c7daca;
-  border-radius: 8px;
-  background: #eaf3e9;
+  color: var(--muted, #61736b);
+  font-size: 13px;
+  line-height: 1.6;
 }
+.species-gate-info-icon { flex: 0 0 18px; margin-top: 2px; }
+.submission-modal-title { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.submission-modal-title > span { min-width: 0; overflow-wrap: anywhere; }
+.submission-refresh-control { position: relative; display: inline-flex; }
+.submission-refresh-tooltip { position: absolute; top: calc(100% + 6px); left: 0; z-index: 2; width: max-content; max-width: min(240px, calc(100vw - 64px)); padding: 7px 10px; border-radius: 6px; background: var(--forest, #173f34); color: #fff; font-size: 12px; font-weight: 400; line-height: 1.5; opacity: 0; visibility: hidden; pointer-events: none; }
+.submission-refresh-control:hover .submission-refresh-tooltip, .submission-refresh-control:focus-within .submission-refresh-tooltip { opacity: 1; visibility: visible; }
+.submission-refresh-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line, #dfe7df); border-radius: 8px; background: #fff; color: var(--green, #33745d); cursor: pointer; }
+.submission-refresh-button:focus-visible { outline: 2px solid var(--green, #33745d); outline-offset: 3px; }
+.submission-refresh-button:disabled { opacity: .55; cursor: default; }
 @media (max-width: 620px) {
   .species-request-header {
     flex-direction: column;
@@ -2062,6 +2090,10 @@ onBeforeUnmount(() => {
 .review-feedback.error {
   color: #8a2929;
   background: #fff0ed;
+}
+.review-feedback.info {
+  color: #315b49;
+  background: #f0f7f1;
 }
 .review-feedback.success {
   color: #245b3d;

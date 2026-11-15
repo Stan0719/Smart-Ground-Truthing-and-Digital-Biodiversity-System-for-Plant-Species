@@ -171,6 +171,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
       return fetchHandler(url, options)
     },
     require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
       if (name === 'vue') return {
         ...vue,

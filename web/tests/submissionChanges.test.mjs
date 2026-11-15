@@ -12,7 +12,7 @@ const script = compileScript(descriptor, { id: 'submission-changes' })
 const template = compileTemplate({ source: descriptor.template.content, filename: filename.pathname,
   id: 'submission-changes', compilerOptions: { bindingMetadata: script.bindings } })
 const compile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-async function render(update, locale = 'en') {
+async function render(update, locale = 'en', props = {}) {
   const messages = JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`, import.meta.url), 'utf8'))
   const exports = {}
   const context = { exports, require(name) {
@@ -25,7 +25,7 @@ async function render(update, locale = 'en') {
   const component = exports.default
   vm.runInNewContext(`(function () { ${compile(template.code)} })()`, context)
   component.render = exports.render
-  return renderToString(vue.createSSRApp(component, { update, revision: 2 }))
+  return renderToString(vue.createSSRApp(component, { update, revision: 2, ...props }))
 }
 test('verified changes render stored values and metadata in every locale with an explicit reload', async () => {
   for (const locale of ['en', 'ms', 'zh-CN']) {
@@ -44,4 +44,22 @@ test('missing history and ordinary revisions never fabricate an Updated badge or
     if (value?.state !== 'unchanged') assert.match(html, /could not be verified/)
     assert.match(html, /Loaded observation revision 2/)
   }
+})
+
+
+test('first pending registration has a neutral revision without inventing missing history in all locales', async () => {
+  for (const locale of ['en', 'ms', 'zh-CN']) {
+    const html = await render({ state: 'unavailable', changes: [] }, locale, { revision: 1, initialSubmission: true })
+    assert.doesNotMatch(html, /history-unavailable|updated-badge/)
+    const messages = JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`, import.meta.url), 'utf8'))
+    assert.ok(html.includes(messages.submissionChanges.loadedRevision.replace('{revision}', '1')))
+    assert.ok(!html.includes(messages.submissionChanges.historyUnavailable))
+  }
+})
+
+
+test('reload can be relocated to the review header without changing other consumers', async () => {
+  const hidden = await render({ state: 'unchanged' }, 'en', { hideReload: true })
+  assert.doesNotMatch(hidden, /<button/)
+  assert.match(await render({ state: 'unchanged' }), /<button/)
 })

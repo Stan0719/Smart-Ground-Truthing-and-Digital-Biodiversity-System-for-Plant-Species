@@ -55,6 +55,7 @@ function harness(handler, account = officer, options = {}) {
   const context = { exports, console, Intl, crypto: globalThis.crypto, HTMLElement: Element, document: { get activeElement() { return active }, elementFromPoint: (...args) => options.hitTest?.(...args) },
     URL: { createObjectURL(file) { const url = `blob:preview-${++serial}`; created.push({ file, url }); return url }, revokeObjectURL(url) { revoked.push(url) } },
     require(name) {
+      if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return { ...vue, onMounted: callback => mounted.push(callback), useId: () => 'photo-test', withDirectives: node => node, resolveDynamicComponent: name => name }
       if (name === 'vue-i18n') return { useI18n: () => ({ t, locale: vue.ref('en') }) }
       if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: listener => { listeners.add(listener); return () => listeners.delete(listener) } }

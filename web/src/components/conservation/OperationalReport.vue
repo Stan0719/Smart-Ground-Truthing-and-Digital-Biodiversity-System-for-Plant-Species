@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vOfficerDropdown } from './officerDropdown'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
@@ -108,8 +109,8 @@ defineExpose({ load, exportFile, exportDocument })
       <p v-if="category === 'threats'" class="scope">{{ text(report.basis) }}</p>
       <p v-else-if="category === 'observations'" class="scope">{{ text('observationScopeShort') }}</p>
       <div v-if="category === 'iot'" class="control-bar">
-        <label class="field"><span>{{ text('device') }}</span><select v-model="device" @change="load"><option v-for="item in report.devices" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-        <label class="field"><span>{{ text('measurement') }}</span><select v-model="measurement" @change="load"><option v-for="item in report.measurements" :key="item" :value="item">{{ text(item) }}</option></select></label>
+        <label class="field"><span>{{ text('device') }}</span><select v-officer-dropdown v-model="device" @change="load"><option v-for="item in report.devices" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+        <label class="field"><span>{{ text('measurement') }}</span><select v-officer-dropdown v-model="measurement" @change="load"><option v-for="item in report.measurements" :key="item" :value="item">{{ text(item) }}</option></select></label>
       </div>
       <div class="operational-metrics" :class="{ 'iot-metrics': category === 'iot', 'observation-metrics': category === 'observations' }">
         <div v-for="stat in report.statistics" :key="stat.key" class="metric" :class="[statClasses(stat.key), { 'report-stat': category !== 'threats' }]">

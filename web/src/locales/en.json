@@ -1,5 +1,7 @@
 {
   "approvedChanges": {
+    "allTypes": "All Types",
+    "searchPlaceholder": "Submission ID, Plant ID, name, submitter, type or zone",
     "historicalAvailable": "Reviewed values captured at approval.",
     "submissionType": "Submission Type",
     "originalRegistration": "Original Registration",
@@ -88,6 +90,8 @@
     }
   },
   "submissionChanges": {
+    "upToDate": "Submission is up to date. Your review comment has been preserved.",
+    "reloadRequired": "The latest submission could not be verified. Reload it before reviewing.",
     "cycleChanged": "This species request entered a new review cycle. Reload and inspect the latest submission before deciding.",
     "finalRejected": "Rejected is final. This submission is read-only and cannot be edited or resubmitted.",
     "automaticRejection": "Automatic linked registration rejection caused by the species decision",
@@ -96,7 +100,7 @@
     "edited": "Botanist content edit - snapshot {version} - {date}",
     "unavailable": "Unavailable",
     "historyUnavailable": "Earlier field values could not be verified for this submission. Change history is unavailable.",
-    "loadedRevision": "Loaded observation revision {revision}. Reload to check for newer content.",
+    "loadedRevision": "Loaded observation revision {revision}.",
     "reload": "Reload Latest Submission",
     "conflict": "This submission changed or was reviewed after it was opened. Load the latest submission and inspect it before deciding again.",
     "plantName": "Plant Scientific Name",
@@ -1764,6 +1768,9 @@
         "registrations": "New Plant Registrations",
         "registrationEyebrow": "Verification Workflow",
         "registrationIntro": "Review and approve or reject new plant registrations and associated species requests.",
+        "submissionView": "Submission View",
+        "allSubmissions": "All Submissions",
+        "unverifiedOriginSubmissions": "Unverified Origin Submissions",
         "reviewQueue": "Review Queue",
         "legacy": "Unclassified / Legacy Observations",
         "originUnverified": "Origin not verified",
@@ -1826,6 +1833,7 @@
         "loadFailed": "The linked species request could not be verified. Plant review remains locked.",
         "imageAlt": "Submitted species-request image {id}",
         "states": {
+          "verified": "Approved — species association verified",
           "loading": "Loading species resolution",
           "pending": "Pending Review",
           "approved": "Species Request Approved",
@@ -1838,6 +1846,7 @@
           "saving": "Saving species decision…"
         },
         "notices": {
+          "approvedReadOnly": "The approved species association is verified. This approved submission is read-only.",
           "loading": "Refreshing the submission to verify the linked species request. Plant review is temporarily locked.",
           "pending": "This submission proposes a new species. Review and resolve the species request before making a decision on the plant observation.",
           "approved": "The returned request is approved and its resulting species matches this submission. Plant review may proceed according to the observation status.",

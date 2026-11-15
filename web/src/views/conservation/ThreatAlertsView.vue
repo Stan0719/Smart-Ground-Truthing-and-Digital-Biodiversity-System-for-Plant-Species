@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
@@ -251,14 +252,14 @@ const submitResponse = async () => {
     /></label>
     <label class="field"
       ><span>{{ ct('Severity') }}</span
-      ><select v-model="severity" disabled title="Canonical alerts do not provide severity.">
+      ><select v-officer-dropdown v-model="severity" disabled title="Canonical alerts do not provide severity.">
         <option value="">{{ ct('All severities') }}</option>
         <option v-for="item in severityOptions" :key="item" :value="item">{{ ct(item) }}</option>
       </select></label
     >
     <label class="field"
       ><span>{{ ct('Status') }}</span
-      ><select v-model="status">
+      ><select v-officer-dropdown v-model="status">
         <option value="">{{ ct('All statuses') }}</option>
         <option v-for="item in statusOptions" :key="item" :value="item">{{ ct(item) }}</option>
       </select></label
@@ -381,7 +382,7 @@ const submitResponse = async () => {
     </dl>
     <label class="field">
       <span>Response status</span>
-      <select v-model="responseStatus" :disabled="selectedAlert.status === 'Resolved' || isSavingResponse">
+      <select v-officer-dropdown v-model="responseStatus" :disabled="selectedAlert.status === 'Resolved' || isSavingResponse">
         <option value="Reviewing">Reviewing</option>
         <option value="Resolved">Resolved</option>
       </select>
