@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { faceSession } from "./faceSession";
-import { plantApi } from "./plantApi";
+import { plantApi, plantAssetSources } from "./plantApi";
 import { mobileApiConfiguration } from "./apiConfiguration";
 import { createBotanistNotificationStore } from "./botanistNotificationStore";
 
@@ -19,5 +19,15 @@ export async function ownedNotificationObservation(accountId, observationId) {
   const payload = await plantApi(`/observations/${encodeURIComponent(observationId)}`, { expectedAccountId: accountId });
   const row = payload?.observation;
   if (!row || row.owner_subject !== `staff:${accountId}` || String(row.id) !== String(observationId)) throw Error("This observation is unavailable for your account.");
-  return row;
+  const assets = Array.isArray(row.assets) ? row.assets.filter((asset) => asset?.id && ["image/jpeg", "image/png"].includes(String(asset.content_type || "").toLowerCase())) : [];
+  let photos = [];
+  if (assets.length) {
+    try {
+      const sources = await plantAssetSources(assets, accountId);
+      photos = assets.map((asset, index) => ({ id: String(asset.id), ...sources[index] }));
+    } catch {
+      // Keep authorized observation details available if photo URLs cannot be resolved.
+    }
+  }
+  return { ...row, photos };
 }

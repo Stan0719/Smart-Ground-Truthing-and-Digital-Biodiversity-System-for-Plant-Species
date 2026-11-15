@@ -84,6 +84,43 @@ test('Botanist notifications return complete newest-first history and persist ow
   assert.ok((await call('/notifications')).data.notifications.some((item) => item.type === 'correction_requested' && item.observationId === 'obs-pending'));
 });
 
+test('Species review notifications use explicit owner-scoped request identity and status', async (t) => {
+  const pool = await createPlantDatabase();
+  t.after(() => pool.end());
+  await pool.query(`
+    CREATE TABLE botanist_notification(
+      id TEXT PRIMARY KEY, recipient_subject TEXT NOT NULL, type TEXT NOT NULL, source_key TEXT NOT NULL,
+      observation_id TEXT, review_id TEXT, plant_id BIGINT, metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, read_at TIMESTAMPTZ,
+      UNIQUE(recipient_subject,source_key)
+    );
+    CREATE TABLE species_request_submission(
+      request_id INTEGER PRIMARY KEY, owner_subject TEXT NOT NULL, request_status TEXT NOT NULL,
+      review_comment TEXT, submitted_at TIMESTAMPTZ NOT NULL, reviewed_at TIMESTAMPTZ
+    );
+    INSERT INTO species_request_submission VALUES
+      (4,'staff:alice','Correction Required','Please add a clear photo.','2026-11-01T00:00:00Z','2026-11-03T00:00:00Z'),
+      (5,'staff:alice','Rejected','The identification could not be verified.','2026-11-01T00:00:00Z','2026-11-04T00:00:00Z'),
+      (6,'staff:bob','Correction Required','Private feedback','2026-11-01T00:00:00Z','2026-11-05T00:00:00Z');
+  `);
+  const auth = { session: async (token) => ({ id: token === 'b'.repeat(64) ? 'bob' : 'alice', role: 'Botanist', status: 'Active', mustChangePassword: false }), event: async () => {} };
+  const server = createPlantApp({ pool, auth, origins: new Set() }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); });
+  const notifications = async (token) => {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/notifications`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(response.status, 200);
+    return (await response.json()).notifications;
+  };
+  const alice = await notifications('a'.repeat(64));
+  assert.deepEqual(alice.map((row) => row.requestId).sort(), ['4', '5']);
+  assert.equal(alice.find((row) => row.requestId === '4').type, 'species_correction_requested');
+  assert.equal(alice.find((row) => row.requestId === '4').entityType, 'species_request');
+  assert.equal(alice.find((row) => row.requestId === '4').comment, 'Please add a clear photo.');
+  assert.equal(alice.find((row) => row.requestId === '5').type, 'species_request_rejected');
+  assert.deepEqual((await notifications('b'.repeat(64))).map((row) => row.requestId), ['6']);
+});
+
 test('notification history endpoints fail clearly before the approved table migration exists', async (t) => {
   const pool = await createPlantDatabase();
   t.after(() => pool.end());

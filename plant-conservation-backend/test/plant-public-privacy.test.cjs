@@ -7,7 +7,7 @@ const {createPlantApp}=require('../server.js');
 
 test('public plant, species, QR and assets use safe projections while staff/owners retain their contracts',async t=>{
  const pool=await createPlantDatabase();t.after(()=>pool.end());
- await pool.query("CREATE TABLE plant_app.qr_code(qr_id integer,plant_id integer,qr_code text,status text)");
+ await pool.query("CREATE SCHEMA IF NOT EXISTS plant_app; CREATE TABLE plant_app.qr_code(qr_id integer,plant_id integer,qr_code text,status text)");
  await pool.query(`INSERT INTO species(scientific_name,common_name,description,rbac_data) VALUES
  ('Public species','Public common','Description','{"habitat":"Habitat","culturalSignificance":"Culture"}'),
  ('Internal species','Internal common','Description','{}'),

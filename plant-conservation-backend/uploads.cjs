@@ -97,7 +97,7 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
         if (b.plant_id) {
           const observation = (
             await c.query(
-              "SELECT id FROM plant_observation WHERE id=$1 AND plant_id=$2 AND owner_subject=$3 AND status IN ('Draft','Correction Required','Rejected')",
+              "SELECT id FROM plant_observation WHERE id=$1 AND plant_id=$2 AND owner_subject=$3 AND status IN ('Draft','Correction Required')",
               [b.observation_id, b.plant_id, subject(req.user)],
             )
           ).rows[0];
@@ -238,6 +238,9 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
           row.observation_id === row.latest_approved_observation_id
         : row.approved)
       : row.approved;
+    const approvedFieldObservationPhoto = Boolean(permitted(req.user, "plants.scientific.read") && row.plant_id &&
+      row.observation_id && row.observation_plant_id != null && row.rbac_status === "Approved" &&
+      row.observation_status === "Approved" && row.approved && row.owner_subject === row.observation_owner_subject);
     if (!visibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto && !ownObservationPhoto)
       fail(404, "Asset unavailable.");
     if (!classification) fail(404, "Asset unavailable.");
@@ -259,6 +262,7 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
     if (
       row.plant_id &&
       !approvedPlantPhoto &&
+      !approvedFieldObservationPhoto &&
       !ownProposalPhoto &&
       !ownSubmissionPhoto &&
        !ownObservationPhoto &&

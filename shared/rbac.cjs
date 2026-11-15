@@ -137,7 +137,7 @@ function assertEdit(user, observation) {
     observation.owner_subject !== `staff:${user.id}`
   )
     return 403;
-  return ["Draft", "Correction Required", "Rejected"].includes(
+  return ["Draft", "Correction Required"].includes(
     observation.status,
   )
     ? 0

@@ -8,10 +8,9 @@ const { createPlantApp } = require("../server.js");
 test("QR lookup resolves only approved, visible plant assignments", async (t) => {
   const pool = await createPlantDatabase();
   t.after(() => pool.end());
-  await pool.query(`CREATE TABLE plant_app.qr_code(
+  await pool.query(`CREATE SCHEMA IF NOT EXISTS plant_app; CREATE TABLE plant_app.qr_code(
     qr_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    plant_id BIGINT UNIQUE REFERENCES plant_app.plant_record(plant_id) ON DELETE SET NULL,
-    qr_code TEXT NOT NULL UNIQUE,
+    plant_id BIGINT UNIQUE REFERENCES plant_app.plant_record(plant_id) ON DELETE SET NULL,    qr_code TEXT NOT NULL UNIQUE,
     status VARCHAR(30) NOT NULL DEFAULT 'generated',
     generated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     assigned_at TIMESTAMPTZ,

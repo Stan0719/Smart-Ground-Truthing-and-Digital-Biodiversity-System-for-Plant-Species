@@ -4,7 +4,7 @@ import { AppState } from "react-native";
 import { createBotanistRecordsLoader, fetchBotanistRecords } from "./botanistRecords";
 
 export function useBotanistRecords(accountId) {
-  const [state, setState] = useState({ accountId, plants: [], observations: [], requests: [], loading: true, loaded: false, error: "" });
+  const [state, setState] = useState({ accountId, plants: [], observations: [], requests: [], edits: [], recordChanges: [], loading: true, loaded: false, error: "" });
   const loader = useMemo(() => createBotanistRecordsLoader(() => fetchBotanistRecords(accountId),
     (next) => setState({ accountId, ...next })), [accountId]);
   useFocusEffect(useCallback(() => {
@@ -12,6 +12,6 @@ export function useBotanistRecords(accountId) {
     const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void loader.refresh(); });
     return () => { subscription.remove(); loader.cancel(); };
   }, [loader]));
-  const current = state.accountId === accountId ? state : { ...loader.getState(), plants: [], requests: [], observations: [] };
+  const current = state.accountId === accountId ? state : { ...loader.getState(), plants: [], requests: [], observations: [], edits: [], recordChanges: [] };
   return { ...current, refresh: loader.refresh };
 }

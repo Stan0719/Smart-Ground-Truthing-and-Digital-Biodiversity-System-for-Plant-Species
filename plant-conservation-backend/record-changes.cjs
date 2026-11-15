@@ -142,6 +142,29 @@ async function currentPhotoIds(c, observationId, approved) {
   return (await c.query("SELECT id FROM plant_asset WHERE observation_id=$1 AND approved=$2 AND content_type='image/jpeg' ORDER BY created_at,id",
     [observationId, approved])).rows.map((row) => row.id);
 }
+async function recordChangeCorrectionNotificationsAvailable(c) {
+  return Boolean((await c.query("SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass(current_schema() || '.botanist_notification') AND conname='botanist_notification_type_check' AND pg_get_constraintdef(oid) LIKE '%record_change_correction%') AS available")).rows[0]?.available);
+}
+async function recordChangeReviewEventsAvailable(c) {
+  return Boolean((await c.query("SELECT to_regclass(current_schema() || '.record_change_review_event') IS NOT NULL AS available")).rows[0]?.available);
+}
+async function currentChangeBase(c, change) {
+  if (change.plant_id) {
+    const plant = (await c.query("SELECT * FROM plant_record WHERE plant_id=$1 FOR UPDATE", [change.plant_id])).rows[0];
+    if (!plant || plant.rbac_status !== "Approved") fail(409, "Approved plant has changed.");
+    const base = await approvedPlantSnapshot(c, plant);
+    if (digest(base) !== change.base_fingerprint) fail(409, "Approved plant changed since this proposal. Start a fresh edit.");
+    return { plant, base };
+  }
+  await c.query("SELECT species_id FROM species WHERE species_id=$1 FOR UPDATE", [change.species_id]);
+  const request = (await c.query("SELECT * FROM species_request_submission WHERE approved_species_id=$1 AND owner_subject=$2 AND request_status='Approved' FOR UPDATE",
+    [change.species_id, change.owner_subject])).rows[0];
+  const base = request && { request_id: request.request_id, species_id: change.species_id, ...speciesSnapshot(request),
+    photo_fingerprint: createHash("sha256").update(request.photo).digest("hex"),
+    species_version: await speciesVersion(c, change.species_id) };
+  if (!request || digest(base) !== change.base_fingerprint) fail(409, "Approved species changed since this proposal. Start a fresh edit.");
+  return { request, base };
+}
 async function applyPlantPhotos(c, { plantId, observationId, owner, approved, proposal, keyPrefix }) {
   if (proposal.photos === undefined && proposal.photo_ids === undefined) return;
   const existing = await currentPhotoIds(c, observationId, approved);
@@ -191,11 +214,11 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
     const proposal = await normalized(plantProposal(edit), "plant");
     const result = await transaction(pool, async (c) => {
       const plant = await ownedPlant(c, numericId(req.params.id), req.user, true);
-      if (!["Pending Review", "Rejected", "Correction Required"].includes(plant.rbac_status))
+      if (!["Pending Review", "Correction Required"].includes(plant.rbac_status))
         fail(409, "Approved plants require a reviewed change submission.");
       const observation = (await c.query("SELECT * FROM plant_observation WHERE plant_id=$1 AND owner_subject=$2 ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE",
         [plant.plant_id, subject(req.user)])).rows[0];
-      if (!observation || !["Pending Review", "Rejected", "Correction Required"].includes(observation.status))
+      if (!observation || !["Pending Review", "Correction Required"].includes(observation.status))
         fail(409, "Plant observation is unavailable for correction.");
       if (observation.revision !== expectedRevision) fail(409, "Plant changed. Reload its latest version before saving.");
       const before = await pendingPlantSnapshot(c, plant, observation, qrPlantSchema);
@@ -235,7 +258,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
     const proposal = await normalized(speciesProposal(req.body), "species");
     const result = await transaction(pool, async (c) => {
       const row = await ownedSpeciesRequest(c, numericId(req.params.id), req.user, true);
-      if (!["Pending Review", "Rejected", "Correction Required"].includes(row.request_status))
+      if (!["Pending Review", "Correction Required"].includes(row.request_status))
         fail(409, "Approved species require a reviewed change submission.");
       const before = { request_id: row.request_id, species_id: row.proposed_species_id,
         ...speciesSnapshot(row) };
@@ -321,7 +344,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
           photo_fingerprint: createHash("sha256").update(row.photo).digest("hex"),
           species_version: await speciesVersion(c, speciesId) };
       }
-      if ((await c.query(`SELECT id FROM record_change_submission WHERE status='Pending Review' AND ${plantId ? "plant_id" : "species_id"}=$1`,
+      if ((await c.query(`SELECT id FROM record_change_submission WHERE status IN ('Pending Review','Correction Required') AND ${plantId ? "plant_id" : "species_id"}=$1`,
         [plantId || speciesId])).rows.length) fail(409, "Changes are already pending review for this record.");
       const changeId = randomUUID();
       await c.query("INSERT INTO record_change_submission(id,plant_id,species_id,owner_subject,base_snapshot,proposed_snapshot,base_fingerprint,client_key,payload_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
@@ -346,6 +369,55 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
       return { id: changeId, status: "Pending Review" };
     });
     res.status(201).json({ change: result });
+  });
+
+  app.patch("/api/record-changes/:id", allow("plants.create"), async (req, res) => {
+    const body = req.body || {};
+    if (!Number.isInteger(body.revision) || body.revision < 1 || !body.proposed || typeof body.proposed !== "object" || Array.isArray(body.proposed) ||
+      Object.keys(body).some((key) => !["revision", "proposed"].includes(key))) fail(400, "Invalid correction submission.");
+    const updated = await transaction(pool, async (c) => {
+      const change = (await c.query("SELECT * FROM record_change_submission WHERE id=$1 FOR UPDATE", [req.params.id])).rows[0];
+      if (!change || change.owner_subject !== subject(req.user)) fail(404, "Owned edit proposal unavailable.");
+      if (change.status !== "Correction Required" || change.revision !== body.revision) fail(409, "Reload this correction request before resubmitting.");
+      const kind = change.plant_id ? "plant" : "species";
+      const proposal = await normalized(kind === "plant" ? plantProposal(body.proposed) : speciesProposal(body.proposed), kind);
+      if (kind === "plant" && proposal.photos === undefined && proposal.photo_ids === undefined) {
+        if (change.proposed_snapshot.photos !== undefined) proposal.photos = change.proposed_snapshot.photos;
+        if (change.proposed_snapshot.photo_ids !== undefined) proposal.photo_ids = change.proposed_snapshot.photo_ids;
+      }
+      if (kind === "species" && proposal.photo === undefined && change.proposed_snapshot.photo !== undefined)
+        proposal.photo = change.proposed_snapshot.photo;
+      const { plant, base } = await currentChangeBase(c, change);
+      if (kind === "plant") {
+        if (proposal.species_id !== String(plant.species_id)) await speciesRow(c, proposal.species_id, req.user);
+        if (proposal.photo_ids !== undefined || proposal.photos !== undefined) {
+          const retained = proposal.photo_ids || [];
+          if (retained.some((photoId) => !base.photo_ids.includes(photoId)) || retained.length + (proposal.photos?.length || 0) < 3 || retained.length + (proposal.photos?.length || 0) > 8)
+            fail(409, "Plant photos changed or the proposed photo count is invalid. Reload before saving.");
+        }
+        if (proposal.qr_id !== undefined && String(proposal.qr_id) !== String(base.qr_id) &&
+          !(await c.query("SELECT qr_id FROM plant_app.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated'", [proposal.qr_id])).rows.length)
+          fail(409, "Selected QR code is no longer available. Refresh the QR list.");
+      }
+      const targetId = kind === "plant" ? change.plant_id : change.species_id;
+      const payloadHash = digest({ kind, targetId, proposal });
+      const nextRevision = change.revision + 1;
+      const row = (await c.query(`UPDATE record_change_submission SET proposed_snapshot=$1,payload_hash=$2,revision=$3,status='Pending Review',
+        reviewed_by=NULL,reviewed_at=NULL,cancelled_by=NULL,cancelled_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$4 RETURNING id,status,revision,review_comment,updated_at`,
+      [proposal, payloadHash, nextRevision, change.id])).rows[0];
+      if (await historyAvailable(c)) {
+        const proposedSnapshot = kind === "plant"
+          ? plantProposedSnapshot(base, proposal, change.id, proposal.qr_id === undefined || String(proposal.qr_id) === String(base.qr_id)
+            ? base.qr_token : (await c.query("SELECT qr_code FROM plant_app.qr_code WHERE qr_id=$1", [proposal.qr_id])).rows[0]?.qr_code)
+          : { ...change.base_snapshot, ...speciesSnapshot(proposal) };
+        if (kind === "species") await c.query("UPDATE record_version_history SET snapshot=$1,species_photo=COALESCE($2,species_photo),status='Pending Review' WHERE change_id=$3",
+          [proposedSnapshot, proposal.photo ? Buffer.from(proposal.photo.base64, "base64") : null, change.id]);
+        else await c.query("UPDATE record_version_history SET snapshot=$1,status='Pending Review' WHERE change_id=$2", [proposedSnapshot, change.id]);
+      }
+      await audit(c, req.user, "record_change_resubmitted", change.id);
+      return { ...row, plant_id: change.plant_id, species_id: change.species_id };
+    });
+    res.json({ change: updated });
   });
 
   const read = (req, res, next) => allow(permitted(req.user, "species.manage") ? "species.manage" : "plants.create")(req, res, next);
@@ -373,8 +445,25 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
     res.type("image/jpeg").send(Buffer.from(photo.base64, "base64"));
   });
 
+  app.post("/api/record-changes/:id/cancel", allow("plants.create"), async (req, res) => {
+    if (req.body && Object.keys(req.body).length) fail(400, "Cancellation does not accept proposal changes.");
+    const cancelled = await transaction(pool, async (c) => {
+      const change = (await c.query("SELECT * FROM record_change_submission WHERE id=$1 FOR UPDATE", [req.params.id])).rows[0];
+      if (!change || change.owner_subject !== subject(req.user)) fail(404, "Owned edit proposal unavailable.");
+      if (!["Pending Review", "Correction Required"].includes(change.status))
+        fail(409, "Only an active edit proposal can be cancelled.");
+      const row = (await c.query(`UPDATE record_change_submission SET status='Cancelled',cancelled_by=$1,cancelled_at=CURRENT_TIMESTAMP,
+        updated_at=CURRENT_TIMESTAMP WHERE id=$2 RETURNING *`, [subject(req.user), change.id])).rows[0];
+      // Keep any Officer feedback intact; the status and audit event record cancellation.
+      if (await historyAvailable(c)) await c.query("UPDATE record_version_history SET status='Cancelled' WHERE change_id=$1", [change.id]);
+      await audit(c, req.user, "record_change_cancelled", change.id);
+      return { id: row.id, status: row.status, cancelled_at: row.cancelled_at };
+    });
+    res.json({ change: cancelled });
+  });
+
   app.post("/api/record-changes/:id/review", allow("species.manage"), async (req, res) => {
-    if (!req.body || !["Approved", "Rejected"].includes(req.body.decision) ||
+    if (!req.body || !["Approved", "Rejected", "Correction Required"].includes(req.body.decision) ||
       Object.keys(req.body).some((key) => !["decision", "comment"].includes(key))) fail(400, "Invalid review decision.");
     const comment = text(req.body.comment);
     const result = await transaction(pool, async (c) => {
@@ -382,6 +471,10 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
       if (!change) fail(404, "Change submission unavailable.");
       if (change.status !== "Pending Review") fail(409, "This submission was already reviewed.");
       if (change.owner_subject === subject(req.user)) fail(403, "You cannot review your own changes.");
+      if (req.body.decision === "Correction Required") {
+        if (!comment) fail(400, "Correction feedback is required.");
+        if (!(await recordChangeCorrectionNotificationsAvailable(c))) fail(503, "Plant and Species edit correction notifications require migration 018.");
+      }
       if (req.body.decision === "Approved") {
         if (change.plant_id) {
           const plant = (await c.query("SELECT * FROM plant_record WHERE plant_id=$1 FOR UPDATE", [change.plant_id])).rows[0];
@@ -422,8 +515,19 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
       }
       await c.query("UPDATE record_change_submission SET status=$1,review_comment=$2,reviewed_by=$3,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$4",
         [req.body.decision, comment, subject(req.user), change.id]);
+      if (await recordChangeReviewEventsAvailable(c)) await c.query(`INSERT INTO record_change_review_event
+        (id,change_id,revision,status,reviewer_subject,comment,created_at) VALUES($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP)`,
+      [randomUUID(), change.id, change.revision, req.body.decision, subject(req.user), comment]);
       if (await historyAvailable(c)) await c.query("UPDATE record_version_history SET status=$1,review_comment=$2,reviewed_by=$3,reviewed_at=CURRENT_TIMESTAMP WHERE change_id=$4",
         [req.body.decision, comment, subject(req.user), change.id]);
+      if (req.body.decision === "Correction Required") {
+        const recordKind = change.plant_id ? "plant" : "species";
+        const targetId = change.plant_id ?? change.base_snapshot?.request_id ?? change.species_id;
+        const metadata = { entityType: "record_change", changeId: change.id, recordKind, targetId: String(targetId), revision: change.revision };
+        await c.query(`INSERT INTO botanist_notification(id,recipient_subject,type,source_key,plant_id,metadata)
+          VALUES($1,$2,'record_change_correction',$3,$4,$5::jsonb) ON CONFLICT(recipient_subject,source_key) DO NOTHING`,
+        [randomUUID(), change.owner_subject, `record-change-correction:${change.id}:${change.revision}`, change.plant_id, metadata]);
+      }
       await audit(c, req.user, `record_change_${req.body.decision.toLowerCase()}`, change.id);
       return { id: change.id, status: req.body.decision };
     });

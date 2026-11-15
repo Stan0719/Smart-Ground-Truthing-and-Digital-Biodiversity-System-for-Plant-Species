@@ -1,4 +1,4 @@
-import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, translateFieldValue } from "../translations/i18n";
+import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, translateFieldValue, formatDateTime } from "../translations/i18n";
 // screens/PlantDetail.js
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -614,6 +614,10 @@ export default function PlantDetail({
           {latestApprovedObservation ? (
           <View style={styles.observationCard}>
 
+            <InfoRow label={t("myObservations.observationId")} value={latestApprovedObservation.observationId} />
+            <InfoRow label={t("myObservations.plantId")} value={latestApprovedObservation.plantId} />
+            <InfoRow label={t("notificationObservation.reviewStatus")} value={translateLabel(latestApprovedObservation.status)} />
+
             <InfoRow
               label={t("plantDetail.recordedBy")}
               value={
@@ -623,9 +627,7 @@ export default function PlantDetail({
 
             <InfoRow
               label={t("plantDetail.date")}
-              value={formatDate(
-                latestApprovedObservation.date
-              )}
+              value={latestApprovedObservation.date ? formatDateTime(latestApprovedObservation.date) : t("plant.notRecorded")}
             />
 
             <InfoRow
@@ -664,6 +666,14 @@ export default function PlantDetail({
             {latestApprovedObservation.taxonomy ? (
               <InfoRow label={t("recordEdits.taxonomy")} value={latestApprovedObservation.taxonomy} />
             ) : null}
+
+            {latestApprovedObservation.latitude != null && <InfoRow label={t("fieldCollection.latitude")} value={String(latestApprovedObservation.latitude)} />}
+            {latestApprovedObservation.longitude != null && <InfoRow label={t("fieldCollection.longitude")} value={String(latestApprovedObservation.longitude)} />}
+            {latestApprovedObservation.accuracyM != null && <InfoRow label={t("fieldCollection.gpsAccuracyM")} value={String(latestApprovedObservation.accuracyM)} />}
+            {latestApprovedObservation.zone && <InfoRow label={t("recordEdits.zone")} value={latestApprovedObservation.zone} />}
+            {latestApprovedObservation.altitudeM != null && <InfoRow label={t("recordEdits.altitudeM")} value={`${latestApprovedObservation.altitudeM} m`} />}
+            {latestApprovedObservation.reviewComment && <InfoRow label={t("notificationObservation.officerFeedback")} value={latestApprovedObservation.reviewComment} />}
+            {latestApprovedObservation.reviewedAt && <InfoRow label={t("recordEdits.reviewedAt")} value={formatDateTime(latestApprovedObservation.reviewedAt)} />}
 
             <ObservationPhotos photos={latestApprovedObservation.photos} />
 
@@ -706,6 +716,7 @@ export default function PlantDetail({
                 key={observation.observationId}
                 observation={observation}
                 user={user}
+                navigation={navigation}
                 initiallyOpen={String(observation.observationId) === String(focusObservationId)}
               />
             )
@@ -789,7 +800,7 @@ function InfoRow({
 // OBSERVATION CARD
 // =====================================================
 
-function ObservationCard({ observation, user, initiallyOpen = false }) {
+export function ObservationCard({ observation, user, navigation, initiallyOpen = false }) {
   useAppTranslation();
   const [isOpen, setIsOpen] = useState(initiallyOpen);
 
@@ -815,7 +826,7 @@ function ObservationCard({ observation, user, initiallyOpen = false }) {
               styles.statusBadge,
               observation.status === "Approved"
                 ? styles.approvedBadge
-                : styles.pendingBadge,
+                : observation.status === "Rejected" ? styles.rejectedBadge : styles.pendingBadge,
             ]}
           >
             <Text
@@ -823,7 +834,7 @@ function ObservationCard({ observation, user, initiallyOpen = false }) {
                 styles.statusText,
                 observation.status === "Approved"
                   ? styles.approvedText
-                  : styles.pendingText,
+                  : observation.status === "Rejected" ? styles.rejectedText : styles.pendingText,
               ]}
             >
               {translateLabel(observation.status)}
@@ -843,6 +854,11 @@ function ObservationCard({ observation, user, initiallyOpen = false }) {
           <Text style={styles.observationId}>
             {t("plantDetail.fieldObservation")}
           </Text>
+
+          <Text style={styles.historyLabel}>{t("myObservations.observationId")}</Text>
+          <Text style={styles.historyValue}>{observation.observationId}</Text>
+          <Text style={styles.historyLabel}>{t("myObservations.plantId")}</Text>
+          <Text style={styles.historyValue}>{observation.plantId}</Text>
 
           <Text style={styles.observationSummary}>
             {observation.heightCm != null ? t("plantDetail.cm", { heightCm: observation.heightCm }) : t("plantDetail.heightNotRecorded")}
@@ -875,7 +891,19 @@ function ObservationCard({ observation, user, initiallyOpen = false }) {
             </>
           ) : null}
 
+          {observation.latitude != null && <><Text style={styles.historyLabel}>{t("fieldCollection.latitude")}</Text><Text style={styles.historyValue}>{String(observation.latitude)}</Text></>}
+          {observation.longitude != null && <><Text style={styles.historyLabel}>{t("fieldCollection.longitude")}</Text><Text style={styles.historyValue}>{String(observation.longitude)}</Text></>}
+          {observation.accuracyM != null && <><Text style={styles.historyLabel}>{t("fieldCollection.gpsAccuracyM")}</Text><Text style={styles.historyValue}>{String(observation.accuracyM)}</Text></>}
+
           <ObservationPhotos photos={observation.photos} />
+          <TouchableOpacity style={styles.observationViewDetails} accessibilityRole="button"
+            accessibilityLabel={t("recordEdits.viewDetails")}
+            onPress={() => navigation.navigate("NotificationObservation", {
+              observationId: observation.observationId,
+              readOnlyApproved: observation.status === "Approved",
+            })}>
+            <Text style={styles.observationViewDetailsText}>{t("recordEdits.viewDetails")} ›</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -883,6 +911,7 @@ function ObservationCard({ observation, user, initiallyOpen = false }) {
 }
 
 function ObservationPhotos({ photos }) {
+  useAppTranslation();
   if (!photos?.length) return null;
   return (
     <View style={styles.observationPhotosSection}>
@@ -1324,6 +1353,7 @@ observationArrow: {
   pendingBadge: {
     backgroundColor: "#F4E7D2",
   },
+  rejectedBadge: { backgroundColor: "#FCE2E2" },
 
   statusText: {
     fontSize: 8,
@@ -1338,6 +1368,9 @@ observationArrow: {
   pendingText: {
     color: "#8A6939",
   },
+  rejectedText: { color: "#A33F36" },
+  observationViewDetails: { minHeight: 44, alignSelf: "flex-end", justifyContent: "center", paddingHorizontal: 8, marginTop: 6 },
+  observationViewDetailsText: { color: "#28665E", fontSize: 13, fontWeight: "700" },
 
   otherStatusBadge: { backgroundColor: "#E7EBE6" },
   otherStatusText: { color: "#52645A" },

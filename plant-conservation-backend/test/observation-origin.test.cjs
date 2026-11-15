@@ -11,7 +11,7 @@ test("Phase 2: authoritative observation origin across creation, history and rev
   t.after(() => pool.end());
   for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql"])
     await pool.query(readFileSync(join(__dirname, "../migrations", name), "utf8"));
-  await pool.query(`CREATE TABLE plant_app.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  await pool.query(`CREATE SCHEMA IF NOT EXISTS plant_app; CREATE TABLE plant_app.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     plant_id integer UNIQUE,qr_code text UNIQUE,status text,assigned_at timestamptz,activated_at timestamptz,retired_at timestamptz)`);
   await pool.query(`INSERT INTO species(scientific_name,common_name,rbac_data) VALUES
     ('Species A','A','{}'),('Species B','B','{}'),('Unapproved','U','{"approvalStatus":"Pending Review"}'),('Protected','P','{}');

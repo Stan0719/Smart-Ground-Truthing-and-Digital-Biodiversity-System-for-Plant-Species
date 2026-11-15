@@ -69,6 +69,12 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       (mode === "FieldCollection" && !route.params?.draft);
   const updateDraftCount = (saved) => setDraftCount(saved.filter((draft) => draft.kind !== "botanist-form").length);
   const observationDraft = route.params?.draft?.path?.match(/^\/plants\/\d+\/observations$/);
+  const observationEditMode = Boolean(route.params?.editRequestMode || route.params?.editRequest || route.params?.draft?.method === "OBSERVATION_EDIT");
+  const editRequest = route.params?.editRequest || route.params?.draft?.edit_request;
+  const observationCorrectionWorkflow = Boolean(editRequest?.id && editRequest.status === "Correction Required");
+  const routeDraftMatchesCorrection = !observationCorrectionWorkflow || (route.params?.draft?.method === "OBSERVATION_EDIT" &&
+    route.params.draft.path === `/observation-edits/${editRequest.id}` &&
+    String(route.params.draft.edit_request?.id || "") === String(editRequest.id));
   const observationForm = mode === "AddObservation" || edit || Boolean(observationDraft);
   const isNewObservation = mode === "AddObservation" || Boolean(observationDraft);
   const eligibilityMessageKey = (status) => ({
@@ -79,7 +85,8 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     unavailable: "fieldCollection.plantObservationEligibilityUnavailable",
   }[status] || "fieldCollection.plantObservationEligibilityUnavailable");
   const draftObservationId = route.params?.draft?.method === "PATCH" ? route.params.draft.path.split("/").pop() : null;
-  const originalObservation = route.params?.observation || rows.find((row) => String(row.id) === String(draftObservationId)) || null;
+  const originalObservation = route.params?.observation || route.params?.draft?.observation_snapshot ||
+    rows.find((row) => String(row.id) === String(draftObservationId || route.params?.draft?.observation_id)) || null;
   const originalObservationContent = originalObservation?.content || {};
   const selectedPlantId = route.params?.observation?.plant_id || route.params?.draft?.plant_id ||
     route.params?.plantId || route.params?.draft?.path?.match(/^\/plants\/(\d+)\//)?.[1] || form.plant_id;
@@ -138,11 +145,17 @@ export default function FieldCollection({ route, navigation, onLogout }) {
         const plantId = String(route.params?.plantId || "");
         const observationId = String(route.params?.observation?.id || "");
         const candidate = saved.filter((draft) => draft.kind !== "botanist-form" && (
-          edit ? draft.method === "PATCH" && String(draft.path || "").split("/").pop() === (observationId || plantId)
+          observationEditMode ? draft.method === "OBSERVATION_EDIT" && String(draft.observation_id) === observationId &&
+            (!observationCorrectionWorkflow || (draft.path === `/observation-edits/${editRequest.id}` &&
+              String(draft.edit_request?.id || "") === String(editRequest.id)))
+          : edit ? draft.method === "PATCH" && String(draft.path || "").split("/").pop() === (observationId || plantId)
             : newPlant ? draft.path === "/plants"
               : draft.path === `/plants/${plantId}/observations`
         )).sort((a, b) => new Date(b.saved_at || 0) - new Date(a.saved_at || 0))[0];
-        if (candidate) Alert.alert(t("botanistDrafts.recoveryTitle"), t("botanistDrafts.recoveryMessage"), [
+        if (observationCorrectionWorkflow) {
+          if (candidate) navigation.setParams({ draft: candidate });
+          setRecoveryResolved(true);
+        } else if (candidate) Alert.alert(t("botanistDrafts.recoveryTitle"), t("botanistDrafts.recoveryMessage"), [
           { text: t("botanistDrafts.continueDraft"), onPress: () => navigation.setParams({ draft: candidate }) },
           { text: t("botanistDrafts.startNewDraft"), style: "cancel", onPress: () => { draftKey.current = newFieldDraftKey(); setRecoveryResolved(true); } },
         ]);
@@ -193,11 +206,11 @@ export default function FieldCollection({ route, navigation, onLogout }) {
   }
   useEffect(() => {
     load();
-    if (route.params?.observation) {
+      if (route.params?.observation) {
       const observation = route.params.observation;
       draftKey.current = newFieldDraftKey();
       const values = Object.fromEntries(observationFields.map((field) => [
-        field, observation.content?.[field] == null ? "" : String(observation.content[field]),
+        field, (editRequest?.proposed_content || observation.content)?.[field] == null ? "" : String((editRequest?.proposed_content || observation.content)[field]),
       ]));
       setForm({ ...blankForm(observation.plant_id), ...values });
       setInitialForm({ ...blankForm(observation.plant_id), ...values });
@@ -211,7 +224,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       setPhotos([]);
       setInvalidField("");
     }
-    if (route.params?.draft) {
+    if (route.params?.draft && routeDraftMatchesCorrection) {
       const draft = route.params.draft;
       draftKey.current = draft.client_key;
       const values = Object.fromEntries(observationFields.map((field) => [
@@ -234,7 +247,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       setInvalidField("");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when the selected observation, draft, or plant changes.
-  }, [route.params?.observation?.id, route.params?.draft?.client_key, route.params?.plantId]);
+  }, [route.params?.observation?.id, route.params?.editRequest?.id, route.params?.draft?.client_key, route.params?.plantId, routeDraftMatchesCorrection]);
   /* eslint-enable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!user?.id) return undefined;
@@ -274,6 +287,9 @@ export default function FieldCollection({ route, navigation, onLogout }) {
   }
   async function capture(camera) {
     if (capturing.current) return;
+    if (observationEditMode && photos.length + (originalObservation?.assets?.length || 0) >= 3) {
+      setError(t("observationEdits.photoLimit")); return;
+    }
     capturing.current = true;
     setError("");
     try {
@@ -295,6 +311,22 @@ export default function FieldCollection({ route, navigation, onLogout }) {
   function createDraft() {
     const data = Object.fromEntries(observationFields.map((field) => [field, String(form[field] ?? "")]));
     const assets = photos.map(({ uri, ...asset }) => asset);
+    if (observationEditMode) {
+      const observation = originalObservation;
+      if (!observation?.id || observation.owner_subject !== `staff:${user?.id}` || observation.status !== "Approved")
+        throw Error(t("observationEdits.ownedApprovedRequired"));
+      const request = editRequest || route.params?.draft?.edit_request;
+      return { client_key: draftKey.current, method: "OBSERVATION_EDIT",
+        path: request?.id ? `/observation-edits/${request.id}` : "/observation-edits",
+        observation_id: String(observation.id), edit_request: request,
+        observation_snapshot: { id: observation.id, plant_id: observation.plant_id, owner_subject: observation.owner_subject,
+          status: observation.status, origin_type: observation.origin_type, revision: observation.revision,
+          content: observation.content, assets: observation.assets || [] },
+        plant_id: String(observation.plant_id),
+        body: { content: data, observation_id: String(observation.id),
+          ...(request?.id ? { revision: request.revision } : { client_key: draftKey.current }),
+          photo_ids: request?.retained_photo_ids || (observation.assets || []).map((asset) => asset.id) }, assets };
+    }
     if (edit) {
       const recovered = route.params?.draft;
       const observation = recovered?.method === "PATCH"
@@ -364,6 +396,19 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           throw eligibilityError;
         }
       }
+      if (online && observationEditMode && !observationCorrectionWorkflow) {
+        if (editRequest?.id) throw Error(t("observationEdits.ownedApprovedRequired"));
+        const observationId = originalObservation?.id;
+        if (!observationId) throw Error(t("observationEdits.ownedApprovedRequired"));
+        const [current, history] = await Promise.all([
+          plantApi(`/observations/${encodeURIComponent(observationId)}`, { expectedAccountId: user.id }),
+          plantApi(`/observations/${encodeURIComponent(observationId)}/edit-history`, { expectedAccountId: user.id }),
+        ]);
+        const currentObservation = current?.observation;
+        if (!Array.isArray(history?.edits) || currentObservation?.owner_subject !== `staff:${user.id}` || currentObservation.status !== "Approved" ||
+          (history?.edits || []).some((request) => ["Pending Review", "Correction Required"].includes(request.status)))
+          throw Error(t("observationEdits.ownedApprovedRequired"));
+      }
       const draft = createDraft();
       if (online) {
         try { validateObservationDraft(draft); }
@@ -395,9 +440,10 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       } else if (submittedItem?.id) {
         const message = submittedItem.type === "plant"
           ? t("addPlant.plantAndItsPhotosWereSavedTheQrCodeIs", { plantId: submittedItem.id })
-          : edit ? t("fieldCollection.observationResubmittedForReview") : t("fieldCollection.observationSubmittedForReview");
+          : observationEditMode ? t("observationEdits.submitted") : edit ? t("fieldCollection.observationResubmittedForReview") : t("fieldCollection.observationSubmittedForReview");
         Alert.alert(t("fieldCollection.submissionSuccessful"), message, [{ text: t("common.ok"), onPress: () => submittedItem.type === "plant"
           ? navigation.navigate("BotanistSubmissions", { botanist: user, openTarget: { kind: "plant", recordId: submittedItem.id } })
+          : submittedItem.type === "observation-edit" ? navigation.navigate("NotificationObservation", { observationId: submittedItem.id, editRequestId: submittedItem.requestId })
           : navigation.navigate("MainTabs", { screen: "PlantsTab", params: { screen: "PlantDetails", params: { plantId: submittedItem.plantId, focusObservationId: submittedItem.id } } }) }]);
       }
     } catch (e) {
@@ -457,10 +503,28 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       </View>
     );
   }
+  const observationSectionTitle = (number, key) => isNewObservation ? (
+    <View style={styles.numberedHeading}>
+      <View style={styles.sectionNumberBadge}><Text style={styles.sectionNumber}>{number}</Text></View>
+      <Text style={styles.numberedSectionTitle}>{t(key)}</Text>
+    </View>
+  ) : <Text style={styles.sectionTitle}>{t(key)}</Text>;
+  const cancelNewObservation = () => {
+    if (busy || completed) return;
+    const leave = async () => {
+      await autosave.stop();
+      navigation.navigate("MainTabs", { screen: "PlantsTab", params: { screen: "PlantDetails", params: { plantId: selectedPlantId } } });
+    };
+    if (!autoSaveMeaningful) { void leave(); return; }
+    Alert.alert(t("fieldCollection.leaveObservationTitle"), t("fieldCollection.leaveObservationMessage"), [
+      { text: t("fieldCollection.keepEditing"), style: "cancel" },
+      { text: t("fieldCollection.leaveObservation"), style: "destructive", onPress: () => { void leave(); } },
+    ]);
+  };
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-      <View style={styles.page}>
+      <View style={[styles.page, isNewObservation && styles.observationPage]}>
       <View style={styles.pageHeadingRow}>
       <Text style={styles.pageTitle}>
         {dashboard
@@ -468,10 +532,10 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           : mode === "PlantQRCode"
             ? t("fieldCollection.plantQrCodes")
             : edit
-              ? t("fieldCollection.correctObservation")
+              ? t(observationEditMode ? editRequest ? "fieldCollection.correctObservation" : "observationEdits.editObservation" : "fieldCollection.correctObservation")
               : newPlant
                 ? t("fieldCollection.registerPlant")
-                : t("fieldCollection.addObservation")}
+                : t("navigation.addNewObservation")}
       </Text>
       <RefreshButton onPress={load} loading={loading} label={t("common.refresh")} />
       </View>
@@ -514,15 +578,15 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       )}
       {user && !dashboard && mode !== "PlantQRCode" && (
         <>
-          <View style={styles.card}>
+          <View style={[styles.card, isNewObservation && styles.observationCard]}>
           {observationForm ? (
             <>
-              <Text style={styles.sectionTitle}>{t("fieldCollection.plantInformation")}</Text>
-              <Text style={styles.sectionHint}>{t("fieldCollection.readOnlyPlantInformation")}</Text>
-              {edit && !!originalObservation?.review_comment && (
+              {observationSectionTitle("01", "fieldCollection.plantInformation")}
+              <Text style={[styles.sectionHint, isNewObservation && styles.numberedSectionHint]}>{t("fieldCollection.readOnlyPlantInformation")}</Text>
+              {edit && !!(editRequest?.review_comment || originalObservation?.review_comment) && (
                 <View style={styles.officerFeedback}>
                   <Text style={styles.officerFeedbackLabel}>{t("notificationObservation.officerFeedback")}</Text>
-                  <Text style={styles.plantInfoValue}>{originalObservation.review_comment}</Text>
+                  <Text style={styles.plantInfoValue}>{editRequest?.review_comment || originalObservation?.review_comment}</Text>
                 </View>
               )}
               {[
@@ -562,12 +626,12 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             </>
           )}
           </View>
-          <View style={styles.card}>
-          <Text style={styles.sectionTitle}>{t(observationForm ? "fieldCollection.plantCondition" : "fieldCollection.observationSection")}</Text>
+          <View style={[styles.card, isNewObservation && styles.observationCard]}>
+          {observationSectionTitle("02", observationForm ? "fieldCollection.plantCondition" : "fieldCollection.observationSection")}
           {(observationForm ? ["healthStatus", "lifeStage", "heightCm", "morphology"] : ["heightCm", "healthStatus", "lifeStage", "morphology", "taxonomy", "notes"]).map(renderObservationField)}
           </View>
-          <View style={styles.card}>
-          <Text style={styles.sectionTitle}>{t(observationForm ? "fieldCollection.observationLocation" : "fieldCollection.locationSection")}</Text>
+          <View style={[styles.card, isNewObservation && styles.observationCard]}>
+          {observationSectionTitle("03", observationForm ? "fieldCollection.observationLocation" : "fieldCollection.locationSection")}
           {["latitude", "longitude", "accuracy_m"].map((field) => {
             const label = fieldLabel(field, newPlant && ["latitude", "longitude"].includes(field));
             return <View key={field} style={styles.fieldGroup}>
@@ -583,21 +647,21 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             {locating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.locationButtonText}>{t("addPlant.getCurrentLocation")}</Text>}
           </TouchableOpacity>
           </View>
-          <View style={styles.card}>
-          <Text style={styles.sectionTitle}>{t(observationForm ? "fieldCollection.fieldNotesPhotoEvidence" : "fieldCollection.photosSection")}</Text>
+          <View style={[styles.card, isNewObservation && styles.observationCard]}>
+          {observationSectionTitle("04", observationForm ? "fieldCollection.fieldNotesPhotoEvidence" : "fieldCollection.photosSection")}
           {observationForm && ["taxonomy", "notes"].map(renderObservationField)}
           {edit && <>
             <Text style={styles.originalInformationLabel}>{t("recordEdits.originalInformation")}</Text>
             {originalPhotos.length ? <View style={styles.photoList}>{originalPhotos.map((source, index) => <Image key={`${originalAssetKey}-${index}`} source={source} style={styles.photoPreview} resizeMode="cover" />)}</View>
               : <Text style={styles.originalInformationValue}>{t("recordEdits.informationNotAvailable")}</Text>}
-            <Text style={styles.originalInformationValue}>{t("fieldCollection.photoReuseUnavailable")}</Text>
+            {!observationEditMode && <Text style={styles.originalInformationValue}>{t("fieldCollection.photoReuseUnavailable")}</Text>}
             <Text style={styles.originalInformationLabel}>{t("recordEdits.updatedInformation")}</Text>
           </>}
           <View style={styles.actionRow}>
-          <TouchableOpacity style={[styles.photoButton, styles.actionFlex]} onPress={() => capture(true)} accessibilityRole="button">
+          <TouchableOpacity style={styles.photoButton} onPress={() => capture(true)} activeOpacity={0.8} accessibilityRole="button">
             <Text style={styles.photoButtonText}>{t("addPlant.camera")}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.photoButton, styles.actionFlex]} onPress={() => capture(false)} accessibilityRole="button">
+          <TouchableOpacity style={styles.photoButton} onPress={() => capture(false)} activeOpacity={0.8} accessibilityRole="button">
             <Text style={styles.photoButtonText}>{t("addPlant.gallery")}</Text>
           </TouchableOpacity>
           </View>
@@ -614,16 +678,18 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           ))}
           </View>
           </View>
-          <View style={styles.card}>
-          <Text style={styles.sectionTitle}>{t("fieldCollection.submissionSection")}</Text>
-          <View style={styles.formActionRow}>
-            <TouchableOpacity style={[styles.secondaryAction, (busy || completed) && styles.disabledButton]} disabled={busy || completed} onPress={() => save(false)} accessibilityRole="button" accessibilityState={{ disabled: busy || completed }}>
-              <Text style={styles.secondaryActionText}>{t("fieldCollection.saveOfflineDraft")}</Text>
+          <View style={[styles.card, isNewObservation && styles.observationCard]}>
+          {observationSectionTitle("05", "fieldCollection.submissionSection")}
+          <View style={[styles.formActionRow, isNewObservation && styles.observationActionRow]}>
+            <TouchableOpacity style={[styles.secondaryAction, isNewObservation && styles.observationHalfButton, (busy || completed) && styles.disabledButton]} disabled={busy || completed} onPress={() => save(false)} accessibilityRole="button" accessibilityState={{ disabled: busy || completed }}>
+              {busy ? <ActivityIndicator color="#2F6B4F" /> : <Text style={styles.secondaryActionText}>{t(isNewObservation ? "botanistDrafts.saveDraft" : "fieldCollection.saveOfflineDraft")}</Text>}
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.primaryButton, (busy || completed || (isNewObservation && plantEligibility !== "approved")) && styles.disabledButton]} disabled={busy || completed || (isNewObservation && plantEligibility !== "approved")} onPress={() => save(true)} accessibilityRole="button" accessibilityState={{ disabled: busy || completed || (isNewObservation && plantEligibility !== "approved") }}>
-              <Text style={styles.primaryButtonText}>{t("fieldCollection.submitAndSynchronize")}</Text>
+            <TouchableOpacity style={[styles.primaryButton, isNewObservation && styles.observationHalfButton, (busy || completed || (isNewObservation && plantEligibility !== "approved")) && styles.disabledButton]} disabled={busy || completed || (isNewObservation && plantEligibility !== "approved")} onPress={() => save(true)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ disabled: busy || completed || (isNewObservation && plantEligibility !== "approved") }}>
+              {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{t(isNewObservation ? "fieldCollection.addObservation" : observationEditMode ? "observationEdits.submitChanges" : "fieldCollection.submitAndSynchronize")}</Text>}
             </TouchableOpacity>
           </View>
+          {isNewObservation && <TouchableOpacity style={[styles.cancelObservationButton, (busy || completed) && styles.disabledButton]} onPress={cancelNewObservation} disabled={busy || completed} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ disabled: busy || completed }}><Text style={styles.cancelObservationText}>{t("common.cancel")}</Text></TouchableOpacity>}
+          {observationEditMode && <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.goBack()} disabled={busy} accessibilityRole="button"><Text>{t("common.cancel")}</Text></TouchableOpacity>}
           </View>
         </>
       )}
@@ -638,7 +704,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             <TouchableOpacity style={styles.secondaryButton} onPress={() => showQr(row)}>
               <Text>{t("fieldCollection.viewPersistentQrCode")}</Text>
             </TouchableOpacity>
-            {["Draft", "Correction Required", "Rejected"].includes(
+            {["Draft", "Correction Required"].includes(
               row.status,
             ) && (
               <TouchableOpacity
@@ -692,11 +758,17 @@ const styles = StyleSheet.create({
   screen: fieldFormStyles.container,
   scrollContent: { flexGrow: 1, alignItems: "center", paddingHorizontal: 16, paddingTop: 18, paddingBottom: 36 },
   page: { width: "100%", maxWidth: 900, gap: 12 },
+  observationPage: { maxWidth: 720 },
   pageHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   pageTitle: { flex: 1, minWidth: 0, fontSize: 27, fontWeight: "700", color: "#234B3A", marginBottom: 2 },
   plantEligibilityNotice: { padding: 12, borderRadius: 12, backgroundColor: "#FFF7E8", borderWidth: 1, borderColor: "#EAD9B5" },
   plantEligibilityText: { color: "#77501D", fontSize: 13, lineHeight: 19 },
   card: fieldFormStyles.card,
+  observationCard: { marginBottom: 4, padding: 20, borderColor: "#DCE8D6", elevation: 1 },
+  numberedHeading: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
+  sectionNumberBadge: { width: 34, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#EAF6E7" },
+  sectionNumber: { color: "#2F6B4F", fontSize: 13, fontWeight: "700", includeFontPadding: false },
+  numberedSectionTitle: { ...fieldFormStyles.sectionTitle, flex: 1, minWidth: 0, marginBottom: 0, lineHeight: 23, includeFontPadding: false },
   sectionTitle: fieldFormStyles.sectionTitle,
   label: fieldFormStyles.label,
   fieldGroup: { marginBottom: 7 },
@@ -710,6 +782,7 @@ const styles = StyleSheet.create({
   input: [fieldFormStyles.input, { width: "100%", marginTop: 6 }],
   multiline: fieldFormStyles.textArea,
   sectionHint: { marginTop: -5, marginBottom: 5, color: "#718078", fontSize: 12, lineHeight: 17 },
+  numberedSectionHint: { marginTop: 0, marginBottom: 6 },
   invalidLabel: { color: "#A34436" },
   invalidInput: { borderWidth: 1, borderColor: "#C85C5C" },
   choiceButton: { minHeight: 48, justifyContent: "center", paddingHorizontal: 14, paddingVertical: 11, marginTop: 7, borderRadius: 11, backgroundColor: "#f3f8f4", borderWidth: 1, borderColor: "#e0ebe3" },
@@ -720,17 +793,20 @@ const styles = StyleSheet.create({
   deleteDraftButton: { width: 48, minHeight: 48, alignItems: "center", justifyContent: "center", marginVertical: 0, borderRadius: 12, backgroundColor: "#FDF1EF", borderWidth: 1, borderColor: "#F2D5D1" },
   secondaryButtonText: { color: "#2b5948", fontWeight: "600", fontSize: 15, textAlign: "center" },
   formActionRow: { flexDirection: "row", flexWrap: "wrap", gap: 9, marginTop: 8 },
+  observationActionRow: { flexWrap: "nowrap" },
+  observationHalfButton: { flex: 1, flexBasis: 0, minWidth: 0 },
   secondaryAction: { flexGrow: 1, flexBasis: "45%", minWidth: 145, minHeight: 48, justifyContent: "center", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: "#E8EDDA", borderWidth: 1, borderColor: "#AFCBB7" },
   secondaryActionText: { color: "#2F6B4F", fontWeight: "700", fontSize: 14, textAlign: "center" },
   primaryButton: [fieldFormStyles.submitButton, { flexGrow: 1, flexBasis: "45%", minWidth: 145, marginTop: 0, paddingHorizontal: 12, paddingVertical: 8 }],
-  disabledButton: { opacity: 0.55 },
-  primaryButtonText: [fieldFormStyles.submitButtonText, { fontSize: 16, textAlign: "center" }],
+  disabledButton: { opacity: 0.58 },
+  primaryButtonText: fieldFormStyles.submitButtonText,
+  cancelObservationButton: { marginTop: 10, minHeight: 48, borderRadius: 14, backgroundColor: "#E8EEE6", alignItems: "center", justifyContent: "center" },
+  cancelObservationText: { color: "#468585", fontSize: 14, fontWeight: "600" },
   locationButton: fieldFormStyles.locationButton,
   locationButtonText: fieldFormStyles.locationButtonText,
-  photoButton: [fieldFormStyles.photoButton, { flexDirection: "row", gap: 7 }],
+  photoButton: fieldFormStyles.photoButton,
   photoButtonText: fieldFormStyles.photoButtonText,
   actionRow: fieldFormStyles.photoButtonRow,
-  actionFlex: { flex: 1 },
   photoList: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 14 },
   photoItem: { width: 112, position: "relative" },
   photoPreview: fieldFormStyles.photoPreview,

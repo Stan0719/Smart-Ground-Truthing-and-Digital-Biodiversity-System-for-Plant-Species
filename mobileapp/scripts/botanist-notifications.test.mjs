@@ -41,6 +41,34 @@ test("unknown review states and plant approval events are not invented", () => {
   assert.equal(eventsFromObservations({ observations: [row()] }, "alice").some((event) => event.type === "plant_approved"), false);
 });
 
+test("explicit Species request metadata survives notification loading without a Plant inference", async () => {
+  const f = fixture();
+  f.dependencies.fetchNotifications = async () => ({ notifications: [{
+    id: "species-request:7:Correction Required:2026-11-02T03:00:00.000Z",
+    type: "species_correction_requested", entityType: "species_request", requestId: "7",
+    createdAt: "2026-11-02T03:00:00.000Z", read: true, comment: "Add a clearer species photo.",
+  }] });
+  const [item] = (await createBotanistNotificationStore(f.dependencies).load("alice")).items;
+  assert.equal(item.entityType, "species_request");
+  assert.equal(item.requestId, "7");
+  assert.equal(item.plantId, undefined);
+  assert.equal(item.comment, "Add a clearer species photo.");
+});
+
+test("record-change correction metadata remains explicit and owner-scoped", async () => {
+  const f = fixture();
+  f.dependencies.fetchNotifications = async () => ({ notifications: [{ id: "record-change:edit-17:1", type: "record_change_correction",
+    entityType: "record_change", changeId: "edit-17", recordKind: "plant", targetId: "17", revision: 1,
+    createdAt: "2026-11-02T03:00:00.000Z", read: false, comment: "Clarify the plant description." }] });
+  const [item] = (await createBotanistNotificationStore(f.dependencies).load("alice")).items;
+  assert.equal(item.entityType, "record_change");
+  assert.equal(item.changeId, "edit-17");
+  assert.equal(item.recordKind, "plant");
+  assert.equal(item.targetId, "17");
+  assert.equal(item.observationId, undefined);
+  assert.match(notificationMessage(item), /Clarify the plant description/);
+});
+
 test("notifications are deduplicated, sorted newest first, and repeated refresh preserves unread count", async () => {
   const f = fixture();
   f.payload({ observations: [row(), row(), row({ id: "2", reviewed_at: "2026-11-02T02:30:00.000Z" })] });

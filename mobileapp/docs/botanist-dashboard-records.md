@@ -28,7 +28,7 @@ name refers to the historical pre-migration schema.
 
 The dashboard loads plants, observations and species requests from the existing
 APIs, with all requests bound to the active account ID. A second client ownership
-filter uses staff:<account ID>, never display names. Requests appear in My Species
+filter uses staff:<account ID></account>, never display names. Requests appear in My Species
 Requests with their real status; the Pending Approval statistic filters the owner's
 pending plants/observations and requests. It is an owner submission view, not an
 approval interface. No approval controls or permission grants were added.

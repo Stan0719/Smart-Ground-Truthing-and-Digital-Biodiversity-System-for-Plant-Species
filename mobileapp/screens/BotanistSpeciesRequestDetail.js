@@ -1,10 +1,12 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, RefreshControl } from "react-native";
+import { ActivityIndicator, View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, submissionStatus } from "../utils/botanistRecords";
 import EditAction from "../components/EditAction";
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
+import { plantApi } from "../utils/plantApi";
+import Ionicons from "@expo/vector-icons/Ionicons";
 
 export default function BotanistSpeciesRequestDetailScreen({ route, navigation }) {
   useAppTranslation();
@@ -15,11 +17,15 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
   const [state, setState] = useState({ key, loading: true, request: null, error: "" });
   const [revision, setRevision] = useState(0);
   const [changeInfo, setChangeInfo] = useState(null);
+  const [activeSelectedChangeId, setActiveSelectedChangeId] = useState(null);
   const [changeError, setChangeError] = useState("");
   const [editAvailability, setEditAvailability] = useState("checking");
+  const [cancellingEdit, setCancellingEdit] = useState(false);
+  const [cancelEditError, setCancelEditError] = useState("");
   useFocusEffect(useCallback(() => {
     let active = true;
     setChangeInfo(null);
+    setActiveSelectedChangeId(null);
     setChangeError("");
     if (historicalDetail) {
       setEditAvailability("not-required");
@@ -37,6 +43,19 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
         historicalCurrent: route.params?.historicalCurrent === true,
         historicalSuperseded: route.params?.historicalSuperseded === true,
       }, loading: false, error: "" });
+      const selectedChangeId = route.params?.selectedChangeId == null ? null : String(route.params.selectedChangeId);
+      if (selectedChangeId) fetchBotanistRecordChangeStatus(accountId, "species", requestId).then((result) => {
+        if (!active) return;
+        const selected = [result.pending, result.latest].find((change) =>
+          change && String(change.id) === selectedChangeId);
+        if (selected) setState((previous) => previous.key === key && previous.request
+          ? { ...previous, request: { ...previous.request, request_status: selected.status } } : previous);
+        setChangeInfo(selected || null);
+        setActiveSelectedChangeId(result.pending && String(result.pending.id) === selectedChangeId
+          ? selectedChangeId : null);
+      }).catch((error) => {
+        if (active) setChangeError(error.message);
+      });
       return () => { active = false; };
     }
     setEditAvailability("checking");
@@ -58,6 +77,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
     });
     return () => { active = false; };
   }, [key, accountId, requestId, revision, historicalDetail, route.params?.historicalSnapshot,
+    route.params?.selectedChangeId,
     route.params?.historicalVersionStatus, route.params?.historicalVersionDate, route.params?.historicalReviewedAt,
     route.params?.historicalReviewComment, route.params?.historicalPhotos, route.params?.submissionVersionLabel,
     route.params?.historicalCurrent, route.params?.historicalSuperseded]));
@@ -79,15 +99,16 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
         <Text style={styles.value}>{t("recordEdits.versionHistory")} ›</Text></TouchableOpacity>
       }
       {!historicalDetail && changeInfo && !(request.request_status === "Approved" && editAvailability === "pending") && <View style={styles.error}><Text style={styles.value}>
-        {changeInfo.status === "Pending Review" ? t("recordEdits.changesPending") : changeInfo.status === "Rejected" ? t("recordEdits.changesRejected") : t("recordEdits.changesApproved")}
+        {changeInfo.status === "Pending Review" ? t("recordEdits.changesPending") : changeInfo.status === "Rejected" ? t("recordEdits.changesRejected") : changeInfo.status === "Cancelled" ? t("recordEdits.cancelledStatus") : changeInfo.status === "Correction Required" ? translateLabel(changeInfo.status) : t("recordEdits.changesApproved")}
       </Text>{!!changeInfo.review_comment && <Text style={styles.value}>{changeInfo.review_comment}</Text>}</View>}
+      {!!cancelEditError && <Text accessibilityRole="alert" style={styles.errorText}>{cancelEditError}</Text>}
       <View style={styles.hero}>
         {request.photo && <Image source={request.photo} style={styles.photo} resizeMode="cover" accessibilityLabel={t("submissions.photo")} />}
         {historicalDetail && !request.photo && <Text style={styles.missingPhoto}>{t("recordEdits.noPhotos")}</Text>}
         <View style={styles.heroText}>
           <Text style={styles.reference}>{t("submissions.requestId")} {request.request_id}</Text>
           <View style={styles.titleRow}><Text style={styles.title}>{request.scientific_name || t("recordEdits.historicalFieldUnavailable")}</Text>
-            {!historicalDetail && ["Approved", "Pending Review", "Rejected", "Correction Required"].includes(request.request_status) &&
+            {!historicalDetail && ["Approved", "Pending Review", "Correction Required"].includes(request.request_status) &&
               <EditAction testID="edit-own-species" disabled={request.request_status === "Approved" && editAvailability !== "clear"}
                 labelKey={request.request_status === "Approved" && editAvailability !== "clear" ? "recordEdits.editUnavailable" : undefined}
                 onPress={() => navigation.navigate("EditSpeciesRequest", { requestId, botanist: route.params?.botanist })} />}
@@ -101,6 +122,31 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
           <View style={[styles.badge, submissionStatus(request.request_status) === "approved" ? styles.approved : submissionStatus(request.request_status) === "rejected" ? styles.rejected : styles.pending]}>
             <Text style={styles.badgeText}>{request.request_status ? translateLabel(request.request_status) : t("recordEdits.historicalFieldUnavailable")}</Text>
           </View>
+      {route.params?.selectedChangeId != null &&
+        activeSelectedChangeId === String(route.params.selectedChangeId) &&
+        ["Pending Review", "Correction Required"].includes(changeInfo?.status) &&
+        changeInfo.owner_subject === `staff:${accountId}` &&
+        (route.params?.selectedChangeId == null || String(changeInfo.id) === String(route.params.selectedChangeId)) && <View style={styles.cancelEditAction}><TouchableOpacity accessibilityRole="button" disabled={cancellingEdit} style={[styles.deleteEditButton, cancellingEdit && { opacity: 0.65 }]} onPress={() => Alert.alert(t("recordEdits.deleteEditTitle"), t("recordEdits.deleteEditMessage"), [
+          { text: t("common.cancel"), style: "cancel" },
+          { text: t("recordEdits.cancelEditRequest"), style: "destructive", onPress: async () => {
+            setCancelEditError(""); setCancellingEdit(true);
+            try {
+              await plantApi(`/record-changes/${encodeURIComponent(changeInfo.id)}/cancel`, { method: "POST", expectedAccountId: accountId, body: {} });
+              Alert.alert(t("recordEdits.cancelEditRequest"), t("recordEdits.editCancelled"));
+              if (historicalDetail) {
+                setState((previous) => previous.key === key && previous.request
+                  ? { ...previous, request: { ...previous.request, request_status: "Cancelled" } } : previous);
+                setActiveSelectedChangeId(null);
+              }
+              refresh();
+            } catch (error) {
+              setCancelEditError(translateUIMessage(error.message || t("recordEdits.cancelEditFailed")));
+            } finally { setCancellingEdit(false); }
+          } },
+        ])}>
+          {cancellingEdit ? <ActivityIndicator size="small" color="#A33F36" /> : <Ionicons name="trash-outline" size={17} color="#A33F36" />}
+          <Text style={styles.deleteEditText}>{cancellingEdit ? t("common.pleaseWait") : t("recordEdits.cancelEditRequest")}</Text>
+        </TouchableOpacity></View>}
         </View>
       </View>
       {!historicalDetail && request.request_status === "Approved" && editAvailability === "pending" && <View style={styles.editAvailabilityNote}>
@@ -151,4 +197,7 @@ const styles = StyleSheet.create({
   value: { color: "#234B3A", fontSize: 15, lineHeight: 23 },
   error: { backgroundColor: "#FFF2EB", borderRadius: 12, padding: 15, gap: 12 }, errorText: { color: "#A34436", lineHeight: 21 },
   retry: { alignSelf: "flex-start", padding: 12, backgroundColor: "#468585", borderRadius: 10 }, retryText: { color: "#FFFFFF", fontWeight: "700" },
+  cancelEditAction: { borderTopWidth: 1, borderTopColor: "#E2EDE0", marginTop: 8, paddingTop: 10, alignItems: "flex-end" },
+  deleteEditButton: { minHeight: 44, alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 7, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#E8B9B2" },
+  deleteEditText: { color: "#A33F36", fontSize: 13, fontWeight: "700" },
 });

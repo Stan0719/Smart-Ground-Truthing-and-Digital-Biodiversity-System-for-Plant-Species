@@ -72,7 +72,7 @@ test('Registered By resolves only a verified profile match and never exposes a s
   })
 })
 
-test('plant scientific name uses its own approved/submitted name, then the linked species name when absent', () => {
+test('plant scientific name uses its own approved/submitted name and never substitutes the linked species name', () => {
   const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gm, '')
     .replace(/export /g, '')
@@ -84,7 +84,7 @@ test('plant scientific name uses its own approved/submitted name, then the linke
     mapBackendPlant({ plant_id: 12, rbac_status: 'Pending Review', species_details: { scientific_name: 'Species name' } }),
   ]`, context)
   assert.deepEqual(JSON.parse(JSON.stringify(plants.map((plant) => plant.plantScientificName))), [
-    'Approved plant name', 'Submitted plant name', 'Species name',
+    'Approved plant name', 'Submitted plant name', '',
   ])
 })
 
@@ -98,7 +98,7 @@ test('wrapped approved observation content maps to Visitor card facts without us
     latest_approved: { content: { heightCm: 10, healthStatus: 'Healthy', lifeStage: 'Mature', morphology: 'Broad leaves' } },
     latest_submission: { content: { heightCm: 99, healthStatus: 'Poor', lifeStage: 'Seedling', morphology: 'Unreviewed' } }
   }, new Map([['2', { scientificName: 'Species eight', name: 'Common eight' }]]))`, context)
-  assert.equal(plant.plantScientificName, 'Species eight')
+  assert.equal(plant.plantScientificName, '')
   assert.deepEqual(JSON.parse(JSON.stringify(plant.latestApproved)), {
     heightCm: 10, healthStatus: 'Healthy', lifeStage: 'Mature', date: null, morphology: 'Broad leaves', notes: '',
   })
@@ -271,7 +271,11 @@ test('Plant Detail maps the selected observation content and its own image asset
     { id: 'observation-photo', uri: 'https://example.invalid/api/assets/observation-photo' },
   ])
   assert.deepEqual(JSON.parse(JSON.stringify(observation.photos[0].headers)), { Authorization: 'Bearer fixture-token' })
-  assert.equal(plant.observations.find((row) => row.observationId === 'observation-old').photos.length, 0)
+  const olderObservation = plant.observations.find((row) => row.observationId === 'observation-old')
+  assert.deepEqual(JSON.parse(JSON.stringify(olderObservation.photos.map(photo => ({ id: photo.id, uri: photo.uri })))), [
+    { id: 'old-observation-photo', uri: 'https://example.invalid/api/assets/old-observation-photo' },
+  ])
+  assert.deepEqual(JSON.parse(JSON.stringify(olderObservation.photos[0].headers)), { Authorization: 'Bearer fixture-token' })
 })
 
 test('Plant Detail follows observation cursors so older history is not cut off at the first page', async () => {

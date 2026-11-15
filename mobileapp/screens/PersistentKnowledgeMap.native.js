@@ -1,8 +1,9 @@
 import React from "react";
 import MapView, { Marker } from "react-native-maps";
-import { t } from "../translations/i18n";
+import { t, useAppTranslation } from "../translations/i18n";
 
 export default function PersistentKnowledgeMap({ plants }) {
+  useAppTranslation();
   return (
     <MapView
       style={{ flex: 1 }}

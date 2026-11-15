@@ -8,23 +8,31 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 test("the catalogue has button and pull refresh backed by the shared API loader", () => {
   const source = read("screens/Species.js");
   assert.match(source, /testID="catalogue-species-refresh"/);
-  assert.match(source, /onPress=\{refresh\}/);
-  assert.match(source, /onRefresh=\{refresh\}/);
+  assert.match(source, /const refreshAll = useCallback\(\(\) => Promise\.all\(\[refresh\(\), refreshFavourites\(true\)\]\)/);
+  assert.match(source, /onPress=\{refreshAll\}/);
+  assert.match(source, /onRefresh=\{refreshAll\}/);
 });
 
-for (const [file, loader, retainedState] of [
-  ["screens/SpeciesDetail.js", "loadSpeciesDetails", "setSpeciesPlants([])"],
-  ["screens/Plant.js", "loadSpeciesPlants", "setSpeciesPlants([])"],
-  ["screens/PlantDetail.js", "loadPlant", "setPlant(null)"],
+for (const [file, loader, buttonId, guard] of [
+  ["screens/SpeciesDetail.js", "loadSpeciesDetails", "species-detail-refresh", /if \(requestRef\.current\) return requestRef\.current/],
+  ["screens/Plant.js", "loadSpeciesPlants", "plant-list-refresh", /activeRequest\?\.key === requestKey && activeRequest\.promise/],
+  ["screens/PlantDetail.js", "loadPlant", "plant-detail-refresh", /if \(requestRef\.current\) return requestRef\.current/],
 ]) {
-  test(`${file} uses a real guarded pull refresh and retains successful content on failure`, () => {
+  test(`${file} refreshes through its guarded loader without clearing successful content on failure`, () => {
     const source = read(file);
     assert.match(source, /<RefreshControl/);
-    assert.ok(source.includes(`onRefresh={() => void ${loader}(true)}`));
-    assert.ok(source.includes(`onPress={() => void ${loader}(true)}`));
-    assert.match(source, /testID="(?:species-detail|plant-list|plant-detail)-refresh"/);
-    assert.match(source, /if \(requestRef\.current\) return requestRef\.current/);
-    assert.ok(!source.includes(retainedState));
+    assert.ok(source.includes(`onRefresh={() => { void ${loader}(true);`));
+    assert.ok(source.includes(buttonId), `refresh control should expose ${buttonId}`);
+    assert.match(source, guard);
+    const catchAt = source.indexOf("} catch (error) {");
+    const finallyAt = source.indexOf("} finally {", catchAt);
+    assert.ok(catchAt >= 0 && finallyAt > catchAt, "loader should have a bounded error handler");
+    const errorHandler = source.slice(catchAt, finallyAt);
+    assert.ok(!errorHandler.includes("setSpeciesPlants([])") && !errorHandler.includes("setPlant(null)"));
+    if (file === "screens/PlantDetail.js") {
+      assert.ok(source.includes("setPlant(null);"), "changing plant IDs must clear the previous owner's record");
+      assert.match(source, /useEffect\(\(\) => \{[\s\S]*?setPlant\(null\);[\s\S]*?\}, \[plantId\]\)/);
+    }
   });
 }
 
@@ -54,7 +62,8 @@ test("plant detail refresh forwards the expected account through every API read"
   const plant = await vm.runInContext("fetchPlantDetail(8, { includeObservations: true, accountId: 'owner' })", context);
   assert.equal(plant.plantId, "8");
   assert.equal(plant.speciesId, "6");
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4, "plant detail also reads the plant's asset list");
   assert.ok(calls.every((call) => call.authorization === "Bearer private-test-token"));
   assert.ok(calls.some((call) => call.url.endsWith("/api/species?scope=scientific")));
+  assert.ok(calls.some((call) => call.url.endsWith("/api/assets?plant_id=8")));
 });

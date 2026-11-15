@@ -14,6 +14,7 @@ const { mountPlantGallery } = require("./plant-gallery.cjs");
 const { mountPlantDetail } = require("./plant-detail.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
+const { mountObservationEdits } = require("./observation-edits.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
 const { mountPlantSimilarity } = require("./plant-similarity.cjs");
 const { mountStaffNotifications } = require("./staff-notifications.cjs");
@@ -59,6 +60,7 @@ function createPlantApp({
   app.use("/api/my-plants", express.json({ limit: "64mb" }));
   app.use("/api/my-species-requests", express.json({ limit: "8mb" }));
   app.use("/api/record-changes", express.json({ limit: "64mb" }));
+  app.use("/api/observation-edits", express.json({ limit: "24mb" }));
   app.use(express.json({ limit: "6mb" }));
   mountDeviceIngestion(app, { pool });
   app.use(identity(auth));
@@ -68,6 +70,7 @@ function createPlantApp({
   mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
   require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
+  mountObservationEdits(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
   mountSpeciesPhotoLibrary(app, { pool, allow, writesEnabled: speciesPhotoWritesEnabled });

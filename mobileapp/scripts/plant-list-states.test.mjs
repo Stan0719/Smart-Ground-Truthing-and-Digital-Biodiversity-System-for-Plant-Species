@@ -11,7 +11,9 @@ vm.runInContext(`${helperSource.replace("export ", "")}; this.getPlantListViewSt
 
 test("Plants page distinguishes loading, results, empty, filtered-empty, and API error", () => {
   const resolve = context.getPlantListViewState;
-  assert.equal(resolve({ loading: true, errorMessage: "offline", sourceCount: 1, visibleCount: 0, hasActiveFilters: true }), "loading");
+  assert.equal(resolve({ loading: true, errorMessage: "offline", sourceCount: 1, visibleCount: 0, hasActiveFilters: true }), "filtered-empty", "refreshing cached records does not replace their current view with a loading screen");
+  assert.equal(resolve({ loading: true, errorMessage: "", sourceCount: 1, visibleCount: 1, hasActiveFilters: false }), "results", "refreshing keeps visible records on screen");
+  assert.equal(resolve({ loading: false, errorMessage: "offline", sourceCount: 1, visibleCount: 1, hasActiveFilters: false }), "results", "a failed refresh keeps visible records on screen");
   assert.equal(resolve({ loading: false, errorMessage: "offline", sourceCount: 0, visibleCount: 0, hasActiveFilters: false }), "error");
   assert.equal(resolve({ loading: false, errorMessage: "", sourceCount: 2, visibleCount: 2, hasActiveFilters: false }), "results");
   assert.equal(resolve({ loading: false, errorMessage: "", sourceCount: 0, visibleCount: 0, hasActiveFilters: false }), "empty");
@@ -23,6 +25,7 @@ test("loading and API-error UI exclude the leaf empty state and Clear Filters", 
   assert.equal((source.match(/t\("plant\.loadingPlantRecords"\)/g) || []).length, 1, "only one plant-record loading label is rendered");
   assert.match(source, /listViewState === "loading" \? <View style=\{styles\.loadingState\}/);
   assert.match(source, /listViewState === "error" \? <View style=\{styles\.loadError\}/);
+  assert.match(source, /!!errorMessage && speciesPlants\.length > 0 && <Text accessibilityRole="alert"/);
   assert.match(source, /listViewState === "filtered-empty" && hasActiveResultFilters &&/);
   assert.match(source, /!loading && !refreshing && !errorMessage && speciesPlants\.length > 0 && listViewState !== "filtered-empty"/);
   assert.match(source, /onPress=\{\(\) => \{ void loadSpeciesPlants\(true\); \}\}/);

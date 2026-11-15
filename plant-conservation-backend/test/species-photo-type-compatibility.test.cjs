@@ -61,7 +61,7 @@ test("014/015 accept the verified mixed key types without altering existing evid
       "species_request_proposed_image.asset_id": "text",
     };
     const rows = (await pool.query(`SELECT table_name || '.' || column_name AS key,data_type
-      FROM information_schema.columns WHERE table_schema='public'`)).rows;
+      FROM information_schema.columns WHERE table_schema='plant_app'`)).rows;
     for (const [key, type] of Object.entries(expected))
       assert.equal(rows.find((r) => r.key === key)?.data_type, type, key);
     assert.deepEqual((await pool.query("SELECT conname FROM pg_constraint WHERE NOT convalidated")).rows, []);

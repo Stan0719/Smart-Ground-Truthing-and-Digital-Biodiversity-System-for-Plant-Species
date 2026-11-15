@@ -573,6 +573,44 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     });
     res.status(201).json(result);
   });
+  const withRecorderNames = async (rows) => {
+    const names = new Map();
+    for (const row of rows) {
+      const owner = row.owner_subject;
+      if (!names.has(owner)) {
+        let name = null;
+        if (owner?.startsWith("staff:") && auth.db?.prepare) {
+          try {
+            const account = await auth.db.prepare("SELECT id,name,role FROM users WHERE id=?").get(owner.slice(6));
+            if (account?.role === "Botanist" && typeof account.name === "string" && account.name.trim())
+              name = account.name.trim();
+          } catch { /* Observation remains readable if the account directory is unavailable. */ }
+        }
+        names.set(owner, name);
+      }
+      row.recorded_by_name = names.get(owner);
+    }
+    return rows;
+  };
+  const withCurrentApprovedEditReview = async (rows) => {
+    const ids = rows.filter((row) => row.status === "Approved").map((row) => row.id);
+    if (!ids.length) return rows;
+    try {
+      const available = (await pool.query("SELECT to_regclass(current_schema() || '.observation_edit_request') IS NOT NULL AS available")).rows[0]?.available;
+      if (!available) return rows;
+      const reviews = (await pool.query(`SELECT DISTINCT ON (observation_id) observation_id,review_comment,reviewed_at
+        FROM observation_edit_request WHERE observation_id=ANY($1::text[]) AND status='Approved'
+        ORDER BY observation_id,version_number DESC,id DESC`, [ids])).rows;
+      const byId = new Map(reviews.map((review) => [review.observation_id, review]));
+      return rows.map((row) => {
+        const review = row.status === "Approved" ? byId.get(row.id) : null;
+        return review ? { ...row, review_comment: review.review_comment, reviewed_at: review.reviewed_at,
+          review_decision: "Approved" } : row;
+      });
+    } catch { return rows; }
+  };
+  const enrichObservationRead = async (rows, officer) => withRecorderNames(
+    await withCurrentApprovedEditReview(await withResubmissionEvidence(pool, await classifyObservations(pool, rows), officer)));
   const readObservations = async (req, res) => {
     const mine = req.query.scope === "mine";
     if (mine && !permitted(req.user, "plants.create"))
@@ -638,7 +676,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
         ) r ON true
         LEFT JOIN rbac_species_visibility v
           ON v.species_id = p.species_id
-        WHERE ($1 OR (o.owner_subject = $2 AND p.registered_subject = $2) OR (
+        WHERE ($1 OR o.owner_subject = $2 OR (
             o.status = 'Approved'
             AND COALESCE(v.visibility, 'protected') = ANY($3::text[])
           ))
@@ -646,10 +684,9 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             CASE
               WHEN $5 THEN
                 o.owner_subject = $2
-                AND p.registered_subject = $2
               ELSE (
                 COALESCE(v.visibility, 'protected') = ANY($3::text[])
-                OR (o.owner_subject = $2 AND p.registered_subject = $2)
+                OR o.owner_subject = $2
               )
             END
           )
@@ -670,14 +707,14 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     ).rows;
     if (observationId !== null) {
       if (!rows.length) fail(404, "Observation unavailable.");
-      const enriched = await withResubmissionEvidence(pool, await classifyObservations(pool, rows), officer);
+      const enriched = await enrichObservationRead(rows, officer);
       return res.json({ observation: projectGps(enriched[0], req.user) });
     }
     const hasMore = pageOptions && rows.length > pageOptions.limit;
     const batch = pageOptions ? rows.slice(0, pageOptions.limit) : rows;
     const classified = await classifyObservations(pool, batch);
     const visible = pageOptions?.origin ? classified.filter(row => row.origin_type === pageOptions.origin) : classified;
-    const enriched = await withResubmissionEvidence(pool, visible, officer);
+    const enriched = await withRecorderNames(await withCurrentApprovedEditReview(await withResubmissionEvidence(pool, visible, officer)));
     res.json({ observations: projectGps(enriched.map(({ queue_created_at, ...row }) => row), req.user),
       ...(pageOptions ? { page: queuePage(batch, pageOptions, Boolean(hasMore)) } : {}) });
   };
@@ -696,16 +733,37 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       fail(403, "Botanist notifications are unavailable for this account.");
     if (!(await botanistNotificationsAvailable(pool)))
       fail(503, "Persistent notification history requires the approved Botanist notification migration.");
+    const recordChangesAvailable = (await pool.query("SELECT to_regclass(current_schema() || '.record_change_submission') IS NOT NULL AS available")).rows[0]?.available;
+    const recordChangeReviewEventsAvailable = recordChangesAvailable && (await pool.query("SELECT to_regclass(current_schema() || '.record_change_review_event') IS NOT NULL AS available")).rows[0]?.available;
     const rows = (await pool.query(
       `SELECT n.id,n.type,n.source_key,n.observation_id,n.plant_id,n.created_at,
-        (n.read_at IS NOT NULL) AS read,n.metadata,r.comment
+        (n.read_at IS NOT NULL) AS read,n.metadata,COALESCE(r.comment,${recordChangesAvailable && recordChangeReviewEventsAvailable ? "rce.comment" : "NULL"}) AS comment
        FROM botanist_notification n
        LEFT JOIN observation_review r ON r.id=n.review_id
+       ${recordChangesAvailable ? "LEFT JOIN record_change_submission rc ON rc.id=n.metadata->>'changeId' AND rc.owner_subject=n.recipient_subject" : ""}
+       ${recordChangeReviewEventsAvailable ? "LEFT JOIN record_change_review_event rce ON rce.change_id=rc.id AND rce.revision::text=n.metadata->>'revision'" : ""}
        WHERE n.recipient_subject=$1
        ORDER BY n.created_at DESC,n.id DESC`,
       [subject(req.user)],
     )).rows;
-    res.json({ notifications: rows.map((row) => ({
+    const speciesRows = await requestsAvailable(pool) ? (await pool.query(
+      `SELECT request_id,request_status,review_comment,submitted_at,reviewed_at
+       FROM species_request_submission WHERE owner_subject=$1
+       AND request_status IN ('Pending Review','Approved','Rejected','Correction Required')
+       ORDER BY COALESCE(reviewed_at,submitted_at) DESC LIMIT 200`,
+      [subject(req.user)],
+    )).rows : [];
+    const speciesTypes = { "Pending Review": "species_request_submitted", Approved: "species_request_approved",
+      Rejected: "species_request_rejected", "Correction Required": "species_correction_requested" };
+    const editAvailable = (await pool.query("SELECT to_regclass(current_schema() || '.observation_edit_request') IS NOT NULL AS available")).rows[0]?.available;
+    const editEvents = editAvailable ? (await pool.query(`SELECT e.id,e.request_id,e.observation_id,e.event_type,e.comment,e.created_at,e.read_at,o.plant_id
+      FROM observation_edit_event e JOIN observation_edit_request r ON r.id=e.request_id
+      JOIN plant_observation o ON o.id=e.observation_id WHERE r.owner_subject=$1
+      ORDER BY e.created_at DESC LIMIT 500`, [subject(req.user)])).rows : [];
+    const editTypes = { submitted: "observation_edit_submitted", correction_required: "observation_edit_correction",
+      resubmitted: "observation_edit_resubmitted", approved: "observation_edit_approved", rejected: "observation_edit_rejected",
+      cancelled: "observation_edit_cancelled" };
+    res.json({ notifications: [...rows.map((row) => ({
       id: row.id,
       type: row.type,
       sourceKey: row.source_key,
@@ -716,7 +774,20 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       ...(typeof row.comment === "string" ? { comment: row.comment } : {}),
       ...(row.metadata?.count != null ? { count: Number(row.metadata.count) } : {}),
       ...(typeof row.metadata?.draftKey === "string" ? { draftKey: row.metadata.draftKey } : {}),
-    })) });
+      ...(row.type === "record_change_correction" && row.metadata?.entityType === "record_change" &&
+        ["plant", "species"].includes(row.metadata?.recordKind) && typeof row.metadata?.changeId === "string" && typeof row.metadata?.targetId === "string"
+        ? { entityType: "record_change", changeId: row.metadata.changeId, recordKind: row.metadata.recordKind,
+          targetId: row.metadata.targetId, ...(Number.isInteger(row.metadata.revision) ? { revision: row.metadata.revision } : {}) } : {}),
+    })), ...speciesRows.map((row) => ({
+      id: `species-request:${row.request_id}:${row.request_status}:${new Date(row.reviewed_at || row.submitted_at).toISOString()}`,
+      type: speciesTypes[row.request_status], entityType: "species_request", requestId: String(row.request_id),
+      sourceKey: `species-request:${row.request_id}:${row.request_status}`, createdAt: row.reviewed_at || row.submitted_at,
+      read: true, ...(row.review_comment ? { comment: row.review_comment } : {}),
+    })), ...editEvents.map((event) => ({ id: `observation-edit:${event.id}`, type: editTypes[event.event_type],
+      entityType: "observation_edit", requestId: event.request_id, observationId: event.observation_id,
+      plantId: String(event.plant_id), createdAt: event.created_at, read: Boolean(event.read_at),
+      ...(event.comment ? { comment: event.comment } : {}),
+    }))] });
   });
   app.post("/api/notifications/read", allow("observations.create"), async (req, res) => {
     if (String(req.user?.role || "").toLowerCase() !== "botanist")
@@ -731,7 +802,15 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     const result = all
       ? await pool.query("UPDATE botanist_notification SET read_at=COALESCE(read_at,CURRENT_TIMESTAMP) WHERE recipient_subject=$1 AND read_at IS NULL", [subject(req.user)])
       : await pool.query("UPDATE botanist_notification SET read_at=COALESCE(read_at,CURRENT_TIMESTAMP) WHERE recipient_subject=$1 AND id=ANY($2::text[]) AND read_at IS NULL", [subject(req.user), [...new Set(ids)]]);
-    res.json({ updated: result.rowCount });
+    let editResult = { rowCount: 0 };
+    const editsAvailable = (await pool.query("SELECT to_regclass(current_schema() || '.observation_edit_event') IS NOT NULL AS available")).rows[0]?.available;
+    if (editsAvailable) editResult = all
+      ? await pool.query(`UPDATE observation_edit_event e SET read_at=COALESCE(e.read_at,CURRENT_TIMESTAMP)
+          FROM observation_edit_request r WHERE r.id=e.request_id AND r.owner_subject=$1 AND e.read_at IS NULL`, [subject(req.user)])
+      : await pool.query(`UPDATE observation_edit_event e SET read_at=COALESCE(e.read_at,CURRENT_TIMESTAMP)
+          FROM observation_edit_request r WHERE r.id=e.request_id AND r.owner_subject=$1 AND e.id=ANY($2::text[]) AND e.read_at IS NULL`,
+        [subject(req.user), ids.filter((value) => value.startsWith("observation-edit:")).map((value) => value.slice("observation-edit:".length))]);
+    res.json({ updated: result.rowCount + editResult.rowCount });
   });
   app.post("/api/notifications/sync", allow("observations.create"), async (req, res) => {
     if (String(req.user?.role || "").toLowerCase() !== "botanist")
@@ -827,7 +906,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
         ).rows[0];
         await speciesRow(c, plant.species_id, req.user);
         if (row.status !== "Draft") return;
-        if (!["Draft", "Correction Required", "Rejected"].includes(row.status))
+        if (!["Draft", "Correction Required"].includes(row.status))
           fail(409, "Observation cannot be submitted in its current state.");
         await c.query(
           "UPDATE plant_observation SET status='Pending Review',updated_at=CURRENT_TIMESTAMP WHERE id=$1",

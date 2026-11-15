@@ -413,7 +413,7 @@ test("missing table is distinguished from insufficient SELECT", async () => {
   assert.equal(report.tables.some((row) => row.table_name === "permission"), false);
 });
 
-test("actual CLI main returns nonzero for RLS-blocked inspection", () => {
+test("actual CLI main returns nonzero for RLS-blocked inspection", (t) => {
   const cliPath = resolve(__dirname, "../scripts/preflight-rbac.cjs");
   const serializedPool = fakePoolForCatalog.toString();
   const childSource = `
@@ -429,6 +429,8 @@ test("actual CLI main returns nonzero for RLS-blocked inspection", () => {
     encoding: "utf8",
     env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
   });
+  if (child.error?.code === "EPERM")
+    return t.skip("Node subprocess launch denied by the sandbox; process-level CLI result cannot be verified here");
   assert.equal(child.status, 2, child.stderr);
   assert.match(child.stdout, /"status": "BLOCKED_INCOMPLETE"/);
   assert.match(child.stdout, /"endpointType": "session-pooler"/);

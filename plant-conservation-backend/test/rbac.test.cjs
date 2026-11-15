@@ -66,6 +66,7 @@ test("ownership, workflow, feedback, and self-approval restrictions", () => {
     status: "Correction Required",
   };
   assert.equal(assertEdit(user("Botanist"), observation), 0);
+  assert.equal(assertEdit(user("Botanist"), { ...observation, status: "Rejected" }), 409);
   assert.equal(
     assertEdit({ ...user("Botanist"), id: "another" }, observation),
     403,

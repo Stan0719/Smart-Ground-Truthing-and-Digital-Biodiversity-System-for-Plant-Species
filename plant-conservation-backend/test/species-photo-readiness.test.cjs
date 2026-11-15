@@ -14,12 +14,7 @@ const migration = (name) =>
 test("plant_app migration compatibility and fail-closed activation use runtime catalog evidence", async (t) => {
   const pool = await createPlantDatabase();
   t.after(() => pool.end());
-  await pool.query(
-    "CREATE SCHEMA plant_app; SET search_path TO plant_app,pg_catalog;",
-  );
-  await pool.query(
-    readFileSync(join(__dirname, "../schema.postgres.sql"), "utf8"),
-  );
+  await pool.query("SET search_path TO plant_app,pg_catalog;");
   for (const name of [
     "004-species-requests.sql",
     "006-atomic-plant-submissions.sql",

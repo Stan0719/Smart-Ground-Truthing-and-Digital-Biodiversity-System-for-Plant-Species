@@ -43,6 +43,79 @@ async function createSpecies(c, data, user) {
 function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, qrPlantSchema = "plant_app" }) {
   qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
   app.get("/api/plant-submissions/capabilities",allow("plants.create"),async(_req,res)=>res.json({semantic_photo_roles_available:await rolesAvailable(pool),photo_roles:["whole_plant","leaf_close_up","stem_bark","flower_fruit","additional"]}));
+  const withdrawalReady = async () => Boolean((await pool.query(`SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
+      AND table_name='plant_record' AND column_name='withdrawn_at') AS ready`)).rows[0]?.ready);
+  app.get("/api/plant-submissions/:plantId/withdrawal", allow("plants.create"), async (req, res) => {
+    if (req.user?.role !== "Botanist") fail(403, "Botanist access required.");
+    const plantId = id(String(req.params.plantId));
+    if (!await withdrawalReady()) fail(503, "Plant withdrawal requires migration 020.");
+    const plant = (await pool.query(`SELECT plant_id,registered_subject,rbac_status,withdrawn_at FROM plant_record
+      WHERE plant_id=$1`, [plantId])).rows[0];
+    if (!plant) fail(404, "Plant submission not found.");
+    if (plant.registered_subject !== subject(req.user)) fail(403, "Only the submitting Botanist can view withdrawal availability.");
+    const original = (await pool.query(`SELECT id,owner_subject,status,origin_type FROM plant_observation
+      WHERE plant_id=$1 ORDER BY created_at,id LIMIT 1`, [plantId])).rows[0];
+    if (!original || !["Pending Review", "Correction Required"].includes(plant.rbac_status) || plant.withdrawn_at ||
+        original.owner_subject !== subject(req.user) ||
+        !["initial_registration", "unknown"].includes(original.origin_type) ||
+        !["Pending Review", "Correction Required"].includes(original.status))
+      return res.json({ eligible: false });
+    const blockers = (await pool.query(`SELECT
+      EXISTS(SELECT 1 FROM plant_observation WHERE plant_id=$1 AND id<>$2) AS other_observations,
+      EXISTS(SELECT 1 FROM observation_review WHERE observation_id=$2 AND decision IN ('Approved','Rejected','Flagged')) AS final_review,
+      EXISTS(SELECT 1 FROM record_change_submission WHERE plant_id=$1 AND status IN ('Pending Review','Correction Required')) AS active_change,
+      EXISTS(SELECT 1 FROM observation_edit_request WHERE observation_id=$2 AND status IN ('Pending Review','Correction Required')) AS active_observation_edit`,
+      [plantId, original.id])).rows[0];
+    res.json({ eligible: !Object.values(blockers).some(Boolean),
+      ...(!Object.values(blockers).some(Boolean) ? { observation_id: original.id } : {}) });
+  });
+  app.post("/api/plant-submissions/:plantId/withdraw", allow("plants.create"), async (req, res) => {
+    if (req.user?.role !== "Botanist") fail(403, "Only the submitting Botanist can withdraw a Plant submission.");
+    if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length) fail(400, "Withdrawal does not accept submission changes.");
+    const plantId = id(String(req.params.plantId));
+    if (!await withdrawalReady()) fail(503, "Plant withdrawal requires migration 020.");
+    const result = await transaction(pool, async (c) => {
+      // Officer review locks the Observation first. Use the same order so a
+      // simultaneous decision and withdrawal cannot both commit.
+      const original = (await c.query(`SELECT id,plant_id,owner_subject,status,origin_type,client_key
+        FROM plant_observation WHERE plant_id=$1 ORDER BY created_at,id LIMIT 1 FOR UPDATE`, [plantId])).rows[0];
+      const plant = (await c.query(`SELECT plant_id,registered_subject,rbac_status,withdrawn_at
+        FROM plant_record WHERE plant_id=$1 FOR UPDATE`, [plantId])).rows[0];
+      if (!plant) fail(404, "Plant submission not found.");
+      if (plant.registered_subject !== subject(req.user)) fail(403, "Only the submitting Botanist can withdraw this Plant.");
+      if (plant.rbac_status === "Withdrawn" || plant.withdrawn_at) fail(409, "Plant submission was already withdrawn.");
+      if (!original || original.owner_subject !== subject(req.user) ||
+          !["initial_registration", "unknown"].includes(original.origin_type))
+        fail(409, "Original Plant submission could not be verified.");
+      if (!["Pending Review", "Correction Required"].includes(plant.rbac_status) ||
+          !["Pending Review", "Correction Required"].includes(original.status))
+        fail(409, "Only an unapproved Pending Review or Correction Required Plant can be withdrawn.");
+      const dependencies = (await c.query(`SELECT
+        EXISTS(SELECT 1 FROM plant_observation WHERE plant_id=$1 AND id<>$2) AS other_observations,
+        EXISTS(SELECT 1 FROM observation_review WHERE observation_id=$2 AND decision IN ('Approved','Rejected','Flagged')) AS final_review,
+        EXISTS(SELECT 1 FROM record_change_submission WHERE plant_id=$1 AND status IN ('Pending Review','Correction Required')) AS active_change,
+        EXISTS(SELECT 1 FROM observation_edit_request WHERE observation_id=$2 AND status IN ('Pending Review','Correction Required')) AS active_observation_edit`,
+        [plantId, original.id])).rows[0];
+      if (dependencies.other_observations || dependencies.active_change || dependencies.active_observation_edit)
+        fail(409, "This Plant has linked submissions that must be resolved before withdrawal.");
+      if (dependencies.final_review) fail(409, "The Officer has already finalized this Plant review.");
+      await c.query(`UPDATE plant_observation SET status='Withdrawn',revision=revision+1,
+        updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [original.id]);
+      const withdrawn = (await c.query(`UPDATE plant_record SET rbac_status='Withdrawn',
+        withdrawn_by=$2,withdrawn_at=CURRENT_TIMESTAMP WHERE plant_id=$1
+        RETURNING plant_id,rbac_status,withdrawn_by,withdrawn_at`, [plantId, subject(req.user)])).rows[0];
+      await c.query(`UPDATE record_version_history SET status='Withdrawn' WHERE plant_id=$1
+        AND record_type='plant' AND change_id IS NULL AND snapshot->>'observation_id'=$2
+        AND status IN ('Pending Review','Correction Required')`, [plantId, original.id]);
+      await c.query(`UPDATE plant_submission_receipt SET result=result || jsonb_build_object('status','Withdrawn')
+        WHERE owner_subject=$1 AND client_key=$2 AND result->>'id'=$3`,
+        [subject(req.user), original.client_key, original.id]);
+      await audit(c, req.user, "plant_submission_withdrawn", plantId);
+      return { withdrawn: true, plant: withdrawn };
+    });
+    res.json(result);
+  });
   app.post("/api/plant-submissions", allow("plants.create"), async (req, res) => {
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b) || Object.keys(b).some((key) =>

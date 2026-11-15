@@ -7,6 +7,19 @@ import { botanistNotifications, ownedNotificationObservation } from "../utils/bo
 import { notificationPresentation } from "../utils/botanistNotificationStore";
 import { localizedNotificationMessage } from "../translations/notifications";
 import { readDrafts } from "../utils/fieldStorage";
+import { fetchBotanistSpeciesRequest, fetchBotanistRecordChange } from "../utils/botanistRecords";
+import { plantApi } from "../utils/plantApi";
+
+const speciesNotificationTitles = {
+  species_request_submitted: "notifications.speciesRequestSubmitted",
+  species_request_approved: "notifications.speciesRequestApproved",
+  species_request_rejected: "notifications.speciesRequestRejected",
+  species_correction_requested: "notifications.speciesCorrectionRequested",
+  record_change_correction: "notifications.recordChangeCorrection",
+};
+const notificationTitle = (item) => speciesNotificationTitles[item.type]
+  ? t(speciesNotificationTitles[item.type]) : item.entityType === "observation_edit"
+    ? t(`observationEdits.notifications.${item.type}`) : translateLabel(notificationPresentation[item.type].title);
 
 export default function BotanistNotifications({ navigation, user }) {
   useAppTranslation();
@@ -34,10 +47,36 @@ export default function BotanistNotifications({ navigation, user }) {
     try {
       await botanistNotifications.markRead(accountId, [item.id]);
       await refresh(false);
-      if (item.observationId) {
+      if (item.entityType === "record_change" && item.changeId && ["plant", "species"].includes(item.recordKind)) {
+        const proposal = await fetchBotanistRecordChange(accountId, item.changeId, { kind: item.recordKind, targetId: item.targetId, status: "any" });
+        if (item.revision != null && proposal.revision < item.revision) throw Error(t("botanistNotifications.theRecordMayBeUnavailableYourAccessMayHaveChanged"));
+        if (proposal.status === "Correction Required") {
+          if (item.recordKind === "plant") navigation.navigate("EditPlant", { plantId: proposal.plant_id, botanist: user, correction: true, correctionChangeId: proposal.id });
+          else navigation.navigate("EditSpeciesRequest", { requestId: String(proposal.base_snapshot?.request_id || ""), botanist: user, correction: true, correctionChangeId: proposal.id });
+        } else if (item.recordKind === "plant") navigation.navigate("BotanistPlantDetail", { plantId: proposal.plant_id, botanist: user });
+        else navigation.navigate("BotanistSpeciesRequestDetail", { requestId: String(proposal.base_snapshot?.request_id || ""), botanist: user });
+      } else if (item.entityType === "species_request" && item.requestId) {
+        const request = await fetchBotanistSpeciesRequest(accountId, item.requestId);
+        if (item.type === "species_correction_requested" && request.request_status === "Correction Required")
+          navigation.navigate("EditSpeciesRequest", { requestId: item.requestId, botanist: user, correction: true });
+        else navigation.navigate("BotanistSpeciesRequestDetail", { requestId: item.requestId, botanist: user });
+      } else if (item.entityType === "observation_edit" && item.requestId && item.observationId) {
+        const [observation, payload] = await Promise.all([
+          ownedNotificationObservation(accountId, item.observationId),
+          plantApi(`/observation-edits/${encodeURIComponent(item.requestId)}`, { expectedAccountId: accountId }),
+        ]);
+        if (payload.edit?.owner_subject !== `staff:${accountId}` || payload.edit?.observation_id !== observation.id)
+          throw Error(t("observationEdits.unavailable"));
+        if (item.type === "observation_edit_correction" && payload.edit.status === "Correction Required")
+          navigation.navigate("FieldCollectionEdit", { observation, plantId: observation.plant_id, editRequest: payload.edit });
+        else navigation.navigate("NotificationObservation", { observationId: observation.id, editRequestId: payload.edit.id });
+      } else if (item.observationId) {
         const observation = await ownedNotificationObservation(accountId, item.observationId);
-        if (["correction_requested", "observation_rejected"].includes(item.type) &&
-            ["Draft", "Correction Required", "Rejected"].includes(observation.status)) {
+        if (observation.origin_type === "initial_registration") {
+          if (item.type === "correction_requested" && observation.status === "Correction Required")
+            navigation.navigate("EditPlant", { plantId: observation.plant_id, botanist: user, correction: true });
+          else navigation.navigate("BotanistPlantDetail", { plantId: observation.plant_id, botanist: user });
+        } else if (item.type === "correction_requested" && observation.status === "Correction Required" && observation.origin_type === "subsequent_observation") {
           navigation.navigate("FieldCollectionEdit", { observation, plantId: observation.plant_id });
         } else navigation.navigate("NotificationObservation", { observationId: observation.id });
       } else if (item.type === "sync_failed") {
@@ -46,8 +85,8 @@ export default function BotanistNotifications({ navigation, user }) {
           Alert.alert(t("botanistNotifications.draftNoLongerPending"), t("botanistNotifications.thisDraftHasAlreadySynchronizedOrIsNoLongerSaved"));
           return;
         }
-        navigation.navigate(draft.method === "PATCH" ? "FieldCollectionEdit" : draft.path === "/plants" ? "FieldCollectionPlant" : "FieldCollection", { draft });
-      } else Alert.alert(translateLabel(notificationPresentation[item.type].title), localizedNotificationMessage(item));
+        navigation.navigate(["PATCH", "OBSERVATION_EDIT"].includes(draft.method) ? "FieldCollectionEdit" : draft.path === "/plants" ? "FieldCollectionPlant" : "FieldCollection", { draft });
+      } else Alert.alert(notificationTitle(item), localizedNotificationMessage(item));
     } catch (cause) {
       Alert.alert(t("botanistNotifications.couldNotOpenNotification"), t("botanistNotifications.theRecordMayBeUnavailableYourAccessMayHaveChanged", { message: translateUIMessage(cause.message) }));
     } finally { actionRunning.current = false; setBusy(null); }
@@ -94,21 +133,21 @@ export default function BotanistNotifications({ navigation, user }) {
       </View> : null}
       renderItem={({ item }) => {
         const presentation = notificationPresentation[item.type];
-        const destructive = ["observation_rejected", "sync_failed"].includes(item.type);
+        const destructive = ["observation_rejected", "species_request_rejected", "observation_edit_rejected", "observation_edit_cancelled", "sync_failed"].includes(item.type);
         return <TouchableOpacity
           style={[styles.card, !item.read && styles.unreadCard, busy === item.id && styles.disabled]}
           onPress={() => openNotification(item)}
           disabled={!!busy}
           activeOpacity={0.75}
           accessibilityRole="button"
-          accessibilityLabel={t("botanistNotifications.label", { value0: translateLabel(item.read ? "Read" : "Unread"), title: translateLabel(presentation.title), value2: localizedNotificationMessage(item) })}
+          accessibilityLabel={t("botanistNotifications.label", { value0: translateLabel(item.read ? "Read" : "Unread"), title: notificationTitle(item), value2: localizedNotificationMessage(item) })}
         >
           <View style={[styles.icon, destructive && styles.destructiveIcon]}>
             {busy === item.id ? <ActivityIndicator color="#35786F" /> : <Ionicons name={presentation.icon} size={22} color={destructive ? "#A34740" : "#35786F"} />}
           </View>
           <View style={styles.details}>
             <View style={styles.titleRow}>
-              <Text style={[styles.title, !item.read && styles.unreadTitle]}>{translateLabel(presentation.title)}</Text>
+              <Text style={[styles.title, !item.read && styles.unreadTitle]}>{notificationTitle(item)}</Text>
               {!item.read && <View style={styles.dot} />}
             </View>
             <Text style={styles.message} numberOfLines={3}>{localizedNotificationMessage(item)}</Text>

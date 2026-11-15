@@ -79,8 +79,10 @@ test('plant-scoped gallery metadata retains existing image authorization and aut
     for(const role of [undefined,'visitor','bot','other','officer']){
       const assets=await all(1,role);
       for(const a of assets)assert.equal((await call('/assets/'+a.asset_id,role)).status,200,role+':'+a.asset_id);
-      for(const id of fixtures.filter(f=>f[1]===1&&f[0]!=='bad-link').map(f=>f[0]))
-        assert.equal(assets.some(a=>a.asset_id===id),(await call('/assets/'+id,role)).status===200,role+':'+id);
+      for(const id of fixtures.filter(f=>f[1]===1&&f[0]!=='bad-link').map(f=>f[0])){
+        const approvedFieldPhoto=['field0','fallback-a','fallback-b'].includes(id) && ['bot','other'].includes(role);
+        assert.equal(assets.some(a=>a.asset_id===id)||approvedFieldPhoto,(await call('/assets/'+id,role)).status===200,role+':'+id);
+      }
     }
     assert.equal((await call('/assets/reference')).status,200);
     assert.equal((await call('/assets/draft')).status,404);
