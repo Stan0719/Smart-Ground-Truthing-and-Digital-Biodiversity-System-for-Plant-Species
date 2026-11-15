@@ -21,8 +21,8 @@ const text = node => node.children.map(child => child.type === 2 ? child.content
 const expected = {
   IoTMonitoringView: [
     ['iot-device-table', ['Sensor ID', 'Device Name', 'Device Type', 'Serial Number', 'Related Plant', 'Location Description', 'Status', 'Installed At', 'Latest Reading', 'Actions']],
-    ['iot-reading-table', ['Reading ID', 'Sensor ID', 'Plant ID', 'Temperature', 'Humidity', 'Soil Moisture', 'Rainfall', 'Motion', 'GPS', 'Recorded At', 'Actions']],
-    ['iot-history-table', ['Reading ID', 'Recorded Time', 'Related Plant', 'Temperature', 'Humidity', 'Soil Moisture', 'Rainfall', 'Motion', 'GPS']],
+    ['iot-reading-table', ['Reading ID', 'Sensor ID', 'Plant ID', 'Temperature', 'Humidity', 'Soil Raw (ADC)', 'Soil Condition', 'Rain Raw (ADC)', 'Surface Condition', 'Motion', 'GPS', 'Recorded At', 'Actions']],
+    ['iot-history-table', ['Reading ID', 'Recorded Time', 'Related Plant', 'Temperature', 'Humidity', 'Soil Raw (ADC)', 'Soil Condition', 'Rain Raw (ADC)', 'Surface Condition', 'Motion', 'GPS']],
   ],
   ThreatAlertsView: [
     ['camera-event-table', ['Event ID', 'Event Type', 'Plant ID', 'Camera ID', 'Detection Confidence', 'Status', 'Detected At', 'Recording', 'Actions']],

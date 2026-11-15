@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 import os
 import time
+from uuid import uuid4
 
 import cv2
 from ultralytics import YOLO, YOLOWorld
@@ -9,9 +10,11 @@ from ultralytics import YOLO, YOLOWorld
 if __package__:
     from . import camera_server
     from .iot_movement import IoTMovementSource
+    from .clip_publisher import ClipPublisher
 else:
     import camera_server
     from iot_movement import IoTMovementSource
+    from clip_publisher import ClipPublisher
 
 try:
     import winsound
@@ -250,10 +253,10 @@ def build_ui_frame(
     return ui_frame
 
 
-def start_recording(recordings_dir, fps, frame_size):
+def start_recording(recordings_dir, fps, frame_size, event_id=None):
     recordings_dir.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    recording_path = recordings_dir / f"possible_plant_contact_{timestamp}.mp4"
+    recording_path = recordings_dir / (f"{event_id}.raw.mp4" if event_id else f"possible_plant_contact_{timestamp}.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(recording_path), fourcc, fps, frame_size)
 
@@ -265,7 +268,7 @@ def start_recording(recordings_dir, fps, frame_size):
     return EventVideoWriter(writer, fps, frame_size), str(recording_path)
 
 
-def _run_camera(web_enabled=False, sensor=None):
+def _run_camera(web_enabled=False, sensor=None, publisher=None):
     model = YOLO(str(BASE_DIR / "yolov8n.pt"))
     plant_model = YOLOWorld(str(BASE_DIR / "yolov8s-worldv2.pt"))
     plant_model.set_classes(["plant", "potted plant"])
@@ -282,7 +285,7 @@ def _run_camera(web_enabled=False, sensor=None):
     region_revision = fixed_region.revision
     frame = None
 
-    recordings_dir = BASE_DIR / "recordings"
+    recordings_dir = publisher.root if publisher is not None and publisher.configured else BASE_DIR / "recordings"
 
     delay = 30
     paused = False
@@ -291,6 +294,7 @@ def _run_camera(web_enabled=False, sensor=None):
     contact_monitor = PlantContactMonitor()
     video_writer = None
     recording_path = ""
+    recording_event_id = None
     saved_clip_count = 0
 
     unique_person_ids = set()
@@ -300,11 +304,17 @@ def _run_camera(web_enabled=False, sensor=None):
         contact_monitor.started.clear()
 
     def finish_recording(announce=False):
-        nonlocal video_writer, saved_clip_count, recording_path
+        nonlocal video_writer, saved_clip_count, recording_path, recording_event_id
         if video_writer is None:
             return
         video_writer.release()
         video_writer = None
+        if recording_event_id and publisher is not None and publisher.configured:
+            try:
+                publisher.finish(recording_event_id)
+            except (OSError, ValueError):
+                print('Recording retained locally; event metadata could not be finalized.', flush=True)
+        recording_event_id = None
         saved_clip_count += 1
         if announce:
             print(f"Recording saved: {recording_path}")
@@ -326,222 +336,231 @@ def _run_camera(web_enabled=False, sensor=None):
 
     camera_frame_count = 0
     camera_started_at = time.monotonic()
-    while True:
-        display_frame = None
+    try:
+        while True:
+            display_frame = None
 
-        if fixed_region.revision != region_revision:
-            reset_monitoring()
-            region_revision = fixed_region.revision
-            last_contact_alert_time = float("-inf")
-            finish_recording()
+            if fixed_region.revision != region_revision:
+                reset_monitoring()
+                region_revision = fixed_region.revision
+                last_contact_alert_time = float("-inf")
+                finish_recording()
 
-        if not paused:
-            ret, frame = cap.read()
+            if not paused:
+                ret, frame = cap.read()
 
-            if not ret:
-                elapsed = time.monotonic() - camera_started_at
+                if not ret:
+                    elapsed = time.monotonic() - camera_started_at
 
-                print("Error: Could not read camera frame.")
-                print(f"Camera index: {CAMERA_INDEX}")
-                print(f"Frames received: {camera_frame_count}")
-                print(f"Time before failure: {elapsed:.2f} seconds")
-                print(f"Camera still opened: {cap.isOpened()}")
-                break
+                    print("Error: Could not read camera frame.")
+                    print(f"Camera index: {CAMERA_INDEX}")
+                    print(f"Frames received: {camera_frame_count}")
+                    print(f"Time before failure: {elapsed:.2f} seconds")
+                    print(f"Camera still opened: {cap.isOpened()}")
+                    break
 
-            camera_frame_count += 1
+                camera_frame_count += 1
 
-            frame = cv2.resize(frame, FRAME_SIZE)
+                frame = cv2.resize(frame, FRAME_SIZE)
 
-            results = model.track(
-                frame,
-                conf=0.5,
-                imgsz=640,
-                persist=True,
-                verbose=False,
-            )
-
-            human_count_frame = 0
-            animal_count_frame = 0
-
-            annotated_frame = frame.copy()
-            plant_count_frame = 0
-            plants = []
-            plant_results = plant_model.track(frame, conf=PLANT_CONFIDENCE,
-                                              imgsz=640, persist=True, verbose=False)
-            if plant_results and plant_results[0].boxes is not None:
-                for box in plant_results[0].boxes:
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (100, 220, 200), 2)
-                    put_text(annotated_frame, "Plant", (x1, max(20, y1 - 10)),
-                             0.55, (100, 220, 200), 1)
-                    plant_count_frame += 1
-                    plant_id = int(box.id.item()) if box.id is not None else None
-                    plants.append((plant_id, (x1, y1, x2, y2)))
-
-            pose_results = pose_model.predict(frame, conf=0.25, imgsz=640, verbose=False)
-            wrists = draw_wrists(annotated_frame, pose_results[0]) if pose_results else []
-            wrist_count_frame = len(wrists)
-
-            if results and results[0].boxes is not None:
-                for box in results[0].boxes:
-                    cls_id = int(box.cls.item())
-                    label = model.names[cls_id]
-
-                    if label == "person":
-                        display_label = "Human"
-                        color = (0, 255, 0)
-                        human_count_frame += 1
-                    elif label in animal_classes:
-                        display_label = "Animal"
-                        color = (255, 150, 40)
-                        animal_count_frame += 1
-                    else:
-                        continue
-
-                    obj_id = None
-                    if box.id is not None:
-                        obj_id = int(box.id.item())
-
-                    if obj_id is not None:
-                        if label == "person":
-                            unique_person_ids.add(obj_id)
-                        elif label in animal_classes:
-                            unique_animal_ids.add(obj_id)
-
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-
-                    text = display_label
-                    if obj_id is not None:
-                        text = f"{display_label} ID:{obj_id}"
-
-                    put_text(
-                        annotated_frame,
-                        text,
-                        (x1, max(y1 - 10, 24)),
-                        0.68,
-                        color,
-                        2,
-                    )
-
-            fixed_region.draw(annotated_frame)
-            monitored_plants = fixed_region.monitoring_regions(plants)
-            now = time.monotonic()
-            contact_ids, contact_elapsed = contact_monitor.update(monitored_plants, wrists, now)
-            sensor_state = sensor.snapshot() if sensor is not None else {'status': 'unavailable', 'movement': None}
-            # Detector track IDs are not database plant IDs. A selected region
-            # identifies the one plant monitored by this configured physical sensor.
-            sensor_moving = sensor_state['status'] == 'moving' and sensor_state['movement'] == 1
-            handling_ids = contact_ids if fixed_region.bounds is not None and sensor_moving else set()
-            put_text(annotated_frame, f"MPU6050: {sensor_state['status']}", (20, 75),
-                     0.55, (100, 220, 220), 1)
-            contact_seconds = max(contact_elapsed.values(), default=0)
-            for plant_id, bounds in monitored_plants:
-                if plant_id in contact_elapsed:
-                    put_text(annotated_frame, f"Possible contact: {contact_elapsed[plant_id]:.1f}/{PLANT_CONTACT_SECONDS:g}s",
-                             (bounds[0], min(FRAME_SIZE[1] - 10, bounds[3] + 22)),
-                             0.5, (0, 220, 255), 1)
-
-            if handling_ids:
-                last_contact_seen_time = now
-                put_text(
-                    annotated_frame,
-                    "POSSIBLE HANDLING: CONTACT + MPU6050",
-                    (20, 44),
-                    0.7,
-                    (0, 0, 255),
-                    3,
+                results = model.track(
+                    frame,
+                    conf=0.5,
+                    imgsz=640,
+                    persist=True,
+                    verbose=False,
                 )
 
-                if now - last_contact_alert_time >= ALERT_COOLDOWN_SECONDS:
-                    print(f"ALERT: {PLANT_CONTACT_SECONDS:g}s camera contact plus fresh MPU6050 movement.")
+                human_count_frame = 0
+                animal_count_frame = 0
 
-                    if web_enabled:
-                        camera_server.publish_event(
-                            "possible_plant_contact",
-                            "Camera contact + MPU6050 movement",
-                            f"Wrist proximity for at least {PLANT_CONTACT_SECONDS:g} seconds "
-                            "with fresh MPU6050 movement from this plant's sensor. Please review.",
+                annotated_frame = frame.copy()
+                plant_count_frame = 0
+                plants = []
+                plant_results = plant_model.track(frame, conf=PLANT_CONFIDENCE,
+                                                  imgsz=640, persist=True, verbose=False)
+                if plant_results and plant_results[0].boxes is not None:
+                    for box in plant_results[0].boxes:
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (100, 220, 200), 2)
+                        put_text(annotated_frame, "Plant", (x1, max(20, y1 - 10)),
+                                 0.55, (100, 220, 200), 1)
+                        plant_count_frame += 1
+                        plant_id = int(box.id.item()) if box.id is not None else None
+                        plants.append((plant_id, (x1, y1, x2, y2)))
+
+                pose_results = pose_model.predict(frame, conf=0.25, imgsz=640, verbose=False)
+                wrists = draw_wrists(annotated_frame, pose_results[0]) if pose_results else []
+                wrist_count_frame = len(wrists)
+
+                if results and results[0].boxes is not None:
+                    for box in results[0].boxes:
+                        cls_id = int(box.cls.item())
+                        label = model.names[cls_id]
+
+                        if label == "person":
+                            display_label = "Human"
+                            color = (0, 255, 0)
+                            human_count_frame += 1
+                        elif label in animal_classes:
+                            display_label = "Animal"
+                            color = (255, 150, 40)
+                            animal_count_frame += 1
+                        else:
+                            continue
+
+                        obj_id = None
+                        if box.id is not None:
+                            obj_id = int(box.id.item())
+
+                        if obj_id is not None:
+                            if label == "person":
+                                unique_person_ids.add(obj_id)
+                            elif label in animal_classes:
+                                unique_animal_ids.add(obj_id)
+
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+
+                        text = display_label
+                        if obj_id is not None:
+                            text = f"{display_label} ID:{obj_id}"
+
+                        put_text(
+                            annotated_frame,
+                            text,
+                            (x1, max(y1 - 10, 24)),
+                            0.68,
+                            color,
+                            2,
                         )
 
-                    if winsound is not None:
-                        winsound.Beep(1000, 300)
+                fixed_region.draw(annotated_frame)
+                monitored_plants = fixed_region.monitoring_regions(plants)
+                now = time.monotonic()
+                contact_ids, contact_elapsed = contact_monitor.update(monitored_plants, wrists, now)
+                sensor_state = sensor.snapshot() if sensor is not None else {'status': 'unavailable', 'movement': None}
+                # Detector track IDs are not database plant IDs. A selected region
+                # identifies the one plant monitored by this configured physical sensor.
+                sensor_moving = sensor_state['status'] == 'moving' and sensor_state['movement'] == 1
+                handling_ids = contact_ids if fixed_region.bounds is not None and sensor_moving else set()
+                put_text(annotated_frame, f"MPU6050: {sensor_state['status']}", (20, 75),
+                         0.55, (100, 220, 220), 1)
+                contact_seconds = max(contact_elapsed.values(), default=0)
+                for plant_id, bounds in monitored_plants:
+                    if plant_id in contact_elapsed:
+                        put_text(annotated_frame, f"Possible contact: {contact_elapsed[plant_id]:.1f}/{PLANT_CONTACT_SECONDS:g}s",
+                                 (bounds[0], min(FRAME_SIZE[1] - 10, bounds[3] + 22)),
+                                 0.5, (0, 220, 255), 1)
 
-                    last_contact_alert_time = now
-
-                if video_writer is None:
-                    video_writer, recording_path = start_recording(
-                        recordings_dir,
-                        RECORDING_FPS,
-                        RECORDING_SIZE,
+                if handling_ids:
+                    last_contact_seen_time = now
+                    put_text(
+                        annotated_frame,
+                        "POSSIBLE HANDLING: CONTACT + MPU6050",
+                        (20, 44),
+                        0.7,
+                        (0, 0, 255),
+                        3,
                     )
-            elif fixed_region.bounds is None:
-                put_text(annotated_frame, "SELECT THIS PLANT WITH P", (20, 44),
-                         0.7, (0, 220, 255), 2)
-            elif contact_ids:
-                put_text(annotated_frame, "CONTACT ONLY: WAITING FOR MPU6050", (20, 44),
-                         0.7, (0, 220, 255), 2)
 
-            should_stop_recording = (
-                video_writer is not None
-                and not handling_ids
-                and (sensor_state['status'] not in ('moving', 'stationary')
-                     or now - last_contact_seen_time >= RECORD_AFTER_CONTACT_SECONDS)
-            )
+                    if now - last_contact_alert_time >= ALERT_COOLDOWN_SECONDS:
+                        print(f"ALERT: {PLANT_CONTACT_SECONDS:g}s camera contact plus fresh MPU6050 movement.")
 
-            if should_stop_recording:
-                finish_recording(announce=True)
+                        if winsound is not None:
+                            winsound.Beep(1000, 300)
 
-            display_frame = build_ui_frame(
-                annotated_frame,
-                human_count_frame,
-                animal_count_frame,
-                video_writer is not None,
-                paused,
-                saved_clip_count,
-                recording_path,
-                plant_count_frame,
-                wrist_count_frame,
-                contact_seconds,
-                sensor_state['status'],
-                fixed_region.bounds is not None,
-            )
+                        last_contact_alert_time = now
 
-            if web_enabled:
-                camera_server.publish_frame(annotated_frame)
+                    if video_writer is None:
+                        recording_event_id = uuid4().hex
+                        video_writer, recording_path = start_recording(
+                            recordings_dir,
+                            RECORDING_FPS,
+                            RECORDING_SIZE,
+                            recording_event_id if publisher is not None and publisher.configured else None,
+                        )
+                        if video_writer is not None and web_enabled:
+                            event = camera_server.publish_event(
+                                "possible_plant_contact",
+                                "Camera contact + MPU6050 movement",
+                                f"Wrist proximity for at least {PLANT_CONTACT_SECONDS:g} seconds "
+                                "with fresh MPU6050 movement from this plant's sensor. Please review.",
+                                event_id=recording_event_id,
+                            reading_id=sensor_state.get('readingId'),
+                            )
+                            if publisher is not None and publisher.configured:
+                                try:
+                                    publisher.begin(event)
+                                except OSError:
+                                    print('Recording started but its local metadata could not be saved.', flush=True)
+                elif fixed_region.bounds is None:
+                    put_text(annotated_frame, "SELECT THIS PLANT WITH P", (20, 44),
+                             0.7, (0, 220, 255), 2)
+                elif contact_ids:
+                    put_text(annotated_frame, "CONTACT ONLY: WAITING FOR MPU6050", (20, 44),
+                             0.7, (0, 220, 255), 2)
 
-            if video_writer is not None:
-                video_writer.write(annotated_frame, now)
+                should_stop_recording = (
+                    video_writer is not None
+                    and not handling_ids
+                    and (sensor_state['status'] not in ('moving', 'stationary')
+                         or now - last_contact_seen_time >= RECORD_AFTER_CONTACT_SECONDS)
+                )
 
-        if display_frame is not None:
-            cv2.imshow(WINDOW_NAME, display_frame)
+                if should_stop_recording:
+                    finish_recording(announce=True)
 
-        wait_time = 0 if paused else delay
-        key = cv2.waitKey(wait_time) & 0xFF
+                display_frame = build_ui_frame(
+                    annotated_frame,
+                    human_count_frame,
+                    animal_count_frame,
+                    video_writer is not None,
+                    paused,
+                    saved_clip_count,
+                    recording_path,
+                    plant_count_frame,
+                    wrist_count_frame,
+                    contact_seconds,
+                    sensor_state['status'],
+                    fixed_region.bounds is not None,
+                )
 
-        if key == ord("q"):
-            print("Quit requested.")
-            break
+                if web_enabled:
+                    camera_server.publish_frame(annotated_frame)
 
-        if key == ord("c"):
-            fixed_region.select(None)
-        if key == ord("p") and frame is not None:
-            x, y, width, height = cv2.selectROI("Fixed plant region", frame, False, False)
-            cv2.destroyWindow("Fixed plant region")
-            if width >= 10 and height >= 10:
-                fixed_region.select((x, y, x + width, y + height))
+                if video_writer is not None:
+                    video_writer.write(annotated_frame, now)
 
-        if key == 32:
-            paused = not paused
-            if paused:
-                finish_recording()
-            reset_monitoring()
-            print("Paused" if paused else "Playing")
+            if display_frame is not None:
+                cv2.imshow(WINDOW_NAME, display_frame)
 
-    finish_recording(announce=True)
+            wait_time = 0 if paused else delay
+            key = cv2.waitKey(wait_time) & 0xFF
 
-    cap.release()
-    cv2.destroyAllWindows()
+            if key == ord("q"):
+                print("Quit requested.")
+                break
+
+            if key == ord("c"):
+                fixed_region.select(None)
+            if key == ord("p") and frame is not None:
+                x, y, width, height = cv2.selectROI("Fixed plant region", frame, False, False)
+                cv2.destroyWindow("Fixed plant region")
+                if width >= 10 and height >= 10:
+                    fixed_region.select((x, y, x + width, y + height))
+
+            if key == 32:
+                paused = not paused
+                if paused:
+                    finish_recording()
+                reset_monitoring()
+                print("Paused" if paused else "Playing")
+
+    finally:
+        finish_recording(announce=True)
+        cap.release()
+        cv2.destroyAllWindows()
 
     print("\nFINAL UNIQUE COUNT SUMMARY")
     print(f"Unique humans detected: {len(unique_person_ids)}")
@@ -558,7 +577,9 @@ def main():
         _run_camera(sensor=sensor)
         return
 
-    camera_id = os.environ.get("CAMERA_ID", "CAM-001").strip() or "CAM-001"
+    camera_id = os.environ.get("CAMERA_DEVICE_ID", "").strip() or os.environ.get("CAMERA_ID", "CAM-001").strip() or "CAM-001"
+    publisher = ClipPublisher.from_environment(
+        Path(os.environ.get("CAMERA_RECORDINGS_DIR") or BASE_DIR / "recordings"), plant_id)
     try:
         server = camera_server.start_server(camera_id, plant_id)
     except OSError as error:
@@ -568,9 +589,11 @@ def main():
         ) from error
 
     try:
+        publisher.start()
         sensor.start()
-        _run_camera(web_enabled=True, sensor=sensor)
+        _run_camera(web_enabled=True, sensor=sensor, publisher=publisher)
     finally:
+        publisher.close()
         sensor.close()
         server.shutdown()
         server.server_close()

@@ -15,3 +15,19 @@ export function iotDate(value?: string | null): string {
 export function deviceDisplayTitle(name: string): string {
   return name.toLowerCase() === 'plantsensordevice' ? 'Plant Sensor Device' : name
 }
+
+// Match the raw ADC classifications in IoT/PlantPrototype/PlantPrototype.ino.
+// These are display labels; the stored sensor readings remain unchanged.
+export function soilCondition(value?: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '\u2014'
+  if (value > 2700) return 'Dry'
+  if (value < 2300) return 'Wet'
+  return 'Slightly moist'
+}
+
+export function surfaceCondition(value?: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '\u2014'
+  if (value > 3000) return 'Dry'
+  if (value < 2200) return 'Wet surface'
+  return 'Water present'
+}

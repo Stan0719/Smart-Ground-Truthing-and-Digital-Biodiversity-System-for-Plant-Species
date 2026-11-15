@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
 import { monitoringDate, monitoringLabels } from '../../utils/officerMonitoringDisplay'
 import { threatAlertBadgeStyle } from '../../utils/workflowBadge'
 import AppModal from '../../components/conservation/AppModal.vue'
 import { useConservationText } from '../../composables/useConservationText'
-import { prototypeCameraEvents } from '../../data/cameraMonitoringPrototype'
+import { loadCameraEvents } from '../../services/cameraEvents'
+import { sessionSnapshot, subscribeSession, type AuthUser } from '../../services/auth'
+import { formatPlantId } from '../../utils/plantId'
 import type { CameraEvent } from '../../types/cameraMonitoring'
 import {
   loadCanonicalAlerts,
@@ -22,6 +24,49 @@ const route = useRoute()
 const alerts = ref<CanonicalThreatAlert[]>([])
 const selectedAlert = ref<CanonicalThreatAlert | null>(null)
 const selectedCameraEvent = ref<CameraEvent | null>(null)
+const cameraEvents = ref<CameraEvent[]>([])
+const isCameraLoading = ref(false)
+const cameraError = ref('')
+const cameraHasMore = ref(false)
+const playbackError = ref(false)
+let cameraRequest: AbortController | null = null
+let cameraGeneration = 0, disposed = false
+const cameraSession = (user: AuthUser | null, pending: boolean) => !pending && user?.status === 'Active' &&
+  !user.mustChangePassword && ['Administrator', 'Conservation Officer'].includes(user.role) ? `${user.id}:${user.role}` : ''
+let cameraIdentity = cameraSession(sessionSnapshot().user, sessionSnapshot().pending)
+const clearCameraEvents = () => {
+  cameraGeneration++
+  cameraRequest?.abort(); cameraRequest = null
+  cameraEvents.value = []; selectedCameraEvent.value = null
+  cameraError.value = ''; cameraHasMore.value = false; isCameraLoading.value = false
+}
+const refreshCameraEvents = async () => {
+  if (!cameraIdentity || disposed || isCameraLoading.value) return
+  const generation = cameraGeneration, controller = new AbortController()
+  cameraRequest = controller
+  isCameraLoading.value = true; cameraError.value = ''
+  try {
+    const result = await loadCameraEvents(controller.signal)
+    if (generation !== cameraGeneration || disposed) return
+    cameraEvents.value = result.events; cameraHasMore.value = result.hasMore
+    if (selectedCameraEvent.value) selectedCameraEvent.value = result.events.find(event => event.eventId === selectedCameraEvent.value?.eventId) ?? null
+    selectedAlertId()
+  } catch (error) {
+    if (generation === cameraGeneration && !disposed)
+      cameraError.value = error instanceof Error ? error.message : 'Unable to retrieve camera events.'
+  } finally {
+    if (cameraRequest === controller) cameraRequest = null
+    if (generation === cameraGeneration && !disposed) isCameraLoading.value = false
+  }
+}
+const unsubscribeCamera = subscribeSession((user, pending) => {
+  const next = cameraSession(user, pending)
+  if (next === cameraIdentity) return
+  cameraIdentity = next; clearCameraEvents()
+  if (cameraIdentity) void refreshCameraEvents()
+})
+onBeforeUnmount(() => { disposed = true; unsubscribeCamera(); clearCameraEvents() })
+watch(() => selectedCameraEvent.value?.eventId, () => { playbackError.value = false })
 const search = ref('')
 const severity = ref('')
 const status = ref('')
@@ -38,7 +83,7 @@ const loadedAlerts = computed(() => [...alerts.value, ...(selectedAlert.value ? 
 const alertLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.id)))
 const deviceLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.deviceId)))
 const readingLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.readingId)))
-const cameraLabels = computed(() => monitoringLabels([...loadedAlerts.value.map(item => item.cameraId), ...prototypeCameraEvents.map(item => item.cameraId)]))
+const cameraLabels = computed(() => monitoringLabels([...loadedAlerts.value.map(item => item.cameraId), ...cameraEvents.value.map(item => item.cameraId)]))
 const subjectLabels = computed(() => monitoringLabels(loadedAlerts.value.flatMap(item => item.responses.map(response => response.officerSubject))))
 const formatAlertId = (id: string) => alertLabels.value.get(id) || id
 const formatConfidence = (value: string | number | null) => {
@@ -53,14 +98,9 @@ const formatDuration = (seconds?: number) => {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 const isWebVideoUrl = (value?: string) => {
-  if (!value) return false
-  try {
-    const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
-  }
+  return typeof value === 'string' && /^\/api\/data\/camera-events\/[a-f0-9]{32}\/video$/.test(value)
 }
+const recordingLabel = (event: CameraEvent) => ({ recording: 'Recording', processing: 'Processing', ready: 'Available', failed: 'Interrupted', unavailable: 'Unavailable' })[event.recordingStatus ?? 'unavailable']
 const openAlert = (alert: CanonicalThreatAlert) => {
   selectedAlert.value = alert
   responseStatus.value = alert.status === 'Reviewing' ? 'Resolved' : 'Reviewing'
@@ -73,7 +113,7 @@ const selectedAlertId = () => {
   const queryValue = route.query.alert
   if (typeof queryValue !== 'string') return
   selectedCameraEvent.value =
-    prototypeCameraEvents.find((event) => event.eventId === queryValue) ?? null
+    cameraEvents.value.find((event) => event.eventId === queryValue) ?? null
   selectedAlert.value = null
   if (selectedCameraEvent.value) return
 
@@ -97,6 +137,7 @@ const loadAlerts = async () => {
 }
 
 onMounted(loadAlerts)
+onMounted(refreshCameraEvents)
 watch(() => [route.query.alert, route.query.device, route.query.reading], selectedAlertId)
 
 const severityOptions = computed<string[]>(() => [])
@@ -221,10 +262,15 @@ const submitResponse = async () => {
     <header class="panel-header">
       <div>
         <h2>{{ ct('Suspicious Camera Events') }}</h2>
-        <span class="panel-description">{{ ct('Demonstration camera events') }}</span>
+        <span class="panel-description">Saved camera events and their local recordings. Refresh to check for new clips.</span>
       </div>
+      <button class="action-button" :disabled="isCameraLoading" :aria-busy="isCameraLoading" @click="refreshCameraEvents">{{ isCameraLoading ? 'Refreshing...' : 'Refresh' }}</button>
     </header>
-    <div class="table-scroll officer-table-scroll" role="region" :aria-label="ct('Suspicious Camera Events')" tabindex="0">
+    <p v-if="cameraError" class="state-message error-state" role="alert">{{ cameraError }}</p>
+    <p v-else-if="isCameraLoading && !cameraEvents.length" class="state-message">Loading camera events...</p>
+    <p v-else-if="!cameraEvents.length" class="state-message">No saved camera events yet.</p>
+    <p v-if="cameraHasMore" class="state-message">Showing the latest 100 camera events.</p>
+    <div v-if="cameraEvents.length" class="table-scroll officer-table-scroll" role="region" :aria-label="ct('Suspicious Camera Events')" tabindex="0">
         <table class="officer-data-table camera-event-table"><colgroup><col class="column-identifier" /><col class="column-description" /><col class="column-plant" /><col class="column-identifier" /><col class="column-metric" /><col class="column-status" /><col class="column-time" /><col class="column-status" /><col class="column-actions" /></colgroup>
         <thead>
           <tr>
@@ -240,19 +286,19 @@ const submitResponse = async () => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="event in prototypeCameraEvents" :key="event.eventId">
+          <tr v-for="event in cameraEvents" :key="event.eventId">
             <td>
               <strong>{{ event.eventId }}</strong>
             </td>
             <td>{{ event.description }}</td>
-            <td>{{ event.plantId }}</td>
+            <td>{{ formatPlantId(event.plantId) }}</td>
             <td>{{ event.cameraId }}</td>
             <td>{{ formatConfidence(event.confidence) }}</td>
             <td>
               <span class="badge" :style="threatAlertBadgeStyle(event.status)" :class="event.status?.toLowerCase()">{{ event.status }}</span>
             </td>
             <td>{{ dt(event.detectedAt) }}</td>
-            <td>{{ isWebVideoUrl(event.videoUrl) ? ct('Available') : ct('Unavailable') }}</td>
+            <td>{{ ct(recordingLabel(event)) }}</td>
             <td>
               <button class="action-button" @click="selectedCameraEvent = event">
                 {{ ct('View') }}
@@ -373,15 +419,18 @@ const submitResponse = async () => {
       :src="selectedCameraEvent.videoUrl"
       controls
       preload="metadata"
+      :key="selectedCameraEvent.eventId"
+      @error="playbackError = true"
     ></video>
     <div v-else class="recording-unavailable">
       <strong>{{ ct('Recording unavailable') }}</strong
-      ><span>{{ ct('Awaiting secure video-serving integration') }}</span>
+      ><span>{{ selectedCameraEvent.recordingStatus === 'recording' ? 'This event is still being recorded.' : selectedCameraEvent.recordingStatus === 'processing' ? 'The clip is being prepared. Refresh the event list shortly.' : 'This recording was interrupted or is unavailable.' }}</span>
     </div>
+    <p v-if="playbackError" class="state-message error-state" role="alert">Unable to play this clip. Check your login and that the recording is available on the backend computer.</p>
     <div class="modal-actions">
       <RouterLink
         class="secondary-button plant-link"
-        :to="`/plant/${selectedCameraEvent.plantId}`"
+        :to="`/plant/${formatPlantId(selectedCameraEvent.plantId)}`"
         >{{ ct('View Plant') }}</RouterLink
       >
     </div>

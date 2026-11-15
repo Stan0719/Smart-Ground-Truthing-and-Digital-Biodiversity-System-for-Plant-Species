@@ -137,11 +137,14 @@ class PlantContactTests(unittest.TestCase):
         with patch.dict(cam.os.environ, {'CAMERA_ID': 'CAM-TEST', 'CAMERA_PLANT_ID': '42'}), \
                 patch.object(cam.IoTMovementSource, 'from_environment') as source, \
                 patch.object(cam.camera_server, 'start_server', return_value=server) as start, \
+                patch.object(cam.ClipPublisher, 'from_environment') as publisher, \
                 patch.object(cam, '_run_camera', side_effect=RuntimeError('Camera failed')) as run:
             with self.assertRaisesRegex(RuntimeError, 'Camera failed'):
                 cam.main()
         start.assert_called_once_with('CAM-TEST', '42')
-        run.assert_called_once_with(web_enabled=True, sensor=source.return_value)
+        run.assert_called_once_with(web_enabled=True, sensor=source.return_value, publisher=publisher.return_value)
+        publisher.return_value.start.assert_called_once_with()
+        publisher.return_value.close.assert_called_once_with()
         source.return_value.close.assert_called_once_with()
         server.shutdown.assert_called_once_with()
         server.server_close.assert_called_once_with()

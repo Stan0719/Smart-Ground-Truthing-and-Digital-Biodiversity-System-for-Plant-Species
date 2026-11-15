@@ -43,7 +43,8 @@ class CameraHTTPTests(unittest.TestCase):
 
     def test_events_match_the_existing_website_contract_without_fabricated_confidence(self):
         self.assertEqual(self.request_json('/camera-events'), (200, {'events': []}))
-        camera_server.publish_event('possible_plant_contact', 'Possible plant contact', 'Review required.')
+        published = camera_server.publish_event('possible_plant_contact', 'Possible plant contact', 'Review required.',
+                                                event_id='a' * 32, reading_id='trigger-reading')
         status, result = self.request_json('/camera-events')
         self.assertEqual(status, 200)
         event = result['events'][0]
@@ -54,6 +55,9 @@ class CameraHTTPTests(unittest.TestCase):
         self.assertIsNone(event['confidence'])
         self.assertTrue(event['eventId'])
         self.assertTrue(event['detectedAt'])
+        self.assertEqual(event['eventId'], 'a' * 32)
+        self.assertEqual(event['readingId'], 'trigger-reading')
+        self.assertEqual(published, event)
 
     def test_live_feed_contains_a_decodable_jpeg_with_correct_multipart_headers(self):
         camera_server.publish_frame(np.full((54, 96, 3), 127, dtype=np.uint8))

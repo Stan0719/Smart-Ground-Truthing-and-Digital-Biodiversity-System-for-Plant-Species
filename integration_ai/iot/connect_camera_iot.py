@@ -83,6 +83,7 @@ def main(argv=None):
     parser.add_argument("--port", required=True, help="ESP32 serial port, e.g. COM11")
     parser.add_argument("--plant", required=True, type=plant_id, help="Assigned plant ID: 1 or PL001")
     parser.add_argument("--device-id", default=os.environ.get("DEVICE_ID", ""), help="Registered Sensor device ID")
+    parser.add_argument("--camera-device-id", default=os.environ.get("CAMERA_DEVICE_ID", ""), help="Registered Camera device ID for saved clip integration")
     parser.add_argument("--api-origin", default=os.environ.get("PLANT_API_ORIGIN", "http://127.0.0.1:3000"))
     parser.add_argument("--camera", type=Path, default=DEFAULT_CAMERA, help="Optional camera script path")
     parser.add_argument("--camera-index", type=int, default=0, help="Webcam index (default: 0)")
@@ -121,6 +122,11 @@ def main(argv=None):
 
     env = dict(os.environ, PLANT_API_ORIGIN=origin, DEVICE_ID=device_id, DEVICE_KEY=key,
                CAMERA_PLANT_ID=args.plant, CAMERA_ID=os.environ.get("CAMERA_ID") or "CAM-001")
+    if args.camera_device_id:
+        camera_key = os.environ.get("CAMERA_DEVICE_KEY", "") or getpass.getpass("Camera provisioning key (hidden): ")
+        if not re.fullmatch(r"[a-f0-9]{64}", camera_key):
+            parser.error("A 64-character Camera provisioning key is required for clip integration.")
+        env.update(CAMERA_DEVICE_ID=args.camera_device_id.strip(), CAMERA_DEVICE_KEY=camera_key)
     uploader = camera = None
     try:
         print("Starting sensor uploader and camera. Keep the backend running.", flush=True)

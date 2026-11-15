@@ -8,7 +8,7 @@ import { parse, compileScript, compileTemplate, compileStyle } from '@vue/compil
 import postcss from 'postcss'
 import * as service from '../src/services/iotMonitoring.ts'
 import * as alertsService from '../src/services/threatAlerts.ts'
-import { iotDate, deviceDisplayTitle } from '../src/utils/iotDisplay.ts'
+import { iotDate, deviceDisplayTitle, soilCondition, surfaceCondition } from '../src/utils/iotDisplay.ts'
 import { monitoringLabels } from '../src/utils/officerMonitoringDisplay.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
 
@@ -36,7 +36,7 @@ function harness() {
     if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { listener = fn; return () => { listener = null } } }
     if (name.endsWith('iotMonitoring')) return service
     if (name.endsWith('threatAlerts')) return alertsService
-    if (name.endsWith('iotDisplay')) return { iotDate, deviceDisplayTitle }
+    if (name.endsWith('iotDisplay')) return { iotDate, deviceDisplayTitle, soilCondition, surfaceCondition }
     if (name.endsWith('officerMonitoringDisplay')) return { monitoringLabels }
     if (name.endsWith('plantId')) return { formatPlantId }
     if (name.includes('useConservationText')) return { useConservationText: () => ({ ct: value => value }) }
@@ -51,6 +51,48 @@ function harness() {
     stop() { cleanup.forEach(fn => fn()); scope.stop() } }
 }
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b }); return { promise, resolve, reject } }
+
+test('soil and surface conditions match firmware thresholds, including boundaries and missing readings', () => {
+  for (const [value, expected] of [[0, 'Wet'], [2299, 'Wet'], [2300, 'Slightly moist'], [2500, 'Slightly moist'], [2700, 'Slightly moist'], [2701, 'Dry'], [4095, 'Dry']]) {
+    assert.equal(soilCondition(value), expected)
+  }
+  for (const [value, expected] of [[0, 'Wet surface'], [2199, 'Wet surface'], [2200, 'Water present'], [2600, 'Water present'], [3000, 'Water present'], [3001, 'Dry'], [4095, 'Dry']]) {
+    assert.equal(surfaceCondition(value), expected)
+  }
+  for (const value of [null, undefined, NaN, Infinity, -Infinity]) {
+    assert.equal(soilCondition(value), '\u2014')
+    assert.equal(surfaceCondition(value), '\u2014')
+  }
+})
+
+test('latest and historical tables derive conditions from each row without changing the readings', async () => {
+  const original = globalThis.fetch, h = harness()
+  globalThis.fetch = async () => Response.json({ devices: [device()] })
+  try {
+    await h.state.loadDevices()
+    for (const [soil, rain, expectedSoil, expectedSurface] of [[4095, 4095, 'Dry', 'Dry'], [2500, 2600, 'Slightly moist', 'Water present'], [0, 0, 'Wet', 'Wet surface'], [null, null, '\u2014', '\u2014']]) {
+      const current = service.mapCanonicalDevice({ ...device(), latest_reading: reading('condition', { soilMoisture: soil, rainfall: rain }) })
+      h.state.readingDevices.value = [current]
+      h.state.historyDevice.value = current
+      h.state.historyReadings.value = [current.latest_reading]
+      h.state.selectedReading.value = current.latest_reading
+      for (const tableClass of ['iot-reading-table', 'iot-history-table']) {
+        const table = h.render().find(n => n.type === 'table' && n.props.class.includes(tableClass))
+        const cells = flat(table).filter(n => n.type === 'td')
+        assert.equal(cells[5].children, soil === null ? '\u2014' : String(soil))
+        assert.equal(cells[6].children, expectedSoil)
+        assert.equal(cells[7].children, rain === null ? '\u2014' : String(rain))
+        assert.equal(cells[8].children, expectedSurface)
+      }
+      const modal = h.render().find(n => n.type?.name === 'AppModal.vue' && n.props?.title === 'Sensor Reading Details')
+      const values = flat(modal).filter(n => n.type === 'dd')
+      assert.equal(values[4].children, expectedSoil)
+      assert.equal(values[5].children, expectedSurface)
+      assert.equal(current.latest_reading.soil_moisture, soil)
+      assert.equal(current.latest_reading.rainfall_mm, rain)
+    }
+  } finally { h.stop(); globalThis.fetch = original }
+})
 
 test('reading View and Details share the reference layout, single ID, dynamic data and existing actions', async () => {
   const original = globalThis.fetch, h = harness()
@@ -75,9 +117,9 @@ test('reading View and Details share the reference layout, single ID, dynamic da
       const title = flat(modal.children.title())
       assert.equal(title.filter(n => n.type?.name === 'MonitoringIdentifier.vue').length, 0)
       assert.equal(title.filter(n => n.props?.class === 'reading-header-icon').length, 1)
-      assert.deepEqual(body.filter(n => n.type === 'dt').map(nodeText), ['Temperature', 'Humidity', 'Soil Moisture', 'Rainfall', 'Motion', 'GPS', 'Recorded At'])
-      assert.equal(body.filter(n => n.props?.class === 'reading-field-icon').length, 7)
-      assert.deepEqual(body.filter(n => n.type === 'dd').map(nodeText), ['22.1 \u00b0C', '64%', '4095%', '123 mm', 'No motion', '\u2014', '10 Nov 2026, 16:20'])
+      assert.deepEqual(body.filter(n => n.type === 'dt').map(nodeText), ['Temperature', 'Humidity', 'Soil Raw (ADC)', 'Rain Raw (ADC)', 'Soil Condition', 'Surface Condition', 'Motion', 'GPS', 'Recorded At'])
+      assert.equal(body.filter(n => n.props?.class === 'reading-field-icon').length, 9)
+      assert.deepEqual(body.filter(n => n.type === 'dd').map(nodeText), ['22.1 \u00b0C', '64%', '4095', '123', 'Dry', 'Wet surface', 'No motion', '\u2014', '10 Nov 2026, 16:20'])
       const actions = body.filter(n => n.type === 'button')
       assert.deepEqual(actions.map(nodeText), ['View Alerts', 'View on Map'])
       assert.ok(actions.every(n => flat(n).some(child => child.type === 'svg')))
@@ -118,7 +160,7 @@ test('reading modal motion colors and missing-value behavior preserve the existi
       assert.equal(modal.props.subtitle, 'Plant —')
       assert.equal(body.filter(n => n.type === 'button').length, 1)
       assert.equal(nodeText(body.find(n => n.type === 'button')), 'View Alerts')
-      assert.equal(body.filter(n => n.type === 'dd').map(nodeText).filter(value => value === '—').length, motion === null ? 7 : 6)
+      assert.equal(body.filter(n => n.type === 'dd').map(nodeText).filter(value => value === '—').length, motion === null ? 9 : 8)
     }
     const rules = []; postcss.parse(descriptor.styles[0].content).walkRules(rule => rules.push(rule))
     for (const [selector, background, color] of [['.reading-motion', '#E5E7EB', '#374151'], ['.reading-motion.detected', '#FFEDD5', '#9A3412']]) {
@@ -552,7 +594,7 @@ test('logout, pending session, account change and unmount abort/invalidate late 
   } finally { globalThis.fetch = original }
 })
 
-test('pre-task motion mapping, measurement presentation and inventory actions are restored', async () => {
+test('raw ADC presentation preserves motion mapping and inventory actions', async () => {
   for (const [value, expected] of [[0,false], [1,true], [2,false], [-1,false], [true,null], ['1',null], [null,null]]) {
     assert.equal(service.mapCanonicalDevice({ ...device(), latest_reading: reading('motion', { movement: value }) }).latest_reading.motion_detected, expected)
   }
@@ -562,10 +604,12 @@ test('pre-task motion mapping, measurement presentation and inventory actions ar
   try {
     await h.state.loadDevices()
     const nodes = h.render()
-    assert.ok(nodes.some(n => n.children === '4095%'))
-    assert.ok(nodes.some(n => n.children === '123 mm'))
+    assert.ok(nodes.some(n => n.children === '4095'))
+    assert.ok(nodes.some(n => n.children === '123'))
     assert.ok(nodes.some(n => n.children === 'No motion'))
-    assert.ok(!nodes.some(n => n.children === '4095 raw' || n.children === '123 raw'))
+    assert.ok(nodes.some(n => n.children === 'Dry'))
+    assert.ok(nodes.some(n => n.children === 'Wet surface'))
+    assert.ok(!nodes.some(n => n.children === '4095%' || n.children === '123 mm'))
     assert.equal(h.state.motionValue({ motion_detected: null }), '—')
     assert.equal(h.state.motionValue({ motion_detected: true }), 'Detected')
     assert.equal(h.state.gpsValue(h.state.devices.value[0].latest_reading), '—')
@@ -637,14 +681,12 @@ test('unauthorized sessions cannot refresh; session loss also invalidates an ini
   } finally { h.stop(); globalThis.fetch = original }
 })
 
-test('reading details and charts retain Malaysia dates and restore pre-task measurement units', async () => {
+test('reading details and charts retain Malaysia dates and display raw ADC units', async () => {
   const chart = readFileSync(new URL('../src/components/conservation/SensorHistoryChart.vue', import.meta.url), 'utf8')
   assert.match(chart, /const formatTimestamp = iotDate/)
-  assert.match(source, /title="Soil moisture over time"\s+unit="%"/)
-  assert.match(source, /title="Rainfall over time"\s+unit="mm"/)
-  assert.ok(!source.includes('raw ADC'))
-  assert.equal((source.match(/soil_moisture, '%'/g) || []).length, 3)
-  assert.equal((source.match(/rainfall_mm, ' mm'/g) || []).length, 3)
+  assert.match(source, /title="Soil raw readings over time"\s+unit="ADC"/)
+  assert.match(source, /title="Rain raw readings over time"\s+unit="ADC"/)
+  assert.doesNotMatch(source, /soil_moisture, '%'|rainfall_mm, ' mm'/)
   const original = globalThis.fetch
   globalThis.fetch = async () => Response.json({ devices: [device()] })
   const h = harness()
@@ -652,7 +694,7 @@ test('reading details and charts retain Malaysia dates and restore pre-task meas
     await h.state.loadDevices()
     h.state.selectedReading.value = h.state.latestReadings.value[0].reading
     assert.ok(h.render().some(n => n.type === 'dd' && n.children === '10 Nov 2026, 16:20'))
-    assert.ok(h.render().some(n => n.type === 'dd' && n.children === '4095%'))
+    assert.ok(h.render().some(n => n.type === 'dd' && n.children === '4095'))
     assert.equal(h.state.dt(null), '—')
     assert.equal(h.state.cards.value.find(card => card[0] === 'onlineDevices')[1], '—')
     assert.equal(h.state.cards.value.find(card => card[0] === 'offlineDevices')[1], '—')

@@ -7,7 +7,8 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
 import { threatAlertBadgeStyle } from '../src/utils/workflowBadge.ts'
-import { prototypeCameraEvents } from '../src/data/cameraMonitoringPrototype.ts'
+import * as cameraService from '../src/services/cameraEvents.ts'
+import { formatPlantId } from '../src/utils/plantId.ts'
 import { monitoringDate, monitoringLabels } from '../src/utils/officerMonitoringDisplay.ts'
 import * as alertService from '../src/services/threatAlerts.ts'
 import {
@@ -17,7 +18,7 @@ import {
 } from '../src/services/threatAlerts.ts'
 
 const page = readFileSync(new URL('../src/views/conservation/ThreatAlertsView.vue', import.meta.url), 'utf8')
-const cameraFixture = readFileSync(new URL('../src/data/cameraMonitoringPrototype.ts', import.meta.url), 'utf8')
+const savedCameraEvents = [1, 2, 3].map(index => ({ eventId: String(index).repeat(32), plantId: String(index), cameraId: 'registered-camera', eventType: 'possible_plant_contact', title: 'Possible contact', description: 'Contact plus MPU movement', confidence: null, detectedAt: '2026-11-13T00:00:00Z', recordingStartedAt: '2026-11-13T00:00:00Z', recordingEndedAt: '2026-11-13T00:00:10Z', durationSeconds: 10, recordingStatus: 'ready', videoUrl: `/api/data/camera-events/${String(index).repeat(32)}/video`, status: 'New' }))
 const iotPage = readFileSync(new URL('../src/views/conservation/IoTMonitoringView.vue', import.meta.url), 'utf8')
 
 const alert = (overrides = {}) => ({
@@ -117,11 +118,10 @@ test('legacy alert route is no longer authoritative and canonical deep links are
   assert.match(iotPage, /query: \{ device: String\(device\.sensor_id\) \}/)
 })
 
-test('camera prototype remains separate and cannot be posted as a canonical response', () => {
-  assert.match(page, /prototypeCameraEvents/)
-  assert.doesNotMatch(page, /Frontend prototype events/)
-  assert.match(cameraFixture, /Frontend-only fixtures/)
-  assert.doesNotMatch(cameraFixture, /saveAlertResponse|\/api\/data\/alerts/)
+test('saved camera events replace fixtures and cannot be posted as sensor responses', () => {
+  assert.doesNotMatch(page, /prototypeCameraEvents|cameraMonitoringPrototype/)
+  assert.match(page, /loadCameraEvents/)
+  assert.match(page, /recordingLabel\(event\)/)
   assert.match(page, /if \(selectedCameraEvent\.value\) return/)
 })
 
@@ -162,13 +162,17 @@ function pageHarness() {
   const script = compileScript(descriptor, { id: 'threat-badges' })
   const template = compileTemplate({ source: descriptor.template.content, filename: 'ThreatAlertsView.vue', id: 'threat-badges', compilerOptions: { bindingMetadata: script.bindings } })
   const js = value => ts.transpileModule(value, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-  const scope = vue.effectScope(), exports = {}, events = prototypeCameraEvents.map(item => ({ ...item }))
+  const scope = vue.effectScope(), exports = {}, cleanup = []
+  let sessionListener
+  const officer = { id: 'officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }
   const route = vue.reactive({ query: {} })
-  const context = { exports, Error, URL, require(name) {
-    if (name === 'vue') return { ...vue, onMounted() {}, withDirectives: n => n, resolveComponent: name => ({ name }) }
+  const context = { exports, Error, URL, AbortController, require(name) {
+    if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount: fn => cleanup.push(fn), withDirectives: n => n, resolveComponent: name => ({ name }) }
     if (name === 'vue-router') return { useRoute: () => route }
     if (name.endsWith('workflowBadge')) return { threatAlertBadgeStyle }
-    if (name.endsWith('cameraMonitoringPrototype')) return { prototypeCameraEvents: events }
+    if (name.endsWith('cameraEvents')) return cameraService
+    if (name.endsWith('plantId')) return { formatPlantId }
+    if (name.endsWith('/auth')) return { sessionSnapshot: () => ({ user: officer, pending: false }), subscribeSession: fn => { sessionListener = fn; return () => { sessionListener = null } } }
     if (name.endsWith('officerMonitoringDisplay')) return { monitoringDate, monitoringLabels }
     if (name.endsWith('threatAlerts')) return alertService
     if (name.includes('useConservationText')) return { useConservationText: () => ({ ct: x => x, locale: vue.ref('en') }) }
@@ -178,7 +182,8 @@ function pageHarness() {
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
-  return { state, events, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => scope.stop() }
+  state.cameraEvents.value = savedCameraEvents.map(item => ({ ...item }))
+  return { state, events: state.cameraEvents.value, session: (user, pending = false) => sessionListener?.(user, pending), render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => { cleanup.forEach(fn => fn()); scope.stop() } }
 }
 function nodes(root) {
   const result = []
@@ -214,24 +219,59 @@ test('both tables render the exact same alert palette, visible labels and neutra
   } finally { h.stop() }
 })
 
-test('demonstration label, fixture View action and read-only details stay separate from canonical responses', () => {
+test('saved camera View actions play protected recordings and remain separate from sensor responses', () => {
   const original = globalThis.fetch, h = pageHarness()
-  globalThis.fetch = () => { throw Error('Prototype actions must not send requests') }
+  globalThis.fetch = () => { throw Error('View actions must not send writes') }
   try {
     h.state.isLoading.value = false
     let rendered = nodes(h.render())
-    assert.ok(rendered.some(n => n.children === 'Demonstration camera events'))
+    assert.ok(rendered.some(n => typeof n.children === 'string' && n.children.includes('Saved camera events and their local recordings')))
     const table = rendered.find(n => n.type === 'table' && n.props?.class.includes('camera-event-table'))
     const actions = nodes(table).filter(n => n.type === 'button')
     assert.equal(actions.length, 3)
     assert.ok(actions.every(n => n.children.trim() === 'View'))
     actions[0].props.onClick()
-    assert.equal(h.state.selectedCameraEvent.value.eventId, 'CAM-EVT-001')
+    assert.equal(h.state.selectedCameraEvent.value.eventId, '1'.repeat(32))
     rendered = nodes(h.render())
     assert.ok(rendered.some(n => n.props?.to === '/plant/PL001'))
     assert.ok(!rendered.some(n => ['Save Response', 'Start Review', 'Mark Resolved', 'Reopen', 'Delete', 'Edit'].includes(typeof n.children === 'string' ? n.children.trim() : '')))
-    assert.deepEqual(h.events, prototypeCameraEvents)
+    assert.deepEqual(h.events, savedCameraEvents)
+    const video = rendered.find(n => n.type === 'video')
+    assert.equal(video.props.src, savedCameraEvents[0].videoUrl)
+    assert.ok(video.props.controls !== undefined)
+    assert.equal(h.state.isWebVideoUrl('/camera-api/recordings/secret.mp4'), false)
   } finally { h.stop(); globalThis.fetch = original }
+})
+
+test('camera refresh preserves visible events on failure and invalidates delayed results after logout or unmount', async () => {
+  const original = globalThis.fetch
+  try {
+    const h = pageHarness()
+    try {
+      globalThis.fetch = async () => { throw Error('offline') }
+      await h.state.refreshCameraEvents()
+      assert.equal(h.state.cameraEvents.value.length, 3)
+      assert.match(h.state.cameraError.value, /Unable to reach/)
+      globalThis.fetch = async () => Response.json({ events: [], hasMore: false })
+      await h.state.refreshCameraEvents()
+      assert.equal(h.state.cameraEvents.value.length, 0)
+      assert.equal(h.state.cameraError.value, '')
+    } finally { h.stop() }
+    for (const action of ['logout', 'unmount']) {
+      const h = pageHarness()
+      let resolve, signal
+      globalThis.fetch = (_url, options) => { signal = options.signal; return new Promise(done => { resolve = done }) }
+      const request = h.state.refreshCameraEvents()
+      if (action === 'logout') h.session(null)
+      else h.stop()
+      assert.equal(signal.aborted, true)
+      resolve(Response.json({ events: savedCameraEvents, hasMore: false }))
+      await request
+      assert.equal(h.state.cameraEvents.value.length, 0)
+      assert.equal(h.state.selectedCameraEvent.value, null)
+      if (action === 'logout') h.stop()
+    }
+  } finally { globalThis.fetch = original }
 })
 
 test('canonical response UI still allows direct New to Resolved and retains resolved restrictions', async () => {

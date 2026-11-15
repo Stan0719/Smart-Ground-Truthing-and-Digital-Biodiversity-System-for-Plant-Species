@@ -9,6 +9,7 @@ const {
 } = require("./authorization.cjs");
 const { mountDomain } = require("./domain.cjs");
 const { mountIoT, mountDeviceIngestion } = require("./iot.cjs");
+const { mountCameraIngestion, mountCameraEvents } = require("./camera-events.cjs");
 const { mountUploads } = require("./uploads.cjs");
 const { mountPlantGallery } = require("./plant-gallery.cjs");
 const { mountPlantDetail } = require("./plant-detail.cjs");
@@ -28,6 +29,7 @@ function createPlantApp({
   similaritySearch,
   officerNotifications = null,
   speciesPhotoWritesEnabled = false,
+  recordingsRoot,
 }) {
   const app = express();
   app.disable("x-powered-by");
@@ -56,6 +58,7 @@ function createPlantApp({
   app.use("/api/record-changes", express.json({ limit: "64mb" }));
   app.use(express.json({ limit: "6mb" }));
   mountDeviceIngestion(app, { pool });
+  mountCameraIngestion(app, { pool, recordingsRoot });
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
   mountStaffNotifications(app, { pool });
@@ -69,6 +72,7 @@ function createPlantApp({
   mountPlantGallery(app, { pool, allow });
   mountPlantDetail(app, { pool, allow, auth });
   mountIoT(app, { pool, allow });
+  mountCameraEvents(app, { pool, allow, recordingsRoot });
   mountPlantSimilarity(app, { pool, allow, search: similaritySearch });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {
     await pool.query("SELECT 1");
