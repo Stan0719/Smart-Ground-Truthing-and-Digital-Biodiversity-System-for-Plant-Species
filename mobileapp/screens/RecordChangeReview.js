@@ -79,7 +79,8 @@ export default function RecordChangeReview() {
     if (submitting.current || !selected) return;
     submitting.current = true; setBusy(true);
     try {
-      await plantApi(`/${selected.observationEdit ? "observation-edits" : "record-changes"}/${encodeURIComponent(selected.id)}/review`, { method: "POST", body: { decision, comment: comment.trim() } });
+      await plantApi(`/${selected.observationEdit ? "observation-edits" : "record-changes"}/${encodeURIComponent(selected.id)}/review`,
+        { method: "POST", body: { decision, comment: comment.trim(), revision: selected.revision } });
       const capability = await plantApi("/observation-edits/capabilities");
       const [response, observations] = await Promise.all([plantApi("/record-changes"), capability.available
         ? plantApi("/observation-edits") : Promise.resolve({ edits: [] })]);

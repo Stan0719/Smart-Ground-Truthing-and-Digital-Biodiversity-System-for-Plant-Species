@@ -23,6 +23,14 @@ export function canWithdrawOriginalPlant(plant, accountId) {
     !["Approved", "Rejected", "Flagged"].includes(original.review_decision);
 }
 
+export function canWithdrawOriginalSpecies(request, accountId, historical = false) {
+  if (historical || !request || !accountId || (request.requested_by ?? request.owner_subject) !== `staff:${accountId}` ||
+      request.approved_species_id || request.withdrawn_at || request.request_status === "Withdrawn") return false;
+  if (request.request_status === "Correction Required") return true;
+  return request.request_status === "Pending Review" && !request.reviewed_at &&
+    (request.review_cycle == null || Number(request.review_cycle) === 1);
+}
+
 function list(payload, key) {
   if (!Array.isArray(payload?.[key])) throw Error("The backend returned an invalid plant records response.");
   return payload[key];

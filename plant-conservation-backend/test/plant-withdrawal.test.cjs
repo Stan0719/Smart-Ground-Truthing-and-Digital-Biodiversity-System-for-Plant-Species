@@ -78,6 +78,15 @@ test("Original Plant withdrawal keeps audit, QR and linked records while closing
     return { status: response.status, data: await response.json() };
   }
   const withdraw = (item, user = "bot") => call(`/plant-submissions/${item.id}/withdraw`, user);
+  const correctedPending = await plant("Pending Review");
+  await pool.query(`INSERT INTO observation_review(id,observation_id,reviewer_subject,decision,comment)
+    VALUES('prior-correction',$1,'staff:officer','Correction Required','Clarify the record')`,
+  [correctedPending.observationId]);
+  await pool.query("UPDATE plant_observation SET revision=3 WHERE id=$1", [correctedPending.observationId]);
+  const correctedAvailability = await read(`/plant-submissions/${correctedPending.id}/withdrawal`, "bot");
+  assert.deepEqual({ eligible: correctedAvailability.data.eligible, editable: correctedAvailability.data.editable },
+    { eligible: false, editable: false });
+  assert.equal((await withdraw(correctedPending)).status, 409);
   assert.equal((await read(`/plant-submissions/${pending.id}/withdrawal`, "bot")).data.eligible, true);
   assert.equal((await read(`/plant-submissions/${pending.id}/withdrawal`, "other")).status, 403);
   assert.equal((await withdraw(pending, "other")).status, 403);

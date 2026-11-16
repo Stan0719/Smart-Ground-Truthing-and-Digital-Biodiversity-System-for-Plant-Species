@@ -78,6 +78,7 @@ export function versionCardItems(kind, targetId, response) {
       ? Number(version.version_number) : undefined;
     byKey.set(`version:${version.id}`, { key: `version:${version.id}`, kind, targetId, versionId: version.id,
       ...(version.change_id != null ? { priorChangeId: String(version.change_id) } : {}), versionNumber,
+      ...(version.change_revision != null ? { changeRevision: Number(version.change_revision) } : {}),
       snapshot: version.snapshot || {}, title: version.snapshot?.scientific_name,
       commonName: version.snapshot?.common_name ?? version.snapshot?.content?.commonName,
       status: version.status, edited: Boolean(versionNumber && versionNumber > 1), original: versionNumber === 1,
@@ -138,7 +139,10 @@ export function mergeRecordChangeSubmissions(kind, targetId, response, recordCha
   const currentVersions = versions.map((version) => {
     const changeId = version?.change_id;
     const change = changeId == null ? null : currentById.get(String(changeId));
-    return change ? currentReviewFields(version, change) : version;
+    const exactRevision = version?.change_revision != null && Number(version.change_revision) === Number(change?.revision);
+    const singleLegacyRevision = version?.change_revision == null && change &&
+      versions.filter((candidate) => String(candidate?.change_id ?? "") === String(changeId)).length === 1;
+    return change && (exactRevision || singleLegacyRevision) ? currentReviewFields(version, change) : version;
   });
   const currentPriorChanges = priorChanges.map((prior) => {
     const change = prior?.id == null ? null : currentById.get(String(prior.id));

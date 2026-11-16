@@ -1,33 +1,79 @@
 "use strict";
 const { randomUUID } = require("node:crypto");
 const { permitted, visibilityFor } = require("../shared/rbac.cjs");
-const { subject, fail } = require("./domain.cjs");
+const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 
 async function historyAvailable(c) {
   return (await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available;
 }
+async function historyRevisionAvailable(c) {
+  return Boolean((await c.query(`SELECT EXISTS (SELECT 1 FROM information_schema.columns
+    WHERE table_schema=current_schema() AND table_name='record_version_history' AND column_name='change_revision') AS available`)).rows[0]?.available);
+}
+async function requireVersionHistory(c, { revisions = false } = {}) {
+  if (!(await historyAvailable(c)) || (revisions && !(await historyRevisionAvailable(c))))
+    fail(503, revisions
+      ? "Immutable version history requires reviewed migration 028. No submission changes were saved."
+      : "Version history is unavailable. No submission changes were saved.");
+}
+async function requirePlantVersionPhotoHistory(c) {
+  const available = (await c.query(`SELECT to_regclass(current_schema() || '.plant_record_version_photo') IS NOT NULL
+    AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
+      AND table_name='record_version_history' AND column_name='photo_refs_sealed') AS available`)).rows[0]?.available;
+  if (!available) fail(503, "Immutable Plant-version photo history requires Migration 030. No submission changes were saved.");
+}
+async function appendInitialVersion(c, { kind, targetId, owner, snapshot, photo = null }) {
+  await requireVersionHistory(c);
+  const column = kind === "plant" ? "plant_id" : "request_id";
+  const row = (await c.query(`INSERT INTO record_version_history(id,record_type,${column},version_number,owner_subject,edited_by,status,snapshot,species_photo)
+    VALUES($1,$2,$3,1,$4,$4,'Pending Review',$5,$6) RETURNING id,version_number`,
+  [randomUUID(), kind, targetId, owner, snapshot, photo])).rows[0];
+  return row;
+}
 const plantPhotoRefs = (ids) => ids.map((asset_id) => ({ asset_id }));
 
-async function appendVersion(c, { kind, targetId, owner, editor, base, baseStatus, basePhoto = null,
-  proposed, proposedPhoto = null, changeId = null, baselineAt = null, baselineReview = null }) {
-  if (!(await historyAvailable(c))) return null;
+async function appendVersion(c, { kind, targetId, owner, editor, base, proposed,
+  proposedPhoto = null, changeId = null, changeRevision = null, plantPhotoSet = null }) {
+  await requireVersionHistory(c, { revisions: Boolean(changeId) });
+  if (plantPhotoSet) {
+    if (kind !== "plant" || !changeId || !Number.isInteger(changeRevision) ||
+      !Array.isArray(plantPhotoSet.assetIds) || !Array.isArray(plantPhotoSet.stagedAssets) ||
+      JSON.stringify(proposed.photo_refs) !== JSON.stringify(plantPhotoRefs(plantPhotoSet.assetIds)))
+      fail(409, "Sealed Plant-version photos do not match the version snapshot.");
+    await requirePlantVersionPhotoHistory(c);
+  }
   const column = kind === "plant" ? "plant_id" : "request_id";
   const previous = (await c.query(`SELECT id,version_number,status,snapshot FROM record_version_history WHERE ${column}=$1 ORDER BY version_number DESC LIMIT 1 FOR UPDATE`,
     [targetId])).rows[0];
-  if (!previous) {
-    await c.query(`INSERT INTO record_version_history(id,record_type,${column},version_number,owner_subject,edited_by,status,snapshot,species_photo,created_at,reviewed_by,reviewed_at,review_comment)
-      VALUES($1,$2,$3,1,$4,$5,$6,$7,$8,COALESCE($9,CURRENT_TIMESTAMP),$10,$11,$12)`,
-    [randomUUID(), kind, targetId, owner, owner, baseStatus, base, basePhoto, baselineAt,
-      baselineReview?.reviewed_by ?? null, baselineReview?.reviewed_at ?? null, baselineReview?.review_comment ?? null]);
-  }
-  if (previous?.status === "Pending Review")
+  if (!previous) fail(409, "This legacy record has no complete version history. Editing is blocked to preserve its existing history.");
+  if (["Pending Review", "Correction Required"].includes(previous.status))
     await c.query("UPDATE record_version_history SET status='Superseded' WHERE id=$1", [previous.id]);
-  if (!previous && baseStatus === "Pending Review")
-    await c.query(`UPDATE record_version_history SET status='Superseded' WHERE ${column}=$1 AND version_number=1`, [targetId]);
-  const version = previous ? previous.version_number + 1 : 2;
-  const row = (await c.query(`INSERT INTO record_version_history(id,record_type,${column},version_number,owner_subject,edited_by,status,snapshot,previous_snapshot,species_photo,change_id)
-    VALUES($1,$2,$3,$4,$5,$6,'Pending Review',$7,$8,$9,$10) RETURNING id,version_number`,
-    [randomUUID(), kind, targetId, version, owner, editor, proposed, previous?.snapshot || base, proposedPhoto, changeId])).rows[0];
+  const version = previous.version_number + 1;
+  const previousSnapshot = changeId && changeRevision === 1 ? base : previous.snapshot;
+  const row = changeId
+    ? (await c.query(`INSERT INTO record_version_history(id,record_type,${column},version_number,owner_subject,edited_by,status,snapshot,previous_snapshot,species_photo,change_id,change_revision${plantPhotoSet ? ",photo_refs_sealed" : ""})
+      VALUES($1,$2,$3,$4,$5,$6,'Pending Review',$7,$8,$9,$10,$11${plantPhotoSet ? ",TRUE" : ""}) RETURNING id,version_number,change_revision`,
+    [randomUUID(), kind, targetId, version, owner, editor, proposed, previousSnapshot, proposedPhoto, changeId, changeRevision])).rows[0]
+    : (await c.query(`INSERT INTO record_version_history(id,record_type,${column},version_number,owner_subject,edited_by,status,snapshot,previous_snapshot,species_photo)
+      VALUES($1,$2,$3,$4,$5,$6,'Pending Review',$7,$8,$9) RETURNING id,version_number`,
+    [randomUUID(), kind, targetId, version, owner, editor, proposed, previousSnapshot, proposedPhoto])).rows[0];
+  if (plantPhotoSet) {
+    const stagedById = new Map(plantPhotoSet.stagedAssets.map(asset => [asset.id, asset]));
+    if (stagedById.size !== plantPhotoSet.stagedAssets.length ||
+      plantPhotoSet.stagedAssets.some(asset => !plantPhotoSet.assetIds.includes(asset.id)))
+      fail(409, "Staged Plant-version photos do not match the selected photo set.");
+    for (const asset of plantPhotoSet.stagedAssets) {
+      await c.query(`INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content)
+        VALUES($1,$2,$3,$4,NULL,FALSE,'image/jpeg',$5)`,
+      [asset.id, plantPhotoSet.plantId, owner, asset.clientKey, asset.content]);
+    }
+    for (const [position, assetId] of plantPhotoSet.assetIds.entries()) {
+      await c.query(`INSERT INTO plant_record_version_photo
+        (version_id,plant_id,observation_id,owner_subject,position,asset_id)
+        VALUES($1,$2,$3,$4,$5,$6)`,
+      [row.id, plantPhotoSet.plantId, plantPhotoSet.observationId, owner, position, assetId]);
+    }
+  }
   return row;
 }
 
@@ -42,6 +88,7 @@ function plantProposedSnapshot(base, proposal, changeId, qrToken) {
 }
 
 function mountRecordVersionHistory(app, { pool, allow }) {
+  const { subject } = require("./domain.cjs");
   const read = allow("plants.scientific.read");
   async function authorized(req, version) {
     if (!version) fail(404, "Version unavailable.");
@@ -63,8 +110,9 @@ function mountRecordVersionHistory(app, { pool, allow }) {
         (request.approved_species_id && !visibilityFor(req.user).includes(request.visibility))) fail(404, "Version unavailable.");
     }
   }
-  const select = `SELECT id,record_type,plant_id,request_id,version_number,owner_subject,edited_by,status,snapshot,previous_snapshot,
-    species_photo IS NOT NULL AS has_species_photo,change_id,reviewed_by,reviewed_at,review_comment,created_at FROM record_version_history`;
+  const select = async (c) => `SELECT id,record_type,plant_id,request_id,version_number,owner_subject,edited_by,status,snapshot,previous_snapshot,
+    species_photo IS NOT NULL AS has_species_photo,change_id,${await historyRevisionAvailable(c) ? "change_revision" : "NULL::integer AS change_revision"},
+    reviewed_by,reviewed_at,review_comment,created_at FROM record_version_history`;
   app.get("/api/record-versions/capabilities", read, async (_req, res) => {
     res.json({ history_available: await historyAvailable(pool) });
   });
@@ -73,7 +121,7 @@ function mountRecordVersionHistory(app, { pool, allow }) {
     const kind = req.query.kind;
     if (!["plant", "species"].includes(kind) || !/^[1-9]\d*$/.test(String(req.query.id || ""))) fail(400, "Invalid version target.");
     const column = kind === "plant" ? "plant_id" : "request_id";
-    const rows = (await pool.query(`${select} WHERE ${column}=$1 ORDER BY version_number DESC LIMIT 200`, [req.query.id])).rows;
+    const rows = (await pool.query(`${await select(pool)} WHERE ${column}=$1 ORDER BY version_number DESC LIMIT 200`, [req.query.id])).rows;
     if (rows.length) await authorized(req, rows[0]);
     else {
       // Never reveal whether a target exists through an empty history result.
@@ -99,7 +147,7 @@ function mountRecordVersionHistory(app, { pool, allow }) {
   });
   app.get("/api/record-versions/:id", read, async (req, res) => {
     if (!(await historyAvailable(pool))) fail(503, "Version history is not available yet.");
-    const row = (await pool.query(`${select} WHERE id=$1`, [req.params.id])).rows[0];
+    const row = (await pool.query(`${await select(pool)} WHERE id=$1`, [req.params.id])).rows[0];
     await authorized(req, row);
     res.json({ version: row });
   });
@@ -113,4 +161,5 @@ function mountRecordVersionHistory(app, { pool, allow }) {
   });
 }
 
-module.exports = { historyAvailable, appendVersion, plantPhotoRefs, plantProposedSnapshot, mountRecordVersionHistory };
+module.exports = { historyAvailable, historyRevisionAvailable, requireVersionHistory, requirePlantVersionPhotoHistory, appendInitialVersion, appendVersion,
+  plantPhotoRefs, plantProposedSnapshot, mountRecordVersionHistory };

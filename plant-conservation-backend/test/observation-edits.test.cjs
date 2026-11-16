@@ -53,6 +53,9 @@ test('Observation edit proposals preserve approved data, ownership, review state
     return { status: response.status, data: await response.json() };
   };
   const observationId = '11111111-1111-4111-8111-111111111111';
+  const capability = await call('/observation-edits/capabilities', 'bob');
+  assert.equal(capability.data.available, true);
+  assert.equal(capability.data.versioning_available, false, 'the legacy workflow is identified when Migration 030 is absent');
   const original = (await call(`/observations/${observationId}`, 'bob')).data.observation;
   const proposal = { observation_id: observationId, client_key: 'edit-bob-1', content: {
     heightCm: 95, healthStatus: 'Healthy', lifeStage: 'Mature', morphology: 'Edited leaves', notes: 'New note',
@@ -87,8 +90,13 @@ test('Observation edit proposals preserve approved data, ownership, review state
   assert.equal(resubmitted.status, 200, JSON.stringify(resubmitted.data));
   assert.equal(resubmitted.data.edit.id, editId);
   assert.equal(resubmitted.data.edit.status, 'Pending Review');
+  assert.equal((await call(`/observation-edits/${editId}/cancel`, 'bob', 'POST', {})).status, 409);
+  assert.equal((await call(`/observation-edits/${editId}/cancel`, 'carol', 'POST', {})).status, 404);
   assert.equal((await call(`/observation-edits/${editId}`, 'carol', 'PATCH', { revision: 2, content: proposal.content })).status, 404);
-  const approved = await call(`/observation-edits/${editId}/review`, 'officer', 'POST', { decision: 'Approved', comment: 'Accepted.' });
+  assert.equal((await call(`/observation-edits/${editId}/review`, 'officer', 'POST',
+    { decision: 'Approved', comment: 'Stale decision.', revision: 1 })).status, 409);
+  assert.equal((await call(`/observation-edits/${editId}`, 'bob')).data.edit.status, 'Pending Review');
+  const approved = await call(`/observation-edits/${editId}/review`, 'officer', 'POST', { decision: 'Approved', comment: 'Accepted.', revision: 2 });
   assert.equal(approved.status, 200, JSON.stringify(approved.data));
   const current = (await call(`/observations/${observationId}`, 'bob')).data.observation;
   assert.equal(current.id, observationId);

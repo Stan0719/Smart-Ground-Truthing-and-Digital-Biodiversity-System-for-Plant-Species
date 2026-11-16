@@ -1,5 +1,5 @@
 const PAGE_SIZE = 200;
-const SUBMITTED_STATUSES = new Set(["Pending Review", "Approved", "Rejected", "Correction Required", "Flagged"]);
+const SUBMITTED_STATUSES = new Set(["Pending Review", "Approved", "Rejected", "Correction Required", "Flagged", "Withdrawn"]);
 
 function unwrapObservations(payload) {
   if (!Array.isArray(payload?.observations)) throw new Error("The observation service returned an invalid list.");
@@ -81,7 +81,7 @@ export function buildObservationHistoryRows(observation, editHistory) {
   const requests = [...requestById.values()];
   const versions = Array.isArray(editHistory?.versions) ? editHistory.versions : [];
   const rows = versions.map((version) => {
-    const original = Number(version.version_number) === 0;
+    const original = ["original", "legacy_baseline"].includes(version.submission_type) || Number(version.version_number) === 0;
     const edit = version.edit_request_id == null ? null : requestById.get(String(version.edit_request_id));
     return {
       key: `version:${version.id}`,
@@ -91,9 +91,9 @@ export function buildObservationHistoryRows(observation, editHistory) {
       original,
       versionNumber: Number(version.version_number),
       editNumber: edit?.version_number == null ? null : Number(edit.version_number),
-      status: edit?.status || "Approved",
-      reviewComment: edit?.review_comment || (original ? observation.reviewComment : ""),
-      createdAt: edit?.created_at || version.approved_at || observation.date,
+      status: version.status || edit?.status || "Approved",
+      reviewComment: version.review_comment || edit?.review_comment || (original ? observation.reviewComment : ""),
+      createdAt: version.submitted_at || version.baseline_captured_at || version.created_at || edit?.created_at || version.approved_at || observation.date,
       content: version.content || {},
       photoIds: Array.isArray(version.photo_ids) ? version.photo_ids : [],
       current: false,
@@ -119,7 +119,7 @@ export function buildObservationHistoryRows(observation, editHistory) {
     });
   }
 
-  if (!rows.some((row) => row.original)) {
+  if (!rows.some((row) => row.original) && !versions.some((version) => version.verified)) {
     const firstEdit = requests.slice().sort((a, b) => Number(a.version_number) - Number(b.version_number))[0];
     const baseContent = firstEdit?.base_snapshot?.content;
     if (baseContent && typeof baseContent === "object") {
@@ -225,7 +225,7 @@ export async function fetchMyObservations(accountId, botanistName, api) {
   );
 
   let versionHistoryError = false;
-  const historyTargets = observations.filter((item) => item.editRequests.length);
+  const historyTargets = observations.filter((item) => capability.versioning_available || item.editRequests.length);
   for (let offset = 0; offset < historyTargets.length; offset += 5) {
     await Promise.all(historyTargets.slice(offset, offset + 5).map(async (item) => {
       try {

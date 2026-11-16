@@ -287,7 +287,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
   }
   async function capture(camera) {
     if (capturing.current) return;
-    if (observationEditMode && photos.length + (originalObservation?.assets?.length || 0) >= 3) {
+    if (observationEditMode && photos.length + (originalObservation?.assets?.length || 0) + (editRequest?.added_photo_count || 0) >= 3) {
       setError(t("observationEdits.photoLimit")); return;
     }
     capturing.current = true;

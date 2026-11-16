@@ -182,7 +182,7 @@ test('Officer real notifications: isolated committed workflows and durable deliv
     assert.equal(list.filter(n=>n.resource.id===id&&n.event_type==='observation_resubmitted').length,2);
   });
 
-  await t.test('authorized read evidence verifies initial correction versions and fails closed after an ordinary edit',async()=>{
+  await t.test('authorized read evidence verifies correction versions and keeps correction resubmissions locked',async()=>{
     await database.query("INSERT INTO plant_app.qr_code(qr_code,status) VALUES('evidence','generated')");
     const qr=(await database.query("SELECT qr_id FROM plant_app.qr_code WHERE qr_code='evidence'")).rows[0].qr_id;
     const created=await call('/plant-submissions','POST',registration(qr,'read-evidence'));assert.equal(created.status,201);const row=created.data;
@@ -197,11 +197,12 @@ test('Officer real notifications: isolated committed workflows and durable deliv
     const list=await call('/observations?origin_type=initial_registration&limit=100','GET',undefined,'one');assert.equal(list.data.observations.find(item=>item.id===row.id).is_correction_resubmission,true);
     await database.query("DELETE FROM staff_notification_event WHERE observation_id=$1 AND event_type='observation_resubmitted'",[row.id]);
     assert.equal((await read('one')).is_correction_resubmission,true,'initial versions prove the transition without a notification');
-    await call(`/my-plants/${row.plant_id}`,'PATCH',{...edit,expected_revision:3});assert.equal((await read('one')).is_correction_resubmission,null,'ordinary later pending edit is not a fresh correction');
+    assert.equal((await call(`/my-plants/${row.plant_id}`,'PATCH',{...edit,expected_revision:3})).status,409,'correction resubmissions cannot be edited while awaiting review');
+    assert.equal((await read('one')).is_correction_resubmission,true,'the correction resubmission remains verified');
     await database.query("UPDATE plant_observation SET content=content||'{\"is_correction_resubmission\":true}'::jsonb WHERE id=$1",[row.id]);
-    assert.equal((await read('one')).is_correction_resubmission,null,'client content cannot override evidence');
-    const again=await call(`/observations/${row.id}/review`,'POST',{revision:4,decision:'Correction Required',comment:'Second cycle'},'one');assert.equal(again.status,200);
-    const repeated=await call(`/my-plants/${row.plant_id}`,'PATCH',{...edit,expected_revision:5});assert.equal(repeated.status,200);
+    assert.equal((await read('one')).is_correction_resubmission,true,'client content cannot override verified history');
+    const again=await call(`/observations/${row.id}/review`,'POST',{revision:3,decision:'Correction Required',comment:'Second cycle'},'one');assert.equal(again.status,200);
+    const repeated=await call(`/my-plants/${row.plant_id}`,'PATCH',{...edit,expected_revision:4});assert.equal(repeated.status,200,JSON.stringify(repeated.data));
     assert.equal((await read('one')).is_correction_resubmission,true,'a second real cycle is verified');
     await database.query("UPDATE observation_review SET decision='Rejected' WHERE observation_id=$1",[row.id]);assert.equal((await read('one')).is_correction_resubmission,null,'inconsistent persisted evidence is withheld');
     await database.query("UPDATE plant_observation SET status='Draft' WHERE id=$1",[row.id]);assert.equal((await read('one')).is_correction_resubmission,false);

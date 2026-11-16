@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, T
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useBotanistNotifications } from "../utils/useBotanistNotifications";
 import { botanistNotifications, ownedNotificationObservation } from "../utils/botanistNotifications";
-import { notificationPresentation } from "../utils/botanistNotificationStore";
+import { isMatchingInitialObservationCorrection, notificationPresentation } from "../utils/botanistNotificationStore";
 import { localizedNotificationMessage } from "../translations/notifications";
 import { readDrafts } from "../utils/fieldStorage";
 import { fetchBotanistSpeciesRequest, fetchBotanistRecordChange } from "../utils/botanistRecords";
@@ -50,7 +50,17 @@ export default function BotanistNotifications({ navigation, user }) {
       if (item.entityType === "record_change" && item.changeId && ["plant", "species"].includes(item.recordKind)) {
         const proposal = await fetchBotanistRecordChange(accountId, item.changeId, { kind: item.recordKind, targetId: item.targetId, status: "any" });
         if (item.revision != null && proposal.revision < item.revision) throw Error(t("botanistNotifications.theRecordMayBeUnavailableYourAccessMayHaveChanged"));
-        if (proposal.status === "Correction Required") {
+        if (item.recordKind === "plant" && proposal.base_snapshot?.workflow_type === "initial_registration_observation_edit") {
+          const observationId = proposal.base_snapshot.observation_id;
+          const [observation, editPayload] = await Promise.all([
+            ownedNotificationObservation(accountId, observationId),
+            plantApi(`/observation-edits/${encodeURIComponent(proposal.id)}`, { expectedAccountId: accountId }),
+          ]);
+          const edit = editPayload?.edit;
+          if (!isMatchingInitialObservationCorrection({ proposal, edit, observation, revision: item.revision, accountId }))
+            throw Error(t("observationEdits.unavailable"));
+          navigation.navigate("FieldCollectionEdit", { observation, plantId: observation.plant_id, editRequest: edit });
+        } else if (proposal.status === "Correction Required") {
           if (item.recordKind === "plant") navigation.navigate("EditPlant", { plantId: proposal.plant_id, botanist: user, correction: true, correctionChangeId: proposal.id });
           else navigation.navigate("EditSpeciesRequest", { requestId: String(proposal.base_snapshot?.request_id || ""), botanist: user, correction: true, correctionChangeId: proposal.id });
         } else if (item.recordKind === "plant") navigation.navigate("BotanistPlantDetail", { plantId: proposal.plant_id, botanist: user });
@@ -65,7 +75,8 @@ export default function BotanistNotifications({ navigation, user }) {
           ownedNotificationObservation(accountId, item.observationId),
           plantApi(`/observation-edits/${encodeURIComponent(item.requestId)}`, { expectedAccountId: accountId }),
         ]);
-        if (payload.edit?.owner_subject !== `staff:${accountId}` || payload.edit?.observation_id !== observation.id)
+        if (payload.edit?.owner_subject !== `staff:${accountId}` || payload.edit?.observation_id !== observation.id ||
+            (item.revision != null && payload.edit?.revision !== item.revision))
           throw Error(t("observationEdits.unavailable"));
         if (item.type === "observation_edit_correction" && payload.edit.status === "Correction Required")
           navigation.navigate("FieldCollectionEdit", { observation, plantId: observation.plant_id, editRequest: payload.edit });

@@ -434,6 +434,9 @@ test("HTTP review paths preserve Officer images, request-photo history and retry
       [...Object.values(fields), photo],
     )
   ).rows[0];
+  await pool.query(`INSERT INTO record_version_history(id,record_type,request_id,version_number,owner_subject,edited_by,status,snapshot,species_photo)
+    VALUES('gallery-original-v1','species',$1,1,'staff:bot','staff:bot','Pending Review',$2,$3)`,
+  [request.request_id, { request_id: request.request_id, species_id: 1, ...fields }, photo]);
   for (const [id, owner, key, approved] of [
     ["origin", "staff:bot", "origin:species-photo", false],
     ["unrelated-pending", "staff:bot", "unrelated-pending", false],
@@ -555,7 +558,7 @@ test("HTTP review paths preserve Officer images, request-photo history and retry
     `/record-changes/${proposed.data.change.id}/review`,
     "officer",
     "POST",
-    { decision: "Approved", comment: "Verified" },
+    { decision: "Approved", comment: "Verified", revision: proposed.data.change.revision },
   );
   assert.equal(approved.status, 200, JSON.stringify(approved.data));
   assert.equal(

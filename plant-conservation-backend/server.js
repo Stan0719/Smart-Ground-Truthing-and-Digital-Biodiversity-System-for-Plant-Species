@@ -15,6 +15,7 @@ const { mountPlantDetail } = require("./plant-detail.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountObservationEdits } = require("./observation-edits.cjs");
+const { mountObservationWithdrawals } = require("./observation-withdrawals.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
 const { mountPlantSimilarity } = require("./plant-similarity.cjs");
 const { mountStaffNotifications } = require("./staff-notifications.cjs");
@@ -71,6 +72,7 @@ function createPlantApp({
   mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
   require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
   mountObservationEdits(app, { pool, allow });
+  mountObservationWithdrawals(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
   mountSpeciesPhotoLibrary(app, { pool, allow, writesEnabled: speciesPhotoWritesEnabled });

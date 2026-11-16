@@ -131,7 +131,8 @@ test("Phase 2: authoritative observation origin across creation, history and rev
   });
   await t.test('permitted species correction preserves original initial origin and immutable receipt', async () => {
     const f = await create(), before = await receipt(f);
-    assert.equal((await edit(f, 2)).status, 200);
+    const edited = await edit(f, 2);
+    assert.equal(edited.status, 200, JSON.stringify(edited.data));
     assert.equal(await origin(f), 'initial_registration');
     assert.deepEqual(await receipt(f), before);
     assert.equal((await review(f, 2)).status, 200);

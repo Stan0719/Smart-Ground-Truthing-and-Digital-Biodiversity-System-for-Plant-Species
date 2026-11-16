@@ -2,6 +2,8 @@
 const { withResubmissionEvidence } = require('./observation-resubmission.cjs');
 const { randomUUID, randomBytes, createHash } = require("node:crypto");
 const { originColumnAvailable, classifyObservations } = require("./observation-origin.cjs");
+const observationVersions = require("./observation-submission-versions.cjs");
+const { canModifyPendingObservation } = require("./status-permissions.cjs");
 const { queueOptions, queuePage } = require("./observation-queue.cjs");
 const {
   permitted,
@@ -142,6 +144,58 @@ async function transaction(pool, operation) {
   } finally {
     c.release();
   }
+}
+
+// Migration 030 is deployed separately. Do not write migration-029-only
+// snapshots: its review rows cannot yet prove which version was decided.
+async function originalObservationVersionsReady(c) {
+  return Boolean((await c.query(`SELECT to_regclass('plant_app.observation_submission_photo') IS NOT NULL
+    AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='plant_app'
+      AND table_name='observation_review' AND column_name='submission_version_id') AS ready`)).rows[0]?.ready);
+}
+
+async function verifiedObservationOrigin(c, row) {
+  return (await classifyObservations(c, [row]))[0]?.origin_type;
+}
+
+// Migration 030 enrolls a fixed set of pre-existing, versionless submissions.
+// Membership is never granted by an API route; current owner/Plant/revision/
+// status and the continued absence of versions are checked under the caller's
+// Observation row lock on every legacy action.
+async function legacyObservationEligibility(c, row) {
+  const available = (await c.query(`SELECT to_regclass('plant_app.observation_legacy_review_eligibility') IS NOT NULL AS available`)).rows[0]?.available;
+  if (!available) return null;
+  return (await c.query(`SELECT e.* FROM observation_legacy_review_eligibility e
+    WHERE e.observation_id=$1 AND e.plant_id=$2 AND e.owner_subject=$3
+      AND $4::integer >= e.captured_revision
+      AND $5::text IN ('Pending Review','Correction Required','Draft')
+      AND NOT EXISTS (SELECT 1 FROM observation_submission_version v WHERE v.observation_id=e.observation_id)
+      AND NOT EXISTS (SELECT 1 FROM plant_submission_receipt r WHERE r.result->>'id'=e.observation_id)
+      AND $6::text IN ('subsequent_observation','unknown')`,
+  [row.id, row.plant_id, row.owner_subject, row.revision, row.status, row.origin_type])).rows[0] || null;
+}
+
+async function hasLegacyCorrectionEvidence(c, row, draft = false, eligibility = null) {
+  const reviewRevision = draft ? row.revision - 2 : row.revision - 1;
+  if (reviewRevision > 0 && (await c.query(`SELECT 1 FROM observation_review
+      WHERE observation_id=$1 AND decision='Correction Required' AND legacy_revision=$2
+        AND reviewer_subject<>$3 AND NULLIF(btrim(comment),'') IS NOT NULL LIMIT 1`,
+  [row.id, reviewRevision, row.owner_subject])).rows.length) return true;
+  // Before Migration 030, existing review rows cannot carry an exact revision.
+  // Permit only the exact state captured at migration time, and only once.
+  if (!eligibility || eligibility.captured_status !== 'Correction Required') return false;
+  const expectedRevision = draft ? eligibility.captured_revision + 1 : eligibility.captured_revision;
+  if (row.revision !== expectedRevision) return false;
+  return (await c.query(`SELECT 1 FROM observation_review
+    WHERE observation_id=$1 AND decision='Correction Required' AND legacy_revision IS NULL
+      AND reviewer_subject<>$2 AND NULLIF(btrim(comment),'') IS NOT NULL LIMIT 1`,
+  [row.id, row.owner_subject])).rows.length > 0;
+}
+
+async function submittedObservationPhotos(c, row) {
+  return (await c.query(`SELECT id FROM plant_asset WHERE observation_id=$1 AND plant_id=$2
+    AND owner_subject=$3 AND content_type IN ('image/jpeg','image/png')
+    ORDER BY created_at,id`, [row.id, row.plant_id, row.owner_subject])).rows.map(photo => photo.id);
 }
 async function audit(c, user, action, target) {
   await c.query(
@@ -763,22 +817,30 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     const editTypes = { submitted: "observation_edit_submitted", correction_required: "observation_edit_correction",
       resubmitted: "observation_edit_resubmitted", approved: "observation_edit_approved", rejected: "observation_edit_rejected",
       cancelled: "observation_edit_cancelled" };
-    res.json({ notifications: [...rows.map((row) => ({
+    res.json({ notifications: [...rows.map((row) => {
+      const legacyObservationEdit = row.metadata?.entityType === "legacy_observation_edit" &&
+        typeof row.metadata?.requestId === "string" && Number.isInteger(row.metadata?.revision) && row.observation_id;
+      const legacyEditTypes = { observation_approved: "observation_edit_approved", observation_rejected: "observation_edit_rejected",
+        correction_requested: "observation_edit_correction" };
+      return {
       id: row.id,
-      type: row.type,
+      type: legacyObservationEdit ? legacyEditTypes[row.type] || row.type : row.type,
       sourceKey: row.source_key,
       ...(row.observation_id ? { observationId: String(row.observation_id) } : {}),
       ...(row.plant_id != null ? { plantId: String(row.plant_id) } : {}),
       createdAt: row.created_at,
       read: Boolean(row.read),
       ...(typeof row.comment === "string" ? { comment: row.comment } : {}),
+      ...(legacyObservationEdit && typeof row.metadata?.comment === "string" ? { comment: row.metadata.comment } : {}),
       ...(row.metadata?.count != null ? { count: Number(row.metadata.count) } : {}),
       ...(typeof row.metadata?.draftKey === "string" ? { draftKey: row.metadata.draftKey } : {}),
       ...(row.type === "record_change_correction" && row.metadata?.entityType === "record_change" &&
         ["plant", "species"].includes(row.metadata?.recordKind) && typeof row.metadata?.changeId === "string" && typeof row.metadata?.targetId === "string"
         ? { entityType: "record_change", changeId: row.metadata.changeId, recordKind: row.metadata.recordKind,
           targetId: row.metadata.targetId, ...(Number.isInteger(row.metadata.revision) ? { revision: row.metadata.revision } : {}) } : {}),
-    })), ...speciesRows.map((row) => ({
+      ...(legacyObservationEdit ? { entityType: "observation_edit", requestId: row.metadata.requestId,
+        ...(Number.isInteger(row.metadata.revision) ? { revision: row.metadata.revision } : {}) } : {}),
+    }; }), ...speciesRows.map((row) => ({
       id: `species-request:${row.request_id}:${row.request_status}:${new Date(row.reviewed_at || row.submitted_at).toISOString()}`,
       type: speciesTypes[row.request_status], entityType: "species_request", requestId: String(row.request_id),
       sourceKey: `species-request:${row.request_id}:${row.request_status}`, createdAt: row.reviewed_at || row.submitted_at,
@@ -889,7 +951,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     "/api/observations/:id/submit",
     allow("observations.create"),
     async (req, res) => {
-      await transaction(pool, async (c) => {
+      await observationVersions.withVersionTransaction(pool, async (c) => {
         const row = (
           await c.query(
             "SELECT * FROM plant_observation WHERE id=$1 FOR UPDATE",
@@ -905,13 +967,84 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           )
         ).rows[0];
         await speciesRow(c, plant.species_id, req.user);
-        if (row.status !== "Draft") return;
-        if (!["Draft", "Correction Required"].includes(row.status))
+        const versioned = await originalObservationVersionsReady(c);
+        if (row.status === "Pending Review") {
+          if (!versioned) return; // Keep legacy clients' verified canonical retry behavior before 030.
+          const origin = await verifiedObservationOrigin(c, row);
+          if (origin === "subsequent_observation") {
+            const current = await observationVersions.latestVersion(c, row.id);
+            const legacy = await legacyObservationEligibility(c, row);
+            const photos = await submittedObservationPhotos(c, row);
+            if (!current && legacy) return; // Migration-captured legacy retry; never fabricate a version.
+            if (!current || current.status !== "Pending Review" || current.request_id !== null ||
+                current.owner_subject !== row.owner_subject ||
+                !(await c.query("SELECT $1::jsonb=$2::jsonb AS matches",
+                  [JSON.stringify(current.content), JSON.stringify(row.content)])).rows[0].matches ||
+                JSON.stringify(current.photo_refs) !== JSON.stringify(photos))
+              fail(409, "The current Pending Review submission cannot be verified.");
+            return;
+          }
+          if (origin === "initial_registration") {
+            const history = (await c.query(`SELECT id FROM record_version_history
+              WHERE record_type='plant' AND plant_id=$1 AND status='Pending Review'
+                AND snapshot->>'observation_id'=$2 AND snapshot->>'observation_revision'=$3
+              ORDER BY version_number DESC LIMIT 1`, [row.plant_id, row.id, String(row.revision)])).rows[0];
+            if (!history) fail(409, "The pending initial-registration version cannot be verified.");
+            return;
+          }
+          if (origin === "unknown" && await legacyObservationEligibility(c, row)) return;
+          fail(409, "Observation origin is uncertain. Its pending submission cannot be verified.");
+        }
+        if (row.status !== "Draft")
           fail(409, "Observation cannot be submitted in its current state.");
+        let source = null;
+        let correctionReviewId = null;
+        let origin = null;
+        let legacy = null;
+        if (versioned) {
+          origin = await verifiedObservationOrigin(c, row);
+          legacy = await legacyObservationEligibility(c, row);
+          if (origin === "subsequent_observation") {
+            source = await observationVersions.latestVersion(c, row.id);
+            if (source) {
+              if (source.status !== "Correction Required" || source.request_id !== null)
+                fail(409, "Observation submission history is inconsistent. Reload before submitting.");
+              const review = (await c.query(`SELECT id FROM observation_review
+                WHERE observation_id=$1 AND submission_version_id=$2 AND decision='Correction Required'`,
+              [row.id, source.id])).rows[0];
+              if (!review) fail(409, "The correction review cannot be linked to this Observation version.");
+              correctionReviewId = review.id;
+            } else if (legacy) {
+              if (!await hasLegacyCorrectionEvidence(c, row, true, legacy))
+                fail(409, "The legacy correction request cannot be verified at this revision.");
+            } else if ((await c.query(`SELECT 1 FROM observation_review WHERE observation_id=$1
+              UNION ALL SELECT 1 FROM observation_version_history WHERE observation_id=$1 LIMIT 1`,
+            [row.id])).rows.length) {
+              fail(409, "Legacy Observation review history cannot be reconstructed safely.");
+            }
+          } else if (origin === "unknown" && legacy) {
+            if (!await hasLegacyCorrectionEvidence(c, row, true, legacy))
+              fail(409, "The legacy correction request cannot be verified at this revision.");
+          } else if (origin !== "initial_registration") {
+            fail(409, "Observation origin is uncertain. Its submission needs review before versioning.");
+          }
+        }
         await c.query(
           "UPDATE plant_observation SET status='Pending Review',updated_at=CURRENT_TIMESTAMP WHERE id=$1",
           [row.id],
         );
+        if (versioned && origin === "subsequent_observation" && !(legacy && !source)) {
+          if (source) await observationVersions.transitionVersion(c, {
+            observationId: row.id, versionId: source.id, status: "Superseded",
+          });
+          const photoRefs = await submittedObservationPhotos(c, row);
+          await observationVersions.insertVersion(c, {
+            observationId: row.id, ownerSubject: row.owner_subject,
+            submissionType: source ? "correction_resubmission" : "original",
+            basedOnVersionId: source?.id ?? null, correctionReviewId,
+            content: row.content, photoRefs,
+          });
+        }
         if (await botanistNotificationsAvailable(c)) await c.query(
           `INSERT INTO botanist_notification(id,recipient_subject,type,source_key,observation_id,plant_id)
            VALUES($1,$2,'observation_submitted',$3,$4,$5) ON CONFLICT(recipient_subject,source_key) DO NOTHING`,
@@ -930,7 +1063,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       fieldContent(req.body.content);
       if (!Number.isInteger(req.body.revision))
         fail(400, "Revision is required.");
-      const result = await transaction(pool, async (c) => {
+      const result = await observationVersions.withVersionTransaction(pool, async (c) => {
         const row = (
           await c.query(
             "SELECT * FROM plant_observation WHERE id=$1 FOR UPDATE",
@@ -938,8 +1071,24 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           )
         ).rows[0];
         if (!row) fail(404, "Observation not found.");
-        const denied = assertEdit(req.user, row);
-        if (denied) fail(denied, "Ownership or review state prevents editing.");
+        const versioned = await originalObservationVersionsReady(c);
+        const origin = versioned ? await verifiedObservationOrigin(c, row) : null;
+        const legacy = versioned ? await legacyObservationEligibility(c, row) : null;
+        if (versioned && origin === "unknown" && !legacy)
+          fail(409, "Observation origin is uncertain. Editing needs review before versioning.");
+        const pendingOriginal = versioned && origin === "subsequent_observation" && row.status === "Pending Review" && !legacy;
+        const legacyPending = Boolean(legacy && row.status === "Pending Review");
+        const legacyCorrection = Boolean(legacy && row.status === "Correction Required");
+        if (pendingOriginal || legacyPending || legacyCorrection) {
+          if (row.owner_subject !== subject(req.user)) fail(403, "Only the submitting Botanist can edit this Observation.");
+          if (legacyCorrection && !await hasLegacyCorrectionEvidence(c, row, false, legacy))
+            fail(409, "The legacy correction request cannot be verified at this revision.");
+          if (pendingOriginal && !await canModifyPendingObservation(c, row))
+            fail(409, "This pending Observation is not eligible for another edit.");
+        } else {
+          const denied = assertEdit(req.user, row);
+          if (denied) fail(denied, "Ownership or review state prevents editing.");
+        }
         if (row.revision !== req.body.revision)
           fail(409, "Reload the latest revision.");
         const plant = (
@@ -949,12 +1098,38 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           )
         ).rows[0];
         await speciesRow(c, plant.species_id, req.user);
+        let pendingSource = null;
+        if (pendingOriginal) {
+          pendingSource = await observationVersions.latestVersion(c, row.id);
+          if (!pendingSource || pendingSource.status !== "Pending Review" ||
+              pendingSource.request_id !== null ||
+              !["original", "pending_edit"].includes(pendingSource.submission_type))
+            fail(409, "Pending Observation version history is incomplete.");
+          await observationVersions.transitionVersion(c, {
+            observationId: row.id, versionId: pendingSource.id, status: "Superseded",
+          });
+        }
+        if (versioned && origin === "subsequent_observation" && row.status === "Correction Required" && !legacyCorrection) {
+          const correctionSource = await observationVersions.latestVersion(c, row.id);
+          if (!correctionSource || correctionSource.status !== "Correction Required" || correctionSource.request_id !== null)
+            fail(409, "Correction review history is incomplete.");
+        }
+        const keepPending = pendingOriginal || legacyPending;
         const updated = (
           await c.query(
-            "UPDATE plant_observation SET content=$1,status='Draft',revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 RETURNING *",
-            [req.body.content, row.id],
+            `UPDATE plant_observation SET content=$1,status=$3,revision=revision+1,
+              updated_at=CURRENT_TIMESTAMP WHERE id=$2 RETURNING *`,
+            [req.body.content, row.id, keepPending ? "Pending Review" : "Draft"],
           )
         ).rows[0];
+        if (pendingSource) {
+          const photoRefs = await submittedObservationPhotos(c, updated);
+          await observationVersions.insertVersion(c, {
+            observationId: row.id, ownerSubject: row.owner_subject,
+            submissionType: "pending_edit", basedOnVersionId: pendingSource.id,
+            content: updated.content, photoRefs,
+          });
+        }
         await audit(c, req.user, "observation_resubmitted", row.id);
         return updated;
       });
@@ -983,17 +1158,55 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           fail(denied, "Review is not permitted or feedback is missing.");
         if (row.revision !== req.body.revision)
           fail(409, "Observation changed. Reload before reviewing.");
+        const versioned = await originalObservationVersionsReady(c);
+        const origin = versioned ? await verifiedObservationOrigin(c, row) : null;
+        let submittedVersion = null;
+        let legacyReview = false;
+        if (versioned && origin === "subsequent_observation") {
+          submittedVersion = (await c.query(`SELECT * FROM observation_submission_version
+            WHERE observation_id=$1 ORDER BY version_number DESC LIMIT 1 FOR UPDATE`, [row.id])).rows[0];
+          if (!submittedVersion && await legacyObservationEligibility(c, row)) legacyReview = true;
+          if (!submittedVersion && !legacyReview)
+            fail(409, "Observation submission version is missing and this record is not migration-eligible legacy data.");
+          if (legacyReview && row.status !== "Pending Review")
+            fail(409, "Only the current legacy Pending Review revision can be reviewed.");
+          if (!legacyReview && (submittedVersion.status !== row.status ||
+              submittedVersion.request_id !== null || submittedVersion.owner_subject !== row.owner_subject ||
+              !(await c.query("SELECT $1::jsonb=$2::jsonb AS matches",
+                [JSON.stringify(submittedVersion.content), JSON.stringify(row.content)])).rows[0].matches ||
+              JSON.stringify(submittedVersion.photo_refs) !== JSON.stringify(await submittedObservationPhotos(c, row))))
+            fail(409, "Observation submission version no longer matches the record under review.");
+        } else if (versioned && origin === "unknown" && await legacyObservationEligibility(c, row)) {
+          legacyReview = true;
+          if (row.status !== "Pending Review")
+            fail(409, "Only the current legacy Pending Review revision can be reviewed.");
+        } else if (versioned && origin !== "initial_registration") {
+          fail(409, "Observation origin is uncertain. Officer review needs verified history.");
+        }
         await assertSpeciesResolved(c, row.plant_id, fail, row.id);
         const review = (await c.query(
-          "INSERT INTO observation_review(id,observation_id,reviewer_subject,decision,comment) VALUES($1,$2,$3,$4,$5) RETURNING id",
+          `INSERT INTO observation_review(id,observation_id,reviewer_subject,decision,comment${submittedVersion ? ",submission_version_id" : legacyReview ? ",legacy_revision" : ""})
+           VALUES($1,$2,$3,$4,$5${submittedVersion || legacyReview ? ",$6" : ""}) RETURNING id,comment`,
           [
             randomUUID(),
             row.id,
             subject(req.user),
             req.body.decision,
             req.body.comment || "Verified.",
+            ...(submittedVersion ? [submittedVersion.id] : legacyReview ? [req.body.revision] : []),
           ],
         )).rows[0];
+        if (submittedVersion) {
+          const transitioned = await c.query(`UPDATE observation_submission_version v
+            SET status=$1,reviewed_by=r.reviewer_subject,reviewed_at=r.created_at,review_comment=r.comment
+            FROM observation_review r
+            WHERE v.id=$2 AND v.observation_id=$3 AND r.id=$4 AND r.observation_id=v.observation_id
+              AND r.submission_version_id=v.id AND r.decision=$1
+              AND r.reviewer_subject=$5 AND r.comment IS NOT DISTINCT FROM $6`,
+          [req.body.decision, submittedVersion.id, row.id, review.id, subject(req.user), review.comment]);
+          if (transitioned.rowCount !== 1)
+            fail(409, "Persisted Officer review no longer matches this Observation version.");
+        }
         await c.query(
           "UPDATE plant_observation SET status=$1,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=$2",
           [req.body.decision, row.id],

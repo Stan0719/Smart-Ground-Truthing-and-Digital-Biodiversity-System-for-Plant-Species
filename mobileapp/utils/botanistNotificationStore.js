@@ -4,6 +4,19 @@ const reviewTypes = {
   "Correction Required": "correction_requested",
 };
 
+export function isMatchingInitialObservationCorrection({ proposal, edit, observation, revision, accountId }) {
+  return Boolean(proposal && edit && observation && accountId &&
+    proposal.base_snapshot?.workflow_type === "initial_registration_observation_edit" &&
+    String(proposal.id) === String(edit.id) &&
+    proposal.status === "Correction Required" && edit.status === "Correction Required" &&
+    Number.isInteger(revision) && proposal.revision === revision && edit.revision === revision &&
+    String(proposal.plant_id) === String(observation.plant_id) &&
+    String(proposal.base_snapshot?.observation_id) === String(observation.id) &&
+    String(edit.observation_id) === String(observation.id) &&
+    proposal.owner_subject === `staff:${accountId}` && edit.owner_subject === `staff:${accountId}` &&
+    observation.owner_subject === `staff:${accountId}` && observation.origin_type === "initial_registration");
+}
+
 export const notificationPresentation = {
   observation_submitted: { title: "Observation Submitted", icon: "paper-plane-outline" },
   observation_approved: { title: "Observation Approved", icon: "checkmark-circle-outline" },
@@ -53,7 +66,7 @@ function normalizeRemoteNotification(item) {
     ...(item.plantId != null ? { plantId: String(item.plantId) } : {}),
     ...(item.entityType === "species_request" && item.requestId != null ? { entityType: item.entityType, requestId: String(item.requestId) } : {}),
     ...(item.entityType === "observation_edit" && item.requestId != null && item.observationId != null
-      ? { entityType: item.entityType, requestId: String(item.requestId) } : {}),
+      ? { entityType: item.entityType, requestId: String(item.requestId), ...(Number.isInteger(item.revision) ? { revision: item.revision } : {}) } : {}),
     ...(item.entityType === "record_change" && item.changeId != null && ["plant", "species"].includes(item.recordKind) && item.targetId != null
       ? { entityType: item.entityType, changeId: String(item.changeId), recordKind: item.recordKind, targetId: String(item.targetId), ...(Number.isInteger(item.revision) ? { revision: item.revision } : {}) } : {}),
     ...(typeof item.comment === "string" ? { comment: item.comment } : {}),

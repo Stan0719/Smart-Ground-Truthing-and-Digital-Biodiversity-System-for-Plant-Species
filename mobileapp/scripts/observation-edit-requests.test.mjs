@@ -2,16 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { canStartObservationEdit, observationContentFields, observationDetailContent } from "../utils/observationDetails.js";
+import { canStartObservationEdit, canWithdrawOriginalObservation, observationContentFields, observationDetailContent } from "../utils/observationDetails.js";
 const require = createRequire(import.meta.url);
 const React = require("react"), ts = require("typescript");
 
 const source = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-function renderObservationDetails(observation, edits = [], params = {}) {
+function renderObservationDetails(observation, edits = [], params = {}, capabilities = { versioningActive: false, editCapabilityVerified: true }) {
   const hooks = { ...React, useCallback: (callback) => callback,
+    useRef: (current) => ({ current }),
     useState: (() => { let slot = 0; return (initial) => [slot++ === 0
-      ? { loading: false, observation, editHistory: { edits, versions: [], events: [] }, editHistoryError: "", photoToken: "", error: "" }
+      ? { loading: false, observation, editHistory: { edits, versions: [], events: [] }, editHistoryError: "", photoToken: "", error: "", ...capabilities }
       : initial, () => {}]; })() };
   const native = { StyleSheet: { create: (value) => value } };
   for (const component of ["ActivityIndicator", "Image", "Modal", "ScrollView", "Text", "TouchableOpacity", "View"])
@@ -28,7 +29,7 @@ function renderObservationDetails(observation, edits = [], params = {}) {
     "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" },
     "@expo/vector-icons/Ionicons": { default: "Ionicons" },
     "../components/EditAction": { default: "EditAction" },
-    "../utils/observationDetails": { canStartObservationEdit, observationContentFields, observationDetailContent },
+    "../utils/observationDetails": { canStartObservationEdit, canWithdrawOriginalObservation, observationContentFields, observationDetailContent },
   };
   const code = ts.transpileModule(source("../screens/NotificationObservation.js"), { fileName: "NotificationObservation.jsx",
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
@@ -62,6 +63,16 @@ test("actual Observation Details renders Edit for an owned current Approved Obse
   "an approved historical snapshot remains read-only");
   for (const origin_type of ["initial_registration", "unknown"])
     assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type })), true, origin_type);
+  assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type: "initial_registration" }, [], {},
+    { versioningActive: true, editCapabilityVerified: true })), true, "verified initial-registration origin is eligible");
+  assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type: undefined }, [], {},
+    { versioningActive: true, editCapabilityVerified: true })), false, "missing provenance is not eligible in version-aware mode");
+  assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type: "unknown", raw_origin_type: "initial_registration" }, [], {},
+    { versioningActive: true, editCapabilityVerified: true })), false, "client raw origin labels cannot override unknown verified provenance");
+  assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type: "subsequent_observation" }, [], {},
+    { versioningActive: true, editCapabilityVerified: true })), true, "verified subsequent origin is eligible");
+  assert.equal(hasEditObservationButton(renderObservationDetails(approved, [], {},
+    { versioningActive: true, editCapabilityVerified: false })), false, "eligibility fails closed if capability mode cannot be verified");
   const screen = source("../screens/NotificationObservation.js");
   assert.ok(screen.indexOf("canStartObservationEdit(row") < screen.indexOf("state.editHistory?.events?.length"),
     "the Edit action appears before the long review and version histories");
@@ -97,10 +108,14 @@ test("Observation Details renders the Plant-style summary, numbered sections, ph
   assert.equal(typeof photo.props.onError, "function");
   assert.equal(typeof find(current, (node) => node?.type === "TouchableOpacity" &&
     children(node).some((child) => child?.type === "Image" && child.props.source?.uri?.endsWith("photo-1")))?.props.onPress, "function");
-  const activeRequest = renderObservationDetails(row, [{ id: "edit-20", status: "Pending Review", owner_subject: "staff:owner" }]);
+  const activeRequest = renderObservationDetails(row, [{ id: "edit-20", status: "Pending Review", revision: 1, owner_subject: "staff:owner" }]);
   const activeSummary = find(activeRequest, (node) => node?.props?.testID === "observation-record-meta");
   assert.ok(find(activeSummary, (node) => node?.type === "TouchableOpacity" && text(node).includes("recordEdits.cancelEditRequest")));
   assert.ok(!find(activeRequest, (node) => node?.type === "EditAction"));
+  const correctedPending = renderObservationDetails(row, [{ id: "edit-20", status: "Pending Review", revision: 2, owner_subject: "staff:owner" }]);
+  assert.ok(!find(correctedPending, (node) => node?.type === "TouchableOpacity" && text(node).includes("recordEdits.cancelEditRequest")));
+  const correctionRequired = renderObservationDetails(row, [{ id: "edit-20", status: "Correction Required", revision: 2, owner_subject: "staff:owner" }]);
+  assert.ok(find(correctionRequired, (node) => node?.type === "TouchableOpacity" && text(node).includes("recordEdits.cancelEditRequest")));
   const historical = renderObservationDetails(row, [], { observationVersionSnapshot: {
     content: { heightCm: 25, zone: "Old zone" }, status: "Rejected", reviewComment: "Historical feedback",
     original: true, current: false, createdAt: "2026-11-12T00:00:00Z", photoIds: [],
@@ -116,6 +131,61 @@ test("Observation Details renders the Plant-style summary, numbered sections, ph
   assert.match(source("../screens/NotificationObservation.js"), /plantApi\(`\/observations\/\$\{encodeURIComponent\(observationId\)\}`/);
 });
 
+test("Botanist Observation details preserve Withdrawn status and hide edit and withdrawal actions", () => {
+  const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
+  const find = (node, predicate) => predicate(node) ? node : children(node).map((child) => find(child, predicate)).find(Boolean);
+  const withdrawn = renderObservationDetails({ id: "obs-withdrawn", plant_id: 24, owner_subject: "staff:owner",
+    origin_type: "subsequent_observation", status: "Withdrawn", withdrawn_at: "2026-11-16T00:00:00Z",
+    content: { heightCm: 24 }, photos: [] });
+  assert.equal(find(withdrawn, (node) => node?.type?.name === "StatusBadge")?.props.status, "Withdrawn");
+  assert.equal(find(withdrawn, (node) => node?.props?.testID === "withdraw-original-observation"), undefined);
+  assert.equal(hasEditObservationButton(withdrawn), false);
+  const historical = renderObservationDetails({ id: "obs-approved", plant_id: 24, owner_subject: "staff:owner",
+    status: "Approved", content: { heightCm: 30 }, photos: [] }, [], {
+    observationVersionSnapshot: { status: "Withdrawn", content: { heightCm: 24 }, original: true,
+      current: false, photoIds: [] },
+  });
+  assert.equal(find(historical, (node) => node?.type?.name === "StatusBadge")?.props.status, "Withdrawn");
+  assert.equal(find(historical, (node) => node?.props?.testID === "withdraw-original-observation"), undefined);
+  assert.equal(hasEditObservationButton(historical), false);
+});
+
+test("rejected Observation details use the selected status for the red alert, summary and exact Officer feedback", () => {
+  const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
+  const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
+  const find = (node, predicate) => predicate(node) ? node : children(node).map((child) => find(child, predicate)).find(Boolean);
+  const observation = { id: "obs-rejected", plant_id: 24, owner_subject: "staff:owner", status: "Approved",
+    content: { heightCm: 18 }, photos: [], review_comment: "Base record feedback" };
+  const rejected = renderObservationDetails(observation, [], { observationVersionSnapshot: {
+    content: { heightCm: 17 }, status: "Rejected", reviewComment: "Exact edit rejection feedback", original: false,
+    editNumber: 1, current: false, photoIds: [],
+  } });
+  const banner = find(rejected, (node) => node?.props?.testID === "observation-rejected-banner");
+  assert.ok(banner);
+  assert.ok(text(banner).includes("notificationObservation.rejectedTitle"));
+  const meta = find(rejected, (node) => node?.props?.testID === "observation-record-meta");
+  assert.ok((Array.isArray(meta.props.style) ? meta.props.style : [meta.props.style]).some((style) => style?.backgroundColor === "#FDECEC"));
+  const badgeElement = find(meta, (node) => node?.type?.name === "StatusBadge");
+  assert.equal(badgeElement.props.status, "Rejected", "the selected version controls the badge rather than the parent row");
+  const badge = badgeElement.type(badgeElement.props);
+  const badgeChildren = React.Children.toArray(badge.props.children);
+  const badgeText = badgeChildren.find((child) => child?.type === "Text");
+  assert.ok((Array.isArray(badge.props.style) ? badge.props.style : [badge.props.style]).some((style) => style?.backgroundColor === "#B42318"));
+  assert.ok((Array.isArray(badgeText.props.style) ? badgeText.props.style : [badgeText.props.style]).some((style) => style?.color === "#FFFFFF"));
+  const feedback = find(rejected, (node) => node?.props?.testID === "observation-rejected-feedback");
+  assert.ok(feedback);
+  assert.ok(text(feedback).includes("Exact edit rejection feedback"));
+  assert.ok(!text(feedback).includes("Base record feedback"));
+  assert.equal((text(rejected).match(/Exact edit rejection feedback/g) || []).length, 1);
+  assert.equal(JSON.parse(source("../translations/en.json")).notificationObservation.rejectedTitle, "Observation Rejected");
+  assert.equal(JSON.parse(source("../translations/ms.json")).notificationObservation.rejectedTitle, "Pemerhatian Ditolak");
+
+  const approved = renderObservationDetails(observation);
+  assert.equal(find(approved, (node) => node?.props?.testID === "observation-rejected-banner"), undefined);
+  const approvedMeta = find(approved, (node) => node?.props?.testID === "observation-record-meta");
+  assert.ok(!(Array.isArray(approvedMeta.props.style) ? approvedMeta.props.style : [approvedMeta.props.style]).some((style) => style?.backgroundColor === "#FDECEC"));
+});
+
 test("Observation detail section labels have English, Malay and Chinese translations", () => {
   const keys = ["recordTitle", "recordSubtitle", "informationSubtitle", "locationInformation", "locationSubtitle",
     "photosSubtitle", "reviewSubtitle", "historySubtitle"];
@@ -129,13 +199,24 @@ test("Approved observation editing reuses the existing form and sends a separate
   const detail = source("../screens/NotificationObservation.js");
   const form = source("../screens/FieldCollection.js");
   const sync = source("../utils/fieldSync.js");
-  assert.match(detail, /canStartObservationEdit\(row, state\.editHistory, activeEdit, selectedDetail, accountId\)/);
+  assert.match(detail, /canStartObservationEdit\(row, state\.editHistory, activeEdit, selectedDetail, accountId, state\.versioningActive\)/);
   assert.match(detail, /navigate\("FieldCollectionEdit", \{ observation: row, plantId: row\.plant_id, editRequestMode: true \}\)/);
   assert.match(form, /method: "OBSERVATION_EDIT"/);
   assert.match(form, /path: request\?\.id \? `\/observation-edits\/\$\{request\.id\}` : "\/observation-edits"/);
   assert.match(sync, /if \(draft\.method === "OBSERVATION_EDIT"\)/);
   assert.match(sync, /method: correction \? "PATCH" : "POST"/);
   assert.match(sync, /type: "observation-edit"/);
+});
+
+test("version-aware Observation editing requires verified origin and Officer decisions submit the displayed revision", () => {
+  const detail = source("../screens/NotificationObservation.js");
+  const review = source("../screens/RecordChangeReview.js");
+  const helper = source("../utils/observationDetails.js");
+  assert.match(detail, /plantApi\("\/observation-edits\/capabilities"/);
+  assert.match(detail, /versioningActive: capability\?\.versioning_available === true/);
+  assert.match(detail, /editCapabilityVerified &&[\s\S]*canStartObservationEdit\(row, state\.editHistory, activeEdit, selectedDetail, accountId, state\.versioningActive\)/);
+  assert.match(helper, /\["initial_registration", "subsequent_observation"\]\.includes\(row\?\.origin_type\)/);
+  assert.match(review, /body: \{ decision, comment: comment\.trim\(\), revision: selected\.revision \}/);
 });
 
 test("Observation Details uses the shared centered header and preserves back navigation", () => {
@@ -201,6 +282,63 @@ test("status badges, separate Officer Review, and active request actions cover a
   assert.match(backend, /row\.status !== "Correction Required" \|\| row\.revision !== revision/);
 });
 
+test("Observation withdrawal is rendered only for an eligible current field request and uses confirmation", async () => {
+  const alerts = [], requests = [];
+  const detail = source("../screens/NotificationObservation.js");
+  assert.match(detail, /plantApi\(`\/observations\/\$\{encodeURIComponent\(row\.id\)\}\/withdraw`/);
+  assert.match(detail, /withdraw-original-observation/);
+  const eligible = { id: "obs-withdraw", plant_id: 24, owner_subject: "staff:owner", status: "Pending Review",
+    origin_type: "subsequent_observation", review_decision: "", content: { heightCm: 60 }, photos: [] };
+  assert.equal(canWithdrawOriginalObservation(eligible, null, false, "owner"), true);
+  for (const status of ["Approved", "Rejected", "Withdrawn", "Superseded"])
+    assert.equal(canWithdrawOriginalObservation({ ...eligible, status }, null, false, "owner"), false, status);
+  assert.equal(canWithdrawOriginalObservation({ ...eligible, status: "Pending Review", review_decision: "Correction Required" }, null, false, "owner"), false,
+    "a correction resubmission awaiting review stays locked");
+  assert.equal(canWithdrawOriginalObservation({ ...eligible, status: "Correction Required" }, null, false, "owner"), true,
+    "a correction request may be withdrawn");
+  assert.equal(canWithdrawOriginalObservation({ ...eligible, origin_type: "initial_registration" }, null, false, "owner"), false);
+  assert.equal(canWithdrawOriginalObservation({ ...eligible, origin_type: "unknown" }, null, false, "owner"), false);
+  assert.equal(canWithdrawOriginalObservation(eligible, { status: "Pending Review" }, false, "owner"), false);
+  assert.equal(canWithdrawOriginalObservation(eligible, null, true, "owner"), false);
+  assert.equal(canWithdrawOriginalObservation({ ...eligible, owner_subject: "staff:other" }, null, false, "owner"), false);
+
+  const code = require("typescript").transpileModule(detail, { fileName: "NotificationObservation.jsx",
+    compilerOptions: { jsx: require("typescript").JsxEmit.React, module: require("typescript").ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
+  const module = { exports: {} };
+  const dependencies = {
+    react: { ...React, useCallback: (callback) => callback, useRef: (current) => ({ current }),
+      useState: (() => { let slot = 0; return (initial) => [slot++ === 0
+        ? { loading: false, observation: eligible, editHistory: { edits: [], versions: [], events: [] }, editHistoryError: "", photoToken: "", error: "" }
+        : initial, () => {}]; })() },
+    "react-native": { StyleSheet: { create: (value) => value }, Alert: { alert: (...args) => alerts.push(args) },
+      ActivityIndicator: "ActivityIndicator", Image: "Image", Modal: "Modal", ScrollView: "ScrollView", Text: "Text", TouchableOpacity: "TouchableOpacity", View: "View" },
+    "@react-navigation/native": { useFocusEffect() {} }, "../translations/i18n": { useAppTranslation() {}, t: (key) => key,
+      translateLabel: (value) => value, translateUIMessage: (value) => value, translateFieldValue: (_field, value) => value,
+      translateFieldLabel: (field) => field, formatDateTime: (value) => value },
+    "../utils/botanistNotifications": { ownedNotificationObservation: async () => eligible },
+    "../utils/plantApi": { plantApi: async (...args) => { requests.push(args); return {}; },
+      getObservationRecorderDisplayName: (_row, _user, fallback) => fallback, plantAssetSources: async () => [] },
+    "../utils/faceSession": { faceSession: {} }, "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" },
+    "@expo/vector-icons/Ionicons": { default: "Ionicons" }, "../components/EditAction": { default: "EditAction" },
+    "../utils/observationDetails": { canStartObservationEdit, canWithdrawOriginalObservation, observationContentFields, observationDetailContent },
+  };
+  new Function("require", "module", "exports", code)((name) => ({ ...dependencies[name], __esModule: name !== "react" }), module, module.exports);
+  const tree = module.exports.default({ route: { params: { observationId: eligible.id } }, navigation: { navigate() {} },
+    user: { id: "owner", role: "botanist", name: "Botanist" } });
+  const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
+  const find = (node, id) => node && typeof node === "object" && (node.props?.testID === id ? node : children(node).map((child) => find(child, id)).find(Boolean));
+  const button = find(tree, "withdraw-original-observation");
+  assert.ok(button, "the actual eligible Observation Details screen renders Withdraw");
+  button.props.onPress();
+  assert.equal(alerts[0][0], "observationWithdrawal.confirmTitle");
+  assert.equal(requests.length, 0, "opening confirmation does not withdraw");
+  assert.equal(alerts[0][2][0].text, "observationWithdrawal.keepSubmission");
+  assert.equal(alerts[0][2][0].style, "cancel");
+  assert.equal(requests.length, 0, "Keep Submission leaves the API untouched");
+  await alerts[0][2][1].onPress();
+  assert.equal(requests[0][0], `/observations/${eligible.id}/withdraw`);
+});
+
 test("correction routing selects the pending proposal while rejected proposals remain read only", () => {
   const notifications = source("../screens/BotanistNotifications.js");
   const correction = source("../screens/BotanistDashboard.js");
@@ -214,6 +352,16 @@ test("correction routing selects the pending proposal while rejected proposals r
   assert.match(officer, /plantApi\("\/observation-edits\/capabilities"\)/);
   assert.match(officer, /selected\.observationEdit \? "observation-edits" : "record-changes"/);
   assert.match(officer, /review\("Correction Required"\)/);
+});
+
+test("legacy initial Observation edit corrections navigate by exact request and revision", () => {
+  const notifications = source("../screens/BotanistNotifications.js");
+  const store = source("../utils/botanistNotificationStore.js");
+  const form = source("../screens/FieldCollection.js");
+  assert.match(store, /item\.entityType === "observation_edit"[\s\S]*Number\.isInteger\(item\.revision\)/);
+  assert.match(form, /photos\.length \+ \(originalObservation\?\.assets\?\.length \|\| 0\) \+ \(editRequest\?\.added_photo_count \|\| 0\) >= 3/);
+  assert.match(notifications, /item\.revision != null && payload\.edit\?\.revision !== item\.revision/);
+  assert.match(notifications, /navigation\.navigate\("FieldCollectionEdit", \{ observation, plantId: observation\.plant_id, editRequest: payload\.edit \}\)/);
 });
 
 test("observation correction draft recovery is scoped to the same request and bypasses the prompt", () => {

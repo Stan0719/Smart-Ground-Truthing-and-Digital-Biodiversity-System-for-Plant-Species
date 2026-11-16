@@ -472,6 +472,7 @@
     "reviewAndManageYourPlantDocumentation": "Semak dan urus dokumentasi tumbuhan anda.",
     "readOnlyVersionSubtitle": "Semak dan urus dokumentasi tumbuhan anda.",
     "recordId": "ID Rekod",
+    "submissionRejected": "Penyerahan Ditolak",
     "speciesInformationIsAvailableButThereAreNoAdditionalFields": "Maklumat spesies tersedia, tetapi tiada medan tambahan untuk dipaparkan.",
     "noLinkedSpecies": "Tiada Spesies Dipautkan",
     "noMatchingSpeciesInformationWasFoundForThisPlantRecord": "Tiada maklumat spesies yang sepadan ditemukan untuk rekod tumbuhan ini.",
@@ -826,6 +827,13 @@
   },
   "map": {
     "unknown": "Tidak Diketahui",
+    "plantExplorer": "Peneroka Tumbuhan",
+    "discoverDocumentedPlantsInNiahNationalPark": "Temui tumbuhan yang didokumentasikan di Taman Negara Niah",
+    "searchByPlantName": "Cari mengikut nama tumbuhan...",
+    "biodiversityMap": "Peta Biodiversiti",
+    "tapAMarkerForDetails": "Tekan penanda untuk melihat tumbuhan",
+    "noMappedPlants": "Tiada lokasi tumbuhan tersedia pada peta.",
+    "viewDetails": "Lihat Butiran",
     "plantMap": "Peta Tumbuhan",
     "exploreDocumentedPlantLocationsInNiahNationalPark": "Terokai lokasi tumbuhan yang didokumentasikan di Taman Negara Niah",
     "searchPlants": "Cari tumbuhan...",
@@ -847,6 +855,7 @@
     "recordTitle": "Rekod Pemerhatian",
     "recordSubtitle": "Semak dan urus pemerhatian anda.",
     "officerFeedback": "Maklum balas Pegawai",
+    "rejectedTitle": "Pemerhatian Ditolak",
     "information": "Maklumat Pemerhatian",
     "informationSubtitle": "Butiran yang direkodkan semasa tinjauan lapangan",
     "locationInformation": "Maklumat Lokasi",
@@ -1399,6 +1408,26 @@
     "successTitle": "Penyerahan Ditarik Balik",
     "successMessage": "Penyerahan tumbuhan anda telah ditarik balik.",
     "failed": "Tidak dapat menarik balik penyerahan ini. Muat semula dan cuba lagi."
+  },
+  "speciesWithdrawal": {
+    "action": "Tarik Balik Penyerahan",
+    "confirmTitle": "Tarik Balik Penyerahan Spesies?",
+    "confirmMessage": "Adakah anda pasti mahu menarik balik penyerahan spesies ini? Pegawai Pemuliharaan tidak akan menyemaknya lagi.",
+    "keepSubmission": "Kekalkan Penyerahan",
+    "successTitle": "Penyerahan Ditarik Balik",
+    "successMessage": "Penyerahan spesies anda telah ditarik balik.",
+    "failed": "Tidak dapat menarik balik penyerahan spesies ini. Muat semula dan cuba lagi."
+  },
+  "observationWithdrawal": {
+    "action": "Tarik Balik Penyerahan",
+    "confirmTitle": "Tarik Balik Pemerhatian?",
+    "confirmMessage": "Adakah anda pasti mahu menarik balik pemerhatian ini? Pegawai Pemuliharaan tidak akan menyemaknya lagi.",
+    "keepSubmission": "Kekalkan Penyerahan",
+    "successTitle": "Pemerhatian Ditarik Balik",
+    "successMessage": "Pemerhatian anda telah ditarik balik.",
+    "failed": "Tidak dapat menarik balik pemerhatian ini. Muat semula dan cuba lagi.",
+    "parentRequired": "Pemerhatian ini sebahagian daripada penyerahan tumbuhan asal. Urus penarikannya melalui penyerahan tumbuhan.",
+    "openPlant": "Buka Penyerahan Tumbuhan"
   },
   "submissions": {
     "withdrawn": "Ditarik Balik",

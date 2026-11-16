@@ -472,6 +472,7 @@
     "reviewAndManageYourPlantDocumentation": "查看并管理植物档案。",
     "readOnlyVersionSubtitle": "查看并管理植物档案。",
     "recordId": "记录编号",
+    "submissionRejected": "提交已驳回",
     "speciesInformationIsAvailableButThereAreNoAdditionalFields": "物种信息可用，但没有其他字段可显示。",
     "noLinkedSpecies": "未关联物种",
     "noMatchingSpeciesInformationWasFoundForThisPlantRecord": "未找到与此植物记录匹配的物种信息。",
@@ -825,6 +826,13 @@
     "unableToChangePasswordPleaseTryAgain": "无法更改密码，请重试。"
   },
   "map": {
+    "plantExplorer": "植物探索",
+    "discoverDocumentedPlantsInNiahNationalPark": "探索尼亚国家公园已记录的植物",
+    "searchByPlantName": "按植物名称搜索...",
+    "biodiversityMap": "生物多样性地图",
+    "tapAMarkerForDetails": "点击标记查看植物详情",
+    "noMappedPlants": "地图上暂无植物位置。",
+    "viewDetails": "查看详情",
     "unknown": "未知",
     "plantMap": "植物地图",
     "exploreDocumentedPlantLocationsInNiahNationalPark": "探索尼亚国家公园已记录的植物位置",
@@ -847,6 +855,7 @@
     "recordTitle": "观察记录",
     "recordSubtitle": "查看和管理您的观察记录。",
     "officerFeedback": "官员反馈",
+    "rejectedTitle": "观察记录已驳回",
     "information": "观察记录信息",
     "informationSubtitle": "实地调查时记录的详情",
     "locationInformation": "位置信息",
@@ -1399,6 +1408,26 @@
     "successTitle": "提交已撤回",
     "successMessage": "您的植物提交已撤回。",
     "failed": "无法撤回这份提交。请刷新后重试。"
+  },
+  "speciesWithdrawal": {
+    "action": "撤回提交",
+    "confirmTitle": "撤回物种提交？",
+    "confirmMessage": "确定要撤回这项物种提交吗？自然保护官员将不再审核此提交。",
+    "keepSubmission": "保留提交",
+    "successTitle": "提交已撤回",
+    "successMessage": "您的物种提交已撤回。",
+    "failed": "无法撤回此物种提交。请刷新后重试。"
+  },
+  "observationWithdrawal": {
+    "action": "撤回提交",
+    "confirmTitle": "撤回观察记录？",
+    "confirmMessage": "确定要撤回这条观察记录吗？自然保护官员将不再审核此记录。",
+    "keepSubmission": "保留提交",
+    "successTitle": "观察记录已撤回",
+    "successMessage": "您的观察记录已撤回。",
+    "failed": "无法撤回此观察记录。请刷新后重试。",
+    "parentRequired": "此观察记录属于原始植物提交。请在植物提交页面管理撤回。",
+    "openPlant": "打开植物提交"
   },
   "submissions": {
     "withdrawn": "已撤回",

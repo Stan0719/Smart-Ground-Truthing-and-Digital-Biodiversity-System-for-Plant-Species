@@ -1,5 +1,5 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage, translateFieldValue, translateFieldLabel, formatDateTime } from "../translations/i18n";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { ownedNotificationObservation } from "../utils/botanistNotifications";
@@ -7,28 +7,32 @@ import { getObservationRecorderDisplayName, plantApi, plantAssetSources } from "
 import { faceSession } from "../utils/faceSession";
 import { mobileApiUrl } from "../utils/apiConfiguration";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { observationContentFields, observationDetailContent, canStartObservationEdit } from "../utils/observationDetails";
+import { observationContentFields, observationDetailContent, canStartObservationEdit, canWithdrawOriginalObservation } from "../utils/observationDetails";
 import EditAction from "../components/EditAction";
 
 const fieldLabel = (field) => ["zone", "altitudeM"].includes(field) ? t(`recordEdits.${field}`) : translateFieldLabel(field);
-const statusTone = (status) => status === "Approved" ? styles.approvedBadge : ["Rejected", "Cancelled", "Withdrawn"].includes(status) ? styles.rejectedBadge
+const statusTone = (status) => status === "Approved" ? styles.approvedBadge : status === "Rejected" ? styles.rejectedBadge : ["Cancelled", "Withdrawn"].includes(status) ? styles.terminalBadge
   : status === "Correction Required" ? styles.correctionBadge : status === "Superseded" ? styles.supersededBadge : styles.pendingBadge;
 function StatusBadge({ status }) {
   useAppTranslation();
   return <View style={[styles.badge, statusTone(status)]} testID="observation-status-badge">
     <Text style={[styles.badgeText, status === "Approved" && styles.approvedBadgeText,
-      ["Rejected", "Cancelled", "Withdrawn"].includes(status) && styles.rejectedBadgeText, status === "Superseded" && styles.supersededBadgeText]}>{translateLabel(status)}</Text>
+      status === "Rejected" && styles.rejectedBadgeText, ["Cancelled", "Withdrawn"].includes(status) && styles.terminalBadgeText, status === "Superseded" && styles.supersededBadgeText]}>{translateLabel(status)}</Text>
   </View>;
 }
 
 export default function NotificationObservation({ route, navigation, user }) {
   useAppTranslation();
-  const [state, setState] = useState({ loading: true, observation: null, editHistory: null, editHistoryError: "", photoToken: "", error: "" });
+  const [state, setState] = useState({ loading: true, observation: null, editHistory: null, editHistoryError: "", photoToken: "", error: "",
+    versioningActive: false, editCapabilityVerified: false });
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [failedPhotoUris, setFailedPhotoUris] = useState([]);
   const [retry, setRetry] = useState(0);
   const [cancellingEdit, setCancellingEdit] = useState(false);
   const [cancelEditError, setCancelEditError] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
+  const withdrawalInFlight = useRef(false);
   const accountId = user?.role === "botanist" ? user.id : null;
   const observationId = route.params?.observationId;
   const readOnlyApproved = route.params?.readOnlyApproved === true;
@@ -36,8 +40,10 @@ export default function NotificationObservation({ route, navigation, user }) {
     let active = true;
     setSelectedPhoto(null);
     setFailedPhotoUris([]);
-    setState({ loading: true, observation: null, editHistory: null, editHistoryError: "", error: "" });
-    if (!accountId) { setState({ loading: false, observation: null, editHistory: null, error: "Sign in as the Botanist who submitted this observation." }); return undefined; }
+    setState({ loading: true, observation: null, editHistory: null, editHistoryError: "", error: "",
+      versioningActive: false, editCapabilityVerified: false });
+    if (!accountId) { setState({ loading: false, observation: null, editHistory: null, error: "Sign in as the Botanist who submitted this observation.",
+      versioningActive: false, editCapabilityVerified: false }); return undefined; }
     const observationRead = readOnlyApproved
       ? plantApi(`/observations/${encodeURIComponent(observationId)}`, { expectedAccountId: accountId })
         .then(async (payload) => {
@@ -48,9 +54,11 @@ export default function NotificationObservation({ route, navigation, user }) {
           return { ...observation, photos: sources.map((source, index) => ({ ...source, id: assets[index].id })) };
         })
       : ownedNotificationObservation(accountId, observationId);
-    observationRead.then(async (observation) => {
+    const capabilityRead = readOnlyApproved ? Promise.resolve({ available: false, versioning_available: false })
+      : plantApi("/observation-edits/capabilities", { expectedAccountId: accountId }).catch(() => null);
+    Promise.all([observationRead, capabilityRead]).then(async ([observation, capability]) => {
       let editHistory = null, editHistoryError = "";
-      if (!readOnlyApproved) {
+      if (!readOnlyApproved && capability?.available) {
         try { editHistory = await plantApi(`/observations/${encodeURIComponent(observationId)}/edit-history`, { expectedAccountId: accountId }); }
         catch (error) { if (![404, 503].includes(error?.status)) editHistoryError = error?.message || t("observationEdits.historyUnavailable"); }
       }
@@ -58,9 +66,11 @@ export default function NotificationObservation({ route, navigation, user }) {
         editHistory?.edits?.some((edit) => edit.retained_photo_ids?.length || edit.added_photo_count) ||
         route.params?.observationVersionSnapshot?.photoIds?.length)
         ? await faceSession.withToken(async (token) => token).catch(() => "") : "";
-      if (active) setState({ loading: false, observation, editHistory, editHistoryError, photoToken, error: "" });
+      if (active) setState({ loading: false, observation, editHistory, editHistoryError, photoToken, error: "",
+        versioningActive: capability?.versioning_available === true, editCapabilityVerified: Boolean(capability) });
     }).catch((error) => {
-      if (active) setState({ loading: false, observation: null, editHistory: null, error: `${error.message} The record may be unavailable or you may be offline.` });
+      if (active) setState({ loading: false, observation: null, editHistory: null, error: `${error.message} The record may be unavailable or you may be offline.`,
+        versioningActive: true, editCapabilityVerified: false });
     });
     return () => { active = false; };
   }, [accountId, observationId, retry, readOnlyApproved, route.params?.observationVersionSnapshot]));
@@ -78,17 +88,20 @@ export default function NotificationObservation({ route, navigation, user }) {
       : historicalSelection ? null : activeEdit;
   const requestSelection = Boolean(route.params?.editRequestId);
   const selectedDetail = historicalSelection || requestSelection;
+  const activeOriginalSnapshot = Boolean(selectedSnapshot?.original && selectedSnapshot.status === row?.status &&
+    ["Pending Review", "Correction Required"].includes(row?.status));
   const displayContent = observationDetailContent(row, selectedSnapshot, selectedVersion, selectedEdit, selectedDetail);
   const displayStatus = selectedDetail
-    ? selectedEdit?.status || selectedSnapshot?.status || (selectedVersion ? "Approved" : row?.status)
+    ? (activeOriginalSnapshot && row?.status === "Withdrawn" ? "Withdrawn" : selectedVersion?.status || selectedEdit?.status || selectedSnapshot?.status || row?.status)
     : row?.status;
   const displayDate = selectedDetail
-    ? selectedSnapshot?.createdAt || selectedEdit?.created_at || selectedVersion?.approved_at || row?.observed_at || row?.created_at
+    ? selectedSnapshot?.createdAt || selectedVersion?.submitted_at || selectedVersion?.baseline_captured_at ||
+      selectedVersion?.created_at || selectedEdit?.created_at || selectedVersion?.approved_at || row?.observed_at || row?.created_at
     : row?.observed_at || row?.created_at;
   const reviewStatus = selectedEdit?.status || displayStatus;
-  const reviewComment = selectedEdit?.review_comment || selectedSnapshot?.reviewComment || (!selectedDetail ? row?.review_comment : "");
-  const reviewedAt = selectedEdit?.reviewed_at || (!selectedDetail ? row?.reviewed_at : null);
-  const reviewedBy = selectedEdit?.reviewed_by || (!selectedDetail ? row?.reviewed_by : null);
+  const reviewComment = selectedVersion?.review_comment || selectedEdit?.review_comment || selectedSnapshot?.reviewComment || (!selectedDetail ? row?.review_comment : "");
+  const reviewedAt = selectedVersion?.reviewed_at || selectedEdit?.reviewed_at || (!selectedDetail ? row?.reviewed_at : null);
+  const reviewedBy = selectedVersion?.reviewed_by || selectedEdit?.reviewed_by || (!selectedDetail ? row?.reviewed_by : null);
   const photoApi = `${mobileApiUrl("plant")}/api`;
   const photoHeaders = state.photoToken ? { Authorization: `Bearer ${state.photoToken}` } : undefined;
   const displayPhotos = selectedDetail
@@ -107,7 +120,32 @@ export default function NotificationObservation({ route, navigation, user }) {
     : row?.photos || [];
   const photos = displayPhotos.filter((photo) => photo?.uri && !failedPhotoUris.includes(photo.uri));
   const locationFields = new Set(["latitude", "longitude", "accuracy_m", "zone", "altitudeM"]);
-  const canEdit = !readOnlyApproved && canStartObservationEdit(row, state.editHistory, activeEdit, selectedDetail, accountId);
+  const canEdit = !readOnlyApproved && state.editCapabilityVerified &&
+    canStartObservationEdit(row, state.editHistory, activeEdit, selectedDetail, accountId, state.versioningActive);
+  const canWithdraw = !readOnlyApproved && Boolean(state.editHistory) &&
+    canWithdrawOriginalObservation(row, activeEdit, selectedDetail && !activeOriginalSnapshot, accountId);
+  const mustWithdrawPlant = !readOnlyApproved && (!selectedDetail || activeOriginalSnapshot) && row?.owner_subject === `staff:${accountId}` &&
+    row.origin_type !== "subsequent_observation" && !row.withdrawn_at && ["Pending Review", "Correction Required"].includes(row.status);
+  const confirmWithdrawal = () => Alert.alert(t("observationWithdrawal.confirmTitle"), t("observationWithdrawal.confirmMessage"), [
+    { text: t("observationWithdrawal.keepSubmission"), style: "cancel" },
+    { text: t("observationWithdrawal.action"), style: "destructive", onPress: async () => {
+      if (withdrawalInFlight.current || !canWithdraw) return;
+      withdrawalInFlight.current = true;
+      setWithdrawing(true);
+      setWithdrawError("");
+      try {
+        await plantApi(`/observations/${encodeURIComponent(row.id)}/withdraw`,
+          { method: "POST", expectedAccountId: accountId, body: {} });
+        Alert.alert(t("observationWithdrawal.successTitle"), t("observationWithdrawal.successMessage"));
+        setRetry((value) => value + 1);
+      } catch (error) {
+        setWithdrawError(translateUIMessage(error.message || t("observationWithdrawal.failed")));
+      } finally {
+        withdrawalInFlight.current = false;
+        setWithdrawing(false);
+      }
+    } },
+  ]);
   const sectionHeader = (number, title, subtitle) => <View style={styles.sectionHeader}>
     <View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>{number}</Text></View>
     <View style={styles.sectionHeading}><Text style={styles.sectionTitle}>{title}</Text>
@@ -132,7 +170,11 @@ export default function NotificationObservation({ route, navigation, user }) {
       {canEdit && <EditAction testID="edit-own-observation" onPress={() => navigation.navigate("FieldCollectionEdit", { observation: row, plantId: row.plant_id, editRequestMode: true })} />}
     </View>
     <Text style={styles.subtitle}>{selectedDetail ? t("botanistPlantDetail.readOnlyVersionSubtitle") : t("notificationObservation.recordSubtitle")}</Text>
-    <View style={styles.recordMeta} testID="observation-record-meta">
+    {displayStatus === "Rejected" && <View style={styles.rejectedBanner} testID="observation-rejected-banner">
+      <Ionicons name="close-circle" size={22} color="#B42318" />
+      <Text style={styles.rejectedBannerText}>{t("notificationObservation.rejectedTitle")}</Text>
+    </View>}
+    <View style={[styles.recordMeta, displayStatus === "Rejected" && styles.rejectedRecordMeta]} testID="observation-record-meta">
       <View style={styles.recordMetaSummary}>
         <View style={styles.recordMetaText}>
           <Text style={styles.recordId}>{t("myObservations.observationId")}</Text>
@@ -149,7 +191,25 @@ export default function NotificationObservation({ route, navigation, user }) {
         {selectedSnapshot?.current && <Text style={styles.currentVersionPill}>{t("recordEdits.currentVersionLabel")}</Text>}
         {!selectedSnapshot?.current && displayStatus === "Approved" && <Text style={styles.supersededVersionPill}>{t("recordEdits.supersededLabel")}</Text>}
       </View>}
-      {selectedEdit && selectedEdit.owner_subject === `staff:${accountId}` && activeEdit?.id === selectedEdit.id && ["Pending Review", "Correction Required"].includes(selectedEdit.status) && <View style={styles.cancelEditAction}><TouchableOpacity
+      {!!withdrawError && <Text accessibilityRole="alert" style={styles.error}>{withdrawError}</Text>}
+      {canWithdraw && <View style={styles.withdrawAction}><TouchableOpacity testID="withdraw-original-observation"
+        accessibilityRole="button" accessibilityLabel={t("observationWithdrawal.action")} disabled={withdrawing}
+        style={[styles.deleteEditButton, withdrawing && styles.disabledButton]} onPress={confirmWithdrawal}>
+        {withdrawing ? <ActivityIndicator size="small" color="#A33F36" /> : <Ionicons name="arrow-undo-outline" size={17} color="#A33F36" />}
+        <Text style={styles.deleteEditText}>{withdrawing ? t("common.pleaseWait") : t("observationWithdrawal.action")}</Text>
+      </TouchableOpacity></View>}
+      {mustWithdrawPlant && <View style={styles.parentWithdrawalNotice}>
+        <Text style={styles.parentWithdrawalText}>{t("observationWithdrawal.parentRequired")}</Text>
+        <TouchableOpacity testID="open-parent-plant-submission" accessibilityRole="button"
+          style={styles.parentPlantButton} onPress={() => navigation.navigate("BotanistPlantDetail", {
+            plantId: row.plant_id, botanist: { id: accountId, role: "Botanist" },
+          })}>
+          <Text style={styles.parentPlantButtonText}>{t("observationWithdrawal.openPlant")}</Text>
+          <Ionicons name="chevron-forward" size={17} color="#2F6B4F" />
+        </TouchableOpacity>
+      </View>}
+      {selectedEdit && selectedEdit.owner_subject === `staff:${accountId}` && activeEdit?.id === selectedEdit.id && ["Pending Review", "Correction Required"].includes(selectedEdit.status) &&
+        (selectedEdit.status === "Correction Required" || selectedEdit.revision === 1) && <View style={styles.cancelEditAction}><TouchableOpacity
         style={[styles.deleteEditButton, cancellingEdit && styles.disabledButton]} disabled={cancellingEdit} accessibilityRole="button"
         onPress={() => Alert.alert(t("recordEdits.deleteEditTitle"), t("recordEdits.deleteEditMessage"), [
           { text: t("common.cancel"), style: "cancel" },
@@ -195,7 +255,12 @@ export default function NotificationObservation({ route, navigation, user }) {
     <View style={styles.card} testID="observation-section-04">
       {sectionHeader("04", t("notificationObservation.officerReview"), t("notificationObservation.reviewSubtitle"))}
       {!!reviewStatus && <View style={styles.field}><Text style={styles.label}>{t("notificationObservation.reviewStatus")}</Text><StatusBadge status={reviewStatus} /></View>}
-      {!!reviewComment && <View style={styles.field}><Text style={styles.label}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.text}>{reviewComment}</Text></View>}
+      {!!reviewComment && (displayStatus === "Rejected"
+        ? <View style={styles.rejectedFeedbackPanel} testID="observation-rejected-feedback">
+          <Text style={styles.rejectedFeedbackHeading}>{t("notificationObservation.officerFeedback")}</Text>
+          <Text style={styles.rejectedFeedbackText}>{reviewComment}</Text>
+        </View>
+        : <View style={styles.field}><Text style={styles.label}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.text}>{reviewComment}</Text></View>)}
       {!!reviewedAt && <View style={styles.field}><Text style={styles.label}>{t("recordEdits.reviewedAt")}</Text><Text style={styles.text}>{formatDateTime(reviewedAt)}</Text></View>}
       {!!reviewedBy && <View style={styles.field}><Text style={styles.label}>{t("recordEdits.reviewedBy")}</Text><Text style={styles.text}>{reviewedBy}</Text></View>}
     </View>
@@ -217,6 +282,12 @@ export default function NotificationObservation({ route, navigation, user }) {
         <Text style={styles.label}>{t("observationEdits.versionHistory")}</Text>
         {state.editHistory.versions.map((version) => <View key={version.id} style={styles.feedback}>
           <Text style={styles.label}>{t("observationEdits.versionLabel", { number: version.version_number })}</Text>
+          {!!version.status && <Text style={styles.text}>{translateLabel(version.status)}</Text>}
+          {!!version.review_decision && version.review_decision !== version.status &&
+            <Text style={styles.text}>{translateLabel(version.review_decision)}</Text>}
+          {!!version.review_comment && <Text style={styles.text}>{version.review_comment}</Text>}
+          {!!version.reviewed_by && <Text style={styles.text}>{version.reviewed_by}</Text>}
+          {!!version.reviewed_at && <Text style={styles.text}>{String(version.reviewed_at).slice(0, 16).replace("T", " ")}</Text>}
           {["heightCm", "healthStatus", "lifeStage", "morphology", "taxonomy", "notes", "latitude", "longitude", "accuracy_m", "zone", "altitudeM"].map((field) =>
             version.content?.[field] != null && version.content[field] !== "" ? <Text key={field} style={styles.text}>{translateLabel(field)}: {String(version.content[field])}</Text> : null)}
           {!!state.photoToken && version.photo_ids?.length > 0 && <ScrollView horizontal contentContainerStyle={styles.photoRow}>
@@ -250,7 +321,10 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   title: { fontSize: 25, fontWeight: "700", color: "#234B3A", flexShrink: 1 },
   subtitle: { marginTop: 6, marginBottom: 18, fontSize: 13, lineHeight: 19, color: "#718078" },
+  rejectedBanner: { flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 12, backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318", marginBottom: 12 },
+  rejectedBannerText: { flex: 1, flexShrink: 1, color: "#8F1D16", fontSize: 15, fontWeight: "800", lineHeight: 21 },
   recordMeta: { padding: 14, marginBottom: 18, borderRadius: 14, backgroundColor: "#E9F7E4" },
+  rejectedRecordMeta: { backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0" },
   recordMetaSummary: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   recordMetaText: { flex: 1, minWidth: 0 },
   recordId: { fontSize: 11, color: "#718078" },
@@ -262,8 +336,10 @@ const styles = StyleSheet.create({
   correctionBadge: { backgroundColor: "#F4E7D2" },
   approvedBadge: { backgroundColor: "#D8EBD9" },
   approvedBadgeText: { color: "#468585" },
-  rejectedBadge: { backgroundColor: "#F4E9E6" },
-  rejectedBadgeText: { color: "#884B43" },
+  rejectedBadge: { backgroundColor: "#B42318" },
+  rejectedBadgeText: { color: "#FFFFFF" },
+  terminalBadge: { backgroundColor: "#F4E9E6" },
+  terminalBadgeText: { color: "#884B43" },
   supersededBadge: { backgroundColor: "#E7EBE6" },
   supersededBadgeText: { color: "#56625A" },
   versionMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
@@ -278,6 +354,9 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 17, fontWeight: "700", color: "#234B3A" },
   sectionSubtitle: { marginTop: 4, fontSize: 11, lineHeight: 16, color: "#718078" },
   feedback: { backgroundColor: "#EEF7EF", padding: 14, borderRadius: 12, marginBottom: 12 },
+  rejectedFeedbackPanel: { padding: 14, borderRadius: 12, backgroundColor: "#FEF2F1", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318", marginBottom: 12, gap: 6 },
+  rejectedFeedbackHeading: { fontSize: 12, fontWeight: "800", color: "#8F1D16" },
+  rejectedFeedbackText: { color: "#6F302B", fontSize: 14, lineHeight: 21 },
   field: { marginBottom: 16 },
   photoSection: { marginTop: 8, marginBottom: 10 },
   photoRow: { flexDirection: "row", gap: 8, paddingVertical: 6 },
@@ -296,6 +375,11 @@ const styles = StyleSheet.create({
   button: { minHeight: 46, borderRadius: 12, backgroundColor: "#35786F", alignItems: "center", justifyContent: "center", marginTop: 18 },
   buttonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
   cancelEditAction: { borderTopWidth: 1, borderTopColor: "#C9DEC9", marginTop: 12, paddingTop: 10, alignItems: "flex-end" },
+  withdrawAction: { borderTopWidth: 1, borderTopColor: "#C9DEC9", marginTop: 12, paddingTop: 10, alignItems: "flex-end" },
+  parentWithdrawalNotice: { marginTop: 12, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "#D8E7D5", backgroundColor: "#F1F7EE", gap: 8 },
+  parentWithdrawalText: { color: "#52665A", fontSize: 13, lineHeight: 20 },
+  parentPlantButton: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", alignSelf: "flex-start", gap: 6, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#E5F0E1", borderWidth: 1, borderColor: "#B7CFB5" },
+  parentPlantButtonText: { color: "#2F6B4F", fontSize: 14, fontWeight: "700" },
   deleteEditButton: { minHeight: 44, alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 7, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#E8B9B2" },
   disabledButton: { opacity: 0.65 },
   deleteEditText: { color: "#A33F36", fontSize: 13, fontWeight: "700" },

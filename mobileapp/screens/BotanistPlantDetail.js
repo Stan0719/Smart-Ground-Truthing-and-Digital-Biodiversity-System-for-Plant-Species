@@ -321,6 +321,7 @@ export default function BotanistPlantDetailScreen({
   const [cancellingEdit, setCancellingEdit] = useState(false);
   const [cancelEditError, setCancelEditError] = useState("");
   const [withdrawalCandidate, setWithdrawalCandidate] = useState(null);
+  const [pendingOriginalEditable, setPendingOriginalEditable] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState("");
   const withdrawalInFlight = useRef(false);
@@ -348,6 +349,7 @@ function findPlant() {
             record.registeredBy === `staff:${botanistId}`))) return;
       plantApi(`/plant-submissions/${encodeURIComponent(plantId)}/withdrawal`,
         { expectedAccountId: botanistId }).then((availability) => {
+        if (active && record) setPendingOriginalEditable(availability?.editable === true);
         if (active && availability?.eligible === true &&
             (selectedOriginalId == null || String(availability.observation_id) === String(selectedOriginalId)))
           setWithdrawalCandidate(record || { id: plantId });
@@ -360,6 +362,7 @@ function findPlant() {
     setActiveSelectedChangeId(null);
     setChangeError("");
     setWithdrawalCandidate(null);
+    setPendingOriginalEditable(false);
     setWithdrawError("");
     setEditAvailability("checking");
     setSelectedPhotoUri(null);
@@ -820,20 +823,28 @@ const rawPhotos = Array.isArray(plant.photos)
           <Text style={styles.title}>
             {isEditing ? t("botanistPlantDetail.editPlantRecord") : t("botanistPlantDetail.plantRecord")}
           </Text>
-          {!plant.isHistoricalVersion && plant.isServerRecord && ["Approved", "Pending Review", "Correction Required"].includes(plant.status) &&
+          {!plant.isHistoricalVersion && plant.isServerRecord &&
+            (plant.status === "Approved" || (["Pending Review", "Correction Required"].includes(plant.status) && pendingOriginalEditable)) &&
             <EditAction testID="edit-own-plant" disabled={plant.status === "Approved" && editAvailability !== "clear"}
               labelKey={plant.status === "Approved" && editAvailability !== "clear" ? "recordEdits.editUnavailable" : undefined}
               onPress={() => navigation.navigate("EditPlant", { plantId: plant.id, botanist, correction: plant.status !== "Approved" && plant.initialObservation?.status === "Correction Required" })} />}
         </View>
 
         <Text style={styles.subtitle}>{plant.isHistoricalVersion ? t("botanistPlantDetail.readOnlyVersionSubtitle") : t("botanistPlantDetail.reviewAndManageYourPlantDocumentation")}</Text>
+        {plant.status === "Rejected" && <View style={styles.rejectedBanner} testID="plant-rejected-banner">
+          <Ionicons name="close-circle" size={22} color="#B42318" />
+          <Text style={styles.rejectedBannerText}>{t("botanistPlantDetail.submissionRejected")}</Text>
+        </View>}
         {plant.isHistoricalVersion && plant.historicalSnapshotUnavailable && <Text style={styles.mutedText}>{t("recordEdits.originalSnapshotUnavailable")}</Text>}
         {plant.isHistoricalVersion && !!route.params?.historicalReviewComment &&
-          <View style={styles.changeNotice}><Text style={styles.changeNoticeText}>{t("notificationObservation.officerFeedback")}</Text>
-            <Text style={styles.changeNoticeText}>{route.params.historicalReviewComment}</Text></View>}
+          <View style={[styles.changeNotice, plant.status === "Rejected" && styles.rejectedFeedbackPanel]}>
+            <Text style={[styles.changeNoticeText, plant.status === "Rejected" && styles.rejectedFeedbackText]}>{t("notificationObservation.officerFeedback")}</Text>
+            <Text style={[styles.changeNoticeText, plant.status === "Rejected" && styles.rejectedFeedbackText]}>{route.params.historicalReviewComment}</Text></View>}
         {!plant.isHistoricalVersion && ["Rejected", "Correction Required"].includes(plant.status) &&
           plant.initialObservation?.status === plant.status && !!plant.initialObservation.review_comment &&
-          <View style={styles.changeNotice}><Text style={styles.changeNoticeText}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.changeNoticeText}>{plant.initialObservation.review_comment}</Text></View>}
+          <View style={[styles.changeNotice, plant.status === "Rejected" && styles.rejectedFeedbackPanel]} testID={plant.status === "Rejected" ? "plant-rejected-feedback" : undefined}>
+            <Text style={[styles.changeNoticeText, plant.status === "Rejected" && styles.rejectedFeedbackHeading]}>{t("notificationObservation.officerFeedback")}</Text>
+            <Text style={[styles.changeNoticeText, plant.status === "Rejected" && styles.rejectedFeedbackText]}>{plant.initialObservation.review_comment}</Text></View>}
         {!plant.isHistoricalVersion && plant.status === "Approved" && editAvailability === "pending" && <View style={styles.editAvailabilityNote}>
           <Text style={styles.pendingEditLabel}>{t("recordEdits.pendingEdit")}</Text>
           <Text style={styles.changeNoticeText}>{t("recordEdits.pendingEditExplanation")}</Text>
@@ -848,7 +859,7 @@ const rawPhotos = Array.isArray(plant.photos)
         {!!withdrawError && <Text style={styles.changeError} accessibilityRole="alert">{withdrawError}</Text>}
         {!plant.isHistoricalVersion && !!changeError && plant.status !== "Approved" && <Text style={styles.changeError}>{translateUIMessage(changeError)}</Text>}
 
-        <View style={styles.recordMeta} testID={plant.isHistoricalVersion ? "historical-plant-record-meta" : "plant-record-meta"}>
+        <View style={[styles.recordMeta, plant.status === "Rejected" && styles.rejectedRecordMeta]} testID={plant.isHistoricalVersion ? "historical-plant-record-meta" : "plant-record-meta"}>
           <View style={styles.recordMetaSummary}>
           <View style={styles.recordMetaText}>
             <Text style={styles.recordId}>{t("botanistPlantDetail.recordId")}</Text>
@@ -859,11 +870,11 @@ const rawPhotos = Array.isArray(plant.photos)
           </View>
 
           <View style={styles.recordMetaStatus}>
-            <View style={[styles.statusBadge, plant.status === "Withdrawn" ? styles.withdrawnStatusBadge : !plant.isHistoricalVersion && (
+            <View style={[styles.statusBadge, plant.status === "Rejected" ? styles.rejectedStatusBadge : plant.status === "Withdrawn" ? styles.withdrawnStatusBadge : !plant.isHistoricalVersion && (
               plant.status === "Approved" ? styles.approvedStatusBadge :
                 plant.status === "Pending Review" ? styles.pendingStatusBadge : null
             )]}>
-              <Text style={[styles.statusText, plant.status === "Withdrawn" && styles.withdrawnStatusText,
+              <Text style={[styles.statusText, plant.status === "Rejected" ? styles.rejectedStatusText : plant.status === "Withdrawn" && styles.withdrawnStatusText,
                 !plant.isHistoricalVersion && plant.status === "Pending Review" && styles.pendingStatusText]}>
                 {plant.isHistoricalVersion
                   ? plant.status ? translateLabel(plant.status) : t("recordEdits.historicalFieldUnavailable")
@@ -881,6 +892,7 @@ const rawPhotos = Array.isArray(plant.photos)
           activeSelectedChangeId === String(route.params.selectedChangeId) &&
           (!plant.isHistoricalVersion || ["Pending Review", "Correction Required"].includes(plant.status)) &&
           ["Pending Review", "Correction Required"].includes(changeInfo?.status) &&
+          (changeInfo.status === "Correction Required" || changeInfo.revision === 1) &&
           changeInfo.owner_subject === `staff:${botanistId}` &&
           (route.params?.selectedChangeId == null || String(changeInfo.id) === String(route.params.selectedChangeId)) && <View style={styles.cancelEditAction}><TouchableOpacity
           disabled={cancellingEdit} style={[styles.deleteEditButton, cancellingEdit && { opacity: 0.65 }]} onPress={() => Alert.alert(t("recordEdits.deleteEditTitle"), t("recordEdits.deleteEditMessage"), [
@@ -1131,6 +1143,11 @@ const styles = StyleSheet.create({
 
   editHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   changeNotice: { padding: 12, borderRadius: 12, backgroundColor: "#FFF1D6", marginBottom: 12, gap: 4 },
+  rejectedBanner: { flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 12, backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318", marginBottom: 12 },
+  rejectedBannerText: { flex: 1, flexShrink: 1, color: "#8F1D16", fontSize: 15, fontWeight: "800", lineHeight: 21 },
+  rejectedFeedbackPanel: { backgroundColor: "#FEF2F1", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318" },
+  rejectedFeedbackHeading: { color: "#8F1D16", fontWeight: "800" },
+  rejectedFeedbackText: { color: "#6F302B" },
   deleteEditButton: { minHeight: 44, alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 7, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#E8B9B2" },
   withdrawButton: { minHeight: 48, alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 7, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#E8B9B2" },
   withdrawDisabled: { opacity: 0.65 },
@@ -1164,6 +1181,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: COLORS.light,
   },
+  rejectedRecordMeta: { backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0" },
 
   recordMetaSummary: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   cancelEditAction: { borderTopWidth: 1, borderTopColor: "#C9DEC9", marginTop: 12, paddingTop: 10, alignItems: "flex-end" },
@@ -1200,6 +1218,8 @@ const styles = StyleSheet.create({
   },
 
   approvedStatusBadge: { backgroundColor: "#D8EBD9" },
+  rejectedStatusBadge: { backgroundColor: "#B42318" },
+  rejectedStatusText: { color: "#FFFFFF" },
   pendingStatusBadge: { backgroundColor: "#F4E7D2" },
   withdrawnStatusBadge: { backgroundColor: "#F4E9E6" },
   withdrawnStatusText: { color: "#884B43" },

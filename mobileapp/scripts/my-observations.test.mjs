@@ -10,6 +10,23 @@ const detail = readFileSync(new URL("../screens/NotificationObservation.js", imp
 const utility = readFileSync(new URL("../utils/myObservations.js", import.meta.url), "utf8");
 const detailUtility = readFileSync(new URL("../utils/observationDetails.js", import.meta.url), "utf8");
 
+test("verified Observation revisions keep their own statuses, reviews, and navigation targets", () => {
+  const observation = { id: "field-1", status: "Approved", date: "2026-11-16T00:00:00Z", content: {} };
+  const versions = [
+    { id: "original-1", version_number: 1, submission_type: "original", status: "Superseded",
+      verified: true, content: { notes: "Original" }, photo_ids: ["photo-1"], review_comment: "Correct this" },
+    { id: "correction-2", version_number: 2, submission_type: "correction_resubmission", status: "Approved",
+      verified: true, content: { notes: "Corrected" }, photo_ids: ["photo-2"], review_comment: "Accepted" },
+  ];
+  const rows = buildObservationHistoryRows(observation, { versions, edits: [] });
+  assert.deepEqual(rows.map(row => [row.versionId, row.status, row.reviewComment]),
+    [["original-1", "Superseded", "Correct this"], ["correction-2", "Approved", "Accepted"]]);
+  assert.equal(rows.length, 2, "verified history must not invent another original");
+  assert.equal(rows[1].current, true);
+  assert.equal(observationHistoryRoute(observation, rows[0])[1].observationVersionId, "original-1");
+  assert.match(detail, /selectedVersion\?\.status \|\| selectedEdit\?\.status/);
+});
+
 test("dashboard positions My Observations between submissions and drafts with its own route", () => {
   const submissions = dashboard.indexOf('testID="dashboard-submissions"');
   const observations = dashboard.indexOf('testID="dashboard-my-observations"');
@@ -66,6 +83,21 @@ test("loader uses only creator-scoped observations, including pending records on
   assert.equal(calls.some((call) => call.path === "/notifications"), false, "timeline remains loaded by Observation Details only");
   assert.ok(calls.every((call) => call.options.expectedAccountId === "bot-a"));
   assert.ok(calls.filter((call) => call.path.startsWith("/observations?")).every((call) => call.path.includes("scope=mine")));
+});
+
+test("withdrawn original Observations remain visible in the Botanist all-history list", async () => {
+  const withdrawn = { id: "withdrawn-observation", plant_id: 24, owner_subject: "staff:bot-a", status: "Withdrawn",
+    origin_type: "subsequent_observation", created_at: "2026-11-14T10:00:00Z", content: { notes: "Retained history" } };
+  const api = async (path) => {
+    if (path.includes("/observations?")) return { observations: [withdrawn], page: { next_cursor: null } };
+    if (path === "/observation-edits/capabilities") return { available: false };
+    throw Error(`Unexpected route ${path}`);
+  };
+  const result = await fetchMyObservations("bot-a", "Botanist A", api);
+  assert.equal(result.observations.length, 1);
+  assert.equal(result.observations[0].status, "Withdrawn");
+  assert.equal(result.observations[0].content.notes, "Retained history");
+  assert.equal(observationMatchesFilter(result.observations[0], "all"), true);
 });
 
 test("page refreshes on pull, and offers distinct loading, empty and error states", () => {

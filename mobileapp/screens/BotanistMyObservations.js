@@ -12,9 +12,9 @@ const observationFilters = ["all", "pending", "approved", "rejected"];
 
 function StatusBadge({ status, style }) {
   useAppTranslation();
-  const tone = status === "Approved" ? styles.approvedBadge : status === "Rejected" ? styles.rejectedBadge : styles.pendingBadge;
+  const tone = status === "Approved" ? styles.approvedBadge : ["Rejected", "Withdrawn"].includes(status) ? styles.rejectedBadge : styles.pendingBadge;
   return <View style={[styles.badge, tone, style]}>
-    <Text style={[styles.badgeText, status === "Approved" && styles.approvedText, status === "Rejected" && styles.rejectedText]}>{translateLabel(status)}</Text>
+    <Text style={[styles.badgeText, status === "Approved" && styles.approvedText, ["Rejected", "Withdrawn"].includes(status) && styles.rejectedText]}>{translateLabel(status)}</Text>
   </View>;
 }
 

@@ -30,6 +30,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     CONSTRAINT botanist_notification_check CHECK((type IN ('observation_submitted','observation_approved','observation_rejected','correction_requested') AND observation_id IS NOT NULL) OR (type IN ('sync_failed','sync_completed') AND observation_id IS NULL)))`);
   await pool.query(migration("023-record-change-correction-notifications.sql"));
   await pool.query(migration("024-record-change-review-events.sql"));
+  await pool.query(migration("028-immutable-record-version-revisions.sql"));
   const photo = await sharp({ create: { width: 4, height: 4, channels: 3, background: "green" } }).jpeg().toBuffer();
   const species = (await pool.query("INSERT INTO species(scientific_name,common_name,description,rbac_data) VALUES('Species A','Common A','Original description',$1) RETURNING species_id",
     [{ habitat: "Forest", culturalSignificance: "Existing cultural knowledge", retainedMetadata: { source: "fixture" }, approvalStatus: "Approved", submittedBy: "staff:bot" }])).rows[0].species_id;
@@ -52,6 +53,14 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
   const content = { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Original", taxonomy: "Existing taxonomy", latitude: 4.5, longitude: 113.7, altitudeM: 14, zone: "Original zone", notes: "" };
   await pool.query("INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES('approved-observation',$1,'staff:bot','Approved',$2,'approved-obs-key'),('pending-observation',$3,'staff:bot','Pending Review',$2,'pending-obs-key')", [approvedPlant, content, pendingPlant]);
   await pool.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES('old-photo',$1,'staff:bot','old-photo-key','approved-observation',TRUE,'image/jpeg',$2)", [approvedPlant, photo]);
+  await pool.query(`INSERT INTO record_version_history(id,record_type,plant_id,version_number,owner_subject,edited_by,status,snapshot)
+    VALUES('approved-plant-v1','plant',$1,1,'staff:bot','staff:bot','Approved',$2),
+      ('pending-plant-v1','plant',$3,1,'staff:bot','staff:bot','Pending Review',$4)`,
+  [approvedPlant, { plant_id: approvedPlant, species_id: species, scientific_name: "Plant A", qr_token: "qr-edit-approved", observation_id: "approved-observation", observation_revision: 1, photo_ids: ["old-photo"], photo_refs: [{ asset_id: "old-photo" }], content },
+    pendingPlant, { plant_id: pendingPlant, species_id: species, scientific_name: "Plant Pending", qr_token: "qr-edit-pending", observation_id: "pending-observation", observation_revision: 1, photo_ids: [], photo_refs: [], content }]);
+  await pool.query(`INSERT INTO record_version_history(id,record_type,request_id,version_number,owner_subject,edited_by,status,snapshot,species_photo)
+    VALUES('approved-species-v1','species',$1,1,'staff:bot','staff:bot','Approved',$2,$3)`,
+  [request, { request_id: request, species_id: species, scientific_name: "Species A", common_name: "Common A", genus_name: "Genus A", family_name: "Family A", conservation_status: "Least Concern", description: "Original description", habitat: "Forest" }, photo]);
   const roles = { bot: "Botanist", other: "Botanist", officer: "Conservation Officer" };
   const tokens = Object.fromEntries(Object.keys(roles).map((key, index) => [key, String(index + 1).repeat(64)]));
   const auth = { session: async (token) => {
@@ -63,6 +72,11 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
   t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); });
   const base = `http://127.0.0.1:${server.address().port}/api`;
   async function call(path, role = "bot", method = "GET", body) {
+    if (method === "POST" && /\/record-changes\/[^/]+\/review$/.test(path) && body && body.revision === undefined) {
+      const changeId = path.split("/")[2];
+      const current = (await pool.query("SELECT revision FROM record_change_submission WHERE id=$1", [changeId])).rows[0];
+      if (current) body = { ...body, revision: current.revision };
+    }
     const response = await fetch(base + path, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokens[role]}` }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: response.status, data: await response.json() };
   }
@@ -89,6 +103,30 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     } finally {
       await pool.query("UPDATE plant_record SET rbac_status='Pending Review' WHERE plant_id=$1", [pendingPlant]);
     }
+  });
+  await t.test("corrected original Plant stays locked while pending Officer review", async () => {
+    const row = (await pool.query(`INSERT INTO plant_record(species_id,registered_subject,scientific_name,rbac_status,qr_token)
+      VALUES($1,'staff:bot','Correction Lock Plant','Pending Review','qr-correction-lock') RETURNING plant_id`, [species])).rows[0];
+    await pool.query("INSERT INTO plant_app.qr_code(plant_id,qr_code,status) VALUES($1,'qr-correction-lock','assigned')", [row.plant_id]);
+    await pool.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,origin_type,content,client_key)
+      VALUES('correction-lock-observation',$1,'staff:bot','Pending Review','initial_registration',$2,'correction-lock-key')`,
+    [row.plant_id, content]);
+    await pool.query(`INSERT INTO record_version_history(id,record_type,plant_id,version_number,owner_subject,edited_by,status,snapshot)
+      VALUES('correction-lock-v1','plant',$1,1,'staff:bot','staff:bot','Pending Review',$2)`,
+    [row.plant_id, { plant_id: row.plant_id, species_id: species, scientific_name: "Correction Lock Plant", qr_token: "qr-correction-lock",
+      observation_id: "correction-lock-observation", observation_revision: 1, photo_ids: [], photo_refs: [], content }]);
+    assert.equal((await call("/observations/correction-lock-observation/review", "officer", "POST",
+      { decision: "Correction Required", comment: "Clarify morphology.", revision: 1 })).status, 200);
+    assert.equal((await call(`/my-plants/${row.plant_id}`, "bot", "PATCH",
+      { ...plant("Correction Lock Plant"), expected_revision: 2 })).status, 200);
+    assert.equal((await call(`/my-plants/${row.plant_id}`, "bot", "PATCH",
+      { ...plant("Must Remain Locked"), expected_revision: 3 })).status, 409);
+    const correctionHistory = (await pool.query("SELECT version_number,status,snapshot FROM record_version_history WHERE plant_id=$1 ORDER BY version_number", [row.plant_id])).rows;
+    assert.deepEqual(correctionHistory.map((version) => [version.version_number, version.status]), [[1, "Superseded"], [2, "Pending Review"]]);
+    assert.equal(correctionHistory[0].snapshot.content.morphology, "Original");
+    assert.equal(correctionHistory[1].snapshot.content.morphology, "Changed");
+    assert.equal((await pool.query("SELECT status FROM plant_observation WHERE id='correction-lock-observation'")).rows[0].status,
+      "Pending Review");
   });
   await t.test("approved plant proposal stays separate, rejection retains original", async () => {
     const body = { kind: "plant", target_id: approvedPlant, proposed: { ...plant("Plant Proposed", 45.5, 115.7), qr_id: 3 }, client_key: "approved-edit-1" };
@@ -171,6 +209,11 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     const id = created.data.species_request.request_id;
     assert.equal((await call(`/my-species-requests/${id}`, "other", "PATCH", speciesData("Intrusion"))).status, 404);
     assert.equal((await call(`/my-species-requests/${id}`, "bot", "PATCH", speciesData("Corrected species"))).status, 200);
+    assert.deepEqual((await pool.query("SELECT version_number,status FROM record_version_history WHERE request_id=$1 ORDER BY version_number", [id])).rows
+      .map((version) => [version.version_number, version.status]), [[1, "Superseded"], [2, "Pending Review"]]);
+    assert.equal((await call(`/species-requests/${id}/review`, "officer", "POST",
+      { decision: "Approved", comment: "Unsupported version selector", version_number: 1, visibility: "public" })).status, 400,
+    "Species review keeps the existing request contract without a version selector");
     let row = (await pool.query("SELECT scientific_name,request_status FROM species_request_submission WHERE request_id=$1", [id])).rows[0];
     assert.deepEqual(row, { scientific_name: "Corrected species", request_status: "Pending Review" });
     assert.equal((await call(`/species-requests/${id}/review`, "officer", "POST", { decision: "Rejected", comment: "Need clearer traits" })).status, 200);
@@ -189,6 +232,23 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal(historicalPhoto.status, 200);
     assert.equal((await fetch(`${base}/record-versions/${history.data.versions[1].id}/photo`,
       { headers: { Authorization: `Bearer ${tokens.other}` } })).status, 404);
+  });
+  await t.test("corrected original Species stays locked while pending Officer review", async () => {
+    const created = await call("/species-requests", "bot", "POST", {
+      ...speciesData("Species Pending Correction Lock"),
+      photo: { content_type: "image/jpeg", base64: photo.toString("base64") },
+      client_key: "species-correction-lock",
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    const id = created.data.species_request.request_id;
+    assert.equal((await call(`/species-requests/${id}/review`, "officer", "POST",
+      { decision: "Correction Required", comment: "Clarify the habitat." })).status, 200);
+    assert.equal((await call(`/my-species-requests/${id}`, "bot", "PATCH",
+      speciesData("Species Pending Correction Lock Updated"))).status, 200);
+    assert.equal((await call(`/my-species-requests/${id}`, "bot", "PATCH",
+      speciesData("Species Must Stay Locked"))).status, 409);
+    const state = (await pool.query("SELECT request_status FROM species_request_submission WHERE request_id=$1", [id])).rows[0];
+    assert.equal(state.request_status, "Pending Review");
   });
   await t.test("approved photo replacements become visible only after review", async () => {
     const replacement = await sharp({ create: { width: 4, height: 4, channels: 3, background: "red" } }).png().toBuffer();
@@ -216,6 +276,11 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal(String(detail.data.plant.qr_id), "2");
     const revised = { ...plant("Plant Pending QR"), expected_revision: 2, qr_id: 4 };
     assert.equal((await call(`/my-plants/${pendingPlant}`, "bot", "PATCH", revised)).status, 200);
+    const pendingHistory = (await pool.query("SELECT version_number,status,snapshot FROM record_version_history WHERE plant_id=$1 ORDER BY version_number", [pendingPlant])).rows;
+    assert.deepEqual(pendingHistory.map((version) => [version.version_number, version.status]),
+      [[1, "Superseded"], [2, "Superseded"], [3, "Pending Review"]]);
+    assert.equal(pendingHistory[0].snapshot.scientific_name, "Plant Pending");
+    assert.equal(pendingHistory[1].snapshot.scientific_name, "Plant Corrected");
     assert.equal((await pool.query("SELECT qr_token FROM plant_record WHERE plant_id=$1", [pendingPlant])).rows[0].qr_token, "qr-edit-free-two");
     assert.deepEqual((await pool.query("SELECT qr_id,plant_id,status FROM plant_app.qr_code WHERE qr_id IN (2,4) ORDER BY qr_id")).rows.map((r) => r.status), ["retired", "assigned"]);
   });
@@ -249,8 +314,11 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal(versions.data.history_available, true);
     assert.deepEqual(versions.data.versions.map((v) => v.version_number), [5, 4, 3, 2, 1]);
     assert.equal(versions.data.versions[0].status, "Approved");
-    assert.equal(versions.data.versions[1].status, "Approved");
+    assert.equal(versions.data.versions[1].status, "Superseded");
+    assert.equal(versions.data.versions[2].status, "Superseded");
     assert.equal(versions.data.versions[3].status, "Rejected");
+    assert.equal(versions.data.versions[4].status, "Superseded");
+    assert.equal(versions.data.versions.filter((v) => v.status === "Approved").length, 1);
     assert.equal(versions.data.versions[4].snapshot.qr_token, "qr-edit-approved");
     assert.equal(versions.data.versions[0].snapshot.qr_token, "qr-edit-free");
     assert.equal((await call(`/record-versions?kind=plant&id=${approvedPlant}`, "other")).status, 404);
@@ -263,7 +331,12 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
       proposed: plant("Plant Correction One"), client_key: "plant-correction-one" });
     assert.equal(first.status, 201, JSON.stringify(first.data));
     const changeId = first.data.change.id;
-    assert.equal((await call(`/record-changes/${changeId}/review`, "officer", "POST", { decision: "Correction Required", comment: "Clarify the morphology." })).status, 200);
+    assert.equal(first.data.change.revision, 1);
+    const reviewRace = await Promise.all([
+      call(`/record-changes/${changeId}/review`, "officer", "POST", { decision: "Correction Required", comment: "Clarify the morphology." }),
+      call(`/record-changes/${changeId}/review`, "officer", "POST", { decision: "Correction Required", comment: "Clarify the morphology." }),
+    ]);
+    assert.deepEqual(reviewRace.map((result) => result.status).sort(), [200, 409]);
     assert.deepEqual((await pool.query("SELECT scientific_name,rbac_status FROM plant_record WHERE plant_id=$1", [approvedPlant])).rows[0],
       { scientific_name: "Plant QR and Photo Edit", rbac_status: "Approved" });
     const correction = await call(`/record-changes/${changeId}`);
@@ -276,19 +349,39 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
       item.comment === "Clarify the morphology."));
     const corrected = { ...plant("Plant Correction Resubmitted"), content: { ...plant("Plant Correction Resubmitted").content, morphology: "Corrected morphology" } };
     assert.equal((await call(`/record-changes/${changeId}`, "other", "PATCH", { revision: 1, proposed: corrected })).status, 404);
-    assert.equal((await call(`/record-changes/${changeId}`, "bot", "PATCH", { revision: 1, proposed: corrected })).status, 200);
+    const correctionRace = await Promise.all([
+      call(`/record-changes/${changeId}`, "bot", "PATCH", { revision: 1, proposed: corrected }),
+      call(`/record-changes/${changeId}`, "bot", "PATCH", { revision: 1, proposed: corrected }),
+    ]);
+    assert.deepEqual(correctionRace.map((result) => result.status).sort(), [200, 409]);
     const resubmitted = (await call(`/record-changes/${changeId}`)).data.change;
     assert.equal(resubmitted.id, changeId);
     assert.equal(resubmitted.revision, 2);
     assert.equal(resubmitted.status, "Pending Review");
+    assert.equal((await call(`/record-changes/${changeId}/review`, "officer", "POST",
+      { decision: "Approved", comment: "Stale revision one", revision: 1 })).status, 409,
+    "an Officer action opened for the previous correction cycle cannot review the latest version");
+    let changeVersions = (await pool.query("SELECT version_number,change_revision,status,snapshot,review_comment FROM record_version_history WHERE change_id=$1 ORDER BY change_revision", [changeId])).rows;
+    assert.deepEqual(changeVersions.map((version) => [version.change_revision, version.status]), [[1, "Superseded"], [2, "Pending Review"]]);
+    assert.notEqual(changeVersions[0].snapshot.content.morphology, changeVersions[1].snapshot.content.morphology);
+    assert.equal(changeVersions[0].review_comment, "Clarify the morphology.");
+    assert.equal(changeVersions[1].review_comment, null);
+    assert.equal((await call(`/record-changes/${changeId}/cancel`, "bot", "POST", {})).status, 409);
+    assert.equal((await call(`/record-changes/${changeId}/cancel`, "other", "POST", {})).status, 404);
     assert.equal((await call("/record-changes", "bot", "POST", { kind: "plant", target_id: approvedPlant, proposed: corrected, client_key: "duplicate-during-correction" })).status, 409);
     assert.equal((await pool.query("SELECT scientific_name FROM plant_record WHERE plant_id=$1", [approvedPlant])).rows[0].scientific_name, "Plant QR and Photo Edit");
     assert.equal((await call(`/record-changes/${changeId}/review`, "officer", "POST", { decision: "Correction Required", comment: "Feedback B: add the observation date." })).status, 200);
+    changeVersions = (await pool.query("SELECT version_number,change_revision,status,review_comment FROM record_version_history WHERE change_id=$1 ORDER BY change_revision", [changeId])).rows;
+    assert.deepEqual(changeVersions.map((version) => [version.change_revision, version.status]), [[1, "Superseded"], [2, "Correction Required"]]);
+    assert.equal(changeVersions[1].review_comment, "Feedback B: add the observation date.");
     const secondCorrectionNotifications = (await call("/notifications")).data.notifications.filter((item) => item.changeId === changeId);
     assert.deepEqual(secondCorrectionNotifications.map((item) => item.comment).sort(), ["Clarify the morphology.", "Feedback B: add the observation date."].sort());
     const correctedAgain = { ...plant("Plant Correction Resubmitted Again"), content: { ...plant("Plant Correction Resubmitted Again").content, morphology: "Corrected twice" } };
     assert.equal((await call(`/record-changes/${changeId}`, "bot", "PATCH", { revision: 2, proposed: correctedAgain })).status, 200);
     assert.equal((await call(`/record-changes/${changeId}/review`, "officer", "POST", { decision: "Approved", comment: "Feedback C: approved." })).status, 200);
+    changeVersions = (await pool.query("SELECT version_number,change_revision,status,review_comment FROM record_version_history WHERE change_id=$1 ORDER BY change_revision", [changeId])).rows;
+    assert.deepEqual(changeVersions.map((version) => [version.change_revision, version.status]), [[1, "Superseded"], [2, "Superseded"], [3, "Approved"]]);
+    assert.equal(changeVersions[2].review_comment, "Feedback C: approved.");
     assert.equal((await pool.query("SELECT scientific_name FROM plant_record WHERE plant_id=$1", [approvedPlant])).rows[0].scientific_name, "Plant Correction Resubmitted Again");
     const reviewEvents = (await pool.query("SELECT revision,status,comment FROM record_change_review_event WHERE change_id=$1 ORDER BY revision", [changeId])).rows;
     assert.deepEqual(reviewEvents.map((event) => [event.revision, event.status, event.comment]), [
@@ -312,8 +405,16 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     const corrected = { ...proposedSpecies, scientific_name: "Species Correction Resubmitted" };
     assert.equal((await call(`/record-changes/${changeId}`, "bot", "PATCH", { revision: 1, proposed: corrected })).status, 200);
     assert.equal((await call(`/record-changes/${changeId}`)).data.change.id, changeId);
+    const speciesVersions = (await pool.query("SELECT change_revision,status,snapshot,review_comment FROM record_version_history WHERE change_id=$1 ORDER BY change_revision", [changeId])).rows;
+    assert.deepEqual(speciesVersions.map((version) => [version.change_revision, version.status]), [[1, "Superseded"], [2, "Pending Review"]]);
+    assert.notEqual(speciesVersions[0].snapshot.scientific_name, speciesVersions[1].snapshot.scientific_name);
+    assert.equal(speciesVersions[0].review_comment, "Use the accepted common name.");
+    assert.equal(speciesVersions[1].review_comment, null);
+    assert.equal((await call(`/record-changes/${changeId}/cancel`, "bot", "POST", {})).status, 409);
     assert.equal((await call(`/record-changes/${changeId}/review`, "officer", "POST", { decision: "Approved", comment: "Accepted." })).status, 200);
     assert.equal((await pool.query("SELECT scientific_name FROM species WHERE species_id=$1", [species])).rows[0].scientific_name, corrected.scientific_name);
+    assert.deepEqual((await pool.query("SELECT change_revision,status FROM record_version_history WHERE change_id=$1 ORDER BY change_revision", [changeId])).rows
+      .map((version) => [version.change_revision, version.status]), [[1, "Superseded"], [2, "Approved"]]);
     const cancelled = await call("/record-changes", "bot", "POST", { kind: "species", target_id: request, proposed: { ...corrected, scientific_name: "Species Cancelled Edit" }, client_key: "species-cancel-correction" });
     assert.equal(cancelled.status, 201, JSON.stringify(cancelled.data));
     assert.equal((await call(`/record-changes/${cancelled.data.change.id}/review`, "officer", "POST", { decision: "Correction Required", comment: "Please refine." })).status, 200);
@@ -370,6 +471,33 @@ test("migration 009 is additive and repeatable in an isolated schema", async (t)
   assert.equal((await pool.query("SELECT species_id FROM plant_record WHERE plant_id=$1", [plantId])).rows[0].species_id, speciesId);
   assert.equal((await pool.query("SELECT count(*)::integer AS count FROM record_version_history")).rows[0].count, 0);
   assert.equal((await pool.query("SELECT relrowsecurity FROM pg_class WHERE oid='record_version_history'::regclass")).rows[0].relrowsecurity, true);
+});
+
+test("migration 028 labels an unambiguous legacy revision and protects immutable snapshots", async (t) => {
+  const pool = await createPlantDatabase();
+  t.after(() => pool.end());
+  const migration = (name) => readFileSync(join(__dirname, `../migrations/${name}`), "utf8");
+  await pool.query(migration("004-species-requests.sql"));
+  await pool.query(migration("008-record-change-submissions.sql"));
+  await pool.query(migration("021-observation-edit-requests.sql"));
+  await pool.query(migration("022-cancel-edit-requests.sql"));
+  const speciesId = (await pool.query("INSERT INTO species(scientific_name) VALUES('Revision test species') RETURNING species_id")).rows[0].species_id;
+  const plantId = (await pool.query("INSERT INTO plant_record(species_id,registered_subject,qr_token) VALUES($1,'staff:bot','revision-qr') RETURNING plant_id", [speciesId])).rows[0].plant_id;
+  await pool.query(migration("009-record-version-history.sql"));
+  await pool.query(`INSERT INTO record_change_submission(id,plant_id,owner_subject,revision,base_snapshot,proposed_snapshot,base_fingerprint,client_key,payload_hash)
+    VALUES('revision-change',$1,'staff:bot',2,'{}','{"scientific_name":"revision two"}','base','revision-key','revision-hash')`, [plantId]);
+  await pool.query(`INSERT INTO record_version_history(id,record_type,plant_id,version_number,owner_subject,edited_by,status,snapshot,change_id)
+    VALUES('revision-history','plant',$1,2,'staff:bot','staff:bot','Pending Review','{"scientific_name":"revision two"}','revision-change')`, [plantId]);
+  await pool.query(migration("025-original-plant-withdrawal.sql"));
+  await pool.query(migration("026-original-species-withdrawal.sql"));
+  await pool.query(migration("027-original-observation-withdrawal.sql"));
+  await pool.query(migration("028-immutable-record-version-revisions.sql"));
+  await pool.query(migration("028-immutable-record-version-revisions.sql"));
+  assert.equal((await pool.query("SELECT change_revision FROM record_version_history WHERE id='revision-history'")).rows[0].change_revision, 2);
+  await assert.rejects(pool.query("UPDATE record_version_history SET snapshot='{}' WHERE id='revision-history'"), /immutable/);
+  await pool.query("UPDATE record_version_history SET status='Correction Required',review_comment='Keep feedback' WHERE id='revision-history'");
+  assert.deepEqual((await pool.query("SELECT status,review_comment FROM record_version_history WHERE id='revision-history'")).rows[0],
+    { status: "Correction Required", review_comment: "Keep feedback" });
 });
 
 test("pre-009 approved edit proposals remain readable as partial earlier history", async (t) => {

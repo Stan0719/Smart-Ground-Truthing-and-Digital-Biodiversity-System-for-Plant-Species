@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBotanistNotificationStore, eventsFromObservations, notificationMessage } from "../utils/botanistNotificationStore.js";
+import { readFileSync } from "node:fs";
+import { createBotanistNotificationStore, eventsFromObservations, isMatchingInitialObservationCorrection, notificationMessage } from "../utils/botanistNotificationStore.js";
 
 const row = (extra = {}) => ({ id: "1", plant_id: 9, owner_subject: "staff:alice", status: "Approved", reviewed_at: "2026-11-02T02:00:00.000Z", review_decision: "Approved", review_comment: "Verified leaf details.", ...extra });
 function fixture() {
@@ -67,6 +68,37 @@ test("record-change correction metadata remains explicit and owner-scoped", asyn
   assert.equal(item.targetId, "17");
   assert.equal(item.observationId, undefined);
   assert.match(notificationMessage(item), /Clarify the plant description/);
+});
+
+test("initial-registration Observation correction notifications require the exact owned Observation and revision", () => {
+  const proposal = { id: "change-1", plant_id: 17, owner_subject: "staff:alice", status: "Correction Required", revision: 2,
+    base_snapshot: { workflow_type: "initial_registration_observation_edit", observation_id: "obs-initial" } };
+  const edit = { id: "change-1", observation_id: "obs-initial", owner_subject: "staff:alice", status: "Correction Required", revision: 2 };
+  const observation = { id: "obs-initial", plant_id: 17, owner_subject: "staff:alice", origin_type: "initial_registration" };
+  const input = { proposal, edit, observation, revision: 2, accountId: "alice" };
+  assert.equal(isMatchingInitialObservationCorrection(input), true);
+  assert.equal(isMatchingInitialObservationCorrection({ ...input, revision: 1 }), false, "stale notification revision is rejected");
+  assert.equal(isMatchingInitialObservationCorrection({ ...input, observation: { ...observation, origin_type: "subsequent_observation" } }), false);
+  assert.equal(isMatchingInitialObservationCorrection({ ...input, proposal: { ...proposal, plant_id: 18 } }), false);
+  assert.equal(isMatchingInitialObservationCorrection({ ...input, edit: { ...edit, owner_subject: "staff:bob" } }), false);
+  const screen = readFileSync(new URL("../screens/BotanistNotifications.js", import.meta.url), "utf8");
+  assert.match(screen, /navigation\.navigate\("FieldCollectionEdit", \{ observation, plantId: observation\.plant_id, editRequest: edit \}\)/);
+  assert.match(screen, /proposal\.base_snapshot\?\.workflow_type === "initial_registration_observation_edit"/);
+  assert.match(screen, /navigation\.navigate\("EditPlant", \{ plantId: proposal\.plant_id, botanist: user, correction: true, correctionChangeId: proposal\.id \}\)/,
+    "ordinary Plant correction notifications retain their existing destination");
+});
+
+test("legacy Observation edit correction notifications retain request identity and revision", async () => {
+  const f = fixture();
+  f.dependencies.fetchNotifications = async () => ({ notifications: [{ id: "legacy-edit-notice", type: "observation_edit_correction",
+    entityType: "observation_edit", requestId: "legacy-edit-1", observationId: "obs-initial", plantId: "17", revision: 4,
+    createdAt: "2026-11-16T03:00:00.000Z", read: false, comment: "Clarify the field notes." }] });
+  const [item] = (await createBotanistNotificationStore(f.dependencies).load("alice")).items;
+  assert.equal(item.entityType, "observation_edit");
+  assert.equal(item.requestId, "legacy-edit-1");
+  assert.equal(item.observationId, "obs-initial");
+  assert.equal(item.revision, 4);
+  assert.equal(item.comment, "Clarify the field notes.");
 });
 
 test("notifications are deduplicated, sorted newest first, and repeated refresh preserves unread count", async () => {

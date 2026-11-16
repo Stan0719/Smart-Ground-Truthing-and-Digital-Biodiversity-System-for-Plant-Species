@@ -23,7 +23,7 @@ async function createReadySpeciesPhotoDatabase() {
   try {
     await pool.query("SET search_path TO plant_app,pg_catalog;");
     for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql",
-      "008-record-change-submissions.sql", "009-record-version-history.sql"])
+      "008-record-change-submissions.sql", "009-record-version-history.sql", "028-immutable-record-version-revisions.sql"])
       await pool.query(readFileSync(join(__dirname, "../migrations", name), "utf8"));
     await useVerifiedPhotoKeyTypes(pool);
     for (const name of ["014-species-image-gallery.sql", "015-species-photo-roles.sql"])

@@ -97,7 +97,8 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
         if (b.plant_id) {
           const observation = (
             await c.query(
-              "SELECT id FROM plant_observation WHERE id=$1 AND plant_id=$2 AND owner_subject=$3 AND status IN ('Draft','Correction Required')",
+              `SELECT id FROM plant_observation WHERE id=$1 AND plant_id=$2 AND owner_subject=$3
+                AND status IN ('Draft','Correction Required') FOR UPDATE`,
               [b.observation_id, b.plant_id, subject(req.user)],
             )
           ).rows[0];

@@ -1,7 +1,7 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { ActivityIndicator, View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
-import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, submissionStatus } from "../utils/botanistRecords";
+import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, submissionStatus, canWithdrawOriginalSpecies } from "../utils/botanistRecords";
 import EditAction from "../components/EditAction";
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
@@ -22,6 +22,9 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
   const [editAvailability, setEditAvailability] = useState("checking");
   const [cancellingEdit, setCancellingEdit] = useState(false);
   const [cancelEditError, setCancelEditError] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
+  const withdrawalInFlight = useRef(false);
   useFocusEffect(useCallback(() => {
     let active = true;
     setChangeInfo(null);
@@ -84,6 +87,26 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
   const current = state.key === key ? state : { loading: true, request: null, error: "" };
   const request = current.request;
   const refresh = () => { if (!current.loading) setRevision((value) => value + 1); };
+  const canWithdraw = canWithdrawOriginalSpecies(request, accountId, historicalDetail);
+  const confirmWithdrawal = () => Alert.alert(t("speciesWithdrawal.confirmTitle"), t("speciesWithdrawal.confirmMessage"), [
+    { text: t("speciesWithdrawal.keepSubmission"), style: "cancel" },
+    { text: t("speciesWithdrawal.action"), style: "destructive", onPress: async () => {
+      if (withdrawalInFlight.current || !canWithdraw) return;
+      withdrawalInFlight.current = true;
+      setWithdrawing(true);
+      setWithdrawError("");
+      try {
+        await plantApi(`/species-requests/${encodeURIComponent(request.request_id)}/withdraw`,
+          { method: "POST", expectedAccountId: accountId, body: {} });
+        setState((previous) => previous.key === key && previous.request
+          ? { ...previous, request: { ...previous.request, request_status: "Withdrawn" } } : previous);
+        Alert.alert(t("speciesWithdrawal.successTitle"), t("speciesWithdrawal.successMessage"));
+        setRevision((value) => value + 1);
+      } catch (error) {
+        setWithdrawError(translateUIMessage(error.message || t("speciesWithdrawal.failed")));
+      } finally { withdrawalInFlight.current = false; setWithdrawing(false); }
+    } },
+  ]);
   const field = (label, value) => value || historicalDetail ? <View key={label} style={styles.field}><Text style={styles.label}>{t(`submissions.${label}`)}</Text><Text style={styles.value}>{value == null || value === "" ? t("recordEdits.historicalFieldUnavailable") : value}</Text></View> : null;
   const date = (value) => value ? new Date(value).toLocaleString() : "";
   return <ScrollView style={styles.page} contentContainerStyle={styles.content}
@@ -108,7 +131,9 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
         <View style={styles.heroText}>
           <Text style={styles.reference}>{t("submissions.requestId")} {request.request_id}</Text>
           <View style={styles.titleRow}><Text style={styles.title}>{request.scientific_name || t("recordEdits.historicalFieldUnavailable")}</Text>
-            {!historicalDetail && ["Approved", "Pending Review", "Correction Required"].includes(request.request_status) &&
+            {!historicalDetail && (request.request_status === "Approved" || request.request_status === "Correction Required" ||
+              (request.request_status === "Pending Review" && !request.reviewed_at &&
+                (request.review_cycle == null || Number(request.review_cycle) === 1))) &&
               <EditAction testID="edit-own-species" disabled={request.request_status === "Approved" && editAvailability !== "clear"}
                 labelKey={request.request_status === "Approved" && editAvailability !== "clear" ? "recordEdits.editUnavailable" : undefined}
                 onPress={() => navigation.navigate("EditSpeciesRequest", { requestId, botanist: route.params?.botanist })} />}
@@ -119,12 +144,20 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
             {request.historicalCurrent && <Text style={styles.currentVersionPill}>{t("recordEdits.currentVersionLabel")}</Text>}
             {request.historicalSuperseded && <Text style={styles.supersededVersionPill}>{t("recordEdits.supersededLabel")}</Text>}
           </View>}
-          <View style={[styles.badge, submissionStatus(request.request_status) === "approved" ? styles.approved : submissionStatus(request.request_status) === "rejected" ? styles.rejected : styles.pending]}>
+          <View style={[styles.badge, submissionStatus(request.request_status) === "approved" ? styles.approved : ["rejected", "withdrawn", "superseded"].includes(submissionStatus(request.request_status)) ? styles.rejected : styles.pending]}>
             <Text style={styles.badgeText}>{request.request_status ? translateLabel(request.request_status) : t("recordEdits.historicalFieldUnavailable")}</Text>
           </View>
+          {!!withdrawError && <Text accessibilityRole="alert" style={styles.withdrawError}>{withdrawError}</Text>}
+          {canWithdraw && <View style={styles.withdrawAction}><TouchableOpacity testID="withdraw-original-species"
+            accessibilityRole="button" accessibilityLabel={t("speciesWithdrawal.action")} disabled={withdrawing}
+            style={[styles.withdrawButton, withdrawing && styles.withdrawDisabled]} onPress={confirmWithdrawal}>
+            {withdrawing ? <ActivityIndicator size="small" color="#A33F36" /> : <Ionicons name="arrow-undo-outline" size={17} color="#A33F36" />}
+            <Text style={styles.withdrawText}>{withdrawing ? t("common.pleaseWait") : t("speciesWithdrawal.action")}</Text>
+          </TouchableOpacity></View>}
       {route.params?.selectedChangeId != null &&
         activeSelectedChangeId === String(route.params.selectedChangeId) &&
         ["Pending Review", "Correction Required"].includes(changeInfo?.status) &&
+        (changeInfo.status === "Correction Required" || changeInfo.revision === 1) &&
         changeInfo.owner_subject === `staff:${accountId}` &&
         (route.params?.selectedChangeId == null || String(changeInfo.id) === String(route.params.selectedChangeId)) && <View style={styles.cancelEditAction}><TouchableOpacity accessibilityRole="button" disabled={cancellingEdit} style={[styles.deleteEditButton, cancellingEdit && { opacity: 0.65 }]} onPress={() => Alert.alert(t("recordEdits.deleteEditTitle"), t("recordEdits.deleteEditMessage"), [
           { text: t("common.cancel"), style: "cancel" },
@@ -186,6 +219,11 @@ const styles = StyleSheet.create({
   badge: { alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, marginTop: 4 },
   pending: { backgroundColor: "#FFF1D6" }, approved: { backgroundColor: "#E1F4E3" }, rejected: { backgroundColor: "#FCE2E2" },
   badgeText: { color: "#234B3A", fontWeight: "700", fontSize: 12 },
+  withdrawAction: { borderTopWidth: 1, borderTopColor: "#E2EDE0", marginTop: 10, paddingTop: 10, alignItems: "flex-end" },
+  withdrawButton: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#E8B9B2" },
+  withdrawDisabled: { opacity: 0.65 },
+  withdrawText: { color: "#A33F36", fontSize: 13, fontWeight: "700" },
+  withdrawError: { color: "#A34436", fontSize: 13, lineHeight: 20 },
   versionMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 2 },
   versionPill: { overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, color: "#234B3A", backgroundColor: "#E8F2E4", fontSize: 11, fontWeight: "700" },
   currentVersionPill: { overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, color: "#FFFFFF", backgroundColor: "#468585", fontSize: 11, fontWeight: "700" },

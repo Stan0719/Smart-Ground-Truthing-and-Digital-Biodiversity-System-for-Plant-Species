@@ -472,6 +472,7 @@
     "reviewAndManageYourPlantDocumentation": "Review and manage your plant documentation.",
     "readOnlyVersionSubtitle": "Review and manage your plant documentation.",
     "recordId": "Record ID",
+    "submissionRejected": "Submission Rejected",
     "speciesInformationIsAvailableButThereAreNoAdditionalFields": "Species information is available, but there are no additional fields to display.",
     "noLinkedSpecies": "No Linked Species",
     "noMatchingSpeciesInformationWasFoundForThisPlantRecord": "No matching species information was found for this plant record.",
@@ -826,6 +827,13 @@
   },
   "map": {
     "unknown": "Unknown",
+    "plantExplorer": "Plant Explorer",
+    "discoverDocumentedPlantsInNiahNationalPark": "Discover documented plants in Niah National Park",
+    "searchByPlantName": "Search by plant name...",
+    "biodiversityMap": "Biodiversity Map",
+    "tapAMarkerForDetails": "Tap a marker to explore a plant",
+    "noMappedPlants": "No plant locations are available on the map.",
+    "viewDetails": "View Details",
     "plantMap": "Plant Map",
     "exploreDocumentedPlantLocationsInNiahNationalPark": "Explore documented plant locations in Niah National Park",
     "searchPlants": "Search plants...",
@@ -847,6 +855,7 @@
     "recordTitle": "Observation Record",
     "recordSubtitle": "Review and manage your observation.",
     "officerFeedback": "Officer feedback",
+    "rejectedTitle": "Observation Rejected",
     "information": "Observation Information",
     "informationSubtitle": "Details recorded during the field survey",
     "locationInformation": "Location Information",
@@ -1399,6 +1408,26 @@
     "successTitle": "Submission Withdrawn",
     "successMessage": "Your Plant submission has been withdrawn.",
     "failed": "Unable to withdraw this Plant. Please refresh and try again."
+  },
+  "speciesWithdrawal": {
+    "action": "Withdraw Submission",
+    "confirmTitle": "Withdraw Species Submission?",
+    "confirmMessage": "Are you sure you want to withdraw this Species submission? It will no longer be reviewed by the Conservation Officer.",
+    "keepSubmission": "Keep Submission",
+    "successTitle": "Submission Withdrawn",
+    "successMessage": "Your Species submission has been withdrawn.",
+    "failed": "Unable to withdraw this Species submission. Please refresh and try again."
+  },
+  "observationWithdrawal": {
+    "action": "Withdraw Submission",
+    "confirmTitle": "Withdraw Observation?",
+    "confirmMessage": "Are you sure you want to withdraw this Observation? It will no longer be reviewed by the Conservation Officer.",
+    "keepSubmission": "Keep Submission",
+    "successTitle": "Observation Withdrawn",
+    "successMessage": "Your Observation has been withdrawn.",
+    "failed": "Unable to withdraw this Observation. Please refresh and try again.",
+    "parentRequired": "This Observation is part of the original Plant submission. Manage its withdrawal from the Plant submission.",
+    "openPlant": "Open Plant Submission"
   },
   "submissions": {
     "withdrawn": "Withdrawn",
