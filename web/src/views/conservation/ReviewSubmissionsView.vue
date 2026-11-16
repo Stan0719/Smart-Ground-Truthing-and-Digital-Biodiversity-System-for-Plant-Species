@@ -4,6 +4,7 @@ import ApprovedRecordChanges from '../../components/conservation/ApprovedRecordC
 import { readCompleteQueue, submissionSearchMatches, changeMatches, changeSpeciesId, changeZone, unifiedReviewRows, type RecordChange } from '../../services/recordChanges'
 const objectValue = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const changeProposals = ref<RecordChange[]>([])
+const submitterNames = ref<Record<string, string>>({})
 const changeDialog = ref<InstanceType<typeof ApprovedRecordChanges> | null>(null)
 const visibleLimit = ref(100)
 
@@ -401,6 +402,8 @@ const submissionSubmitterLabels = computed(() => submitterIdentifierLabels([
 ]))
 const submitterLabel = (subject: string) => {
   if (!subject) return rt('unavailable')
+  const staffId = subject.startsWith('staff:') ? subject.slice(6) : ''
+  if (staffId && submitterNames.value[staffId]) return submitterNames.value[staffId]
   const account = reviewSession.value.user
   // The existing authenticated session can identify only this exact account.
   // Other submitters have no authorized name/directory mapping on this page.
@@ -1187,6 +1190,19 @@ async function loadObservations(append = false) {
     const mapped = rawObservations.map(mapObservation).filter((item): item is ReviewObservation => item !== null && item.origin !== 'subsequent_observation')
     observations.value = [...new Map(mapped.map(item => [item.id,item])).values()]
     changeProposals.value = [...new Map(changes.map(item => [item.id,item])).values()]
+    const staffIds = [...new Set([
+      ...observations.value.map(item => item.recordedBy),
+      ...changeProposals.value.map(item => item.owner_subject),
+    ].filter(subject => subject.startsWith('staff:')).map(subject => subject.slice(6)))].slice(0, 100)
+    if (staffIds.length) {
+      try {
+        const response = await fetch(`/api/conservation/submitter-names?ids=${encodeURIComponent(staffIds.join(','))}`, { credentials: 'same-origin' })
+        if (current() && response.ok) {
+          const body = await response.json() as { names?: Record<string, string> }
+          if (body.names && typeof body.names === 'object') submitterNames.value = body.names
+        }
+      } catch { /* Keep the abbreviated identifier if the directory is unavailable. */ }
+    }
     skippedRecords.value = rawObservations.filter(item => mapObservation(item) === null).length
   } catch (failure) {
     if (current()) { observations.value = []; changeProposals.value = []; loadError.value = failure instanceof Error ? failure.message : rt('feedback.loadFailed') }

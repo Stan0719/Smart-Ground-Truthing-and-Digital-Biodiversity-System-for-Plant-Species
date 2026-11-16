@@ -74,6 +74,7 @@ const observations = ref<ApiObservation[]>([])
 const plants = ref<ApiPlant[]>([])
 const species = ref<ApiSpecies[]>([])
 const alerts = ref<ApiAlert[]>([])
+const submitterNames = ref<Record<string, string>>({})
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i
 const observationDisplayLabels = computed(() => new Map([...monitoringLabels(observations.value.map(item => item.id))].map(([raw, label]) => [raw, formatObservationId(raw) || (uuid.test(raw) ? `OBS-${label.replace(/\u2026$/, '')}` : label)])))
 const subjectLabels = computed(() => {
@@ -81,6 +82,8 @@ const subjectLabels = computed(() => {
   const part = (value: string) => /^(staff|visitor):/.test(value) ? value.slice(value.indexOf(':') + 1) : value
   const tokens = monitoringLabels(subjects.map(part))
   return new Map(subjects.map(subject => {
+    const staffId = subject.startsWith('staff:') ? subject.slice(6) : ''
+    if (staffId && submitterNames.value[staffId]) return [subject, submitterNames.value[staffId]]
     const account = session.value.user
     if (authorizedOfficer.value && account && subject === `staff:${account.id}` && account.name?.trim()) return [subject, account.name.trim()]
     const raw = part(subject), token = tokens.get(raw) || raw
@@ -132,6 +135,16 @@ const loadObservations = async () => {
   observationsError.value = ''
   try {
     observations.value = await loadJson<ApiObservation>('/api/observations', 'observations')
+    const ids = [...new Set(observations.value.map(row => row.owner_subject).filter((subject): subject is string => typeof subject === 'string' && subject.startsWith('staff:')).map(subject => subject.slice(6)))].slice(0, 100)
+    if (ids.length) {
+      try {
+        const response = await fetch(`/api/conservation/submitter-names?ids=${encodeURIComponent(ids.join(','))}`, { signal: AbortSignal.timeout(15000) })
+        if (response.ok) {
+          const body = await response.json() as { names?: Record<string, string> }
+          if (body.names && typeof body.names === 'object') submitterNames.value = body.names
+        }
+      } catch { /* Keep the abbreviated identifier if the directory is unavailable. */ }
+    }
   } catch (error) {
     observations.value = []
     observationsError.value = error instanceof Error ? error.message : 'Observations unavailable.'
