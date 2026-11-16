@@ -3545,17 +3545,20 @@ test('temporary verification failure preserves Officer review drafts while block
   try {
     await h.state.loadObservations();await h.state.open(h.state.observations.value[0])
     h.state.comment.value='Keep my unsaved review';h.state.speciesReviewComment.value='Keep species draft'
+    h.state.speciesCycleConflict.value=true;h.state.reviewMessage.value={message:'Private notice',variant:'info'};h.state.feedback.value={message:'Private feedback',variant:'error'}
     const officer=h.state.reviewSession.value.user
     h.emitSession(officer,true)
     assert.equal(h.state.selected.value.id,firstId)
     assert.equal(h.state.comment.value,'Keep my unsaved review')
     assert.equal(h.state.speciesReviewComment.value,'Keep species draft')
     assert.equal(h.state.canReviewPlant.value,false)
+    assert.equal(h.state.speciesCycleConflict.value,true);assert.equal(h.state.reviewMessage.value.message,'Private notice')
     await h.state.decide('Approved');assert.equal(h.calls.filter(call=>call.options.method==='POST').length,0)
     h.emitSession(officer,false)
     assert.equal(h.state.comment.value,'Keep my unsaved review');assert.equal(h.state.canReviewPlant.value,true)
     h.emitSession(null,false)
     assert.equal(h.state.selected.value,null);assert.equal(h.state.comment.value,'')
+    assert.equal(h.state.speciesCycleConflict.value,false);assert.equal(h.state.reviewMessage.value,null);assert.equal(h.state.feedback.value,null)
   }finally{h.stop()}
 })
 
@@ -3672,6 +3675,7 @@ test('linked and standalone species conflicts recover completed decisions with o
       assert.equal(h.state.speciesVisibility.value, '')
       assert.equal(h.state.canReviewSpecies.value, false)
       assert.equal(h.state.reviewMessage.value.variant, 'info')
+      assert.equal(h.state.speciesSaveError.value, '')
       await h.state.decideSpecies('Rejected'); assert.equal(posts, 1)
     } finally { h.stop() }
   }
@@ -3747,4 +3751,103 @@ test('a late observation queue page cannot overwrite recovered detail and table 
     assert.equal(h.state.selected.value.status,'Rejected')
     assert.equal(h.state.observations.value[0].status,'Rejected')
   } finally {h.stop()}
+})
+
+
+test('recovery safeguards: Species save navigation clears only its own request and never duplicates POST', async () => {
+  let release, posts = 0
+  const rows = [fixture({ species_request: requestFixture() }), fixture({ id: secondId })]
+  const h = harness((url, options) => {
+    if (url.startsWith('/api/conservation/submitter-names?')) return Response.json({names:{}})
+    if (options.method === 'POST') { posts++; return new Promise(resolve => release = resolve) }
+    return fixtureResponse(url, rows)
+  })
+  try {
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0])
+    h.state.speciesReviewComment.value = 'Review reason'
+    const saving = h.state.decideSpecies('Rejected'); await flush()
+    assert.equal(posts, 1); assert.ok(release)
+    h.route.query = {review: secondId}; await flush()
+    release(Response.json({reviewed:true})); await saving; await flush()
+    assert.equal(h.state.speciesSaving.value, false)
+    assert.equal(h.state.selected.value.id, secondId)
+    assert.equal(h.state.speciesReviewComment.value, '')
+    assert.equal(posts, 1)
+  } finally { h.stop() }
+})
+
+test('recovery safeguards: Observation conflict preserves linked Species draft and clears visibility without retry', async () => {
+  let posted = false, posts = 0
+  const row = () => fixture({revision: posted ? 4 : 3, species_request: requestFixture({request_status:'Approved',approved_species_id:8})})
+  const h = harness((url, options) => {
+    if (options.method === 'POST') { posted = true; posts++; return Response.json({error:'Revision conflict'},{status:409}) }
+    return fixtureResponse(url,[row()])
+  })
+  try {
+    await h.state.loadObservations(); await h.state.open(h.state.observations.value[0])
+    h.state.speciesReviewComment.value = 'Unsaved linked Species reason'; h.state.speciesVisibility.value = 'public'
+    await h.state.decide('Rejected') // Rejection requires a comment and must not send a request yet.
+    assert.equal(posts, 0)
+    h.state.comment.value = 'Plant reason'; await h.state.decide('Rejected')
+    assert.equal(posts, 1)
+    assert.equal(h.state.speciesReviewComment.value, 'Unsaved linked Species reason')
+    assert.equal(h.state.speciesVisibility.value, '')
+    assert.equal(h.state.comment.value, 'Plant reason')
+    assert.equal(h.state.selected.value.revision, 4)
+  } finally {h.stop()}
+})
+
+test('recovery safeguards: delayed Observation readback ignores navigation, session changes, newer selection and disposal', async () => {
+  for (const action of ['route', 'pending', 'logout', 'newer', 'dispose']) {
+    let release, posted = false, posts = 0
+    const rows = [fixture(), fixture({id:secondId})]
+    const h = harness((url, options) => {
+      if (options.method === 'POST') { posted = true; posts++; return Response.json({error:'Conflict'},{status:409}) }
+      if (posted && url === `/api/observations/${firstId}`) return new Promise(resolve => release = resolve)
+      return fixtureResponse(url,rows)
+    })
+    let stopped = false
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0])
+      const saving = h.state.decide('Approved'); await flush(); assert.ok(release)
+      if (action === 'route') h.route.query = {review:secondId}
+      if (action === 'pending') h.emitSession(h.state.reviewSession.value.user,true)
+      if (action === 'logout') h.emitSession(null)
+      if (action === 'newer') {const officer=h.state.reviewSession.value.user;h.emitSession(officer,true);h.emitSession(officer,false);await h.state.open(h.state.observations.value[1])}
+      if (action === 'dispose') {h.stop();stopped=true}
+      await flush()
+      release(Response.json({observation:fixture({status:'Rejected',revision:99})}))
+      await saving; await flush()
+      assert.equal(posts,1)
+      assert.notEqual(h.state.selected.value?.revision,99)
+      assert.ok(h.state.observations.value.every(row=>row.revision!==99))
+      assert.notEqual(h.state.reviewMessage.value?.message,'Conflict')
+    } finally {if(!stopped)h.stop()}
+  }
+})
+
+
+test('recovery safeguards: obsolete Species cleanup cannot clear a newer submission save', async () => {
+  const releases = []; let posts = 0
+  const rows = [fixture({species_request:requestFixture()}), fixture({id:secondId,species_request:requestFixture({request_id:'9'})})]
+  const h = harness((url, options) => {
+    if (options.method === 'POST') {posts++;return new Promise(resolve=>releases.push(resolve))}
+    return fixtureResponse(url,rows)
+  })
+  try {
+    await h.state.loadObservations();await h.state.open(h.state.observations.value[0])
+    h.state.speciesReviewComment.value='First reason'
+    const first=h.state.decideSpecies('Rejected');await flush();assert.equal(posts,1)
+    const officer=h.state.reviewSession.value.user
+    h.emitSession(officer,true);h.emitSession(officer,false)
+    await h.state.open(h.state.observations.value[1])
+    h.state.speciesReviewComment.value='Second reason'
+    const second=h.state.decideSpecies('Rejected');await flush();assert.equal(posts,2)
+    releases[0](Response.json({reviewed:true}));await first
+    assert.equal(h.state.speciesSaving.value,true)
+    assert.equal(h.state.selected.value.id,secondId)
+    assert.equal(h.state.speciesReviewComment.value,'Second reason')
+    releases[1](Response.json({reviewed:true}));await second
+    assert.equal(h.state.speciesSaving.value,false);assert.equal(posts,2)
+  }finally{h.stop()}
 })

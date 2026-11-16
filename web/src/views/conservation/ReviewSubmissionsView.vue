@@ -628,7 +628,7 @@ const unsubscribeReviewSession = subscribeSession((user, pending) => {
     clearPlantQr()
     listRequest++; observations.value = []; changeProposals.value = []; hasMore.value = false; nextCursor.value = null; isLoading.value = false
     selectionRequest++; selectionLoading.value = false; selectionError.value = ''; selected.value = null; standaloneRequest.value = null; speciesSaving.value = false; speciesRefreshing.value = false; comment.value = ''; needsReload.value = true
-    resetSpeciesState()
+    resetSpeciesState(); speciesCycleConflict.value = false; reviewMessage.value = null; feedback.value = null
   }
 })
 const canReviewPlant = computed(
@@ -1096,7 +1096,8 @@ async function decideSpecies(decision: SpeciesRequestDecision) {
     }
     speciesReviewComment.value = typedComment
   } finally {
-    if (current()) {
+    // Cleanup belongs to this request, even when navigation made its result stale.
+    if (!disposed && token === selectionRequest) {
       speciesSaving.value = false
       if (route.query.review !== observationId) void resolveQuery()
     }
@@ -1165,7 +1166,7 @@ async function decideStandaloneSpecies(decision: SpeciesRequestDecision, typedCo
     if (!current()) return
     if (error instanceof ReviewApiError && error.status === 409 && !committed) {
       await recoverSpeciesConflict(error, typedComment, current)
-      if (!current()) return
+      return
     } else speciesNeedsReload.value = committed || !(error instanceof ReviewApiError) || ![400,401,403].includes(error.status)
     speciesSaveError.value = committed ? rt('speciesRequest.savedReloadFailed') : error instanceof Error ? error.message : rt('speciesRequest.loadFailed')
     speciesReviewComment.value = typedComment
@@ -1279,9 +1280,11 @@ async function decide(decision: ReviewDecision) {
       return
     }
     const result = await performObservationReview({ id, revision, decision, comment: typedComment, request, read: fetchObservation,
-      current: () => !disposed && token === selectionRequest && selected.value?.id === id, invalidResponse: rt('feedback.invalidResponse') })
+      current: () => !disposed && token === selectionRequest && officerSessionReady.value && selected.value?.id === id && route.query.review === id, invalidResponse: rt('feedback.invalidResponse') })
     if (!result) return
+    const speciesDraft = speciesReviewComment.value
     if (result.observation) updateObservation(result.observation)
+    if (result.kind !== 'saved') { speciesReviewComment.value = speciesDraft; speciesVisibility.value = '' }
     needsReload.value = result.needsReload
     if (result.kind === 'saved') { comment.value = selected.value?.reviewComment || ''; showFeedback(rt('feedback.saved'), 'success') }
     else {
