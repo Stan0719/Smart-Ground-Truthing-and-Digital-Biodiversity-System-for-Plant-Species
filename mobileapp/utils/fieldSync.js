@@ -180,9 +180,13 @@ export function validateObservationDraft(draft) {
       ...(result.accuracy_m === undefined ? {} : { accuracy_m: result.accuracy_m }),
     };
   }
+  if (draft.method === "OBSERVATION_EDIT" && (!/^\/observation-edits(?:\/[A-Za-z0-9-]+)?$/.test(draft.path || "") ||
+    !/^[A-Za-z0-9-]+$/.test(String(draft.observation_id || "")) ||
+    (draft.path !== "/observation-edits" && (!Number.isInteger(body.revision) || body.revision <= 0))))
+    invalid("The observation edit target or revision is unavailable.");
   if (draft.method === "PATCH" && (!Number.isInteger(body.revision) || body.revision <= 0 || !/^\/observations\/[A-Za-z0-9-]+$/.test(draft.path || "")))
     invalid("The correction target or revision is unavailable.");
-  if (!isPlantRegistration && draft.method !== "PATCH" && !/^\/plants\/\d+\/observations$/.test(draft.path || ""))
+  if (!isPlantRegistration && !["PATCH", "OBSERVATION_EDIT"].includes(draft.method) && !/^\/plants\/\d+\/observations$/.test(draft.path || ""))
     invalid("Observation information is incomplete.");
   return { ...draft, body: normalizedBody };
 }
@@ -216,6 +220,30 @@ export function syncDrafts(accountId, { onSubmitted } = {}) {
           Object.keys({ ...row.content, ...draft.body.content }).some(
             (key) => row.content[key] !== draft.body.content[key],
           );
+        if (draft.method === "OBSERVATION_EDIT") {
+          const observationId = String(draft.observation_id);
+          const currentObservation = await plantApi(`/observations/${encodeURIComponent(observationId)}`, { expectedAccountId: accountId });
+          if (currentObservation.observation?.owner_subject !== `staff:${accountId}` || currentObservation.observation?.status !== "Approved")
+            throw Error("The approved observation is unavailable for this edit. The draft remains saved.");
+          const correction = draft.path !== "/observation-edits";
+          if (correction) {
+            const currentRequest = await plantApi(draft.path, { expectedAccountId: accountId });
+            if (currentRequest.edit?.owner_subject !== `staff:${accountId}` || currentRequest.edit?.status !== "Correction Required")
+              throw Error("The observation correction is no longer available. The draft remains saved.");
+          }
+          const { observation_id, client_key, ...correctionBody } = draft.body;
+          const body = { ...(correction ? correctionBody : { ...correctionBody, observation_id, client_key }),
+            ...(draft.assets?.length ? { photos: draft.assets.map(({ content_type, base64 }) => ({ content_type, base64 })) } : {}) };
+          saved = (await plantApi(draft.path, { method: correction ? "PATCH" : "POST", body,
+            expectedAccountId: accountId })).edit;
+          onSubmitted?.({ clientKey: storedDraft.client_key, id: observationId,
+            plantId: String(currentObservation.observation.plant_id), requestId: saved.id,
+            status: saved.status, type: "observation-edit" });
+          if ((await removeDraft(accountId, storedDraft.client_key, storedDraft)) !== false) {
+            synced++; completedKeys.push(storedDraft.client_key);
+          }
+          continue;
+        }
         if (draft.method === "PATCH") {
           const result = await plantApi("/observations", {
             expectedAccountId: accountId,

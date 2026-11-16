@@ -93,7 +93,7 @@ test('a slower request for the previous species cannot replace the selected spec
       ],
       filterUniqueSpeciesPlantRecords:(records,id,slug)=>records.filter(record=>id!=null?String(record.speciesId)===String(id):record.speciesSlug===slug),
       filterPlantRecordsForRole:(records,role,accountId,{publicOnly=false}={})=>publicOnly?records:records.filter(record=>record.currentStatus==='Approved'||(role==='Botanist'&&record.currentStatus==='Pending Review'&&record.registeredBy===`staff:${accountId}`)),
-      getPlantDisplayObservation:()=>null,isOwnedPendingPlant:()=>false,isPlantVisibleInRoleCatalog:plant=>plant.currentStatus==='Approved',mergeOwnedPendingPlantZones:records=>records,
+      getPlantDisplayObservation:()=>null,getScopedPlantRecords:(scoped,scope)=>scoped?.scope===scope&&Array.isArray(scoped.records)?scoped.records:[],isOwnedPendingPlant:()=>false,isPlantVisibleInRoleCatalog:plant=>plant.currentStatus==='Approved',mergeOwnedPendingPlantZones:records=>records,
     },
     '../utils/plantCardDisplay':{getPlantCardZoneLabel:()=>'',getPlantCardZoneValue:()=>null},
     '../components/RefreshButton':{default:'RefreshButton'},'../components/FavouriteHeart':{default:'FavouriteHeart'},
@@ -111,7 +111,7 @@ test('a slower request for the previous species cannot replace the selected spec
   resolveFirst([{id:'5',slug:'species-5',name:'Species 5'}]);
   resolveSecond([{id:'6',slug:'species-6',name:'Species 6'}]);
   await Promise.all([previousRequest,selectedRequest]);
-  assert.deepEqual(state[1].map(plant=>plant.plantId),['8']);
+  assert.deepEqual(state[1].records.map(plant=>plant.plantId),['8']);
   render('6','species-6');
   assert.equal(screenTree.type,'SafeAreaView');
   assert.deepEqual(screenTree.props.edges,['top','left','right']);

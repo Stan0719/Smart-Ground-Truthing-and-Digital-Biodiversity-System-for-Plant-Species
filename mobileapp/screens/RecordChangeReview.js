@@ -29,8 +29,13 @@ export default function RecordChangeReview() {
     try {
       const capabilities = await plantApi("/record-changes/capabilities");
       if (!capabilities.approved_edits_available) throw Error(t("recordEdits.migrationRequired"));
-      const response = await plantApi("/record-changes");
-      if (active.current) setState((old) => ({ ...old, loading: false, error: "", changes: response.changes || [] }));
+      const observationCapability = await plantApi("/observation-edits/capabilities");
+      const [response, observations] = await Promise.all([plantApi("/record-changes"), observationCapability.available
+        ? plantApi("/observation-edits") : Promise.resolve({ edits: [] })]);
+      const observationEdits = (observations.edits || []).map((edit) => ({ ...edit, observationEdit: true,
+        base_snapshot: edit.base_snapshot, proposed_snapshot: { content: edit.proposed_content, photo_ids: edit.retained_photo_ids },
+        proposal_photo_count: edit.added_photo_count, created_at: edit.created_at }));
+      if (active.current) setState((old) => ({ ...old, loading: false, error: "", changes: [...(response.changes || []), ...observationEdits] }));
     } catch (error) { if (active.current) setState((old) => ({ ...old, loading: false, error: error.message })); }
   }, []);
   useFocusEffect(useCallback(() => {
@@ -52,13 +57,13 @@ export default function RecordChangeReview() {
         const originalVersion = history.versions?.find((item) => item.version_number === proposalVersion?.version_number - 1);
         if (originalVersion?.has_species_photo) speciesPhotoPath = `/record-versions/${encodeURIComponent(originalVersion.id)}/photo`;
       }
-      const original = selected.plant_id
+      const original = selected.plant_id || selected.observationEdit
         ? (selected.base_snapshot?.photo_ids || []).map((id) => source(`/assets/${encodeURIComponent(id)}`))
         : speciesPhotoPath ? [source(speciesPhotoPath)] : [];
       const proposed = Array.from({ length: Number(selected.proposal_photo_count) || 0 }, (_, index) =>
-        source(`/record-changes/${encodeURIComponent(selected.id)}/photos/${index}`));
+        source(`/${selected.observationEdit ? "observation-edits" : "record-changes"}/${encodeURIComponent(selected.id)}/photos/${index}`));
       const retained = selected.proposed_snapshot?.photo_ids ?? (proposed.length ? [] : selected.base_snapshot?.photo_ids || []);
-      const removed = selected.plant_id ? (selected.base_snapshot?.photo_ids || []).filter((id) => !retained.includes(id)).map((id) => source(`/assets/${encodeURIComponent(id)}?scope=mine`)) : [];
+      const removed = selected.plant_id || selected.observationEdit ? (selected.base_snapshot?.photo_ids || []).filter((id) => !retained.includes(id)).map((id) => source(`/assets/${encodeURIComponent(id)}?scope=mine`)) : [];
       if (active) setImages({ original, proposed, removed, added: proposed });
     }).catch(() => { if (active) setImages({ original: [], proposed: [], removed: [], added: [] }); });
     return () => { active = false; };
@@ -66,24 +71,28 @@ export default function RecordChangeReview() {
   function select(id) { setState((old) => ({ ...old, selected: id })); setComment(""); }
   function review(decision) {
     if (submitting.current || !selected || !comment.trim()) return Alert.alert(t("common.error"), t("recordEdits.reviewReasonRequired"));
-    Alert.alert(t("recordEdits.confirmTitle"), t(decision === "Approved" ? "recordEdits.approveConfirm" : "recordEdits.rejectConfirm"), [
-      { text: t("common.cancel"), style: "cancel" }, { text: t(decision === "Approved" ? "recordEdits.approve" : "recordEdits.reject"), onPress: () => void submit(decision) },
+    Alert.alert(t("recordEdits.confirmTitle"), t(decision === "Approved" ? "recordEdits.approveConfirm" : decision === "Rejected" ? "recordEdits.rejectConfirm" : "recordEdits.correctionConfirm"), [
+      { text: t("common.cancel"), style: "cancel" }, { text: t(decision === "Approved" ? "recordEdits.approve" : decision === "Rejected" ? "recordEdits.reject" : "recordEdits.requestCorrection"), onPress: () => void submit(decision) },
     ]);
   }
   async function submit(decision) {
     if (submitting.current || !selected) return;
     submitting.current = true; setBusy(true);
     try {
-      await plantApi(`/record-changes/${encodeURIComponent(selected.id)}/review`, { method: "POST", body: { decision, comment: comment.trim() } });
-      const response = await plantApi("/record-changes");
-      setState({ loading: false, error: "", changes: response.changes || [], selected: null });
+      await plantApi(`/${selected.observationEdit ? "observation-edits" : "record-changes"}/${encodeURIComponent(selected.id)}/review`,
+        { method: "POST", body: { decision, comment: comment.trim(), revision: selected.revision } });
+      const capability = await plantApi("/observation-edits/capabilities");
+      const [response, observations] = await Promise.all([plantApi("/record-changes"), capability.available
+        ? plantApi("/observation-edits") : Promise.resolve({ edits: [] })]);
+      setState({ loading: false, error: "", changes: [...(response.changes || []), ...(observations.edits || []).map((edit) => ({ ...edit, observationEdit: true,
+        proposed_snapshot: { content: edit.proposed_content, photo_ids: edit.retained_photo_ids }, proposal_photo_count: edit.added_photo_count }))], selected: null });
       setComment("");
       Alert.alert(t("recordEdits.reviewSaved"));
     } catch (error) { Alert.alert(t("common.error"), translateUIMessage(error.message)); }
     finally { submitting.current = false; setBusy(false); }
   }
   const original = flattened(selected?.base_snapshot);
-  const proposed = selected?.plant_id ? { ...original, ...flattened(selected?.proposed_snapshot) } : flattened(selected?.proposed_snapshot);
+  const proposed = selected?.plant_id || selected?.observationEdit ? { ...original, ...flattened(selected?.proposed_snapshot) } : flattened(selected?.proposed_snapshot);
   const labels = [...new Set([...Object.keys(original), ...Object.keys(proposed)])]
     .filter((field) => JSON.stringify(original[field] ?? null) !== JSON.stringify(proposed[field] ?? null));
   return <ScrollView style={styles.page} contentContainerStyle={styles.content}>
@@ -93,7 +102,7 @@ export default function RecordChangeReview() {
       <TouchableOpacity style={styles.secondary} onPress={() => { setState((old) => ({ ...old, loading: true })); void load({ current: true }); }}><Text style={styles.secondaryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>}
     {!state.loading && !state.error && !state.changes.length && <Text style={styles.muted}>{t("recordEdits.noChanges")}</Text>}
     {!selected && state.changes.map((change) => <TouchableOpacity key={change.id} style={styles.card} onPress={() => select(change.id)} accessibilityRole="button">
-      <Text style={styles.heading}>{t(change.plant_id ? "recordEdits.plantInformation" : "recordEdits.editSpecies")} #{change.plant_id || change.species_id}</Text>
+      <Text style={styles.heading}>{t(change.observationEdit ? "myObservations.observationId" : change.plant_id ? "recordEdits.plantInformation" : "recordEdits.editSpecies")} #{change.observation_id || change.plant_id || change.species_id}</Text>
       <Text style={styles.muted}>{change.status} · {new Date(change.created_at).toLocaleString()}</Text>
     </TouchableOpacity>)}
     {selected && <>
@@ -123,6 +132,7 @@ export default function RecordChangeReview() {
         <TextInput style={styles.input} value={comment} onChangeText={setComment} multiline />
         <TouchableOpacity style={styles.primary} onPress={() => review("Approved")} disabled={busy}><Text style={styles.primaryText}>{t("recordEdits.approve")}</Text></TouchableOpacity>
         <TouchableOpacity style={styles.secondary} onPress={() => review("Rejected")} disabled={busy}><Text style={styles.secondaryText}>{t("recordEdits.reject")}</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.secondary} onPress={() => review("Correction Required")} disabled={busy}><Text style={styles.secondaryText}>{t("observationEdits.requestCorrection")}</Text></TouchableOpacity>
       </View>}
     </>}
   </ScrollView>;

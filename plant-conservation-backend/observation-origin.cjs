@@ -1,6 +1,7 @@
 "use strict";
 
-// No dependency on domain/review code: classification never changes eligibility.
+// No dependency on domain/review code. Version-aware callers rely on this
+// classification for eligibility, so uncertain provenance resolves to unknown.
 const origins = new Set(["initial_registration", "subsequent_observation", "unknown"]);
 const positiveId = value => /^[1-9][0-9]*$/.test(String(value));
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -39,6 +40,12 @@ function validReceipt(receipt, plant, observations, species, requests) {
 
 async function classifyObservations(pool, rows) {
   if (!rows.length) return rows;
+  // Migration 030 enables version-aware actions. The stored origin label alone
+  // is insufficient evidence for those actions; older deployments retain the
+  // established classification until the coordinated migration is active.
+  const versionAware = Boolean((await pool.query(`SELECT to_regclass('plant_app.observation_submission_photo') IS NOT NULL
+    AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='plant_app'
+      AND table_name='observation_review' AND column_name='submission_version_id') AS ready`)).rows[0]?.ready);
   const plantIds = [...new Set(rows.map(row => String(row.plant_id)))];
   const ids = rows.map(row => row.id);
   const hasReceipts = Boolean((await pool.query("SELECT to_regclass('plant_submission_receipt') IS NOT NULL AS available")).rows[0]?.available);
@@ -55,17 +62,30 @@ async function classifyObservations(pool, rows) {
     requests = new Map((await pool.query(`SELECT request_id,owner_subject,client_key,proposed_species_id,approved_species_id
       FROM species_request_submission WHERE request_id::text=ANY($1::text[])`, [requestIds])).rows.map(row => [String(row.request_id), row]));
   }
+  // Compare timestamps and JSON in PostgreSQL: converting timestamptz through
+  // JavaScript would discard microseconds and reject genuine creation events.
+  const evidence = new Map(versionAware ? (await pool.query(`SELECT o.id,
+      (SELECT count(*)::int FROM business_audit a WHERE a.action='observation_submitted'
+        AND a.target=o.id AND a.actor_subject=o.owner_subject AND a.created_at=o.created_at) AS creation_events,
+      EXISTS (SELECT 1 FROM observation_submission_version v WHERE v.observation_id=o.id
+        AND v.status='Approved' AND (o.status IS DISTINCT FROM 'Approved'
+          OR v.owner_subject IS DISTINCT FROM o.owner_subject
+          OR v.content IS DISTINCT FROM o.content)) AS mismatched_version
+    FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id
+    WHERE o.id=ANY($1::text[])`, [ids])).rows.map(row => [row.id, row]) : []);
   return rows.map(row => {
     const stored = Object.hasOwn(row, "origin_type") ? row.origin_type : "unknown";
     const candidates = receipts.filter(receipt => String(receipt.result?.plant_id) === String(row.plant_id) || receipt.result?.id === row.id);
     let origin = "unknown";
     if (origins.has(stored) && candidates.length === 0) {
-      if (stored === "subsequent_observation") origin = stored;
+      if (stored === "subsequent_observation" && (!versionAware ||
+          (evidence.get(row.id)?.creation_events === 1 && evidence.get(row.id)?.mismatched_version === false))) origin = stored;
     } else if (origins.has(stored) && candidates.length === 1 &&
         validReceipt(candidates[0], plants.get(String(row.plant_id)), observations, species, requests)) {
       const exactInitial = candidates[0].result.id === row.id;
       if (exactInitial && stored !== "subsequent_observation") origin = "initial_registration";
-      if (!exactInitial && stored === "subsequent_observation") origin = stored;
+      if (!exactInitial && stored === "subsequent_observation" && (!versionAware ||
+          (evidence.get(row.id)?.creation_events === 1 && evidence.get(row.id)?.mismatched_version === false))) origin = stored;
     }
     // Replace any raw column value; never return receipt internals to the client.
     return { ...row, origin_type: origin };

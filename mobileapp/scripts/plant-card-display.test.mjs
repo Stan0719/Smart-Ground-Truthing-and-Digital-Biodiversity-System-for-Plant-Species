@@ -59,10 +59,27 @@ test("the Plants page may show Zone only for an authenticated owner's pending pl
 
 test("the Plants page hydrates Zones with one owner-scoped list read only when own pending plants are present", () => {
   const list = read("../screens/Plant.js");
-  assert.match(list, /records\.some\(\(record\) => isOwnedPendingPlant\(record, user\?\.id\)\)/);
-  assert.match(list, /fetchPlantRecords\(catalog, \{ accountId: user\?\.id, scopeMine: true \}\)/);
-  assert.match(list, /mergeOwnedPendingPlantZones\(records, ownerRecords, user\?\.id\)/);
+  assert.match(list, /records\.some\(\(record\) => isOwnedPendingPlant\(record, accountId\)\)/);
+  assert.match(list, /fetchPlantRecords\(catalog, \{ accountId, scopeMine: true \}\)/);
+  assert.match(list, /mergeOwnedPendingPlantZones\(records, ownerRecords, accountId\)/);
   assert.match(list, /allowOwnedPending: isBotanist && isOwnedPendingPlant\(plant, user\?\.id\)/);
+});
+
+test("plant list refresh retains the current account's records and hides another account's records immediately", () => {
+  const api = read("../utils/plantApi.js");
+  const helper = api.match(/export function getScopedPlantRecords\(state, scope\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(helper, "plant API should expose scope-bound list projection");
+  const context = vm.createContext({});
+  vm.runInContext(`${helper.replace("export ", "")}\nthis.getScopedPlantRecords = getScopedPlantRecords;`, context);
+  const records = [{ plantId: "pending-owner-record" }];
+  const state = { scope: "owner:botanist:species:6", records };
+  assert.equal(context.getScopedPlantRecords(state, state.scope), records);
+  assert.deepEqual(Array.from(context.getScopedPlantRecords(state, "different-owner:botanist:species:6")), []);
+
+  const list = read("../screens/Plant.js");
+  assert.match(list, /getScopedPlantRecords\(scopedSpeciesPlants, requestKey\)/);
+  assert.match(list, /if \(activeRequest\?\.key !== requestKey\) \{\s*setScopedSpeciesPlants\(\{ scope: requestKey, records: \[\] \}\);\s*\}/);
+  assert.match(list, /setScopedSpeciesPlants\(\{ scope: requestKey, records: visibleRecords \}\)/);
 });
 
 test("the Zone change keeps the existing search, approval filters, and sorting predicates", () => {

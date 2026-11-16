@@ -97,7 +97,8 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
         if (b.plant_id) {
           const observation = (
             await c.query(
-              "SELECT id FROM plant_observation WHERE id=$1 AND plant_id=$2 AND owner_subject=$3 AND status IN ('Draft','Correction Required','Rejected')",
+              `SELECT id FROM plant_observation WHERE id=$1 AND plant_id=$2 AND owner_subject=$3
+                AND status IN ('Draft','Correction Required') FOR UPDATE`,
               [b.observation_id, b.plant_id, subject(req.user)],
             )
           ).rows[0];
@@ -232,6 +233,11 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
     const ownObservationPhoto = Boolean(row.plant_id && row.observation_id && row.observation_plant_id != null &&
       row.owner_subject === owner && row.observation_owner_subject === owner &&
       ["Draft", "Pending Review", "Correction Required"].includes(row.observation_status));
+    const ownHistoricalObservationPhoto = Boolean(req.query.scope === "mine" &&
+      permitted(req.user, "plants.create") && row.plant_id && row.observation_id &&
+      row.observation_plant_id != null && row.rbac_status === "Approved" &&
+      row.observation_status === "Approved" &&
+      (row.registered_subject === owner || row.observation_owner_subject === owner));
     const approvedPlantPhoto = row.plant_id
       ? row.rbac_status === "Approved" && (row.observation_id
         ? row.observation_plant_id != null && row.observation_status === "Approved" &&
@@ -248,20 +254,13 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
     if (!canReadScientificCatalogue(req.user) &&
         (classification.rbac_data?.approvalStatus || "Approved") !== "Approved")
       fail(404, "Asset unavailable.");
-    if (!classification) fail(404, "Asset unavailable.");
-    if (row.species_id && (!row.approved || (classification.rbac_data?.approvalStatus || "Approved") !== "Approved") &&
-        !(permitted(req.user, "species.manage") || permitted(req.user, "plants.catalogue.scientific.read")) &&
-        !(canReadScientificCatalogue(req.user) && row.owner_subject === owner))
-      fail(404, "Asset unavailable.");
-    if (!canReadScientificCatalogue(req.user) &&
-        (classification.rbac_data?.approvalStatus || "Approved") !== "Approved")
-      fail(404, "Asset unavailable.");
     if (
       row.plant_id &&
       !approvedPlantPhoto &&
       !ownProposalPhoto &&
       !ownSubmissionPhoto &&
        !ownObservationPhoto &&
+      !ownHistoricalObservationPhoto &&
       req.user?.role !== "Conservation Officer" && !permitted(req.user, "plants.catalogue.scientific.read")
     )
       fail(404, "Asset unavailable.");

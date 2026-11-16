@@ -1,46 +1,16 @@
 {
-  "App.js": [
-    "route.name===\"HomeTab\"",
-    "route.name===\"PlantsTab\"",
-    "route.name===\"ScanTab\"",
-    "route.name===\"MapTab\"",
-    "route.name===\"AccountTab\"",
-    "route.name===\"ScanTab\"",
-    "user?.role===\"botanist\"",
-    "user?.role===\"botanist\"",
-    "user.role===\"botanist\"",
-    "verifiedUser.role===\"botanist\"",
-    "faceSession.restore()",
-    "faceSession.restore()",
-    "state===\"active\"",
-    "navigationRef.getCurrentRoute()?.name!==\"Login\"",
-    "faceSession.logout()",
-    "current?.name===\"AccountTab\"",
-    "current?.name===\"HomeTab\"",
-    "loggedInUser.role===\"botanist\""
-  ],
   "screens/Account.js": [
+    "user?.role?.toLowerCase()===\"visitor\"",
     "user?.role===\"conservation-officer\"",
     "navigation.navigate(\"RecordChangeReview\")",
+    "navigation.navigate(\"FavouritePlants\")",
+    "navigation.navigate(\"ScanHistory\")",
     "navigation.navigate(\"FavouritePlants\")",
     "navigation.navigate(\"ScanHistory\")"
   ],
   "screens/AddObservation.js": [
     "user?.role===\"botanist\"",
     "navigation.goBack()",
-    "navigation.goBack()"
-  ],
-  "screens/AddPlant.js": [
-    "plantApi(\"/qr-codes\")",
-    "code.status===\"generated\"",
-    "status!==\"granted\"",
-    "status!==\"granted\"",
-    "status!==\"granted\"",
-    "status!==\"granted\"",
-    "status!==\"granted\"",
-    "status!==\"granted\"",
-    "status!==\"granted\"",
-    "plantApi(\"/plant-submissions\",{method:\"POST\",body:{...(newSpecies?{new_species:newSpecies}:{species_id:Number(selectedSpecies.id)}),scientific_name:plantScientificName.trim(),latitude:latitudeValue,longitude:longitudeValue,...(accuracyValue===undefined?{}:{accuracy_m:accuracyValue}),content,photos,client_key:clientKeyRef.current,qr_id:selectedQRCode.qr_id}})",
     "navigation.goBack()"
   ],
   "screens/BotanistDashboard.js": [

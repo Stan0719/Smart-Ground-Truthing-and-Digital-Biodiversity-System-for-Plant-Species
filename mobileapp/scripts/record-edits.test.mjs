@@ -17,7 +17,7 @@ function screen(file, dependencies) {
   }, module, module.exports);
   return module.exports.default;
 }
-function harness(file, { record, approved, species = false, locationDenied = false, failReuseOnce = false, pendingEdit = false, editAvailabilityError = false, conflictOnChange = false, draftSaveError = false, savedDraft = null, speciesRequestId = null, speciesRequest = null, acknowledgement = undefined, catalog = [{ id: "6", scientificName: "Species name", commonName: "Common name" }] }) {
+function harness(file, { record, approved, species = false, locationDenied = false, failReuseOnce = false, photoSourceFailsOnce = false, pendingEdit = false, editAvailabilityError = false, conflictOnChange = false, draftSaveError = false, savedDraft = null, findDraftCandidate = null, speciesRequestId = null, speciesRequest = null, correctionChange = null, acknowledgement = undefined, catalog = [{ id: "6", scientificName: "Species name", commonName: "Common name" }], qrCodes = [{ qr_id: 2, qr_code: "current-token", plant_id: 8, status: "assigned" }, { qr_id: 3, qr_code: "free-token", plant_id: null, status: "generated" }] }) {
   let stateIndex = 0, refIndex = 0, states = [], refs = [], focus, alert, calls = [], draftSaves = [], navigations = [], photoReads = 0;
   const hooks = { ...React, useCallback: (fn) => fn, useRef: (initial) => {
     const index = refIndex++; if (!(index in refs)) refs[index] = { current: initial }; return refs[index];
@@ -36,13 +36,14 @@ function harness(file, { record, approved, species = false, locationDenied = fal
     if (path === "/record-changes" && options?.method === "POST" && conflictOnChange)
       throw Object.assign(Error("Changes are already pending review for this record."), { status: 409 });
     if (path === "/record-changes" && options?.method === "POST") return acknowledgement === undefined ? { change: { id: "change-12", status: "Pending Review" } } : acknowledgement;
-    if (path === "/qr-codes") return { qr_codes: [{ qr_id: 2, qr_code: "current-token", plant_id: 8, status: "assigned" },
-      { qr_id: 3, qr_code: "free-token", plant_id: null, status: "generated" }] };
+    if (/^\/record-changes\/[^/]+$/.test(path) && options?.method === "PATCH") return { change: { id: correctionChange?.id, status: "Pending Review", revision: 2 } };
+    if (path === "/qr-codes") return { qr_codes: qrCodes };
     return {};
   };
-  let failDownload = failReuseOnce;
+  let failDownload = failReuseOnce, failPhotoSource = photoSourceFailsOnce;
   const deps = { react: hooks, "react-native": native,
     "../components/OriginalUpdatedField": { default: (props) => React.createElement("View", {}, React.createElement("Text", {}, props.label), props.originalContent, props.children) },
+    "../components/fieldFormStyles": { fieldFormStyles: { photoButtonRow: {}, photoButton: {}, photoButtonText: {}, qrRefreshButton: {}, qrRefreshText: {} } },
     "../components/BotanicalSkeleton": { DetailSkeletonContent: "DetailSkeletonContent" },
     "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
     "expo-image-picker": { requestCameraPermissionsAsync: async () => ({ granted: true }), requestMediaLibraryPermissionsAsync: async () => ({ granted: true }),
@@ -59,21 +60,25 @@ function harness(file, { record, approved, species = false, locationDenied = fal
         children) },
     "../utils/qrInventory": { normalizeQRCodes: (payload) => payload.qr_codes.map((qr) => ({ id: String(qr.qr_id), label: `QR-${String(qr.qr_id).padStart(4, "0")}`, plantId: qr.plant_id == null ? null : String(qr.plant_id), status: qr.status })) },
     "../utils/botanistRecords": { ...(species ? { fetchBotanistSpeciesRequest: async () => { if (speciesFetchCount++ > 0 && record.failReload) throw Error("offline"); return { ...record }; } } : { fetchBotanistPlant: async () => record }),
+      fetchBotanistRecordChange: async (_accountId, changeId, options) => { assert.equal(String(changeId), String(correctionChange?.id)); assert.equal(options.kind, species ? "species" : "plant"); return correctionChange; },
       fetchBotanistRecordChangeStatus: async () => {
         if (editAvailabilityError) throw Error("offline");
         return { available: true, pending: pendingEdit ? { status: "Pending Review" } : null, latest: null };
       } },
-    "../utils/plantApi": species ? { plantApi: api } : { plantApi: api, fetchSpeciesCatalog: async () => catalog },
+    "../utils/plantApi": species ? { plantApi: api, recordChangePhotoSource: async () => ({ uri: "https://example.invalid/proposed-photo" }) } : { plantApi: api, fetchSpeciesCatalog: async () => catalog,
+      plantAssetSources: async (assets) => { if (failPhotoSource) { failPhotoSource = false; throw Error("Photo session unavailable"); }
+        return assets.map((asset) => ({ uri: `https://example.invalid/existing-${String(asset.id).replace("photo-", "")}` })); },
+      recordChangePhotoSource: async () => ({ uri: "https://example.invalid/proposed-photo" }) },
     "../utils/photoReuse": { downloadPhotoForReuse: async () => {
       if (failDownload) { failDownload = false; throw Object.assign(Error("PHOTO_REUSE_DOWNLOAD_FAILED"), { code: "PHOTO_REUSE_DOWNLOAD_FAILED" }); }
       return { photo: { content_type: "image/jpeg", base64: "cmV1c2Vk" }, cleanup: async () => {} };
     } },
-    "../utils/botanistFormDrafts": { getBotanistFormDraft: async () => savedDraft, findBotanistFormDraft: async () => null, saveBotanistFormDraft: async (accountId, draft) => { draftSaves.push({ accountId, draft }); if (draftSaveError) throw Error("storage unavailable"); return { ...draft, saved_at: "test" }; }, deleteBotanistFormDraft: async () => true },
+    "../utils/botanistFormDrafts": { getBotanistFormDraft: async () => savedDraft, findBotanistFormDraft: async (...args) => findDraftCandidate && (!args[3] || args[3](findDraftCandidate)) ? findDraftCandidate : null, saveBotanistFormDraft: async (accountId, draft) => { draftSaves.push({ accountId, draft }); if (draftSaveError) throw Error("storage unavailable"); return { ...draft, saved_at: "test" }; }, deleteBotanistFormDraft: async () => true },
     "../utils/botanistDraftAutosave": { useBotanistDraftAutosave: () => ({ stop: async () => {}, flush: async () => {} }) },
     "../translations/i18n": { useAppTranslation() {}, t: (key) => key, translateUIMessage: (value) => value },
   };
   const component = screen(file, deps);
-  const route = { params: { botanist: { id: "owner" }, ...(species ? { requestId: "1" } : { plantId: "8", ...(savedDraft ? { formDraftKey: savedDraft.client_key } : {}), ...(speciesRequestId ? { speciesRequestId } : {}) }) } };
+  const route = { params: { botanist: { id: "owner" }, ...(correctionChange ? { correctionChangeId: correctionChange.id, correction: true } : {}), ...(species ? { requestId: "1" } : { plantId: "8", ...(savedDraft ? { formDraftKey: savedDraft.client_key } : {}), ...(speciesRequestId ? { speciesRequestId } : {}) }) } };
   const navigation = { goBack() {}, setParams(params) { navigations.push(["setParams", params]); }, navigate(...args) { navigations.push(args); } };
   const render = () => { stateIndex = 0; refIndex = 0; return component({ route, navigation }); };
   function walk(node, predicate) {
@@ -96,11 +101,67 @@ function harness(file, { record, approved, species = false, locationDenied = fal
 }
 const plant = (status) => ({ id: "8", speciesId: "6", scientificName: "Manual plant name", status, qrId: "2", qrCode: "QR-0002",
   latestObservation: { revision: 1, assets: [{ id: "photo-1" }, { id: "photo-2" }, { id: "photo-3" }], content: { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Leaves", notes: "", latitude: 4.5, longitude: 113.7 } },
-  observations: [{ status: "Approved", content: { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Leaves", notes: "", latitude: 4.5, longitude: 113.7 } }],
+  observations: [{ status: "Approved", assets: [{ id: "photo-1" }, { id: "photo-2" }, { id: "photo-3" }], content: { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Leaves", notes: "", latitude: 4.5, longitude: 113.7 } }],
   photos: [1, 2, 3].map((index) => ({ uri: `https://example.invalid/existing-${index}` })) });
 const request = (status) => ({ request_id: 1, content_revision: 1, request_status: status, scientific_name: "Species A", common_name: "Common A",
   genus_name: "Genus A", family_name: "Family A", conservation_status: "Least Concern", description: "Original", habitat: "Forest",
   photo: { uri: "https://example.invalid/species" } });
+
+test("Plant correction keeps a selected species in a bounded, searchable list", async () => {
+  const catalog = Array.from({ length: 24 }, (_, index) => ({ id: String(index + 1), scientificName: `Species ${index + 1}`, commonName: `Common ${index + 1}` }));
+  const h = harness("screens/EditPlantRecord.js", { record: plant("Pending Review"), catalog });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  const list = h.walk(h.render(), (node) => node.type === "ScrollView" && node.props.nestedScrollEnabled && node.props.style?.maxHeight === 220);
+  assert.ok(list, "species options scroll independently of the form");
+  const last = h.walk(list, (node) => node.type === "TouchableOpacity" && h.text(node).includes("Species 24"));
+  last.props.onPress();
+  const search = h.walk(h.render(), (node) => node.type === "TextInput" && node.props.placeholder === "addPlant.searchByScientificOrCommonName");
+  search.props.onChangeText("Species 3");
+  assert.ok(h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node).includes("Species 24") && node.props.accessibilityState?.selected));
+  assert.ok(h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node).includes("recordEdits.requestNewSpecies")));
+});
+
+test("Plant correction lists only available and current QR codes and retains refresh", async () => {
+  const qrCodes = [
+    { qr_id: 2, qr_code: "current-token", plant_id: 8, status: "assigned" },
+    { qr_id: 3, qr_code: "other-token", plant_id: 9, status: "assigned" },
+    { qr_id: 4, qr_code: "retired-token", plant_id: null, status: "retired" },
+    ...Array.from({ length: 20 }, (_, index) => ({ qr_id: 10 + index, qr_code: `free-${index}`, plant_id: null, status: "generated" })),
+  ];
+  const h = harness("screens/EditPlantRecord.js", { record: plant("Pending Review"), qrCodes });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  const lists = h.collect(h.render(), (node) => node.type === "ScrollView" && node.props.nestedScrollEnabled && node.props.style?.maxHeight === 220);
+  assert.equal(lists.length, 2);
+  assert.ok(h.text(lists[1]).includes("QR-0002"));
+  assert.ok(h.text(lists[1]).includes("QR-0029"));
+  assert.ok(!h.text(lists[1]).includes("QR-0003"));
+  assert.ok(!h.text(lists[1]).includes("QR-0004"));
+  h.walk(lists[1], (node) => node.type === "TouchableOpacity" && h.text(node).includes("QR-0029")).props.onPress();
+  assert.ok(h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node).includes("QR-0029") && node.props.accessibilityState?.selected));
+  await h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node).includes("recordEdits.refreshQr")).props.onPress();
+  assert.ok(h.calls.filter(([path]) => path === "/qr-codes").length >= 2);
+});
+
+test("Plant correction resolves original photos by baseline asset ID, not gallery position", async () => {
+  const correctionChange = { id: "change-8", status: "Correction Required", revision: 1, review_comment: "Review photos",
+    base_snapshot: { photo_ids: ["photo-3", "photo-1"] }, proposed_snapshot: {}, proposal_photo_count: 0 };
+  const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), correctionChange });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  const originals = h.collect(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox");
+  assert.equal(originals.length, 2);
+  assert.equal(h.walk(originals[0], (node) => node.type === "Image")?.props.source.uri, "https://example.invalid/existing-3");
+  assert.equal(h.walk(originals[1], (node) => node.type === "Image")?.props.source.uri, "https://example.invalid/existing-1");
+});
+
+test("Plant correction shows a retry when original photo authorization fails", async () => {
+  const h = harness("screens/EditPlantRecord.js", { record: plant("Pending Review"), photoSourceFailsOnce: true });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(h.text(h.render()).includes("Photo session unavailable"));
+  const retry = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node).includes("common.tryAgain"));
+  assert.ok(retry);
+  retry.props.onPress(); await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(h.walk(h.render(), (node) => node.type === "Image" && node.props.source?.uri === "https://example.invalid/existing-1"));
+});
 
 test("Edit Plant opens the separate species request route only after saving the account and plant scoped draft", async () => {
   const h = harness("screens/EditPlantRecord.js", { record: plant("Approved") });
@@ -226,7 +287,7 @@ for (const approved of [false, true]) {
     if (!approved) assert.equal(saved[1].body.expected_revision, 1);
     assert.equal(h.alert[0], "recordEdits.savedTitle");
     h.alert[2][0].onPress();
-    assert.deepEqual(h.navigations.at(-1), ["BotanistSubmissions", { botanist: { id: "owner" }, openTarget: { kind: "plant", recordId: "8", ...(approved ? { changeId: "change-12" } : {}) } }]);
+    assert.deepEqual(h.navigations.at(-1), ["BotanistSubmissions", { botanist: { id: "owner" }, openTarget: { kind: "plant", recordId: "8" } }]);
   });
   test(`${approved ? "approved" : "pending"} species editor prefills and submits to the correct endpoint`, async () => {
     const h = harness("screens/EditSpeciesRequest.js", { record: request(approved ? "Approved" : "Pending Review"), species: true });
@@ -243,7 +304,7 @@ for (const approved of [false, true]) {
     assert.equal(Object.hasOwn(saved[1].body.proposed || saved[1].body, "photo"), false, "text-only species edits must retain the saved photo");
     assert.equal(h.alert[0], "recordEdits.savedTitle");
     h.alert[2][0].onPress();
-    assert.deepEqual(h.navigations.at(-1), ["BotanistSubmissions", { botanist: { id: "owner" }, openTarget: { kind: "species", recordId: "1", ...(approved ? { changeId: "change-12" } : {}) } }]);
+    assert.deepEqual(h.navigations.at(-1), ["BotanistSubmissions", { botanist: { id: "owner" }, openTarget: { kind: "species", recordId: "1" } }]);
   });
 }
 
@@ -298,6 +359,81 @@ test("species backend 409 pending-edit conflict preserves the proposal values", 
   submit.props.onPress(); await h.alert[2][1].onPress();
   assert.equal(h.alert[1], "recordEdits.pendingEditExplanation");
   assert.ok(h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "Species A"));
+});
+
+test("Plant edit correction is prefilled from the owner proposal and PATCHes the same proposal ID", async () => {
+  const correctionChange = { id: "change-plant-1", plant_id: "8", owner_subject: "staff:owner", status: "Correction Required", revision: 1,
+    review_comment: "Clarify the morphology.", proposal_photo_count: 0,
+    proposed_snapshot: { scientific_name: "Proposed plant name", species_id: "6", qr_id: 2,
+      content: { heightCm: 31, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Corrected leaves", notes: "Updated note", zone: "Zone B", latitude: 4.5, longitude: 113.7 } } };
+  const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), correctionChange });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(h.text(h.render()).includes("Clarify the morphology."));
+  assert.ok(h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "Proposed plant name"));
+  assert.ok(h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "Corrected leaves"));
+  h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.onPress();
+  await h.alert[2][1].onPress();
+  const sent = h.calls.find(([path, options]) => path === "/record-changes/change-plant-1" && options.method === "PATCH");
+  assert.equal(sent[1].body.revision, 1);
+  assert.equal(sent[1].body.proposed.scientific_name, "Proposed plant name");
+  assert.equal(sent[1].body.proposed.content.morphology, "Corrected leaves");
+  h.alert[2][0].onPress();
+  assert.deepEqual(h.navigations.at(-1), ["BotanistSubmissions", { botanist: { id: "owner" }, openTarget: { kind: "plant", recordId: "8" } }]);
+  assert.equal(h.calls.some(([path, options]) => path === "/record-changes" && options?.method === "POST"), false);
+});
+
+test("Species edit correction is prefilled and resubmits the same proposal", async () => {
+  const correctionChange = { id: "change-species-1", species_id: "6", owner_subject: "staff:owner", status: "Correction Required", revision: 1,
+    review_comment: "Use a clearer common name.", proposal_photo_count: 0, base_snapshot: { request_id: 1 },
+    proposed_snapshot: { scientific_name: "Proposed species", common_name: "Updated common", genus_name: "Genus A", family_name: "Family A",
+      conservation_status: "Least Concern", description: "Updated description", habitat: "Wet forest" } };
+  const h = harness("screens/EditSpeciesRequest.js", { record: request("Approved"), species: true, correctionChange });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(h.text(h.render()).includes("Use a clearer common name."));
+  assert.ok(h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "Proposed species"));
+  h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.onPress();
+  await h.alert[2][1].onPress();
+  const sent = h.calls.find(([path, options]) => path === "/record-changes/change-species-1" && options.method === "PATCH");
+  assert.equal(sent[1].body.revision, 1);
+  assert.equal(sent[1].body.proposed.scientific_name, "Proposed species");
+  h.alert[2][0].onPress();
+  assert.deepEqual(h.navigations.at(-1), ["BotanistSubmissions", { botanist: { id: "owner" }, openTarget: { kind: "species", recordId: "1" } }]);
+  assert.equal(h.calls.some(([path, options]) => path === "/record-changes" && options?.method === "POST"), false);
+});
+
+test("Plant correction silently restores only a draft for the same correction request", async () => {
+  const correctionChange = { id: "change-plant-1", plant_id: "8", owner_subject: "staff:owner", status: "Correction Required", revision: 1,
+    proposed_snapshot: { scientific_name: "Submitted plant", species_id: "6", qr_id: 2, content: { morphology: "Submitted morphology" } } };
+  const candidate = { client_key: "plant-correction-draft", correction_change_id: correctionChange.id,
+    form: { scientific_name: "Unsaved plant", species_id: "6", qr_id: "2", morphology: "Unsaved morphology" },
+    photo_refs: [{ slot: "new:00", uri: "file://unsaved.jpg" }] };
+  const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), correctionChange, savedDraft: candidate, findDraftCandidate: candidate });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  const tree = h.render();
+  assert.equal(h.alert, undefined, "correction drafts do not prompt");
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Unsaved plant"));
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Unsaved morphology"));
+});
+
+test("Species correction ignores an unfinished draft for a different correction request", async () => {
+  const correctionChange = { id: "change-species-1", species_id: "6", owner_subject: "staff:owner", status: "Correction Required", revision: 1,
+    base_snapshot: { request_id: 1 }, proposed_snapshot: { scientific_name: "Latest submitted species", common_name: "Latest common" } };
+  const unrelated = { client_key: "other-correction-draft", correction_change_id: "different-change",
+    form: { scientific_name: "Unrelated draft", common_name: "Unrelated common" }, photo_refs: [] };
+  const h = harness("screens/EditSpeciesRequest.js", { record: request("Approved"), species: true, correctionChange, savedDraft: unrelated, findDraftCandidate: unrelated });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  const tree = h.render();
+  assert.equal(h.alert, undefined, "correction drafts do not prompt");
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Latest submitted species"));
+  assert.equal(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Unrelated draft"), null);
+});
+
+test("normal plant editing keeps the existing unfinished-draft recovery prompt", async () => {
+  const candidate = { client_key: "ordinary-plant-draft", correction_change_id: null,
+    form: { scientific_name: "Saved ordinary edit", species_id: "6", qr_id: "2" }, photo_refs: [] };
+  const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), findDraftCandidate: candidate });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.alert?.[0], "botanistDrafts.recoveryTitle");
 });
 
 test("species editor reuses the authenticated original through the existing single-photo payload", async () => {

@@ -188,8 +188,7 @@ export function AddPlantForm({
       return !term ||
         species.scientificName.toLowerCase().includes(term) ||
         species.name.toLowerCase().includes(term);
-    })
-    .slice(0, 8);
+    });
 
   // const [category, setCategory] =
   //   useState("");
@@ -1003,7 +1002,7 @@ function handleRemoveSpeciesPhoto(index) {
             )}
 
             {showSpeciesPicker && !loadingSpeciesCatalog && !speciesCatalogError && (
-              <View style={styles.speciesPickerList}>
+              <ScrollView style={styles.speciesPickerList} nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
                 {filteredSpecies.length ? (
                   filteredSpecies.map((species) => (
                     <TouchableOpacity
@@ -1027,7 +1026,7 @@ function handleRemoveSpeciesPhoto(index) {
                 ) : (
                   <Text style={styles.speciesPickerEmpty}>{t("addPlant.noMatchingSpeciesInTheDatabaseAskAConservationOfficer")}</Text>
                 )}
-              </View>
+              </ScrollView>
             )}
 
             {selectedSpecies && (
@@ -1309,29 +1308,6 @@ function handleRemoveSpeciesPhoto(index) {
 
 
               {/* -------------------------------------------
-                  SPECIES APPROVAL INFO
-              ------------------------------------------- */}
-
-              <View
-                style={styles.approvalInfo}
-              >
-
-                <Text
-                  style={
-                    styles.approvalTitle
-                  }
-                >{t("addPlant.speciesApprovalRequired")}</Text>
-
-                <Text
-                  style={
-                    styles.approvalText
-                  }
-                >{t("addPlantWorkflow.requestApprovalInfo")}</Text>
-
-              </View>
-
-
-              {/* -------------------------------------------
                   ADD SPECIES REQUEST
               ------------------------------------------- */}
 
@@ -1344,6 +1320,10 @@ function handleRemoveSpeciesPhoto(index) {
             </View>
 
           )}
+
+          <View
+            style={styles.speciesDivider}
+          />
 
 
           {/* =================================================
@@ -1593,12 +1573,20 @@ function handleRemoveSpeciesPhoto(index) {
                       </TouchableOpacity>
                     ))
                   )}
-                  <RefreshButton
-                    style={styles.qrRefreshSpacing}
+                  <TouchableOpacity
+                    style={[styles.qrRefreshButton, availableQRCodes.length === 0 ? styles.qrRefreshEmpty : styles.qrRefreshAvailable]}
                     onPress={loadAvailableQRCodes}
-                    loading={loadingQRCodes}
-                    label={t("addPlant.refreshQrInventory")}
-                  />
+                    disabled={loadingQRCodes}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("addPlant.refreshQrInventory")}
+                    accessibilityState={{ disabled: loadingQRCodes, busy: loadingQRCodes }}
+                    testID="add-plant-qr-refresh"
+                  >
+                    {loadingQRCodes ? <ActivityIndicator size="small" color="#28665E" />
+                      : <Ionicons name="refresh-outline" size={18} color="#28665E" />}
+                    <Text style={styles.qrRefreshText}>{t("addPlant.refreshQrInventory")}</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </>
@@ -2037,6 +2025,8 @@ const styles = StyleSheet.create({
 
   speciesPickerList: {
     marginTop: 6,
+    marginRight: 52,
+    maxHeight: 240,
     borderWidth: 1,
     borderColor: "#DCE8D6",
     borderRadius: 10,
@@ -2156,31 +2146,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: "#6D7F75",
-  },
-
-
-  approvalInfo: {
-    marginTop: 20,
-    padding: 14,
-    backgroundColor: "#E9F7E4",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#D4EBD0",
-  },
-
-
-  approvalTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#234B3A",
-  },
-
-
-  approvalText: {
-    marginTop: 5,
-    fontSize: 12,
-    lineHeight: 18,
-    color: "#5F7067",
   },
 
 
@@ -2600,10 +2565,10 @@ const styles = StyleSheet.create({
   },
 
 
-  qrRefreshSpacing: {
-    alignSelf: "flex-start",
-    marginTop: 8,
-  },
+  qrRefreshButton: fieldFormStyles.qrRefreshButton,
+  qrRefreshAvailable: { alignSelf: "flex-end", marginRight: 10 },
+  qrRefreshEmpty: { alignSelf: "center" },
+  qrRefreshText: fieldFormStyles.qrRefreshText,
 
   qrDropdown: {
     marginTop: 5,

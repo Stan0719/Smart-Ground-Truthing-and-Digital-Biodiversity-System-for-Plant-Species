@@ -2,14 +2,15 @@
 // Historical capture and read projection. Lazy baselines can contain later edits;
 // only a snapshot captured in the actual approval transaction is trustworthy.
 const { randomUUID } = require("node:crypto");
+const { initialVersionAvailable } = require("./record-version-history.cjs");
 async function available(c) {
-  return (await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available;
+  return initialVersionAvailable(c);
 }
 const missing = () => ({ state: "unavailable", assets: [], fields: {} });
 // Store in the existing optional history entity. Parent review locks serialize numbering;
 // no approval, live-record, upload, notification or status semantics change here.
 async function captureApprovedReview(c, { kind, submissionId, reviewId, reviewer, versionId = null }) {
-  if (!(await available(c))) return;
+  if (!(await initialVersionAvailable(c))) return;
   let targetId, owner, snapshot, photo = null;
   if (kind === "plant") {
     const row = (await c.query(`SELECT o.*,p.species_id,p.scientific_name AS plant_scientific_name,

@@ -5,6 +5,31 @@ export function submissionStatus(status) {
   const value = String(status || "").toLowerCase();
   return value === "approved" ? "approved" : value === "rejected" ? "rejected" : ["pending", "pending review"].includes(value) ? "pending" : value;
 }
+export function resolvePlantRecordStatus(storedStatus, initialObservation) {
+  // The Plant row can retain Pending Review after an Officer rejects or
+  // requests correction on the initial Observation. Keep an approved current
+  // Plant and a withdrawn submission distinct from that historical decision.
+  if (storedStatus === "Approved" || storedStatus === "Withdrawn") return storedStatus;
+  return initialObservation?.status || storedStatus;
+}
+export function canWithdrawOriginalPlant(plant, accountId) {
+  if (!plant?.isServerRecord || !["Pending Review", "Correction Required"].includes(plant.status) ||
+      String(plant.registeredBy) !== `staff:${accountId}` || plant.hasApprovedObservation ||
+      !["Pending Review", "Correction Required"].includes(plant.initialSubmissionStatus) ||
+      !plant.initialObservationId || plant.observations?.length !== 1) return false;
+  const original = plant.observations[0];
+  return String(original.id) === String(plant.initialObservationId) &&
+    ["initial_registration", "unknown"].includes(original.origin_type) &&
+    !["Approved", "Rejected", "Flagged"].includes(original.review_decision);
+}
+
+export function canWithdrawOriginalSpecies(request, accountId, historical = false) {
+  if (historical || !request || !accountId || (request.requested_by ?? request.owner_subject) !== `staff:${accountId}` ||
+      request.approved_species_id || request.withdrawn_at || request.request_status === "Withdrawn") return false;
+  if (request.request_status === "Correction Required") return true;
+  return request.request_status === "Pending Review" && !request.reviewed_at &&
+    (request.review_cycle == null || Number(request.review_cycle) === 1);
+}
 
 function list(payload, key) {
   if (!Array.isArray(payload?.[key])) throw Error("The backend returned an invalid plant records response.");
@@ -19,10 +44,13 @@ export function projectBotanistRecords(accountId, rows, observations, requests) 
     const history = ownedObservations.filter((o) => String(o.plant_id) === String(row.plant_id))
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     const latest = history[0];
+    const initialObservation = history.find((observation) => observation.origin_type === "initial_registration") ||
+      (history.length === 1 ? history[0] : null);
+    const currentStatus = resolvePlantRecordStatus(mapped.currentStatus, initialObservation);
     const latestApproved = history.find((observation) => observation.status === "Approved") || mapped.latestApproved;
     // A pending edit must not replace the live, approved values on Plant Details.
     // For an unapproved initial registration, show the owner's latest submitted data.
-    const content = mapped.currentStatus === "Approved"
+    const content = currentStatus === "Approved"
       ? latestApproved?.content || latestApproved || {}
       : latest?.content || row.latest_submission || row.latest_approved || {};
     const request = ownedRequests.find((r) => String(r.proposed_species_id ?? r.approved_species_id) === String(row.species_id));
@@ -30,10 +58,13 @@ export function projectBotanistRecords(accountId, rows, observations, requests) 
     const submittedSpecies = request ? { id: String(row.species_id), scientificName: request.scientific_name,
       commonName: request.common_name, genus: request.genus_name, family: request.family_name,
       conservationStatus: request.conservation_status, description: request.description, habitat: request.habitat } : undefined;
-    return { ...mapped, isServerRecord: true, status: mapped.currentStatus, name: mapped.commonName,
+    return { ...mapped, isServerRecord: true, currentStatus, status: currentStatus, name: mapped.commonName,
       height: content.heightCm, healthStatus: content.healthStatus, growthStage: content.lifeStage,
       morphology: content.morphology, zone: content.zone, altitude: content.altitudeM,
       latestObservation: latest, observationStatus: latest?.status || row.observation_status,
+      initialObservation,
+      initialSubmissionStatus: initialObservation?.status || null,
+      initialObservationId: initialObservation?.id || null,
       speciesRequest: request, speciesRequestId: request?.request_id, syncStatus: "Synced",
       speciesDetails: mapped.species || submittedSpecies, observations: history };
   });
@@ -42,15 +73,19 @@ export function projectBotanistRecords(accountId, rows, observations, requests) 
 async function fetchRecords(accountId, plantId) {
   if (!accountId) throw Error("Sign in as the Botanist who submitted this record.");
   const options = { expectedAccountId: accountId };
-  const [plantsResult, observationsResult, requestsResult] = await Promise.allSettled([
+  const [plantsResult, observationsResult, requestsResult, editsResult, recordChangesResult] = await Promise.allSettled([
     plantApi((plantId ? `/plants/${encodeURIComponent(plantId)}` : "/plants") + "?scope=mine", options).then((payload) => {
       if (plantId ? !payload?.plant : !Array.isArray(payload?.plants)) throw Error("The backend returned an invalid plant records response.");
       return payload;
     }),
     plantApi("/observations?scope=mine", options).then((payload) => { list(payload, "observations"); return payload; }),
     plantApi("/species-requests", options).then((payload) => { list(payload, "species_requests"); return payload; }),
+    plantApi("/observation-edits/capabilities", options).then((capability) => capability?.available
+      ? plantApi("/observation-edits", options).then((payload) => { list(payload, "edits"); return payload; }) : { edits: [] }),
+    plantApi("/record-changes/capabilities", options).then((capability) => capability?.approved_edits_available
+      ? plantApi("/record-changes", options).then((payload) => { list(payload, "changes"); return payload; }) : { changes: [] }),
   ]);
-  for (const result of [plantsResult, observationsResult, requestsResult]) {
+  for (const result of [plantsResult, observationsResult, requestsResult, editsResult, recordChangesResult]) {
     if (result.status === "rejected" && authenticationError(result.reason)) throw result.reason;
   }
   if (plantId && plantsResult.status === "rejected") throw plantsResult.reason;
@@ -59,14 +94,21 @@ async function fetchRecords(accountId, plantId) {
   if (plantsResult.status === "rejected") warnings.push(plantsResult.reason.message || "Unable to load plant records.");
   if (observationsResult.status === "rejected") warnings.push("Plant records loaded, but observation updates could not be refreshed. Pull to refresh and retry.");
   if (requestsResult.status === "rejected") warnings.push("Plant records loaded, but species requests could not be refreshed. Pull to refresh and retry.");
+  if (editsResult.status === "rejected" && editsResult.reason?.status !== 404 && editsResult.reason?.status !== 503)
+    warnings.push("Observation edits could not be refreshed. Pull to refresh and retry.");
+  if (recordChangesResult.status === "rejected" && recordChangesResult.reason?.status !== 404 && recordChangesResult.reason?.status !== 503)
+    warnings.push("Plant and species edits could not be refreshed. Pull to refresh and retry.");
   const result = projectBotanistRecords(accountId, plants ? (plantId ? [plants.plant] : list(plants, "plants")) : [],
     observationsResult.status === "fulfilled" ? list(observationsResult.value, "observations") : [],
     requestsResult.status === "fulfilled" ? list(requestsResult.value, "species_requests") : []);
   result.warnings = warnings;
+  result.edits = editsResult.status === "fulfilled" ? editsResult.value.edits.filter((row) => row.owner_subject === `staff:${accountId}`) : [];
+  result.recordChanges = recordChangesResult.status === "fulfilled" ? recordChangesResult.value.changes.filter((row) => row.owner_subject === `staff:${accountId}`) : [];
   // Omit failed sections so the same-account loader retains their last successful read.
   if (plantsResult.status === "rejected") delete result.plants;
   if (observationsResult.status === "rejected") delete result.observations;
   if (requestsResult.status === "rejected") delete result.requests;
+  if (recordChangesResult.status === "rejected") delete result.recordChanges;
   const photoResults = await Promise.allSettled([
     Promise.all((result.plants || []).map(async (plant) => {
       const assets = plant.latestObservation?.assets || [];
@@ -82,6 +124,17 @@ async function fetchRecords(accountId, plantId) {
     requestCount: result.requests?.length, observationCount: result.observations?.length,
   });
   return result;
+}
+
+export async function fetchBotanistRecordChange(accountId, changeId, { kind, targetId, status = "Correction Required" } = {}) {
+  if (!accountId || !changeId) throw Error("Record change proposal unavailable.");
+  const payload = await plantApi(`/record-changes/${encodeURIComponent(changeId)}`, { expectedAccountId: accountId });
+  const change = payload?.change;
+  if (!change || String(change.id) !== String(changeId) || change.owner_subject !== `staff:${accountId}` || (status !== "any" && change.status !== status) ||
+      (kind === "plant" && (!change.plant_id || (targetId != null && String(change.plant_id) !== String(targetId)))) ||
+      (kind === "species" && (!change.species_id || (targetId != null && String(change.base_snapshot?.request_id) !== String(targetId)))) ||
+      (kind && !["plant", "species"].includes(kind))) throw Error("Record change proposal unavailable.");
+  return change;
 }
 export const fetchBotanistRecords = (accountId) => fetchRecords(accountId);
 export async function fetchBotanistSpeciesRequest(accountId, requestId) {
@@ -116,7 +169,7 @@ export async function fetchBotanistRecordChanges(accountId) {
 function findPendingReviewedChange(changes, kind, targetId) {
   const target = String(targetId);
   return changes.find((change) => {
-    if (String(change.status || "").trim().toLowerCase() !== "pending review") return false;
+    if (!["pending review", "correction required"].includes(String(change.status || "").trim().toLowerCase())) return false;
     return kind === "plant"
       ? change.plant_id != null && String(change.plant_id) === target
       : change.base_snapshot?.request_id != null && String(change.base_snapshot.request_id) === target;
@@ -143,7 +196,7 @@ export async function fetchBotanistRecordChangeStatus(accountId, kind, targetId)
 }
 
 export function createBotanistRecordsLoader(load, changed) {
-  let state = { plants: [], observations: [], requests: [], loaded: false, loading: false, error: "" };
+  let state = { plants: [], observations: [], requests: [], edits: [], recordChanges: [], loaded: false, loading: false, error: "" };
   let pending = null, visit = 0;
   const publish = (next) => { state = next; changed(state); };
   return {
@@ -158,7 +211,7 @@ export function createBotanistRecordsLoader(load, changed) {
       }).catch((error) => {
         if (visit === current) publish({ ...state,
           ...(authenticationError(error)
-            ? { plants: [], observations: [], requests: [], loaded: false } : {}),
+            ? { plants: [], observations: [], requests: [], edits: [], recordChanges: [], loaded: false } : {}),
           loading: false, error: error.message || "Unable to load plant records." });
       }).finally(() => { if (pending === task) pending = null; });
       pending = task;

@@ -42,15 +42,18 @@ test("Visitors remain restricted even if the client object contains location fie
   assert.deepEqual(display({ latitude: null, longitude: null, zone: "Owner-only Zone" }, "Visitor"), { status: "restricted" });
 });
 
-test("Map and Plant Details use the same location display policy", () => {
-  for (const screen of ["Map.js", "PlantDetail.js"]) {
-    const screenSource = readFileSync(new URL(`../screens/${screen}`, import.meta.url), "utf8");
-    assert.match(screenSource, /getPlantLocationDisplay/);
-    assert.match(screenSource, /map\.locationRestricted/);
-    assert.match(screenSource, /map\.locationNotRecorded/);
-  }
+test("Map markers use authorized coordinates and compact cards keep GPS in Plant Details", () => {
   const map = readFileSync(new URL("../screens/Map.js", import.meta.url), "utf8");
   const detail = readFileSync(new URL("../screens/PlantDetail.js", import.meta.url), "utf8");
+  const nativeMap = readFileSync(new URL("../components/PlantExplorerMap.native.js", import.meta.url), "utf8");
+  assert.match(map, /getPlantLocationDisplay\(record\.location, user\?\.role\)/);
+  assert.match(map, /plant\.mapLocation\.status === "available"/);
+  assert.match(nativeMap, /fitToCoordinates\(coordinates/);
+  assert.match(nativeMap, /onViewDetails\(selected\)/);
+  assert.doesNotMatch(map, /location\.latitude\.toFixed|location\.longitude\.toFixed/);
+  assert.match(detail, /getPlantLocationDisplay/);
+  assert.match(detail, /map\.locationRestricted/);
+  assert.match(detail, /map\.locationNotRecorded/);
   assert.ok(detail.indexOf("const [plant, setPlant]") < detail.indexOf("const locationDisplay"));
   assert.match(map, /fetchPlantRecords\(\[\], \{ accountId: user\.id, scopeMine: true \}\)/);
   assert.match(map, /recordsById\.set\(record\.plantId, record\)/);
@@ -59,8 +62,8 @@ test("Map and Plant Details use the same location display policy", () => {
   assert.match(detail, /isOwnedPendingPlant\(plant, user\?\.id\)/);
   assert.match(detail, /const locationZoneValue = locationDisplay\.zone/);
   assert.ok((detail.match(/\{locationZoneValue\}|value=\{locationZoneValue\}/g) || []).length >= 2);
+  assert.match(map, /mapLocation\.zone/);
   for (const value of ["accuracyM", "altitudeM", "zone"]) {
-    assert.match(map, new RegExp(`location\\.${value}`));
     assert.match(detail, new RegExp(`locationDisplay\\.${value}`));
   }
 });

@@ -16,7 +16,7 @@ async function withResubmissionEvidence(db,rows,officer){
       AND h.owner_subject=o.owner_subject AND h.edited_by=o.owner_subject AND previous.owner_subject=o.owner_subject
       AND h.snapshot->>'observation_id'=o.id AND h.snapshot->>'observation_revision'=o.revision::text
       AND h.created_at=o.updated_at AND h.previous_snapshot=previous.snapshot
-      AND previous.snapshot->>'observation_id'=o.id AND previous.status='Correction Required'
+      AND previous.snapshot->>'observation_id'=o.id AND previous.status='Superseded'
       AND previous.reviewed_at=r.created_at AND previous.reviewed_by=r.reviewer_subject
       AND NOT EXISTS(SELECT 1 FROM record_version_history newer WHERE newer.plant_id=h.plant_id AND newer.version_number>h.version_number)
       AND EXISTS(SELECT 1 FROM business_audit a WHERE a.target=o.plant_id::text AND a.actor_subject=o.owner_subject

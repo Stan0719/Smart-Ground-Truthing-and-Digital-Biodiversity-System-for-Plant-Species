@@ -66,7 +66,7 @@ test('species asset listing admits approved public JPEG/PNG only, preserves RBAC
     assert.equal((await call('/assets/pdf')).status,403);
     assert.equal((await call('/assets/missing')).status,404);
   });
-  await t.test('existing scientific/Officer privileges remain distinct and Administrator gets no grant', async () => {
+  await t.test('existing scientific, Officer and Administrator catalogue privileges follow the shared RBAC matrix', async () => {
     assert.deepEqual(await listed(2,'bot'),['internal-png']);
     assert.deepEqual(await listed(3,'bot'),[]);
     assert.equal((await call('/assets/protected-png','bot')).status,404);
@@ -75,8 +75,8 @@ test('species asset listing admits approved public JPEG/PNG only, preserves RBAC
     assert.ok((await listed(1,'officer')).includes('unapproved-png'));
     assert.ok((await listed(1,'officer')).includes('pdf'));
     assert.equal((await call('/assets/pdf','officer')).status,200);
-    assert.equal((await call('/assets?species_id=1','admin')).status,403);
-    assert.equal((await call('/assets/a-tied','admin')).status,403);
-    assert.equal((await call('/species/1','admin')).status,403);
+    assert.equal((await call('/assets?species_id=1','admin')).status,200);
+    assert.equal((await call('/assets/a-tied','admin')).status,200);
+    assert.equal((await call('/species/1','admin')).status,200);
   });
 });
