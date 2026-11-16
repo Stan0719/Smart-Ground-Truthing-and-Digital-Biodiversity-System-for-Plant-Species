@@ -25,3 +25,12 @@ __pycache__/
 plant-conservation-backend/backups/
 web/server/data/
 mobileapp/face_backend/data/
+
+plant-conservation-backend/qr-local.env
+supabase/.temp/
+
+# Local model weights and camera recordings
+*.pt
+*.pth
+*.onnx
+Ai/**/camera/recordings/

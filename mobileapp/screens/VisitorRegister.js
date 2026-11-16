@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 import { faceApi } from "../utils/faceApi";
+import { authNavigationStyles } from "../components/authNavigationStyles";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -192,8 +193,9 @@ export default function VisitorRegisterScreen({ navigation }) {
                   <TouchableOpacity style={[styles.primaryButton, isSubmitting && styles.disabledButton]} onPress={handleRegister} disabled={isSubmitting} activeOpacity={0.75} accessibilityRole="button">
                     <Text style={styles.primaryButtonText}>{isSubmitting ? t("visitorRegister.creatingAccount") : t("visitorRegister.createAccount")}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.loginPrompt} onPress={() => navigation.goBack()} activeOpacity={0.65} accessibilityRole="button">
-                    <Text style={styles.promptText}>{t("visitorRegister.alreadyHaveAnAccount")}<Text style={styles.promptLink}>{t("visitorRegister.login")}</Text></Text>
+                  <TouchableOpacity style={authNavigationStyles.button} onPress={() => navigation.goBack()} activeOpacity={0.75}
+                    accessibilityRole="button" accessibilityLabel={t("login.logIn")}>
+                    <Text style={authNavigationStyles.text}>{t("login.logIn")}</Text>
                   </TouchableOpacity>
                 </View>
               </>
@@ -207,15 +209,15 @@ export default function VisitorRegisterScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#244B47" },
-  keyboardView: { flex: 1, overflow: "hidden", backgroundColor: "#2B5651" },
+  keyboardView: { flex: 1, backgroundColor: "#2B5651" },
   topGlow: { position: "absolute", top: -90, right: -80, width: 190, height: 190, borderRadius: 95, backgroundColor: "rgba(80, 180, 152, 0.13)" },
   bottomGlow: { position: "absolute", bottom: -130, left: -110, width: 270, height: 270, borderRadius: 135, backgroundColor: "rgba(31, 64, 61, 0.45)" },
   scrollContent: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 36 },
   content: { width: "100%", maxWidth: 390, alignSelf: "center", paddingTop: 32, paddingHorizontal: 32, paddingBottom: 28, borderWidth: 1, borderColor: "rgba(222, 249, 196, 0.18)", borderRadius: 22, backgroundColor: "#2B5651", shadowColor: "#0C2520", shadowOffset: { width: 0, height: 28 }, shadowOpacity: 0.38, shadowRadius: 35, elevation: 12 },
   iconCircle: { width: 58, height: 58, borderRadius: 29, backgroundColor: "#50B498", justifyContent: "center", alignItems: "center", alignSelf: "center", marginBottom: 16, shadowColor: "#0F3029", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.32, shadowRadius: 11, elevation: 8 },
   title: { marginBottom: 9, color: "#FFF6DC", fontSize: 30, fontWeight: "700", textAlign: "center" },
-  subtitle: { marginBottom: 30, color: "#C9DDD6", fontSize: 14, lineHeight: 22, textAlign: "center" },
-  form: { gap: 22 },
+  subtitle: { marginBottom: 24, color: "#C9DDD6", fontSize: 16, lineHeight: 22, textAlign: "center" },
+  form: { gap: 16 },
   inputGroup: { position: "relative", height: 54 },
   input: { width: "100%", height: "100%", paddingHorizontal: 18, paddingTop: 6, borderWidth: 1, borderColor: "rgba(224, 235, 221, 0.2)", borderRadius: 12, backgroundColor: "#1F403D", color: "#FFF6DC", fontSize: 16 },
   inputFocused: { borderColor: "#76D1B5", backgroundColor: "#234944", shadowColor: "#50B498", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.16, shadowRadius: 4, elevation: 2 },
@@ -226,7 +228,4 @@ const styles = StyleSheet.create({
   primaryButton: { width: "100%", height: 52, marginTop: 5, borderRadius: 12, backgroundColor: "#50B498", justifyContent: "center", alignItems: "center", shadowColor: "#0C2822", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.24, shadowRadius: 9, elevation: 6 },
   disabledButton: { opacity: 0.65 },
   primaryButtonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
-  loginPrompt: { alignSelf: "center", paddingVertical: 2 },
-  promptText: { color: "#C9DDD6", fontSize: 13 },
-  promptLink: { color: "#DEF9C4", fontWeight: "700" },
 });

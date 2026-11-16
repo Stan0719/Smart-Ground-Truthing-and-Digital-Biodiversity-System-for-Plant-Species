@@ -4,7 +4,8 @@ import { onBeforeUnmount, onMounted } from 'vue'
 const props = withDefaults(
   defineProps<{
     feedbackId: number
-    variant: 'success' | 'error'
+    variant: 'success' | 'error' | 'info'
+    title?: string
     message: string
     duration?: number
   }>(),
@@ -30,8 +31,8 @@ onBeforeUnmount(() => {
   <div
     class="action-feedback"
     :class="`action-feedback--${variant}`"
-    :role="variant === 'success' ? 'status' : 'alert'"
-    :aria-live="variant === 'success' ? 'polite' : 'assertive'"
+    :role="variant === 'error' ? 'alert' : 'status'"
+    :aria-live="variant === 'error' ? 'assertive' : 'polite'"
   >
     <svg
       v-if="variant === 'success'"
@@ -49,6 +50,11 @@ onBeforeUnmount(() => {
       />
       <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
     </svg>
+    <svg v-else-if="variant === 'info'" class="action-feedback__icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+      <circle cx="12" cy="8" r="1" fill="currentColor" />
+      <path d="M12 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    </svg>
     <svg
       v-else
       class="action-feedback__icon"
@@ -61,7 +67,7 @@ onBeforeUnmount(() => {
       <circle cx="12" cy="16.5" r="1" fill="currentColor" />
     </svg>
     <p>
-      <strong>{{ variant === 'success' ? 'Success' : 'Error' }}</strong>
+      <strong>{{ title ?? (variant === 'success' ? 'Success' : variant === 'info' ? 'Information' : 'Error') }}</strong>
       <span>{{ message }}</span>
     </p>
   </div>
@@ -96,6 +102,14 @@ onBeforeUnmount(() => {
   background: #fde8e7;
   color: #7a271a;
   box-shadow: 0 10px 28px rgba(122, 39, 26, 0.16);
+  animation: action-feedback-in 180ms ease-out;
+}
+
+.action-feedback--info {
+  border-left: 4px solid #1E40AF;
+  background: #DBEAFE;
+  color: #1E40AF;
+  box-shadow: 0 10px 28px rgba(30, 64, 175, 0.15);
   animation: action-feedback-in 180ms ease-out;
 }
 

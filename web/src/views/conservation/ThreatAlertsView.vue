@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
+import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { sessionSnapshot, subscribeSession } from '../../services/auth'
+import type { ThreatAlertPreview } from '../../data/threatAlertPreview'
+import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
+import { monitoringDate, monitoringLabels } from '../../utils/officerMonitoringDisplay'
+import { threatAlertBadgeStyle } from '../../utils/workflowBadge'
 import AppModal from '../../components/conservation/AppModal.vue'
 import { useConservationText } from '../../composables/useConservationText'
-import { prototypeCameraEvents } from '../../data/cameraMonitoringPrototype'
-import type { CameraEvent } from '../../types/cameraMonitoring'
 import {
-  CANONICAL_ALERT_CAP,
   loadCanonicalAlerts,
   saveAlertResponse,
   ThreatAlertApiError,
@@ -14,11 +17,11 @@ import {
   type CanonicalThreatAlert,
 } from '../../services/threatAlerts'
 
-const { ct, dt } = useConservationText()
+const { ct, locale } = useConservationText()
+const dt = (value?: string | null) => monitoringDate(value, locale.value)
 const route = useRoute()
 const alerts = ref<CanonicalThreatAlert[]>([])
 const selectedAlert = ref<CanonicalThreatAlert | null>(null)
-const selectedCameraEvent = ref<CameraEvent | null>(null)
 const search = ref('')
 const severity = ref('')
 const status = ref('')
@@ -31,28 +34,69 @@ const responseError = ref('')
 const responseFeedback = ref('')
 const isSavingResponse = ref(false)
 
-const formatAlertId = (id: string) => id
-const formatConfidence = (value: string | number | null) => {
-  if (value === null || value === '') return 'Not available'
-  const confidence = Number(value)
-  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 100) return 'Not available'
-  const percentage = confidence <= 1 ? confidence * 100 : confidence
-  return `${Math.round(percentage)}%`
+// The preview module (including fixtures and local decisions) is never imported in production.
+const developmentPreview = import.meta.env.DEV && ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+const preview = shallowRef<ThreatAlertPreview | null>(null)
+const session = ref(sessionSnapshot())
+const hasLoaded = ref(false)
+const isStartingPreview = ref(false)
+let generation = 0
+const authorizedPreview = computed(() => !session.value.pending && session.value.user?.role === 'Conservation Officer' && session.value.user.status === 'Active' && !session.value.user.mustChangePassword)
+const canPreview = computed(() => developmentPreview && authorizedPreview.value && hasLoaded.value && !isLoading.value && !errorMessage.value && alerts.value.length === 0)
+const previewActive = computed(() => canPreview.value && preview.value !== null)
+const isSampleAlert = computed(() => !!selectedAlert.value && !!preview.value?.owns(selectedAlert.value))
+const displayedAlerts = computed(() => previewActive.value ? preview.value!.rows : alerts.value)
+const exitPreview = () => {
+  if (isSampleAlert.value) {
+    selectedAlert.value = null
+    responseNote.value = ''
+    responseError.value = ''
+    responseFeedback.value = ''
+  }
+  preview.value = null
+  isStartingPreview.value = false
+  generation++
 }
-const formatDuration = (seconds?: number) => {
-  if (seconds === undefined) return '—'
-  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
-}
-const isWebVideoUrl = (value?: string) => {
-  if (!value) return false
+const startPreview = async () => {
+  if (!import.meta.env.DEV || !canPreview.value || preview.value || isStartingPreview.value) return
+  const token = generation
+  isStartingPreview.value = true
   try {
-    const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
+    const { createThreatAlertPreview } = await import('../../data/threatAlertPreview')
+    if (token === generation && canPreview.value) preview.value = createThreatAlertPreview()
+  } finally {
+    if (token === generation) isStartingPreview.value = false
   }
 }
+const unsubscribeSession = subscribeSession(() => {
+  exitPreview()
+  session.value = sessionSnapshot()
+  hasLoaded.value = false
+  isLoading.value = false
+  alerts.value = []
+  selectedAlert.value = null
+})
+onBeforeUnmount(() => { exitPreview(); unsubscribeSession() })
+
+const loadedAlerts = computed(() => [...displayedAlerts.value, ...(selectedAlert.value ? [selectedAlert.value] : [])])
+const alertLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.id)))
+const deviceLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.deviceId)))
+const readingLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.readingId)))
+const cameraLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.cameraId)))
+const subjectLabels = computed(() => monitoringLabels(loadedAlerts.value.flatMap(item => item.responses.map(response => response.officerSubject))))
+const formatAlertId = (id: string) => alertLabels.value.get(id) || id
+// Match the same validated timestamp and Malaysia timezone used by dt().
+const detectionDate = (value: string) => {
+  if (monitoringDate(value) === '\u2014') return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(value.replace(' ', 'T')))
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value
+  return `${part('year')}-${part('month')}-${part('day')}`
+}
 const openAlert = (alert: CanonicalThreatAlert) => {
+  if (!alerts.value.includes(alert) && !(import.meta.env.DEV && previewActive.value && preview.value?.owns(alert))) return
   selectedAlert.value = alert
   responseStatus.value = alert.status === 'Reviewing' ? 'Resolved' : 'Reviewing'
   responseNote.value = ''
@@ -63,27 +107,30 @@ const openAlert = (alert: CanonicalThreatAlert) => {
 const selectedAlertId = () => {
   const queryValue = route.query.alert
   if (typeof queryValue !== 'string') return
-  selectedCameraEvent.value =
-    prototypeCameraEvents.find((event) => event.eventId === queryValue) ?? null
   selectedAlert.value = null
-  if (selectedCameraEvent.value) return
-
   const alert = alerts.value.find((item) => item.id === queryValue)
   if (alert) openAlert(alert)
 }
 
 const loadAlerts = async () => {
+  exitPreview()
+  hasLoaded.value = false
   isLoading.value = true
   errorMessage.value = ''
+  const token = generation
   try {
-    alerts.value = await loadCanonicalAlerts()
+    const result = await loadCanonicalAlerts()
+    if (token !== generation) return
+    alerts.value = result
+    hasLoaded.value = true
     selectedAlertId()
   } catch (error) {
+    if (token !== generation) return
     alerts.value = []
     errorMessage.value =
       error instanceof Error ? error.message : 'Unable to retrieve threat alerts.'
   } finally {
-    isLoading.value = false
+    if (token === generation) isLoading.value = false
   }
 }
 
@@ -91,9 +138,9 @@ onMounted(loadAlerts)
 watch(() => [route.query.alert, route.query.device, route.query.reading], selectedAlertId)
 
 const severityOptions = computed<string[]>(() => [])
-const statusOptions = computed(() => [...new Set(alerts.value.map((alert) => alert.status))])
+const statusOptions = computed(() => [...new Set(displayedAlerts.value.map((alert) => alert.status))])
 const filteredAlerts = computed(() =>
-  alerts.value.filter((alert) => {
+  displayedAlerts.value.filter((alert) => {
     const searchable =
       `${alert.id} ${alert.metric} ${alert.value} ${alert.deviceId} ${alert.readingId ?? ''} ${alert.cameraId ?? ''} ${alert.status}`
         .toLowerCase()
@@ -104,7 +151,7 @@ const filteredAlerts = computed(() =>
       searchable &&
       !severity.value &&
       (!status.value || alert.status === status.value) &&
-      (!date.value || alert.createdAt.slice(0, 10) === date.value) &&
+      (!date.value || detectionDate(alert.detectedAt) === date.value) &&
       (!deviceQuery || alert.deviceId === deviceQuery) &&
       (!readingQuery || alert.readingId === readingQuery)
     )
@@ -129,6 +176,21 @@ const submitResponse = async () => {
   responseFeedback.value = ''
   if (!responseNote.value.trim()) {
     responseError.value = 'A response note is required.'
+    return
+  }
+  if (import.meta.env.DEV && isSampleAlert.value) {
+    if (!previewActive.value || !authorizedPreview.value) return
+    const result = preview.value!.respond(selectedAlert.value, responseNote.value, responseStatus.value)
+    if (result) responseError.value = result
+    else {
+      responseNote.value = ''
+      responseFeedback.value = 'Sample response applied locally. Not saved to database.'
+    }
+    return
+  }
+  // Only a selected object from the canonical API array may reach a real mutation.
+  if (!alerts.value.includes(selectedAlert.value)) {
+    responseError.value = 'This alert is not a current backend record. Reload before responding.'
     return
   }
   const id = selectedAlert.value.id
@@ -177,28 +239,27 @@ const submitResponse = async () => {
   </section>
 
   <section class="summary-grid">
-    <article v-for="card in cards" :key="String(card[0])" class="summary-card">
+    <article v-for="card in cards" :key="String(card[0])" class="summary-card alert-summary-card" :data-status="String(card[0])">
       <p>{{ ct(String(card[0])) }}</p>
       <strong>{{ card[1] }}</strong>
-      <small>{{ ct('PostgreSQL alert register') }}</small>
     </article>
   </section>
 
   <div class="control-bar">
     <label class="field search-field"
       ><span>{{ ct('Search') }}</span
-      ><input v-model="search" :placeholder="ct('Alert ID, Plant ID or type')"
+      ><input v-model="search" :placeholder="ct('Alert ID, device, reading, type or status')"
     /></label>
     <label class="field"
       ><span>{{ ct('Severity') }}</span
-      ><select v-model="severity" disabled title="Canonical alerts do not provide severity.">
+      ><select v-officer-dropdown v-model="severity" disabled title="Canonical alerts do not provide severity.">
         <option value="">{{ ct('All severities') }}</option>
         <option v-for="item in severityOptions" :key="item" :value="item">{{ ct(item) }}</option>
       </select></label
     >
     <label class="field"
       ><span>{{ ct('Status') }}</span
-      ><select v-model="status">
+      ><select v-officer-dropdown v-model="status">
         <option value="">{{ ct('All statuses') }}</option>
         <option v-for="item in statusOptions" :key="item" :value="item">{{ ct(item) }}</option>
       </select></label
@@ -209,116 +270,50 @@ const submitResponse = async () => {
     /></label>
   </div>
 
-  <section class="panel camera-alert-panel">
+  <section class="panel">
     <header class="panel-header">
       <div>
-        <h2>{{ ct('Suspicious Camera Events') }}</h2>
-        <span class="panel-description">{{
-          ct('Frontend prototype events · not persisted or connected to the AI module')
-        }}</span>
+        <h2>{{ ct('Threat Alerts') }}</h2>
+        <span v-if="previewActive" class="sample-marker">SAMPLE DATA &mdash; summary cards show real backend counts</span>
+      </div>
+      <div v-if="developmentPreview && canPreview" class="preview-controls">
+        <button v-if="!previewActive" class="action-button" type="button" :disabled="isStartingPreview" @click="startPreview">Preview Sample Alerts</button>
+        <button v-else class="action-button" type="button" @click="exitPreview">Exit Preview</button>
       </div>
     </header>
-    <div class="table-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th>{{ ct('Event ID') }}</th>
-            <th>{{ ct('Event Type') }}</th>
-            <th>{{ ct('Plant ID') }}</th>
-            <th>{{ ct('Camera ID') }}</th>
-            <th>{{ ct('Detection Confidence') }}</th>
-            <th>{{ ct('Status') }}</th>
-            <th>{{ ct('Detected At') }}</th>
-            <th>{{ ct('Recording') }}</th>
-            <th>{{ ct('Actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="event in prototypeCameraEvents" :key="event.eventId">
-            <td>
-              <strong>{{ event.eventId }}</strong>
-            </td>
-            <td>{{ event.description }}</td>
-            <td>{{ event.plantId }}</td>
-            <td>{{ event.cameraId }}</td>
-            <td>{{ formatConfidence(event.confidence) }}</td>
-            <td>
-              <span class="badge" :class="event.status.toLowerCase()">{{ event.status }}</span>
-            </td>
-            <td>{{ dt(event.detectedAt) }}</td>
-            <td>{{ isWebVideoUrl(event.videoUrl) ? ct('Available') : ct('Unavailable') }}</td>
-            <td>
-              <button class="action-button" @click="selectedCameraEvent = event">
-                {{ ct('View') }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <p v-if="isLoading" class="state-message" role="status">Loading threat alerts...</p>
+    <div v-else-if="errorMessage" class="state-message error-state" role="alert">
+      <p>{{ errorMessage }}</p>
+      <button class="action-button" @click="loadAlerts">Try again</button>
     </div>
-  </section>
-
-  <p v-if="isLoading" class="state-message">Loading threat alerts...</p>
-  <div v-else-if="errorMessage" class="state-message error-state">
-    <p>{{ errorMessage }}</p>
-    <button class="action-button" @click="loadAlerts">Try again</button>
-  </div>
-  <section v-else class="panel">
-    <header class="panel-header">
-      <div>
-        <h2>{{ ct('PostgreSQL Threat Alerts') }}</h2>
-        <span class="panel-description"
-          >Canonical alerts and response records · up to {{ CANONICAL_ALERT_CAP }} each.</span
-        >
-      </div>
-    </header>
-    <p v-if="!filteredAlerts.length" class="state-message">No threat alerts found.</p>
-    <div v-else class="table-scroll">
-      <table>
+    <p v-else-if="!filteredAlerts.length" class="state-message">No threat alerts found.</p>
+    <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="ct('Threat Alerts')" tabindex="0">
+      <table class="officer-data-table threat-alert-table"><colgroup><col class="column-id" /><col class="column-type" /><col class="column-identifier" /><col class="column-identifier" /><col class="column-status" /><col class="column-time" /><col class="column-actions" /></colgroup>
         <thead>
           <tr>
-            <th>{{ ct('Alert ID') }}</th>
-            <th>{{ ct('Alert Type') }}</th>
-            <th>{{ ct('Plant ID') }}</th>
-            <th>{{ ct('Species') }}</th>
-            <th>{{ ct('Reading Reference') }}</th>
-            <th>{{ ct('Device') }}</th>
-            <th>{{ ct('Detection Confidence') }}</th>
-            <th>{{ ct('Severity') }}</th>
-            <th>{{ ct('Status') }}</th>
-            <th>{{ ct('Detected At') }}</th>
-            <th>{{ ct('Actions') }}</th>
+            <th scope="col">{{ ct('Alert ID') }}</th>
+            <th scope="col">{{ ct('Alert Type') }}</th>
+            <th scope="col">{{ ct('Reading Reference') }}</th>
+            <th scope="col">{{ ct('Device') }}</th>
+            <th scope="col">{{ ct('Status') }}</th>
+            <th scope="col">{{ ct('Detected At') }}</th>
+            <th scope="col">{{ ct('Actions') }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="alert in filteredAlerts" :key="alert.id">
             <td>
-              <strong>{{ formatAlertId(alert.id) }}</strong>
+              <strong><MonitoringIdentifier :value="alert.id" :labels="alertLabels" /></strong>
             </td>
             <td>{{ alert.metric }}</td>
-            <td>—</td>
-            <td><em>Not available</em></td>
-            <td>{{ alert.readingId ?? '—' }}</td>
-            <td>{{ alert.deviceId }}</td>
-            <td>Not available</td>
+            <td><MonitoringIdentifier :value="alert.readingId" :labels="readingLabels" /></td>
+            <td><MonitoringIdentifier :value="alert.deviceId" :labels="deviceLabels" /></td>
             <td>
-              <span class="badge unavailable">Not available</span>
-            </td>
-            <td>
-              <span class="badge" :class="alert.status.toLowerCase()">{{ alert.status }}</span>
+              <span class="badge" :style="threatAlertBadgeStyle(alert.status)" :class="alert.status?.toLowerCase()">{{ alert.status }}</span>
             </td>
             <td>{{ dt(alert.detectedAt) }}</td>
             <td>
-              <div class="action-group">
-                <button class="action-button" @click="openAlert(alert)">
-                  {{ ct('View') }}</button
-                ><button
-                  class="action-button"
-                  disabled
-                  title="Canonical alerts do not provide a plant ID."
-                  >{{ ct('View Plant') }}</button
-                >
-              </div>
+              <button class="action-button" @click="openAlert(alert)">{{ ct('View') }}</button>
             </td>
           </tr>
         </tbody>
@@ -327,78 +322,23 @@ const submitResponse = async () => {
   </section>
 
   <AppModal
-    v-if="selectedCameraEvent"
-    :title="selectedCameraEvent.title"
-    :subtitle="`${selectedCameraEvent.eventId} · ${selectedCameraEvent.plantId}`"
-    wide
-    @close="selectedCameraEvent = null"
-  >
-    <dl class="detail-list camera-event-details">
-      <div>
-        <dt>{{ ct('Camera ID') }}</dt>
-        <dd>{{ selectedCameraEvent.cameraId }}</dd>
-      </div>
-      <div>
-        <dt>{{ ct('Event Type') }}</dt>
-        <dd>{{ selectedCameraEvent.description }}</dd>
-      </div>
-      <div>
-        <dt>{{ ct('Detection Confidence') }}</dt>
-        <dd>{{ formatConfidence(selectedCameraEvent.confidence) }}</dd>
-      </div>
-      <div>
-        <dt>{{ ct('Timestamp') }}</dt>
-        <dd>{{ dt(selectedCameraEvent.detectedAt) }}</dd>
-      </div>
-      <div>
-        <dt>{{ ct('Duration') }}</dt>
-        <dd>{{ formatDuration(selectedCameraEvent.durationSeconds) }}</dd>
-      </div>
-      <div>
-        <dt>{{ ct('Current Status') }}</dt>
-        <dd>{{ selectedCameraEvent.status }}</dd>
-      </div>
-      <div class="wide">
-        <dt>{{ ct('Description') }}</dt>
-        <dd>{{ selectedCameraEvent.description }}</dd>
-      </div>
-    </dl>
-    <h3>{{ ct('Event Recording') }}</h3>
-    <video
-      v-if="isWebVideoUrl(selectedCameraEvent.videoUrl)"
-      class="event-video"
-      :src="selectedCameraEvent.videoUrl"
-      controls
-      preload="metadata"
-    ></video>
-    <div v-else class="recording-unavailable">
-      <strong>{{ ct('Recording unavailable') }}</strong
-      ><span>{{ ct('Awaiting secure video-serving integration') }}</span>
-    </div>
-    <div class="modal-actions">
-      <RouterLink
-        class="secondary-button plant-link"
-        :to="`/plant/${selectedCameraEvent.plantId}`"
-        >{{ ct('View Plant') }}</RouterLink
-      >
-    </div>
-  </AppModal>
-
-  <AppModal
     v-if="selectedAlert"
     :title="`${formatAlertId(selectedAlert.id)} · ${selectedAlert.metric}`"
-    :subtitle="`${selectedAlert.deviceId} · canonical alert`"
+    :subtitle="`${deviceLabels.get(selectedAlert.deviceId) || selectedAlert.deviceId} · ${isSampleAlert ? 'sample alert' : 'canonical alert'}`"
     wide
+    accessible
     @close="selectedAlert = null"
   >
+    <p v-if="isSampleAlert" class="sample-marker" role="status">SAMPLE PREVIEW &mdash; NOT SAVED TO DATABASE</p>
+    <MonitoringIdentifier :value="selectedAlert.id" :labels="alertLabels" />
     <dl class="detail-list real-alert-details">
       <div>
         <dt>{{ ct('Reading Reference') }}</dt>
-        <dd>{{ selectedAlert.readingId ?? '—' }}</dd>
+        <dd><MonitoringIdentifier :value="selectedAlert.readingId" :labels="readingLabels" /></dd>
       </div>
       <div>
         <dt>{{ ct('Device') }}</dt>
-        <dd>{{ selectedAlert.deviceId }}</dd>
+        <dd><MonitoringIdentifier :value="selectedAlert.deviceId" :labels="deviceLabels" /></dd>
       </div>
       <div>
         <dt>{{ ct('Detection Confidence') }}</dt>
@@ -426,23 +366,23 @@ const submitResponse = async () => {
       </div>
       <div class="wide">
         <dt>{{ ct('Camera Reference') }}</dt>
-        <dd>{{ selectedAlert.cameraId ?? '—' }}</dd>
+        <dd><MonitoringIdentifier :value="selectedAlert.cameraId" :labels="cameraLabels" /></dd>
       </div>
     </dl>
     <h3>{{ ct('Response History') }}</h3>
     <div v-if="!selectedAlert.responses.length" class="evidence-unavailable">
       <strong>No response history recorded</strong>
-      <span>Canonical response history will appear after a saved Officer action.</span>
+      <span>{{ isSampleAlert ? 'Sample history appears after a local preview decision.' : 'Canonical response history will appear after a saved Officer action.' }}</span>
     </div>
     <dl v-else class="detail-list real-alert-details">
       <div v-for="response in selectedAlert.responses" :key="response.id" class="wide">
         <dt>{{ response.status }} · {{ dt(response.createdAt) }}</dt>
-        <dd>{{ response.note }} · {{ response.officerSubject }}</dd>
+        <dd>{{ response.note }} · <MonitoringIdentifier :value="response.officerSubject" :labels="subjectLabels" /></dd>
       </div>
     </dl>
     <label class="field">
       <span>Response status</span>
-      <select v-model="responseStatus" :disabled="selectedAlert.status === 'Resolved' || isSavingResponse">
+      <select v-officer-dropdown v-model="responseStatus" :disabled="selectedAlert.status === 'Resolved' || isSavingResponse">
         <option value="Reviewing">Reviewing</option>
         <option value="Resolved">Resolved</option>
       </select>
@@ -451,8 +391,8 @@ const submitResponse = async () => {
       <span>Response note</span>
       <textarea v-model="responseNote" :disabled="selectedAlert.status === 'Resolved' || isSavingResponse"></textarea>
     </label>
-    <p v-if="responseError" class="state-message error-state">{{ responseError }}</p>
-    <p v-if="responseFeedback" class="state-message">{{ responseFeedback }}</p>
+    <p v-if="responseError" class="state-message error-state" role="alert">{{ responseError }}</p>
+    <p v-if="responseFeedback" class="state-message" role="status">{{ responseFeedback }}</p>
     <div class="modal-actions">
       <button
         class="primary-button"
@@ -466,14 +406,20 @@ const submitResponse = async () => {
 </template>
 
 <style scoped>
-.camera-alert-panel {
-  margin-bottom: 18px;
-}
-.camera-event-details .wide,
+.preview-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.sample-marker { display: block; margin-top: 6px; color: #854d0e; font-weight: 700; overflow-wrap: anywhere; }
+
+.officer-layout.officer-layout .officer-table-scroll .threat-alert-table { min-width: 68rem; }
+
+.alert-summary-card { --alert-card-background: #e8f0f5; --alert-card-ink: #315d78; padding: 16px; border: 1px solid var(--alert-card-ink); background: var(--alert-card-background); color: var(--alert-card-ink); }
+.alert-summary-card[data-status="Active Alerts"] { --alert-card-background: #fbe8e5; --alert-card-ink: #a33f35; }
+.alert-summary-card[data-status="New Alerts"] { --alert-card-background: #e8f0f5; --alert-card-ink: #315d78; }
+.alert-summary-card[data-status="Under Review"] { --alert-card-background: #fff1db; --alert-card-ink: #926119; }
+.alert-summary-card[data-status="Resolved"] { --alert-card-background: #e7f3e9; --alert-card-ink: #287347; }
+.officer-layout.officer-layout.officer-layout .alert-summary-card :is(p, strong) { color: inherit; }
 .real-alert-details .wide {
   grid-column: 1 / -1;
 }
-.recording-unavailable,
 .evidence-unavailable {
   min-height: 180px;
   display: flex;
@@ -486,24 +432,9 @@ const submitResponse = async () => {
   color: #526b60;
   text-align: center;
 }
-.recording-unavailable span,
 .evidence-unavailable span {
   color: #819088;
   font-size: 10px;
-}
-.event-video {
-  width: 100%;
-  max-height: 420px;
-  border-radius: 11px;
-  background: #17221e;
-}
-.plant-link {
-  display: inline-flex;
-  align-items: center;
-  text-decoration: none;
-}
-a.action-button {
-  text-decoration: none;
 }
 .state-message {
   margin: 18px 0;
@@ -521,3 +452,5 @@ a.action-button {
   margin-top: 0;
 }
 </style>
+
+<style src="../../styles/officer-data-tables.css"></style>

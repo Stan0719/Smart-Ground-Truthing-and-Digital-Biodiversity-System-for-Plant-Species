@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AdminPageShell from '../components/AdminPageShell.vue'
+import AdminTableIdentifier from '../components/AdminTableIdentifier.vue'
 import StaffDialog from '../components/StaffDialog.vue'
 import { api, logout, type AuthUser } from '../services/auth'
 import { plantApi, type Device } from '../services/plantApi'
@@ -21,10 +22,6 @@ const pages: Record<string, { title: string; intro: string }> = {
     title: 'Sensor Management',
     intro: 'Register devices and configure their status and alert thresholds.',
   },
-  alerts: {
-    title: 'Threat Alerts',
-    intro: 'Monitor recorded alerts. Conservation Officers manage alert responses.',
-  },
   settings: { title: 'Security Settings', intro: 'Manage sign-in limits and session duration.' },
   activity: {
     title: 'System Activity',
@@ -41,14 +38,6 @@ interface Reading {
   values: Record<string, number>
   created_at: string
 }
-interface Alert {
-  id: string
-  device_id: string
-  metric: string
-  value: number
-  status: string
-  created_at: string
-}
 interface Audit {
   id: string | number
   created_at: string | number
@@ -62,7 +51,6 @@ interface Audit {
 }
 const devices = ref<Device[]>([]),
   readings = ref<Reading[]>([]),
-  alerts = ref<Alert[]>([]),
   events = ref<Audit[]>([]),
   users = ref<AuthUser[]>([]),
   permissions = ref<Record<string, string[]>>({})
@@ -97,13 +85,6 @@ const filteredDevices = computed(() =>
     (d) =>
       `${d.name} ${d.id}`.toLowerCase().includes(search.value.toLowerCase()) &&
       (filter.value === 'All' || d.status === filter.value),
-  ),
-)
-const filteredAlerts = computed(() =>
-  alerts.value.filter(
-    (a) =>
-      `${a.device_id} ${a.metric} ${a.id}`.toLowerCase().includes(search.value.toLowerCase()) &&
-      (filter.value === 'All' || a.status === filter.value),
   ),
 )
 const filteredReadings = computed(() =>
@@ -161,9 +142,7 @@ async function load() {
       events.value.sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       )
-    } else if (requested === 'alerts')
-      alerts.value = (await plantApi<{ alerts: Alert[] }>('/alerts')).alerts
-    else {
+    } else {
       const [d, r] = await Promise.all([
         plantApi<{ devices: Device[] }>('/devices'),
         plantApi<{ readings: Reading[] }>('/readings'),
@@ -256,7 +235,6 @@ watch(section, () => {
   message.value = ''
   devices.value = []
   readings.value = []
-  alerts.value = []
   events.value = []
   permissions.value = {}
   void load()
@@ -298,12 +276,7 @@ watch(section, () => {
           <option>All</option>
           <option>Active</option>
           <option>Inactive</option></select
-        ><select v-if="section === 'alerts'" v-model="filter" aria-label="Alert status">
-          <option>All</option>
-          <option>New</option>
-          <option>Reviewing</option>
-          <option>Resolved</option>
-        </select>
+        >
       </div>
       <template v-if="section === 'roles'">
         <p class="muted">
@@ -357,8 +330,8 @@ watch(section, () => {
             <span>Received readings</span><strong>{{ error ? '—' : readings.length }}</strong>
           </div>
         </div>
-        <div class="table-scroll">
-          <table>
+        <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="Sensor devices">
+          <table class="admin-data-table admin-device-table">
             <thead>
               <tr>
                 <th>Sensor</th>
@@ -371,7 +344,7 @@ watch(section, () => {
             <tbody>
               <tr v-for="d in filteredDevices" :key="d.id">
                 <td>
-                  {{ d.name }}<small>{{ d.id }}</small>
+                  {{ d.name }}<small><AdminTableIdentifier :value="d.id" copy-label="Copy full Device ID" /></small>
                 </td>
                 <td>
                   <span class="badge" :class="{ neutral: d.status !== 'Active' }">{{
@@ -446,43 +419,6 @@ watch(section, () => {
           </p>
         </section>
       </template>
-      <div v-if="section === 'alerts'" class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Alert</th>
-              <th>Device</th>
-              <th>Measurement</th>
-              <th>Status</th>
-              <th>Recorded at</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="a in filteredAlerts" :key="a.id">
-              <td>{{ a.id }}</td>
-              <td>{{ a.device_id }}</td>
-              <td>{{ measurement({ [a.metric]: a.value }) }}</td>
-              <td>
-                <span class="badge">{{ a.status }}</span>
-              </td>
-              <td>{{ date(a.created_at) }}</td>
-            </tr>
-            <tr v-if="!filteredAlerts.length">
-              <td colspan="5" class="empty">
-                {{
-                  busy
-                    ? 'Loading alerts…'
-                    : error
-                      ? 'Alerts unavailable.'
-                      : alerts.length
-                        ? 'No matching alerts.'
-                        : 'No threat alerts recorded.'
-                }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
       <div v-if="section === 'activity'" class="table-scroll">
         <table>
           <thead>

@@ -1,11 +1,14 @@
 import { ref } from 'vue'
+import { mapPlantCardMetadata } from './plantCardMapping'
 import { plantApi, type Species } from './plantApi'
 import { plants } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
 import { refreshSession } from '../composables/usePrototypeSession'
+import { plantThumbnailImages, speciesImageSelection } from './assetImages'
 export const knowledgeError = ref('')
 let generation = 0
 interface RecordRow {
+  plant_image_asset_id?: string
   plant_id: string
   species_id: string
   rbac_status?: string
@@ -13,6 +16,8 @@ interface RecordRow {
   latitude?: number
   longitude?: number
   accuracy_m?: number
+  zone?: string | null
+  altitude_m?: number | null
   registered_at?: string
   observed_at?: string
   registered_subject?: string
@@ -32,13 +37,12 @@ export async function refreshKnowledge() {
   try {
     const user = await refreshSession()
     if (attempt !== generation) return
-    // These sessions cannot read plant data under RBAC. Do not issue forbidden
-    // background requests from the public homepage or password-change screen.
-    if (user?.role === 'Administrator' || user?.mustChangePassword) return
-    const scientific = ['Botanist', 'Conservation Officer'].includes(user?.role || '')
+    // Password-change sessions cannot read the scientific catalogue.
+    if (user?.mustChangePassword) return
+    const scientific = ['Botanist', 'Conservation Officer', 'Administrator'].includes(user?.role || '')
     const [catalog, records] = await Promise.all([
       plantApi<{ species: Species[] }>(`/species?scope=${scientific ? 'scientific' : 'public'}`),
-      plantApi<{ plants: RecordRow[] }>('/plants'),
+      plantApi<{ plants: RecordRow[] }>(user ? '/plants' : '/plants?scope=public-web'),
     ])
     if (attempt !== generation) return
     plants.push(
@@ -70,25 +74,11 @@ export async function refreshKnowledge() {
           speciesId: String(r.species_id),
           speciesName: s?.scientificName || '',
           commonName: s?.name || '',
-          latestApproved: {
-            date: r.observed_at?.slice(0, 10) || r.registered_at?.slice(0, 10) || '',
-            heightCm: r.latest_approved?.heightCm ?? NaN,
-            healthStatus: r.latest_approved?.healthStatus || '',
-            lifeStage: r.latest_approved?.lifeStage || '',
-            morphology: r.latest_approved?.morphology || '',
-            notes: r.latest_approved?.notes || '',
-          },
-          location: {
-            zone: '',
-            latitude: r.latitude === undefined ? NaN : Number(r.latitude),
-            longitude: r.longitude === undefined ? NaN : Number(r.longitude),
-            altitudeM: NaN,
-            accuracyM: Number(r.accuracy_m ?? NaN),
-          },
+          ...mapPlantCardMetadata(r),
           qr: { code: '', status: r.rbac_status || r.status || '' },
           registeredBy: r.registered_subject || '',
           registeredAt: r.registered_at?.slice(0, 10) || '',
-          images: [],
+          images: plantThumbnailImages(r),
           observations: [],
         }
       }),
@@ -100,10 +90,8 @@ export async function refreshKnowledge() {
             `/assets?species_id=${s.speciesId}`,
           )
           if (attempt !== generation) return
-          s.images = result.assets
-            .filter((a) => a.content_type.startsWith('image/'))
-            .map((a) => ({ path: `/api/data/assets/${a.id}`, caption: 'Official species photo' }))
-          s.image = s.images[0]?.path
+          const portrait = catalog.species.find(row => String(row.species_id) === s.speciesId)
+          Object.assign(s, speciesImageSelection(result.assets, portrait?.image_url, portrait?.image_asset_id))
         }),
       )
       if (attempt !== generation) return
@@ -115,7 +103,7 @@ export async function refreshKnowledge() {
     if (e instanceof Error && e.message === 'Access denied.') {
       const current = await refreshSession()
       if (attempt !== generation) return
-      if (current?.role === 'Administrator' || current?.mustChangePassword) return
+      if (current?.mustChangePassword) return
     }
     if (attempt === generation) {
       plants.splice(0)

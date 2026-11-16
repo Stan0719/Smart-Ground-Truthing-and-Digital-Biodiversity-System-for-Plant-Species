@@ -106,8 +106,10 @@ async function request(path: string, options: RequestInit = {}): Promise<unknown
   return result
 }
 
-export async function loadCanonicalAlerts(): Promise<CanonicalThreatAlert[]> {
-  const result = record(await request(CANONICAL_ALERTS_PATH))
+export async function loadCanonicalAlerts(signal?: AbortSignal): Promise<CanonicalThreatAlert[]> {
+  const result = record(await request(CANONICAL_ALERTS_PATH, signal ? {
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+  } : {}))
   if (!result || !Array.isArray(result.alerts) || !Array.isArray(result.responses))
     throw new ThreatAlertApiError('The threat alert service returned an invalid response.', 200, 'invalid')
   const responses = result.responses.map(mapResponse)

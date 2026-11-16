@@ -43,11 +43,15 @@ export async function fetchVisitorFavourites(accountId) {
   const rawSpecies = payload?.favourites?.species;
   if (!Array.isArray(rawPlants) || !Array.isArray(rawSpecies))
     throw Error("The backend returned an invalid favourites response.");
-  const images = await addAuthenticatedImages([...rawPlants, ...rawSpecies], accountId);
+  const imageRows = [
+    ...rawPlants.map((row) => ({ ...row, image_asset_id: row.plant_image_asset_id })),
+    ...rawSpecies,
+  ];
+  const images = await addAuthenticatedImages(imageRows, accountId);
   return {
     plants: rawPlants.map((row) => ({
       ...mapBackendPlant(row),
-      image: images.get(String(row.image_asset_id)) || null,
+      image: images.get(String(row.plant_image_asset_id)) || null,
       favouritedAt: row.favourited_at || null,
     })),
     species: rawSpecies.map((row) => ({
@@ -56,6 +60,14 @@ export async function fetchVisitorFavourites(accountId) {
       favouritedAt: row.favourited_at || null,
     })),
   };
+}
+
+export async function fetchVisitorFavouritePlantIds(accountId) {
+  requireAccountId(accountId);
+  const payload = await requestVisitorApi("/visitor/favourites", { accountId });
+  const rows = payload?.favourites?.plants;
+  if (!Array.isArray(rows)) throw Error("The backend returned an invalid favourites response.");
+  return new Set(rows.map((row) => row?.plant_id).filter((id) => id != null).map(String));
 }
 
 export async function setVisitorFavourite(accountId, type, id, favourited) {
@@ -89,10 +101,24 @@ export async function recordVisitorScan(accountId, qrCode) {
 
 export async function fetchVisitorScanHistory(accountId) {
   requireAccountId(accountId);
-  const payload = await requestVisitorApi("/visitor/scan-history", { accountId });
-  if (!Array.isArray(payload?.scans)) throw Error("The backend returned an invalid scan history response.");
-  const rows = payload.scans;
-  const images = await addAuthenticatedImages(rows.map((row) => row.plant || {}), accountId);
+  const pageSize = 200;
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const payload = await requestVisitorApi(`/visitor/scan-history?limit=${pageSize}&offset=${offset}`, { accountId });
+    if (!Array.isArray(payload?.scans)) throw Error("The backend returned an invalid scan history response.");
+    rows.push(...payload.scans);
+    const hasMore = payload.page?.has_more === true ||
+      (payload.page?.has_more === undefined && payload.scans.length === pageSize);
+    if (!hasMore || payload.scans.length === 0) break;
+    offset += payload.scans.length;
+  }
+  let images = new Map();
+  try {
+    images = await addAuthenticatedImages(rows.map((row) => row.plant || {}), accountId);
+  } catch {
+    // Keep the history available when a protected image source cannot be resolved.
+  }
   return rows.map((row) => ({
     ...row,
     scannedAt: row.scanned_at,

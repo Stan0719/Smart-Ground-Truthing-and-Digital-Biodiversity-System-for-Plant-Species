@@ -1,6 +1,8 @@
 import { readApiResponse } from './apiResponse'
 
 export interface Species {
+  image_url?: string
+  image_asset_id?: string
   species_id: string
   scientific_name: string
   common_name: string

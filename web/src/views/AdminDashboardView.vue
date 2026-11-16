@@ -1,35 +1,59 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { emptyOverview, loadOverview, accountSummary, overviewDate } from '../services/adminOverview'
+import { sessionSnapshot, subscribeSession } from '../services/auth'
+import { formatPlantId } from '../utils/plantId'
+import AdminTableIdentifier from '../components/AdminTableIdentifier.vue'
 import AdminPageShell from '../components/AdminPageShell.vue'
 
 const router = useRouter()
 const { t, te } = useI18n()
 
-const speciesCount = ref<number | null>(null)
-const speciesLoading = ref(true)
-
-
-onMounted(async () => {
-  try {
-    const response = await fetch(
-      '/api/species'
-    )
-
-    if (!response.ok) {
-      throw new Error(`Failed to load species: ${response.status}`)
-    }
-
-    const data = await response.json()
-    console.log('Species API response:', data)
-
-    speciesCount.value = Number(data.count)
-  } catch (error) {
-    console.error('Could not load species count:', error)
-  } finally {
-    speciesLoading.value = false
-  }
+const overview = ref(emptyOverview())
+const loading = ref(true)
+const now = ref(new Date())
+let generation = 0
+let busy = false
+let disposed = false
+let stopSession: (() => void) | undefined
+async function refresh() {
+  if (disposed || busy || sessionSnapshot().user?.role !== 'Administrator') return
+  busy = true
+  const version = generation
+  const result = await loadOverview()
+  if (version === generation) { overview.value = result; loading.value = false; now.value = new Date() }
+  busy = false
+  if (version !== generation && !disposed) void refresh()
+}
+onMounted(() => {
+  stopSession = subscribeSession((user, pending) => {
+    generation++
+    overview.value = emptyOverview()
+    loading.value = pending
+    if (!pending && user?.role === 'Administrator') void refresh()
+  })
+  void refresh()
+  window.addEventListener('focus', refresh)
+})
+onBeforeUnmount(() => { disposed = true; generation++; stopSession?.(); window.removeEventListener('focus', refresh) })
+const accounts = computed(() => accountSummary(overview.value.users))
+const active = computed(() => overview.value.devices?.filter(d => d.status === 'Active').length ?? null)
+const shown = (value: number | null | undefined) => value ?? (loading.value ? '…' : '—')
+const currentDate = computed(() => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuching', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now.value))
+const greeting = computed(() => {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuching', hour: 'numeric', hourCycle: 'h23' }).format(now.value))
+  return hour < 12 ? 'Good morning, Administrator' : hour < 18 ? 'Good afternoon, Administrator' : 'Good evening, Administrator'
+})
+const lastSync = computed(() => {
+  const times = overview.value.devices?.map(d => d.latest_reading?.created_at).filter((v): v is string => Boolean(v)).filter(v => Number.isFinite(Date.parse(v))) ?? []
+  return times.length ? overviewDate(times.sort((a, b) => Date.parse(b) - Date.parse(a))[0]) : '—'
+})
+const donutStyle = computed(() => {
+  const total = overview.value.devices?.length ?? 0
+  const percent = total ? (active.value ?? 0) / total * 100 : 0
+  return { background: `conic-gradient(#3b9671 0 ${percent}%, #e5e7eb ${percent}% 100%)` }
 })
 
 const openUserManagement = async () => {
@@ -48,7 +72,7 @@ const openSensorManagement = async () => {
 }
 
 const openThreatAlerts = async () => {
-  await router.push({ name: 'admin-alerts' })
+  await router.push({ name: 'admin-iot' })
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
 }
 
@@ -57,88 +81,29 @@ const openSystemActivity = async () => {
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
 }
 
-const summaryCards = [
-
-  { title: 'totalUsers', value: '18', note: 'activeRoles', icon: '♙', tone: 'green' },
-  { title: 'plantRecords', value: '350', note: 'digitalCollection', icon: '♧', tone: 'green' },
-  { title: 'iotSensors', value: '27', note: 'threeZones', icon: '⌁', tone: 'blue' },
-  { title: 'activeSensors', value: '25', note: 'onlinePercent', icon: '✓', tone: 'success' },
-  { title: 'offlineSensors', value: '2', note: 'requiresAttention', icon: '×', tone: 'neutral' },
-  { title: 'threatAlerts', value: '3', note: 'needReview', icon: '!', tone: 'danger' },
-]
-
-const threatAlerts = [
-  {
-    id: 'A001',
-    plant: 'PL002',
-    type: 'Movement Detected',
-    location: 'Zone A',
-    time: '29 Sep 2026, 10:35 AM',
-    severity: 'High',
-    status: 'New',
-  },
-  {
-    id: 'A002',
-    plant: 'PL010',
-    type: 'High Temperature',
-    location: 'Zone B',
-    time: '29 Sep 2026, 11:20 AM',
-    severity: 'Medium',
-    status: 'Reviewing',
-  },
-  {
-    id: 'A003',
-    plant: 'PL021',
-    type: 'Sensor Offline',
-    location: 'Zone C',
-    time: '29 Sep 2026, 12:05 PM',
-    severity: 'Low',
-    status: 'New',
-  },
-]
-
-const sensorActivity = [
-  {
-    sensor: 'S001',
-    plant: 'PL001',
-    temperature: '29°C',
-    humidity: '82%',
-    movement: 'No',
-    status: 'Online',
-    update: '2 mins ago',
-  },
-  {
-    sensor: 'S002',
-    plant: 'PL002',
-    temperature: '31°C',
-    humidity: '75%',
-    movement: 'Yes',
-    status: 'Alert',
-    update: '5 mins ago',
-  },
-  {
-    sensor: 'S003',
-    plant: 'PL003',
-    temperature: '28°C',
-    humidity: '85%',
-    movement: 'No',
-    status: 'Offline',
-    update: '20 mins ago',
-  },
-]
-
-const userRoles = [
-  { label: 'administrators', value: 3, percent: 17, color: '#28745a' },
-  { label: 'conservationOfficers', value: 5, percent: 28, color: '#55a781' },
-  { label: 'botanists', value: 10, percent: 55, color: '#91c7a8' },
-]
-
-const activities = [
-  { title: 'createdBotanist', time: '29 Sep 2026, 10:20 AM', type: 'user' },
-  { title: 'updatedSensor', time: '29 Sep 2026, 11:05 AM', type: 'sensor' },
-  { title: 'changedRole', time: '29 Sep 2026, 12:10 PM', type: 'role' },
-  { title: 'sensorOffline', time: '29 Sep 2026, 12:30 PM', type: 'warning' },
-]
+const summaryCards = computed(() => [
+  { title: 'totalUsers', value: shown(accounts.value?.total), note: accounts.value ? `${accounts.value.roles} account roles` : loading.value ? 'Loading accounts…' : 'Account directory unavailable', icon: '♙', tone: 'green' },
+  { title: 'plantRecords', value: shown(overview.value.totals?.plants), note: 'Individual plant records', icon: '♧', tone: 'green' },
+  { title: 'iotSensors', value: shown(overview.value.devices?.length), note: 'Registered devices', icon: '⌁', tone: 'blue' },
+  { title: 'activeSensors', value: shown(active.value), note: 'Active registration status', icon: '✓', tone: 'success' },
+  { title: 'offlineSensors', value: '—', note: 'Connectivity unavailable', icon: '×', tone: 'neutral' },
+  { title: 'threatAlerts', value: shown(overview.value.totals?.alerts), note: 'Not resolved', icon: '!', tone: 'danger' },
+])
+const threatAlerts = computed(() => (overview.value.alerts ?? []).slice().sort((a,b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0,3).map(a => ({
+  id: a.id, plant: overview.value.devices?.find(d => d.id === a.device_id)?.plant_id ?? '—',
+  type: a.metric, location: '—', time: overviewDate(a.created_at), severity: '—', status: a.status,
+})))
+const sensorActivity = computed(() => (overview.value.devices ?? []).filter(d => d.latest_reading).sort((a,b) => Date.parse(b.latest_reading!.created_at) - Date.parse(a.latest_reading!.created_at)).slice(0,3).map(d => ({
+  sensor: d.id, plant: d.plant_id ?? '—', temperature: d.latest_reading?.values.temperature == null ? '—' : `${d.latest_reading.values.temperature}°C`,
+  humidity: d.latest_reading?.values.humidity == null ? '—' : `${d.latest_reading.values.humidity}%`,
+  movement: d.latest_reading?.values.movement == null ? '—' : String(d.latest_reading.values.movement),
+  status: d.status, update: overviewDate(d.latest_reading?.created_at),
+})))
+const userRoles = computed(() => ['Administrator', 'Conservation Officer', 'Botanist', 'Visitor'].map((role,index) => {
+  const count = accounts.value?.users.filter(u => u.role === role).length ?? 0
+  return { label: role, value: shown(accounts.value ? count : null), percent: accounts.value?.total ? count / accounts.value.total * 100 : 0, color: ['#28745a','#55a781','#91c7a8','#bed9cb'][index] }
+}))
+const activities = computed(() => (overview.value.events ?? []).slice(0,4).map(e => ({ id: e.id, title: e.reason.replaceAll('_',' '), time: overviewDate(e.created_at), type: 'user' })))
 const dataLabel = (value: string) => {
   const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
   return te(key) ? t(key) : value
@@ -154,10 +119,10 @@ const dataLabel = (value: string) => {
     <div class="dashboard">
       <section class="welcome-row">
         <div>
-          <h2>{{ t('adminDashboard.greeting') }}</h2>
+          <h2>{{ greeting }}</h2>
           <p>{{ t('adminDashboard.intro') }}</p>
         </div>
-        <time datetime="2026-09-29">{{ t('adminDashboard.date') }}</time>
+        <time :datetime="now.toISOString()">{{ currentDate }}</time>
       </section>
 
       <section class="summary-grid" :aria-label="t('adminDashboard.systemSummary')">
@@ -171,16 +136,8 @@ const dataLabel = (value: string) => {
           <div>
             <p>{{ t(`adminDashboard.summary.${card.title}`) }}</p>
             <strong>
-              {{
-                card.title === 'plantRecords'
-                  ? speciesLoading
-                    ? '...'
-                    : speciesCount !== null
-                      ? speciesCount
-                      : 'Unavailable'
-                  : card.value
-              }}
-            </strong><small>{{ t(`adminDashboard.summary.${card.note}`) }}</small>
+              {{ card.value }}
+            </strong>
           </div>
         </article>
       </section>
@@ -197,9 +154,9 @@ const dataLabel = (value: string) => {
             </button>
           </div>
           <div class="sensor-content">
-            <div class="donut" role="img" :aria-label="t('adminDashboard.sensorChartLabel')">
+            <div class="donut" :style="donutStyle" role="img" :aria-label="'Active registration status; connectivity unavailable'">
               <div>
-                <strong>27</strong><span>{{ t('adminDashboard.totalSensors') }}</span>
+                <strong>{{ shown(overview.devices?.length) }}</strong><span>{{ t('adminDashboard.totalSensors') }}</span>
               </div>
             </div>
             <div class="sensor-legend">
@@ -207,21 +164,21 @@ const dataLabel = (value: string) => {
                 <span class="dot active-dot"></span>
                 <p>
                   {{ t('adminDashboard.activeSensors')
-                  }}<small>{{ t('adminDashboard.operatingNormally') }}</small>
+                  }}<small>{{ 'Active registration status' }}</small>
                 </p>
-                <strong>25</strong>
+                <strong>{{ shown(active) }}</strong>
               </div>
               <div>
                 <span class="dot offline-dot"></span>
                 <p>
                   {{ t('adminDashboard.offlineSensors')
-                  }}<small>{{ t('adminDashboard.requiresAttention') }}</small>
+                  }}<small>{{ 'Connectivity unavailable' }}</small>
                 </p>
-                <strong>2</strong>
+                <strong>—</strong>
               </div>
               <div class="uptime">
                 <span>{{ t('adminDashboard.networkAvailability') }}</span
-                ><strong>92.6%</strong>
+                ><strong>—</strong>
               </div>
             </div>
           </div>
@@ -233,31 +190,31 @@ const dataLabel = (value: string) => {
               <p class="section-kicker">{{ t('adminDashboard.services') }}</p>
               <h2>{{ t('adminDashboard.systemStatus') }}</h2>
             </div>
-            <span class="all-operational">{{ t('adminDashboard.allSystemsNormal') }}</span>
+            <span class="all-operational" style="background: #f3f4f6; color: #617169">{{ 'Service checks' }}</span>
           </div>
           <div class="service-list">
             <div>
-              <span><i></i>{{ t('adminDashboard.webSystem') }}</span
-              ><strong>{{ t('adminDashboard.operational') }}</strong>
+              <span><i :style="{ background: overview.healthy ? undefined : '#9ca3af' }"></i>{{ t('adminDashboard.webSystem') }}</span
+              ><strong :style="{ color: overview.healthy ? undefined : '#617169' }">{{ loading ? 'Checking…' : overview.healthy ? 'Operational' : 'Unavailable' }}</strong>
             </div>
             <div>
-              <span><i></i>{{ t('adminDashboard.iotService') }}</span
-              ><strong>{{ t('adminDashboard.operational') }}</strong>
+              <span><i style="background: #9ca3af"></i>{{ t('adminDashboard.iotService') }}</span
+              ><strong style="color: #617169">Unknown</strong>
             </div>
             <div>
-              <span><i></i>{{ t('adminDashboard.sensorNetwork') }}</span
-              ><strong>{{ t('adminDashboard.onlineCount') }}</strong>
+              <span><i style="background: #9ca3af"></i>{{ t('adminDashboard.sensorNetwork') }}</span
+              ><strong style="color: #617169">Unavailable</strong>
             </div>
             <div>
-              <span><i></i>{{ t('adminDashboard.lastSync') }}</span
-              ><strong>{{ t('adminDashboard.twoMinutesAgo') }}</strong>
+              <span><i style="background: #9ca3af"></i>{{ t('adminDashboard.lastSync') }}</span
+              ><strong>{{ lastSync }}</strong>
             </div>
           </div>
         </section>
       </div>
 
       <section class="panel table-panel">
-        <div class="panel-header">
+        <div class="panel-header admin-table-title">
           <div>
             <p class="section-kicker danger-kicker">{{ t('adminDashboard.attentionRequired') }}</p>
             <h2>{{ t('adminDashboard.recentThreatAlerts') }}</h2>
@@ -266,8 +223,8 @@ const dataLabel = (value: string) => {
             {{ t('adminDashboard.viewAllAlerts') }} →
           </button>
         </div>
-        <div class="table-scroll">
-          <table>
+        <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="Dashboard records">
+          <table class="admin-data-table admin-overview-table">
             <thead>
               <tr>
                 <th>{{ t('adminDashboard.table.alertId') }}</th>
@@ -281,11 +238,12 @@ const dataLabel = (value: string) => {
               </tr>
             </thead>
             <tbody>
+              <tr v-if="!threatAlerts.length"><td colspan="8">{{ loading ? 'Loading alerts…' : overview.alerts ? 'No threat alerts recorded.' : 'Threat alerts unavailable. Please retry by refocusing this page.' }}</td></tr>
               <tr v-for="alert in threatAlerts" :key="alert.id">
                 <td>
-                  <strong>{{ alert.id }}</strong>
+                  <strong><AdminTableIdentifier :value="alert.id" /></strong>
                 </td>
-                <td>{{ alert.plant }}</td>
+                <td>{{ formatPlantId(alert.plant) || '—' }}</td>
                 <td>{{ dataLabel(alert.type) }}</td>
                 <td>{{ dataLabel(alert.location) }}</td>
                 <td>{{ alert.time }}</td>
@@ -300,7 +258,7 @@ const dataLabel = (value: string) => {
                   }}</span>
                 </td>
                 <td>
-                  <button class="view-button" type="button">{{ t('adminDashboard.view') }}</button>
+                  <button class="view-button" type="button" @click="openThreatAlerts">{{ t('adminDashboard.view') }}</button>
                 </td>
               </tr>
             </tbody>
@@ -309,7 +267,7 @@ const dataLabel = (value: string) => {
       </section>
 
       <section class="panel table-panel">
-        <div class="panel-header">
+        <div class="panel-header admin-table-title">
           <div>
             <p class="section-kicker">{{ t('adminDashboard.latestReadings') }}</p>
             <h2>{{ t('adminDashboard.recentSensorActivity') }}</h2>
@@ -318,8 +276,8 @@ const dataLabel = (value: string) => {
             {{ t('adminDashboard.viewAllSensors') }} →
           </button>
         </div>
-        <div class="table-scroll">
-          <table>
+        <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="Dashboard records">
+          <table class="admin-data-table admin-overview-table">
             <thead>
               <tr>
                 <th>{{ t('adminDashboard.table.sensorId') }}</th>
@@ -332,11 +290,12 @@ const dataLabel = (value: string) => {
               </tr>
             </thead>
             <tbody>
+              <tr v-if="!sensorActivity.length"><td colspan="7">{{ loading ? 'Loading readings…' : overview.devices ? 'No sensor readings recorded.' : 'Sensor readings unavailable.' }}</td></tr>
               <tr v-for="sensor in sensorActivity" :key="sensor.sensor">
                 <td>
-                  <strong>{{ sensor.sensor }}</strong>
+                  <strong><AdminTableIdentifier :value="sensor.sensor" /></strong>
                 </td>
-                <td>{{ sensor.plant }}</td>
+                <td>{{ formatPlantId(sensor.plant) || '—' }}</td>
                 <td>{{ sensor.temperature }}</td>
                 <td>{{ sensor.humidity }}</td>
                 <td>{{ dataLabel(sensor.movement) }}</td>
@@ -366,7 +325,7 @@ const dataLabel = (value: string) => {
           <div class="role-list">
             <div v-for="role in userRoles" :key="role.label" class="role-row">
               <div class="role-copy">
-                <span>{{ t(`adminDashboard.roles.${role.label}`) }}</span
+                <span>{{ role.label }}</span
                 ><strong>{{ role.value }}</strong>
               </div>
               <div class="role-track">
@@ -384,15 +343,16 @@ const dataLabel = (value: string) => {
             </div>
           </div>
           <div class="timeline">
+            <p v-if="!activities.length">{{ loading ? 'Loading activity…' : overview.events ? 'No activity recorded.' : 'Activity unavailable.' }}</p>
             <div
               v-for="activity in activities"
-              :key="activity.title"
+              :key="activity.id"
               class="timeline-item"
               :class="activity.type"
             >
               <span class="timeline-dot"></span>
               <div>
-                <strong>{{ t(`adminDashboard.activities.${activity.title}`) }}</strong
+                <strong>{{ activity.title }}</strong
                 ><time>{{ activity.time }}</time>
               </div>
             </div>
@@ -480,7 +440,7 @@ const dataLabel = (value: string) => {
   min-width: 0;
   padding: 18px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 13px;
   border: 1px solid #e1e7e1;
   border-radius: 15px;
@@ -488,15 +448,15 @@ const dataLabel = (value: string) => {
   box-shadow: 0 6px 18px rgba(35, 70, 53, 0.045);
 }
 .summary-icon {
-  width: 37px;
-  height: 37px;
-  flex: 0 0 37px;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
   display: grid;
   place-items: center;
   border-radius: 10px;
   background: #e4f0e8;
   color: #37785e;
-  font-size: 19px;
+  font-size: 28px;
   font-weight: 800;
 }
 .summary-card p {
@@ -511,13 +471,6 @@ const dataLabel = (value: string) => {
   color: #274e40;
   font-size: 25px;
   line-height: 1;
-}
-.summary-card small {
-  display: block;
-  margin-top: 6px;
-  color: #93a099;
-  font-size: 9px;
-  white-space: nowrap;
 }
 .tone-blue .summary-icon {
   background: #e4f0f2;
@@ -622,7 +575,7 @@ const dataLabel = (value: string) => {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: conic-gradient(#3b9671 0 92.6%, #e2a899 92.6% 100%);
+  background: #e5e7eb;
 }
 .donut::before {
   content: '';
@@ -963,12 +916,18 @@ td strong {
   }
   .summary-card {
     padding: 14px;
+    gap: 8px;
   }
   .summary-icon {
-    display: none;
+    width: 40px;
+    height: 40px;
+    flex-basis: 40px;
+    font-size: 25px;
   }
-  .summary-card p,
-  .summary-card small {
+  .summary-card > div:last-child {
+    min-width: 0;
+  }
+  .summary-card p {
     white-space: normal;
   }
   .sensor-content {

@@ -125,10 +125,11 @@ test("an older empty response cannot overwrite an already completed newer visit"
 
 test("normalization keeps assigned records, deduplicates and sorts bigint identifiers stably", () => {
   const result = normalizeQRCodes(payload(
-    row("9007199254740993"), row("9007199254740992"), row(9), row(9),
+    row("9007199254740993"), row("9007199254740992"), row(9), row(9), row(12, { status: "retired" }),
     row(10, { plant_id: 4, status: "assigned" }), row(11, { plant_id: 5, status: "active" }),
   ));
-  assert.deepEqual(result.map((qr) => qr.id), ["9007199254740993", "9007199254740992", "11", "10", "9"]);
+  assert.deepEqual(result.map((qr) => qr.id), ["9007199254740993", "9007199254740992", "12", "11", "10", "9"]);
+  assert.equal(result.find((qr) => qr.id === "12").status, "retired");
   assert.equal(result.find((qr) => qr.id === "10").plantId, "4");
   assert.equal(result.find((qr) => qr.id === "9").label, "QR-0009");
   assert.throws(() => normalizeQRCodes(payload(row(1), row(1, { qr_code: "different" }))), /conflicting/);
@@ -154,6 +155,29 @@ test("confirmed generation survives a failed read and invalidates older response
   assert.equal(await loader.refresh(), false);
   assert.deepEqual(loader.getState().records.map((qr) => qr.id), ["3", "2", "1"]);
   assert.throws(() => loader.addGenerated(payload()), /did not return/);
+});
+
+test("confirmed retirement keeps the QR record and moves it out of the unused inventory", async () => {
+  let serverRows = payload(row(1), row(2));
+  const loader = createQRInventoryLoader(() => serverRows, () => {});
+  await loader.refresh();
+  assert.equal(loader.retire("1"), true);
+  assert.deepEqual(loader.getState().records.map((qr) => [qr.id, qr.status]), [["2", "generated"], ["1", "retired"]]);
+  assert.equal(loader.getState().hasLoaded, true);
+  serverRows = payload(row(1, { status: "retired" }), row(2));
+  assert.equal(await loader.refresh(), true);
+  assert.deepEqual(loader.getState().records.map((qr) => [qr.id, qr.status]), [["2", "generated"], ["1", "retired"]]);
+});
+
+test("assigned and already retired QR records cannot be retired again", async () => {
+  const loader = createQRInventoryLoader(() => payload(
+    row(1, { plant_id: 8, status: "assigned" }),
+    row(2, { status: "retired" }),
+  ), () => {});
+  await loader.refresh();
+  assert.equal(loader.retire("1"), false);
+  assert.equal(loader.retire("2"), false);
+  assert.deepEqual(loader.getState().records.map((qr) => qr.status), ["retired", "assigned"]);
 });
 
 test("print builds a vector QR from the unchanged payload with A4 geometry", async () => {

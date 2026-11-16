@@ -15,6 +15,7 @@ export interface PlantObservation {
 }
 
 export interface PlantRecord {
+  reviewStatus?: string
   plantId: string
   speciesSlug: string
   speciesId: string

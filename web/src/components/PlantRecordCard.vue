@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { workflowBadgeStyle } from '../utils/workflowBadge'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PlantRecord } from '../data/plantRecords'
 import { plants as species } from '../data/plants'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
+import { webAssetUrl } from '../services/assetImages'
+import { plantReviewStatuses } from '../services/plantCardMapping'
 
 const props = withDefaults(
   defineProps<{
@@ -14,15 +17,28 @@ const props = withDefaults(
 )
 const { t, te, locale } = useI18n()
 
-const primaryImage = computed(() => props.plant.images.find((image) => image.path)?.path)
+const primaryImage = computed(() => webAssetUrl(props.plant.images.find((image) => image.path)?.path))
+const failedImage = ref('')
+watch(() => [props.plant.plantId, primaryImage.value], () => { failedImage.value = '' })
+function imageFailed(event: Event) {
+  const src = (event.currentTarget as HTMLImageElement | null)?.getAttribute('src')
+  if (src) failedImage.value = src
+}
 const selectedSpecies = computed(() =>
   species.find((item) => item.slug === props.plant.speciesSlug),
 )
 const { isLoggedIn, userRole } = usePrototypeSession()
+const isGuest = computed(() => !isLoggedIn.value)
 const canViewStaffPlantData = computed(
   () =>
-    isLoggedIn.value && (userRole.value === 'admin' || userRole.value === 'conservation-officer'),
+    isLoggedIn.value && (userRole.value === 'conservation-officer' || userRole.value === 'admin'),
 )
+const reviewStatus = computed(() => plantReviewStatuses.find(status => status === props.plant.reviewStatus) || '')
+const statusKey = computed(() => reviewStatus.value.toLowerCase().replace(/\s+/g, ''))
+const statusLabel = computed(() => {
+  const key = `conservationPages.observations.values.${statusKey.value}`
+  return te(key) ? t(key) : reviewStatus.value
+})
 
 const optionLabel = (value: string) => {
   if (!value) return '—'
@@ -68,16 +84,19 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   <article class="plant-record-card" :class="{ compact }">
     <div class="record-image">
       <img
-        v-if="primaryImage"
+        v-if="primaryImage && failedImage !== primaryImage"
         :src="primaryImage"
         :alt="t('common.fieldRecordAlt', { id: plant.plantId })"
+        @error="imageFailed"
       />
       <div v-else class="record-placeholder" aria-hidden="true">🌿</div>
-      <span>{{ plant.plantId }}</span>
+      <span v-if="!isGuest && reviewStatus" class="review-status" :style="workflowBadgeStyle(reviewStatus)" :class="`status-${statusKey}`">{{ statusLabel }}</span>
     </div>
 
     <div class="record-copy">
-      <h3>{{ plant.plantId }}</h3>
+      <div v-if="!isGuest" class="record-heading">
+        <h3>{{ plant.plantId }}</h3>
+      </div>
       <p class="record-common-name">{{ displayName }}</p>
       <p class="record-species">{{ displayScientificName }}</p>
       <dl v-if="canViewStaffPlantData">
@@ -98,7 +117,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
           <dd>{{ formatDate(plant.latestApproved.date) }}</dd>
         </div>
       </dl>
-      <dl v-else>
+      <dl v-else-if="!isGuest">
         <div>
           <dt>{{ t('common.height') }}</dt>
           <dd>{{ displayHeight }}</dd>
@@ -117,6 +136,10 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
         </div>
       </dl>
 
+      <dl v-else-if="translatedGenus !== '—'">
+        <div><dt>{{ t('speciesLabels.genus') }}</dt><dd>{{ translatedGenus }}</dd></div>
+      </dl>
+
       <RouterLink
         v-if="showDetailLink"
         :to="`/plant/${plant.plantId}`"
@@ -132,6 +155,8 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
 
 <style scoped>
 .plant-record-card {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
   border: 1px solid rgba(58, 96, 70, 0.12);
@@ -147,6 +172,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   box-shadow: 0 18px 38px rgba(33, 57, 44, 0.14);
 }
 .record-image {
+  flex-shrink: 0;
   position: relative;
   height: 210px;
 }
@@ -163,18 +189,14 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   background: linear-gradient(145deg, #dfe9da, #c8d9c3);
   font-size: 48px;
 }
-.record-image > span {
-  position: absolute;
-  left: 14px;
-  bottom: 12px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #214638;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 800;
-}
+.record-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.record-heading h3 { min-width: 0; overflow-wrap: anywhere; }
+.review-status { position: absolute; top: 10px; right: 10px; max-width: calc(100% - 20px); box-sizing: border-box; padding: 5px 9px; border-radius: 8px; background: #eef1ed; color: #374c42; font-size: 11px; font-weight: 700; line-height: 1.4; text-align: right; white-space: normal; overflow-wrap: anywhere; }
 .record-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
   padding: 21px;
 }
 .record-copy h3 {
@@ -208,6 +230,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   text-transform: uppercase;
 }
 .record-copy dd {
+  overflow-wrap: anywhere;
   margin: 3px 0 0;
   color: #315447;
   font-size: 12px;
@@ -228,8 +251,10 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
 .learn-more {
   position: relative;
   width: 170px;
-  height: 42px;
-  margin: 0 auto;
+  max-width: 100%;
+  min-height: 42px;
+  flex-shrink: 0;
+  margin: auto auto 0;
   display: block;
   padding: 0;
   border: 0;
@@ -274,8 +299,10 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   transform: rotate(45deg);
 }
 .learn-more .button-text {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
   padding: 11px 8px 11px 34px;
   color: #805020;
   font-weight: 700;

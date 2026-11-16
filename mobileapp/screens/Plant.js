@@ -13,14 +13,17 @@ import {
   ScrollView,
   Image,
   RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 
 import {
   getSpeciesBySlug,
 } from "../data/mockData";
 import { useFocusEffect } from "@react-navigation/native";
-import { getSpeciesImageSource } from "../data/speciesImages";
-import { fetchPlantRecords, fetchSpeciesCatalog } from "../utils/plantApi";
+import { SafeAreaView } from "react-native-safe-area-context";
+import BackButton from "../components/BackButton";
+import { fetchPlantRecords, fetchSpeciesCatalog, filterUniqueSpeciesPlantRecords, filterPlantRecordsForRole, getPlantDisplayObservation, getScopedPlantRecords, isOwnedPendingPlant, mergeOwnedPendingPlantZones } from "../utils/plantApi";
+import { getPlantCardZoneLabel, getPlantCardZoneValue } from "../utils/plantCardDisplay";
 import RefreshButton from "../components/RefreshButton";
 import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
@@ -63,6 +66,27 @@ const zoneOptions = [
   "C",
 ];
 
+function useSpeciesScopedState(scope, initialValue) {
+  const [entry, setEntry] = useState({ scope, value: initialValue });
+  const value = entry.scope === scope ? entry.value : initialValue;
+  const update = useCallback((nextValue) => {
+    setEntry((current) => ({
+      scope,
+      value: typeof nextValue === "function"
+        ? nextValue(current.scope === scope ? current.value : initialValue)
+        : nextValue,
+    }));
+  }, [scope, initialValue]);
+  return [value, update];
+}
+
+export function getPlantListViewState({ loading, errorMessage, sourceCount, visibleCount, hasActiveFilters }) {
+  if (visibleCount > 0) return "results";
+  if (loading && sourceCount === 0) return "loading";
+  if (errorMessage && sourceCount === 0) return "error";
+  if (sourceCount === 0) return "empty";
+  return hasActiveFilters ? "filtered-empty" : "empty";
+}
 
 export default function Species({
   route,
@@ -71,78 +95,96 @@ export default function Species({
 }) {
   useAppTranslation();
 
-  const { slug, speciesId } = route.params || {};
-  const isBotanist = user?.role?.toLowerCase() === "botanist";
-  const isVisitor = user?.role?.toLowerCase() === "visitor";
+  const { slug } = route.params || {};
+  const accountId = user?.id;
+  const role = user?.role;
+  const isBotanist = role?.toLowerCase() === "botanist";
+  const isVisitor = role?.toLowerCase() === "visitor";
+  const publicOnly = !user || isVisitor;
   const favourites = useVisitorFavourites(user);
+  const routeParams = route.params || {};
+  const currentSpeciesId = routeParams.speciesId;
+  const currentSlug = routeParams.slug;
+  const requestKey = `${String(accountId ?? "")}:${String(role ?? "")}:${String(currentSpeciesId ?? "")}:${String(currentSlug ?? "")}`;
 
   const [selectedSpecies, setSelectedSpecies] = useState(
     route.params?.species || getSpeciesBySlug(slug) || null
   );
-  const [speciesPlants, setSpeciesPlants] = useState([]);
+  const [scopedSpeciesPlants, setScopedSpeciesPlants] = useState({ scope: null, records: [] });
+  const speciesPlants = getScopedPlantRecords(scopedSpeciesPlants, requestKey);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const requestRef = useRef(null);
-
+  const requestRef = useRef({ key: null, id: 0, promise: null });
   const loadSpeciesPlants = useCallback((isRefresh = false) => {
-    if (requestRef.current) return requestRef.current;
+    const activeRequest = requestRef.current;
+    if (activeRequest?.key === requestKey && activeRequest.promise) {
+      return activeRequest.promise;
+    }
+    const requestId = (activeRequest?.id || 0) + 1;
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setErrorMessage("");
+    if (activeRequest?.key !== requestKey) {
+      setScopedSpeciesPlants({ scope: requestKey, records: [] });
+    }
     const request = (async () => {
       try {
-        const catalog = await fetchSpeciesCatalog({ accountId: user?.id });
-        const records = await fetchPlantRecords(catalog, { accountId: user?.id });
+        const catalog = await fetchSpeciesCatalog({ accountId, publicOnly });
+        let records = await fetchPlantRecords(catalog, { accountId, publicOnly });
+        if (isBotanist && records.some((record) => isOwnedPendingPlant(record, accountId))) {
+          const ownerRecords = await fetchPlantRecords(catalog, { accountId, scopeMine: true });
+          records = mergeOwnedPendingPlantZones(records, ownerRecords, accountId);
+        }
         const matchedSpecies = catalog.find((item) =>
-          speciesId != null
-            ? String(item.id) === String(speciesId)
-            : item.slug === slug
-        ) || route.params?.species || getSpeciesBySlug(slug) || null;
-        const matchedId = matchedSpecies?.id ?? speciesId;
-        const recordsForSpecies = matchedId != null
-          ? records.filter((record) => String(record.speciesId) === String(matchedId))
-          : records.filter((record) => record.speciesSlug === slug);
+          currentSpeciesId != null
+            ? String(item.id) === String(currentSpeciesId)
+            : item.slug === currentSlug
+        ) || routeParams.species || getSpeciesBySlug(currentSlug) || null;
+        const matchedId = matchedSpecies?.id ?? currentSpeciesId;
+        const recordsForSpecies = filterUniqueSpeciesPlantRecords(records, matchedId, currentSlug);
+        const visibleRecords = filterPlantRecordsForRole(recordsForSpecies, role, accountId, { publicOnly });
 
-        setSelectedSpecies(matchedSpecies);
-        setSpeciesPlants(recordsForSpecies);
+        if (requestRef.current?.id === requestId) {
+          setSelectedSpecies(matchedSpecies);
+          setScopedSpeciesPlants({ scope: requestKey, records: visibleRecords });
+        }
       } catch (error) {
-        setErrorMessage(error.message || "Unable to load plant records.");
+        if (requestRef.current?.id === requestId) {
+          setErrorMessage(error.message || "Unable to load plant records.");
+        }
       } finally {
-        if (requestRef.current === request) requestRef.current = null;
-        setLoading(false);
-        setRefreshing(false);
+        if (requestRef.current?.id === requestId) {
+          requestRef.current = { key: requestKey, id: requestId, promise: null };
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
-    requestRef.current = request;
+    requestRef.current = { key: requestKey, id: requestId, promise: request };
     return request;
-  }, [slug, speciesId, route.params?.species, user?.id]);
+  }, [requestKey, currentSpeciesId, currentSlug, routeParams.species, accountId, role, isBotanist, publicOnly]);
 
   useFocusEffect(useCallback(() => {
     void loadSpeciesPlants(false);
   }, [loadSpeciesPlants]));
 
 
-  const [searchQuery, setSearchQuery] =
-    useState("");
+  const [searchQuery, setSearchQuery] = useSpeciesScopedState(requestKey, "");
 
-  const [healthFilter, setHealthFilter] =
-    useState("All");
+  const [plantStatusFilter, setPlantStatusFilter] = useSpeciesScopedState(requestKey, "allVisible");
 
-  const [lifeStageFilter, setLifeStageFilter] =
-    useState("All");
+  const [healthFilter, setHealthFilter] = useSpeciesScopedState(requestKey, "All");
 
-  const [qrFilter, setQrFilter] =
-    useState("All");
+  const [lifeStageFilter, setLifeStageFilter] = useSpeciesScopedState(requestKey, "All");
 
-  const [zoneFilter, setZoneFilter] =
-    useState("All");
+  const [qrFilter, setQrFilter] = useSpeciesScopedState(requestKey, "All");
 
-  const [sortOption, setSortOption] =
-    useState("default");
+  const [zoneFilter, setZoneFilter] = useSpeciesScopedState(requestKey, "All");
 
-  const [filtersOpen, setFiltersOpen] =
-    useState(false);
+  const [sortOption, setSortOption] = useSpeciesScopedState(requestKey, "default");
+
+  const [filtersOpen, setFiltersOpen] = useSpeciesScopedState(requestKey, false);
 
 
   // =====================================================
@@ -157,6 +199,7 @@ export default function Species({
 
     const filtered = speciesPlants.filter(
       (plant) => {
+        const observation = getPlantDisplayObservation(plant);
 
         const matchesSearch =
           !query ||
@@ -164,17 +207,21 @@ export default function Species({
             ?.toLowerCase()
             .includes(query);
 
+        const matchesStatus = !isBotanist || plantStatusFilter === "allVisible" ||
+          (plantStatusFilter === "approved" && plant.currentStatus === "Approved") ||
+          (plantStatusFilter === "myPending" && isOwnedPendingPlant(plant, user?.id));
+
 
         const matchesHealth =
           !isBotanist ||
           healthFilter === "All" ||
-          plant.latestApproved?.healthStatus ===
+          (observation?.healthStatus || "Not recorded") ===
             healthFilter;
 
 
         const matchesLifeStage =
           lifeStageFilter === "All" ||
-          plant.latestApproved?.lifeStage ===
+          (observation?.lifeStage || "Not recorded") ===
             lifeStageFilter;
 
 
@@ -184,16 +231,20 @@ export default function Species({
           plant.qr?.status === qrFilter;
 
 
+        const zoneValue = getPlantCardZoneValue(plant, user?.role, {
+          allowOwnedPending: isBotanist && isOwnedPendingPlant(plant, user?.id),
+        });
         const matchesZone =
             !isBotanist ||
             zoneFilter === "All" ||
             (zoneFilter === "Not recorded"
-              ? plant.location?.zone === "Not recorded"
-              : plant.location?.zone === `Zone ${zoneFilter}`);
+              ? zoneValue === null && plant.location?.restricted !== true
+              : zoneValue === `Zone ${zoneFilter}`);
 
 
         return (
           matchesSearch &&
+          matchesStatus &&
           matchesHealth &&
           matchesLifeStage &&
           matchesQr &&
@@ -241,6 +292,9 @@ export default function Species({
     zoneFilter,
     sortOption,
     isBotanist,
+    plantStatusFilter,
+    user?.id,
+    user?.role,
   ]);
 
 
@@ -251,11 +305,27 @@ export default function Species({
       isBotanist && qrFilter !== "All",
       isBotanist && zoneFilter !== "All",
       sortOption !== "default",
+      isBotanist && plantStatusFilter !== "allVisible",
     ].filter(Boolean).length;
+
+  const hasActiveResultFilters = Boolean(searchQuery.trim()) ||
+    (isBotanist && plantStatusFilter !== "allVisible") ||
+    (isBotanist && healthFilter !== "All") ||
+    lifeStageFilter !== "All" ||
+    (isBotanist && qrFilter !== "All") ||
+    (isBotanist && zoneFilter !== "All");
+  const listViewState = getPlantListViewState({
+    loading: loading || refreshing,
+    errorMessage,
+    sourceCount: speciesPlants.length,
+    visibleCount: filteredPlants.length,
+    hasActiveFilters: hasActiveResultFilters,
+  });
 
 
   const clearFilters = () => {
     setSearchQuery("");
+    setPlantStatusFilter("allVisible");
     setHealthFilter("All");
     setLifeStageFilter("All");
     setQrFilter("All");
@@ -267,63 +337,35 @@ export default function Species({
   if (!selectedSpecies) {
     return (
       <View style={styles.notFound}>
-
         <View style={styles.unavailableLanguageHeader}><LanguageSelector /></View>
-
-        <Text style={styles.icon}>
-          🌿
-        </Text>
-
-        <Text style={styles.title}>
-          {loading ? t("plant.loadingSpecies") : t("plant.speciesNotFound")}
-        </Text>
-
-        {!!errorMessage && (
-          <Text style={{ color: "#B42318", marginTop: 8, textAlign: "center" }}>
-            {translateUIMessage(errorMessage)}
-          </Text>
-        )}
-
-        <TouchableOpacity
-          style={styles.button}
-          onPress={() =>
-            navigation.navigate("Plants")
-          }
-        >
-          <Text style={styles.buttonText}>{t("plant.returnToSpecies")}</Text>
-        </TouchableOpacity>
-
+        {loading || refreshing ? <View style={styles.loadingState}>
+          <ActivityIndicator size="small" color="#2F6B4F" />
+          <Text style={styles.loadingText}>{t("plant.loadingSpecies")}</Text>
+        </View> : errorMessage ? <View style={styles.loadError}>
+          <Text accessibilityRole="alert" style={styles.loadErrorText}>{translateUIMessage(errorMessage)}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => { void loadSpeciesPlants(true); }} accessibilityRole="button">
+            <Text style={styles.retryText}>{t("common.retry")}</Text>
+          </TouchableOpacity>
+        </View> : <>
+          <Text style={styles.icon}>??</Text>
+          <Text style={styles.title}>{t("plant.speciesNotFound")}</Text>
+          <TouchableOpacity style={styles.button} onPress={() => navigation.navigate("Plants")}>
+            <Text style={styles.buttonText}>{t("plant.returnToSpecies")}</Text>
+          </TouchableOpacity>
+        </>}
       </View>
     );
   }
 
 
   return (
-    <ScrollView
-      style={styles.page}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing || favourites.refreshing}
-          onRefresh={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
-          tintColor="#468585"
-          colors={["#468585"]}
-        />
-      }
-    >
-
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       {/* HEADER */}
 
       <View style={styles.header}>
 
         <View style={styles.headerToolbar}>
-        <TouchableOpacity
-          style={styles.heroBackButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.heroBackText}>{t("plant.back")}</Text>
-        </TouchableOpacity>
+        <BackButton label={t("plant.back")} variant="plain" style={styles.backButton} onPress={() => navigation.goBack()} />
         <LanguageSelector />
         </View>
 
@@ -331,7 +373,7 @@ export default function Species({
         <Text style={styles.label}>{t("plant.plantRecords")}</Text>
 
         <View style={styles.headingRow}>
-          <Text style={styles.heading}>{t("plant.allVerifiedPlants")}</Text>
+          <Text style={styles.heading}>{t("plant.allVisiblePlants")}</Text>
           <RefreshButton
             onPress={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
             loading={loading || refreshing || favourites.refreshing}
@@ -344,19 +386,31 @@ export default function Species({
           {selectedSpecies.name}
         </Text>
 
-        <Text style={styles.count}>
+        {!loading && !refreshing && !errorMessage && <Text style={styles.count}>
           {filteredPlants.length}{" "}
           {filteredPlants.length === 1
             ? t("plant.plant")
-            : t("plant.plants")}{" "}{t("plant.found")}</Text>
+            : t("plant.plants")}{" "}{t("plant.found")}</Text>}
 
-        {loading && <Text style={{ marginTop: 8, color: "#52665C" }}>{t("plant.loadingPlantRecords")}</Text>}
-        {!!errorMessage && <Text style={{ marginTop: 8, color: "#B42318" }}>{translateUIMessage(errorMessage)}</Text>}
         {!!favourites.mutationError && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(favourites.mutationError)}</Text>}
         {!!favourites.error && !favourites.loading && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(favourites.error)}</Text>}
+        {!!errorMessage && speciesPlants.length > 0 && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(errorMessage)}</Text>}
 
       </View>
 
+
+    <ScrollView
+      style={styles.page}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing || favourites.refreshing}
+          onRefresh={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
+          tintColor="#468585"
+          colors={["#468585"]}
+        />
+      }
+    >
 
       {/* SEARCH */}
 
@@ -395,6 +449,30 @@ export default function Species({
         </TouchableOpacity>
 
       </View>
+
+      {isBotanist && <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.statusFilters}
+        accessibilityLabel={t("plant.recordVisibilityFilters")}
+      >
+        {[
+          ["allVisible", t("plant.allVisible")],
+          ["approved", t("plant.approvedOnly")],
+          ["myPending", t("plant.myPending")],
+        ].map(([value, label]) => {
+          const selected = plantStatusFilter === value;
+          return <TouchableOpacity
+            key={value}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            onPress={() => setPlantStatusFilter(value)}
+            style={[styles.statusFilterChip, selected && styles.statusFilterChipSelected]}
+          >
+            <Text style={[styles.statusFilterText, selected && styles.statusFilterTextSelected]}>{label}</Text>
+          </TouchableOpacity>;
+        })}
+      </ScrollView>}
 
 
       {/* FILTERS */}
@@ -481,7 +559,7 @@ export default function Species({
           />
 
 
-          {activeFilterCount > 0 && (
+          {!loading && !refreshing && !errorMessage && speciesPlants.length > 0 && listViewState !== "filtered-empty" && activeFilterCount > 0 && (
             <TouchableOpacity
               style={styles.clearButton}
               onPress={clearFilters}
@@ -498,7 +576,15 @@ export default function Species({
 
       <View style={styles.list}>
 
-        {filteredPlants.length > 0 ? (
+        {listViewState === "loading" ? <View style={styles.loadingState} testID="plant-list-loading">
+          <ActivityIndicator size="small" color="#2F6B4F" />
+          <Text style={styles.loadingText}>{t("plant.loadingPlantRecords")}</Text>
+        </View> : listViewState === "error" ? <View style={styles.loadError} testID="plant-list-error">
+          <Text accessibilityRole="alert" style={styles.loadErrorText}>{translateUIMessage(errorMessage)}</Text>
+          <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => { void loadSpeciesPlants(true); }}>
+            <Text style={styles.retryText}>{t("common.retry")}</Text>
+          </TouchableOpacity>
+        </View> : listViewState === "results" ? (
 
           filteredPlants.map((plant) => (
             <PlantCard
@@ -520,16 +606,15 @@ export default function Species({
             </Text>
 
             <Text style={styles.emptyTitle}>
-              {loading
-                ? t("plant.loadingPlantRecords")
-                : speciesPlants.length === 0
-                  ? t("plant.noPlantRecordsForThisSpeciesYet")
-                  : t("plant.noPlantsMatchYourCurrentSearchOrFilters")}
+              {listViewState === "filtered-empty"
+                ? t("plant.noPlantsMatchYourCurrentSearchOrFilters")
+                : t("plant.noPlantRecordsForThisSpeciesYet")}
             </Text>
 
-            {activeFilterCount > 0 && (
+            {listViewState === "filtered-empty" && hasActiveResultFilters && (
               <TouchableOpacity
-                style={styles.clearButton}
+                testID="plant-list-clear-filters"
+                style={[styles.clearButton, styles.emptyClearButton]}
                 onPress={clearFilters}
               >
                 <Text style={styles.clearText}>{t("map.clearFilters")}</Text>
@@ -542,6 +627,7 @@ export default function Species({
       </View>
 
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -638,18 +724,16 @@ function PlantCard({
   useAppTranslation();
   const [failedImageKey, setFailedImageKey] = useState(null);
 
-  const species = plant.species || getSpeciesBySlug(plant.speciesSlug) || {
-    name: plant.commonName,
-    genus: plant.genus,
-  };
-  const speciesImageSource = getSpeciesImageSource(species);
   const sourceKey = (source) => typeof source === "number" ? `local:${source}` : source?.uri || null;
-  const imageSource = plant.plantImage && sourceKey(plant.plantImage) !== failedImageKey
-    ? plant.plantImage
-    : speciesImageSource && sourceKey(speciesImageSource) !== failedImageKey
-      ? speciesImageSource
-      : null;
+  const imageSource = plant.plantImage && sourceKey(plant.plantImage) !== failedImageKey ? plant.plantImage : null;
+  const observation = getPlantDisplayObservation(plant);
   const isBotanist = user?.role?.toLowerCase() === "botanist";
+  const isPublicViewer = !user || isVisitor || user?.role?.toLowerCase() === "guest";
+  const zoneLabel = getPlantCardZoneLabel(plant, user?.role, {
+    restricted: t("map.locationRestricted"),
+    missing: t("plant.notRecorded"),
+    allowOwnedPending: isBotanist && isOwnedPendingPlant(plant, user?.id),
+  });
 
   return (
     <View style={styles.card}>
@@ -674,11 +758,12 @@ function PlantCard({
           </Text>
         )}
 
-        {isBotanist && (
-          <Text style={styles.zoneBadge}>
-            {plant.location?.zone || t("plant.notRecorded")}
+        {!isPublicViewer && <View pointerEvents="none" style={styles.imageBadges}>
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, plantStatusStyle(plant.currentStatus)]}>
+            {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
-        )}
+          <Text numberOfLines={2} style={[styles.imageBadge, styles.zoneBadge, styles.imageZoneBadge]}>{zoneLabel}</Text>
+        </View>}
 
       </View>
 
@@ -686,13 +771,11 @@ function PlantCard({
       {/* CONTENT */}
       <View style={styles.cardContent}>
 
-        <Text style={styles.plantId}>
-          {plant.plantId}
-        </Text>
-
         <Text style={styles.species}>
-          {species?.name || t("plant.plantRecord")}
+          {plant.plantScientificName || t("plant.unnamedPlant")}
         </Text>
+        <Text style={styles.plantId}>{t("plantDetail.plantId")}: {plant.plantId}</Text>
+        {!!plant.plantCommonName && <Text style={styles.infoValue}>{plant.plantCommonName}</Text>}
 
 
         <View style={styles.infoGrid}>
@@ -701,12 +784,12 @@ function PlantCard({
             <>
               <Info
                 label={t("plant.health")}
-                value={plant.latestApproved?.healthStatus || t("plant.notRecorded")}
+                value={observation?.healthStatus || t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lifeStage2")}
-                value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
+                value={observation?.lifeStage || t("plant.notRecorded")}
               />
 
               <Info
@@ -716,35 +799,41 @@ function PlantCard({
 
               <Info
                 label={t("plant.height")}
-                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
+                value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
               />
+              <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
+              <Info label={t("plant.locationZone")} value={zoneLabel} />
             </>
           ) : (
             <>
               <Info
                 label={t("plant.height")}
-                value={plant.latestApproved?.heightCm != null ? `${plant.latestApproved.heightCm} cm` : t("plant.notRecorded")}
+                value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lifeStage2")}
-                value={plant.latestApproved?.lifeStage || t("plant.notRecorded")}
-              />
-
-              <Info
-                label={t("plant.genus")}
-                value={species?.genus || "-"}
+                value={observation?.lifeStage || t("plant.notRecorded")}
               />
 
               <Info
                 label={t("plant.lastVerified")}
                 value={formatDate(plant.latestApproved?.date)}
               />
+              <Info label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
+              <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
+              {!isPublicViewer && <Info label={t("plant.locationZone")} value={zoneLabel} />}
             </>
           )}
 
         </View>
 
+        {isBotanist && plant.latestSubmission?.status ? (
+          <Text style={styles.infoValue}>{t("botanistRecords.observationStatus")}{translateLabel(plant.latestSubmission.status)}</Text>
+        ) : null}
+        {isBotanist && plant.currentStatus === "Pending Review" ? (
+          <Text accessibilityRole="text" style={styles.pendingApprovalHint}>{t("plant.awaitingOfficerApproval")}</Text>
+        ) : null}
 
         <View style={styles.viewRecord}>
 
@@ -764,6 +853,16 @@ function PlantCard({
       />}
     </View>
   );
+}
+
+function plantStatusStyle(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "approved": return styles.statusApproved;
+    case "pending review": return styles.statusPending;
+    case "rejected": return styles.statusRejected;
+    case "correction required": return styles.statusCorrection;
+    default: return styles.statusOther;
+  }
 }
 
 
@@ -804,6 +903,11 @@ function formatDate(dateString) {
 
 const styles = StyleSheet.create({
 
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#E7F2E2",
+  },
+
   page: {
     flex: 1,
     backgroundColor: "#F7FBF4",
@@ -811,29 +915,14 @@ const styles = StyleSheet.create({
 
   header: {
     padding: 22,
-    paddingTop: 50,
+    paddingTop: 8,
     backgroundColor: "#E7F2E2",
   },
 
   headerToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+  backButton: { alignSelf: "flex-start", maxWidth: "100%" },
   headingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   unavailableLanguageHeader: { position: "absolute", top: 50, right: 22 },
-
-  heroBackButton: {
-    alignSelf: "center",
-    minHeight: 44,
-    justifyContent: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: "#FFFFFFAA",
-  },
-
-  heroBackText: {
-    color: "#468585",
-    fontSize: 12,
-    fontWeight: "700",
-  },
 
   plantImage: {
     width: "100%",
@@ -874,6 +963,46 @@ controls: {
   gap: 8,
   paddingHorizontal: 20,
   paddingVertical: 20,
+},
+
+statusFilters: {
+  paddingHorizontal: 20,
+  paddingBottom: 12,
+  gap: 8,
+},
+
+statusFilterChip: {
+  minHeight: 40,
+  justifyContent: "center",
+  paddingHorizontal: 14,
+  borderRadius: 20,
+  borderWidth: 1,
+  borderColor: "#D6E9D9",
+  backgroundColor: "#FFFFFF",
+},
+
+statusFilterChipSelected: {
+  borderColor: "#2F6B4F",
+  backgroundColor: "#D6E9D9",
+},
+
+statusFilterText: {
+  color: "#52665C",
+  fontSize: 12,
+  fontWeight: "600",
+},
+
+statusFilterTextSelected: {
+  color: "#2F6B4F",
+  fontWeight: "700",
+},
+
+pendingApprovalHint: {
+  marginTop: 10,
+  color: "#805B16",
+  fontSize: 12,
+  lineHeight: 17,
+  fontWeight: "600",
 },
 
 search: {
@@ -987,9 +1116,48 @@ filterToggle: {
     backgroundColor: "#468585",
   },
 
+  emptyClearButton: {
+    alignSelf: "center",
+    minHeight: 42,
+    justifyContent: "center",
+    marginTop: 14,
+    paddingHorizontal: 18,
+  },
+
+  loadingState: {
+    minHeight: 92,
+    padding: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2EDE0",
+    borderRadius: 15,
+  },
+  loadingText: { color: "#52665C", fontSize: 14 },
+  loadError: { padding: 20, alignItems: "center", borderWidth: 1, borderColor: "#F0D7D4", borderRadius: 15, backgroundColor: "#FFF9F8" },
+  loadErrorText: { color: "#A52A3A", textAlign: "center", lineHeight: 21 },
+
   clearText: {
     color: "#FFFFFF",
     fontSize: 10,
+    fontWeight: "700",
+  },
+
+  retryButton: {
+    minHeight: 44,
+    justifyContent: "center",
+    marginTop: 14,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: "#2F6B4F",
+  },
+
+  retryText: {
+    color: "#FFFFFF",
+    fontSize: 13,
     fontWeight: "700",
   },
 
@@ -1012,7 +1180,7 @@ filterToggle: {
     shadowRadius: 6,
   },
 
-  plantHeart: { position: "absolute", top: 8, right: 8, backgroundColor: "#FFFFFFE8" },
+  plantHeart: { position: "absolute", top: 8, right: 8, backgroundColor: "#FFFFFFE8", zIndex: 2 },
 
   cardImage: {
     height: 135,
@@ -1022,37 +1190,38 @@ filterToggle: {
     backgroundColor: "#DCE8D6",
     },
 
+  imageBadges: { position: "absolute", top: 9, left: 10, right: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 6 },
+  imageBadge: { maxWidth: "48%", overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, color: "#FFFFFF", fontSize: 9, lineHeight: 12, fontWeight: "700", textAlign: "center" },
+  statusBadge: { backgroundColor: "#315B49" },
+  statusApproved: { backgroundColor: "#23734D" },
+  statusPending: { backgroundColor: "#A76512" },
+  statusRejected: { backgroundColor: "#A53A35" },
+  statusCorrection: { backgroundColor: "#8C5D20" },
+  statusOther: { backgroundColor: "#52645A" },
+
     plantIcon: {
     fontSize: 45,
     },
 
-  zoneBadge: {
-    position: "absolute",
-    top: 10,
-    right: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: "#143625DD",
-    color: "#FFFFFF",
-    fontSize: 9,
-    fontWeight: "700",
-  },
+  zoneBadge: { backgroundColor: "#143625DD" },
+  imageZoneBadge: { marginLeft: "auto" },
 
   cardContent: {
     padding: 14,
   },
 
   plantId: {
-    color: "#234B3A",
-    fontSize: 16,
-    fontWeight: "700",
+    marginTop: 4,
+    color: "#7C8982",
+    fontSize: 11,
+    fontWeight: "600",
   },
 
   species: {
-    marginTop: 3,
-    color: "#7C8982",
-    fontSize: 10,
+    color: "#234B3A",
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: "700",
   },
 
   infoGrid: {

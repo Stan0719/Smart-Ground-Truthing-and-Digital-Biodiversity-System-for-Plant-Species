@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Chart, registerables } from 'chart.js'
+import { iotDate } from '../../utils/iotDisplay'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 Chart.register(...registerables)
@@ -21,16 +22,7 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 const hasData = computed(() => props.points.length > 0)
 let chart: Chart | null = null
 
-const formatTimestamp = (value: string) => {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('en-MY', {
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
-}
+const formatTimestamp = iotDate
 
 const renderChart = async () => {
   chart?.destroy()

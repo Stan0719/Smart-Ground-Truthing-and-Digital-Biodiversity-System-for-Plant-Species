@@ -140,6 +140,19 @@ export function createAuthServer({ auth, recovery, staff, diagnostics = null, ke
         return send(401, { error: 'Please sign in again.' })
       }
       if (path === '/api/auth/me' && req.method === 'GET') return send(200, { user })
+      if (path === '/api/conservation/submitter-names' && req.method === 'GET') {
+        if (user.role !== 'Conservation Officer' || user.mustChangePassword)
+          return send(403, { error: 'Access denied.' })
+        const ids = [...new Set((new URL(req.url, origin).searchParams.get('ids') || '').split(',').filter(Boolean))]
+        if (ids.length > 100 || ids.some(id => id.length > 100))
+          return send(400, { error: 'Invalid submitter list.' })
+        const names = {}
+        for (const id of ids) {
+          const account = await auth.byId(id)
+          if (account && ['Botanist', 'Conservation Officer', 'Administrator'].includes(account.role) && account.name?.trim()) names[id] = account.name.trim()
+        }
+        return send(200, { names })
+      }
       if (path === '/api/auth/password' && req.method === 'POST') {
         if (
           typeof body.password !== 'string' ||

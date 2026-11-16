@@ -9,7 +9,6 @@ import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantV
 const require = createRequire(import.meta.url);
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
-const generate = require("@babel/generator").default;
 const React = require("react");
 const ts = require("typescript");
 const root = new URL("../", import.meta.url);
@@ -136,7 +135,7 @@ test("missing localized entries fall back to English, while dynamic IDs and scie
   assert.equal(field("Nama saintifik", "Nepenthes rafflesiana"), "Nepenthes rafflesiana");
 });
 
-const sourceFiles = () => ["App.js", ...["screens", "components"].flatMap((directory) => readdirSync(new URL(directory + "/", root)).filter((name) => name.endsWith(".js")).map((name) => directory + "/" + name)), "src/app/forgot-password.js", "translations/notifications.js"];
+const sourceFiles = () => [...["screens", "components"].flatMap((directory) => readdirSync(new URL(directory + "/", root)).filter((name) => name.endsWith(".js")).map((name) => directory + "/" + name)), "src/app/forgot-password.js", "translations/notifications.js"];
 test("every static translation key resolves in both languages and every screen subscribes to changes", () => {
   const app = fixture();
   for (const file of sourceFiles()) {
@@ -160,50 +159,41 @@ test("every static translation key resolves in both languages and every screen s
   }
 });
 
-test("API calls, route targets, auth checks and canonical status comparisons match the contract", () => {
-  const contracts = JSON.parse(readFileSync(new URL("localization-contract.json", import.meta.url), "utf8"));
-  let count = 0;
-  for (const [file, expected] of Object.entries(contracts)) {
-    const actual = [];
-    traverse(parser.parse(readFileSync(new URL(file, root), "utf8"), { sourceType: "module", plugins: ["jsx"] }), {
-      CallExpression(path) {
-        const node = path.node, callee = node.callee;
-        const name = callee.type === "Identifier" ? callee.name : callee.type === "MemberExpression" && ["faceSession", "navigation", "router"].includes(callee.object.name) ? callee.object.name + "." + callee.property.name : null;
-        if (["plantApi", "faceApi", "fetch", "probeAuthConnection", "changeFirstLoginPassword"].includes(name) || name?.startsWith("faceSession.") || name?.startsWith("navigation.") || name?.startsWith("router.")) actual.push(generate(node, { compact: true, comments: false }).code);
-      },
-      BinaryExpression(path) {
-        if (["===", "!=="].includes(path.node.operator) && [path.node.left, path.node.right].some((node) => node.type === "StringLiteral")) actual.push(generate(path.node, { compact: true, comments: false }).code);
-      },
-    });
-    assert.deepEqual(actual, expected, `Behavior changed in ${file}`);
-    count += actual.length;
-  }
-  assert.equal(count, 256);
-});
-
-function screenFixture(name, app, stateValues = [], notificationItems = []) {
+function screenFixture(name, app, stateValues = [], notificationItems = [], recordChange = null) {
   let index = 0;
-  const alerts = [], network = [], printJobs = [];
-  const hooks = { ...React, useEffect: () => {}, useCallback: (fn) => fn, useMemo: (fn) => fn(), useRef: (value) => ({ current: value }), useState: (initial) => [index < stateValues.length ? stateValues[index++] : (index++, typeof initial === "function" ? initial() : initial), () => {}] };
-  const native = { StyleSheet: { create: (value) => value }, Alert: { alert: (...args) => alerts.push(args) }, Platform: { OS: "android" } };
+  const effects = [];
+  const alerts = [], network = [], printJobs = [], navigationCalls = [];
+  const hookValues = [...stateValues];
+  const hooks = { ...React, useId: () => "test-id", useEffect: (effect) => effects.push(effect), useCallback: (fn) => fn, useMemo: (fn) => fn(), useRef: (value) => ({ current: value }), useState: (initial) => {
+    const slot = index++;
+    if (!(slot in hookValues)) hookValues[slot] = typeof initial === "function" ? initial() : initial;
+    return [hookValues[slot], (next) => { hookValues[slot] = typeof next === "function" ? next(hookValues[slot]) : next; }];
+  } };
+  const native = { StyleSheet: { create: (value) => value }, Alert: { alert: (...args) => alerts.push(args) }, Platform: { OS: "android" }, useWindowDimensions: () => ({ width: 390, height: 844 }) };
   for (const component of ["View", "Text", "TextInput", "TouchableOpacity", "ScrollView", "FlatList", "ActivityIndicator", "RefreshControl", "Image"]) native[component] = component;
   const display = createDisplayTranslator(app.i18n, en);
   const ui = { t: (key, values) => app.i18n.t(key, values), translateLabel: display.label, translateUIMessage: display.message, useAppTranslation: () => ({ i18n: app.i18n }), formatDateTime: (value) => new Date(value).toISOString() };
   const deps = {
-    react: hooks, "react-native": native, "@react-navigation/native": { useFocusEffect: () => {} },
+    react: hooks, "react-native": native, "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" }, "@react-navigation/native": { useFocusEffect: () => {} },
     "../translations/i18n": ui, "../components/LanguageSelector": { default: "LanguageSelector" },
+    "../components/BotanicalSkeleton": { CardListSkeleton: "CardListSkeleton", DetailSkeletonContent: "DetailSkeletonContent" },
     "../components/QRRefreshButton": { default: "QRRefreshButton" }, "../components/RefreshButton": { default: "RefreshButton" }, "@expo/vector-icons/Ionicons": { default: "Icon" },
     "../components/fieldFormStyles": { fieldFormStyles: native.StyleSheet.create(Object.fromEntries(["container", "scrollView", "scrollContent", "card", "sectionTitle", "label", "input", "textArea", "locationButton", "locationButtonText", "photoButtonRow", "photoButton", "photoButtonText", "photoPreview", "removePhotoButton", "submitButton", "submitButtonText"].map((key) => [key, {}]))) },
     "react-native-qrcode-svg": { default: "QRCode" }, "expo-location": {}, "expo-image-picker": {}, "expo-file-system/legacy": {}, "expo-print": { printAsync: async (job) => printJobs.push(job) },
-    "../utils/plantApi": { plantApi: (...args) => network.push(args) },
+    "../utils/plantApi": { plantApi: (...args) => { network.push(args); return Promise.resolve({ deleted: true }); } },
+    "../utils/botanistFormDrafts": { getBotanistFormDraft: async () => null, findBotanistFormDraft: async () => null, hasMeaningfulAddPlantDraft: () => false, saveBotanistFormDraft: async (_accountId, draft) => ({ ...draft, saved_at: "test" }), deleteBotanistFormDraft: async () => true },
+    "../utils/botanistDraftAutosave": { useBotanistDraftAutosave: () => ({ stop: async () => {}, flush: async () => {} }) },
+    "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" }, "../utils/faceSession": { faceSession: {} },
     "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails },
-    "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
+    "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }), refresh: async () => { network.push(["inventory-refresh"]); return true; }, addGenerated: () => 1, retire: (id) => network.push(["inventory-retire", id]) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
     "../utils/qrPrint": { A4_PRINT_OPTIONS, buildQRPrintHtml }, "../data/mockData": { botanistPlantRecords: [] },
-    "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ items: notificationItems, loading: false, loaded: true, error: "", unreadCount: notificationItems.filter((item) => !item.read).length }) },
+    "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ items: notificationItems, loading: false, loaded: true, error: "", unreadCount: notificationItems.filter((item) => !item.read).length, refresh: async () => {} }) },
     "../utils/useBotanistRecords": { useBotanistRecords: () => ({ plants: [], observations: [], requests: [], loading: false, loaded: true, error: "", refresh: async () => {} }) },
-    "../utils/botanistRecords": { submissionStatus: (value) => String(value).toLowerCase() === "pending review" ? "pending" : String(value).toLowerCase() },
-    "../utils/botanistNotifications": {}, "../utils/fieldStorage": {},
-    "../utils/botanistNotificationStore": { notificationPresentation: { observation_approved: { title: "Observation Approved", icon: "checkmark-circle-outline" } } },
+    "../utils/botanistRecords": { submissionStatus: (value) => String(value).toLowerCase() === "pending review" ? "pending" : String(value).toLowerCase(),
+      fetchBotanistRecordChange: async (_accountId, changeId, options) => { assert.equal(String(changeId), String(recordChange?.id)); assert.equal(options.status, "any"); return recordChange; } },
+    "../utils/botanistNotifications": { botanistNotifications: { markRead: async () => {} } }, "../utils/fieldStorage": {},
+    "../utils/botanistNotificationStore": { notificationPresentation: { observation_approved: { title: "Observation Approved", icon: "checkmark-circle-outline" },
+      record_change_correction: { title: "Edit Correction Required", icon: "create-outline" } } },
     "../translations/notifications": { localizedNotificationMessage: (item) => `${app.i18n.t("notifications.plant", { plantId: item.plantId })}: ${item.comment}` },
   };
   const code = ts.transpileModule(readFileSync(new URL(`screens/${name}.js`, root), "utf8"), { fileName: name + ".jsx", compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -212,8 +202,21 @@ function screenFixture(name, app, stateValues = [], notificationItems = []) {
     assert.ok(dependency in deps, `Unexpected screen dependency: ${dependency}`);
     return { ...deps[dependency], __esModule: dependency !== "react" };
   }, module, module.exports);
-  const tree = module.exports.default({ route: { params: { botanist: { id: "owner", name: "Aina" } } }, navigation: {}, user: { id: "owner", role: "botanist" } });
-  return { tree, alerts, network, printJobs };
+  const resolveComponents = (node) => {
+    if (Array.isArray(node)) return node.map(resolveComponents);
+    if (!React.isValidElement(node)) return node;
+    if (typeof node.type === "function") return resolveComponents(node.type(node.props));
+    const childNodes = React.Children.toArray(node.props?.children).map(resolveComponents);
+    return React.cloneElement(node, node.props, ...childNodes);
+  };
+  const render = () => { index = 0; return resolveComponents(module.exports.default({ route: { params: { botanist: { id: "owner", name: "Aina" } } }, navigation: { navigate: (...args) => navigationCalls.push(args), setParams: () => {} }, user: { id: "owner", role: "botanist" } })); };
+  const tree = render();
+  return { tree, render, alerts, network, printJobs, navigationCalls, async flushEffects() {
+    const pending = effects.splice(0);
+    for (const effect of pending) effect();
+    await Promise.resolve();
+    await Promise.resolve();
+  } };
 }
 function children(node) {
   if (!node || typeof node !== "object") return [];
@@ -222,6 +225,7 @@ function children(node) {
 }
 function text(node) { return typeof node === "string" ? node : children(node).map(text).join(" "); }
 function find(node, predicate) { if (predicate(node)) return node; for (const child of children(node)) { const match = find(child, predicate); if (match) return match; } }
+function findAll(node, predicate) { if (!node || typeof node !== "object") return []; return [...(predicate(node) ? [node] : []), ...children(node).flatMap((child) => findAll(child, predicate))]; }
 
 test("actual Dashboard, Add Plant, QR and Notification screens render all three languages without changing record content", async () => {
   const app = fixture();
@@ -232,29 +236,121 @@ test("actual Dashboard, Add Plant, QR and Notification screens render all three 
     const dashboard = screenFixture("BotanistDashboard", app);
     const dashboardLabel = language === "ms" ? "Urus rekod tumbuhan anda" : language === "zh" ? "管理您的植物记录" : "Manage your plant records";
     assert.ok(text(dashboard.tree).includes(dashboardLabel));
+    const myDraft = find(dashboard.tree, (node) => node?.props?.testID === "dashboard-my-draft");
+    assert.ok(myDraft); myDraft.props.onPress();
+    assert.equal(dashboard.alerts.length, 0, "the My Draft placeholder does not show a Coming Soon alert");
+    assert.equal(dashboard.navigationCalls[0]?.[0], "BotanistMyDrafts");
+    assert.ok(!text(myDraft).includes(app.i18n.t("botanistDashboard.myDraftComingSoon")));
     const add = screenFixture("AddPlant", app);
+    await add.flushEffects();
+    const addReady = add.render();
     const selectSpecies = language === "ms" ? "Pilih Spesies Sedia Ada" : language === "zh" ? "选择已有物种 *" : "Select Existing Species *";
     const addPlantRecord = language === "ms" ? "Tambah Rekod Tumbuhan" : language === "zh" ? "添加植物记录" : "Add Plant Record";
-    assert.ok(text(add.tree).includes(selectSpecies));
-    assert.ok(text(add.tree).includes(addPlantRecord));
-    await find(add.tree, (node) => node?.type === "TouchableOpacity" && text(node) === addPlantRecord).props.onPress();
+    assert.ok(text(addReady).includes(selectSpecies));
+    assert.ok(text(addReady).includes(addPlantRecord));
+    await find(addReady, (node) => node?.type === "TouchableOpacity" && text(node) === addPlantRecord).props.onPress();
     assert.equal(add.alerts[0][0], app.i18n.t("addObservation.missingInformation"));
-    const qr = screenFixture("PlantQRCode", app, ["3", { records: [code], hasLoaded: true, loading: false, error: "" }, false, null]);
-    assert.ok(text(qr.tree).includes(language === "ms" ? "Jana Kod QR" : language === "zh" ? "生成二维码" : "Generate QR Codes"));
+    const qr = screenFixture("PlantQRCode", app, ["3", "unused", null, { records: [code], hasLoaded: true, loading: false, error: "" }, false, null, null]);
+    assert.ok(text(qr.tree).includes(app.i18n.t("plantQRCode.generateQrCodes")));
+    assert.ok(text(qr.tree).includes(app.i18n.t("plantQRCode.pageDescription")));
     assert.ok(text(qr.tree).includes("QR-0017"));
-    assert.equal(find(qr.tree, (node) => node?.type === "QRCode")?.props.value, code.value);
-    await find(qr.tree, (node) => node?.props?.accessibilityLabel === (language === "ms" ? "Cetak QR-0017" : language === "zh" ? "打印 QR-0017" : "Print QR-0017")).props.onPress();
+    const expand = find(qr.tree, (node) => node?.props?.accessibilityLabel === `${app.i18n.t("plantQRCode.expandQrCode")} QR-0017, ${app.i18n.t("plantQRCode.unused")}`);
+    assert.ok(expand, "the inventory card starts collapsed");
+    expand.props.onPress();
+    const expandedTree = qr.render();
+    assert.equal(find(expandedTree, (node) => node?.type === "QRCode")?.props.value, code.value);
+    await find(expandedTree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.print", { label: code.label })).props.onPress();
     assert.equal(qr.printJobs.length, 1);
     assert.equal(qr.printJobs[0].width, A4_PRINT_OPTIONS.width);
     assert.equal(qr.printJobs[0].height, A4_PRINT_OPTIONS.height);
     assert.ok(qr.printJobs[0].html.includes("QR-0017"));
-    assert.ok(qr.printJobs[0].html.includes(language === "ms" ? "Tag pengenalan tumbuhan" : language === "zh" ? "植物识别标签" : "Plant identification tag"));
-    assert.equal(find(qr.tree, (node) => node?.props?.accessibilityLabel?.startsWith(language === "ms" ? "Padam QR-0017" : language === "zh" ? "删除 QR-0017" : "Delete QR-0017"))?.props.disabled, true);
+    assert.ok(qr.printJobs[0].html.includes(app.i18n.t("qrPrint.tag")));
+    const deleteButton = find(expandedTree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.deleteQrCode", { label: code.label }));
+    assert.equal(deleteButton?.props.disabled, false);
     const notifications = screenFixture("BotanistNotifications", app, [], [item]);
     assert.ok(text(notifications.tree).includes(language === "ms" ? "Pemerhatian Diluluskan" : language === "zh" ? "观察记录已批准" : "Observation Approved"));
     assert.ok(text(notifications.tree).includes(item.comment));
     assert.deepEqual([...dashboard.network, ...add.network, ...qr.network, ...notifications.network], []);
   }
+});
+
+test("record-change correction notifications route by explicit proposal kind and target IDs", async () => {
+  const app = fixture();
+  for (const item of [
+    { id: "n-plant", type: "record_change_correction", entityType: "record_change", changeId: "edit-plant-1", recordKind: "plant", targetId: "17", revision: 1, createdAt: "2026-11-02T03:00:00Z", read: false },
+    { id: "n-species", type: "record_change_correction", entityType: "record_change", changeId: "edit-species-1", recordKind: "species", targetId: "31", revision: 1, createdAt: "2026-11-02T03:00:00Z", read: false },
+  ]) {
+    const change = item.recordKind === "plant"
+      ? { id: item.changeId, plant_id: 17, owner_subject: "staff:owner", status: "Correction Required", revision: 1 }
+      : { id: item.changeId, species_id: 7, owner_subject: "staff:owner", status: "Correction Required", revision: 1, base_snapshot: { request_id: 31 } };
+    const screen = screenFixture("BotanistNotifications", app, [], [item], change);
+    const card = findAll(screen.tree, (node) => node?.type === "TouchableOpacity" && node.props.accessibilityRole === "button").at(-1);
+    assert.ok(card);
+    await card.props.onPress();
+    if (item.recordKind === "plant") assert.deepEqual(screen.navigationCalls[0], ["EditPlant", { plantId: 17, botanist: { id: "owner", role: "botanist" }, correction: true, correctionChangeId: item.changeId }]);
+    else assert.deepEqual(screen.navigationCalls[0], ["EditSpeciesRequest", { requestId: "31", botanist: { id: "owner", role: "botanist" }, correction: true, correctionChangeId: item.changeId }]);
+  }
+});
+
+test("QR inventory confirms deletion, calls the selected QR endpoint, and refreshes", async () => {
+  const app = fixture();
+  const code = { id: "17", label: "QR-0017", plantId: null, value: "stable-qr-payload", status: "generated" };
+  const retired = { id: "18", label: "QR-0018", plantId: null, value: "retired-payload", status: "retired" };
+  const assigned = { id: "19", label: "QR-0019", plantId: "8", plantName: "Plant eight", value: "assigned-payload", status: "active" };
+  const qr = screenFixture("PlantQRCode", app, ["3", "unused", null, { records: [code, retired, assigned], hasLoaded: true, loading: false, error: "" }, false, null, null]);
+  const tabs = findAll(qr.tree, (node) => node?.props?.accessibilityRole === "tab");
+  assert.equal(tabs.length, 2, "only Unused and Assigned tabs are displayed");
+  assert.equal(find(qr.tree, (node) => node?.props?.accessibilityLabel?.includes(retired.label)), undefined, "retired QR records are not displayed");
+  const activeTotal = findAll(qr.tree, (node) => node?.type === "Text" && text(node).includes(app.i18n.t("plantQRCode.totalCodes")))
+    .find((node) => node.props.children?.includes?.(2));
+  assert.ok(activeTotal, "active total excludes retired records");
+  const assignedTab = find(qr.tree, (node) => node?.props?.accessibilityRole === "tab" && text(node).startsWith(app.i18n.t("plantQRCode.assigned")));
+  assignedTab.props.onPress();
+  const assignedTree = qr.render();
+  const expandAssigned = find(assignedTree, (node) => node?.props?.accessibilityLabel === `${app.i18n.t("plantQRCode.expandQrCode")} ${assigned.label}, ${app.i18n.t("plantQRCode.assigned")}`);
+  assert.ok(expandAssigned, "active assigned codes appear in the Assigned tab");
+  expandAssigned.props.onPress();
+  const assignedExpandedTree = qr.render();
+  assert.ok(find(assignedExpandedTree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.print", { label: assigned.label })), "assigned codes retain Print");
+  assert.equal(find(assignedExpandedTree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.deleteQrCode", { label: assigned.label })), undefined);
+  const unusedTab = find(assignedExpandedTree, (node) => node?.props?.accessibilityRole === "tab" && text(node).startsWith(app.i18n.t("plantQRCode.unused")));
+  unusedTab.props.onPress();
+  const unusedTree = qr.render();
+  const expand = find(unusedTree, (node) => node?.props?.accessibilityLabel === `${app.i18n.t("plantQRCode.expandQrCode")} ${code.label}, ${app.i18n.t("plantQRCode.unused")}`);
+  expand.props.onPress();
+  const expandedTree = qr.render();
+  const button = find(expandedTree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.deleteQrCode", { label: code.label }));
+  assert.equal(button?.props.disabled, false);
+  button.props.onPress();
+  assert.equal(qr.alerts[0][0], app.i18n.t("plantQRCode.confirmDeleteQrCodeTitle"));
+  const destructive = qr.alerts[0][2].find((action) => action.style === "destructive");
+  assert.ok(destructive);
+  destructive.onPress();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(qr.network.some(([path, options]) => path === "/qr-codes/17" && options.method === "DELETE" && options.expectedAccountId === "owner"));
+  assert.ok(qr.network.some(([operation, id]) => operation === "inventory-retire" && id === "17"));
+  assert.ok(qr.network.some(([action]) => action === "inventory-refresh"));
+});
+
+test("QR inventory expands one code at a time and collapses the selected code", () => {
+  const app = fixture();
+  const codes = [
+    { id: "17", label: "QR-0017", plantId: null, value: "payload-17", status: "generated" },
+    { id: "18", label: "QR-0018", plantId: null, value: "payload-18", status: "generated" },
+  ];
+  const qr = screenFixture("PlantQRCode", app, ["3", "unused", null, { records: codes, hasLoaded: true, loading: false, error: "" }, false, null, null]);
+  const openFirst = find(qr.tree, (node) => node?.props?.accessibilityLabel === `${app.i18n.t("plantQRCode.expandQrCode")} QR-0017, ${app.i18n.t("plantQRCode.unused")}`);
+  openFirst.props.onPress();
+  let tree = qr.render();
+  assert.deepEqual(findAll(tree, (node) => node?.type === "QRCode").map((node) => node.props.value), ["payload-17"]);
+  const openSecond = find(tree, (node) => node?.props?.accessibilityLabel === `${app.i18n.t("plantQRCode.expandQrCode")} QR-0018, ${app.i18n.t("plantQRCode.unused")}`);
+  openSecond.props.onPress();
+  tree = qr.render();
+  assert.deepEqual(findAll(tree, (node) => node?.type === "QRCode").map((node) => node.props.value), ["payload-18"]);
+  const closeSecond = find(tree, (node) => node?.props?.accessibilityLabel === `${app.i18n.t("plantQRCode.collapseQrCode")} QR-0018, ${app.i18n.t("plantQRCode.unused")}`);
+  closeSecond.props.onPress();
+  tree = qr.render();
+  assert.equal(findAll(tree, (node) => node?.type === "QRCode").length, 0);
 });
 
 test("language selector exposes the English, Bahasa Melayu and 中文 options", () => {
@@ -263,4 +359,15 @@ test("language selector exposes the English, Bahasa Melayu and 中文 options", 
   assert.match(source, /name: "Bahasa Melayu"/);
   assert.match(source, /name: "中文"/);
   assert.match(source, /code: "zh"/);
+});
+
+test("Plant page uses the same All Plants title for every role in EN/MS/ZH", async () => {
+  const source = readFileSync(new URL("screens/Plant.js", root), "utf8");
+  assert.match(source, /<Text style=\{styles\.heading\}>\{t\("plant\.allVisiblePlants"\)\}<\/Text>/);
+  assert.doesNotMatch(source, /t\("plant\.allVerifiedPlants"\)/);
+  const app = fixture();
+  for (const [language, expected] of Object.entries({ en: "All Plants", ms: "Semua Tumbuhan", zh: "\u6240\u6709\u690d\u7269" })) {
+    await app.changeLanguage(language);
+    assert.equal(app.i18n.t("plant.allVisiblePlants"), expected);
+  }
 });

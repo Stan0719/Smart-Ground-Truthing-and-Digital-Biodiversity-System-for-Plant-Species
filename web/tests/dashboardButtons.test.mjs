@@ -113,8 +113,8 @@ test('shared sizing cannot introduce arbitrary text breaking or wrapping table a
 test('Observations uses one primary action and retains the nonbreaking table action contract', () => {
   const observation = readFileSync(new URL('../src/views/conservation/ObservationsView.vue', import.meta.url), 'utf8')
   const review = readFileSync(new URL('../src/views/conservation/ReviewSubmissionsView.vue', import.meta.url), 'utf8')
-  assert.match(observation, /class="table-scroll"><table>/)
-  const group = observation.match(/<td><div class="action-group">([\s\S]*?)<\/div><\/td>/)?.[1]
+  assert.match(observation, /class="table-scroll observations-scroll"/)
+  const group = observation.match(/<td class="actions-cell"><div class="action-group">([\s\S]*?)<\/div><\/td>/)?.[1]
   assert.ok(group)
   // Four field actions, or five registration/legacy actions; primary variants are exclusive.
   assert.equal((group.match(/class="action-button"/g) || []).length, 6)
@@ -122,7 +122,7 @@ test('Observations uses one primary action and retains the nonbreaking table act
   assert.match(group, /<button v-else class="action-button" @click="open\(item\)"/)
   assert.match(group, /<RouterLink v-if="authorizedOfficer && item.origin !== 'subsequent_observation'/)
   assert.match(group, /@click="open\(item, true\)"/)
-  assert.match(review, /class="table-scroll"/)
+  assert.match(review, /class="table-scroll reviews-scroll"/)
   assert.match(review, /class="action-button" :disabled="reviewBusy" @click="open\(observation\)"/)
   assert.ok(find('table :is(button', 'min-width', 'max-content'))
 })

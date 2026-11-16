@@ -13,13 +13,34 @@ import uuid
 import sqlite3
 import time
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
 
 LABELS = {'Soil Moisture': 'soilMoisture', 'Rain Sensor': 'rainfall',
-          'Sound Sensor': 'sound', 'Temperature': 'temperature', 'Humidity': 'humidity'}
+          'Raindrop Sensor': 'rainfall', 'Sound Sensor': 'sound',
+          'Temperature': 'temperature', 'Humidity': 'humidity'}
+
+
+def validate_api_origin(origin):
+    message = ('Configure PLANT_API_ORIGIN as an HTTPS origin, or use HTTP only '
+               'with localhost, 127.0.0.1 or [::1] for local development.')
+    origin = origin.strip()
+    try:
+        url = urllib.parse.urlsplit(origin)
+        port = url.port
+    except ValueError:
+        raise ValueError(message) from None
+    if (not url.hostname or url.username is not None or url.password is not None
+            or url.path not in ('', '/') or '?' in origin or '#' in origin
+            or '\\' in origin or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in origin)
+            or (port is not None and not 1 <= port <= 65535)
+            or not (url.scheme == 'https' or
+                    (url.scheme == 'http' and url.hostname in ('localhost', '127.0.0.1', '::1')))):
+        raise ValueError(message)
+    return url.geturl().rstrip('/')
 
 def serial_module():
     try:
@@ -51,32 +72,46 @@ def list_serial_ports():
     return 0 if ports else 1
 
 
-def frames(lines):
+def frames(lines, *, include_metadata=False):
     values = {}
     dashboard = False
     section = None
+    mpu_connected = None
+    observed_at = None
+
+    def result():
+        if not include_metadata:
+            return values
+        return {'values': values, 'capture': {
+            'observed_at': observed_at or datetime.now(timezone.utc).isoformat(),
+            'mpu_connected': mpu_connected,
+        }}
+
     for line in lines:
         line = line.strip()
         if line == '========== SENSOR READINGS ==========':
             values = {}
             dashboard = False
             section = None
+            mpu_connected = observed_at = None
         elif line == '====================================':
             if values:
-                yield values
+                yield result()
             values = {}
             dashboard = False
             section = None
+            mpu_connected = observed_at = None
         elif line == 'BIODIVERSITY SENSOR MONITOR':
             if values:
-                yield values
+                yield result()
             values = {}
             dashboard = True
             section = None
+            mpu_connected = observed_at = None
         elif dashboard and line.startswith('[') and line.endswith(']'):
             section = line[1:-1].strip()
         else:
-            match = re.match(r'^(Soil Moisture|Rain Sensor|Sound Sensor|Temperature|Humidity)\s*:\s*(-?[\d.]+)', line)
+            match = re.match(r'^(Soil Moisture|Rain Sensor|Raindrop Sensor|Sound Sensor|Temperature|Humidity)\s*:\s*(-?[\d.]+)', line)
             if match:
                 try:
                     value = float(match[2])
@@ -104,8 +139,13 @@ def frames(lines):
                         values[LABELS[match[1]]] = value
             if line.startswith('IMU:') and 'change detected' in line:
                 values['movement'] = 1
-            if dashboard and line.startswith('Movement') and 'DETECTED' in line.upper():
-                values['movement'] = 1
+            health = re.match(r'^(MPU6050|Status)\s*:\s*(Connected|Not detected|Disconnected)\s*$', line, re.IGNORECASE)
+            if dashboard and health and (health[1].upper() == 'MPU6050' or section == 'MPU6050'):
+                mpu_connected = health[2].lower() == 'connected'
+            movement = re.match(r'^Movement(?:\s+Status)?\s*:\s*(DETECTED|No movement)\s*$', line, re.IGNORECASE)
+            if dashboard and movement:
+                values['movement'] = int(movement[1].lower() == 'detected')
+                observed_at = datetime.now(timezone.utc).isoformat()
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -123,10 +163,13 @@ class Outbox:
         self.db.execute('CREATE TABLE IF NOT EXISTS queue (id INTEGER PRIMARY KEY, body TEXT NOT NULL)')
         self.db.commit()
 
-    def enqueue(self, device, values):
+    def enqueue(self, device, values, *, capture=None):
         if self.db.execute('SELECT COUNT(*) FROM queue').fetchone()[0] >= 10000:
             raise RuntimeError('Device outbox is full. Restore connectivity and flush before reading more frames.')
-        payload = json.dumps({'device_id': device, 'values': values, 'client_key': uuid.uuid4().hex})
+        data = {'device_id': device, 'values': values, 'client_key': uuid.uuid4().hex}
+        if capture is not None:
+            data['capture'] = capture
+        payload = json.dumps(data)
         self.db.execute('INSERT INTO queue(body) VALUES(?)', (payload,))
         self.db.commit()  # Commit before network I/O; retries reuse this client key.
 
@@ -188,10 +231,10 @@ def main():
         parser.error('--port must be a local serial port, not a network URL')
     if args.port:
         serial_module()  # Check optional dependency before any network or outbox access.
-    origin = os.environ.get('PLANT_API_ORIGIN', '')
-    url = urllib.parse.urlsplit(origin)
-    if url.scheme != 'https' or not url.hostname or url.username or url.password or url.query or url.fragment or url.path not in ('', '/'):
-        raise SystemExit('Configure an HTTPS PLANT_API_ORIGIN.')
+    try:
+        origin = validate_api_origin(os.environ.get('PLANT_API_ORIGIN', ''))
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
     key, device = os.environ.get('DEVICE_KEY', ''), os.environ.get('DEVICE_ID', '')
     if not re.fullmatch(r'[a-f0-9]{64}', key) or not device:
         raise SystemExit('Configure DEVICE_ID and DEVICE_KEY for the registered sensor.')
@@ -208,8 +251,8 @@ def main():
         else:
             outbox.flush(send, device)
         if not args.flush_only and not args.drain:
-            for values in frames(serial_lines(args.port) if args.port else sys.stdin):
-                outbox.enqueue(device, values)
+            for frame in frames(serial_lines(args.port) if args.port else sys.stdin, include_metadata=True):
+                outbox.enqueue(device, frame['values'], capture=frame['capture'])
                 outbox.flush(send, device)
                 queued = outbox.db.execute('SELECT COUNT(*) FROM queue').fetchone()[0]
                 if queued:

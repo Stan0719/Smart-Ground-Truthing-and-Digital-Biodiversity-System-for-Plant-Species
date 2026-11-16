@@ -1,21 +1,59 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
 const { t } = useI18n()
-defineProps<{ title: string; subtitle?: string; wide?: boolean }>()
-defineEmits<{ close: [] }>()
+const props = defineProps<{ title: string; subtitle?: string; wide?: boolean; accessible?: boolean }>()
+const emit = defineEmits<{ close: [] }>()
+const backdrop = ref<HTMLElement | null>(null)
+const card = ref<HTMLElement | null>(null)
+let opener: HTMLElement | null = null
+let previousOverflow = ''
+const inertNodes = new Map<HTMLElement, boolean>()
+const focusables = () => Array.from(card.value?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"]') || [])
+function keyboard(event: KeyboardEvent) {
+  if (!props.accessible) return
+  if (event.key === 'Escape') { event.preventDefault(); emit('close') }
+  if (event.key !== 'Tab') return
+  const entries = focusables(), first = entries[0], last = entries.at(-1)
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+}
+onMounted(async () => {
+  if (!props.accessible) return
+  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  // Lock the root scroller; locking body changes sticky dashboard ancestors.
+  previousOverflow = document.documentElement.style.overflow
+  document.documentElement.style.overflow = 'hidden'
+  let current = backdrop.value
+  while (current?.parentElement) {
+    for (const sibling of current.parentElement.children) if (sibling !== current && sibling instanceof HTMLElement) {
+      inertNodes.set(sibling, sibling.inert); sibling.inert = true
+    }
+    current = current.parentElement
+    if (current === document.body) break
+  }
+  await nextTick(); focusables()[0]?.focus({ preventScroll: true })
+})
+onBeforeUnmount(() => {
+  if (!props.accessible) return
+  for (const [node, inert] of inertNodes) node.inert = inert
+  document.documentElement.style.overflow = previousOverflow
+  if (opener?.isConnected) opener.focus({ preventScroll: true })
+})
 </script>
 <template>
-  <div class="modal-backdrop" @click.self="$emit('close')">
+  <div ref="backdrop" class="modal-backdrop" @click.self="$emit('close')" @keydown="keyboard">
     <section
       class="modal-card"
+      ref="card"
       :class="{ wide }"
       role="dialog"
       aria-modal="true"
       :aria-label="title"
     >
       <header class="modal-header">
-        <div>
-          <h2>{{ title }}</h2>
+        <div :class="{ 'custom-modal-title': $slots.title }">
+          <h2><slot name="title">{{ title }}</slot></h2>
           <p v-if="subtitle">{{ subtitle }}</p>
         </div>
         <button
@@ -31,3 +69,7 @@ defineEmits<{ close: [] }>()
     </section>
   </div>
 </template>
+
+<style scoped>
+.custom-modal-title { flex: 1; min-width: 0; }
+</style>

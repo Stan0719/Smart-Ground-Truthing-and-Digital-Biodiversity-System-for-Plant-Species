@@ -18,7 +18,7 @@ export const adminNotifications = ref<AdminNotification[]>([
     message: 'Movement detected near PL002.',
     time: '2 mins ago',
     read: false,
-    route: '/admin/alerts',
+    route: '/admin/iot',
   },
   {
     id: 'N002',
@@ -36,7 +36,7 @@ export const adminNotifications = ref<AdminNotification[]>([
     message: 'High temperature detected near PL010.',
     time: '15 mins ago',
     read: false,
-    route: '/admin/alerts',
+    route: '/admin/iot',
   },
   {
     id: 'N004',

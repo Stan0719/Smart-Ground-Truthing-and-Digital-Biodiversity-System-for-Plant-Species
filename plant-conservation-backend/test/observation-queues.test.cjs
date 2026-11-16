@@ -11,7 +11,7 @@ test("Phase 3: authorized effective-origin queues and bounded pagination", async
   t.after(() => pool.end());
   for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql"])
     await pool.query(readFileSync(join(__dirname, "../migrations", name), "utf8"));
-  await pool.query(`CREATE TABLE public.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  await pool.query(`CREATE TABLE plant_app.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     plant_id integer UNIQUE,qr_code text UNIQUE,status text,assigned_at timestamptz,activated_at timestamptz,retired_at timestamptz)`);
   await pool.query(`INSERT INTO species(scientific_name,common_name,rbac_data) VALUES
     ('Species A','A','{}'),('Species B','B','{}'),('Unapproved','U','{"approvalStatus":"Pending Review"}'),('Protected','P','{}');
@@ -39,6 +39,8 @@ test("Phase 3: authorized effective-origin queues and bounded pagination", async
     INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result)
     SELECT 'staff:bot','queue-'||n,repeat('a',64),jsonb_build_object('id',n::text,'plant_id',n,'species_id',1,'species_request_id',NULL,'status','Pending Review','qr_token','queue-qr-'||n) FROM generate_series(100,619) n;
     INSERT INTO plant_record(plant_id,species_id,registered_subject,qr_token,rbac_status) VALUES(10000,1,'staff:bot','field-queue','Approved'),(10001,4,'staff:other','protected-queue','Approved');
+    INSERT INTO plant_app.qr_code(plant_id,qr_code,status,assigned_at)
+      VALUES(10000,'field-queue','active',CURRENT_TIMESTAMP);
     INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,origin_type,created_at)
     SELECT n::text,10000,'staff:bot','Pending Review','{"heightCm":30,"latitude":4,"longitude":113}', 'field-'||n,'subsequent_observation','2026-01-01T00:00:00.000124Z' FROM generate_series(20000,20699) n;
     INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,created_at)

@@ -10,8 +10,9 @@ submission receipt exists. No duplicate or replacement record was needed.
 
 Plant identity is in plant_record; species classification is in species; field
 content is in plant_observation; the request is in species_request_submission.
-Location, QR assignment and photos use the existing plant_location, public.qr_code
-and plant_asset relationships.
+Location, QR assignment and photos use the existing plant_location,
+plant_app.qr_code and plant_asset relationships. The former `public.qr_code`
+name refers to the historical pre-migration schema.
 
 ## Root causes
 
@@ -27,7 +28,7 @@ and plant_asset relationships.
 
 The dashboard loads plants, observations and species requests from the existing
 APIs, with all requests bound to the active account ID. A second client ownership
-filter uses staff:<account ID>, never display names. Requests appear in My Species
+filter uses staff:<account ID></account>, never display names. Requests appear in My Species
 Requests with their real status; the Pending Approval statistic filters the owner's
 pending plants/observations and requests. It is an owner submission view, not an
 approval interface. No approval controls or permission grants were added.

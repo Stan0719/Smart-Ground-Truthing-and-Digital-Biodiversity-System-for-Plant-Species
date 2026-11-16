@@ -1,11 +1,19 @@
 import { t, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import React, { useRef, useState } from "react";
-import { Modal, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { faceApi, validateFaceSession, faceReference, faceDiagnostic } from "../utils/faceApi";
-import { runFaceCapture, FACE_CAPTURE_VERSION } from "../utils/faceCaptureFlow";
+import { runFaceCapture } from "../utils/faceCaptureFlow";
 export { faceCameraConfigured } from "../utils/faceApi";
+
+function captureFeedback(failure, mode) {
+  if (mode !== "recognize") return translateUIMessage(failure.message || t("faceCameraModal.unableToVerifyFaceTryAgainOrUseYourPassword"));
+  if (failure.code === "no_face") return t("faceCameraModal.noFaceDetected");
+  if (failure.code === "multiple_faces") return t("faceCameraModal.multipleFacesDetected");
+  if (["API_UNREACHABLE", "API_TIMEOUT", "API_CONFIGURATION"].includes(failure.code)) return t("faceCameraModal.connectionUnavailable");
+  return t("faceCameraModal.recognitionFailed");
+}
 
 function Capture({ request, onClose, onResult, isCurrent }) {
   useAppTranslation();
@@ -19,7 +27,9 @@ function Capture({ request, onClose, onResult, isCurrent }) {
   const autoAttempted = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [stage, setStage] = useState("");
+  const [, setStage] = useState("");
+  const { width, height } = useWindowDimensions();
+  const previewWidth = Math.min(width - 40, 400, Math.max(160, (height - 280) * 0.75));
   React.useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   async function cameraReady() {
     if (!sizeConfigured.current) {
@@ -64,7 +74,7 @@ function Capture({ request, onClose, onResult, isCurrent }) {
         if (active.current && isCurrent(request.id)) onResult({ alreadyEnrolled: true }, request.id);
         return;
       }
-      if (active.current && isCurrent(request.id)) setError(failure.message || "Unable to verify face. Try again or use your password.");
+      if (active.current && isCurrent(request.id)) setError(captureFeedback(failure, request.mode));
     } finally { lock.current = false; if (active.current) setBusy(false); }
   }, [ready, request, onResult, isCurrent]);
   const scanRef = useRef(scan);
@@ -74,23 +84,43 @@ function Capture({ request, onClose, onResult, isCurrent }) {
     const timer = setTimeout(() => { autoAttempted.current = true; scanRef.current(); }, 900);
     return () => clearTimeout(timer);
   }, [request.mode, permission?.granted, ready]);
-  return <SafeAreaView style={{ flex: 1, backgroundColor: "#244B47", padding: 20 }}>
-    <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={onClose}><Text style={{ color: "white", fontSize: 20, padding: 16 }}>{t("faceCameraModal.closeUsePassword")}</Text></TouchableOpacity>
-    <Text accessibilityRole="header" style={{ color: "white", fontSize: 22, padding: 16 }}>{request.mode === "enroll" ? t("faceCameraModal.faceRegistration") : t("faceCameraModal.faceLogin")}</Text>
-    {typeof __DEV__ === "boolean" && __DEV__ && <Text style={{ color: "white", padding: 8 }}>{t("login.faceFlow")}{FACE_CAPTURE_VERSION} · {request.mode}</Text>}
-    <Text style={{ color: "white", fontSize: 18, padding: 16 }}>{request.mode === "enroll"
-      ? request.legacyProof
-        ? t("faceCameraModal.agreeToSaveANewLiveFacialTemplateForYour")
-        : t("faceCameraModal.agreeToSendAFacePhotoToYourProjectS")
-      : t("faceCameraModal.faceLoginPrototypeFaceTheCameraInGoodLightingYour")}</Text>
-    {!permission?.granted ? <TouchableOpacity onPress={askPermission}><Text style={{ color: "#DEF9C4", fontSize: 22, padding: 16 }}>{t("faceCameraModal.allowCamera")}</Text></TouchableOpacity>
-      : <CameraView ref={camera} style={{ flex: 1 }} facing="front" mirror={false} pictureSize={pictureSize} onCameraReady={cameraReady} onMountError={() => setError("Camera could not start. Use password login.")} />}
-    {permission?.granted && <Text style={{ color: "white", padding: 8 }}>{t("faceCameraModal.keepYourForeheadChinAndBothCheeksVisibleHoldStill")}</Text>}
-    {busy && <Text style={{ color: "white", padding: 12 }}>{translateUIMessage(stage)}{t("faceCameraModal.pleaseWaitBeforeClosing")}</Text>}
-    {!!error && <Text accessibilityRole="alert" style={{ color: "white", padding: 12 }}>{translateUIMessage(error)}</Text>}
-    <View style={{ padding: 16 }}><TouchableOpacity accessibilityRole="button" disabled={!permission?.granted || !ready || busy} onPress={() => scan(request.mode === "enroll")}>
-      <Text style={{ color: "#DEF9C4", fontSize: 22 }}>{busy ? t("faceCameraModal.checkingFace") : request.mode === "enroll" ? t("faceCameraModal.agreeAndRegisterMyFace") : error ? t("faceCameraModal.retryFaceLogin") : t("faceCameraModal.scanAndSignIn")}</Text>
-    </TouchableOpacity></View>
+  return <SafeAreaView style={styles.screen}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <View style={styles.content}>
+        <TouchableOpacity style={styles.backButton} accessibilityRole="button" accessibilityLabel={t("faceCameraModal.backToLogin")}
+          disabled={busy} onPress={onClose}>
+          <Text style={styles.backText}>{"\u2039  "}{t("faceCameraModal.backToLogin")}</Text>
+        </TouchableOpacity>
+        <Text accessibilityRole="header" style={styles.title}>{request.mode === "enroll" ? t("faceCameraModal.faceRegistration") : t("faceCameraModal.faceLogin")}</Text>
+        <Text style={styles.subtitle}>{request.mode === "enroll"
+          ? request.legacyProof
+            ? t("faceCameraModal.agreeToSaveANewLiveFacialTemplateForYour")
+            : t("faceCameraModal.agreeToSendAFacePhotoToYourProjectS")
+          : t("faceCameraModal.positionFaceInsideFrame")}</Text>
+        <View style={[styles.preview, { width: previewWidth }]}>
+          {permission?.granted ? <>
+            <CameraView ref={camera} style={styles.camera} facing="front" mirror={false} pictureSize={pictureSize}
+              onCameraReady={cameraReady} onMountError={() => setError(t("faceCameraModal.cameraCouldNotStartUsePasswordLogin"))} />
+            <View pointerEvents="none" accessible={false} style={styles.faceGuide} />
+          </> : <View style={styles.permissionState}>
+            <Text style={styles.permissionText}>{!permission ? t("faceCameraModal.startingCamera") :
+              permission.canAskAgain === false ? t("faceCameraModal.cameraPermissionSettings") : t("faceCameraModal.cameraPermissionNeeded")}</Text>
+          </View>}
+        </View>
+        {permission?.granted && <Text style={styles.hint}>{t("faceCameraModal.keepFaceVisible")}</Text>}
+        {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+        {permission && !permission.granted && permission.canAskAgain !== false ? <TouchableOpacity style={styles.primaryButton} accessibilityRole="button"
+          accessibilityLabel={t("faceCameraModal.allowCamera")} onPress={askPermission}>
+          <Text style={styles.primaryText}>{t("faceCameraModal.allowCamera")}</Text>
+        </TouchableOpacity> : permission?.granted && <TouchableOpacity style={[styles.primaryButton, (!ready || busy) && styles.disabledButton]}
+          accessibilityRole="button" accessibilityState={{ disabled: !ready || busy, busy }} disabled={!ready || busy}
+          onPress={() => scan(request.mode === "enroll")}>
+          {busy && <ActivityIndicator color="#173B36" size="small" />}
+          <Text style={styles.primaryText}>{busy ? t("faceCameraModal.checkingFace") : request.mode === "enroll"
+            ? t("faceCameraModal.agreeAndRegisterMyFace") : error ? t("faceCameraModal.retryFaceLogin") : t("faceCameraModal.scanAndSignIn")}</Text>
+        </TouchableOpacity>}
+      </View>
+    </ScrollView>
   </SafeAreaView>;
 }
 export default function FaceCameraModal({ request, onClose, onResult, isCurrent }) {
@@ -100,3 +130,29 @@ export default function FaceCameraModal({ request, onClose, onResult, isCurrent 
     {request && <Capture key={request.id} request={request} onClose={() => onClose(request.id)} onResult={onResult} isCurrent={isCurrent} />}
   </Modal>;
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: "#244B47" },
+  scroll: { flex: 1 },
+  scrollContent: { flexGrow: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 20, paddingVertical: 20 },
+  content: { width: "100%", maxWidth: 440, alignItems: "center", gap: 14 },
+  backButton: { alignSelf: "flex-start", minHeight: 48, paddingHorizontal: 8, justifyContent: "center" },
+  backText: { color: "#DEF9C4", fontSize: 16, fontWeight: "600" },
+  title: { color: "#FFF6DC", fontSize: 26, fontWeight: "700", textAlign: "center" },
+  subtitle: { color: "#E0EDE5", fontSize: 16, lineHeight: 23, textAlign: "center" },
+  preview: { aspectRatio: 3 / 4, borderRadius: 18, overflow: "hidden", backgroundColor: "#193B37",
+    justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: "rgba(222, 249, 196, 0.3)" },
+  camera: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 },
+  faceGuide: { width: "62%", height: "70%", borderRadius: 999, borderWidth: 2,
+    borderColor: "rgba(255, 246, 220, 0.8)" },
+  permissionState: { paddingHorizontal: 22 },
+  permissionText: { color: "#E0EDE5", fontSize: 16, lineHeight: 23, textAlign: "center" },
+  hint: { color: "#E0EDE5", fontSize: 16, lineHeight: 22, textAlign: "center" },
+  error: { width: "100%", color: "#FFF6DC", backgroundColor: "#6B3532", borderRadius: 10,
+    padding: 12, fontSize: 16, lineHeight: 22, textAlign: "center" },
+  primaryButton: { width: "100%", minHeight: 54, flexDirection: "row", gap: 9,
+    alignItems: "center", justifyContent: "center", paddingHorizontal: 16, paddingVertical: 12,
+    borderRadius: 12, backgroundColor: "#50B498" },
+  disabledButton: { opacity: 0.65 },
+  primaryText: { color: "#173B36", fontSize: 17, fontWeight: "700", textAlign: "center" },
+});

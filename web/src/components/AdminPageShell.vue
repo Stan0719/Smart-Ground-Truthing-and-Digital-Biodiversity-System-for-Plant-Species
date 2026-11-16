@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import '../styles/admin-typography.css'
+import '../styles/admin-tables.css'
 import { logout as serverLogout } from '../services/auth'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -39,12 +41,6 @@ const items = [
     labelKey: 'dashboardNav.sensorManagement',
     icon: '◉',
     to: '/admin/sensors',
-  },
-  {
-    id: 'Threat Alerts',
-    labelKey: 'dashboardNav.threatAlerts',
-    icon: 'threat',
-    to: '/admin/alerts',
   },
   {
     id: 'System Activity',
@@ -590,5 +586,18 @@ const items = [
   display: block;
   flex-shrink: 0;
   overflow: visible;
+}
+/* Administrator-only header layout keeps complete words and controls readable. */
+.admin-shell.admin-shell.admin-shell .topbar { flex-wrap: wrap; gap: 12px; padding-block: 14px; }
+.admin-shell.admin-shell.admin-shell .heading { flex: 1 1 15rem; min-width: 0; }
+.admin-shell.admin-shell.admin-shell.admin-shell .heading h1 { word-break: normal; overflow-wrap: normal; }
+.admin-shell.admin-shell.admin-shell .heading p { display: block; }
+.admin-shell.admin-shell.admin-shell .menu-button { flex-shrink: 0; }
+.admin-shell.admin-shell.admin-shell :deep(.admin-topbar-actions) { flex: 0 0 auto; margin-left: auto; max-width: 100%; }
+@media (max-width: 620px) {
+  .admin-shell.admin-shell.admin-shell .topbar { display: grid; grid-template-columns: 39px minmax(0, 1fr); align-items: center; }
+  .admin-shell.admin-shell.admin-shell .heading { grid-column: 1 / -1; }
+  .admin-shell.admin-shell.admin-shell .topbar:has(> .menu-button) .heading { grid-column: 2; }
+  .admin-shell.admin-shell.admin-shell :deep(.admin-topbar-actions) { grid-column: 1 / -1; justify-self: end; }
 }
 </style>
