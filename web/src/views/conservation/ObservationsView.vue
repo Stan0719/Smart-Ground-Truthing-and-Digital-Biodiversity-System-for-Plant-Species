@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import '../../styles/officer-copy.css'
+import { useOfficerCopyConfirmation } from '../../composables/useOfficerCopyConfirmation'
+const copyConfirmation = useOfficerCopyConfirmation({ schedule: (fn, ms) => window.setTimeout(fn, ms), cancel: id => window.clearTimeout(id as number) })
+const controlCopied = copyConfirmation.copied, controlToastKey = copyConfirmation.toastKey
+
 import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import SubmissionChanges from '../../components/conservation/SubmissionChanges.vue'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
@@ -81,6 +86,7 @@ const copyPending = ref(false)
 const copiedKey = ref('')
 let copyAttempt = 0
 function clearCopyState() {
+  copyConfirmation.clear()
   copyAttempt++
   copyFeedback.value = ''; copiedKey.value = ''; copyFailed.value = false; copyPending.value = false
 }
@@ -146,6 +152,11 @@ const authorizedOfficer = computed(() => !session.value.pending && session.value
 const unsubscribeSession = subscribeSession((user, pending) => {
   const previousId = session.value.user?.id
   session.value = { user, pending }
+  if (pending && user && previousId === user.id) {
+    if (reviewSaving.value || detailLoading.value) reviewNeedsReload.value = true
+    detailRequest++; detailLoading.value = false
+    return
+  }
   if (!authorizedOfficer.value || previousId !== user?.id) {
     clearCopyState(); closeModal(true); invalidateList(); observations.value = []
   }
@@ -523,7 +534,7 @@ const submitterLabel = (subject: string) => {
   const key = subject.startsWith('staff:') ? 'staffIdentifier' : subject.startsWith('visitor:') ? 'visitorIdentifier' : 'submitterIdentifier'
   return t('conservationPages.observations.' + key, { id: subjectTokens.value.get(subject) || compactIdentifierTokens([subject], subjectPart).get(subject) || subjectPart(subject) })
 }
-async function copyIdentifier(value: string, kind: 'observation' | 'subject', reviewSubject = false) {
+async function copyIdentifier(value: string, kind: 'observation' | 'subject', reviewSubject = false, controlKey = `${kind}:${value}`) {
   if (!authorizedOfficer.value || copyPending.value || !value) return
   const listed = observations.value.some(item => (kind === 'observation' ? item.id : item.ownerSubject) === value)
   const detail = selected.value
@@ -531,13 +542,14 @@ async function copyIdentifier(value: string, kind: 'observation' | 'subject', re
   if (!listed && !displayedInModal) return
   const attempt = ++copyAttempt, actor = session.value.user?.id
   const current = () => !disposed && attempt === copyAttempt && authorizedOfficer.value && actor === session.value.user?.id
+  copyConfirmation.reset(controlKey)
   copyPending.value = true; copiedKey.value = ''; copyFeedback.value = ''; copyFailed.value = false
   try {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
     await navigator.clipboard.writeText(value)
     if (!current()) return
     copiedKey.value = `${kind}:${value}`
-    copyFeedback.value = t('conservationPages.observations.' + (kind === 'observation' ? 'copiedObservation' : 'copiedSubject'), { id: kind === 'observation' ? observationLabel(value) : submitterLabel(value) })
+    copyFeedback.value = ''; copyConfirmation.confirm(controlKey)
   } catch {
     if (current()) { copyFailed.value = true; copyFeedback.value = t('conservationPages.observations.copyUnavailable') }
   } finally { if (current()) copyPending.value = false }
@@ -556,6 +568,7 @@ const filtered = computed(() => {
   })
 })
 const filtersHideLoaded = computed(() => filtered.value.length < observations.value.filter(item => queueOrigin.value === 'all' || item.origin === queueOrigin.value).length)
+watch(filtered, () => { copyAttempt++; copyPending.value = false; copyConfirmation.clear() })
 const history = computed(() => selected.value
   ? observations.value.filter((item) => item.plantRawId === selected.value?.plantRawId) : [])
 const speciesOptions = computed(() => {
@@ -593,13 +606,18 @@ async function resolveObservationQuery() {
       navigationError.value = error instanceof Error ? error.message : t('conservationPages.observations.errors.invalidResponse')
   }
 }
-watch(() => [route.query.observation, authorizedOfficer.value, session.value.user?.id], resolveObservationQuery, { immediate: true })
+watch(() => [route.query.observation, authorizedOfficer.value, session.value.user?.id], (next, previous) => {
+  // A same-account verification outage/recovery must not reopen or close a draft.
+  if (previous && next[0] === previous[0] && next[2] === previous[2] && session.value.user && (session.value.pending || selected.value)) return
+  void resolveObservationQuery()
+}, { immediate: true })
 
 onMounted(loadObservations)
 onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); detailRequest++; invalidateList(); unsubscribeSession() })
 </script>
 
 <template>
+  <span class="officer-copy-live" role="status" aria-live="polite" aria-atomic="true"><span v-if="controlToastKey && !controlToastKey.startsWith('submitter:')" :key="controlToastKey">{{ t('conservationPages.reviews.copiedToast') }}</span></span>
   <section class="page-intro"><div>
     <p class="page-kicker">{{ t('conservationPages.observations.eyebrow') }}</p>
     <h2>{{ t('conservationPages.observations.title') }}</h2>
@@ -650,9 +668,9 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
       <thead><tr><th scope="col">{{ t('conservationPages.observations.observationId') }}</th><th scope="col">{{ t('conservationPages.observations.plantId') }}</th><th scope="col">{{ t('conservationPages.observations.species') }}</th><th scope="col">{{ t('conservationPages.observations.submittedBy') }}</th><th scope="col">{{ t('conservationPages.observations.status') }}</th><th scope="col">{{ t('conservationPages.observations.created') }}</th><th scope="col">{{ t('conservationPages.observations.actions') }}</th></tr></thead>
       <tbody>
         <tr v-for="item in filtered" :key="item.id">
-          <td class="identity-cell"><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation')"><svg v-if="copiedKey !== `observation:${item.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></div><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></td><td>{{ item.plantDisplayId }}</td>
+          <td class="identity-cell"><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation', false, `observation-icon-0:${item.id}`)"><svg v-if="!controlCopied[`observation-icon-0:${item.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-0:${item.id}`" :key="`observation-icon-0:${item.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></td><td>{{ item.plantDisplayId }}</td>
           <td><em>{{ speciesName(item) }}</em><small v-if="item.commonName && item.scientificName">{{ item.commonName }}</small><small v-if="item.hasSpeciesRequest">{{ t('conservationPages.observations.newSpeciesRequest') }}</small></td>
-          <td class="identity-cell"><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject')"><svg v-if="copiedKey !== `subject:${item.ownerSubject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></div></td><td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(item.status)" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td><td>{{ formatDate(item.createdAt) }}</td>
+          <td class="identity-cell"><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject', false, `observation-icon-1:${item.id}:${item.ownerSubject}`)"><svg v-if="!controlCopied[`observation-icon-1:${item.id}:${item.ownerSubject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-1:${item.id}:${item.ownerSubject}`" :key="`observation-icon-1:${item.id}:${item.ownerSubject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></div></td><td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(item.status)" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td><td>{{ formatDate(item.createdAt) }}</td>
           <td class="actions-cell"><div class="action-group">
             <button v-if="canReviewField(item)" class="action-button" :disabled="reviewSaving" @click="open(item, true)">{{ t('conservationPages.observations.review') }}</button>
             <button v-else class="action-button" @click="open(item)">{{ t('common.viewDetails') }}</button>
@@ -674,7 +692,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
     <template #title>
       <span class="observation-title-layout">
         <span class="observation-title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 2 21 2c0 4-1 11-5 15-2 2-4 3-5 3ZM2 22l12-12" /></svg></span>
-        <span class="observation-title-copy"><span>{{ modalText('title') }}</span><span class="observation-title-subtitle"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation')"><svg v-if="copiedKey !== `observation:${selected.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></span></span></span>
+        <span class="observation-title-copy"><span>{{ modalText('title') }}</span><span class="observation-title-subtitle"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation', false, `observation-icon-2:${selected.id}`)"><svg v-if="!controlCopied[`observation-icon-2:${selected.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-2:${selected.id}`" :key="`observation-icon-2:${selected.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></span></span></span>
       </span>
     </template>
     <ActionFeedback v-if="commentFeedbackId !== null" :key="commentFeedbackId" :feedback-id="commentFeedbackId" variant="error" :message="rt('feedback.commentRequired')" @dismiss="dismissCommentFeedback" />
@@ -691,9 +709,9 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
             <section class="observation-information-section">
               <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg>{{ modalText('details') }}</h3>
               <dl class="detail-list observation-details">
-                <div><dt>{{ t('conservationPages.observations.observationId') }}</dt><dd class="full-identifier"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation')"><svg v-if="copiedKey !== `observation:${selected.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></span></dd></div>
+                <div><dt>{{ t('conservationPages.observations.observationId') }}</dt><dd class="full-identifier"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation', false, `observation-icon-3:${selected.id}`)"><svg v-if="!controlCopied[`observation-icon-3:${selected.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-3:${selected.id}`" :key="`observation-icon-3:${selected.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></span></dd></div>
                 <div><dt>{{ t('conservationPages.observations.status') }}</dt><dd><span class="badge" :style="workflowBadgeStyle(selected.status)">{{ label(selected.status) }}</span></dd></div>
-                <div><dt>{{ t('conservationPages.observations.submittedBy') }}</dt><dd class="full-identifier"><span class="identifier-line"><span :title="selected.ownerSubject">{{ submitterLabel(selected.ownerSubject) }}</span><template v-if="selected.ownerSubject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" @click="copyIdentifier(selected.ownerSubject, 'subject')"><svg v-if="copiedKey !== `subject:${selected.ownerSubject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></span></dd></div>
+                <div><dt>{{ t('conservationPages.observations.submittedBy') }}</dt><dd class="full-identifier"><span class="identifier-line"><span :title="selected.ownerSubject">{{ submitterLabel(selected.ownerSubject) }}</span><template v-if="selected.ownerSubject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" @click="copyIdentifier(selected.ownerSubject, 'subject', false, `observation-icon-4:${selected.id}:${selected.ownerSubject}`)"><svg v-if="!controlCopied[`observation-icon-4:${selected.id}:${selected.ownerSubject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-4:${selected.id}:${selected.ownerSubject}`" :key="`observation-icon-4:${selected.id}:${selected.ownerSubject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></span></dd></div>
                 <div><dt>{{ t('conservationPages.observations.created') }}</dt><dd>{{ modalDate(selected.createdAt) }}</dd></div>
                 <div><dt>{{ t('conservationPages.observations.lastUpdated') }}</dt><dd>{{ modalDate(selected.updatedAt) }}</dd></div>
                 <div><dt>{{ t('conservationPages.observations.reviewedAt') }}</dt><dd>{{ modalDate(selected.reviewedAt) }}</dd></div>
@@ -750,7 +768,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
 
             </div>
           </section>
-          <ObservationReviewHistory v-if="authorizedOfficer" :observation-id="selected.id" :refresh-key="reviewHistoryRefresh"><template #reviewer="{ subject }"><span class="identifier-line"><span :title="subject">{{ submitterLabel(subject) }}</span><template v-if="subject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" @click="copyIdentifier(subject, 'subject', true)"><svg v-if="copiedKey !== `subject:${subject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></span></template></ObservationReviewHistory>
+          <ObservationReviewHistory v-if="authorizedOfficer" :observation-id="selected.id" :refresh-key="reviewHistoryRefresh"><template #reviewer="{ subject, review }"><span class="identifier-line"><span :title="subject">{{ submitterLabel(subject) }}</span><template v-if="subject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" @click="copyIdentifier(subject, 'subject', true, `observation-icon-5:${selected.id}:${review.id}:${subject}`)"><svg v-if="!controlCopied[`observation-icon-5:${selected.id}:${review.id}:${subject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-5:${selected.id}:${review.id}:${subject}`" :key="`observation-icon-5:${selected.id}:${review.id}:${subject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></span></template></ObservationReviewHistory>
     <div v-if="canOpenReview" class="modal-actions observation-review-actions">
       <RouterLink class="action-button modal-review-link" :to="{ name: 'conservation-reviews', query: { review: selected.id } }" @click="closeModal()">{{ t('conservationPages.observations.reviewSubmission') }}</RouterLink>
     </div>

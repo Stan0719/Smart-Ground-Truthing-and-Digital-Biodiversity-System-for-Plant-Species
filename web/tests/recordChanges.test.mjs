@@ -42,7 +42,7 @@ async function harness(language='en', overrides={}, fetchHandler=async()=>Respon
   const make=tag=>({tag,children:[],props:{},text:'',showModal(){this.open=true},close(){this.open=false}})
   const renderer=vue.createRenderer({createElement:make,createText:text=>({...make('text'),text}),createComment:()=>make('comment'),setText:(n,t)=>n.text=t,setElementText:(n,t)=>{n.text=t;n.children=[]},parentNode:n=>n.parent,nextSibling:n=>n?.parent?.children[n.parent.children.indexOf(n)+1]||null,patchProp:(n,k,_old,v)=>n.props[k]=v,insert:(n,p,anchor)=>{if(n.parent)n.parent.children=n.parent.children.filter(c=>c!==n);n.parent=p;const i=anchor?p.children.indexOf(anchor):-1;if(i<0)p.children.push(n);else p.children.splice(i,0,n)},remove:n=>{if(n?.parent)n.parent.children=n.parent.children.filter(child=>child!==n)}})
   const root=make('root'),app=renderer.createApp(exports.default);app.mount(root);await flush()
-  return {root,calls,route,app,expire:()=>sessionChanged(null,true),setConflict:()=>fail=true,complete:(status='Approved')=>{fail=false;latest={...latest,status}},button:label=>nodes(root,n=>n.tag==='button'&&text(n).trim()===label).at(-1)}
+  return {root,calls,route,app,changeSession:(user,pending=false)=>sessionChanged(user,pending),expire:()=>sessionChanged(null,true),setConflict:()=>fail=true,complete:(status='Approved')=>{fail=false;latest={...latest,status}},button:label=>nodes(root,n=>n.tag==='button'&&text(n).trim()===label).at(-1)}
 }
 test('comparisons retain omitted fields, expose true changed values and never fabricate missing baseline',()=>{
   const rows=compareChange({...proposal,proposed_snapshot:{...proposal.proposed_snapshot,new_field:'new'}})
@@ -143,3 +143,22 @@ test('species baseline photograph matches the recorded fingerprint rather than a
     } finally {h.app.unmount()}
   }
 });
+
+
+test('temporary proposal verification preserves comment and selection while blocking decisions; logout clears private state',async()=>{
+  const h=await harness()
+  const officer={id:'officer',role:'Conservation Officer',status:'Active',mustChangePassword:false}
+  try {
+    h.route.query={change:id};await flush()
+    nodes(h.root,n=>n.tag==='textarea')[0].props['onUpdate:modelValue']('Keep proposal draft');await flush()
+    const before=h.calls.length
+    h.changeSession(officer,true);await flush()
+    assert.match(text(h.root),/Proposed name/)
+    assert.equal(h.app._instance.setupState.comment,'Keep proposal draft')
+    assert.equal(h.button('Approve Change').props.disabled,true)
+    await h.button('Approve Change').props.onClick();assert.equal(h.calls.length,before)
+    h.changeSession(officer,false);await flush()
+    assert.equal(h.app._instance.setupState.comment,'Keep proposal draft')
+    h.expire();await flush();assert.doesNotMatch(text(h.root),/Proposed name/)
+  }finally{h.app.unmount()}
+})

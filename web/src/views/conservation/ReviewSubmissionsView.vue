@@ -1,7 +1,12 @@
 <script setup lang="ts">
+import '../../styles/officer-copy.css'
+import { useOfficerCopyConfirmation } from '../../composables/useOfficerCopyConfirmation'
+const copyConfirmation = useOfficerCopyConfirmation({ schedule: (fn, ms) => window.setTimeout(fn, ms), cancel: id => window.clearTimeout(id as number) })
+const controlCopied = copyConfirmation.copied, controlToastKey = copyConfirmation.toastKey
+
 import ReviewFilterDropdown from '../../components/conservation/ReviewFilterDropdown.vue'
 import ApprovedRecordChanges from '../../components/conservation/ApprovedRecordChanges.vue'
-import { readCompleteQueue, submissionSearchMatches, changeMatches, changeSpeciesId, changeZone, unifiedReviewRows, type RecordChange } from '../../services/recordChanges'
+import { readCompleteQueue, submissionSearchMatches, changeMatches, changeSpeciesId, changeZone, unifiedReviewRows, type RecordChange, type UnifiedReviewRow } from '../../services/recordChanges'
 const objectValue = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const changeProposals = ref<RecordChange[]>([])
 const submitterNames = ref<Record<string, string>>({})
@@ -89,8 +94,23 @@ const copyFeedback = ref('')
 const copyFailed = ref(false)
 const copyPending = ref(false)
 const copiedKey = ref('')
+// Submitted By feedback belongs to a submission row, never to its shared owner.
+const copiedToastRow = computed({ get: () => controlToastKey.value.startsWith('submitter:') ? controlToastKey.value.slice(10) : '', set: key => { if (key) copyConfirmation.activate('submitter:' + key); else if (controlToastKey.value.startsWith('submitter:')) copyConfirmation.dismiss() } })
+const submitterCopied = ref<Record<string, boolean>>({})
+const submitterPending = ref<Record<string, boolean>>({})
+const submitterCopies = new Map<string, { source: ReviewObservation | RecordChange; subject: string; timer?: ReturnType<typeof setTimeout> }>()
+function resetSubmitterCopy(key: string) {
+  if (copiedToastRow.value === key) copiedToastRow.value = ''
+  const entry = submitterCopies.get(key)
+  if (entry?.timer !== undefined) window.clearTimeout(entry.timer)
+  submitterCopies.delete(key)
+  delete submitterCopied.value[key]; delete submitterPending.value[key]
+}
+function clearSubmitterCopies() { for (const key of submitterCopies.keys()) resetSubmitterCopy(key) }
 let copyAttempt = 0
 function clearCopyState() {
+  copyConfirmation.clear()
+  clearSubmitterCopies()
   copyAttempt++
   copyFeedback.value = ''; copiedKey.value = ''; copyFailed.value = false; copyPending.value = false
 }
@@ -423,17 +443,47 @@ const submitterLabel = (subject: string) => {
   const key = subject.startsWith('staff:') ? 'staffIdentifier' : subject.startsWith('visitor:') ? 'visitorIdentifier' : 'submitterIdentifier'
   return t('conservationPages.observations.' + key, { id: subjectTokens.value.get(subject) || subjectPart(subject) })
 }
-async function copyIdentifier(value: string, kind: 'observation' | 'subject' | 'change') {
+async function copySubmitter(row: UnifiedReviewRow<ReviewObservation>) {
+  if (!officerSessionReady.value || submitterPending.value[row.key]) return
+  const source = 'observation' in row ? row.observation : row.change
+  const subject = 'observation' in row ? row.observation.recordedBy : row.change.owner_subject
+  const actor = reviewSession.value.user?.id
+  const matchesRow = () => reviewRows.value.some(item => item.key === row.key && ('observation' in item ? item.observation : item.change) === source && ('observation' in item ? item.observation.recordedBy : item.change.owner_subject) === subject)
+  if (!subject || !matchesRow()) return
+  resetSubmitterCopy(row.key)
+  const entry = { source, subject, timer: undefined as ReturnType<typeof setTimeout> | undefined }
+  submitterCopies.set(row.key, entry); submitterPending.value[row.key] = true
+  const current = () => !disposed && officerSessionReady.value && actor === reviewSession.value.user?.id && submitterCopies.get(row.key) === entry && matchesRow()
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(subject)
+    if (!current()) return
+    submitterCopied.value[row.key] = true
+    copiedToastRow.value = row.key
+    copyFeedback.value = ''; copyFailed.value = false
+    entry.timer = window.setTimeout(() => {
+      if (submitterCopies.get(row.key) === entry) resetSubmitterCopy(row.key)
+    }, 2000)
+  } catch {
+    if (current()) {
+      copiedToastRow.value = ''
+      resetSubmitterCopy(row.key)
+      copyFailed.value = true; copyFeedback.value = t('conservationPages.observations.copyUnavailable')
+    }
+  } finally { if (current()) delete submitterPending.value[row.key] }
+}
+async function copyIdentifier(value: string, kind: 'observation' | 'subject' | 'change', controlKey = `${kind}:${value}`) {
   if (!officerSessionReady.value || copyPending.value || !(observations.value.some(item => (kind === 'observation' ? item.id : item.recordedBy) === value) || changeProposals.value.some(item => (kind === 'change' ? item.id : item.owner_subject) === value)) || !value) return
   const attempt = ++copyAttempt, actor = reviewSession.value.user?.id
   const current = () => !disposed && attempt === copyAttempt && officerSessionReady.value && actor === reviewSession.value.user?.id
+  copyConfirmation.reset(controlKey)
   copyPending.value = true; copiedKey.value = ''; copyFeedback.value = ''; copyFailed.value = false
   try {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
     await navigator.clipboard.writeText(value)
     if (!current()) return
     copiedKey.value = `${kind}:${value}`
-    copyFeedback.value = kind === 'change' ? t('approvedChanges.copiedProposal') : t('conservationPages.observations.' + (kind === 'observation' ? 'copiedObservation' : 'copiedSubject'), { id: kind === 'observation' ? observationLabel(value) : submitterLabel(value) })
+    copyFeedback.value = ''; copyConfirmation.confirm(controlKey)
   } catch {
     if (current()) { copyFailed.value = true; copyFeedback.value = t('conservationPages.observations.copyUnavailable') }
   } finally { if (current()) copyPending.value = false }
@@ -469,6 +519,12 @@ const allReviewRows = computed(() => {
   return selection ? [selection,...rows.filter(row => row.key !== selection.key)] : rows
 })
 const reviewRows = computed(() => allReviewRows.value.slice(0, visibleLimit.value))
+watch(reviewRows, () => { copyAttempt++; copyPending.value = false; copyConfirmation.clear() })
+watch(reviewRows, rows => {
+  for (const [key, entry] of submitterCopies) {
+    if (!rows.some(row => row.key === key && ('observation' in row ? row.observation : row.change) === entry.source && ('observation' in row ? row.observation.recordedBy : row.change.owner_subject) === entry.subject)) resetSubmitterCopy(key)
+  }
+}, { flush: 'sync' })
 const proposalTokens = computed(() => compactIdentifierTokens(changeProposals.value.map(row => row.id)))
 const proposalLabel = (id: string) => `CHANGE-${proposalTokens.value.get(id) || id}`
 async function openChange(change: RecordChange) {
@@ -530,6 +586,12 @@ const officerSessionReady = computed(() => !reviewSession.value.pending && revie
 const unsubscribeReviewSession = subscribeSession((user, pending) => {
   const old = reviewSession.value.user?.id
   reviewSession.value = { user, pending }
+  if (pending && user && old === user.id) {
+    if (isSaving.value || speciesSaving.value || selectionLoading.value || speciesRefreshing.value) needsReload.value = true
+    selectionRequest++; listRequest++; selectionLoading.value = false; isLoading.value = false
+    isSaving.value = false; speciesSaving.value = false; speciesRefreshing.value = false
+    return
+  }
   if (pending || !user || user.role !== 'Conservation Officer' || user.status !== 'Active' || user.mustChangePassword || old !== user.id) {
     similarityRequest++
     similarityAbort?.abort()
@@ -774,16 +836,18 @@ async function copyQrIdentity() {
   const attempt = ++qrCopyAttempt, actor = reviewSession.value.user?.id
   const current = () => !disposed && attempt === qrCopyAttempt && officerSessionReady.value &&
     actor === reviewSession.value.user?.id && selected.value?.id === observationId && plantQr.value?.identity === value
+  copyConfirmation.reset('qr:' + observationId)
   qrCopyPending.value = true; qrCopyFeedback.value = ''; qrCopyFailed.value = false; qrCopied.value = false
   try {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
     await navigator.clipboard.writeText(value)
-    if (current()) { qrCopied.value = true; qrCopyFeedback.value = rt('qrCopied') }
+    if (current()) { qrCopied.value = true; qrCopyFeedback.value = ''; copyConfirmation.confirm('qr:' + observationId) }
   } catch {
     if (current()) { qrCopyFailed.value = true; qrCopyFeedback.value = rt('qrCopyUnavailable') }
   } finally { if (current()) qrCopyPending.value = false }
 }
 function clearPlantQr() {
+  if (selected.value) copyConfirmation.reset('qr:' + selected.value.id)
   qrCopyAttempt++
   qrCopyFeedback.value = ''; qrCopyFailed.value = false; qrCopyPending.value = false; qrCopied.value = false
   qrRequest++
@@ -1228,6 +1292,7 @@ watch(
   () => [route.query.review, route.query.speciesRequest, officerSessionReady.value],
   () => void resolveQuery(),
 )
+watch(() => [route.query.review, route.query.speciesRequest, route.query.change], clearSubmitterCopies)
 onBeforeUnmount(() => {
   disposed = true
   clearCopyState()
@@ -1241,6 +1306,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <span class="officer-copy-live" role="status" aria-live="polite" aria-atomic="true"><span v-if="controlToastKey && !controlToastKey.startsWith('submitter:')" :key="controlToastKey">{{ t('conservationPages.reviews.copiedToast') }}</span></span>
+  <div class="submitter-copy-status" role="status" aria-live="polite" aria-atomic="true">
+    <span v-if="copiedToastRow" :key="copiedToastRow">{{ rt('copiedToast') }}</span>
+  </div>
   <ActionFeedback
     v-if="feedback"
     :key="feedback.id"
@@ -1313,14 +1382,14 @@ onBeforeUnmount(() => {
         <tbody>
           <tr v-for="row in reviewRows" :key="row.key">
           <template v-if="'observation' in row"><template v-for="observation in [row.observation]" :key="observation.id">
-          <td class="identity-cell"><div class="identifier-line"><strong :title="observation.id">{{ observationLabel(observation.id) }}</strong><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" @click="copyIdentifier(observation.id, 'observation')"><svg v-if="copiedKey !== `observation:${observation.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></div></td>
+          <td class="identity-cell"><div class="identifier-line"><strong :title="observation.id">{{ observationLabel(observation.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" @click="copyIdentifier(observation.id, 'observation', `review-icon-0:${observation.id}`)"><svg v-if="!controlCopied[`review-icon-0:${observation.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `review-icon-0:${observation.id}`" :key="`review-icon-0:${observation.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div></td>
             <td class="plant-id-cell">{{ observation.plantId }}</td>
             <td class="submission-type-cell"><div class="species-request-list">
               <span class="species-request-badge">{{ observation.origin === 'unknown' ? rt('queues.unverifiedOriginSubmissions') : observation.speciesRequest ? rt('speciesRequest.title') : t('approvedChanges.originalRegistration') }}</span>
               <span v-if="observation.speciesRequest?.updated" class="badge species-updated-badge">{{ rt('speciesRequest.updated') }}</span>
             </div></td>
             <td><em v-if="observation.speciesRequest?.scientificName || observation.plantScientificName || observation.scientificName">{{ observation.speciesRequest ? observation.speciesRequest.scientificName || ct('Species unavailable') : observation.plantScientificName || observation.scientificName }}</em><span v-else>{{ ct('Species unavailable') }}</span></td>
-          <td class="identity-cell"><div class="identifier-line"><span :title="observation.recordedBy">{{ submitterLabel(observation.recordedBy) }}</span><template v-if="observation.recordedBy"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" @click="copyIdentifier(observation.recordedBy, 'subject')"><svg v-if="copiedKey !== `subject:${observation.recordedBy}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></div></td>
+          <td class="identity-cell"><div class="identifier-line"><span :title="observation.recordedBy">{{ submitterLabel(observation.recordedBy) }}</span><template v-if="observation.recordedBy"><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="submitter-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></template></div></td>
             <td>{{ observation.zone || rt('notRecorded') }}</td>
             <td>{{ formatDate(observation.createdAt) }}</td>
             <td class="status-cell">
@@ -1352,11 +1421,11 @@ onBeforeUnmount(() => {
             </div></td>
           </template></template>
           <template v-else>
-            <td class="identity-cell edit-identity"><div class="identifier-line"><strong :title="row.change.id" :aria-label="row.change.id">{{ proposalLabel(row.change.id) }}</strong><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('approvedChanges.copyProposal')" @click="copyIdentifier(row.change.id, 'change')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg></button></div><small v-if="row.change.plant_id == null">{{ t('approvedChanges.speciesId') + ': ' + row.change.species_id }}</small></td>
+            <td class="identity-cell edit-identity"><div class="identifier-line"><strong :title="row.change.id" :aria-label="row.change.id">{{ proposalLabel(row.change.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('approvedChanges.copyProposal')" @click="copyIdentifier(row.change.id, 'change', `review-icon-1:${row.change.id}`)"><svg v-if="!controlCopied[`review-icon-1:${row.change.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `review-icon-1:${row.change.id}`" :key="`review-icon-1:${row.change.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="row.change.plant_id == null">{{ t('approvedChanges.speciesId') + ': ' + row.change.species_id }}</small></td>
             <td class="plant-id-cell">{{ row.change.plant_id != null ? formatPlantId(row.change.plant_id) || row.change.plant_id : '\u2014' }}</td>
             <td class="submission-type-cell"><div class="species-request-list"><span class="species-request-badge edit-type-badge" :class="row.kind === 'approved_plant_change' ? 'plant-edit' : 'species-edit'">{{ t(row.kind === 'approved_plant_change' ? 'approvedChanges.plantEdit' : 'approvedChanges.speciesEdit') }}</span></div></td>
             <td><em>{{ row.change.proposed_snapshot.scientific_name || rt('notRecorded') }}</em></td>
-            <td class="identity-cell"><div class="identifier-line"><span :title="row.change.owner_subject">{{ submitterLabel(row.change.owner_subject) }}</span><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(row.change.owner_subject) })" @click="copyIdentifier(row.change.owner_subject, 'subject')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg></button></div></td>
+            <td class="identity-cell"><div class="identifier-line"><span :title="row.change.owner_subject">{{ submitterLabel(row.change.owner_subject) }}</span><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(row.change.owner_subject) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="submitter-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></div></td>
             <td>{{ changeZone(row.change) || rt('notRecorded') }}</td>
             <td>{{ formatDate(row.change.created_at) }}</td>
             <td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(row.change.status)" :class="row.change.status.toLowerCase().replaceAll(' ', '-')">{{ row.change.status === 'Cancelled' ? t('approvedChanges.cancelled') : ct(row.change.status) }}</span></span></td>
@@ -1661,10 +1730,10 @@ onBeforeUnmount(() => {
               <dd>
                 <div v-if="plantQr.identity" class="identifier-line qr-identifier">
                   <span :title="plantQr.identity">{{ qrLabel(plantQr.identity) }}</span>
-                  <button type="button" class="identifier-copy" :disabled="!officerSessionReady || qrCopyPending" :aria-label="rt('copyQrIdentity')" :title="rt('copyQrIdentity')" @click="copyQrIdentity">
-                    <svg v-if="!qrCopied" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg>
+                  <span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || qrCopyPending" :aria-label="rt('copyQrIdentity')" :title="rt('copyQrIdentity')" @click="copyQrIdentity">
+                    <svg v-if="!controlCopied[`qr:${selected.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg>
                     <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg>
-                  </button>
+                  </button><span v-if="controlToastKey === `qr:${selected.id}`" :key="`qr:${selected.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span>
                 </div>
                 <span v-else>{{ rt('notRecorded') }}</span>
                 <span class="qr-copy-feedback" role="status" aria-live="polite" aria-atomic="true">{{ qrCopyFeedback }}</span>
@@ -1864,6 +1933,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* Non-interactive and deliberately below the Officer modal layer (300).
+   No animation or transition: reduced-motion users receive the same feedback. */
+.submitter-copy-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.submitter-copy-anchor { position: relative; display: inline-flex; flex: none; }
+.submitter-copy-toast { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 200; pointer-events: none; white-space: nowrap; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 48px); padding: 10px 16px; border-radius: 8px; background: #DCF3E4; color: #245A46; box-shadow: 0 4px 14px #173f3426; font-size: 14px; font-weight: 500; line-height: 1.4; }
+.submitter-copy-toast svg { width: 16px; height: 16px; flex: none; }
+
 .officer-layout.officer-layout .review-section .review-section-heading {
   display: flex;
   align-items: center;

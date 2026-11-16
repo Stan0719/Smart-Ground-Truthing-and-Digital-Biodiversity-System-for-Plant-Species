@@ -1,4 +1,5 @@
 {
+  "sessionVerification": {"unavailable": "Session verification is temporarily unavailable. Your work is retained. Please retry.", "retry": "Retry"},
   "approvedChanges": {
     "allTypes": "All Types",
     "searchPlaceholder": "Submission ID, Plant ID, name, submitter, type or zone",
@@ -1764,6 +1765,7 @@
       "appliedPeriod": "Reporting Period: {period}"
     },
     "reviews": {
+      "copiedToast": "Copied",
       "queues": {
         "registrations": "New Plant Registrations",
         "registrationEyebrow": "Verification Workflow",

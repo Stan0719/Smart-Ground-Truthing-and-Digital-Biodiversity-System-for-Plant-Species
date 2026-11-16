@@ -1,3 +1,4 @@
+import { useOfficerCopyConfirmation } from '../src/composables/useOfficerCopyConfirmation.ts'
 import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -158,6 +159,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
     AbortSignal,
     AbortController,
     console,
+    window: { setTimeout, clearTimeout, ...options.window },
     navigator: { clipboard: options.clipboard },
     fetch: async (url, options) => {
       calls.push({ url, options })
@@ -171,6 +173,8 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
       return fetchHandler(url, options)
     },
     require(name) {
+    if (name.endsWith('.css')) return {}
+    if (name.includes('useOfficerCopyConfirmation')) return { useOfficerCopyConfirmation }
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
       if (name === 'vue') return {
@@ -878,20 +882,21 @@ test('copy buttons write the exact full UUID and subject and give accessible suc
   const h = harness(identityHandler([fixture({ owner_subject: owner })]), officer, false, null, 'en', { clipboard: { writeText: async value => { writes.push(value) } } })
   try {
     await h.state.loadObservations()
+    const requestsBeforeCopy = h.calls.length
     const buttons = copyButtons(h)
     assert.equal(buttons.length, 2)
     assert.match(buttons[0].props['aria-label'], /Copy full observation ID for OBS-5D8A3647/)
     assert.equal(buttons[0].props.type, 'button')
     await buttons[0].props.onClick()
     assert.deepEqual(writes, [uuid])
-    assert.match(h.state.copyFeedback.value, /Full observation ID copied/)
+    assert.equal(h.state.copyFeedback.value, ''); assert.ok(h.state.controlToastKey.value)
     await copyButtons(h)[1].props.onClick()
     assert.deepEqual(writes, [uuid, owner])
-    assert.match(h.state.copyFeedback.value, /Full submitter identifier copied/)
+    assert.equal(h.state.copyFeedback.value, ''); assert.ok(h.state.controlToastKey.value)
     const feedback = nodes(h.render()).find(node => String(node.props?.class).includes('copy-feedback'))
     assert.equal(feedback.props.role, 'status'); assert.equal(feedback.props['aria-live'], 'polite')
     assert.equal(feedback.props['aria-atomic'], 'true')
-    assert.equal(h.calls.length, 1)
+    assert.equal(h.calls.length, requestsBeforeCopy)
     assert.ok(h.calls.every(call => !call.options.method || call.options.method === 'GET'))
   } finally { h.stop() }
 })
@@ -1285,4 +1290,48 @@ test('Resubmitted is informational, localized and strictly limited to verified P
    assert.match(styles,/background: #FFF1DB; color: #926119/)
   }finally{h.stop()}
  }
+})
+
+
+test('all Observation copy icons use control-specific checkmarks and the same anchored two-second toast',async()=>{
+ let now=0,id=0;const timers=new Map(),copied=[]
+ const window={setTimeout(fn,ms){const key=++id;timers.set(key,{fn,due:now+ms});return key},clearTimeout(key){timers.delete(key)}}
+ const owner='staff:shared-owner',other='6d8a3647-e3c3-43fa-b355-aabdddf05f72'
+ const h=harness(identityHandler([fixture({owner_subject:owner}),fixture({id:other,owner_subject:owner})]),officer,false,null,'en',{window,clipboard:{writeText:async value=>copied.push(value)}})
+ const checks=()=>nodes(h.render()).filter(n=>n.type==='span'&&n.props?.class==='officer-copy-anchor').filter(n=>nodes(n).some(c=>c.type==='button'&&nodes(c).some(svg=>svg.type==='path'&&svg.props?.d==='m5 12 4 4 10-10')))
+ const toasts=()=>nodes(h.render()).filter(n=>n.props?.class==='officer-copy-toast')
+ try{
+  await h.state.loadObservations();const buttons=copyButtons(h)
+  await buttons[1].props.onClick();assert.deepEqual(copied,[owner]);assert.equal(checks().length,1);assert.equal(toasts().length,1)
+  assert.equal(h.state.copyFeedback.value,'')
+  await buttons[3].props.onClick();assert.deepEqual(copied,[owner,owner]);assert.equal(checks().length,2);assert.equal(toasts().length,1)
+  const old=[...timers.values()][0].fn
+  now=1500;await buttons[1].props.onClick();old();assert.equal(checks().length,2)
+  now=2000;for(const [key,t] of timers)if(t.due<=now){timers.delete(key);t.fn()}
+  assert.equal(checks().length,1);assert.equal(toasts().length,1)
+  now=3500;for(const [key,t] of timers)if(t.due<=now){timers.delete(key);t.fn()}
+  assert.equal(checks().length,0);assert.equal(toasts().length,0)
+ }finally{h.stop()}
+ assert.equal(timers.size,0)
+})
+
+
+test('temporary authentication verification preserves field-review drafts and blocks decisions until recovery',async()=>{
+ const h=harness(async url=>Response.json(url.startsWith('/api/observations?')?{observations:[fixture()],page:{has_more:false,next_cursor:null}}:url==='/api/observations'?{observations:[fixture()]}:{observation:fixture()}))
+ try{
+  await h.state.loadObservations()
+  await h.state.open(h.state.observations.value[0],true)
+  h.state.reviewComment.value='Keep field review draft'
+  const officer=h.state.session.value.user
+  h.changeSession(officer,true)
+  assert.equal(h.state.selected.value.id,uuid)
+  assert.equal(h.state.reviewComment.value,'Keep field review draft')
+  assert.equal(h.state.authorizedOfficer.value,false)
+  await h.state.decide('Approved')
+  assert.equal(h.calls.filter(call=>call.options?.method==='POST').length,0)
+  h.changeSession(officer,false)
+  assert.equal(h.state.reviewComment.value,'Keep field review draft')
+  assert.equal(h.state.authorizedOfficer.value,true)
+  h.changeSession(null,false);assert.equal(h.state.selected.value,null)
+ }finally{h.stop()}
 })

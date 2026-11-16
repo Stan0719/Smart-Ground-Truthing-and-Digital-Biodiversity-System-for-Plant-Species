@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, currentUser, logout, type AuthUser } from '../services/auth'
+import { api, currentUser, verifySession, sessionVerificationCurrent, logout, type AuthUser } from '../services/auth'
 const props = defineProps<{ canEdit?: boolean; standalone?: boolean }>(),
   router = useRouter(),
   user = ref<AuthUser | null>(null),
@@ -30,11 +30,15 @@ async function saveProfile() {
       role: user.value.role,
       status: user.value.status,
     })
-    const verified = await currentUser()
-    if (!verified) {
+    const result = await verifySession()
+    if (!sessionVerificationCurrent(result) || result.status === 'superseded') return
+    if (result.status === 'unavailable') { error.value = 'Session verification is temporarily unavailable. Please retry.'; return }
+    if (result.status === 'unauthenticated') {
       await router.replace('/')
       return
     }
+    if (result.status !== 'authenticated') return
+    const verified = result.user
     user.value = verified
     profile.value = { name: verified.name, email: verified.email }
     window.dispatchEvent(new Event('niah-account-updated'))

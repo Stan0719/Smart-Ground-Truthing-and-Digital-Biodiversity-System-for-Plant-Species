@@ -1,3 +1,4 @@
+import { useOfficerCopyConfirmation } from '../src/composables/useOfficerCopyConfirmation.ts'
 import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
 import { similarityBadgeStyle } from '../src/utils/similarityBadge.ts'
 import { assetUrlFromId } from '../src/services/assetImages.ts'
@@ -116,6 +117,8 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
       return fetchHandler(url, options)
     },
     require(name) {
+    if (name.endsWith('.css')) return {}
+    if (name.includes('useOfficerCopyConfirmation')) return { useOfficerCopyConfirmation }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
     if (name.endsWith('similarityBadge')) return { similarityBadgeStyle }
     if (name.endsWith('assetImages')) return { assetUrlFromId }
@@ -1733,23 +1736,25 @@ test('loaded identifier collisions extend independently of search and original f
   } finally { h.stop() }
 })
 
-test('review copy controls copy full original identities and announce localized feedback without HTTP writes', async () => {
+test('review copy controls preserve full identifiers; Submitted By has no success banner', async () => {
   for (const language of ['en', 'ms', 'zh-CN']) {
     const row = fixture(), copied = []
     const h = harness(url => fixtureResponse(url, [row]), {}, language, undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
     try {
       await h.state.loadObservations()
+      const requestsBeforeCopy = h.calls.length
       for (const [index, value] of [row.id, row.owner_subject].entries()) {
         const button = reviewCopyButtons(h)[index]
         assert.ok(button.props['aria-label'] && !button.props['aria-label'].startsWith('conservationPages.'))
         await button.props.onClick()
         assert.equal(copied[index], value)
-        assert.ok(h.state.copyFeedback.value && !h.state.copyFailed.value)
+        if (index === 0) { assert.equal(h.state.copyFeedback.value, ''); assert.ok(h.state.controlToastKey.value); assert.equal(h.state.copyFailed.value, false) }
+        else { assert.equal(h.state.copyFeedback.value, ''); assert.equal(h.state.submitterCopied.value['observation:' + row.id], true) }
       }
       const live = nodes(h.render()).find(node => String(node.props?.class).includes('copy-feedback'))
       assert.equal(live.props['aria-live'], 'polite')
       assert.equal(live.props.role, 'status')
-      assert.equal(h.calls.length, 2)
+      assert.equal(h.calls.length, requestsBeforeCopy)
     } finally { h.stop() }
   }
 })
@@ -2793,7 +2798,7 @@ test('edit identifiers are emphasized, distinct badges preserve registration gre
     for(const row of editRows) {
       const identity=nodes(row).find(n=>n.type==='td'&&String(n.props?.class).includes('edit-identity'))
       assert.ok(identity);await nodes(identity).find(n=>n.type==='button').props.onClick()
-      assert.equal(copied.at(-1),row.key.slice(7));assert.ok(h.state.copyFeedback.value)
+      assert.equal(copied.at(-1),row.key.slice(7));assert.equal(h.state.copyFeedback.value,'');assert.ok(h.state.controlToastKey.value)
     }
     const badges=nodes(reviewTable(h)).filter(n=>n.type==='span'&&String(n.props?.class).includes('edit-type-badge'))
     assert.ok(badges.some(n=>n.props.class.includes('plant-edit')));assert.ok(badges.some(n=>n.props.class.includes('species-edit')))
@@ -3330,4 +3335,226 @@ test('unverified submissions remain discoverable with the existing modal provena
     assert.equal(h.state.allReviewRows.value.length, 6)
     assert.ok(!h.calls.some(call => call.options.method === 'POST'))
   } finally { h.stop() }
+})
+
+
+function submitterClock() {
+ let now=0,id=0;const timers=new Map()
+ return {timers,window:{setTimeout(fn,ms){const key=++id;timers.set(key,{fn,due:now+ms});return key},clearTimeout(key){timers.delete(key)}},advance(ms){now+=ms;for(const [key,timer] of timers)if(timer.due<=now){timers.delete(key);timer.fn()}}}
+}
+const submittedByButtons=h=>nodes(reviewTable(h)).filter(n=>n.type==='button'&&n.props?.['data-submitter-copy'])
+const checkedSubmitterRows=h=>submittedByButtons(h).filter(b=>nodes(b).some(n=>n.type==='path'&&n.props?.d==='m5 12 4 4 10-10')).map(b=>b.props['data-submitter-copy'])
+
+test('Submitted By rows with shared names/identifiers and cross-type overlapping IDs have independent timers',async()=>{
+ const clock=submitterClock(),copied=[]
+ const rows=[fixture({owner_subject:'staff:shared'}),fixture({id:secondId,owner_subject:'staff:shared'})]
+ const change=changeFixture({id:firstId,owner_subject:'staff:shared'})
+ const h=harness(url=>fixtureResponse(url,rows),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async v=>copied.push(v)},recordChangesHandler:()=>changesResponse([change])})
+ try{
+  await h.state.loadObservations();h.state.submitterNames.value={shared:'Botanist KEE'}
+  const button=key=>submittedByButtons(h).find(b=>b.props['data-submitter-copy']===key)
+  h.state.reviewMessage.value={variant:'info',message:'Existing conflict notice'}
+  await button('observation:'+firstId).props.onClick()
+  assert.deepEqual(checkedSubmitterRows(h),['observation:'+firstId])
+  assert.equal(h.state.copyFeedback.value,'');assert.equal(h.state.reviewMessage.value.message,'Existing conflict notice')
+  assert.equal(h.state.submitterLabel('staff:shared'),'Botanist KEE')
+  clock.advance(1000);await button('observation:'+secondId).props.onClick();await button('change:'+firstId).props.onClick()
+  assert.equal(checkedSubmitterRows(h).length,3)
+  clock.advance(1000);assert.equal(checkedSubmitterRows(h).length,2);assert.ok(!checkedSubmitterRows(h).includes('observation:'+firstId))
+  clock.advance(1000);assert.deepEqual(checkedSubmitterRows(h),[])
+  assert.deepEqual(copied,['staff:shared','staff:shared','staff:shared'])
+ }finally{h.stop()}
+ assert.equal(clock.timers.size,0)
+})
+
+test('Submitted By repeated successful copy restarts duration and ignores an old timer callback',async()=>{
+ const clock=submitterClock(),h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async()=>{}}})
+ try{
+  await h.state.loadObservations();await submittedByButtons(h)[0].props.onClick()
+  const old=[...clock.timers.values()][0].fn
+  clock.advance(1500);await submittedByButtons(h)[0].props.onClick();assert.equal(clock.timers.size,1)
+  old();assert.equal(checkedSubmitterRows(h).length,1)
+  clock.advance(500);assert.equal(checkedSubmitterRows(h).length,1)
+  clock.advance(1500);assert.deepEqual(checkedSubmitterRows(h),[])
+ }finally{h.stop()}
+})
+
+test('Submitted By failure, filters, refreshed/reused identities and unmount clear stale confirmation',async()=>{
+ const clock=submitterClock();let fail=false
+ const h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async()=>{if(fail)throw Error('blocked')}}})
+ try{
+  await h.state.loadObservations();fail=true;await submittedByButtons(h)[0].props.onClick()
+  assert.deepEqual(checkedSubmitterRows(h),[]);assert.equal(h.state.copyFailed.value,true)
+  fail=false;await submittedByButtons(h)[0].props.onClick();assert.equal(h.state.copyFeedback.value,'')
+  h.state.search.value='unmatched';await flush();assert.equal(clock.timers.size,0)
+  h.state.search.value='';await flush();assert.deepEqual(checkedSubmitterRows(h),[])
+  await submittedByButtons(h)[0].props.onClick()
+  h.state.observations.value=h.state.observations.value.map(row=>({...row}));await flush()
+  assert.deepEqual(checkedSubmitterRows(h),[])
+  await submittedByButtons(h)[0].props.onClick()
+  h.state.observations.value[0].recordedBy='staff:different';await flush();assert.deepEqual(checkedSubmitterRows(h),[])
+  await submittedByButtons(h)[0].props.onClick();assert.equal(clock.timers.size,1)
+ }finally{h.stop()}
+ assert.equal(clock.timers.size,0)
+})
+
+test('Submitted By late clipboard completion cannot restore confirmation after row removal or logout',async()=>{
+ for(const logout of [false,true]){
+  const pending=deferred(),clock=submitterClock(),h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:()=>pending.promise}})
+  try{
+   await h.state.loadObservations();const copying=submittedByButtons(h)[0].props.onClick()
+   if(logout)h.emitSession(null);else h.state.observations.value=[]
+   await flush();pending.resolve();await copying
+   assert.equal(Object.keys(h.state.submitterCopied.value).length,0);assert.equal(clock.timers.size,0);assert.equal(h.state.copyFeedback.value,'')
+  }finally{h.stop()}
+ }
+})
+
+
+test('Submitted By sort changes keep success attached to its row and refresh resets it',async()=>{
+ const clock=submitterClock(),rows=[fixture(),fixture({id:secondId,created_at:'2026-09-01T01:00:00Z'})]
+ const h=harness(url=>fixtureResponse(url,rows),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async()=>{}}})
+ try{
+  await h.state.loadObservations();await submittedByButtons(h)[0].props.onClick()
+  h.state.observations.value[1].createdAt='2026-12-01T01:00:00Z';await flush()
+  assert.equal(submittedByButtons(h)[0].props['data-submitter-copy'],'observation:'+secondId)
+  assert.deepEqual(checkedSubmitterRows(h),['observation:'+firstId])
+  await h.state.loadObservations();assert.deepEqual(checkedSubmitterRows(h),[]);assert.equal(clock.timers.size,0)
+ }finally{h.stop()}
+})
+
+
+test('Submitted By equal display names with distinct staff identities copy each original value',async()=>{
+ const copied=[],clock=submitterClock()
+ const h=harness(url=>fixtureResponse(url,[fixture({owner_subject:'staff:one'}),fixture({id:secondId,owner_subject:'staff:two'})]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async value=>copied.push(value)}})
+ try{
+  await h.state.loadObservations();h.state.submitterNames.value={one:'stanton',two:'stanton'}
+  assert.equal(h.state.submitterLabel('staff:one'),h.state.submitterLabel('staff:two'))
+  await submittedByButtons(h).find(b=>b.props['data-submitter-copy']==='observation:'+firstId).props.onClick()
+  assert.deepEqual(checkedSubmitterRows(h),['observation:'+firstId])
+  await submittedByButtons(h).find(b=>b.props['data-submitter-copy']==='observation:'+secondId).props.onClick()
+  assert.deepEqual(copied,['staff:one','staff:two']);assert.equal(checkedSubmitterRows(h).length,2)
+ }finally{h.stop()}
+})
+
+
+const submitterToasts=h=>nodes(h.render()).filter(n=>n.type==='span'&&n.props?.class==='submitter-copy-toast')
+
+test('Submitted By success shows one compact Copied toast only after clipboard completion and expires at two seconds',async()=>{
+ const clock=submitterClock(),pending=deferred(),copied=[]
+ const h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:value=>{copied.push(value);return pending.promise}}})
+ try{
+  await h.state.loadObservations();assert.equal(submitterToasts(h).length,0)
+  const copying=submittedByButtons(h)[0].props.onClick();assert.equal(submitterToasts(h).length,0)
+  pending.resolve();await copying
+  assert.deepEqual(copied,[fixture().owner_subject]);assert.equal(submitterToasts(h).length,1)
+  const toast=submitterToasts(h)[0]
+  assert.equal(nodes(toast).find(n=>n.type==='span'&&typeof n.children==='string').children,'Copied')
+  assert.equal(toast.props['aria-hidden'],'true');assert.ok(nodes(toast).some(n=>n.type==='svg'))
+  const live=nodes(h.render()).find(n=>n.props?.class==='submitter-copy-status')
+  assert.equal(live.props.role,'status');assert.equal(live.props['aria-live'],'polite');assert.equal(live.props['aria-atomic'],'true')
+  assert.equal(h.state.copyFeedback.value,'')
+  clock.advance(1999);assert.equal(submitterToasts(h).length,1)
+  clock.advance(1);assert.equal(submitterToasts(h).length,0);assert.deepEqual(checkedSubmitterRows(h),[])
+ }finally{h.stop()}
+})
+
+test('Submitted By latest successful row refreshes one toast; an older row timer cannot dismiss it',async()=>{
+ const clock=submitterClock()
+ const h=harness(url=>fixtureResponse(url,[fixture(),fixture({id:secondId})]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async()=>{}}})
+ try{
+  await h.state.loadObservations()
+  await submittedByButtons(h).find(b=>b.props['data-submitter-copy']==='observation:'+firstId).props.onClick()
+  clock.advance(1000)
+  await submittedByButtons(h).find(b=>b.props['data-submitter-copy']==='observation:'+secondId).props.onClick()
+  assert.equal(submitterToasts(h).length,1)
+  clock.advance(1000);assert.equal(submitterToasts(h).length,1)
+  assert.equal(h.state.copiedToastRow.value,'observation:'+secondId)
+  clock.advance(1000);assert.equal(submitterToasts(h).length,0)
+ }finally{h.stop()}
+})
+
+test('Submitted By failed clipboard and navigation leave no success toast, and cleanup removes timers',async()=>{
+ const clock=submitterClock();let fail=false
+ const h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async()=>{if(fail)throw Error('denied')}}})
+ try{
+  await h.state.loadObservations();await submittedByButtons(h)[0].props.onClick()
+  fail=true;await submittedByButtons(h)[0].props.onClick()
+  assert.equal(submitterToasts(h).length,0);assert.deepEqual(checkedSubmitterRows(h),[]);assert.equal(h.state.copyFailed.value,true)
+  fail=false;await submittedByButtons(h)[0].props.onClick()
+  h.route.query={review:firstId};await flush()
+  assert.equal(submitterToasts(h).length,0);assert.equal(clock.timers.size,0)
+  await submittedByButtons(h)[0].props.onClick();assert.equal(submitterToasts(h).length,1)
+ }finally{h.stop()}
+ assert.equal(clock.timers.size,0)
+})
+
+test('Submitted By toast has exact brand colors, icon anchoring, no pointer interception or motion, and localized text',async()=>{
+ const source=descriptor.styles[0].content
+ assert.match(source,/background: #DCF3E4; color: #245A46/)
+ assert.match(source,/\.submitter-copy-anchor \{ position: relative;/)
+ assert.match(source,/bottom: calc\(100% \+ 8px\); left: 50%; transform: translateX\(-50%\)/)
+ assert.match(source,/z-index: 200; pointer-events: none/)
+ assert.doesNotMatch(source.match(/\.submitter-copy-toast \{[^}]*\}/)[0],/animation|transition/)
+ for(const [language,label] of [['en','Copied'],['ms','Disalin'],['zh-CN','\u5df2\u590d\u5236']]){
+  const clock=submitterClock(),h=harness(url=>fixtureResponse(url,[fixture()]),{},language,undefined,null,{window:clock.window,clipboard:{writeText:async()=>{}}})
+  try{await h.state.loadObservations();await submittedByButtons(h)[0].props.onClick();assert.equal(nodes(submitterToasts(h)[0]).find(n=>n.type==='span'&&typeof n.children==='string').children,label)}finally{h.stop()}
+ }
+})
+
+
+test('Submitted By Copied toast renders directly above the clicked icon in its own anchor',async()=>{
+ const clock=submitterClock(),h=harness(url=>fixtureResponse(url,[fixture(),fixture({id:secondId})]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async()=>{}}})
+ try{
+  await h.state.loadObservations()
+  await submittedByButtons(h).find(b=>b.props['data-submitter-copy']==='observation:'+secondId).props.onClick()
+  const anchors=nodes(reviewTable(h)).filter(n=>n.props?.class==='submitter-copy-anchor')
+  assert.equal(anchors.length,2)
+  const withToast=anchors.filter(n=>nodes(n).some(child=>child.props?.class==='submitter-copy-toast'))
+  assert.equal(withToast.length,1)
+  assert.equal(nodes(withToast[0]).find(n=>n.type==='button').props['data-submitter-copy'],'observation:'+secondId)
+ }finally{h.stop()}
+})
+
+
+test('Review submission ID, proposal ID and QR copy icons share the anchored two-second flow',async()=>{
+ const clock=submitterClock(),copied=[]
+ const change=changeFixture({id:firstId})
+ const h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{window:clock.window,clipboard:{writeText:async value=>copied.push(value)},recordChangesHandler:()=>changesResponse([change])})
+ const toasts=()=>nodes(h.render()).filter(n=>n.props?.class==='officer-copy-toast')
+ try{
+  await h.state.loadObservations()
+  const ids=reviewCopyButtons(h).filter(b=>!b.props['data-submitter-copy'])
+  assert.equal(ids.length,2)
+  await ids[0].props.onClick();assert.equal(toasts().length,1)
+  await ids[1].props.onClick();assert.deepEqual(copied,[firstId,firstId]);assert.equal(toasts().length,1)
+  assert.equal(Object.keys(h.state.controlCopied.value).length,2);assert.equal(h.state.copyFeedback.value,'')
+  clock.advance(2000);assert.equal(toasts().length,0);assert.equal(Object.keys(h.state.controlCopied.value).length,0)
+  await h.state.open(h.state.observations.value[0]);await flush()
+  h.state.plantQr.value={identity:'QR-exact-original'};h.state.qrLoading.value=false;h.state.qrError.value=''
+  await h.state.copyQrIdentity();assert.equal(copied.at(-1),'QR-exact-original');assert.equal(toasts().length,1);assert.equal(h.state.qrCopyFeedback.value,'')
+  assert.ok(nodes(h.render()).some(n=>n.props?.class==='officer-copy-anchor'&&nodes(n).some(c=>c.props?.class==='officer-copy-toast')))
+  clock.advance(2000);assert.equal(toasts().length,0)
+ }finally{h.stop()}
+ assert.equal(clock.timers.size,0)
+})
+
+
+test('temporary verification failure preserves Officer review drafts while blocking decisions; confirmed logout clears them', async () => {
+  const h=harness(url=>fixtureResponse(url,[fixture()]))
+  try {
+    await h.state.loadObservations();await h.state.open(h.state.observations.value[0])
+    h.state.comment.value='Keep my unsaved review';h.state.speciesReviewComment.value='Keep species draft'
+    const officer=h.state.reviewSession.value.user
+    h.emitSession(officer,true)
+    assert.equal(h.state.selected.value.id,firstId)
+    assert.equal(h.state.comment.value,'Keep my unsaved review')
+    assert.equal(h.state.speciesReviewComment.value,'Keep species draft')
+    assert.equal(h.state.canReviewPlant.value,false)
+    await h.state.decide('Approved');assert.equal(h.calls.filter(call=>call.options.method==='POST').length,0)
+    h.emitSession(officer,false)
+    assert.equal(h.state.comment.value,'Keep my unsaved review');assert.equal(h.state.canReviewPlant.value,true)
+    h.emitSession(null,false)
+    assert.equal(h.state.selected.value,null);assert.equal(h.state.comment.value,'')
+  }finally{h.stop()}
 })

@@ -96,6 +96,13 @@ watch(() => route.query.change, id => {
   else { detailGeneration++; selected.value = null; comment.value = ''; error.value = ''; busy.value = false; photos.value = []; originalPhotos.value = [] }
 }, { immediate: true })
 const unsubscribe = subscribeSession((user,pending) => {
+  if (!pending && session.value.pending && user && user.id === session.value.user?.id && user.role === 'Conservation Officer' && user.status === 'Active' && !user.mustChangePassword) {
+    session.value = { user, pending }; return
+  }
+  if (pending && user && user.id === session.value.user?.id) {
+    detailGeneration++; conflict.value = conflict.value || busy.value; busy.value = false
+    session.value = { user, pending }; return
+  }
   detailGeneration++; selected.value = null; comment.value = ''; photos.value = []; originalPhotos.value = []
   loading.value = false; busy.value = false; session.value = { user,pending }
   if (officerReady.value) { if (typeof route.query.change === 'string') void open(route.query.change) }

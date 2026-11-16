@@ -1,4 +1,5 @@
 {
+  "sessionVerification": {"unavailable": "Pengesahan sesi tidak tersedia buat sementara waktu. Kerja anda dikekalkan. Sila cuba lagi.", "retry": "Cuba Lagi"},
   "approvedChanges": {
     "allTypes": "Semua Jenis",
     "searchPlaceholder": "ID penyerahan, ID tumbuhan, nama, pengirim, jenis atau zon",
@@ -1891,6 +1892,7 @@
       "appliedPeriod": "Tempoh laporan: {period}"
     },
     "reviews": {
+      "copiedToast": "Disalin",
       "queues": {
         "registrations": "Pendaftaran Tumbuhan Baharu",
         "registrationEyebrow": "Aliran Kerja Pengesahan",

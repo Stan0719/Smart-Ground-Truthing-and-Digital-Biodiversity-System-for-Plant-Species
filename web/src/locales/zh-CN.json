@@ -1,4 +1,5 @@
 {
+  "sessionVerification": {"unavailable": "暂时无法验证会话。您的工作已保留，请重试。", "retry": "重试"},
   "approvedChanges": {
     "allTypes": "所有类型",
     "searchPlaceholder": "提交编号、植物编号、名称、提交人、类型或区域",
@@ -1884,6 +1885,7 @@
       "appliedPeriod": "报告期间：{period}"
     },
     "reviews": {
+      "copiedToast": "已复制",
       "queues": {
         "registrations": "新植株登记",
         "registrationEyebrow": "核验流程",

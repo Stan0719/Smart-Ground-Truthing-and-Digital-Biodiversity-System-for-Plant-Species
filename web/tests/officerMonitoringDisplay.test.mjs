@@ -1,3 +1,4 @@
+import { useOfficerCopyConfirmation } from '../src/composables/useOfficerCopyConfirmation.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
@@ -71,6 +72,8 @@ function identifierHarness({ clipboard, authorized = true } = {}) {
   const timers = new Map()
   let session = { pending: false, user: { id: 'officer', role: authorized ? 'Conservation Officer' : 'Botanist', status: 'Active', mustChangePassword: false } }
   const context = { exports: {}, navigator: { clipboard }, Error, setTimeout: (callback, delay) => { const id = ++timerId; timers.set(id, { callback: () => { timers.delete(id); callback() }, delay }); return id }, clearTimeout: id => timers.delete(id), require(name) {
+    if (name.endsWith('.css')) return {}
+    if (name.includes('useOfficerCopyConfirmation')) return { useOfficerCopyConfirmation }
     if (name === 'vue') return { ...Vue, watch: (...args) => Vue.watch(...args), onBeforeUnmount: fn => { cleanup = fn } }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
     if (name.includes('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { listener = fn; return () => {} } }
@@ -82,21 +85,23 @@ function identifierHarness({ clipboard, authorized = true } = {}) {
   return { state, props, timers, cleanup: () => cleanup(), logout: () => { session = { pending: false, user: null }; listener() } }
 }
 
-test('reading title success feedback expires after three seconds and timers reset on recopy, logout and close', async () => {
+test('reading title success feedback expires after two seconds and timers reset on recopy, logout and close', async () => {
   const h = identifierHarness({ clipboard: { writeText: async () => {} } })
   h.props.feedbackDuration = 3000
   try {
     await h.state.copy()
-    assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
+    assert.equal(h.state.copied.value.identifier, true); assert.equal(h.state.toastKey.value, 'identifier'); assert.equal(h.state.feedback.value, '')
     assert.equal(h.timers.size, 1)
     const [firstId, firstTimer] = [...h.timers][0]
-    assert.equal(firstTimer.delay, 3000)
+    assert.equal(firstTimer.delay, 2000)
     await h.state.copy()
     assert.equal(h.timers.has(firstId), false)
     firstTimer.callback()
-    assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
+    assert.equal(h.state.copied.value.identifier, true); assert.equal(h.state.toastKey.value, 'identifier'); assert.equal(h.state.feedback.value, '')
     const timer = [...h.timers.values()][0]
     timer.callback()
+    assert.equal(h.state.copied.value.identifier, undefined)
+    assert.equal(h.state.toastKey.value, '')
     assert.equal(h.state.feedback.value, '')
     await h.state.copy(); h.logout()
     assert.equal(h.timers.size, 0)
@@ -120,7 +125,7 @@ test('copy writes the exact full ID and supplies copied feedback, not the label'
   assert.equal(h.state.shortened.value, true)
   await h.state.copy()
   assert.deepEqual(copied, [first])
-  assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
+  assert.equal(h.state.copied.value.identifier, true); assert.equal(h.state.toastKey.value, 'identifier'); assert.equal(h.state.feedback.value, '')
   h.cleanup()
 })
 
@@ -135,7 +140,7 @@ test('submitter copy preserves the complete staff prefix and only reports succes
     assert.equal(h.state.feedback.value, '')
     assert.deepEqual(copied, [id])
     resolve(); await work
-    assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
+    assert.equal(h.state.copied.value.identifier, true); assert.equal(h.state.toastKey.value, 'identifier'); assert.equal(h.state.feedback.value, '')
   } finally { h.cleanup() }
   const failed = identifierHarness({ clipboard: { writeText: async () => { throw Error('denied') } } })
   failed.props.value = id; failed.props.labels = submitterIdentifierLabels([id]); await Vue.nextTick()
@@ -175,8 +180,10 @@ test('reading-title copy retains full-ID behavior, pending feedback and accessib
     assert.deepEqual(copied, [first])
     assert.notEqual(copied[0], h.state.label.value)
     resolve(); await work
-    assert.equal(h.state.feedback.value, 'monitoringDisplay.copied')
-    assert.ok(render().some(n => n.props?.role === 'status' && n.children === 'monitoringDisplay.copied'))
+    assert.equal(h.state.copied.value.identifier, true); assert.equal(h.state.toastKey.value, 'identifier'); assert.equal(h.state.feedback.value, '')
+    assert.ok(render().some(n => n.props?.role === 'status' && n.props?.['aria-live'] === 'polite'))
+    assert.ok(render().some(n => n.props?.class === 'officer-copy-toast'))
+    assert.ok(render().some(n => n.type === 'span' && n.children === 'conservationPages.reviews.copiedToast'))
     assert.match(descriptor.styles[0].content, /\.monitoring-id-copy:focus-visible/)
   } finally { h.cleanup() }
 })
@@ -269,8 +276,8 @@ test('Reviewed By copy renders compact staff ID with full hover text, copies the
     assert.ok(render().some(n=>n.type==='span'&&n.children==='staff:7f6e5d4c\u2026'&&n.props.title===id));
     const button=render().find(n=>n.type==='button');assert.equal(button.props['aria-label'],'Copy full staff ID');
     await button.props.onClick({stopPropagation(){}});
-    assert.deepEqual(copied,[id]);assert.equal(h.state.feedback.value,'monitoringDisplay.copied');
-    const timer=[...h.timers.values()][0];assert.equal(timer.delay,3000);timer.callback();assert.equal(h.state.feedback.value,'');
+    assert.deepEqual(copied,[id]);assert.equal(h.state.copied.value.identifier,true);assert.equal(h.state.toastKey.value,'identifier');assert.equal(h.state.feedback.value,'');
+    const timer=[...h.timers.values()][0];assert.equal(timer.delay,2000);timer.callback();assert.equal(h.state.feedback.value,'');
     for(const value of ['staff:42','',null,undefined]) {
       h.props.value=value;h.props.labels=submitterIdentifierLabels([value]);await Vue.nextTick();
       assert.equal(h.state.label.value,value||'\u2014');assert.equal(render().some(n=>n.type==='button'),false);
@@ -278,3 +285,14 @@ test('Reviewed By copy renders compact staff ID with full hover text, copies the
     assert.deepEqual(copied,[id]);
   } finally {h.cleanup()}
 });
+
+
+test('shared Officer copy icons with the same value confirm independently and show only the latest toast',async()=>{
+ const copied=[],a=identifierHarness({clipboard:{writeText:async value=>copied.push(value)}}),b=identifierHarness({clipboard:{writeText:async value=>copied.push(value)}})
+ try{
+  await a.state.copy();assert.equal(a.state.copied.value.identifier,true);assert.equal(b.state.copied.value.identifier,undefined)
+  await b.state.copy();assert.equal(a.state.copied.value.identifier,true);assert.equal(a.state.toastKey.value,'');assert.equal(b.state.toastKey.value,'identifier')
+  assert.deepEqual(copied,[first,first]);[...a.timers.values()][0].callback();assert.equal(b.state.toastKey.value,'identifier')
+  ;[...b.timers.values()][0].callback();assert.equal(b.state.toastKey.value,'');assert.equal(b.state.copied.value.identifier,undefined)
+ }finally{a.cleanup();b.cleanup()}
+})
