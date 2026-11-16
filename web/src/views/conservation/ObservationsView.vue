@@ -16,7 +16,6 @@ import { mapLinkedSpeciesRequest, type LinkedSpeciesRequest } from '../../servic
 import AppModal from '../../components/conservation/AppModal.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import ObservationReviewHistory from '../../components/conservation/ObservationReviewHistory.vue'
-import { formatReviewTimestamp } from '../../services/observationReviewHistory'
 import { formatPlantId } from '../../utils/plantId'
 import { observationOrigin, observationQueueUrl, readQueuePage, type ObservationOrigin, type ObservationQueue } from '../../services/observationQueue'
 
@@ -97,7 +96,7 @@ const species = ref('')
 const owner = ref('')
 const date = ref('')
 const modalText = (key: string) => t('observationModal.' + key)
-const modalDate = (value: string) => formatReviewTimestamp(value, locale.value)
+const modalDate = (value: string) => formatDate(value)
 const modalHeaders = new WeakMap<HTMLElement, { observer: ResizeObserver; observationId: string; measure: () => void }>()
 const vObservationDialog: Directive<HTMLElement, string> = {
   mounted(root, binding) {
@@ -218,9 +217,10 @@ const formatDate = (value: string) => {
   if (!value) return '—'
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return '—'
-  return new Intl.DateTimeFormat(locale.value === 'ms' ? 'ms-MY' : locale.value, {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(parsed)
+  const parts = new Intl.DateTimeFormat(locale.value === 'ms' ? 'ms-MY' : locale.value, {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kuching',
+  }).formatToParts(parsed)
+  return ['day', 'month', 'year'].map(type => parts.find(part => part.type === type)?.value).join(' ')
 }
 
 const mapObservation = (value: unknown): ObservationView | null => {

@@ -51,6 +51,7 @@ interface ReviewObservation {
   historicalState: string
   historicalPhotosUnavailable: boolean
   reviewedBy: string
+  tableReviewedBy: string
   origin: ObservationOrigin
   // Raw backend ID is authoritative; displayId preserves numeric legacy presentation only.
   id: string
@@ -336,6 +337,10 @@ const mapObservation = (value: unknown): ReviewObservation | null => {
     historicalState,
     historicalPhotosUnavailable: historicalState === 'unavailable' || historical?.photos_unavailable === true,
     reviewedBy: stringValue(item.reviewed_by),
+    // A previous cycle's reviewer must never label a new Pending Review row.
+    tableReviewedBy: ['Approved', 'Rejected', 'Correction Required', 'Flagged'].includes(stringValue(item.status)) &&
+      stringValue(item.review_decision) === item.status && Number.isFinite(Date.parse(stringValue(item.reviewed_at)))
+      ? stringValue(item.reviewed_by) : '',
     origin: observationOrigin(item.origin_type),
     id,
     displayId: formatObservationId(id) || id,
@@ -435,6 +440,19 @@ const labelsWithSubmitterNames = (values: (string | null | undefined)[]) => {
 const submissionSubmitterLabels = computed(() => labelsWithSubmitterNames([
   ...observations.value.map(item => item.recordedBy), selected.value?.recordedBy,
 ]))
+// The directory resolves names only; review ownership comes from the row's decision.
+const reviewerName = (subject: string) => {
+  if (!officerSessionReady.value || !subject.startsWith('staff:')) return '—'
+  const id = subject.slice(6)
+  const name = submitterNames.value[id]
+  if (typeof name === 'string' && name.trim()) return name.trim()
+  const account = reviewSession.value.user
+  return account && subject === `staff:${account.id}` && account.name?.trim() ? account.name.trim() : '—'
+}
+const changeReviewerName = (change: RecordChange) => reviewerName(
+  ['Approved', 'Rejected', 'Correction Required'].includes(change.status) &&
+    Number.isFinite(Date.parse(change.reviewed_at || '')) ? change.reviewed_by || '' : '',
+)
 const submitterLabel = (subject: string) => {
   if (!subject) return rt('unavailable')
   const staffId = subject.startsWith('staff:') ? subject.slice(6) : ''
@@ -1333,6 +1351,7 @@ async function loadObservations(append = false) {
       ...observations.value.map(item => item.reviewedBy),
       ...observations.value.map(item => item.speciesRequest?.reviewedBy || ''),
       ...changeProposals.value.map(item => item.owner_subject),
+      ...changeProposals.value.map(item => item.reviewed_by || ''),
     ].filter(subject => subject.startsWith('staff:')).map(subject => subject.slice(6)))].slice(0, 100)
     if (staffIds.length) {
       try {
@@ -1426,7 +1445,7 @@ onBeforeUnmount(() => {
     <p class="copy-feedback" :class="{ warning: copyFailed }" role="status" aria-live="polite" aria-atomic="true">{{ copyFeedback }}</p>
     <div class="table-scroll reviews-scroll" role="region" :aria-label="rt('queues.registrations')" tabindex="0">
       <table class="reviews-table">
-        <colgroup><col class="observation-column" /><col class="plant-column" /><col class="type-column" /><col class="species-column" /><col class="submitter-column" /><col class="zone-column" /><col class="created-column" /><col class="status-column" /><col class="similarity-column" /><col class="actions-column" /></colgroup>
+        <colgroup><col class="observation-column" /><col class="plant-column" /><col class="type-column" /><col class="species-column" /><col class="submitter-column" /><col class="reviewer-column" /><col class="zone-column" /><col class="created-column" /><col class="status-column" /><col class="similarity-column" /><col class="actions-column" /></colgroup>
         <thead>
           <tr>
             <th scope="col">{{ t('approvedChanges.submissionId') }}</th>
@@ -1434,6 +1453,7 @@ onBeforeUnmount(() => {
             <th scope="col">{{ t('approvedChanges.submissionType') }}</th>
             <th scope="col">{{ ct('Species') }}</th>
             <th scope="col">{{ ct('Submitted By') }}</th>
+            <th scope="col">{{ t('approvedChanges.reviewedByColumn') }}</th>
             <th scope="col">{{ ct('Location Zone') }}</th>
             <th scope="col">{{ rt('recordCreated') }}</th>
             <th scope="col">{{ ct('Status') }}</th>
@@ -1452,6 +1472,7 @@ onBeforeUnmount(() => {
             </div></td>
             <td><em v-if="observation.speciesRequest?.scientificName || observation.plantScientificName || observation.scientificName">{{ observation.speciesRequest ? observation.speciesRequest.scientificName || ct('Species unavailable') : observation.plantScientificName || observation.scientificName }}</em><span v-else>{{ ct('Species unavailable') }}</span></td>
           <td class="identity-cell"><div class="identifier-line"><span :title="observation.recordedBy">{{ submitterLabel(observation.recordedBy) }}</span><template v-if="observation.recordedBy"><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="submitter-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></template></div></td>
+            <td class="reviewer-cell">{{ reviewerName(observation.tableReviewedBy) }}</td>
             <td>{{ observation.zone || rt('notRecorded') }}</td>
             <td>{{ formatDate(observation.createdAt) }}</td>
             <td class="status-cell">
@@ -1488,6 +1509,7 @@ onBeforeUnmount(() => {
             <td class="submission-type-cell"><div class="species-request-list"><span class="species-request-badge edit-type-badge" :class="row.kind === 'approved_plant_change' ? 'plant-edit' : 'species-edit'">{{ t(row.kind === 'approved_plant_change' ? 'approvedChanges.plantEdit' : 'approvedChanges.speciesEdit') }}</span></div></td>
             <td><em>{{ row.change.proposed_snapshot.scientific_name || rt('notRecorded') }}</em></td>
             <td class="identity-cell"><div class="identifier-line"><span :title="row.change.owner_subject">{{ submitterLabel(row.change.owner_subject) }}</span><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(row.change.owner_subject) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="submitter-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></div></td>
+            <td class="reviewer-cell">{{ changeReviewerName(row.change) }}</td>
             <td>{{ changeZone(row.change) || rt('notRecorded') }}</td>
             <td>{{ formatDate(row.change.created_at) }}</td>
             <td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(row.change.status)" :class="row.change.status.toLowerCase().replaceAll(' ', '-')">{{ row.change.status === 'Cancelled' ? t('approvedChanges.cancelled') : ct(row.change.status) }}</span></span></td>
@@ -1496,7 +1518,7 @@ onBeforeUnmount(() => {
           </template>
           </tr>
           <tr v-if="isLoading || loadError || !reviewRows.length">
-            <td colspan="10">
+            <td colspan="11">
               {{
                 isLoading
                   ? 'Loading review submissions...'
@@ -2072,9 +2094,9 @@ onBeforeUnmount(() => {
 @media (max-width: 480px) { .review-summary-grid { grid-template-columns: minmax(0, 1fr); } }
 .reviews-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
 .reviews-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }
-.reviews-table { width: 100%; min-width: 107rem; table-layout: auto; white-space: normal; border-collapse: separate; border-spacing: 0; }
+.reviews-table { width: 100%; min-width: 120rem; table-layout: auto; white-space: normal; border-collapse: separate; border-spacing: 0; }
 .reviews-table .observation-column { width: 12rem; }
-.reviews-table .submitter-column { width: 13rem; }
+.reviews-table .submitter-column, .reviews-table .reviewer-column { width: 13rem; }
 .reviews-table .plant-column { width: 6rem; }
 .reviews-table .type-column { width: 11rem; }
 .reviews-table .species-column { width: 13rem; }
@@ -2088,7 +2110,7 @@ onBeforeUnmount(() => {
 .reviews-table thead th:last-child { border-top-right-radius: 10px; }
 .reviews-table td { font-size: 14px; line-height: 1.5; }
 .reviews-table .plant-id-cell { color: #315749; font-weight: 700; }
-.reviews-table .identity-cell strong { color: inherit; font-weight: 400; }
+.reviews-table .identity-cell strong { color: inherit; font-weight: 700; }
 .reviews-table .edit-identity strong { color: #315749; font-weight: 700; }
 .reviews-table .edit-identity small { display: block; color: #60776c; margin-top: 3px; }
 .reviews-table .species-request-badge.plant-edit { background: #e5f2f7; color: #22546b; border-color: #aacbd8; }

@@ -11,6 +11,7 @@
     "historicalPhotosUnavailable": "Historical photographs unavailable.",
     "historicalSpeciesUnavailable": "Historical field values unavailable for this species request.",
     "reviewedBy": "Reviewed By",
+    "reviewedByColumn": "REVIEWED BY",
     "submissionId": "Submission ID",
     "summary": "Change summary",
   "targetType": "Target type",

@@ -1114,7 +1114,7 @@ test('Observation modal opts into accessibility and its own two-column theme wit
     assert.ok(modal)
     assert.equal(modal.props.accessible, '')
     assert.equal(modal.props.title, 'Plant Observation')
-    assert.equal(h.state.modalDate('2026-11-07T06:20:00Z'), '7 Nov 2026, 14:20')
+    assert.equal(h.state.modalDate('2026-11-07T06:20:00Z'), '7 November 2026')
     assert.equal(h.state.modalDate('bad'), '\u2014')
     assert.ok(nodes(modal).some(node => node.props?.class === 'observation-information-column'))
     assert.ok(nodes(modal).some(node => String(node.props?.class).includes('observation-review-column')))

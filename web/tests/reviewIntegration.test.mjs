@@ -1692,13 +1692,13 @@ test('legacy deep links select the explicit fallback; all queue labels render in
 const reviewTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'reviews-table')
 const reviewCopyButtons = h => nodes(reviewTable(h)).filter(node => node.type === 'button' && node.props?.class === 'identifier-copy')
 
-test('review queue retains the requested ten headers, compact observation/subject labels and raw review identifiers', async () => {
+test('review queue retains the requested eleven headers, compact observation/subject labels and raw review identifiers', async () => {
   const row = fixture({ owner_subject: 'staff:2ace382f-1111-4111-8111-111111111111' })
   const h = harness(url => fixtureResponse(url, [row]))
   try {
     await h.state.loadObservations()
     const headers = nodes(reviewTable(h)).filter(node => node.type === 'th')
-    assert.deepEqual(headers.map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
+    assert.deepEqual(headers.map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
     assert.ok(headers.every(node => node.props.scope === 'col'))
     assert.equal(h.state.observationLabel(row.id), 'OBS-AA3BD8BE')
     assert.equal(h.state.submitterLabel(row.owner_subject), 'Staff \u00b7 2ACE382F')
@@ -1816,7 +1816,7 @@ test('review table preserves alignment/header and uses shared workflow colors wi
   const sharedHeader = /th\s*\{([^}]+)\}/.exec(shared)[1]
   assert.match(sharedHeader, /text-transform: uppercase/)
   assert.match(sharedHeader, /letter-spacing: 0.6px/)
-  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 107rem; table-layout: auto;[^}]*border-collapse: separate; border-spacing: 0/)
+  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 120rem; table-layout: auto;[^}]*border-collapse: separate; border-spacing: 0/)
   assert.match(css, /\.reviews-scroll\s*\{ min-width: 0; max-width: 100%; overflow-x: auto/)
   assert.match(css, /\.reviews-table \.badge\s*\{[^}]*display: inline-flex; align-items: center;[^}]*white-space: nowrap/)
   assert.match(css, /\.reviews-scroll \.reviews-table \.action-group\s*\{[^}]*flex-wrap: nowrap; align-items: center;[^}]*gap: 7px; width: max-content; min-width: max-content/)
@@ -1857,7 +1857,7 @@ test('review summary omits loaded-submission notices from cards and table in eve
       assert.equal(summary.props['aria-describedby'], undefined)
       assert.equal(reviewSummaryCards(h).length, 5)
       assert.ok(reviewSummaryCards(h).every(card => !nodes(card).some(node => node.type === 'small')))
-      assert.equal(nodes(reviewTable(h)).filter(node => node.type === 'th').length, 10)
+      assert.equal(nodes(reviewTable(h)).filter(node => node.type === 'th').length, 11)
       assert.equal(reviewCopyButtons(h).length, 2)
       assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
     } finally { h.stop() }
@@ -2387,22 +2387,22 @@ test('redundant decision heading is absent while localized accessible group, com
   } finally { h.stop() }
 })
 
-test('Review Submissions retains exactly ten aligned columns while full observation copying stays authoritative', async () => {
+test('Review Submissions retains exactly eleven aligned columns while full observation copying stays authoritative', async () => {
   const row = fixture({ plant_id: 18 }), copied = []
   const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
   try {
     await h.state.loadObservations()
     const table = reviewTable(h)
-    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['observation-column', 'plant-column', 'type-column', 'species-column', 'submitter-column', 'zone-column', 'created-column', 'status-column', 'similarity-column', 'actions-column'])
-    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['observation-column', 'plant-column', 'type-column', 'species-column', 'submitter-column', 'reviewer-column', 'zone-column', 'created-column', 'status-column', 'similarity-column', 'actions-column'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
     const renderedRow = nodes(table).find(node => node.type === 'tr' && node.key === 'observation:' + row.id)
     const cells = nodes(renderedRow).filter(node => node.type === 'td')
-    assert.equal(cells.length, 10)
+    assert.equal(cells.length, 11)
     assert.equal(cells[1].props.class, 'plant-id-cell')
     assert.equal(cells[1].children, 'PL018')
     assert.equal(cells[0].props.class, 'identity-cell')
     assert.match(descriptor.styles[0].content, /\.reviews-table \.plant-id-cell\s*\{ color: #315749; font-weight: 700/)
-    assert.match(descriptor.styles[0].content, /\.reviews-table \.identity-cell strong\s*\{ color: inherit; font-weight: 400/)
+    assert.match(descriptor.styles[0].content, /\.reviews-table \.identity-cell strong\s*\{ color: inherit; font-weight: 700/)
     assert.equal(nodes(cells[0]).find(node => node.type === 'strong').children, 'OBS-AA3BD8BE')
     const copy = nodes(cells[0]).find(node => node.type === 'button')
     await copy.props.onClick()
@@ -2741,7 +2741,7 @@ test('one original table integrates registration, linked species, plant edits an
       await h.state.loadObservations();assert.equal(h.state.loadError.value,'')
       const table=reviewTable(h),text=renderText(h)
       assert.equal(nodes(h.render()).filter(n=>n.type==='table'&&n.props?.class==='reviews-table').length,1)
-      assert.equal(nodes(table).filter(n=>n.type==='th').length,10)
+      assert.equal(nodes(table).filter(n=>n.type==='th').length,11)
       assert.equal(nodes(table).find(n=>n.type==='th').children,labels.submissionId)
       assert.equal(nodes(table).filter(n=>n.type==='th')[1].children,labels.plantId)
       for (const rendered of nodes(table).filter(n=>n.type==='tr' && n.key)) {
@@ -2749,7 +2749,7 @@ test('one original table integrates registration, linked species, plant edits an
         const expected=rendered.key === 'change:' + plant.id ? 'PL024' : rendered.key === 'change:' + speciesChange.id ? '\u2014' : 'PL001'
         assert.equal(cells[1].children,expected)
       }
-      assert.equal(nodes(table).filter(n=>n.type==='td').length,30)
+      assert.equal(nodes(table).filter(n=>n.type==='td').length,33)
       assert.ok(text.includes(labels.plantEdit));assert.ok(text.includes(labels.speciesEdit))
       const rows=h.state.allReviewRows.value
       assert.deepEqual(new Set(rows.map(r=>r.kind)),new Set(['linked_species_request','approved_plant_change','approved_species_change']))
@@ -2818,9 +2818,9 @@ test('submission type owns all four badges, leaving Species with scientific name
   try {
     await h.state.loadObservations();
     const table=reviewTable(h), headers=nodes(table).filter(n=>n.type==='th');
-    assert.equal(headers.length,10);assert.equal(headers[2].children,messages.approvedChanges.submissionType);
+    assert.equal(headers.length,11);assert.equal(headers[2].children,messages.approvedChanges.submissionType);
     for (const row of nodes(table).filter(n=>n.type==='tr'&&n.key)) {
-      const cells=nodes(row).filter(n=>n.type==='td');assert.equal(cells.length,10);
+      const cells=nodes(row).filter(n=>n.type==='td');assert.equal(cells.length,11);
       assert.equal(nodes(cells[2]).filter(n=>String(n.props?.class).includes('species-request-badge')).length,1);
       assert.equal(nodes(cells[3]).filter(n=>String(n.props?.class).includes('badge')).length,0);
       assert.ok(nodes(cells[3]).some(n=>n.type==='em'));
@@ -3559,6 +3559,66 @@ test('temporary verification failure preserves Officer review drafts while block
   }finally{h.stop()}
 })
 
+
+test('Reviewed By resolves the actual completed decision for every existing table category without borrowing linked Species reviewers', async () => {
+  const stamp='2026-11-16T01:00:00Z'
+  const rows=[
+    fixture({status:'Rejected',review_decision:'Rejected',reviewed_by:'staff:latest',reviewed_at:stamp,
+      reviews:[{reviewer_subject:'staff:earlier'},{reviewer_subject:'staff:latest'}]}),
+    fixture({id:secondId,status:'Correction Required',review_decision:'Correction Required',reviewed_by:'staff:latest',reviewed_at:stamp,
+      species_request:requestFixture({request_status:'Approved',reviewed_by:'staff:species-officer',reviewed_at:stamp})}),
+    fixture({id:'18',origin_type:'unknown',status:'Flagged',review_decision:'Flagged',reviewed_by:'staff:latest',reviewed_at:stamp}),
+  ]
+  const changes=[changeFixture({id:'plant-review',status:'Approved',reviewed_by:'staff:latest',reviewed_at:stamp}),
+    changeFixture({id:'species-review',plant_id:null,species_id:8,status:'Rejected',reviewed_by:'staff:latest',reviewed_at:stamp})]
+  const h=harness(url=>url.startsWith('/api/conservation/submitter-names?')
+    ?Response.json({names:{latest:'Officer Aina',earlier:'Earlier Officer','species-officer':'Species Officer'}}):fixtureResponse(url,rows),
+    {},'en',undefined,null,{recordChangesHandler:()=>changesResponse(changes)})
+  try{
+    await h.state.loadObservations()
+    const cells=nodes(reviewTable(h)).filter(n=>n.type==='td'&&n.props?.class==='reviewer-cell')
+    assert.equal(cells.length,5)
+    assert.ok(cells.every(n=>n.children==='Officer Aina'))
+    const lookup=h.calls.find(c=>c.url.startsWith('/api/conservation/submitter-names?'))
+    assert.ok(new URL(lookup.url,'https://fixture.invalid').searchParams.get('ids').split(',').includes('latest'))
+  }finally{h.stop()}
+})
+
+test('Reviewed By hides previous-cycle reviews on Pending Review rows and uses an em dash for unresolved or mismatched evidence', async () => {
+  const stamp='2026-11-16T01:00:00Z'
+  const rows=[fixture({reviewed_by:'staff:earlier',reviewed_at:stamp,review_decision:'Correction Required'}),
+    fixture({id:secondId,status:'Rejected',reviewed_by:'staff:missing',reviewed_at:stamp,review_decision:'Rejected'}),
+    fixture({id:'19',status:'Rejected',reviewed_by:'staff:earlier',reviewed_at:stamp,review_decision:'Flagged'})]
+  const h=harness(url=>url.startsWith('/api/conservation/submitter-names?')?Response.json({names:{earlier:'Earlier Officer'}}):fixtureResponse(url,rows),
+    {},'en',undefined,null,{recordChangesHandler:()=>changesResponse([changeFixture({reviewed_by:'staff:earlier',reviewed_at:stamp})])})
+  try{
+    await h.state.loadObservations()
+    assert.ok(nodes(reviewTable(h)).filter(n=>n.type==='td'&&n.props?.class==='reviewer-cell').every(n=>n.children==='\u2014'))
+    assert.equal(h.state.reviewerName('staff:missing'),'\u2014')
+    assert.equal(h.state.reviewerName('visitor:earlier'),'\u2014')
+  }finally{h.stop()}
+})
+
+test('Reviewed By column is localized, aligns eleven cells, and all Submission IDs retain Plant ID bold weight and copy controls', async () => {
+  for(const language of ['en','ms','zh-CN']){
+    const locale=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'))
+    assert.equal(locale.approvedChanges.reviewedByColumn,{en:'REVIEWED BY',ms:'DISEMAK OLEH','zh-CN':'\u5ba1\u6838\u4eba'}[language])
+    const h=harness(url=>fixtureResponse(url,[fixture()]),{},language,undefined,null,{recordChangesHandler:()=>changesResponse([changeFixture()])})
+    try{
+      await h.state.loadObservations()
+      const table=reviewTable(h)
+      assert.ok(nodes(table).some(n=>n.type==='th'&&n.children===locale.approvedChanges.reviewedByColumn))
+      for(const row of nodes(table).filter(n=>n.type==='tr'&&n.key)){
+        const cells=nodes(row).filter(n=>n.type==='td')
+        assert.equal(cells.length,11)
+        assert.ok(nodes(cells[0]).some(n=>n.type==='strong'&&/^(OBS|CHANGE)-/.test(n.children)))
+        assert.ok(nodes(cells[0]).some(n=>n.type==='button'&&n.props.onClick))
+      }
+      assert.match(descriptor.styles[0].content,/\.identity-cell strong\s*\{[^}]*font-weight: 700/)
+      assert.match(descriptor.styles[0].content,/\.plant-id-cell\s*\{[^}]*font-weight: 700/)
+    }finally{h.stop()}
+  }
+})
 
 test('competing observation decisions refresh detail and filtered table once without retrying; attribution is verified', async () => {
   for (const decision of ['Approved', 'Rejected']) for (const reviewer of ['staff:other-officer', '', 'staff:verified-officer']) {
