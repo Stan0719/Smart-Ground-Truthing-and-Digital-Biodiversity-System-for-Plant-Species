@@ -397,7 +397,19 @@ const observationLabels = computed(() => compactIdentifierTokens([...observation
 const observationLabel = (id: string) => `OBS-${/^[0-9]+$/.test(id) ? id : observationLabels.value.get(id) || id}`
 const subjectPart = (subject: string) => /^(staff|visitor):/.test(subject) ? subject.slice(subject.indexOf(':') + 1) : subject
 const subjectTokens = computed(() => compactIdentifierTokens([...observations.value.map(item => item.recordedBy), ...changeProposals.value.map(item => item.owner_subject), ...(selected.value ? [selected.value.recordedBy] : [])].filter(Boolean), subjectPart))
-const submissionSubmitterLabels = computed(() => submitterIdentifierLabels([
+const labelsWithSubmitterNames = (values: (string | null | undefined)[]) => {
+  const subjects = values.filter((value): value is string => typeof value === 'string' && Boolean(value))
+  const labels = submitterIdentifierLabels(subjects)
+  for (const subject of subjects) {
+    const id = subject.startsWith('staff:') ? subject.slice(6) : ''
+    const account = reviewSession.value.user
+    const name = (id && submitterNames.value[id]) ||
+      (officerSessionReady.value && account && subject === `staff:${account.id}` ? account.name?.trim() : '')
+    if (name) labels.set(subject, name)
+  }
+  return labels
+}
+const submissionSubmitterLabels = computed(() => labelsWithSubmitterNames([
   ...observations.value.map(item => item.recordedBy), selected.value?.recordedBy,
 ]))
 const submitterLabel = (subject: string) => {
@@ -469,8 +481,8 @@ watch([search,submissionType,status,species,date], () => { visibleLimit.value = 
 
 const selectedSpecies = computed(() => selected.value)
 const selectedSpeciesRequest = computed(() => standaloneRequest.value || selected.value?.speciesRequest || null)
-const speciesSubmitterLabels = computed(() => submitterIdentifierLabels([selectedSpeciesRequest.value?.requestedBy]))
-const reviewerLabels = computed(() => submitterIdentifierLabels([selected.value?.reviewedBy, selectedSpeciesRequest.value?.reviewedBy]))
+const speciesSubmitterLabels = computed(() => labelsWithSubmitterNames([selectedSpeciesRequest.value?.requestedBy]))
+const reviewerLabels = computed(() => labelsWithSubmitterNames([selected.value?.reviewedBy, selectedSpeciesRequest.value?.reviewedBy]))
 const speciesRequestImages = computed(() => selectedSpeciesRequest.value?.assets.filter(asset => asset.contentType.startsWith('image/')) || [])
 const speciesPhotoPreview = ref<InstanceType<typeof PlantPhotoLightbox> | null>(null)
 function enlargeSpeciesPhoto(assetId: string, event: Event) {
@@ -1192,6 +1204,8 @@ async function loadObservations(append = false) {
     changeProposals.value = [...new Map(changes.map(item => [item.id,item])).values()]
     const staffIds = [...new Set([
       ...observations.value.map(item => item.recordedBy),
+      ...observations.value.map(item => item.reviewedBy),
+      ...observations.value.map(item => item.speciesRequest?.reviewedBy || ''),
       ...changeProposals.value.map(item => item.owner_subject),
     ].filter(subject => subject.startsWith('staff:')).map(subject => subject.slice(6)))].slice(0, 100)
     if (staffIds.length) {

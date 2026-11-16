@@ -149,7 +149,7 @@ export function createAuthServer({ auth, recovery, staff, diagnostics = null, ke
         const names = {}
         for (const id of ids) {
           const account = await auth.byId(id)
-          if (account && account.role === 'Botanist' && account.name?.trim()) names[id] = account.name.trim()
+          if (account && ['Botanist', 'Conservation Officer', 'Administrator'].includes(account.role) && account.name?.trim()) names[id] = account.name.trim()
         }
         return send(200, { names })
       }
