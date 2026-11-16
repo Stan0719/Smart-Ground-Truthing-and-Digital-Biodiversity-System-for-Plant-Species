@@ -40,10 +40,59 @@ test("plant mapping displays the saved QR inventory label without replacing the 
   assert.equal(context.mapBackendPlant({ ...rows[0], qr_token: "legacy-token" }).qrCode, "legacy-token");
 });
 
+test("Original Plant withdrawal eligibility and history filter use the live owner and status", () => {
+  const records = fixture();
+  const original = { ...records.projectBotanistRecords("owner", rows, observations, requests).plants[0],
+    observations: [{ ...observations[0], origin_type: "initial_registration" }] };
+  assert.equal(records.canWithdrawOriginalPlant(original, "owner"), true);
+  assert.equal(records.canWithdrawOriginalPlant(original, "other"), false);
+  for (const status of ["Approved", "Rejected", "Withdrawn"])
+    assert.equal(records.canWithdrawOriginalPlant({ ...original, status }, "owner"), false);
+  assert.equal(records.canWithdrawOriginalPlant({ ...original, hasApprovedObservation: true }, "owner"), false);
+  assert.equal(records.canWithdrawOriginalPlant({ ...original, initialSubmissionStatus: "Rejected" }, "owner"), false);
+  assert.equal(records.canWithdrawOriginalPlant({ ...original, observations: [...original.observations, { id: "another" }] }, "owner"), false);
+  const speciesSubmission = { requested_by: "staff:owner", request_status: "Pending Review", review_cycle: "1", reviewed_at: null };
+  assert.equal(records.canWithdrawOriginalSpecies(speciesSubmission, "owner"), true);
+  assert.equal(records.canWithdrawOriginalSpecies({ ...speciesSubmission, request_status: "Correction Required", review_cycle: "2" }, "owner"), true);
+  for (const status of ["Approved", "Rejected", "Withdrawn", "Superseded"])
+    assert.equal(records.canWithdrawOriginalSpecies({ ...speciesSubmission, request_status: status }, "owner"), false, status);
+  assert.equal(records.canWithdrawOriginalSpecies({ ...speciesSubmission, review_cycle: "2" }, "owner"), false,
+    "a corrected Pending Review species request cannot be withdrawn");
+  assert.equal(records.canWithdrawOriginalSpecies({ ...speciesSubmission, reviewed_at: "2026-11-15T00:00:00Z" }, "owner"), false);
+  assert.equal(records.canWithdrawOriginalSpecies({ ...speciesSubmission, requested_by: "staff:other" }, "owner"), false);
+  assert.equal(records.canWithdrawOriginalSpecies(speciesSubmission, "owner", true), false);
+  assert.equal(records.canWithdrawOriginalSpecies({ ...speciesSubmission, approved_species_id: "7" }, "owner"), false);
+  const dashboard = submissionsUtils();
+  const withdrawn = { ...original, status: "Withdrawn", initialSubmissionStatus: "Withdrawn" };
+  const group = dashboard.buildSubmissionGroups([withdrawn], "plant", { "plant:8": dashboard.versionCardItems("plant", 8, {
+    history_available: true, versions: [{ id: "original-v1", version_number: 1, status: "Pending Review",
+      snapshot: { observation_id: "observation-8" } }], prior_changes: [],
+  }) })[0];
+  assert.equal(group.versions[0].status, "Withdrawn");
+  assert.equal(dashboard.groupStatusSummary(group).status, "Withdrawn");
+  assert.equal(dashboard.filterSubmissionGroups([group], "withdrawn").length, 1);
+  assert.equal(dashboard.filterSubmissionGroups([group], "pending").length, 0);
+  assert.equal(dashboard.correctionTasks([withdrawn], [{ ...observations[0], status: "Withdrawn", origin_type: "initial_registration" }], [], "owner").length, 0);
+  for (const locale of ["en", "ms", "zh"]) {
+    const catalog = JSON.parse(read(`translations/${locale}.json`));
+    for (const key of ["action", "confirmTitle", "confirmMessage", "keepSubmission", "successTitle", "successMessage", "failed"])
+      assert.ok(catalog.plantWithdrawal[key], `${locale}.${key}`);
+    for (const group of ["speciesWithdrawal", "observationWithdrawal"])
+      for (const key of ["action", "confirmTitle", "confirmMessage", "keepSubmission", "successTitle", "successMessage", "failed"])
+        assert.ok(catalog[group][key], `${locale}.${group}.${key}`);
+    assert.ok(catalog.submissions.withdrawn);
+  }
+  const speciesDetail = read("screens/BotanistSpeciesRequestDetail.js");
+  assert.match(speciesDetail, /canWithdrawOriginalSpecies\(request, accountId, historicalDetail\)/);
+  assert.match(speciesDetail, /withdraw-original-species/);
+  assert.match(speciesDetail, /plantApi\(`\/species-requests\/\$\{encodeURIComponent\(request\.request_id\)\}\/withdraw`/);
+});
+
 function submissionsUtils() {
   return moduleFrom("screens/BotanistDashboard.js", {
     react: React,
     "../components/LanguageSelector": { default: "LanguageSelector" },
+    "../components/fieldFormStyles": { fieldFormStyles: { submitButton: {}, submitButtonText: {} } },
     "../translations/i18n": { useAppTranslation() {}, t: (key) => key, translateLabel: (value) => value, translateUIMessage: (value) => value },
     "react-native": { StyleSheet: { create: (value) => value } },
     "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
@@ -53,6 +102,7 @@ function submissionsUtils() {
     "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" },
     "../utils/faceSession": { faceSession: {} }, "@expo/vector-icons/Ionicons": { default: "Ionicons" },
     "../utils/useBotanistNotifications": { useBotanistNotifications() {} },
+    "../utils/botanistNotifications": { ownedNotificationObservation() {} },
   });
 }
 
@@ -118,6 +168,323 @@ test("separate version cards preserve API status and only mark the latest approv
   assert.equal(dashboard.versionCardItems("plant", 8, { history_available: false, versions: [] }).length, 0);
 });
 
+test("My Submissions supplements missing Plant history with owned requests in every review state", () => {
+  const dashboard = submissionsUtils();
+  const recordChanges = [
+    { id: "rejected-edit", plant_id: 8, owner_subject: "staff:owner", status: "Rejected", review_comment: "Clarify the leaf shape.",
+      created_at: "2026-05-02T00:00:00Z", base_snapshot: { scientific_name: "Original plant" }, proposed_snapshot: { scientific_name: "Rejected plant edit" } },
+    { id: "cancelled-edit", plant_id: 8, owner_subject: "staff:owner", status: "Cancelled", review_comment: "Previous feedback retained.",
+      created_at: "2026-05-03T00:00:00Z", base_snapshot: { scientific_name: "Original plant" }, proposed_snapshot: { scientific_name: "Cancelled plant edit" } },
+    { id: "different-plant", plant_id: 9, owner_subject: "staff:owner", status: "Approved", created_at: "2026-05-04T00:00:00Z",
+      base_snapshot: {}, proposed_snapshot: { scientific_name: "Other plant" } },
+    { id: "other-botanist", plant_id: 8, owner_subject: "staff:other", status: "Rejected", created_at: "2026-05-05T00:00:00Z",
+      base_snapshot: {}, proposed_snapshot: { scientific_name: "Private edit" } },
+  ];
+  const complete = dashboard.mergeRecordChangeSubmissions("plant", 8,
+    { history_available: true, versions: [], prior_changes: [] }, recordChanges.filter((row) => row.owner_subject === "staff:owner"));
+  const cards = dashboard.versionCardItems("plant", 8, complete);
+  assert.deepEqual(cards.map((row) => row.status), ["Rejected", "Cancelled"]);
+  assert.ok(dashboard.filterSubmissionGroups(dashboard.buildSubmissionGroups([
+    { id: 8, status: "Approved", registeredAt: "2025-01-01T00:00:00Z" },
+  ], "plant", { "plant:8": cards }), "rejected").length);
+  assert.equal(dashboard.versionDetailParams(cards[0], { id: "owner" }).historicalReviewComment, "Clarify the leaf shape.");
+  assert.equal(cards.some((row) => row.title === "Private edit" || row.title === "Other plant"), false);
+});
+
+test("live record-change status overrides stale version status by exact change ID across edits to one Plant", () => {
+  const dashboard = submissionsUtils();
+  const currentChanges = [
+    { id: "plant24-edit-2", plant_id: 24, owner_subject: "staff:owner", revision: 2, status: "Rejected",
+      review_comment: "Please correct the leaf description.", reviewed_by: "staff:officer", reviewed_at: "2026-11-12T10:00:00Z" },
+    { id: "plant24-edit-3", plant_id: 24, owner_subject: "staff:owner", revision: 1, status: "Pending Review", review_comment: null },
+    { id: "plant24-edit-4", plant_id: 24, owner_subject: "staff:owner", revision: 2, status: "Correction Required", review_comment: "Add a location." },
+    { id: "plant24-edit-5", plant_id: 24, owner_subject: "staff:owner", revision: 1, status: "Approved", review_comment: "Approved." },
+    { id: "plant24-edit-6", plant_id: 24, owner_subject: "staff:owner", revision: 1, status: "Cancelled", review_comment: "Prior note." },
+    { id: "another-plant-edit", plant_id: 25, owner_subject: "staff:owner", status: "Approved", review_comment: "Different plant" },
+  ];
+  const merged = dashboard.mergeRecordChangeSubmissions("plant", 24, {
+    history_available: true,
+    versions: [
+      { id: "version-24-2", change_id: "plant24-edit-2", version_number: 3, status: "Pending Review", review_comment: null,
+        snapshot: { scientific_name: "Plant 24 Edit 2" } },
+      { id: "version-24-3", change_id: "plant24-edit-3", version_number: 4, status: "Correction Required",
+        review_comment: "Earlier feedback", snapshot: { scientific_name: "Plant 24 Edit 3" } },
+      { id: "version-24-4", change_id: "plant24-edit-4", version_number: 5, status: "Pending Review", snapshot: {} },
+      { id: "version-24-5", change_id: "plant24-edit-5", version_number: 6, status: "Rejected", snapshot: {} },
+      { id: "version-24-6", change_id: "plant24-edit-6", version_number: 7, status: "Pending Review", snapshot: {} },
+      // A version row ID is not a change ID; never infer a match from revision or target alone.
+      { id: "plant24-edit-2", version_number: 5, status: "Pending Review", snapshot: { scientific_name: "Unlinked history row" } },
+    ],
+    prior_changes: [],
+  }, currentChanges);
+  const cards = dashboard.versionCardItems("plant", 24, merged);
+  assert.deepEqual(cards.map((row) => row.status), ["Rejected", "Pending Review", "Correction Required", "Pending Review", "Approved", "Cancelled"]);
+  assert.equal(cards[0].raw.review_comment, "Please correct the leaf description.");
+  assert.equal(cards[1].priorChangeId, "plant24-edit-3", "version history retains its exact linked edit request ID");
+  assert.equal(cards[1].raw.owner_subject, "staff:owner", "ownership comes from the owner-scoped current request list");
+  assert.equal(cards[0].raw.reviewed_by, "staff:officer");
+  assert.equal(cards[1].raw.review_comment, null, "current status and feedback replace stale correction feedback");
+  assert.equal(cards[2].raw.review_comment, "Add a location.");
+  assert.equal(cards[3].raw.review_comment, undefined, "an unrelated version row remains unmatched");
+  assert.equal(cards[4].raw.review_comment, "Approved.");
+  assert.equal(cards[5].raw.review_comment, "Prior note.");
+  assert.ok(dashboard.filterSubmissionGroups(dashboard.buildSubmissionGroups([
+    { id: 24, status: "Approved" },
+  ], "plant", { "plant:24": cards }), "rejected").length, "the rejected edit remains visible under its actual status");
+});
+
+test("record-change refresh updates only the matching revision and leaves ambiguous legacy history untouched", () => {
+  const dashboard = submissionsUtils();
+  const change = { id: "plant24-edit", plant_id: 24, owner_subject: "staff:owner", revision: 2,
+    status: "Approved", review_comment: "Current revision approved." };
+  const merged = dashboard.mergeRecordChangeSubmissions("plant", 24, {
+    history_available: true,
+    versions: [
+      { id: "edit-r1", change_id: change.id, change_revision: 1, status: "Rejected", review_comment: "Earlier decision." },
+      { id: "edit-r2", change_id: change.id, change_revision: 2, status: "Pending Review", review_comment: null },
+      { id: "legacy-r1", change_id: "legacy-edit", status: "Pending Review" },
+      { id: "legacy-r2", change_id: "legacy-edit", status: "Correction Required" },
+    ], prior_changes: [],
+  }, [change, { id: "legacy-edit", plant_id: 24, owner_subject: "staff:owner", revision: 2, status: "Rejected" }]);
+  assert.deepEqual(merged.versions.map((version) => version.status),
+    ["Rejected", "Approved", "Pending Review", "Correction Required"]);
+  assert.equal(merged.versions[0].review_comment, "Earlier decision.");
+  assert.equal(merged.versions[1].review_comment, "Current revision approved.");
+});
+
+test("a rejected original Plant submission follows its own reviewed observation after refresh", () => {
+  const dashboard = submissionsUtils();
+  const plant = { plant_id: 20, registered_subject: "staff:owner", rbac_status: "Pending Review", registered_at: "2026-11-12T00:00:00Z", scientific_name: "JN test 12/11" };
+  const observation = { id: "plant20-original", plant_id: 20, owner_subject: "staff:owner", origin_type: "initial_registration", status: "Pending Review", created_at: "2026-11-12T00:00:00Z", content: {} };
+  const before = fixture().projectBotanistRecords("owner", [plant], [observation], []).plants[0];
+  const reviewed = fixture().projectBotanistRecords("owner", [plant], [{ ...observation, status: "Rejected", review_decision: "Rejected", review_comment: "request correction~" }], []).plants[0];
+  assert.equal(before.initialSubmissionStatus, "Pending Review");
+  assert.equal(before.status, "Pending Review");
+  assert.equal(reviewed.initialSubmissionStatus, "Rejected");
+  assert.equal(reviewed.status, "Rejected", "Plant Details must use the reviewed Original status, not stale Plant RBAC");
+  assert.equal(reviewed.currentStatus, "Rejected");
+  assert.equal(reviewed.initialObservation.review_comment, "request correction~");
+  assert.equal(fixture().canWithdrawOriginalPlant(reviewed, "owner"), false);
+  const fallback = dashboard.buildSubmissionGroups([reviewed], "plant")[0];
+  assert.equal(fallback.versionCount, 1);
+  assert.equal(fallback.versions[0].status, "Rejected");
+  assert.equal(dashboard.groupStatusSummary(fallback).status, "Rejected");
+  const staleVersion = dashboard.versionCardItems("plant", "20", { history_available: true, versions: [
+    { id: "plant20-v1", version_number: 1, status: "Pending Review", snapshot: { observation_id: observation.id } },
+  ] });
+  assert.equal(dashboard.buildSubmissionGroups([reviewed], "plant", { "plant:20": staleVersion })[0].versions[0].status, "Rejected");
+});
+
+test("Plant Details status follows the exact Original review while approved and withdrawn records keep their current state", () => {
+  const records = fixture();
+  const plant = { ...rows[0], plant_id: 20, rbac_status: "Pending Review" };
+  const original = { ...observations[0], id: "original-20", plant_id: 20, origin_type: "initial_registration", review_comment: "Original feedback" };
+  for (const status of ["Pending Review", "Correction Required", "Rejected", "Approved"]) {
+    const projected = records.projectBotanistRecords("owner", [plant], [{ ...original, status }], []).plants[0];
+    assert.equal(projected.status, status);
+    assert.equal(projected.initialSubmissionStatus, status);
+  }
+  const approved = records.projectBotanistRecords("owner", [{ ...plant, rbac_status: "Approved" }],
+    [{ ...original, status: "Correction Required" }, { ...original, id: "later-20", origin_type: "subsequent_observation", status: "Pending Review", created_at: "2026-11-13T00:00:00Z", review_comment: "Unrelated feedback" }], []).plants[0];
+  assert.equal(approved.status, "Approved");
+  assert.equal(approved.initialObservation.review_comment, "Original feedback");
+  assert.equal(approved.latestObservation.review_comment, "Unrelated feedback");
+  const withdrawn = records.projectBotanistRecords("owner", [{ ...plant, rbac_status: "Withdrawn" }],
+    [{ ...original, status: "Pending Review" }], []).plants[0];
+  assert.equal(withdrawn.status, "Withdrawn");
+});
+
+test("Plant 21 correction and approved Edit 1 stay distinct; only the current version opens editable details", () => {
+  const dashboard = submissionsUtils();
+  const record = { id: 21, status: "Approved", registeredAt: "2026-11-12T00:00:00Z", initialSubmissionStatus: "Approved" };
+  const rows = dashboard.versionCardItems("plant", "21", { history_available: true, versions: [
+    { id: "plant21-v1", version_number: 1, status: "Correction Required", created_at: "2026-11-12T00:00:00Z", snapshot: { scientific_name: "JN NEW New" } },
+    { id: "plant21-v2", version_number: 2, status: "Approved", created_at: "2026-11-13T00:00:00Z", snapshot: { scientific_name: "JN NEW New" } },
+  ] });
+  const group = dashboard.buildSubmissionGroups([record], "plant", { "plant:21": rows })[0];
+  assert.equal(group.versionCount, 2);
+  assert.deepEqual(group.versions.map((row) => [row.status, Boolean(row.current), Boolean(row.superseded)]), [
+    ["Correction Required", false, false], ["Approved", true, false],
+  ]);
+  assert.equal(dashboard.groupStatusSummary(group).detailKey, "currentEditSummary");
+  assert.equal(dashboard.submissionVersionRoute(group.versions[0], { id: "owner" })[1].historicalRecordDetail, true);
+  assert.deepEqual(dashboard.submissionVersionRoute(group.versions[1], { id: "owner" })[1],
+    { plantId: "21", botanist: { id: "owner" } });
+});
+
+test("Plant and Species originals show resolved correction only for an approved, directly linked resubmission", () => {
+  const dashboard = submissionsUtils();
+  for (const kind of ["plant", "species"]) {
+    const recordKey = kind === "plant" ? "observation_id" : "request_id";
+    const originalSnapshot = { [recordKey]: kind === "plant" ? "observation-21" : 21, scientific_name: "Original value", content: { notes: "Before correction" } };
+    const base = { id: `${kind}-v1`, version_number: 1, status: "Correction Required", owner_subject: "staff:owner",
+      review_comment: "Please correct the details.", reviewed_at: "2026-11-12T10:00:00Z", snapshot: originalSnapshot };
+    const correction = { id: `${kind}-v2`, version_number: 2, status: "Approved", owner_subject: "staff:owner",
+      edited_by: "staff:owner", change_id: null, previous_snapshot: originalSnapshot,
+      snapshot: { ...originalSnapshot, scientific_name: "Corrected value" } };
+    const groups = (second) => {
+      const rows = dashboard.versionCardItems(kind, 21, { history_available: true, versions: [base, second] });
+      const record = kind === "plant" ? { id: 21, status: "Approved" } : { request_id: 21, request_status: "Approved" };
+      return dashboard.buildSubmissionGroups([record], kind, { [`${kind}:21`]: rows })[0];
+    };
+    const approved = groups(correction);
+    assert.deepEqual(approved.versions.map((row) => row.status), ["Correction Required", "Approved"]);
+    assert.equal(approved.versions[0].correctionResolved, true);
+    assert.equal(approved.versions[0].current, false);
+    assert.equal(approved.versions[1].current, true);
+    assert.equal(dashboard.groupStatusSummary(approved).status, "Approved");
+    const originalDetail = dashboard.versionDetailParams(approved.versions[0], { id: "owner" });
+    assert.equal(originalDetail.historicalVersionStatus, "Correction Required");
+    assert.equal(originalDetail.historicalReviewComment, "Please correct the details.");
+    assert.equal(originalDetail.historicalReviewedAt, "2026-11-12T10:00:00Z");
+    assert.equal(dashboard.submissionVersionRoute(approved.versions[0], { id: "owner" })[1].historicalRecordDetail, true);
+
+    for (const unverified of [
+      { ...correction, status: "Pending Review" },
+      { ...correction, status: "Rejected" },
+      { ...correction, previous_snapshot: undefined },
+      { ...correction, previous_snapshot: { ...originalSnapshot, scientific_name: "Another snapshot" } },
+      { ...correction, owner_subject: "staff:other" },
+      { ...correction, change_id: "independent-edit" },
+    ]) assert.equal(groups(unverified).versions[0].correctionResolved, undefined,
+      `${kind}: an active, rejected, or unlinked request must retain Correction Required`);
+    assert.equal(groups({ ...correction, status: "Rejected" }).versions[1].current, false);
+  }
+});
+
+test("My Submissions renders the resolved label while keeping the Original review decision in its route", () => {
+  const messages = JSON.parse(read("translations/en.json"));
+  const t = (key) => key.split(".").reduce((value, part) => value?.[part], messages) || key;
+  const snapshot = { observation_id: "observation-21", scientific_name: "Plant 21" };
+  const versions = [
+    { id: "plant21-v1", version_number: 1, status: "Correction Required", owner_subject: "staff:owner",
+      review_comment: "Correct the original.", snapshot },
+    { id: "plant21-v2", version_number: 2, status: "Approved", owner_subject: "staff:owner", edited_by: "staff:owner",
+      previous_snapshot: snapshot, snapshot: { ...snapshot, scientific_name: "Corrected Plant 21" } },
+  ];
+  let stateIndex = 0;
+  const slots = [{ "plant:21": submissionsUtils().versionCardItems("plant", 21, { history_available: true, versions }) },
+    { "plant:21": true }, false, false, { "plant:21": true }, "plants", "all"];
+  const native = { StyleSheet: { create: (value) => value }, useWindowDimensions: () => ({ width: 390 }), Alert: { alert() {} } };
+  for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "FlatList", "ScrollView", "Image", "ActivityIndicator", "RefreshControl"]) native[name] = name;
+  const screen = moduleFrom("screens/BotanistDashboard.js", {
+    react: { ...React, useCallback: (callback) => callback, useEffect() {}, useRef: (initial) => ({ current: initial }),
+      useState: (initial) => { const i = stateIndex++; return [slots[i] ?? initial, () => {}]; } },
+    "react-native": native, "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
+    "@react-navigation/native": { useFocusEffect() {} },
+    "../translations/i18n": { useAppTranslation() {}, t, translateLabel: (value) => value, translateUIMessage: (value) => value },
+    "../components/LanguageSelector": { default: "LanguageSelector" }, "@expo/vector-icons/Ionicons": { default: "Icon" },
+    "../components/fieldFormStyles": { fieldFormStyles: { submitButton: {}, submitButtonText: {} } },
+    "../utils/botanistRecords": { submissionStatus: (value) => value === "Approved" ? "approved" : value === "Rejected" ? "rejected" : String(value).toLowerCase() },
+    "../utils/useBotanistRecords": { useBotanistRecords: () => ({ plants: [{ id: 21, status: "Approved", scientificName: "Plant 21" }], requests: [], recordChanges: [],
+      loading: false, loaded: true, error: "", refresh() {} }) },
+    "../utils/plantApi": { plantApi() {} }, "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" },
+    "../utils/faceSession": { faceSession: {} }, "../utils/useBotanistNotifications": { useBotanistNotifications() {} },
+    "../utils/botanistNotifications": { ownedNotificationObservation() {} },
+  });
+  const tree = screen.BotanistSubmissionsScreen({ route: { params: { botanist: { id: "owner" } } }, navigation: { navigate() {}, goBack() {} } });
+  const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
+  const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
+  const find = (node, predicate) => predicate(node) ? node : children(node).map((child) => find(child, predicate)).find(Boolean);
+  const list = find(tree, (node) => node?.type === "FlatList");
+  const card = list.props.renderItem({ item: list.props.data[0] });
+  const original = find(card, (node) => node?.props?.testID === "submission-version-plant:21-version:plant21-v1");
+  const current = find(card, (node) => node?.props?.testID === "submission-version-plant:21-version:plant21-v2");
+  assert.ok(text(original).includes("Correction Resolved"));
+  assert.ok(text(original).includes("Superseded"));
+  assert.equal(original.props.accessibilityLabel, "Original, Correction Resolved, Superseded");
+  assert.ok(text(current).includes("Approved"));
+  assert.ok(text(current).includes("Current Version"));
+});
+
+test("My Submissions Edit 3 route renders Cancel Edit Request on its historical Plant Details screen", async () => {
+  const dashboard = submissionsUtils();
+  const changes = [
+    { id: "plant24-edit-2", plant_id: 24, owner_subject: "staff:owner", status: "Rejected", revision: 1 },
+    { id: "plant24-edit-3", plant_id: 24, owner_subject: "staff:owner", status: "Pending Review", revision: 1 },
+  ];
+  const history = dashboard.mergeRecordChangeSubmissions("plant", 24, { history_available: true,
+    versions: [
+      { id: "v24-1", version_number: 1, status: "Approved", created_at: "2026-01-01", snapshot: { plant_id: 24, scientific_name: "Plant 24", species_details: { scientific_name: "Species 24" } } },
+      { id: "v24-3", change_id: "plant24-edit-3", version_number: 3, status: "Correction Required", created_at: "2026-11-13", snapshot: { plant_id: 24, scientific_name: "Plant 24 Edit 3", species_details: { scientific_name: "Species 24" } } },
+    ], prior_changes: [] }, changes);
+  const cards = dashboard.versionCardItems("plant", 24, history);
+  const group = dashboard.buildSubmissionGroups([{ id: 24, status: "Approved", registeredAt: "2026-01-01" }], "plant", { "plant:24": cards })[0];
+  const edit3 = group.versions.find((row) => row.priorChangeId === "plant24-edit-3");
+  const [screenName, params] = dashboard.submissionVersionRoute(edit3, { id: "owner", name: "Botanist" });
+  assert.equal(screenName, "BotanistPlantDetail");
+  assert.equal(params.plantId, 24);
+  assert.equal(params.versionId, "v24-3", "version ID remains distinct from request ID");
+  assert.equal(params.selectedChangeId, "plant24-edit-3");
+  assert.equal(params.historicalRecordDetail, true);
+
+  let index = 0, slots = [], focus;
+  const hooks = { ...React, useCallback: (fn) => fn, useRef: (initial) => ({ current: initial }), useState: (initial) => {
+    const i = index++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
+    return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }];
+  } };
+  const native = { StyleSheet: { create: (value) => value }, Alert: { alert() {} }, Platform: { OS: "ios" }, UIManager: {}, LayoutAnimation: { Presets: { easeInEaseOut: "ease" }, configureNext() {} } };
+  for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "ScrollView", "Image", "Modal", "ActivityIndicator", "RefreshControl"]) native[name] = name;
+  const screen = moduleFrom("screens/BotanistPlantDetail.js", { react: hooks, "react-native": native,
+    "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
+    "@expo/vector-icons/Ionicons": { default: "Ionicons" },
+    "../utils/botanistRecords": { canWithdrawOriginalPlant: () => false, fetchBotanistPlant: async () => { throw Error("historical navigation must not load the current record"); },
+      fetchBotanistRecordChangeStatus: async (_owner, kind, target) => {
+        assert.equal(kind, "plant"); assert.equal(String(target), "24");
+        return { available: true, pending: changes.find((change) => change.id === params.selectedChangeId), latest: changes[1] };
+      } },
+    "../utils/plantApi": { plantApi: async (path) => path.endsWith("/withdrawal")
+      ? { eligible: true, observation_id: "original-24" } : {}, fetchSpeciesDetail: async () => ({}),
+      getPlantRegisteredByDisplayName: (_plant, _user, fallback) => fallback },
+    "../utils/plantPhotoGallery": { stepPhotoIndex: () => 0 },
+    "../translations/i18n": { useAppTranslation() {}, t: (key) => key, translateLabel: (value) => value,
+      translateFieldValue: (_label, value) => value, translateUIMessage: (value) => value },
+    "../data/mockData": { botanistPlantRecords: [], botanistSpeciesRequests: [], plants: [] },
+    "../components/EditAction": { default: "EditAction" },
+    "../components/OriginalUpdatedField": { default: ({ children }) => React.createElement("View", null, children) },
+  });
+  const route = { params: { ...params, botanist: { id: "owner", name: "Botanist" } } };
+  const render = () => { index = 0; return screen.default({ route, navigation: { navigate() {}, goBack() {} } }); };
+  render(); const cleanup = focus(); await new Promise((resolve) => setImmediate(resolve)); const tree = render();
+  const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
+  const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
+  function find(node, predicate) { if (!node || typeof node !== "object") return null; if (predicate(node)) return node;
+    for (const child of children(node)) { const match = find(child, predicate); if (match) return match; } return null; }
+  const cancelButton = find(tree, (node) => node?.type === "TouchableOpacity" && text(node).includes("recordEdits.cancelEditRequest"));
+  assert.ok(cancelButton, "owner's exact active Pending Review request renders its Cancel Edit Request button");
+  assert.ok(text(tree).includes("Plant 24 Edit 3"));
+  cleanup();
+  route.params = { ...route.params, selectedChangeId: undefined, historicalOriginal: true,
+    historicalSnapshot: { plant_id: 24, observation_id: "original-24", scientific_name: "Plant 24 Original" },
+    historicalVersionStatus: "Pending Review", submissionVersionLabel: "Original" };
+  render(); const originalCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(find(render(), (node) => node?.props?.testID === "withdraw-original-plant"),
+    "the active Original history row shows withdrawal after its owner-scoped availability check");
+  originalCleanup();
+});
+
+test("Plant 13 legacy Pending Review Edit 1 remains read-only without a linked change request", async () => {
+  const dashboard = submissionsUtils();
+  const response = { history_available: true, versions: [
+    { id: "plant13-v1", plant_id: 13, version_number: 1, status: "Superseded", change_id: null, owner_subject: "staff:owner", snapshot: {} },
+    { id: "plant13-v2", plant_id: 13, version_number: 2, status: "Pending Review", change_id: null, owner_subject: "staff:owner", snapshot: {} },
+  ], prior_changes: [] };
+  const merged = dashboard.mergeRecordChangeSubmissions("plant", 13, response, []);
+  const group = dashboard.buildSubmissionGroups([{ id: 13, status: "Pending Review" }], "plant",
+    { "plant:13": dashboard.versionCardItems("plant", 13, merged) })[0];
+  const edit1 = group.versions.find((row) => row.versionNumber === 2);
+  assert.equal(edit1.status, "Pending Review", "the version's live status is displayed accurately");
+  assert.equal(edit1.priorChangeId, undefined);
+  const [, params] = dashboard.submissionVersionRoute(edit1, { id: "owner" });
+  assert.equal(params.versionId, "plant13-v2");
+  assert.equal(params.selectedChangeId, undefined, "historical version IDs must not become cancellation request IDs");
+  const records = fixture(async (path) => path === "/record-changes/capabilities"
+    ? { approved_edits_available: true } : path === "/record-changes" ? { changes: [] }
+      : (() => { throw Error(`Unexpected path ${path}`); })());
+  const status = await records.fetchBotanistRecordChangeStatus("owner", "plant", 13);
+  assert.equal(status.pending, null, "the active-request lookup cannot return a request that does not exist");
+});
+
 test("submission versions group only by their reliable record IDs and status filters include matching historical versions", () => {
   const dashboard = submissionsUtils();
   const pendingEdit = dashboard.versionCardItems("plant", 13, { history_available: true, versions: [
@@ -135,6 +502,13 @@ test("submission versions group only by their reliable record IDs and status fil
   assert.equal(groups[0].record.id, 13);
   assert.equal(groups[0].versionCount, 2, "the original and edit stay inside one group");
   assert.equal(groups[0].versions[0].current, true, "pending edit does not supersede the approved original");
+  const plant13Edit1 = groups[0].versions[1];
+  assert.equal(plant13Edit1.versionNumber, 2);
+  assert.equal(plant13Edit1.priorChangeId, undefined, "a version without change_id is not an edit request");
+  const [, plant13Route] = dashboard.submissionVersionRoute(plant13Edit1, { id: "owner" });
+  assert.equal(plant13Route.historicalRecordDetail, true);
+  assert.equal(plant13Route.versionId, "p13-v2");
+  assert.equal(plant13Route.selectedChangeId, undefined, "an unlinked pending version cannot borrow another request's cancellation ID");
   assert.deepEqual(dashboard.groupStatusSummary(groups[0]), { status: "Approved", detailKey: "pendingEditCount", count: 1 });
   assert.deepEqual(dashboard.filterSubmissionGroups(groups, "pending").map((group) => group.record.id), [13]);
   assert.deepEqual(dashboard.filterSubmissionGroups(groups, "approved").map((group) => group.record.id), [13, 14]);
@@ -152,6 +526,12 @@ test("submission versions group only by their reliable record IDs and status fil
   assert.equal(dashboard.submissionVersionRoute(speciesGroups[0].versions[0], { id: "owner" })[0], "BotanistSpeciesRequestDetail");
   assert.equal(dashboard.submissionVersionRoute(speciesGroups[0].versions[1], { id: "owner" })[1].kind, "species");
   assert.equal(dashboard.submissionVersionRoute(speciesGroups[0].versions[1], { id: "owner" })[1].versionId, "s4-v2");
+  const linkedSpecies = dashboard.mergeRecordChangeSubmissions("species", 4, { history_available: true,
+    versions: [{ id: "s4-edit-v3", change_id: "species-edit-3", version_number: 3, status: "Pending Review", snapshot: {} }], prior_changes: [] },
+  [{ id: "species-edit-3", base_snapshot: { request_id: 4 }, owner_subject: "staff:owner", status: "Pending Review" }]);
+  const linkedSpeciesRow = dashboard.versionCardItems("species", 4, linkedSpecies)[0];
+  assert.equal(dashboard.submissionVersionRoute(linkedSpeciesRow, { id: "owner" })[1].selectedChangeId, "species-edit-3",
+    "Species history passes the exact linked active request ID into its detail route");
 
   const rejectedEdit = dashboard.versionCardItems("plant", 16, { history_available: true, versions: [
     { id: "r16-v1", version_number: 1, status: "Approved", snapshot: {} },
@@ -197,7 +577,7 @@ test("legacy edit groups keep the API base snapshot as an original row with corr
   const makeChange = (id, status, created_at, base_snapshot = { scientific_name: "Original species", photo_ids: ["original-photo"] }, proposed_snapshot = { scientific_name: `Edit ${id}` }) => ({
     key: `change:${id}`, kind: "plant", targetId: 8, priorChangeId: id, snapshot: proposed_snapshot,
     title: proposed_snapshot.scientific_name, status, edited: true, createdAt: created_at,
-    raw: { id, plant_id: 8, status, created_at, base_snapshot, proposed_snapshot },
+    raw: { id, plant_id: 8, owner_subject: "staff:owner", status, created_at, base_snapshot, proposed_snapshot },
   });
   const record = { id: 8, status: "Approved", registeredAt: "2025-01-01T00:00:00Z", scientificName: "Current record" };
   const pending = dashboard.buildSubmissionGroups([record], "plant", { "plant:8": [
@@ -211,12 +591,14 @@ test("legacy edit groups keep the API base snapshot as an original row with corr
   assert.ok(dashboard.filterSubmissionGroups([pending], "pending").includes(pending), "pending filter retains the whole group");
   const originalParams = dashboard.submissionVersionRoute(pending.versions[0], { id: "owner" })[1];
   assert.equal(dashboard.submissionVersionRoute(pending.versions[0], { id: "owner" })[0], "BotanistPlantDetail");
-  assert.equal(originalParams.historicalOriginal, true);
-  assert.equal(originalParams.priorChangeVersion, "original");
-  assert.equal(originalParams.historicalSnapshot.scientific_name, "Original species");
+  assert.equal(originalParams.plantId, "8");
+  assert.equal(originalParams.historicalRecordDetail, undefined, "the current approved original opens editable live details");
   const editParams = dashboard.submissionVersionRoute(pending.versions[1], { id: "owner" })[1];
   assert.equal(editParams.priorChangeId, "pending-8");
+  assert.equal(editParams.selectedChangeId, "pending-8", "the selected owned active edit ID is carried for live cancellation verification");
   assert.equal(editParams.historicalSnapshot.scientific_name, "Edit pending-8");
+  assert.equal(dashboard.submissionVersionRoute(pending.versions[1], { id: "someone-else" })[1].selectedChangeId, undefined,
+    "a different Botanist cannot receive a cancellation candidate");
   assert.equal(pending.versions[0].snapshot.scientific_name, "Original species");
   assert.equal(pending.versions[1].snapshot.scientific_name, "Edit pending-8");
 
@@ -248,9 +630,8 @@ test("legacy edit groups keep the API base snapshot as an original row with corr
   assert.equal(trackedBase.versionCount, 2, "version history previous_snapshot can supply a missing original row");
   assert.equal(trackedBase.versions[0].snapshot.scientific_name, "Plant 8 before edit");
   const previousParams = dashboard.submissionVersionRoute(trackedBase.versions[0], { id: "owner" })[1];
-  assert.equal(previousParams.versionId, "tracked-edit");
-  assert.equal(previousParams.versionSnapshot, "previous");
-  assert.equal(previousParams.historicalSnapshot.scientific_name, "Plant 8 before edit");
+  assert.equal(previousParams.plantId, "8");
+  assert.equal(previousParams.historicalRecordDetail, undefined, "the current approved base opens live details");
 
   const multiple = dashboard.buildSubmissionGroups([record], "plant", { "plant:8": [
     makeChange("edit-1", "Rejected", "2025-02-01T00:00:00Z"),
@@ -303,6 +684,10 @@ test("Field Record Timeline resolves the signed-in profile name only for its con
   assert.equal(context.getObservationRecorderDisplayName(otherObservation, { id: "owner", name: "Amina Botanist" }, "Unknown Botanist"), "Unknown Botanist");
   assert.equal(context.getObservationRecorderDisplayName(ownerObservation, { id: "owner" }, "Unknown Botanist"), "Unknown Botanist");
   assert.equal(context.getObservationRecorderDisplayName({ ...otherObservation, recordedByName: "Daniel Botanist" }, { id: "owner", name: "Amina Botanist" }, "Unknown Botanist"), "Daniel Botanist");
+  const verified = context.mapBackendObservation({ id: "obs-3", owner_subject: "staff:other", status: "Pending Review",
+    recorded_by_name: "Daniel Botanist", content: { status: "Approved", recorded_by_name: "Forged name" } });
+  assert.equal(verified.status, "Pending Review");
+  assert.equal(verified.recordedByName, "Daniel Botanist");
 
   const detailSource = read("screens/PlantDetail.js");
   const staffSectionIndex = detailSource.indexOf("STAFF RECORD");
@@ -339,14 +724,24 @@ test("pending submitted values never replace an approved observation", () => {
   assert.equal(mapped.latestSubmission, null);
 });
 
-test("approved observation selection uses approval state and updated time", () => {
+test("latest verified selection uses recorded date, not a later edit or pending observation", () => {
   const latest = context.selectLatestApprovedObservation([
     { observationId: "old-approved", status: "Approved", date: "2026-01-01", updatedAt: "2026-01-01", heightCm: 10 },
     { observationId: "edited-approved", status: "Approved", date: "2025-12-01", updatedAt: "2026-02-01", heightCm: 20 },
     { observationId: "new-pending", status: "Pending Review", date: "2026-03-01", updatedAt: "2026-03-01", heightCm: 99 },
   ]);
-  assert.equal(latest.observationId, "edited-approved");
-  assert.equal(latest.heightCm, 20);
+  assert.equal(latest.observationId, "old-approved");
+  assert.equal(latest.heightCm, 10);
+  assert.equal(context.selectLatestApprovedObservation([
+    { observationId: "A", status: "Approved", date: "2026-01-01", heightCm: 10 },
+    { observationId: "B", status: "Approved", date: "2026-01-02", updatedAt: "2026-02-01", heightCm: 20 },
+    { observationId: "C", status: "Rejected", date: "2026-01-03", heightCm: 99 },
+  ]).observationId, "B");
+  assert.equal(context.selectLatestApprovedObservation([
+    { observationId: "A", status: "Approved", date: "2026-01-01" },
+    { observationId: "B", status: "Approved", date: "2026-01-01" },
+  ]).observationId, "B", "equal observation dates use a deterministic ID tie-breaker");
+  assert.equal(context.selectLatestApprovedObservation([{ observationId: "C", status: "Pending Review", date: "2026-01-03" }]), null);
 });
 
 test("zero latitude and longitude remain valid mapped coordinates", () => {
@@ -385,7 +780,7 @@ test("loader binds every API call to the account and detail loads owned photo so
   const calls = [];
   const api = fixture(async (path, options) => { calls.push([path, options]); return path === "/plants?scope=mine" ? { plants: rows } : path === "/plants/8?scope=mine" ? { plant: rows[0] } : path === "/observations?scope=mine" ? { observations } : path === "/assets?plant_id=8&scope=mine" ? { assets: [{ id: "asset-8" }] } : { species_requests: requests }; });
   const result = await api.fetchBotanistRecords("owner"); assert.equal(result.plants.length, 1);
-  assert.equal(calls.length, 3); assert.ok(calls.every(([, options]) => options.expectedAccountId === "owner"));
+  assert.equal(calls.length, 5); assert.ok(calls.every(([, options]) => options.expectedAccountId === "owner"));
   const detail = await api.fetchBotanistPlant("owner", "8");
   assert.equal(detail.photos[0].owner, "owner"); assert.equal(detail.photos[0].uri, "https://example.invalid/assets/asset-8");
   assert.ok(calls.some(([path, options]) => path === "/assets?plant_id=8&scope=mine" && options.expectedAccountId === "owner"));
@@ -453,25 +848,27 @@ test("actual focus hook reads once per focus, avoids rerender loops and refreshe
 });
 test("actual plant detail loads the existing owned ID from API and displays its separate species information", async () => {
   let index = 0, slots = [], focus, requested;
-  const hooks = { ...React, useCallback: (fn) => fn, useState: (initial) => {
+  const hooks = { ...React, useCallback: (fn) => fn, useRef: (initial) => ({ current: initial }), useState: (initial) => {
     const i = index++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
     return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }];
   } };
   const messages = JSON.parse(read("translations/en.json"));
   const t = (key) => key.split(".").reduce((a, k) => a?.[k], messages) || key;
   let historyCalls = 0, openedRoutes = [], goBackCalls = 0, pendingChange = null, availabilityError = false, plantLoadFails = false;
-  const native = { StyleSheet: { create: (v) => v }, Alert: { alert: () => {} }, Platform: { OS: "ios" }, UIManager: {}, LayoutAnimation: { Presets: { easeInEaseOut: "ease" }, configureNext: () => {} } };
+  let alertArgs, withdrawalCalls = 0, originalEditable = true;
+  const native = { StyleSheet: { create: (v) => v }, Alert: { alert: (...args) => { alertArgs = args; } }, Platform: { OS: "ios" }, UIManager: {}, LayoutAnimation: { Presets: { easeInEaseOut: "ease" }, configureNext: () => {} } };
   for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "ScrollView", "Image", "Modal", "ActivityIndicator"]) native[name] = name;
   const record = fixture().projectBotanistRecords("owner", rows, observations, requests).plants[0];
+  record.observations = record.observations.map((observation) => ({ ...observation, origin_type: "initial_registration" }));
   record.isHistoricalVersion = false;
   record.photos = [{ uri: "https://example.invalid/assets/private", headers: { Authorization: "Bearer test-only" } }];
   const screen = moduleFrom("screens/BotanistPlantDetail.js", { react: hooks, "react-native": native,
     "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
-    "../utils/botanistRecords": { fetchBotanistPlant: async (...args) => { requested = args; if (plantLoadFails) throw Error("plant detail network failure"); return record; }, fetchBotanistRecordChangeStatus: async () => {
+    "../utils/botanistRecords": { canWithdrawOriginalPlant: fixture().canWithdrawOriginalPlant, fetchBotanistPlant: async (...args) => { requested = args; if (plantLoadFails) throw Error("plant detail network failure"); return record; }, fetchBotanistRecordChangeStatus: async () => {
       if (availabilityError) throw Error("offline");
       return { available: true, pending: pendingChange, latest: pendingChange };
     } },
-    "../utils/plantApi": { getPlantRegisteredByDisplayName: (plant, user, fallback) => plant.registeredBy === `staff:${user?.id}` ? user?.name || fallback : fallback, plantApi: async (path) => { historyCalls++; return path.startsWith("/record-versions?") ? { history_available: true, versions: [{ id: "v2", version_number: 2, status: "Pending Review", created_at: "2026-11-04T00:00:00Z", edited_by: "staff:owner", previous_snapshot: { scientific_name: "Old name" }, snapshot: { scientific_name: "New name" } }], prior_changes: [] } : { version: {} }; } },
+    "../utils/plantApi": { getPlantRegisteredByDisplayName: (plant, user, fallback) => plant.registeredBy === `staff:${user?.id}` ? user?.name || fallback : fallback, plantApi: async (path) => { if (path.endsWith("/withdrawal")) return { eligible: originalEditable, editable: originalEditable, observation_id: "observation-8" }; if (path.endsWith("/withdraw")) { withdrawalCalls++; return { withdrawn: true }; } historyCalls++; return path.startsWith("/record-versions?") ? { history_available: true, versions: [{ id: "v2", version_number: 2, status: "Pending Review", created_at: "2026-11-04T00:00:00Z", edited_by: "staff:owner", previous_snapshot: { scientific_name: "Old name" }, snapshot: { scientific_name: "New name" } }], prior_changes: [] } : { version: {} }; } },
     "@expo/vector-icons/Ionicons": { default: "Ionicons" },
     "../utils/plantPhotoGallery": { stepPhotoIndex: (index, direction, count) => count < 2 ? 0 : (index + direction + count) % count },
     "../translations/i18n": { useAppTranslation: () => {}, t, translateLabel: (v) => v, translateFieldValue: (_, v) => v, translateUIMessage: (v) => v },
@@ -497,14 +894,32 @@ test("actual plant detail loads the existing owned ID from API and displays its 
   assert.equal(historyCalls, 0, "Plant Details no longer loads history for the removed section");
   assert.equal(find((node) => node?.props?.label === "Back to Dashboard", tree), undefined, "Plant Details has no redundant bottom Back to Dashboard button");
   assert.equal(goBackCalls, 0, "removing the bottom button does not invoke its navigation callback");
+  cleanup(); originalEditable = false;
+  render(); const blockedCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  const blockedTree = render();
+  assert.equal(find((node) => node?.type === "EditAction" && node.props.testID === "edit-own-plant", blockedTree), undefined);
+  assert.equal(find((node) => node?.props?.testID === "withdraw-original-plant", blockedTree), undefined);
+  blockedCleanup(); originalEditable = true;
+  render(); const resumedCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  const withdrawAction = find((node) => node?.props?.testID === "withdraw-original-plant", render());
+  assert.ok(withdrawAction, "eligible Original Plant shows withdrawal inside its summary card");
+  assert.ok(find((node) => node?.props?.testID === "plant-record-meta", tree));
+  withdrawAction.props.onPress();
+  assert.equal(alertArgs[0], "Withdraw Plant Submission?");
+  assert.equal(withdrawalCalls, 0, "opening confirmation does not withdraw");
+  await alertArgs[2][1].onPress();
+  assert.equal(withdrawalCalls, 1);
+  assert.equal(find((node) => node?.props?.testID === "withdraw-original-plant", render()), undefined);
+  assert.ok(text(render()).includes("Withdrawn"));
   for (const language of ["en", "ms", "zh"]) {
     const translated = JSON.parse(read(`translations/${language}.json`));
     assert.ok(translated.botanistPlantDetail.backToDashboard, `${language} Back to Dashboard translation remains available`);
   }
-  cleanup();
+  resumedCleanup();
   record.status = "Approved";
   render(); const approvedCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
   assert.equal(find((n) => n?.type === "EditAction" && n.props.testID === "edit-own-plant", render()).props.disabled, false);
+  assert.equal(find((n) => n?.props?.testID === "withdraw-original-plant", render()), undefined);
   approvedCleanup();
   pendingChange = { status: "Pending Review", review_comment: "Please wait" };
   render(); const pendingCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
@@ -524,6 +939,38 @@ test("actual plant detail loads the existing owned ID from API and displays its 
   render(); const correctionCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
   assert.equal(find((n) => n?.type === "EditAction" && n.props.testID === "edit-own-plant", render()).props.disabled, false);
   correctionCleanup();
+  record.status = "Rejected";
+  record.initialObservation = { ...record.initialObservation, status: "Rejected", review_comment: "request correction~" };
+  record.latestObservation = { ...record.latestObservation, status: "Pending Review", review_comment: "Other observation feedback" };
+  render(); const rejectedCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  const rejectedTree = render();
+  const rejectedMeta = find((node) => node?.props?.testID === "plant-record-meta", rejectedTree);
+  assert.ok(text(rejectedMeta).includes("Rejected"), "the Original detail summary displays its reviewed status");
+  const rejectedBanner = find((node) => node?.props?.testID === "plant-rejected-banner", rejectedTree);
+  assert.ok(rejectedBanner, "rejected submissions display a prominent rejection banner");
+  assert.ok(text(rejectedBanner).includes("Submission Rejected"));
+  assert.ok((Array.isArray(rejectedMeta.props.style) ? rejectedMeta.props.style : [rejectedMeta.props.style])
+    .some((style) => style?.backgroundColor === "#FDECEC"), "the Record ID panel uses a light red background");
+  const rejectedBadge = find((node) => node?.type === "View" &&
+    (Array.isArray(node?.props?.style) ? node.props.style : [node?.props?.style]).some((style) => style?.backgroundColor === "#B42318"), rejectedMeta);
+  assert.ok(rejectedBadge, "Rejected uses a solid red badge");
+  const rejectedBadgeLabel = find((node) => node?.type === "Text" && text(node).includes("Rejected") &&
+    (Array.isArray(node?.props?.style) ? node.props.style : [node?.props?.style]).some((style) => style?.color === "#FFFFFF"), rejectedMeta);
+  assert.ok(rejectedBadgeLabel, "the Rejected badge label is white");
+  const rejectedFeedback = find((node) => node?.props?.testID === "plant-rejected-feedback", rejectedTree);
+  assert.ok(rejectedFeedback, "the matching Officer feedback is presented in the rejection panel");
+  assert.ok((Array.isArray(rejectedFeedback.props.style) ? rejectedFeedback.props.style : [rejectedFeedback.props.style])
+    .some((style) => style?.backgroundColor === "#FEF2F1"));
+  assert.equal((text(rejectedTree).match(/request correction~/g) || []).length, 1, "Officer feedback is not duplicated");
+  assert.equal(JSON.parse(read("translations/en.json")).botanistPlantDetail.submissionRejected, "Submission Rejected");
+  assert.equal(JSON.parse(read("translations/ms.json")).botanistPlantDetail.submissionRejected, "Penyerahan Ditolak");
+  assert.ok(!text(rejectedMeta).includes("Pending Review"));
+  assert.equal(find((n) => n?.type === "EditAction" && n.props.testID === "edit-own-plant", rejectedTree), undefined,
+    "a rejected Original does not offer Edit Plant");
+  assert.equal(find((n) => n?.props?.testID === "withdraw-original-plant", rejectedTree), undefined);
+  assert.ok(text(rejectedTree).includes("request correction~"), "feedback belongs to the selected Original review");
+  assert.ok(!text(rejectedTree).includes("Other observation feedback"));
+  rejectedCleanup();
   plantLoadFails = true;
   render(); const loadFailureCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
   const failedTree = render();
@@ -535,7 +982,7 @@ test("actual plant detail loads the existing owned ID from API and displays its 
 
 test("historical plant versions render the normal read-only Plant Record sections from the selected snapshot", async () => {
   let index = 0, slots = [], focus, apiReads = 0, speciesReads = [];
-  const hooks = { ...React, useCallback: (fn) => fn, useState: (initial) => {
+  const hooks = { ...React, useCallback: (fn) => fn, useRef: (initial) => ({ current: initial }), useState: (initial) => {
     const i = index++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
     return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }];
   } };
@@ -549,7 +996,7 @@ test("historical plant versions render the normal read-only Plant Record section
   const photo = { uri: "https://example.invalid/historical-photo", headers: { Authorization: "Bearer history" } };
   const screen = moduleFrom("screens/BotanistPlantDetail.js", { react: hooks,
     "react-native": native, "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
-    "../utils/botanistRecords": { fetchBotanistPlant: async () => { apiReads++; throw Error("must not fetch live record"); }, fetchBotanistRecordChangeStatus: async () => { apiReads++; throw Error("must not fetch history"); } },
+    "../utils/botanistRecords": { canWithdrawOriginalPlant: () => false, fetchBotanistPlant: async () => { apiReads++; throw Error("must not fetch live record"); }, fetchBotanistRecordChangeStatus: async () => { apiReads++; throw Error("must not fetch history"); } },
     "../utils/plantApi": {
       getPlantRegisteredByDisplayName: (_plant, _user, fallback) => fallback,
       fetchSpeciesDetail: async (speciesId, _slug, options) => {
@@ -566,23 +1013,26 @@ test("historical plant versions render the normal read-only Plant Record section
     "../components/OriginalUpdatedField": { default: ({ children }) => React.createElement("View", null, children) },
   });
   const route = { params: { plantId: "8", botanist: { id: "owner", name: "Aina" }, historicalRecordDetail: true,
-    historicalSnapshot: snapshot, historicalVersionStatus: "Pending Review", submissionVersionLabel: "Edit 1", historicalPhotos: [photo] } };
+    historicalSnapshot: snapshot, historicalVersionStatus: "Pending Review", submissionVersionLabel: "Edit 1",
+    historicalReviewComment: "Original Officer feedback remains available.", historicalPhotos: [photo] } };
   const render = () => { index = 0; return screen.default({ route, navigation: { navigate() {}, goBack() {} } }); };
   render(); const cleanup = focus(); await new Promise((resolve) => setImmediate(resolve)); const tree = render();
   const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
   const text = (node) => typeof node === "string" || typeof node === "number" ? String(node) : children(node).map(text).join(" ");
-  function find(predicate, node = tree) { if (predicate(node)) return node; for (const child of children(node)) { const result = find(predicate, child); if (result) return result; } }
-  for (const value of ["Plant Record", "Review and manage your plant documentation.", "Record ID", "8", "01", "Species", "Version-specific Shorea", "Historical common name", "02", "Plant Information", "03", "Staff Record", "04", "Plant Photos", "Historical plant-level name", "175", "Original notes", "Original taxonomy", "Pending Review", "Edit 1", "Niah"]) assert.ok(text(tree).includes(value), value);
+  function find(predicate, node) { if (predicate(node)) return node; for (const child of children(node)) { const result = find(predicate, child); if (result) return result; } }
+  for (const value of ["Plant Record", "Review and manage your plant documentation.", "Record ID", "8", "01", "Species", "Version-specific Shorea", "Historical common name", "02", "Plant Information", "03", "Staff Record", "04", "Plant Photos", "Historical plant-level name", "175", "Original notes", "Original taxonomy", "Pending Review", "Edit 1", "Niah", "Original Officer feedback remains available."]) assert.ok(text(tree).includes(value), value);
   assert.deepEqual(speciesReads, [["6", "owner"]], "history resolves the species ID from this snapshot using the Botanist's authorized API session");
   assert.equal(apiReads, 1, "historical detail does not fetch the current plant record");
   for (const hidden of ["Category", "Submitted By", "Sync Status", "Species ID"]) assert.ok(!text(tree).includes(hidden), hidden);
   assert.ok(!find((node) => node?.type === "EditAction"), "historical details do not expose editing controls");
-  assert.ok(find((node) => node?.type === "Image" && node.props.source.uri === photo.uri), "the selected version's photo is displayed");
+  const imageSources = (function collect(node, out = []) { if (!node || typeof node !== "object") return out; if (node.type === "Image") out.push(node.props?.source); for (const child of children(node)) collect(child, out); return out; })(tree);
+  assert.ok(imageSources.some((source) => source?.uri === photo.uri), "the selected version's photo is displayed");
   assert.ok(!text(tree).includes("Edit History") && !text(tree).includes("Complete Version"));
   const app = read("App.js");
   assert.match(app, /title: t\("navigation\.plantDetails"\)/);
   assert.match(app, /const isHistoricalDetail = route\.params\?\.historicalRecordDetail === true/);
-  assert.match(app, /headerBackTitle: backLabel \|\| undefined/);
+  assert.match(app, /headerBackTitle: ""/);
+  assert.match(app, /headerBackButtonDisplayMode: "minimal"/);
   assert.match(app, /headerTitleAlign: "center"/);
   assert.match(app, /headerBackVisible: false/);
   assert.match(app, /variant="plain"/);
@@ -599,7 +1049,7 @@ test("historical plant versions render the normal read-only Plant Record section
 
 test("owner-visible pending Plant Details use authorized proposed species details without numeric IDs or removed rows", async () => {
   let index = 0, slots = [], focus;
-  const hooks = { ...React, useCallback: (fn) => fn, useState: (initial) => {
+  const hooks = { ...React, useCallback: (fn) => fn, useRef: (initial) => ({ current: initial }), useState: (initial) => {
     const i = index++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
     return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }];
   } };
@@ -614,7 +1064,7 @@ test("owner-visible pending Plant Details use authorized proposed species detail
     latestObservation: { status: "Pending Review", revision: 1 }, photos: [] };
   const screen = moduleFrom("screens/BotanistPlantDetail.js", { react: hooks, "react-native": native,
     "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
-    "../utils/botanistRecords": { fetchBotanistPlant: async () => submittedPlant, fetchBotanistRecordChangeStatus: async () => ({ available: true, pending: null, latest: null }) },
+    "../utils/botanistRecords": { canWithdrawOriginalPlant: () => false, fetchBotanistPlant: async () => submittedPlant, fetchBotanistRecordChangeStatus: async () => ({ available: true, pending: null, latest: null }) },
     "../utils/plantApi": { getPlantRegisteredByDisplayName: () => "Aina Botanist", fetchSpeciesDetail: async () => { throw Error("current pending species details are already authorized on the plant response"); }, plantApi: async () => ({ history_available: true, versions: [], prior_changes: [] }) },
     "@expo/vector-icons/Ionicons": { default: "Ionicons" }, "../utils/plantPhotoGallery": { stepPhotoIndex: () => 0 },
     "../translations/i18n": { useAppTranslation: () => {}, t, translateLabel: (v) => v, translateFieldValue: (_, v) => v, translateUIMessage: (v) => v },
@@ -634,14 +1084,49 @@ test("owner-visible pending Plant Details use authorized proposed species detail
   cleanup();
 });
 
+test("Correction Requests include creator-owned observations on another plant and owner-scoped species requests", () => {
+  const tasks = submissionsUtils().correctionTasks(
+    [{ id: "1", status: "Approved", commonName: "Another Botanist's plant" }, { id: "2", status: "Pending Review", commonName: "My plant" }],
+    [
+      { id: "10", plant_id: "1", owner_subject: "staff:alice", status: "Correction Required", origin_type: "subsequent_observation", review_comment: "Fix the notes" },
+      { id: "11", plant_id: "1", owner_subject: "staff:bob", status: "Correction Required", origin_type: "subsequent_observation" },
+      { id: "12", plant_id: "2", owner_subject: "staff:alice", status: "Correction Required", origin_type: "initial_registration" },
+      { id: "13", plant_id: "2", owner_subject: "staff:alice", status: "Rejected", origin_type: "initial_registration" },
+    ],
+    [
+      { request_id: 21, requested_by: "staff:alice", request_status: "Correction Required", scientific_name: "New species", review_comment: "Add a photo" },
+      { request_id: 22, requested_by: "staff:bob", request_status: "Correction Required" },
+      { request_id: 23, requested_by: "staff:alice", request_status: "Rejected" },
+    ], "alice", [
+      { id: "proposal-1", observation_id: "10", owner_subject: "staff:alice", status: "Correction Required", review_comment: "Correct the edit" },
+      { id: "proposal-2", observation_id: "11", owner_subject: "staff:bob", status: "Correction Required" },
+    ], [
+      { id: "plant-change", plant_id: "1", owner_subject: "staff:alice", status: "Correction Required", proposed_snapshot: { scientific_name: "Plant proposal" }, review_comment: "Plant feedback" },
+      { id: "species-change", species_id: "7", owner_subject: "staff:alice", base_snapshot: { request_id: 21 }, status: "Correction Required", proposed_snapshot: { scientific_name: "Species proposal" } },
+      { id: "foreign-change", plant_id: "2", owner_subject: "staff:bob", status: "Correction Required" },
+    ],
+  );
+  assert.deepEqual(new Set(tasks.map(({ key, kind }) => `${kind}:${key}`)), new Set([
+    "observation:observation:10", "plant:observation:12", "species:species:21", "observationEdit:observation-edit:proposal-1",
+    "plantEdit:plant-edit:plant-change", "speciesEdit:species-edit:species-change",
+  ]));
+  assert.equal(tasks.find((task) => task.id === "10").plantId, "1");
+  assert.equal(tasks.find((task) => task.id === "21").feedback, "Add a photo");
+  assert.equal(tasks.find((task) => task.id === "proposal-1").plantId, "1");
+  assert.equal(tasks.find((task) => task.proposalId === "plant-change").feedback, "Plant feedback");
+  assert.equal(tasks.find((task) => task.proposalId === "species-change").requestId, "21");
+});
+
 for (const language of ["en", "ms", "zh"]) {
-  test(`${language}: dashboard is a main menu and submission/correction pages retain their actions`, () => {
+  test(`${language}: dashboard is a main menu and submission/correction pages retain their actions`, async () => {
     const messages = JSON.parse(read(`translations/${language}.json`));
     const t = (key, values = {}) => key.split(".").reduce((a, k) => a?.[k], messages)?.replace(/\{\{(\w+)\}\}/g, (_, key) => values[key]) || key;
     let index = 0, slots = []; const navigations = [], alerts = [];
-    const projected = fixture().projectBotanistRecords("owner", rows, observations, requests);
+    const projected = fixture().projectBotanistRecords("owner", rows, observations.map((row) => ({ ...row, status: "Pending Review" })), requests);
     let liveRecords = projected, isLoading = false;
     projected.plants[0].latestObservation = { owner_subject: "staff:owner", status: "Correction Required", plant_id: "8", review_comment: "Please add leaf details." };
+    projected.observations[0].status = "Correction Required";
+    projected.observations[0].review_comment = "Please add leaf details.";
     let viewportWidth = 390;
     const native = { StyleSheet: { create: (v) => v }, Alert: { alert: (...args) => alerts.push(args) }, useWindowDimensions: () => ({ width: viewportWidth, height: 844 }) };
     for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "FlatList", "ScrollView", "Image", "ActivityIndicator", "RefreshControl"]) native[name] = name;
@@ -651,8 +1136,10 @@ for (const language of ["en", "ms", "zh"]) {
       "@react-navigation/native": { useFocusEffect: () => {} },
       "../translations/i18n": { useAppTranslation: () => {}, t, translateLabel: (value) => value, translateUIMessage: (v) => v },
       "../components/LanguageSelector": { default: "LanguageSelector" }, "@expo/vector-icons/Ionicons": { default: "Icon" },
+      "../components/fieldFormStyles": { fieldFormStyles: { submitButton: {}, submitButtonText: {} } },
       "../utils/botanistRecords": fixture(),
       "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ unreadCount: 0 }) },
+      "../utils/botanistNotifications": { ownedNotificationObservation: async (_accountId, observationId) => ({ id: observationId, plant_id: "8", status: "Correction Required" }) },
       "../utils/useBotanistRecords": { useBotanistRecords: () => ({ ...liveRecords, loaded: !isLoading, loading: isLoading, error: "", refresh: () => {} }) },
       "../utils/plantApi": { plantApi: async () => ({ history_available: false, versions: [] }) },
       "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" }, "../utils/faceSession": { faceSession: {} },
@@ -664,7 +1151,7 @@ for (const language of ["en", "ms", "zh"]) {
     const text = (node) => typeof node === "string" || typeof node === "number" ? String(node) : children(node).map(text).join(" ");
     function find(predicate, node = tree) { if (predicate(node)) return node; for (const child of children(node)) { const found = find(predicate, child); if (found) return found; } }
     renderDashboard(); assert.ok(text(tree).includes("Aina Botanist"));
-    const cardIDs = ["dashboard-qr", "dashboard-add-plant", "dashboard-submissions", "dashboard-my-draft", "dashboard-corrections"];
+    const cardIDs = ["dashboard-qr", "dashboard-add-plant", "dashboard-submissions", "dashboard-my-observations", "dashboard-my-draft", "dashboard-corrections"];
     const grid = find((node) => node?.type === "View" && children(node).some((child) => child.props?.testID === "dashboard-qr"));
     assert.deepEqual(children(grid).map((child) => child.props.testID), cardIDs);
     assert.ok(!find((node) => node?.props?.testID === "dashboard-submission-section"));
@@ -672,7 +1159,7 @@ for (const language of ["en", "ms", "zh"]) {
     const correctionBadge = find((node) => node?.props?.testID === "correction-request-badge");
     assert.ok(correctionBadge);
     assert.equal(text(correctionBadge), "1");
-    const expectedCardColors = ["#E2F0E4", "#D6E9D9", "#F1EAD8", "#E8EDDA", "#F5E4D5"];
+    const expectedCardColors = ["#E2F0E4", "#D6E9D9", "#D6E9D9", "#E2F0E4", "#E8EDDA", "#F5E4D5"];
     for (let i = 0; i < cardIDs.length; i++) assert.ok(find((node) => node?.props?.testID === cardIDs[i]).props.style.some((style) => style?.backgroundColor === expectedCardColors[i]));
     const headerActions = find((node) => node?.type === "View" && children(node)[0]?.type === "LanguageSelector");
     assert.deepEqual(children(headerActions).map((child) => child.type === "LanguageSelector" ? "language" : children(child).find((icon) => icon?.type === "Icon")?.props?.name), ["language", "notifications-outline", "log-out-outline"]);
@@ -685,8 +1172,10 @@ for (const language of ["en", "ms", "zh"]) {
     assert.ok(find((node) => node?.props?.name === "arrow-forward", draftCard));
     assert.equal(alerts.length, 0); assert.equal(navigations.at(-1)[0], "BotanistMyDrafts");
     projected.plants[0].latestObservation.status = "Approved";
+    projected.observations[0].status = "Approved";
     renderDashboard(); assert.ok(!find((node) => node?.props?.testID === "correction-request-badge"), "resolved requests do not show a badge");
     projected.plants[0].latestObservation.status = "Correction Required";
+    projected.observations[0].status = "Correction Required";
     viewportWidth = 1024; renderDashboard();
     const dashboardScroll = find((node) => node?.type === "ScrollView");
     assert.equal(dashboardScroll.props.contentContainerStyle[1].maxWidth, 1000, "tablet dashboard stays centered and capped");
@@ -712,26 +1201,34 @@ for (const language of ["en", "ms", "zh"]) {
     const matchingPendingRow = find((node) => node?.props?.testID === "submission-version-plant:8-record:plant:8", pendingGroup);
     assert.ok(matchingPendingRow, "a status filter opens a matching group");
     projected.plants[0].latestObservation.status = "Approved";
+    projected.observations[0].status = "Approved";
     slots = []; index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack: () => navigations.push(["back"]) } });
     assert.ok(text(tree).includes(t("botanistDashboard.noCorrectionRequests")), "approved records are not misclassified as active corrections");
     projected.plants[0].latestObservation.status = "Correction Required";
+    projected.observations[0].status = "Correction Required";
+    projected.plants[0].status = "Approved";
     slots = []; index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack: () => navigations.push(["back"]) } });
     assert.ok(text(tree).includes("Please add leaf details."));
+    const correctionCard = find((node) => node?.props?.testID === "correction-task-observation:observation-8");
+    assert.equal(correctionCard?.props.style.backgroundColor, "#FFFFFF");
+    assert.ok(correctionCard?.props.style.borderWidth, "correction card keeps the shared white-card border");
     assert.ok(!text(tree).includes("common.goBack"), "Correction Requests has no redundant in-page back control");
-    assert.ok(text(tree).includes(t("botanistDashboard.correctionFilter.all")));
+    assert.equal(find((node) => node?.props?.testID === "correction-filter-all", tree), undefined, "Correction Requests has no All filter");
+    assert.equal(find((node) => node?.props?.testID === "correction-filter-correctionRequired", tree), undefined, "Correction Requests has no Correction Required filter");
+    assert.ok(text(tree).includes(t("botanistDashboard.matchingCorrectionRequests", { count: 1 })), "the count reflects the matching correction requests");
     const correctionSearch = find((node) => node?.type === "TextInput", tree);
     correctionSearch.props.onChangeText("does not match");
     index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
     assert.ok(text(tree).includes(t("botanistDashboard.noMatchingCorrectionRequests")));
-    const correctionFilter = find((node) => node?.props?.testID === "correction-filter-correctionRequired", tree);
-    correctionFilter.props.onPress();
-    index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
-    assert.ok(text(tree).includes(t("botanistDashboard.correctionFilter.correctionRequired")));
-    assert.ok(text(tree).includes(t("botanistDashboard.noMatchingCorrectionRequests")));
+    assert.ok(text(tree).includes(t("botanistDashboard.noMatchingCorrectionRequests")), "search still filters correction requests");
     correctionSearch.props.onChangeText("");
     index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
     assert.ok(text(tree).includes("Please add leaf details."));
-    const edit = find((node) => node?.type === "TouchableOpacity" && text(node).includes(t("botanistDashboard.editPlantCorrection")), tree); assert.ok(edit); edit.props.onPress(); assert.equal(navigations.at(-1)[0], "FieldCollectionEdit");
+    const edit = find((node) => node?.type === "TouchableOpacity" && text(node).includes(t("fieldCollection.correctObservation")), tree); assert.ok(edit); await edit.props.onPress(); assert.equal(navigations.at(-1)[0], "FieldCollectionEdit");
+    projected.plants[0].status = "Pending Review";
+    slots = []; index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
+    const registration = find((node) => node?.type === "TouchableOpacity" && text(node).includes(t("recordEdits.correctPlantRegistration")), tree);
+    assert.ok(registration); registration.props.onPress(); assert.equal(navigations.at(-1)[0], "EditPlant");
     assert.equal(viewportWidth, 1024);
   });
 }
@@ -793,14 +1290,18 @@ test("pending reviewed edit status failures are not converted to a clear result"
 
 test("read-only request detail renders actual fields, review metadata and authenticated photo", async () => {
   let index = 0, slots = [], focus, requested, pendingChange = null;
-  const hooks = { ...React, useCallback: (fn) => fn, useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = initial; return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }]; } };
-  const native = { StyleSheet: { create: (v) => v } }; for (const name of ["View", "Text", "ScrollView", "Image", "TouchableOpacity", "ActivityIndicator", "RefreshControl"]) native[name] = name;
+  const withdrawalCalls = [], alerts = [];
+  const hooks = { ...React, useCallback: (fn) => fn, useRef: (current) => ({ current }), useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = initial; return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }]; } };
+  const native = { StyleSheet: { create: (v) => v }, Alert: { alert: (...args) => alerts.push(args) } }; for (const name of ["View", "Text", "ScrollView", "Image", "TouchableOpacity", "ActivityIndicator", "RefreshControl"]) native[name] = name;
   const record = { ...requests[0], genus_name: "Actual genus", family_name: "Actual family", conservation_status: "Endangered", description: "Actual description", habitat: "Actual habitat", submitted_at: "2026-11-03T01:00:00Z", review_comment: "Actual reviewer comment", photo: { uri: "https://example.invalid/photo", headers: { Authorization: "Bearer fixture" } } };
   const screen = moduleFrom("screens/BotanistSpeciesRequestDetail.js", {
     react: hooks, "react-native": native, "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
-    "../utils/botanistRecords": { submissionStatus: fixture().submissionStatus, fetchBotanistSpeciesRequest: async (...args) => { requested = args; return record; }, fetchBotanistRecordChangeStatus: async () => ({ available: true, pending: pendingChange, latest: pendingChange }) },
+    "../utils/botanistRecords": { submissionStatus: fixture().submissionStatus, canWithdrawOriginalSpecies: fixture().canWithdrawOriginalSpecies,
+      fetchBotanistSpeciesRequest: async (...args) => { requested = args; return record; }, fetchBotanistRecordChangeStatus: async () => ({ available: true, pending: pendingChange, latest: pendingChange }) },
     "../translations/i18n": { useAppTranslation: () => {}, t: (v) => v, translateLabel: (v) => v, translateUIMessage: (v) => v },
     "../components/EditAction": { default: "EditAction" },
+    "../utils/plantApi": { plantApi: async (...args) => { withdrawalCalls.push(args); return {}; } },
+    "@expo/vector-icons/Ionicons": { default: "Ionicons" },
   });
   const render = () => { index = 0; return screen.default({ route: { params: { requestId: "1", botanist: { id: "owner" } } } }); };
   const initialRequestTree = render();
@@ -809,13 +1310,34 @@ test("read-only request detail renders actual fields, review metadata and authen
   const cleanup = focus(); await new Promise((r) => setImmediate(r)); const tree = render();
   const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
   const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
+  function find(predicate, node = tree) { if (predicate(node)) return node; for (const child of children(node)) { const result = find(predicate, child); if (result) return result; } }
   for (const value of ["Different species name", "Common species name", "Actual genus", "Actual family", "Endangered", "Actual description", "Actual habitat", "Pending Review", "Actual reviewer comment"]) assert.ok(text(tree).includes(value), value);
-  assert.deepEqual(requested, ["owner", "1"]); assert.ok(!text(tree).includes("Delete")); cleanup();
+  assert.deepEqual(requested, ["owner", "1"]); assert.ok(!text(tree).includes("Delete"));
+  const withdrawButton = find((node) => node?.props?.testID === "withdraw-original-species", tree);
+  assert.ok(withdrawButton, "eligible owner sees Withdraw Submission");
+  withdrawButton.props.onPress();
+  assert.equal(alerts[0][0], "speciesWithdrawal.confirmTitle");
+  assert.equal(withdrawalCalls.length, 0, "opening confirmation does not withdraw");
+  assert.equal(alerts[0][2][0].text, "speciesWithdrawal.keepSubmission");
+  await alerts[0][2][1].onPress();
+  assert.equal(withdrawalCalls[0][0], "/species-requests/1/withdraw");
+  assert.equal(alerts[1][0], "speciesWithdrawal.successTitle");
+  cleanup();
+  record.review_cycle = "2";
+  record.reviewed_at = "2026-11-12T00:00:00Z";
+  render(); const correctedCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  const correctedTree = render();
+  function hasEdit(node) { if (!node || typeof node !== "object") return false; return node.type === "EditAction" && node.props.testID === "edit-own-species" || children(node).some(hasEdit); }
+  assert.equal(hasEdit(correctedTree), false, "corrected pending Species cannot open another edit");
+  assert.equal(find((node) => node?.props?.testID === "withdraw-original-species", correctedTree), undefined,
+    "correction resubmission awaiting review cannot be withdrawn");
+  correctedCleanup();
   record.request_status = "Approved";
   render(); const approvedCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
   const approvedTree = render();
-  function find(predicate, node) { if (predicate(node)) return node; for (const child of children(node)) { const result = find(predicate, child); if (result) return result; } }
   assert.equal(find((node) => node?.type === "EditAction" && node.props.testID === "edit-own-species", approvedTree).props.disabled, false);
+  assert.equal(find((node) => node?.props?.testID === "withdraw-original-species", approvedTree), undefined,
+    "approved Species cannot be withdrawn");
   approvedCleanup();
   pendingChange = { status: "Pending Review", review_comment: "Awaiting review" };
   render(); const pendingCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
@@ -827,15 +1349,18 @@ test("read-only request detail renders actual fields, review metadata and authen
 
 test("historical species request versions use the existing read-only request detail layout without fetching current data", async () => {
   let index = 0, slots = [], focus, reads = 0;
-  const hooks = { ...React, useCallback: (fn) => fn, useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial; return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }]; } };
-  const native = { StyleSheet: { create: (v) => v } }; for (const name of ["View", "Text", "ScrollView", "Image", "TouchableOpacity", "ActivityIndicator", "RefreshControl"]) native[name] = name;
+  const hooks = { ...React, useCallback: (fn) => fn, useRef: (current) => ({ current }), useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial; return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }]; } };
+  const native = { StyleSheet: { create: (v) => v }, Alert: { alert() {} } }; for (const name of ["View", "Text", "ScrollView", "Image", "TouchableOpacity", "ActivityIndicator", "RefreshControl"]) native[name] = name;
   const snapshot = { request_id: 4, scientific_name: "Historical species", common_name: "First common name", genus_name: "First genus", family_name: "First family", description: "Original description" };
   const photo = { uri: "https://example.invalid/species-original", headers: { Authorization: "Bearer history" } };
   const screen = moduleFrom("screens/BotanistSpeciesRequestDetail.js", { react: hooks, "react-native": native,
     "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
-    "../utils/botanistRecords": { submissionStatus: fixture().submissionStatus, fetchBotanistSpeciesRequest: async () => { reads++; throw Error("must not fetch live request"); }, fetchBotanistRecordChangeStatus: async () => { reads++; throw Error("must not fetch history"); } },
+    "../utils/botanistRecords": { submissionStatus: fixture().submissionStatus, canWithdrawOriginalSpecies: fixture().canWithdrawOriginalSpecies,
+      fetchBotanistSpeciesRequest: async () => { reads++; throw Error("must not fetch live request"); }, fetchBotanistRecordChangeStatus: async () => { reads++; throw Error("must not fetch history"); } },
     "../translations/i18n": { useAppTranslation: () => {}, t: (v) => v, translateLabel: (v) => v, translateUIMessage: (v) => v },
     "../components/EditAction": { default: "EditAction" },
+    "../utils/plantApi": { plantApi: async () => ({}) },
+    "@expo/vector-icons/Ionicons": { default: "Ionicons" },
   });
   const route = { params: { requestId: "4", botanist: { id: "owner" }, historicalRecordDetail: true, historicalSnapshot: snapshot,
     historicalVersionStatus: "Approved", submissionVersionLabel: "Original", historicalCurrent: true, historicalPhotos: [photo] } };

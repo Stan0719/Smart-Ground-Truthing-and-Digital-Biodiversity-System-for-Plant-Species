@@ -3,8 +3,8 @@ import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity
 import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus } from "../utils/botanistRecords";
-import { plantApi } from "../utils/plantApi";
+import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, fetchBotanistRecordChange } from "../utils/botanistRecords";
+import { plantApi, recordChangePhotoSource } from "../utils/plantApi";
 import { downloadPhotoForReuse } from "../utils/photoReuse";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
@@ -18,7 +18,7 @@ const makeKey = () => `species-edit-${Date.now()}-${Math.random().toString(36).s
 export default function EditSpeciesRequest({ route, navigation }) {
   useAppTranslation();
   const requestId = String(route.params?.requestId || ""), accountId = route.params?.botanist?.id;
-  const [state, setState] = useState({ loading: true, error: "", request: null, available: false });
+  const [state, setState] = useState({ loading: true, error: "", request: null, available: false, correctionChange: null, correctionPhoto: null });
   const [form, setForm] = useState(null), [photo, setPhoto] = useState(null), [reuseOriginalPhoto, setReuseOriginalPhoto] = useState(false), [originalPhotoUnavailable, setOriginalPhotoUnavailable] = useState(false), [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false), [draftMessage, setDraftMessage] = useState(""), [draftError, setDraftError] = useState(""), [draftConflict, setDraftConflict] = useState(false), [offlineDraft, setOfflineDraft] = useState(false);
@@ -45,7 +45,12 @@ export default function EditSpeciesRequest({ route, navigation }) {
         const [request, capabilities] = await Promise.all([fetchBotanistSpeciesRequest(accountId, requestId),
           plantApi("/record-changes/capabilities", { expectedAccountId: accountId })]);
         if (!active) return;
-        const originalForm = Object.fromEntries(fields.map((field) => [field, String(request[field] ?? "")]));
+        const correctionChange = route.params?.correctionChangeId ? await fetchBotanistRecordChange(accountId, route.params.correctionChangeId,
+          { kind: "species", targetId: requestId }) : null;
+        const correctionWorkflow = Boolean(correctionChange || (route.params?.correction && request.request_status === "Correction Required"));
+        const correctionPhoto = correctionChange?.proposal_photo_count ? await recordChangePhotoSource(correctionChange.id, 0, accountId) : null;
+        const proposal = correctionChange?.proposed_snapshot || {};
+        const originalForm = Object.fromEntries(fields.map((field) => [field, String(proposal[field] ?? request[field] ?? "")]));
         initialFormRef.current = originalForm;
         const sameDraft = Boolean(route.params?.formDraftKey && restoredDraftRef.current?.client_key === route.params.formDraftKey);
         if (!sameDraft) {
@@ -54,11 +59,45 @@ export default function EditSpeciesRequest({ route, navigation }) {
         }
         if (route.params?.formDraftKey) {
           const restored = await getBotanistFormDraft(accountId, route.params.formDraftKey, "edit-species", requestId);
-          if (!sameDraft) restoreDraft(restored);
-          setDraftConflict(restored.base_signature !== signature(request));
+          const belongsToCorrection = !correctionWorkflow || (correctionChange
+            ? String(restored.correction_change_id || "") === String(correctionChange.id)
+            : restored.baseline?.request?.request_status === "Correction Required");
+          if (belongsToCorrection) {
+            if (!sameDraft) restoreDraft(restored);
+            setDraftConflict(restored.base_signature !== signature(request));
+          } else {
+            formDraftKey.current = makeKey();
+            navigation.setParams({ formDraftKey: undefined });
+            setDraftError(t("botanistDrafts.restoreFailed"));
+            setDraftConflict(false);
+          }
         } else {
           setForm(originalForm); setPhoto(null); setReuseOriginalPhoto(false); setOriginalPhotoUnavailable(false); setDraftConflict(false);
-          if (!recoveryPromptedRef.current) {
+          if (correctionWorkflow) {
+            recoveryPromptedRef.current = true;
+            let candidate = null;
+            try {
+              candidate = await findBotanistFormDraft(accountId, "edit-species", requestId, (draft) => correctionChange
+                ? String(draft.correction_change_id || "") === String(correctionChange.id)
+                : !draft.correction_change_id && draft.baseline?.request?.request_status === "Correction Required");
+            } catch (draftError) {
+              if (active) setDraftError(translateUIMessage(draftError.message) || t("botanistDrafts.restoreFailed"));
+            }
+            if (active && candidate) {
+              try {
+                const saved = await getBotanistFormDraft(accountId, candidate.client_key, "edit-species", requestId);
+                if (correctionChange
+                  ? String(saved.correction_change_id || "") !== String(correctionChange.id)
+                  : Boolean(saved.correction_change_id) || saved.baseline?.request?.request_status !== "Correction Required")
+                  throw Error("This draft does not belong to the selected correction request.");
+                restoreDraft(saved);
+                setDraftConflict(saved.base_signature !== signature(request));
+              } catch (restoreError) {
+                setDraftError(translateUIMessage(restoreError.message) || t("botanistDrafts.restoreFailed"));
+              }
+            }
+            setRecoveryResolved(true);
+          } else if (!recoveryPromptedRef.current) {
             recoveryPromptedRef.current = true;
             let candidate = null;
             try { candidate = await findBotanistFormDraft(accountId, "edit-species", requestId); }
@@ -77,7 +116,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
           }
         }
         setOfflineDraft(false);
-        setState({ loading: false, error: "", request, available: capabilities.approved_edits_available });
+        setState({ loading: false, error: "", request, available: capabilities.approved_edits_available, correctionChange, correctionPhoto });
         if (request.request_status === "Approved") {
           setEditAvailability("checking");
           fetchBotanistRecordChangeStatus(accountId, "species", requestId).then((result) => {
@@ -102,7 +141,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
     })();
     return () => { active = false; };
   // `reload` intentionally changes the focus callback when the user presses Retry.
-  }, [accountId, requestId, reload, route.params?.formDraftKey])); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accountId, requestId, reload, route.params?.formDraftKey, route.params?.correctionChangeId])); // eslint-disable-line react-hooks/exhaustive-deps
   async function pickPhoto(camera) {
     try {
       const permission = camera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -119,7 +158,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
       const request = state.request;
       const baseline = { request: { request_id: request.request_id, request_status: request.request_status, content_revision: request.content_revision, submitted_at: request.submitted_at,
         ...Object.fromEntries(fields.map((field) => [field, request[field] ?? ""])) } };
-      const draft = await saveBotanistFormDraft(accountId, { client_key: activeFormDraftKey, form_type: "edit-species", target_id: requestId,
+      const draft = await saveBotanistFormDraft(accountId, { client_key: activeFormDraftKey, form_type: "edit-species", target_id: requestId, correction_change_id: state.correctionChange?.id || restoredDraftRef.current?.correction_change_id || null,
         title: form.scientific_name || request.scientific_name || "", base_signature: restoredDraftRef.current?.base_signature || signature(request), baseline,
         submission_client_key: clientKey.current, auto_saved: false, form: { ...form, reuseOriginalPhoto },
         photos: photo ? [{ slot: "new:photo", uri: photo, content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg" }] : [] });
@@ -136,7 +175,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
     const request = state.request;
     const baseline = { request: { request_id: request.request_id, request_status: request.request_status, content_revision: request.content_revision, submitted_at: request.submitted_at,
       ...Object.fromEntries(fields.map((field) => [field, request[field] ?? ""])) } };
-    return { client_key: activeFormDraftKey, form_type: "edit-species", target_id: requestId, title: form.scientific_name || request.scientific_name || "",
+    return { client_key: activeFormDraftKey, form_type: "edit-species", target_id: requestId, correction_change_id: state.correctionChange?.id || restoredDraftRef.current?.correction_change_id || null, title: form.scientific_name || request.scientific_name || "",
       base_signature: restoredDraftRef.current?.base_signature || signature(request), baseline, submission_client_key: clientKey.current,
       auto_saved: autoSaved, form: { ...form, reuseOriginalPhoto },
       photos: photo ? [{ slot: "new:photo", uri: photo, content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg" }] : [] };
@@ -209,7 +248,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
     busy.current = true; setSaving(true);
     let reusedFile;
     try {
-      if (state.request.request_status === "Approved") {
+      if (state.request.request_status === "Approved" && !state.correctionChange) {
         const availability = await refreshEditAvailability();
         if (availability !== "clear") {
           const error = new Error(availability === "pending" ? t("recordEdits.pendingEditExplanation") : t("recordEdits.editAvailabilityUnavailable"));
@@ -226,20 +265,25 @@ export default function EditSpeciesRequest({ route, navigation }) {
       const proposed = Object.fromEntries(fields.map((field) => [field, form[field].trim()]));
       if (photo) proposed.photo = { content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg",
         base64: await FileSystem.readAsStringAsync(photo, { encoding: FileSystem.EncodingType.Base64 }) };
-      else if (reuseOriginalPhoto) {
+      else if (reuseOriginalPhoto && state.correctionPhoto) {
+        reusedFile = await downloadPhotoForReuse(FileSystem, state.correctionPhoto);
+        proposed.photo = reusedFile.photo;
+      } else if (reuseOriginalPhoto) {
         reusedFile = await downloadPhotoForReuse(FileSystem, state.request.photo);
         proposed.photo = reusedFile.photo;
       }
-      let changeId = null;
-      if (state.request.request_status === "Approved") {
+      if (state.correctionChange) {
+        await plantApi(`/record-changes/${encodeURIComponent(state.correctionChange.id)}`, { method: "PATCH", expectedAccountId: accountId,
+          body: { revision: state.correctionChange.revision, proposed } });
+      } else if (state.request.request_status === "Approved") {
         const response = await plantApi("/record-changes", { method: "POST", expectedAccountId: accountId,
           body: { kind: "species", target_id: Number(requestId), proposed, client_key: clientKey.current } });
         const receipt = response?.change;
         if (!receipt || typeof receipt.id !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(receipt.id) ||
           (receipt.status !== undefined && receipt.status !== "Pending Review"))
           throw Error("The server did not confirm a pending change proposal. Refresh your submissions before trying again.");
-        changeId = receipt.id;
-      } else await plantApi(`/my-species-requests/${encodeURIComponent(requestId)}`, { method: "PATCH", expectedAccountId: accountId, body: { ...proposed, expected_revision: state.request.content_revision } });
+      } else await plantApi(`/my-species-requests/${encodeURIComponent(requestId)}`, { method: "PATCH", expectedAccountId: accountId,
+        body: { ...proposed, expected_revision: state.request.content_revision } });
       await autosave.stop();
       if (restoredDraftRef.current) {
         try {
@@ -249,7 +293,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
       }
       setSubmitted(true);
       Alert.alert(t("recordEdits.savedTitle"), t("recordEdits.savedMessage"), [{ text: t("common.ok"), onPress: () => navigation.navigate("BotanistSubmissions", {
-        botanist: route.params?.botanist, openTarget: { kind: "species", recordId: requestId, ...(changeId ? { changeId } : {}) },
+        botanist: route.params?.botanist, openTarget: { kind: "species", recordId: requestId },
       }) }]);
     } catch (error) {
       if (error.code === "SUBMISSION_REJECTED") {
@@ -278,7 +322,8 @@ export default function EditSpeciesRequest({ route, navigation }) {
       <Text style={styles.secondaryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>;
   if (state.request.request_status === "Rejected") return <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{t("recordEdits.finalRejected")}</Text><TouchableOpacity style={styles.secondary} onPress={() => navigation.goBack()}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity></View>;
   return <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-    <Text style={styles.title}>{t("recordEdits.editSpecies")}</Text>
+    <Text style={styles.title}>{t(state.correctionChange || (route.params?.correction && state.request?.request_status === "Correction Required") ? "recordEdits.correctSpeciesRequest" : "recordEdits.editSpecies")}</Text>
+    {(state.correctionChange?.review_comment || (route.params?.correction && state.request?.request_status === "Correction Required" && state.request.review_comment)) ? <Text style={styles.note}>{state.correctionChange?.review_comment || state.request.review_comment}</Text> : null}
     {(versionConflict || (draftConflict && state.request.request_status !== "Approved")) && <View style={styles.conflict} accessibilityRole="alert" accessibilityLiveRegion="assertive">
       <Text style={styles.error}>{t("recordEdits.versionConflict")}</Text>
       <TouchableOpacity style={styles.secondary} disabled={saving} onPress={confirmLoadLatest} accessibilityRole="button"><Text style={styles.secondaryText}>{t("recordEdits.reloadLatest")}</Text></TouchableOpacity>
@@ -309,8 +354,8 @@ export default function EditSpeciesRequest({ route, navigation }) {
           {originalPhotoUnavailable && <Text style={styles.error}>{t("recordEdits.originalPhotoUnavailable")}</Text>}
         </View> : <Text style={styles.secondaryText}>{t("recordEdits.informationNotAvailable")}</Text>}>
         <Text style={styles.photoNote}>{t("recordEdits.speciesPhotoSingleLimit")}</Text>
-        {(photo || (reuseOriginalPhoto && state.request.photo)) && <View style={styles.photoCard}><View style={[styles.photoFrame, reuseOriginalPhoto && !photo && styles.photoFrameSelected]}>
-          <Image source={photo ? { uri: photo } : state.request.photo} style={styles.photo} resizeMode="cover" /></View>
+        {(photo || reuseOriginalPhoto || state.correctionPhoto) && <View style={styles.photoCard}><View style={[styles.photoFrame, reuseOriginalPhoto && !photo && styles.photoFrameSelected]}>
+          <Image source={photo ? { uri: photo } : state.correctionPhoto || state.request.photo} style={styles.photo} resizeMode="cover" /></View>
           <TouchableOpacity style={styles.removeSelection} onPress={() => { setPhoto(null); setReuseOriginalPhoto(false); }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Text style={styles.removeSelectionText}>×</Text></TouchableOpacity>
         </View>}
         <View style={styles.photoActions}>

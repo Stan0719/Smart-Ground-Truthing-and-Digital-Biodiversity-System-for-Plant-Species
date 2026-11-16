@@ -4,11 +4,35 @@ const reviewTypes = {
   "Correction Required": "correction_requested",
 };
 
+export function isMatchingInitialObservationCorrection({ proposal, edit, observation, revision, accountId }) {
+  return Boolean(proposal && edit && observation && accountId &&
+    proposal.base_snapshot?.workflow_type === "initial_registration_observation_edit" &&
+    String(proposal.id) === String(edit.id) &&
+    proposal.status === "Correction Required" && edit.status === "Correction Required" &&
+    Number.isInteger(revision) && proposal.revision === revision && edit.revision === revision &&
+    String(proposal.plant_id) === String(observation.plant_id) &&
+    String(proposal.base_snapshot?.observation_id) === String(observation.id) &&
+    String(edit.observation_id) === String(observation.id) &&
+    proposal.owner_subject === `staff:${accountId}` && edit.owner_subject === `staff:${accountId}` &&
+    observation.owner_subject === `staff:${accountId}` && observation.origin_type === "initial_registration");
+}
+
 export const notificationPresentation = {
   observation_submitted: { title: "Observation Submitted", icon: "paper-plane-outline" },
   observation_approved: { title: "Observation Approved", icon: "checkmark-circle-outline" },
   observation_rejected: { title: "Observation Rejected", icon: "close-circle-outline" },
   correction_requested: { title: "Correction Requested", icon: "create-outline" },
+  species_request_submitted: { title: "Species Request Submitted", icon: "flask-outline" },
+  species_request_approved: { title: "Species Request Approved", icon: "checkmark-circle-outline" },
+  species_request_rejected: { title: "Species Request Rejected", icon: "close-circle-outline" },
+  species_correction_requested: { title: "Species Correction Requested", icon: "create-outline" },
+  record_change_correction: { title: "Edit Correction Required", icon: "create-outline" },
+  observation_edit_submitted: { title: "Observation Edit Submitted", icon: "create-outline" },
+  observation_edit_correction: { title: "Observation Edit Correction Requested", icon: "create-outline" },
+  observation_edit_resubmitted: { title: "Observation Edit Resubmitted", icon: "paper-plane-outline" },
+  observation_edit_approved: { title: "Observation Edit Approved", icon: "checkmark-circle-outline" },
+  observation_edit_rejected: { title: "Observation Edit Rejected", icon: "close-circle-outline" },
+  observation_edit_cancelled: { title: "Observation Edit Cancelled", icon: "close-circle-outline" },
   sync_failed: { title: "Synchronization Failed", icon: "cloud-offline-outline" },
   sync_completed: { title: "Synchronization Completed", icon: "cloud-done-outline" },
 };
@@ -40,6 +64,11 @@ function normalizeRemoteNotification(item) {
     ...(typeof item.sourceKey === "string" ? { sourceKey: item.sourceKey } : {}),
     ...(item.observationId != null ? { observationId: String(item.observationId) } : {}),
     ...(item.plantId != null ? { plantId: String(item.plantId) } : {}),
+    ...(item.entityType === "species_request" && item.requestId != null ? { entityType: item.entityType, requestId: String(item.requestId) } : {}),
+    ...(item.entityType === "observation_edit" && item.requestId != null && item.observationId != null
+      ? { entityType: item.entityType, requestId: String(item.requestId), ...(Number.isInteger(item.revision) ? { revision: item.revision } : {}) } : {}),
+    ...(item.entityType === "record_change" && item.changeId != null && ["plant", "species"].includes(item.recordKind) && item.targetId != null
+      ? { entityType: item.entityType, changeId: String(item.changeId), recordKind: item.recordKind, targetId: String(item.targetId), ...(Number.isInteger(item.revision) ? { revision: item.revision } : {}) } : {}),
     ...(typeof item.comment === "string" ? { comment: item.comment } : {}),
     ...(Number.isInteger(item.count) && item.count > 0 ? { count: item.count } : {}),
     ...(typeof item.draftKey === "string" ? { draftKey: item.draftKey } : {}),

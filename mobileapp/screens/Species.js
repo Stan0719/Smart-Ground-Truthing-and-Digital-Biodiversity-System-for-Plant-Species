@@ -31,6 +31,7 @@ const SPECIES_CARD_WIDTH =
   (SCREEN_WIDTH - GRID_HORIZONTAL_PADDING * 2 - GRID_GAP) / 2;
 
 function SpeciesCardImage({ species }) {
+  useAppTranslation();
   const [failedImageKey, setFailedImageKey] = useState(null);
   const source = getSpeciesImageSource(species);
   const key = typeof source === "number" ? `local:${source}` : source?.uri || null;

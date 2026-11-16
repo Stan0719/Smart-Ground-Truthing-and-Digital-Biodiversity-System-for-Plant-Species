@@ -5,12 +5,14 @@ const { speciesHistory, captureApprovedReview } = require("./historical-reviews.
 const {proposedPhoto}=require("./species-photo-library.cjs");
 const {approveRequestPhoto,setPointer}=require("./species-photo-provenance.cjs");
 const { permitted } = require("../shared/rbac.cjs");
+const { canModifyOriginalSpecies } = require("./status-permissions.cjs");
+const { initialVersionAvailable, appendInitialVersion } = require("./record-version-history.cjs");
 
 const { requireReviewCycle } = require("./species-review-cycle.cjs");
 const { rejectLinkedRegistration } = require("./linked-species-rejection.cjs");
 const fields = ["scientific_name", "common_name", "genus_name", "family_name",
   "conservation_status", "description", "habitat"];
-const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id,(to_jsonb(species_request_submission)->>'content_revision')::integer AS content_revision,to_jsonb(species_request_submission)->>'content_updated_at' AS content_updated_at,(to_jsonb(species_request_submission)->>'review_cycle')::integer AS review_cycle";
+const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id,(to_jsonb(species_request_submission)->>'content_revision')::integer AS content_revision,to_jsonb(species_request_submission)->>'content_updated_at' AS content_updated_at,(to_jsonb(species_request_submission)->>'review_cycle')::integer AS review_cycle,to_jsonb(species_request_submission)->>'withdrawn_by' AS withdrawn_by,to_jsonb(species_request_submission)->>'withdrawn_at' AS withdrawn_at";
 const project = (row) => ({ ...row, photo_url: `/api/species-requests/${row.request_id}/photo`, proposed_photo_url: `/api/species-requests/${row.request_id}/proposed-photo` });
 
 // The deployed table predates this API. Older installations without it retain
@@ -217,6 +219,10 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       const row = (await c.query(`INSERT INTO species_request_submission(owner_subject,client_key,payload_hash,${fields.join(",")},photo)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${columns}`,
         [subject(req.user), clientKey, payloadHash, ...fields.map((key) => data[key]), bytes])).rows[0];
+      if (await initialVersionAvailable(c))
+        await appendInitialVersion(c, { kind: "species", targetId: row.request_id, owner: subject(req.user),
+          snapshot: { request_id: row.request_id, species_id: row.proposed_species_id ?? null,
+            ...Object.fromEntries(fields.map((field) => [field, row[field]])) }, photo: bytes });
       await audit(c, req.user, "species_requested", row.request_id);
       if (officerNotifications) await officerNotifications.enqueueSpeciesRequest(c,row.request_id);
       return row;
@@ -242,6 +248,40 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
     if (!row) fail(404, "Species request unavailable.");
     await servePhoto(res, row.photo);
   });
+  app.post("/api/species-requests/:id/withdraw", allow("plants.create"), async (req, res) => {
+    if (req.user?.role !== "Botanist") fail(403, "Botanist access required.");
+    if (req.body && Object.keys(req.body).length) fail(400, "Withdrawal does not accept submission changes.");
+    const key = requestId(req.params.id);
+    const result = await transaction(pool, async (c) => {
+      const available = (await c.query(`SELECT EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='species_request_submission' AND column_name='withdrawn_at') AS ready`)).rows[0]?.ready;
+      if (!available) fail(503, "Species withdrawal requires the reviewed database migration.");
+      const row = (await c.query("SELECT * FROM species_request_submission WHERE request_id=$1 FOR UPDATE", [key])).rows[0];
+      if (!row || row.owner_subject !== `staff:${req.user.id}`) fail(404, "Owned Species submission unavailable.");
+      if (row.request_status === "Withdrawn" || row.withdrawn_at) fail(409, "This Species submission was already withdrawn.");
+      if (!canModifyOriginalSpecies(row.request_status, row.review_cycle, row.reviewed_at))
+        fail(409, "Only an original Pending Review or Correction Required Species submission can be withdrawn.");
+      if (row.approved_species_id) fail(409, "An approved Species cannot be withdrawn.");
+      if (row.proposed_species_id) {
+        const links = (await c.query(`SELECT
+          EXISTS(SELECT 1 FROM plant_record WHERE species_id=$1) AS plants,
+          EXISTS(SELECT 1 FROM species_request_submission WHERE request_id<>$2 AND
+            (proposed_species_id=$1 OR approved_species_id=$1)) AS other_requests`,
+        [row.proposed_species_id, key])).rows[0];
+        if (links.plants || links.other_requests)
+          fail(409, "This Species submission is linked to other records. Resolve those links before withdrawing it.");
+        await c.query("UPDATE species SET rbac_data=COALESCE(rbac_data,'{}'::jsonb) || '{\"approvalStatus\":\"Withdrawn\"}'::jsonb WHERE species_id=$1", [row.proposed_species_id]);
+      }
+      const withdrawn = (await c.query(`UPDATE species_request_submission SET request_status='Withdrawn',
+        withdrawn_by=$2,withdrawn_at=CURRENT_TIMESTAMP WHERE request_id=$1
+        RETURNING request_id,request_status,withdrawn_by,withdrawn_at`, [key, `staff:${req.user.id}`])).rows[0];
+      if ((await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available)
+        await c.query("UPDATE record_version_history SET status='Withdrawn' WHERE request_id=$1 AND status IN ('Pending Review','Correction Required')", [key]);
+      await audit(c, req.user, "species_submission_withdrawn", key);
+      return withdrawn;
+    });
+    res.json({ withdrawn: true, species_request: result });
+  });
   app.post("/api/species-requests/:id/review", allow("species.manage"), async (req, res) => {
     const requestKey = requestId(req.params.id);
     const b = req.body;
@@ -264,6 +304,12 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       if (!Number.isSafeInteger(b.expected_review_cycle) || b.expected_review_cycle < 1 || b.expected_review_cycle !== row.review_cycle)
         return { cycle_conflict: true };
       if (row.request_status !== "Pending Review") fail(409, "Species request has already been reviewed.");
+      let latestVersion = null;
+      const hasHistory = (await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available;
+      if (hasHistory) latestVersion = (await c.query(`SELECT id,status FROM record_version_history
+        WHERE request_id=$1 ORDER BY version_number DESC LIMIT 1 FOR UPDATE`, [requestKey])).rows[0] || null;
+      if (latestVersion && latestVersion.status !== "Pending Review")
+        fail(409, "Species request is no longer the latest pending version.");
       if (b.decision === "Approved" && fields.some(key => typeof row[key] !== "string" || !row[key].trim()))
         fail(409, "Species request is incomplete.");
       const decisionId = randomUUID();

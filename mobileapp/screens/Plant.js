@@ -22,7 +22,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButton from "../components/BackButton";
-import { fetchPlantRecords, fetchSpeciesCatalog, filterUniqueSpeciesPlantRecords, filterPlantRecordsForRole, getPlantDisplayObservation, isOwnedPendingPlant, mergeOwnedPendingPlantZones } from "../utils/plantApi";
+import { fetchPlantRecords, fetchSpeciesCatalog, filterUniqueSpeciesPlantRecords, filterPlantRecordsForRole, getPlantDisplayObservation, getScopedPlantRecords, isOwnedPendingPlant, mergeOwnedPendingPlantZones } from "../utils/plantApi";
 import { getPlantCardZoneLabel, getPlantCardZoneValue } from "../utils/plantCardDisplay";
 import RefreshButton from "../components/RefreshButton";
 import FavouriteHeart from "../components/FavouriteHeart";
@@ -81,9 +81,9 @@ function useSpeciesScopedState(scope, initialValue) {
 }
 
 export function getPlantListViewState({ loading, errorMessage, sourceCount, visibleCount, hasActiveFilters }) {
-  if (loading) return "loading";
-  if (errorMessage) return "error";
   if (visibleCount > 0) return "results";
+  if (loading && sourceCount === 0) return "loading";
+  if (errorMessage && sourceCount === 0) return "error";
   if (sourceCount === 0) return "empty";
   return hasActiveFilters ? "filtered-empty" : "empty";
 }
@@ -102,19 +102,20 @@ export default function Species({
   const isVisitor = role?.toLowerCase() === "visitor";
   const publicOnly = !user || isVisitor;
   const favourites = useVisitorFavourites(user);
-
-  const [selectedSpecies, setSelectedSpecies] = useState(
-    route.params?.species || getSpeciesBySlug(slug) || null
-  );
-  const [speciesPlants, setSpeciesPlants] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const requestRef = useRef({ key: null, id: 0, promise: null });
   const routeParams = route.params || {};
   const currentSpeciesId = routeParams.speciesId;
   const currentSlug = routeParams.slug;
   const requestKey = `${String(accountId ?? "")}:${String(role ?? "")}:${String(currentSpeciesId ?? "")}:${String(currentSlug ?? "")}`;
+
+  const [selectedSpecies, setSelectedSpecies] = useState(
+    route.params?.species || getSpeciesBySlug(slug) || null
+  );
+  const [scopedSpeciesPlants, setScopedSpeciesPlants] = useState({ scope: null, records: [] });
+  const speciesPlants = getScopedPlantRecords(scopedSpeciesPlants, requestKey);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const requestRef = useRef({ key: null, id: 0, promise: null });
   const loadSpeciesPlants = useCallback((isRefresh = false) => {
     const activeRequest = requestRef.current;
     if (activeRequest?.key === requestKey && activeRequest.promise) {
@@ -124,7 +125,9 @@ export default function Species({
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setErrorMessage("");
-    setSpeciesPlants([]);
+    if (activeRequest?.key !== requestKey) {
+      setScopedSpeciesPlants({ scope: requestKey, records: [] });
+    }
     const request = (async () => {
       try {
         const catalog = await fetchSpeciesCatalog({ accountId, publicOnly });
@@ -144,7 +147,7 @@ export default function Species({
 
         if (requestRef.current?.id === requestId) {
           setSelectedSpecies(matchedSpecies);
-          setSpeciesPlants(visibleRecords);
+          setScopedSpeciesPlants({ scope: requestKey, records: visibleRecords });
         }
       } catch (error) {
         if (requestRef.current?.id === requestId) {
@@ -391,6 +394,7 @@ export default function Species({
 
         {!!favourites.mutationError && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(favourites.mutationError)}</Text>}
         {!!favourites.error && !favourites.loading && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(favourites.error)}</Text>}
+        {!!errorMessage && speciesPlants.length > 0 && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(errorMessage)}</Text>}
 
       </View>
 

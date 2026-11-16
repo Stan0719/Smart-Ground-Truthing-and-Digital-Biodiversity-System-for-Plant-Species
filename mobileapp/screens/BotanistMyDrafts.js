@@ -12,6 +12,7 @@ import { CardListSkeleton } from "../components/BotanicalSkeleton";
 
 function draftType(draft) {
   if (draft.kind === "botanist-form") return draft.form_type;
+  if (draft.method === "OBSERVATION_EDIT") return "observation-edit";
   if (draft.method === "PATCH") return "correct-observation";
   if (draft.path === "/plants") return "field-plant";
   return "observation";
@@ -21,7 +22,7 @@ export function draftCategory(draft) {
   if (["add-plant", "edit-plant", "field-plant"].includes(type)) return "plant-records";
   if (["add-species", "edit-species"].includes(type)) return "species-requests";
   if (type === "correct-observation") return "corrections";
-  if (type === "observation") return "observations";
+  if (["observation", "observation-edit"].includes(type)) return "observations";
   return "other";
 }
 export function filterBotanistDrafts(drafts, category = "all", query = "") {
@@ -32,7 +33,7 @@ export function filterBotanistDrafts(drafts, category = "all", query = "") {
 function draftLabel(draft) {
   const keys = { "add-plant": "botanistDrafts.addPlant", "add-species": "botanistDrafts.addSpecies", "edit-plant": "botanistDrafts.editPlant",
     "edit-species": "botanistDrafts.editSpecies", "correct-observation": "botanistDrafts.correctObservation",
-    "field-plant": "botanistDrafts.fieldPlant", observation: "botanistDrafts.observation" };
+    "field-plant": "botanistDrafts.fieldPlant", observation: "botanistDrafts.observation", "observation-edit": "observationEdits.editObservation" };
   return t(keys[draftType(draft)] || "botanistDrafts.observation");
 }
 function draftDescription(draft) {
@@ -84,11 +85,11 @@ export default function BotanistMyDrafts({ route, navigation }) {
     if (draft.kind === "botanist-form") {
       if (draft.form_type === "add-plant") navigation.navigate("AddPlant", { botanist, formDraftKey: draft.client_key });
       else if (draft.form_type === "add-species") navigation.navigate("AddSpeciesRequest", { botanist, formDraftKey: draft.client_key });
-      else if (draft.form_type === "edit-plant") navigation.navigate("EditPlant", { botanist, plantId: draft.target_id, formDraftKey: draft.client_key });
-      else if (draft.form_type === "edit-species") navigation.navigate("EditSpeciesRequest", { botanist, requestId: String(draft.target_id), formDraftKey: draft.client_key });
+      else if (draft.form_type === "edit-plant") navigation.navigate("EditPlant", { botanist, plantId: draft.target_id, formDraftKey: draft.client_key, ...(draft.correction_change_id ? { correctionChangeId: draft.correction_change_id, correction: true } : {}) });
+      else if (draft.form_type === "edit-species") navigation.navigate("EditSpeciesRequest", { botanist, requestId: String(draft.target_id), formDraftKey: draft.client_key, ...(draft.correction_change_id ? { correctionChangeId: draft.correction_change_id, correction: true } : {}) });
       return;
     }
-    navigation.navigate(draft.method === "PATCH" ? "FieldCollectionEdit" : draft.path === "/plants" ? "FieldCollectionPlant" : "FieldCollection", { botanist, draft });
+    navigation.navigate(["PATCH", "OBSERVATION_EDIT"].includes(draft.method) ? "FieldCollectionEdit" : draft.path === "/plants" ? "FieldCollectionPlant" : "FieldCollection", { botanist, draft });
   }, [route.params?.botanist, navigation]);
   useEffect(() => {
     const draftKey = route.params?.openDraftKey;

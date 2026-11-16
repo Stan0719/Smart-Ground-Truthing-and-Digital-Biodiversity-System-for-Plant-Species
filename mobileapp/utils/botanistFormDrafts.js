@@ -50,12 +50,13 @@ export async function getBotanistFormDraft(accountId, clientKey, formType, targe
   return draft;
 }
 
-export async function findBotanistFormDraft(accountId, formType, targetId) {
+export async function findBotanistFormDraft(accountId, formType, targetId, matches) {
   if (!accountId) throw Error("Sign in with the Botanist account that owns this draft.");
   const rows = await readDrafts(accountId);
   return rows.filter((row) => row.kind === KIND && row.form_type === formType &&
     (formType !== "add-plant" || hasMeaningfulAddPlantDraft(row.form, row.photo_refs)) &&
-    (targetId === undefined || String(row.target_id ?? "") === String(targetId)))
+    (targetId === undefined || String(row.target_id ?? "") === String(targetId)) &&
+    (typeof matches !== "function" || matches(row)))
     .sort((a, b) => new Date(b.saved_at || 0) - new Date(a.saved_at || 0))[0] || null;
 }
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, useWindowDimensions } from "react-native";
+import { StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 const tones = {
@@ -25,18 +25,15 @@ export default function BackButton({
   testID,
 }) {
   const tone = tones[variant] || tones.light;
-  const { width } = useWindowDimensions();
   const plain = variant === "plain";
-  const maxButtonWidth = Math.min(150, Math.max(84, width * 0.29));
-  const visibleLabel = stripArrowGlyphs(label);
-  const visibleAccessibilityLabel = stripArrowGlyphs(accessibilityLabel || label);
+  const visibleAccessibilityLabel = stripArrowGlyphs(accessibilityLabel || label) || "Back";
 
   return (
     <TouchableOpacity
       style={[
         styles.button,
         plain
-          ? [styles.plainButton, { maxWidth: maxButtonWidth }]
+          ? styles.plainButton
           : { backgroundColor: tone.backgroundColor, borderColor: tone.borderColor },
         style,
       ]}
@@ -48,7 +45,6 @@ export default function BackButton({
       testID={testID}
     >
       <Ionicons name="chevron-back" size={20} color={tone.color} />
-      {!!visibleLabel && <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.label, plain && styles.plainLabel, { color: tone.color }, labelStyle]}>{visibleLabel}</Text>}
     </TouchableOpacity>
   );
 }
@@ -60,13 +56,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
-    paddingHorizontal: 11,
+    paddingHorizontal: 0,
     borderWidth: 1,
     borderRadius: 12,
     flexShrink: 0,
   },
-  plainButton: { justifyContent: "flex-start", gap: 4, paddingHorizontal: 0, borderWidth: 0, borderRadius: 0, backgroundColor: "transparent" },
-  label: { fontSize: 14, lineHeight: 19, fontWeight: "700", flexShrink: 1 },
-  plainLabel: { fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  plainButton: { justifyContent: "center", borderWidth: 0, borderRadius: 0, backgroundColor: "transparent" },
 });

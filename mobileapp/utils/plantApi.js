@@ -110,7 +110,11 @@ export async function fetchSpeciesDetail(speciesId, slug, options = {}) {
 }
 
 function mapBackendObservation(record) {
-  record={...record,...record.content,observation_id:record.id??record.observation_id,recorded_by:record.owner_subject??record.recorded_by,observed_at:record.created_at??record.observed_at};
+  const source = record;
+  record={...source,...source.content,observation_id:source.id??source.observation_id,
+    recorded_by:source.owner_subject??source.recorded_by,recorded_by_name:source.recorded_by_name??source.recordedByName,
+    observed_at:source.created_at??source.observed_at,status:source.status,
+    review_comment:source.review_comment,reviewed_at:source.reviewed_at,review_decision:source.review_decision};
   const verificationStatus = record.verification_status ?? record.verificationStatus;
   const status = record.status ?? (
     verificationStatus === "Verified" ? "Approved" :
@@ -133,6 +137,14 @@ function mapBackendObservation(record) {
     morphology: record.morphology ?? "Not recorded",
     taxonomy: record.taxonomy ?? "",
     notes: record.notes ?? "",
+    latitude: record.latitude ?? null,
+    longitude: record.longitude ?? null,
+    accuracyM: record.accuracy_m ?? null,
+    zone: record.zone ?? null,
+    altitudeM: record.altitudeM ?? record.altitude_m ?? null,
+    reviewComment: record.review_comment ?? null,
+    reviewedAt: record.reviewed_at ?? null,
+    reviewDecision: record.review_decision ?? null,
     photos: Array.isArray(record.assets)
       ? record.assets
         .filter((asset) => asset?.id && ["image/jpeg", "image/png"].includes(String(asset.content_type ?? asset.contentType ?? "").toLowerCase()))
@@ -171,7 +183,12 @@ export function getPlantRegisteredByDisplayName(plant, user, unknownName) {
 export function selectLatestApprovedObservation(observations) {
   return observations
     .filter((observation) => observation.status === "Approved")
-    .sort((a, b) => new Date(b.updatedAt || b.date || 0).getTime() - new Date(a.updatedAt || a.date || 0).getTime())[0] || null;
+    .sort((a, b) => (Date.parse(b.date || b.observedAt || "") || 0) - (Date.parse(a.date || a.observedAt || "") || 0)
+      || String(b.observationId || "").localeCompare(String(a.observationId || "")))[0] || null;
+}
+
+export function getScopedPlantRecords(state, scope) {
+  return state?.scope === scope && Array.isArray(state.records) ? state.records : [];
 }
 
 export function mapBackendPlant(record, speciesById = new Map()) {
@@ -201,7 +218,7 @@ export function mapBackendPlant(record, speciesById = new Map()) {
     ...mapBackendSpecies(record.species_details), habitat: record.species_details.habitat || "",
   } : undefined);
   const plantScientificName = record.plant_scientific_name || record.scientific_name || record.scientificName ||
-    observationName?.scientific_name || observationName?.scientificName || species?.scientificName || "";
+    observationName?.scientific_name || observationName?.scientificName || "";
   const registeredAt = record.registered_at ?? record.registeredAt ?? null;
   const plantId = String(record.plant_id ?? record.plantId ?? record.id ?? "");
   const plant = {
@@ -336,6 +353,14 @@ export async function speciesRequestPhotoSources(requests, accountId) {
   });
 }
 
+export async function recordChangePhotoSource(changeId, index, accountId) {
+  return faceSession.withToken(async (token, user) => {
+    if (String(user.id) !== String(accountId)) throw Object.assign(Error("Sign in with the correct account."), { code: "ACCOUNT_MISMATCH", status: 403 });
+    return { uri: mobileApiUrl("plant") + "/api/record-changes/" + encodeURIComponent(changeId) + "/photos/" + encodeURIComponent(index),
+      headers: { Authorization: "Bearer " + token } };
+  });
+}
+
 export async function fetchPlantRecords(speciesCatalog = [], { scopeMine = false, publicOnly = false, ...options } = {}) {
   const payload = await getJson(`/api/plants${scopeMine ? "?scope=mine" : ""}`, { ...options, publicOnly });
   const rawRecords = unwrapList(payload, ["plants", "data", "results"]);
@@ -419,9 +444,8 @@ export async function fetchPlantDetail(plantId, { includeObservations = false, s
       .filter((observation) => String(observation.plant_id ?? observation.plantId) === id)
       .map(mapBackendObservation)
       .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-    const latestApprovedId = selectLatestApprovedObservation(observations)?.observationId;
     const canReadObservationPhotos = (observation) => observation.status === "Approved"
-      ? observation.observationId === latestApprovedId
+      ? true
       : accountId != null && observation.recordedBy === `staff:${accountId}`
         && ["Draft", "Pending Review", "Correction Required"].includes(observation.status);
     const observationPhotos = [...new Map(observations

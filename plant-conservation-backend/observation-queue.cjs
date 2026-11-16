@@ -1,6 +1,6 @@
 "use strict";
 const origins = ["initial_registration", "subsequent_observation", "unknown"];
-const statuses = ["Draft", "Pending Review", "Approved", "Rejected", "Correction Required", "Flagged"];
+const statuses = ["Draft", "Pending Review", "Approved", "Rejected", "Correction Required", "Flagged", "Withdrawn"];
 const idPattern = /^(?:[1-9][0-9]{0,18}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i;
 function queueOptions(query, fail) {
   const enabled = ["origin_type", "status", "limit", "cursor"].some(key => Object.hasOwn(query, key));
