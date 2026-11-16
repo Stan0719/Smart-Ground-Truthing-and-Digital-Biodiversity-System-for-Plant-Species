@@ -120,6 +120,9 @@
     }
   },
   "observationModal": {
+    "upToDate": "Observation is up to date. Your review comment has been preserved.",
+    "currentRecordNotice": "These details and photos show the current observation record. Review history lists earlier decisions and comments, not historical field or photo snapshots.",
+    "historyReadOnly": "Observation History lists separate records for this Plant, not historical snapshots of the selected Observation. This history view is read-only.",
     "title": "Plant Observation",
     "details": "Observation Details",
     "plantSpecies": "Plant & Species Information",
@@ -1987,6 +1990,8 @@
         "reloaded": "The latest submission has been reloaded. Your comment has been preserved; review the current state before submitting a decision.",
         "conflict": "This submission changed while you were reviewing it. The latest version has been reloaded. Your comment has been preserved; review the latest state before trying again.",
         "conflictReloadFailed": "This submission changed, but the latest version could not be loaded. Reload it before trying again. Your comment has been preserved.",
+        "conflictRefreshed": "The latest submission is now displayed. Check its current status before continuing.",
+        "reviewedElsewhere": "This submission has already been reviewed by another Officer. The latest status is now displayed.",
         "savedReloadFailed": "The review was saved, but the latest submission could not be loaded. Reload it before taking further action."
       }
     },

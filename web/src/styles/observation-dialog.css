@@ -109,3 +109,6 @@
   }
   .observation-dialog .observation-decision-actions { position: sticky; bottom: 24px; z-index: 2; }
 }
+
+.observation-dialog .observation-review-feedback.info { color: #315d78; background: #e8f0f5; }
+.observation-data-provenance { color: #536b60; font-size: 13px; line-height: 1.5; }

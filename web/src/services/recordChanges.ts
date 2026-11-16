@@ -1,7 +1,7 @@
 import { formatPlantId } from '../utils/plantId.ts'
 export interface RecordChange {
   id: string; plant_id: number | null; species_id: number | null; owner_subject: string
-  status: 'Pending Review' | 'Approved' | 'Rejected' | 'Cancelled'; created_at: string
+  status: 'Pending Review' | 'Correction Required' | 'Approved' | 'Rejected' | 'Cancelled'; revision: number; created_at: string
   base_snapshot: Record<string, unknown>; proposed_snapshot: Record<string, unknown>
   proposal_photo_count: number; review_comment: string | null; reviewed_by: string | null; reviewed_at: string | null
 }

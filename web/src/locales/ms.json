@@ -120,6 +120,9 @@
     }
   },
   "observationModal": {
+    "upToDate": "Pemerhatian adalah terkini. Komen semakan anda dikekalkan.",
+    "currentRecordNotice": "Butiran dan foto ini menunjukkan rekod pemerhatian semasa. Sejarah semakan menyenaraikan keputusan dan komen terdahulu, bukan petikan nilai medan atau foto terdahulu.",
+    "historyReadOnly": "Sejarah Pemerhatian menyenaraikan rekod berasingan untuk tumbuhan ini, bukan petikan sejarah pemerhatian yang dipilih. Paparan sejarah ini adalah baca sahaja.",
     "title": "Pemerhatian Tumbuhan",
     "details": "Butiran Pemerhatian",
     "plantSpecies": "Maklumat Tumbuhan & Spesies",
@@ -2114,6 +2117,8 @@
         "reloaded": "Penyerahan terkini telah dimuat semula. Komen anda dikekalkan; semak keadaan semasa sebelum menghantar keputusan.",
         "conflict": "Penyerahan berubah semasa anda menyemaknya. Versi terkini telah dimuat semula. Komen anda dikekalkan; semak keadaan terkini sebelum mencuba lagi.",
         "conflictReloadFailed": "Penyerahan berubah tetapi versi terkini tidak dapat dimuatkan. Muat semula sebelum mencuba lagi. Komen anda dikekalkan.",
+        "conflictRefreshed": "Penyerahan terkini kini dipaparkan. Semak status semasa sebelum meneruskan.",
+        "reviewedElsewhere": "Penyerahan ini telah disemak oleh Pegawai lain. Status terkini kini dipaparkan.",
         "savedReloadFailed": "Semakan disimpan tetapi penyerahan terkini tidak dapat dimuatkan. Muat semula sebelum tindakan selanjutnya."
       }
     },

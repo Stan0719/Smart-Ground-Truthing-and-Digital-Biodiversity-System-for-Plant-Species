@@ -11,7 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type Directive } from
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { currentUser, sessionSnapshot, subscribeSession } from '../../services/auth'
-import { ReviewApiError, createReviewRequest, performObservationReview, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions, type ReviewDecision } from '../../services/observationReview'
+import { ReviewApiError, createReviewRequest, performObservationReview, observationReviewSnapshot, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions, type ReviewDecision } from '../../services/observationReview'
 import { mapLinkedSpeciesRequest, type LinkedSpeciesRequest } from '../../services/reviewSpeciesRequest'
 import AppModal from '../../components/conservation/AppModal.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
@@ -22,6 +22,7 @@ import { observationOrigin, observationQueueUrl, readQueuePage, type Observation
 
 interface ObservationAsset { id: string; contentType: string }
 interface ObservationView {
+  reviewSnapshot: ReturnType<typeof observationReviewSnapshot>
   origin: ObservationOrigin
   id: string
   plantRawId: string
@@ -137,6 +138,8 @@ const reviewNeedsReload = ref(false)
 const reviewAcknowledged = ref(true)
 const reviewFeedback = ref('')
 const reviewSuccess = ref(false)
+const reviewInfo = ref(false)
+const reviewFeedbackVariant = computed(() => reviewInfo.value ? 'info' : reviewSuccess.value ? 'success' : 'error')
 const commentFeedbackId = ref<number | null>(null)
 let commentFeedbackSequence = 0
 const reviewCommentError = computed(() => !reviewSuccess.value && reviewFeedback.value === rt('feedback.commentRequired'))
@@ -164,7 +167,7 @@ const unsubscribeSession = subscribeSession((user, pending) => {
 const reviewDecisions = computed(() => selected.value ? reviewTransitions[selected.value.status] || [] : [])
 const canReviewField = (item: ObservationView) => item.origin === 'subsequent_observation' &&
   reviewEligible(session.value.user, session.value.pending, { ...item, owner: item.ownerSubject })
-const reviewAllowed = computed(() => reviewMode.value && !detailLoading.value && !detailError.value && !reviewSaving.value && !reviewNeedsReload.value && reviewAcknowledged.value &&
+const reviewAllowed = computed(() => reviewMode.value && !historyModal.value && !detailLoading.value && !detailError.value && !reviewSaving.value && !reviewNeedsReload.value && reviewAcknowledged.value &&
   selected.value?.origin === 'subsequent_observation' &&
   Boolean(selected.value && reviewEligible(session.value.user, session.value.pending, { ...selected.value, owner: selected.value.ownerSubject })))
 const canOpenReview = computed(() => authorizedOfficer.value && !reviewSaving.value && !historyModal.value && !detailLoading.value && !detailError.value &&
@@ -237,6 +240,7 @@ const mapObservation = (value: unknown): ObservationView | null => {
   ) : {}
   const height = numericValue(content.heightCm, 0)
   return {
+    reviewSnapshot: observationReviewSnapshot(item),
     origin: observationOrigin(item.origin_type),
     id,
     plantRawId,
@@ -377,6 +381,7 @@ async function open(item: ObservationView, reviewing = false, expectedOrigin?: O
   reviewNeedsReload.value = false
   reviewAcknowledged.value = true
   reviewFeedback.value = ''
+  reviewInfo.value = false
   commentFeedbackId.value = null
   reviewSuccess.value = false
   const requestId = ++detailRequest
@@ -420,6 +425,7 @@ function closeModal(force = false) {
   reviewMode.value = false
   reviewComment.value = ''
   reviewFeedback.value = ''
+  reviewInfo.value = false
   commentFeedbackId.value = null
   reviewNeedsReload.value = false
   detailRequest++
@@ -448,17 +454,37 @@ async function reloadReview() {
   if (!selected.value || reviewSaving.value || !authorizedOfficer.value) return
   const id = selected.value.id, token = detailRequest
   reviewSaving.value = true
+  reviewInfo.value = false
+  reviewSuccess.value = false
+  reviewFeedback.value = ''
   try {
     const row = await readReviewObservation(id)
     if (disposed || token !== detailRequest || selected.value?.id !== id) return
-    updateObservation(row); reviewNeedsReload.value = false; reviewAcknowledged.value = false; reviewFeedback.value = rt('feedback.reloaded')
-  } catch (error) { if (token === detailRequest) reviewFeedback.value = error instanceof Error ? error.message : rt('feedback.loadFailed') }
+    const changed = row.reviewSnapshot.observation !== selected.value.reviewSnapshot.observation
+    const mustInspect = !reviewAcknowledged.value
+    const draftComment = reviewComment.value
+    updateObservation(row)
+    reviewComment.value = draftComment
+    reviewNeedsReload.value = false
+    reviewAcknowledged.value = !changed && !mustInspect
+    reviewSuccess.value = false
+    reviewInfo.value = !changed && !mustInspect
+    reviewFeedback.value = reviewInfo.value ? modalText('upToDate') : rt('feedback.reloaded')
+  } catch (error) {
+    if (!disposed && token === detailRequest && selected.value?.id === id) {
+      reviewNeedsReload.value = true
+      reviewSuccess.value = false
+      reviewInfo.value = false
+      reviewFeedback.value = error instanceof Error ? error.message : rt('feedback.loadFailed')
+    }
+  }
   finally { reviewSaving.value = false }
 }
 async function decide(decision: ReviewDecision) {
   if (!reviewAllowed.value || !selected.value || !reviewDecisions.value.includes(decision) || !positiveRevision(selected.value.revision)) return
   if (!reviewCommentValid(decision, reviewComment.value)) {
     reviewSuccess.value = false
+    reviewInfo.value = false
     reviewFeedback.value = rt('feedback.commentRequired')
     commentFeedbackId.value = ++commentFeedbackSequence
     return
@@ -466,7 +492,7 @@ async function decide(decision: ReviewDecision) {
   commentFeedbackId.value = null
   const { id, revision } = selected.value
   const typedComment = reviewComment.value, token = detailRequest
-  reviewSaving.value = true; reviewFeedback.value = ''; reviewSuccess.value = false
+  reviewSaving.value = true; reviewFeedback.value = ''; reviewSuccess.value = false; reviewInfo.value = false
   try {
     try {
       const latest = await readReviewObservation(id)
@@ -701,8 +727,9 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
       <p v-if="detailLoading" class="detail-state" role="status">{{ t('conservationPages.observations.loadingDetails') }}</p>
       <p v-if="detailError" class="detail-state error-state" role="alert">{{ detailError }}</p>
       <p v-if="selected.status === 'Rejected'" class="review-feedback error" role="status">{{ t('submissionChanges.finalRejected') }}</p>
-      <SubmissionChanges v-if="selected.status === 'Pending Review'" :update="selected.submissionUpdate" :revision="selected.revision" :busy="reviewSaving || detailLoading" @reload="reloadReview" />
-      <div v-if="!reviewAcknowledged || reviewNeedsReload" class="review-feedback error" role="alert"><p>{{ t('submissionChanges.conflict') }}</p><button type="button" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ t('submissionChanges.reload') }}</button></div>
+      <SubmissionChanges v-if="selected.status === 'Pending Review'" :update="selected.submissionUpdate" :revision="selected.revision" :initial-submission="selected.origin === 'subsequent_observation' && selected.revision === 1" :busy="reviewSaving || detailLoading" @reload="reloadReview" />
+      <div v-if="!reviewAcknowledged || reviewNeedsReload" class="review-feedback error" role="alert"><p>{{ t(!reviewAcknowledged ? 'submissionChanges.conflict' : 'submissionChanges.reloadRequired') }}</p><button type="button" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ t('submissionChanges.reload') }}</button></div>
+      <p class="observation-data-provenance" role="note">{{ modalText('currentRecordNotice') }}</p>
       <div class="observation-dialog-columns">
         <div class="observation-information-column">
           <template v-if="!reviewNeedsReload">
@@ -761,7 +788,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
             <div class="observation-section-content">
       <p v-if="!reviewAllowed && !detailLoading && !reviewSaving && !reviewNeedsReload" role="status">{{ rt('reviewUnavailable') }}</p>
       <label class="field" for="observation-review-comment"><span>{{ rt('reviewComment') }}</span><textarea id="observation-review-comment" v-model="reviewComment" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :aria-invalid="reviewCommentError || undefined" :aria-describedby="reviewCommentError ? 'observation-review-comment-error' : undefined" maxlength="4000" rows="5" :disabled="reviewSaving || detailLoading" /></label>
-      <p v-if="reviewFeedback" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="{ error: !reviewSuccess, success: reviewSuccess, 'observation-comment-validation': reviewCommentError }"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
+      <p v-if="reviewFeedback" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewInfo || reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="[reviewFeedbackVariant, { 'observation-comment-validation': reviewCommentError }]"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
       <button v-if="reviewNeedsReload" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ rt('reloadLatest') }}</button>
       <label v-if="!reviewAcknowledged && !reviewNeedsReload"><input v-model="reviewAcknowledged" type="checkbox" :disabled="reviewSaving" /> {{ rt('acknowledgeLatest') }}</label>
       <p v-if="reviewSaving" role="status">{{ rt('saving') }}</p>
@@ -786,6 +813,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
     <p v-if="isLoading" role="status">{{ t('conservationPages.observations.loading') }}</p>
     <p v-if="loadError" role="alert">{{ loadError }}</p>
     <button v-if="hasMore || loadError" class="action-button" :disabled="isLoading" @click="loadObservations(Boolean(nextCursor))">{{ rt('queues.loadMore') }}</button>
+    <p class="observation-data-provenance" role="note">{{ modalText('historyReadOnly') }}</p>
     <div class="table-scroll"><table><thead><tr><th>{{ t('conservationPages.observations.id') }}</th><th>{{ t('conservationPages.observations.created') }}</th><th>{{ t('conservationPages.observations.height') }}</th><th>{{ t('conservationPages.observations.health') }}</th><th>{{ t('conservationPages.observations.status') }}</th></tr></thead><tbody><tr v-for="item in history" :key="item.id"><td>{{ item.id }}</td><td>{{ formatDate(item.createdAt) }}</td><td>{{ textOrUnavailable(item.height) }}</td><td>{{ label(item.healthStatus) }}</td><td>{{ label(item.status) }}</td></tr></tbody></table></div>
   </AppModal>
 </template>

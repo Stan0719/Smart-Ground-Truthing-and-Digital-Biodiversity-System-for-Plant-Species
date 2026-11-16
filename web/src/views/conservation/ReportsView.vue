@@ -61,10 +61,6 @@ const chartSpec = computed(() => ({
   values: chartRows.value.map((row) => row.approvedPlants),
   colors: chartRows.value.map((_, index) => index % 2 ? '#65a556' : '#32745b'),
 }))
-const appliedScope = computed(() => {
-  const scope = report.value?.scope
-  return `${scope?.startDate ? `${scope.startDate} to ${scope.endDate}` : rt('periodAllTime')} | Asia/Kuala_Lumpur`
-})
 // Both page and exports label the returned snapshot, never pending filter inputs.
 const appliedPeriodLabel = computed(() => {
   const scope = report.value?.scope

@@ -2514,7 +2514,7 @@ test('Resubmitted is informational, localized and strictly limited to verified P
  }
 })
 
-test('linked and standalone species reviews keep the inspected revision and require explicit conflict reload', async () => {
+test('linked and standalone species reviews refresh conflicted revisions automatically and require inspection before a new decision', async () => {
   for (const standalone of [false, true]) {
     let revision = 1, posts = 0, saved = false
     const raw = () => requestFixture({ request_id: '73', review_cycle: 1, content_revision: revision, request_status: saved ? 'Approved' : 'Pending Review', approved_species_id: saved ? 8 : null, proposed_scientific_name: revision === 1 ? 'Inspected name' : 'Changed name' })
@@ -2542,8 +2542,8 @@ test('linked and standalone species reviews keep the inspected revision and requ
       revision = 2
       await h.state.decideSpecies('Approved')
       assert.equal(posts, 1)
-      assert.equal(h.state.selectedSpeciesRequest.value.contentRevision, 1)
-      assert.equal(h.state.speciesVersionConflict.value, true)
+      assert.equal(h.state.selectedSpeciesRequest.value.contentRevision, 2)
+      assert.equal(h.state.speciesVersionConflict.value, false)
       assert.equal(h.state.canReviewSpecies.value, false)
       assert.equal(h.state.speciesVisibility.value, '')
       await h.state.decideSpecies('Rejected'); assert.equal(posts, 1)
@@ -2710,7 +2710,7 @@ test('pending plant edits refresh explicit names and saved measurements while pr
 });
 
 
-test('linked and standalone review cycles stay tied to inspection through explicit reload and acknowledgement',async()=>{
+test('linked and standalone review cycles stay tied to inspection through automatic readback and explicit acknowledgement',async()=>{
  for(const standalone of [false,true]){
   let cycle=1,posts=0;
   const row=()=>fixture({species_request_id:'73',species_request:requestFixture({request_id:'73',review_cycle:cycle})});
@@ -2722,7 +2722,7 @@ test('linked and standalone review cycles stay tied to inspection through explic
   try{
    await h.state.loadObservations();await flush();if(!standalone)await h.state.open(h.state.observations.value[0]);
    h.state.speciesVisibility.value='public';cycle=2;await h.state.decideSpecies('Approved');
-   assert.equal(posts,1);assert.equal(h.state.speciesVersionConflict.value,true);assert.equal(h.state.speciesVisibility.value,'');
+   assert.equal(posts,1);assert.equal(h.state.speciesVersionConflict.value,false);assert.equal(h.state.speciesVisibility.value,'');
    await h.state.refreshSpeciesRequest();assert.equal(h.state.selectedSpeciesRequest.value.reviewCycle,2);assert.equal(h.state.canReviewSpecies.value,false);
    const checkbox=nodes(h.render()).find(node=>node.type==='input'&&node.props?.type==='checkbox'&&node.props?.onChange);checkbox.props.onChange({target:{checked:true}});
    assert.equal(h.state.canReviewSpecies.value,true);assert.equal(posts,1);
@@ -2730,7 +2730,7 @@ test('linked and standalone review cycles stay tied to inspection through explic
  }
 });
 
-const changeFixture = (overrides = {}) => ({ id:'12345678-1234-1234-1234-123456789abc',plant_id:24,species_id:null,owner_subject:'staff:edit-owner',status:'Pending Review',created_at:'2026-11-14T01:00:00Z',reviewed_at:null,base_snapshot:{scientific_name:'Approved plant name',species_id:8,content:{heightCm:12,zone:'Existing zone'}},proposed_snapshot:{scientific_name:'Proposed plant name',species_id:8,content:{heightCm:18,zone:'Proposed zone'}},proposal_photo_count:0,...overrides })
+const changeFixture = (overrides = {}) => ({ revision:1,id:'12345678-1234-1234-1234-123456789abc',plant_id:24,species_id:null,owner_subject:'staff:edit-owner',status:'Pending Review',created_at:'2026-11-14T01:00:00Z',reviewed_at:null,base_snapshot:{scientific_name:'Approved plant name',species_id:8,content:{heightCm:12,zone:'Existing zone'}},proposed_snapshot:{scientific_name:'Proposed plant name',species_id:8,content:{heightCm:18,zone:'Proposed zone'}},proposal_photo_count:0,...overrides })
 const changesResponse = changes => Response.json({changes,page:{has_more:false,next_cursor:null}})
 test('one original table integrates registration, linked species, plant edits and species edits in all three languages',async()=>{
   for(const language of ['en','ms','zh-CN']) {
@@ -3557,4 +3557,134 @@ test('temporary verification failure preserves Officer review drafts while block
     h.emitSession(null,false)
     assert.equal(h.state.selected.value,null);assert.equal(h.state.comment.value,'')
   }finally{h.stop()}
+})
+
+
+test('competing observation decisions refresh detail and filtered table once without retrying; attribution is verified', async () => {
+  for (const decision of ['Approved', 'Rejected']) for (const reviewer of ['staff:other-officer', '', 'staff:verified-officer']) {
+    let posted = false, posts = 0, recoveryReads = 0
+    const row = () => fixture(posted ? { status: decision, revision: 4, reviewed_by: reviewer, reviewed_at: '2026-11-16T01:00:00Z', review_decision: decision } : {})
+    const h = harness(async (url, options) => {
+      if (options.method === 'POST') { posted = true; posts++; return Response.json({ error: 'Already reviewed' }, { status: 409 }) }
+      if (posted && url === `/api/observations/${firstId}`) recoveryReads++
+      return fixtureResponse(url, [row()])
+    })
+    try {
+      await h.state.loadObservations(); await h.state.open(h.state.observations.value[0])
+      h.state.status.value = 'Pending Review'; h.state.comment.value = 'My unsaved reason'
+      await h.state.decide('Approved')
+      assert.equal(posts, 1); assert.equal(recoveryReads, 1)
+      assert.equal(h.state.selected.value.status, decision)
+      assert.equal(h.state.observations.value[0].status, decision)
+      assert.equal(h.state.filtered.value.length, 0)
+      assert.equal(h.state.comment.value, 'My unsaved reason')
+      assert.equal(h.state.canReviewPlant.value, false)
+      if (reviewer === 'staff:other-officer') {
+        assert.equal(h.state.reviewMessage.value.variant, 'info')
+        assert.equal(h.state.reviewMessage.value.message, messages.conservationPages.reviews.feedback.reviewedElsewhere)
+      } else assert.ok(!h.state.reviewMessage.value.message.includes('already been reviewed by another Officer'))
+      await h.state.decide('Approved'); assert.equal(posts, 1)
+    } finally { h.stop() }
+  }
+})
+
+test('linked and standalone species conflicts recover completed decisions with one detail read and synchronized table', async () => {
+  for (const standalone of [false, true]) for (const decision of ['Approved', 'Rejected']) {
+    let posted = false, posts = 0, recoveryReads = 0
+    const request = () => requestFixture({ request_id: '73', request_status: posted ? decision : 'Pending Review', approved_species_id: posted && decision === 'Approved' ? 8 : null, reviewed_by: posted ? 'staff:other-officer' : null, reviewed_at: posted ? '2026-11-16T01:00:00Z' : null })
+    const row = () => fixture({ species_request_id: '73', species_request: request(), status: posted && decision === 'Rejected' ? 'Rejected' : 'Pending Review' })
+    const h = harness(async (url, options) => {
+      if (options.method === 'POST') { posts++; posted = true; return Response.json({ error: 'Already reviewed' }, { status: 409 }) }
+      if (posted && url === (standalone ? '/api/species-requests/73' : `/api/observations/${firstId}`)) recoveryReads++
+      if (url === '/api/species-requests/73') return Response.json({ species_request: standaloneFixture({ ...request(), scientific_name: 'Recovered species' }) })
+      return fixtureResponse(url, [row()])
+    }, standalone ? { speciesRequest: '73' } : {})
+    try {
+      await h.state.loadObservations(); await flush()
+      if (!standalone) await h.state.open(h.state.observations.value[0])
+      h.state.speciesReviewComment.value = 'Preserve species draft'; h.state.comment.value = 'Preserve plant draft'; h.state.speciesVisibility.value = 'public'
+      await h.state.decideSpecies('Approved'); await flush()
+      assert.equal(posts, 1); assert.equal(recoveryReads, 1)
+      assert.equal(h.state.selectedSpeciesRequest.value.status, decision)
+      assert.equal(h.state.observations.value[0].speciesRequest.status, decision)
+      assert.equal(h.state.speciesReviewComment.value, 'Preserve species draft')
+      assert.equal(h.state.comment.value, 'Preserve plant draft')
+      assert.equal(h.state.speciesVisibility.value, '')
+      assert.equal(h.state.canReviewSpecies.value, false)
+      assert.equal(h.state.reviewMessage.value.variant, 'info')
+      await h.state.decideSpecies('Rejected'); assert.equal(posts, 1)
+    } finally { h.stop() }
+  }
+})
+
+test('record-change detail readbacks patch their table row without refetching or changing filters', async () => {
+  const h = harness(async url => fixtureResponse(url, [fixture()]), {}, 'en', undefined, null, { recordChangesHandler: () => changesResponse([changeFixture()]) })
+  try {
+    await h.state.loadObservations()
+    h.state.status.value = 'Pending Review'
+    h.state.updateChange(changeFixture({ status: 'Approved', reviewed_by: 'staff:other-officer' }))
+    assert.equal(h.state.changeProposals.value[0].status, 'Approved')
+    assert.equal(h.state.matchingChanges.value.length, 0)
+    assert.equal(h.state.status.value, 'Pending Review')
+    h.emitSession(null)
+    h.state.updateChange(changeFixture({ status: 'Rejected' }))
+    assert.equal(h.state.changeProposals.value.length, 0)
+  } finally { h.stop() }
+})
+
+
+test('a late queue load cannot overwrite a newer record-change detail readback', async () => {
+  let release
+  const h = harness(url => fixtureResponse(url, [fixture()]), {}, 'en', undefined, null, { recordChangesHandler: () => new Promise(resolve => release = resolve) })
+  try {
+    const loading = h.state.loadObservations(); await flush()
+    h.state.updateChange(changeFixture({ status: 'Rejected', reviewed_by: 'staff:other-officer' }))
+    release(changesResponse([changeFixture()]))
+    await loading
+    assert.equal(h.state.changeProposals.value[0].status, 'Rejected')
+  } finally { h.stop() }
+})
+
+test('logout during species conflict readback discards late recovery and blocks a second decision', async () => {
+  for (const standalone of [false,true]) {
+    let posted = false, posts = 0, release
+    const row = fixture({ species_request_id: '73', species_request: requestFixture({request_id:'73'}) })
+    const h = harness(async (url, options) => {
+      if (options.method === 'POST') { posted=true; posts++; return Response.json({error:'Conflict'},{status:409}) }
+      if (posted && url === (standalone ? '/api/species-requests/73' : `/api/observations/${firstId}`)) return new Promise(resolve => release=resolve)
+      if (url === '/api/species-requests/73') return Response.json({species_request:standaloneFixture()})
+      return fixtureResponse(url,[row])
+    }, standalone ? {speciesRequest:'73'} : {})
+    try {
+      await h.state.loadObservations();await flush()
+      if(!standalone)await h.state.open(h.state.observations.value[0])
+      h.state.speciesVisibility.value='public'
+      const action=h.state.decideSpecies('Approved');await flush()
+      assert.ok(release)
+      await h.state.decideSpecies('Approved');assert.equal(posts,1)
+      h.emitSession(null)
+      release(standalone ? Response.json({species_request:standaloneFixture({request_status:'Approved',reviewed_by:'staff:other-officer',reviewed_at:'2026-11-16T01:00:00Z'})}) : fixtureResponse(`/api/observations/${firstId}`,[row]))
+      await action;await flush()
+      assert.equal(h.state.selected.value,null);assert.equal(h.state.standaloneRequest.value,null)
+      assert.equal(h.state.speciesReviewComment.value,'')
+      assert.equal(h.state.observations.value.length,0)
+    } finally {h.stop()}
+  }
+})
+
+
+test('a late observation queue page cannot overwrite recovered detail and table status', async () => {
+  let release, delayed = false
+  const h = harness(url => fixtureResponse(url,[fixture()]), {}, 'en', undefined, () => delayed ? new Promise(resolve => release=resolve) : Response.json({observations:[fixture()],page:{has_more:false,next_cursor:null}}))
+  try {
+    await h.state.loadObservations()
+    await h.state.open(h.state.observations.value[0])
+    delayed=true
+    const loading=h.state.loadObservations();await flush()
+    h.state.updateObservation(h.state.mapObservation(fixture({status:'Rejected',revision:4})))
+    release(Response.json({observations:[fixture()],page:{has_more:false,next_cursor:null}}))
+    await loading
+    assert.equal(h.state.selected.value.status,'Rejected')
+    assert.equal(h.state.observations.value[0].status,'Rejected')
+  } finally {h.stop()}
 })

@@ -134,6 +134,9 @@ const queueOrigin = ref<'initial_registration' | 'unknown'>('initial_registratio
 const hasMore = ref(false)
 const nextCursor = ref<string | null>(null)
 let listRequest = 0
+let readbackSequenceCounter = 0
+const observationReadbacks = new Map<string, { sequence: number; observation: ReviewObservation }>()
+const changeReadbacks = new Map<string, { sequence: number; change: RecordChange }>()
 const isLoading = ref(true)
 const loadError = ref('')
 const selectionLoading = ref(false)
@@ -600,12 +603,14 @@ const unsubscribeReviewSession = subscribeSession((user, pending) => {
     similarityErrors.value = {}
     similarityAnalysis.value = null
     similarityTrigger.value = null
+    observationReadbacks.clear(); changeReadbacks.clear()
     clearCopyState()
     knownQrIdentities.value = new Set()
 
     clearPlantQr()
     listRequest++; observations.value = []; changeProposals.value = []; hasMore.value = false; nextCursor.value = null; isLoading.value = false
     selectionRequest++; selectionLoading.value = false; selectionError.value = ''; selected.value = null; standaloneRequest.value = null; speciesSaving.value = false; speciesRefreshing.value = false; comment.value = ''; needsReload.value = true
+    resetSpeciesState()
   }
 })
 const canReviewPlant = computed(
@@ -901,6 +906,7 @@ function updateObservation(observation: ReviewObservation) {
   if (lostDependency) {
     observation = { ...observation, speciesRequest: { ...previousRequest, state: 'error' } }
   }
+  observationReadbacks.set(observation.id, { sequence: ++readbackSequenceCounter, observation })
   observations.value = observations.value.map((item) =>
     item.id === observation.id ? observation : item,
   )
@@ -918,6 +924,7 @@ async function refreshSpeciesRequest() {
   if (standaloneRequest.value) { await refreshStandaloneRequest(); return }
   if (!selected.value || reviewBusy.value || speciesRefreshing.value || selectionLoading.value || selectionError.value) return
   const mustInspect = speciesInspectionRequired.value
+  const speciesDraft = speciesReviewComment.value
   const id = selected.value.id
   const token = ++selectionRequest
   speciesRefreshing.value = true
@@ -927,6 +934,8 @@ async function refreshSpeciesRequest() {
     const fresh = await fetchObservation(id)
     if (disposed || token !== selectionRequest) return
     updateObservation(fresh)
+    speciesReviewComment.value = speciesDraft
+    speciesNeedsReload.value = false
     speciesVersionConflict.value = false
     speciesInspectionRequired.value = mustInspect
     speciesReloaded.value = true
@@ -938,6 +947,48 @@ async function refreshSpeciesRequest() {
   } finally {
     if (!disposed && token === selectionRequest) speciesRefreshing.value = false
   }
+}
+function reviewedByOther(status: string, reviewer: string | undefined, at: string | undefined) {
+  return ['Approved', 'Rejected', 'Correction Required'].includes(status) &&
+    Boolean(at && Number.isFinite(Date.parse(at)) && reviewer?.startsWith('staff:') && reviewer.length > 6 && reviewer !== `staff:${reviewSession.value.user?.id}`)
+}
+async function recoverSpeciesConflict(error: ReviewApiError, draft: string, current: () => boolean, observationId?: string) {
+  const code = error.code
+  const cycleChanged = code === 'SPECIES_REQUEST_REVIEW_CYCLE_CONFLICT'
+  const versionChanged = cycleChanged || code === 'SPECIES_REQUEST_VERSION_CONFLICT'
+  // Lock before reading; never reuse approval visibility after a conflict.
+  requireLatestSpecies(cycleChanged)
+  const plantDraft = comment.value
+  try {
+    if (observationId) {
+      const fresh = await fetchObservation(observationId)
+      if (!current()) return
+      updateObservation(fresh)
+      comment.value = plantDraft
+    } else {
+      const fresh = await fetchStandaloneRequest(standaloneRequest.value!.id)
+      if (!current()) return
+      standaloneRequest.value = fresh
+      void loadObservations()
+    }
+    const fresh = selectedSpeciesRequest.value
+    if (!fresh || ['error','unknown','unavailable'].includes(fresh.state)) throw new ReviewApiError(rt('feedback.invalidResponse'))
+    speciesReviewComment.value = draft
+    speciesVisibility.value = ''
+    speciesNeedsReload.value = false
+    speciesLoadError.value = ''; speciesSaveError.value = ''
+    speciesVersionConflict.value = false
+    speciesCycleConflict.value = cycleChanged
+    speciesReloaded.value = true
+    speciesInspectionRequired.value = fresh.state === 'pending'
+    const confirmed = reviewedByOther(fresh.status, fresh.reviewedBy, fresh.reviewedAt)
+    showFeedback(confirmed ? rt('feedback.reviewedElsewhere') : fresh.state !== 'pending' ? rt('feedback.conflictRefreshed') : versionChanged ? cycleChanged ? t('submissionChanges.cycleChanged') : rt('speciesRequest.submissionChanged') : rt('speciesRequest.conflict'), fresh.state !== 'pending' ? 'info' : 'error')
+  } catch {
+    if (!current()) return
+    requireLatestSpecies(cycleChanged)
+    speciesLoadError.value = rt('speciesRequest.conflictReloadFailed')
+    showFeedback(speciesLoadError.value)
+  } finally { if (current()) speciesReviewComment.value = draft }
 }
 async function decideSpecies(decision: SpeciesRequestDecision) {
   if ((!selected.value && !standaloneRequest.value) || !canReviewSpecies.value || !selectedSpeciesRequest.value) return
@@ -968,14 +1019,18 @@ async function decideSpecies(decision: SpeciesRequestDecision) {
   speciesSaveError.value = ''
   reviewMessage.value = null
   let committed = false
-  const current = () => !disposed && token === selectionRequest
+  const actor = reviewSession.value.user?.id
+  const current = () => !disposed && token === selectionRequest && officerSessionReady.value && actor === reviewSession.value.user?.id && selected.value?.id === observationId && route.query.review === observationId
   try {
     const latest = await fetchObservation(observationId)
     if (!current()) return
     if (latest.origin !== queueOrigin.value || latest.speciesRequest?.id !== requestId || latest.speciesRequest.state !== 'pending') {
       updateObservation(latest)
       speciesReviewComment.value = typedComment
-      showFeedback(latest.origin !== queueOrigin.value ? rt('queues.originMoved') : rt('speciesRequest.conflict'))
+      speciesVisibility.value = ''
+      const fresh = latest.speciesRequest
+      const confirmed = !!fresh && reviewedByOther(fresh.status, fresh.reviewedBy, fresh.reviewedAt)
+      showFeedback(latest.origin !== queueOrigin.value ? rt('queues.originMoved') : confirmed ? rt('feedback.reviewedElsewhere') : rt('feedback.conflictRefreshed'), latest.origin === queueOrigin.value ? 'info' : 'error')
       return
     }
     const result = await request(speciesRequestReviewUrl(requestId), {
@@ -1008,22 +1063,9 @@ async function decideSpecies(decision: SpeciesRequestDecision) {
     showFeedback(rt('speciesRequest.saved'), 'success')
   } catch (error) {
     if (!current()) return
-    if (error instanceof ReviewApiError && ['SPECIES_REQUEST_VERSION_CONFLICT', 'SPECIES_REQUEST_REVIEW_CYCLE_CONFLICT'].includes(error.code || '') && !committed) {
-      requireLatestSpecies(error.code === 'SPECIES_REQUEST_REVIEW_CYCLE_CONFLICT')
-      return
-    }
     if (error instanceof ReviewApiError && error.status === 409 && !committed) {
-      try {
-        const fresh = await fetchObservation(observationId)
-        if (!current()) return
-        updateObservation(fresh)
-        showFeedback(rt('speciesRequest.conflict'))
-      } catch {
-        if (!current()) return
-        speciesNeedsReload.value = true
-        speciesLoadError.value = rt('speciesRequest.conflictReloadFailed')
-        showFeedback(speciesLoadError.value)
-      }
+      await recoverSpeciesConflict(error, typedComment, current, observationId)
+      if (!current()) return
     } else {
       speciesNeedsReload.value =
         committed || !(error instanceof ReviewApiError) || ![400, 401, 403].includes(error.status)
@@ -1085,7 +1127,12 @@ async function decideStandaloneSpecies(decision: SpeciesRequestDecision, typedCo
   try {
     const fresh = await fetchStandaloneRequest(id)
     if (!current()) return
-    if (fresh.state !== 'pending' || fresh.requestedBy === `staff:${reviewSession.value.user?.id}`) throw new ReviewApiError(rt('speciesRequest.conflict'), 409)
+    if (fresh.state !== 'pending' || fresh.requestedBy === `staff:${reviewSession.value.user?.id}`) {
+      standaloneRequest.value = fresh; speciesVisibility.value = ''; speciesReviewComment.value = typedComment
+      const confirmed = reviewedByOther(fresh.status, fresh.reviewedBy, fresh.reviewedAt)
+      showFeedback(confirmed ? rt('feedback.reviewedElsewhere') : rt('feedback.conflictRefreshed'), 'info')
+      return
+    }
     const result = await request(speciesRequestReviewUrl(id), { decision, comment: typedComment, expected_revision: expectedRevision, expected_review_cycle: expectedReviewCycle,
       ...(decision === 'Approved' ? { visibility: speciesVisibility.value } : {}) })
     if (!current()) return
@@ -1098,13 +1145,9 @@ async function decideStandaloneSpecies(decision: SpeciesRequestDecision, typedCo
     showFeedback(rt('speciesRequest.saved'), 'success')
   } catch (error) {
     if (!current()) return
-    if (error instanceof ReviewApiError && ['SPECIES_REQUEST_VERSION_CONFLICT', 'SPECIES_REQUEST_REVIEW_CYCLE_CONFLICT'].includes(error.code || '') && !committed) {
-      requireLatestSpecies(error.code === 'SPECIES_REQUEST_REVIEW_CYCLE_CONFLICT')
-      return
-    }
     if (error instanceof ReviewApiError && error.status === 409 && !committed) {
-      try { const fresh = await fetchStandaloneRequest(id); if (!current()) return; standaloneRequest.value = fresh }
-      catch { if (current()) { speciesNeedsReload.value = true; speciesLoadError.value = rt('speciesRequest.conflictReloadFailed') } }
+      await recoverSpeciesConflict(error, typedComment, current)
+      if (!current()) return
     } else speciesNeedsReload.value = committed || !(error instanceof ReviewApiError) || ![400,401,403].includes(error.status)
     speciesSaveError.value = committed ? rt('speciesRequest.savedReloadFailed') : error instanceof Error ? error.message : rt('speciesRequest.loadFailed')
     speciesReviewComment.value = typedComment
@@ -1225,7 +1268,14 @@ async function decide(decision: ReviewDecision) {
     if (result.kind === 'saved') { comment.value = selected.value?.reviewComment || ''; showFeedback(rt('feedback.saved'), 'success') }
     else {
       comment.value = typedComment
-      if (result.kind === 'conflict') { conflictAcknowledged.value = false; showFeedback(rt(result.needsReload ? 'feedback.conflictReloadFailed' : 'feedback.conflict')) }
+      if (result.kind === 'conflict') {
+        const fresh = result.observation
+        const confirmed = !!fresh && reviewedByOther(fresh.status, fresh.reviewedBy, fresh.reviewedAt)
+        const completed = !!fresh && ['Approved','Rejected','Correction Required'].includes(fresh.status)
+        conflictAcknowledged.value = completed
+        if (fresh?.speciesRequest?.state === 'pending') speciesInspectionRequired.value = true
+        showFeedback(rt(result.needsReload ? 'feedback.conflictReloadFailed' : confirmed ? 'feedback.reviewedElsewhere' : completed ? 'feedback.conflictRefreshed' : 'feedback.conflict'), completed ? 'info' : 'error')
+      }
       else showFeedback(result.committed ? rt('feedback.savedReloadFailed') : result.error instanceof Error ? result.error.message : rt('feedback.requestFailed', { status: 0 }))
     }
   } finally {
@@ -1235,9 +1285,15 @@ async function decide(decision: ReviewDecision) {
 
 }
 
+function updateChange(change: RecordChange) {
+  if (!officerSessionReady.value || disposed) return
+  changeReadbacks.set(change.id, { sequence: ++readbackSequenceCounter, change })
+  changeProposals.value = changeProposals.value.map(row => row.id === change.id ? change : row)
+}
 async function loadObservations(append = false) {
   if (append) { visibleLimit.value += 100; return }
   const token = ++listRequest
+  const readbackSequence = readbackSequenceCounter
   const current = () => !disposed && token === listRequest
   similarityRequest++; similarityAbort?.abort(); similarityLoading.value = ''; similarityResults.value = {}; similarityErrors.value = {}; similarityAnalysis.value = null; similarityTrigger.value = null
   observations.value = []; changeProposals.value = []; visibleLimit.value = 100
@@ -1264,8 +1320,14 @@ async function loadObservations(append = false) {
     ])
     if (!current()) return
     const mapped = rawObservations.map(mapObservation).filter((item): item is ReviewObservation => item !== null && item.origin !== 'subsequent_observation')
-    observations.value = [...new Map(mapped.map(item => [item.id,item])).values()]
-    changeProposals.value = [...new Map(changes.map(item => [item.id,item])).values()]
+    observations.value = [...new Map(mapped.map(item => {
+      const readback = observationReadbacks.get(item.id)
+      return [item.id, readback && readback.sequence > readbackSequence ? readback.observation : item] as const
+    })).values()].filter(item => item.origin !== 'subsequent_observation')
+    changeProposals.value = [...new Map(changes.map(item => {
+      const readback = changeReadbacks.get(item.id)
+      return [item.id, readback && readback.sequence > readbackSequence ? readback.change : item] as const
+    })).values()]
     const staffIds = [...new Set([
       ...observations.value.map(item => item.recordedBy),
       ...observations.value.map(item => item.reviewedBy),
@@ -1319,7 +1381,7 @@ onBeforeUnmount(() => {
     @dismiss="dismissFeedback"
   />
 
-  <ApprovedRecordChanges ref="changeDialog" @updated="loadObservations()" />
+  <ApprovedRecordChanges ref="changeDialog" @updated="updateChange" />
   <section class="page-intro reviews-intro">
     <div>
       <p class="page-kicker">{{ rt('queues.registrationEyebrow') }}</p>

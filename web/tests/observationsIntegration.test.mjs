@@ -1335,3 +1335,127 @@ test('temporary authentication verification preserves field-review drafts and bl
   h.changeSession(null,false);assert.equal(h.state.selected.value,null)
  }finally{h.stop()}
 })
+
+const observationText = h => nodes(h.render()).map(n => typeof n.children === 'string' ? n.children : '').join(' ')
+
+test('unchanged observation reload preserves drafts and acknowledgement with info styling in every locale', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    let row = fixture({ revision: 1 })
+    const h = harness(url => Response.json(url === '/api/observations' ? { observations: [row] } : { observation: row }), officer, false, null, language)
+    try {
+      await h.state.open(h.state.mapObservation(row), true)
+      h.state.reviewComment.value = 'Unsent Officer comment'
+      row = { ...row, updated_at: '2026-11-03T18:00:00+08:00', assets: [...row.assets].reverse(), content: Object.fromEntries(Object.entries(row.content).reverse()) }
+      await h.state.reloadReview()
+      assert.equal(h.state.reviewComment.value, 'Unsent Officer comment')
+      assert.equal(h.state.reviewAcknowledged.value, true)
+      assert.equal(h.state.reviewAllowed.value, true)
+      assert.equal(h.state.reviewNeedsReload.value, false)
+      assert.equal(h.state.reviewFeedbackVariant.value, 'info')
+      const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
+      assert.equal(h.state.reviewFeedback.value, labels.observationModal.upToDate)
+      const info = nodes(h.render()).find(n => n.type === 'p' && String(n.props?.class).includes('observation-review-feedback'))
+      assert.equal(info.props.role, 'status'); assert.ok(info.props.class.includes('info')); assert.ok(!info.props.class.includes('error'))
+      assert.ok(!nodes(h.render()).some(n => n.props?.class === 'review-feedback error'))
+      assert.ok(nodes(h.render()).some(n => n.props?.['initial-submission'] === true))
+      assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
+    } finally { h.stop() }
+  }
+})
+
+for (const [name, patch] of [
+  ['revision', { revision: 5 }], ['content', { content: { ...fixture().content, heightCm: 77 } }],
+  ['photos', { assets: [{ id: 'different-image', content_type: 'image/jpeg' }] }],
+  ['approval', { status: 'Approved', revision: 5 }], ['rejection', { status: 'Rejected', revision: 5 }],
+  ['origin', { origin_type: 'initial_registration' }],
+]) test(`changed observation ${name} requires reinspection without resubmitting a decision`, async () => {
+  const { h, set } = reviewHarness()
+  try {
+    await h.state.open(h.state.mapObservation(fixture()), true); h.state.reviewComment.value = 'Preserve draft'
+    set(fixture(patch)); await h.state.reloadReview()
+    assert.equal(h.state.reviewAcknowledged.value, false)
+    assert.equal(h.state.reviewAllowed.value, false)
+    assert.equal(h.state.reviewComment.value, 'Preserve draft')
+    assert.equal(h.state.reviewFeedbackVariant.value, 'error')
+    h.state.reviewAcknowledged.value = true
+    assert.equal(h.state.reviewAllowed.value, !['approval', 'rejection', 'origin'].includes(name))
+    assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
+  } finally { h.stop() }
+})
+
+for (const invalid of [null, undefined, '4', 0, 1.5, 'http-error']) test(`failed or malformed observation reload ${String(invalid)} blocks review until a successful read`, async () => {
+  let row = fixture(), fail = false
+  const h = harness(url => fail && invalid === 'http-error'
+    ? Response.json({ error: 'Latest read failed' }, { status: 503 })
+    : Response.json(url === '/api/observations' ? { observations: [row] } : { observation: row }))
+  try {
+    await h.state.open(h.state.mapObservation(row), true); h.state.reviewComment.value = 'Preserve failed-read draft'
+    fail = true; if (invalid !== 'http-error') row = fixture({ revision: invalid })
+    await h.state.reloadReview()
+    assert.equal(h.state.reviewNeedsReload.value, true); assert.equal(h.state.reviewAllowed.value, false)
+    assert.equal(h.state.reviewFeedbackVariant.value, 'error')
+    assert.equal(h.state.reviewComment.value, 'Preserve failed-read draft')
+    assert.ok(observationText(h).includes(messages.submissionChanges.reloadRequired))
+    assert.ok(!observationText(h).includes(messages.submissionChanges.conflict))
+    await h.state.decide('Rejected'); assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
+    fail = false; row = fixture(); await h.state.reloadReview()
+    assert.equal(h.state.reviewNeedsReload.value, false); assert.equal(h.state.reviewAllowed.value, true)
+    assert.equal(h.state.reviewFeedbackVariant.value, 'info')
+  } finally { h.stop() }
+})
+
+test('an unchanged reload cannot clear inspection required by an actual HTTP 409', async () => {
+  const { h } = reviewHarness(fixture(), () => Response.json({ error: 'Stale review' }, { status: 409 }))
+  try {
+    await h.state.open(h.state.mapObservation(fixture()), true); h.state.reviewComment.value = 'Keep conflict draft'
+    await h.state.decide('Rejected'); assert.equal(h.state.reviewAcknowledged.value, false)
+    await h.state.reloadReview()
+    assert.equal(h.state.reviewAcknowledged.value, false); assert.equal(h.state.reviewAllowed.value, false)
+    assert.equal(h.state.reviewComment.value, 'Keep conflict draft'); assert.equal(h.state.reviewFeedbackVariant.value, 'error')
+    assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 1)
+    h.state.reviewAcknowledged.value = true; assert.equal(h.state.reviewAllowed.value, true)
+  } finally { h.stop() }
+})
+
+test('validation after an unchanged info reload still uses real error feedback', async () => {
+  const { h } = reviewHarness()
+  try {
+    await h.state.open(h.state.mapObservation(fixture()), true); await h.state.reloadReview()
+    assert.equal(h.state.reviewFeedbackVariant.value, 'info')
+    h.state.reviewComment.value = ''; await h.state.decide('Correction Required')
+    assert.equal(h.state.reviewFeedbackVariant.value, 'error'); assert.equal(h.state.reviewCommentError.value, true)
+    assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
+  } finally { h.stop() }
+})
+
+
+
+test('Observation provenance identifies current content and the separate history view stays read-only in every locale',async()=>{
+  for(const language of ['en','ms','zh-CN']){
+    const row=fixture({status:'Approved',historical_review:{state:'available',fields:{content:{heightCm:999}}}})
+    const h=harness(async()=>Response.json({observation:row}),officer,false,null,language)
+    try{
+      await h.state.open(h.state.mapObservation(row))
+      const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'))
+      const notices=nodes(h.render()).filter(n=>n.props?.class==='observation-data-provenance')
+      assert.ok(notices.some(n=>n.children===labels.observationModal.currentRecordNotice))
+      assert.notEqual(h.state.selected.value.height,'999')
+      h.state.openHistory(h.state.selected.value);await flush()
+      assert.equal(h.state.reviewAllowed.value,false)
+      assert.ok(nodes(h.render()).some(n=>n.props?.class==='observation-data-provenance'&&n.children===labels.observationModal.historyReadOnly))
+      await h.state.decide('Approved');assert.equal(h.calls.filter(c=>c.options?.method==='POST').length,0)
+    }finally{h.stop()}
+  }
+})
+
+test('Superseded and terminal Observation records cannot initiate review decisions',async()=>{
+  for(const status of ['Superseded','Withdrawn','Rejected','Approved','Correction Required']){
+    const row=fixture({status}),h=harness(async()=>Response.json({observation:row}))
+    try{
+      await h.state.open(h.state.mapObservation(row),true)
+      assert.equal(h.state.reviewAllowed.value,false)
+      await h.state.decide('Approved')
+      assert.equal(h.calls.filter(c=>c.options?.method==='POST').length,0)
+    }finally{h.stop()}
+  }
+})

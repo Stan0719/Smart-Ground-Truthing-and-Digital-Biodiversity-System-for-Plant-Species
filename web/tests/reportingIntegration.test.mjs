@@ -306,7 +306,7 @@ test('period inputs stay pending; apply, refresh and reset use the right snapsho
     h.state.pendingPeriod.value = 'custom'
     h.state.pendingStart.value = '2026-11-01'; h.state.pendingEnd.value = '2026-11-03'
     assert.equal(h.calls.length, 1)
-    assert.match(h.state.appliedScope.value, /All time/)
+    assert.match(h.state.appliedPeriodLabel.value, /All time/)
     await h.state.applyFilters()
     assert.equal(h.calls.at(-1).url, '/api/data/reports?period=custom&start=2026-11-01&end=2026-11-03')
     h.state.pendingPeriod.value = 'last-month'
@@ -398,10 +398,10 @@ test('applied period labels come from response metadata and zero-count periods r
   try {
     h.state.pendingPeriod.value='custom';h.state.pendingStart.value='2026-11-01';h.state.pendingEnd.value='2026-11-03'
     await h.state.applyFilters()
-    assert.match(h.state.appliedScope.value,/2026-11-01 to 2026-11-03/)
+    assert.deepEqual([h.state.report.value.scope.startDate,h.state.report.value.scope.endDate],['2026-11-01','2026-11-03'])
     assert.equal(h.state.totalSpecies.value,1);assert.equal(h.state.totalApprovedPlants.value,0)
     assert.ok(nodes(h.render()).some(n=>n.children===messages.conservationPages.reports.noPlantsInPeriod))
-    h.state.pendingStart.value='2026-11-02';assert.match(h.state.appliedScope.value,/2026-11-01/)
+    h.state.pendingStart.value='2026-11-02';assert.equal(h.state.report.value.scope.startDate,'2026-11-01')
     fail=true;await h.state.loadReport();assert.equal(h.state.report.value,null)
     assert.match(h.state.loadError.value,/Reporting unavailable/)
     h.state.exportCsv();await h.state.exportPdf();assert.equal(h.pdfs.length,0)
@@ -447,7 +447,7 @@ test('page shows one localized applied-period label without technical labels; ex
     const tree=nodes(h.render())
     assert.ok(tree.some(n=>n.props?.class==='applied-scope' && n.children===h.state.appliedPeriodLabel.value))
     assert.ok(!tree.some(n=>n.props?.class==='section-kicker'))
-    assert.match(h.state.appliedScope.value,/Asia\/Kuala_Lumpur/)
+    assert.equal(h.state.report.value.scope.timezone,'Asia/Kuala_Lumpur')
     for(const language of ['en','ms','zh-CN']) {
       const translations=JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`,import.meta.url),'utf8')).conservationPages.reports
       assert.ok(translations.appliedPeriod.includes('{period}'))
