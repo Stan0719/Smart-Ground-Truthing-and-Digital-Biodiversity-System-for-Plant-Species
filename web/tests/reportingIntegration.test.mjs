@@ -209,14 +209,14 @@ test('network failures are distinguished by the real report API helper', async (
   } finally { globalThis.fetch = originalFetch }
 })
 
-test('category selector exposes all four implemented reports with explicit filter actions', async () => {
+test('category selector exposes all five implemented reports with explicit filter actions', async () => {
   const h = harness(async () => Response.json(reportFixture()))
   try {
     await h.state.loadReport()
     const tree = nodes(h.render())
     const category = tree.find(n => n.type === 'select' && n.props.id === 'report-category')
     assert.ok(category)
-    assert.deepEqual(nodes(category).filter(n => n.type === 'option').map(n => n.props.value), ['species-approved', 'observations', 'threats', 'iot'])
+    assert.deepEqual(nodes(category).filter(n => n.type === 'option').map(n => n.props.value), ['species-approved', 'observations', 'threats', 'iot', 'iot-summary'])
     assert.ok(!tree.some(n => n.props?.type === 'radio'))
     assert.ok(tree.some(n => n.type === 'label' && n.props.for === 'report-category'))
     assert.ok(tree.some(n => n.type === 'button' && n.props.type === 'submit' && n.children === 'Apply'))
@@ -235,9 +235,9 @@ test('new categories use their own report component and shared applied dates; re
   const h = harness(async () => Response.json(reportFixture()))
   try {
     await h.state.loadReport()
-    for (const category of ['observations','threats','iot']) {
+    for (const category of ['observations','threats','iot','iot-summary']) {
       h.state.reportType.value = category; await vue.nextTick()
-      const child = nodes(h.render()).find(node => node.props?.category === category)
+      const child = nodes(h.render()).find(node => category === 'iot-summary' ? node.type?.name?.includes('IoTEnvironmentalReport') : node.props?.category === category)
       assert.ok(child)
       assert.ok(!nodes(h.render()).some(node => node.props?.class === 'report-preview'))
       h.state.pendingPeriod.value = 'custom'; h.state.pendingStart.value = '2026-11-01'; h.state.pendingEnd.value = '2026-11-05'

@@ -120,3 +120,15 @@ test('stale exports are not finalized, and fixed-size print charts preserve seri
   assert.equal(r.chartConfig().options.responsive,false);assert.equal(r.chartConfig().options.devicePixelRatio,2)
   assert.equal(r.chartConfig().data.datasets[0].data[1].y,null);assert.equal(r.chartConfig().data.datasets[0].borderColor,'#32745b')
 })
+
+test('IoT opt-in four-card PDF places data quality notes after the aggregate table',async()=>{
+  const r=renderer(),snapshot=model('iot-summary',1)
+  snapshot.statistics=Array.from({length:4},(_,i)=>({label:'Metric '+i,value:i,display:String(i)}))
+  snapshot.statisticsColumns=4
+  snapshot.notes=[{label:'Data Quality Note',value:'Missing counts apply to received rows only.'}]
+  assert.equal(await r.renderReportPdf(snapshot,'data:chart',r.pdf),true)
+  const cards=r.pages.flatMap(p=>p.events).filter(e=>e.type==='card')
+  assert.equal(cards.length,4);assert.equal(new Set(cards.map(c=>c.args[1])).size,1)
+  assert.ok(r.events.findIndex(e=>e.text==='Data Quality Note')>r.events.findIndex(e=>e.text==='Device'))
+  assert.ok(r.events.some(e=>e.text==='Missing counts apply to received rows only.'))
+})
