@@ -16,6 +16,7 @@ import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import { fieldFormStyles } from "../components/fieldFormStyles";
 
 const fields = ["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "notes", "zone", "latitude", "longitude", "accuracy_m", "altitudeM"];
+const requiredFields = new Set(["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "latitude", "longitude"]);
 const numeric = new Set(["heightCm", "latitude", "longitude", "accuracy_m", "altitudeM"]);
 const str = (value) => value == null ? "" : String(value);
 const key = () => `edit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -83,6 +84,12 @@ export default function EditPlantRecord({ route, navigation }) {
     (async () => {
       try {
         const plant = await fetchBotanistPlant(accountId, plantId);
+        if (route.params?.pendingRevision != null &&
+            (plant.status !== route.params.pendingStatus ||
+              !["Pending Review", "Correction Required"].includes(plant.status) ||
+              String(plant.latestObservation?.id) !== String(route.params.pendingObservationId) ||
+              Number(plant.latestObservation?.revision) !== Number(route.params.pendingRevision)))
+          throw Error(t("botanistDrafts.editConflict"));
         const [species, capabilities] = await Promise.all([fetchSpeciesCatalog({ accountId }), plantApi("/record-changes/capabilities", { expectedAccountId: accountId })]);
         if (!active) return;
         const content = (plant.status === "Approved"
@@ -480,7 +487,7 @@ export default function EditPlantRecord({ route, navigation }) {
           <Ionicons name="leaf-outline" size={18} color="#2F6B4F" />
           <Text style={styles.requestSpeciesText}>{draftSaving ? t("botanistDrafts.saving") : t("recordEdits.openSpeciesRequest")}</Text>
         </TouchableOpacity>
-      </View> : <OriginalUpdatedField label={t("recordEdits.species")} originalValue={originalSpecies}>
+      </View> : <OriginalUpdatedField label={`${t("addPlantWorkflow.approvedSpecies")} *`} originalValue={originalSpecies}>
       <TextInput style={styles.input} value={speciesSearch} onChangeText={setSpeciesSearch}
         placeholder={t("addPlant.searchByScientificOrCommonName")} accessibilityLabel={t("addPlant.searchSpeciesInTheDatabase")} />
       <ScrollView style={styles.optionList} nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
@@ -489,7 +496,7 @@ export default function EditPlantRecord({ route, navigation }) {
       </ScrollView>
       </OriginalUpdatedField>}
       <Text style={styles.note}>{t("recordEdits.associatedSpeciesName")}: {state.plant.speciesScientificName || state.plant.speciesDetails?.scientificName || t("recordEdits.informationNotAvailable")}</Text>
-      {fields.map((field) => <OriginalUpdatedField key={field} label={t(field === "scientific_name" ? "recordEdits.plantScientificName" : `recordEdits.${field}`)} originalValue={originalFieldValue(field)}>
+      {fields.map((field) => <OriginalUpdatedField key={field} label={`${t(field === "scientific_name" ? "recordEdits.plantScientificName" : `recordEdits.${field}`)}${requiredFields.has(field) ? " *" : ""}`} originalValue={originalFieldValue(field)}>
         <TextInput style={[styles.input, ["morphology", "notes"].includes(field) && styles.multiline]} value={form[field]} onChangeText={(next) => change(field, next)}
           multiline={["morphology", "notes"].includes(field)} keyboardType={numeric.has(field) ? "decimal-pad" : "default"} />
         {field === "altitudeM" && <TouchableOpacity style={fieldFormStyles.locationButton} onPress={detectLocation} disabled={locating} accessibilityRole="button" accessibilityLabel={t("addPlant.getCurrentLocation")} accessibilityState={{ disabled: locating, busy: locating }}>
@@ -544,10 +551,10 @@ export default function EditPlantRecord({ route, navigation }) {
       <View style={styles.updatedPhotoGrid}>{originalPhotoAssets.map((asset) => !selectedOriginalPhotos.includes(asset.id) ? null :
         <View key={asset.id} style={styles.updatedPhotoTile}>{state.originalPhotoSources?.[String(asset.id)] && <Image source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" />}
           <TouchableOpacity style={styles.removePhoto} onPress={() => setSelectedOriginalPhotos((current) => current.filter((id) => id !== asset.id))} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
-            <Ionicons name="close" size={17} color="#FFFFFF" /></TouchableOpacity></View>)}
+            <Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity></View>)}
         {newPhotos.map((uri, index) => <View key={`${uri}-${index}`} style={styles.updatedPhotoTile}><Image source={{ uri }} style={styles.photo} resizeMode="cover" />
           <TouchableOpacity style={styles.removePhoto} onPress={() => setNewPhotos((current) => current.filter((_, item) => item !== index))} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
-            <Ionicons name="close" size={17} color="#FFFFFF" /></TouchableOpacity></View>)}</View>
+            <Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity></View>)}</View>
       <View style={styles.photoActions}><TouchableOpacity style={styles.photoActionButton} onPress={() => pickPhotos(true)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={t("recordEdits.takePhoto")}><Text style={styles.photoActionText}>{t("recordEdits.takePhoto")}</Text></TouchableOpacity>
         <TouchableOpacity style={styles.photoActionButton} onPress={() => pickPhotos(false)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={t("recordEdits.addGallery")}><Text style={styles.photoActionText}>{t("recordEdits.addGallery")}</Text></TouchableOpacity></View>
       </OriginalUpdatedField>
@@ -580,7 +587,7 @@ const styles = StyleSheet.create({
   photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, originalPhotoChoice: { width: 94, height: 94 }, photoThumbFrame: { width: 90, height: 90, borderRadius: 14, borderWidth: 2, borderColor: "#E2EDE0", overflow: "hidden", position: "relative" }, photoThumbFrameSelected: { borderColor: "#468585" }, photo: { width: "100%", height: "100%", borderRadius: 12 }, photoSelectedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "#234B3A35", alignItems: "flex-end", justifyContent: "flex-start", padding: 4 }, photoUnavailableText: { color: "#A34436", fontSize: 10, textAlign: "center" }, photoUnavailable: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: "#F2F4EF", padding: 5 },
   speciesModeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, speciesModeOption: { flexGrow: 1, flexBasis: 150, minHeight: 44, justifyContent: "center", alignItems: "center", paddingHorizontal: 10, borderRadius: 11, borderWidth: 1, borderColor: "#CDE3DC", backgroundColor: "#FAFBF7" }, speciesModeSelected: { backgroundColor: "#D6E9D9", borderColor: "#2F6B4F" }, speciesModeText: { color: "#52665A", fontWeight: "600", textAlign: "center" }, speciesModeTextSelected: { color: "#2F6B4F", fontWeight: "700" }, speciesRequestInfo: { gap: 10, padding: 12, backgroundColor: "#F5F8F1", borderRadius: 12 }, requestSpeciesButton: { alignSelf: "flex-start", minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#AFCBB7", backgroundColor: "#E8EDDA", borderRadius: 11, paddingHorizontal: 14 }, requestSpeciesText: { color: "#2F6B4F", fontWeight: "700" },
   updatedPhotoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, updatedPhotoTile: { width: 90, height: 90, position: "relative", borderRadius: 12 },
-  removePhoto: { position: "absolute", top: -4, right: -4, width: 36, height: 36, borderRadius: 18, backgroundColor: "#A34436", alignItems: "center", justifyContent: "center" },
+  removePhoto: { position: "absolute", top: -4, right: -4, width: 44, height: 44, borderRadius: 11, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4", alignItems: "center", justifyContent: "center" },
   photoActions: fieldFormStyles.photoButtonRow, photoActionButton: fieldFormStyles.photoButton, photoActionText: fieldFormStyles.photoButtonText,
   photoRetryButton: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
   photoLoading: { position: "absolute", alignSelf: "center", top: 34 },

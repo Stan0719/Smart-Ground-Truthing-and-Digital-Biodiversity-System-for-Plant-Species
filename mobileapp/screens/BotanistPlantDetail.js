@@ -326,6 +326,7 @@ export default function BotanistPlantDetailScreen({
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState("");
   const withdrawalInFlight = useRef(false);
+  const withdrawnOriginalObservationId = useRef(null);
   const [editAvailability, setEditAvailability] = useState("checking");
   const [selectedPhotoUri, setSelectedPhotoUri] = useState(null);
   const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
@@ -350,7 +351,9 @@ function findPlant() {
             record.registeredBy === `staff:${botanistId}`))) return;
       plantApi(`/plant-submissions/${encodeURIComponent(plantId)}/withdrawal`,
         { expectedAccountId: botanistId }).then((availability) => {
-        if (active && record) setPendingOriginalEditable(availability?.editable === true);
+        const matchingEvidence = selectedOriginalId == null || availability?.observation_id == null ||
+          String(availability.observation_id) === String(selectedOriginalId);
+        if (active && matchingEvidence) setPendingOriginalEditable(availability?.editable === true);
         if (active && availability?.eligible === true &&
             (selectedOriginalId == null || String(availability.observation_id) === String(selectedOriginalId)))
           setWithdrawalCandidate(record || { id: plantId });
@@ -382,7 +385,9 @@ function findPlant() {
       setPlant({
         id: String(snapshot.plant_id ?? plantId), plantId: String(snapshot.plant_id ?? plantId),
         isServerRecord: true, isHistoricalVersion: true, historicalSnapshotUnavailable: Object.keys(snapshot).length === 0,
-        status: route.params?.historicalVersionStatus || "",
+        status: withdrawnOriginalObservationId.current != null &&
+          String(withdrawnOriginalObservationId.current) === String(snapshot.observation_id)
+          ? "Withdrawn" : route.params?.historicalVersionStatus || "",
         historicalVersionLabel: route.params?.submissionVersionLabel || "",
         historicalCurrent: route.params?.historicalCurrent === true,
         historicalSuperseded: route.params?.historicalSuperseded === true,
@@ -398,16 +403,26 @@ function findPlant() {
         ),
         photos: Array.isArray(route.params?.historicalPhotos) ? route.params.historicalPhotos : [],
       });
-      if (route.params?.historicalOriginal === true) checkWithdrawal(null, snapshot.observation_id);
+      if (withdrawnOriginalObservationId.current == null &&
+          route.params?.historicalOriginalSubmissionWithdrawalCandidate === true &&
+          ["Pending Review", "Correction Required"].includes(route.params?.historicalVersionStatus) &&
+          route.params?.historicalSuperseded !== true && snapshot.observation_id != null)
+        checkWithdrawal(null, snapshot.observation_id);
       const selectedChangeId = route.params?.selectedChangeId == null ? null : String(route.params.selectedChangeId);
-      if (selectedChangeId) fetchBotanistRecordChangeStatus(botanistId, "plant", plantId).then((result) => {
+      if (selectedChangeId) plantApi(`/record-changes/${encodeURIComponent(selectedChangeId)}`,
+        { expectedAccountId: botanistId }).then((result) => {
         if (!active) return;
-        const selected = [result.pending, result.latest].find((change) =>
-          change && String(change.id) === selectedChangeId);
-        if (selected) setPlant((current) => current?.isHistoricalVersion
+        const selected = result?.change;
+        const exactRequest = selected && String(selected.id) === selectedChangeId &&
+          String(selected.plant_id) === String(plantId) && selected.owner_subject === `staff:${botanistId}`;
+        const exactRevision = route.params?.selectedChangeRevision != null
+          ? Number(selected?.revision) === Number(route.params.selectedChangeRevision)
+          : Number(selected?.revision) === 1;
+        if (exactRequest && exactRevision) setPlant((current) => current?.isHistoricalVersion
           ? { ...current, status: selected.status } : current);
-        setChangeInfo(selected || null);
-        setActiveSelectedChangeId(result.pending && String(result.pending.id) === selectedChangeId
+        setChangeInfo(exactRequest && exactRevision ? selected : null);
+        setActiveSelectedChangeId(exactRequest && exactRevision &&
+          ["Pending Review", "Correction Required"].includes(selected.status)
           ? selectedChangeId : null);
       }).catch((error) => {
         if (active) setChangeError(error.message);
@@ -448,10 +463,10 @@ function findPlant() {
     });
     return () => { active = false; };
   }, [botanistId, botanistName, plantId, retry, historicalDetail, route.params?.historicalSnapshot,
-    route.params?.selectedChangeId,
+    route.params?.selectedChangeId, route.params?.selectedChangeRevision,
     route.params?.historicalVersionStatus, route.params?.submissionVersionLabel, route.params?.historicalCurrent,
     route.params?.historicalSuperseded, route.params?.historicalSubmittedBy, route.params?.historicalPhotos,
-    route.params?.historicalOriginal]));
+    route.params?.historicalOriginal, route.params?.historicalOriginalSubmissionWithdrawalCandidate]));
 
 
   const [isEditing, setIsEditing] = useState(false);
@@ -793,6 +808,8 @@ const rawPhotos = Array.isArray(plant.photos)
       try {
         await plantApi(`/plant-submissions/${encodeURIComponent(plantId)}/withdraw`,
           { method: "POST", expectedAccountId: botanistId, body: {} });
+        if (plant.isHistoricalVersion) withdrawnOriginalObservationId.current = plant.historicalContent?.observation_id ??
+          route.params?.historicalSnapshot?.observation_id ?? null;
         setWithdrawalCandidate(null);
         setPlant((current) => current ? { ...current, status: "Withdrawn" } : current);
         setRetry((value) => value + 1);
@@ -805,6 +822,21 @@ const rawPhotos = Array.isArray(plant.photos)
       }
     } },
   ]);
+  const currentPendingOriginal = plant.isHistoricalVersion &&
+    route.params?.historicalOriginalSubmissionWithdrawalCandidate === true &&
+    !plant.historicalSuperseded && ["Pending Review", "Correction Required"].includes(plant.status) &&
+    Number.isInteger(Number(route.params?.historicalVersionNumber)) &&
+    route.params?.historicalSnapshot?.observation_id != null;
+  const showPlantEdit = plant.isServerRecord &&
+    (currentPendingOriginal ? pendingOriginalEditable : !plant.isHistoricalVersion &&
+      (plant.status === "Approved" || (["Pending Review", "Correction Required"].includes(plant.status) && pendingOriginalEditable)));
+  const showEditWithdrawal = route.params?.selectedChangeId != null &&
+    !plant.historicalSuperseded && activeSelectedChangeId === String(route.params.selectedChangeId) &&
+    (!plant.isHistoricalVersion || ["Pending Review", "Correction Required"].includes(plant.status)) &&
+    ["Pending Review", "Correction Required"].includes(changeInfo?.status) &&
+    (changeInfo.status === "Correction Required" || changeInfo.revision === 1) &&
+    changeInfo.owner_subject === `staff:${botanistId}` &&
+    String(changeInfo.id) === String(route.params.selectedChangeId);
 
   // ===================================================
   // UI
@@ -820,15 +852,44 @@ const rawPhotos = Array.isArray(plant.photos)
       >
         {/* PAGE HEADER */}
 
-        <View style={styles.editHeadingRow} testID={plant.isHistoricalVersion ? "historical-plant-heading" : undefined}>
+        <View style={styles.editHeadingRow} testID={plant.isHistoricalVersion ? "historical-plant-heading" : "plant-detail-heading"}>
           <Text style={styles.title}>
             {isEditing ? t("botanistPlantDetail.editPlantRecord") : t("botanistPlantDetail.plantRecord")}
           </Text>
-          {!plant.isHistoricalVersion && plant.isServerRecord &&
-            (plant.status === "Approved" || (["Pending Review", "Correction Required"].includes(plant.status) && pendingOriginalEditable)) &&
+          {(showPlantEdit || showEditWithdrawal || !!withdrawalCandidate) && <View style={styles.headingActions}>
+          {showPlantEdit &&
             <EditAction testID="edit-own-plant" disabled={plant.status === "Approved" && editAvailability !== "clear"}
               labelKey={plant.status === "Approved" && editAvailability !== "clear" ? "recordEdits.editUnavailable" : undefined}
-              onPress={() => navigation.navigate("EditPlant", { plantId: plant.id, botanist, correction: plant.status !== "Approved" && plant.initialObservation?.status === "Correction Required" })} />}
+              onPress={() => navigation.navigate("EditPlant", { plantId: plant.id, botanist,
+                ...(currentPendingOriginal ? {
+                  pendingObservationId: route.params.historicalSnapshot.observation_id,
+                  pendingRevision: Number(route.params.historicalVersionNumber),
+                  pendingStatus: plant.status,
+                } : {}),
+                correction: plant.status !== "Approved" && (currentPendingOriginal
+                  ? plant.status === "Correction Required" : plant.initialObservation?.status === "Correction Required") })} />}
+          {showEditWithdrawal && <TouchableOpacity
+          testID="withdraw-pending-plant-edit" disabled={cancellingEdit} style={[styles.deleteEditButton, cancellingEdit && { opacity: 0.65 }]} accessibilityLabel={t("plantWithdrawal.editAction")} onPress={() => Alert.alert(t("plantWithdrawal.editConfirmTitle"), t("plantWithdrawal.editConfirmMessage"), [
+            { text: t("common.cancel"), style: "cancel" }, { text: t("plantWithdrawal.editAction"), style: "destructive", onPress: async () => {
+              setCancelEditError(""); setCancellingEdit(true);
+              try { await plantApi(`/record-changes/${encodeURIComponent(changeInfo.id)}/cancel`, { method: "POST", expectedAccountId: botanistId, body: {} });
+                Alert.alert(t("recordEdits.cancelEditRequest"), t("recordEdits.editCancelled"));
+                if (plant.isHistoricalVersion) {
+                  setPlant((current) => current?.isHistoricalVersion ? { ...current, status: "Cancelled" } : current);
+                  setActiveSelectedChangeId(null);
+                }
+                setRetry((value) => value + 1);
+              } catch (error) { setCancelEditError(translateUIMessage(error.message || t("recordEdits.cancelEditFailed"))); }
+              finally { setCancellingEdit(false); }
+            } },
+          ])} accessibilityRole="button">{cancellingEdit ? <ActivityIndicator size="small" color="#B42318" /> : <Ionicons name="trash-outline" size={21} color="#B42318" />}</TouchableOpacity>}
+          {!!withdrawalCandidate && <TouchableOpacity
+          testID="withdraw-original-plant" accessibilityRole="button" accessibilityLabel={t("plantWithdrawal.action")}
+          disabled={withdrawing} style={[styles.withdrawButton, withdrawing && styles.withdrawDisabled]}
+          onPress={confirmWithdrawal}>
+          {withdrawing ? <ActivityIndicator size="small" color="#B42318" /> : <Ionicons name="trash-outline" size={21} color="#B42318" />}
+        </TouchableOpacity>}
+          </View>}
         </View>
 
         <Text style={styles.subtitle}>{plant.isHistoricalVersion ? t("botanistPlantDetail.readOnlyVersionSubtitle") : t("botanistPlantDetail.reviewAndManageYourPlantDocumentation")}</Text>
@@ -889,34 +950,6 @@ const rawPhotos = Array.isArray(plant.photos)
           </View>}
           </View>
           </View>
-        {route.params?.selectedChangeId != null &&
-          activeSelectedChangeId === String(route.params.selectedChangeId) &&
-          (!plant.isHistoricalVersion || ["Pending Review", "Correction Required"].includes(plant.status)) &&
-          ["Pending Review", "Correction Required"].includes(changeInfo?.status) &&
-          (changeInfo.status === "Correction Required" || changeInfo.revision === 1) &&
-          changeInfo.owner_subject === `staff:${botanistId}` &&
-          (route.params?.selectedChangeId == null || String(changeInfo.id) === String(route.params.selectedChangeId)) && <View style={styles.cancelEditAction}><TouchableOpacity
-          disabled={cancellingEdit} style={[styles.deleteEditButton, cancellingEdit && { opacity: 0.65 }]} onPress={() => Alert.alert(t("recordEdits.deleteEditTitle"), t("recordEdits.deleteEditMessage"), [
-            { text: t("common.cancel"), style: "cancel" }, { text: t("recordEdits.cancelEditRequest"), style: "destructive", onPress: async () => {
-              setCancelEditError(""); setCancellingEdit(true);
-              try { await plantApi(`/record-changes/${encodeURIComponent(changeInfo.id)}/cancel`, { method: "POST", expectedAccountId: botanistId, body: {} });
-                Alert.alert(t("recordEdits.cancelEditRequest"), t("recordEdits.editCancelled"));
-                if (plant.isHistoricalVersion) {
-                  setPlant((current) => current?.isHistoricalVersion ? { ...current, status: "Cancelled" } : current);
-                  setActiveSelectedChangeId(null);
-                }
-                setRetry((value) => value + 1);
-              } catch (error) { setCancelEditError(translateUIMessage(error.message || t("recordEdits.cancelEditFailed"))); }
-              finally { setCancellingEdit(false); }
-            } },
-          ])} accessibilityRole="button">{cancellingEdit ? <ActivityIndicator size="small" color="#A33F36" /> : <Ionicons name="trash-outline" size={17} color="#A33F36" />}<Text style={styles.deleteEditText}>{cancellingEdit ? t("common.pleaseWait") : t("recordEdits.cancelEditRequest")}</Text></TouchableOpacity></View>}
-        {!!withdrawalCandidate && <View style={styles.cancelEditAction}><TouchableOpacity
-          testID="withdraw-original-plant" accessibilityRole="button" accessibilityLabel={t("plantWithdrawal.action")}
-          disabled={withdrawing} style={[styles.withdrawButton, withdrawing && styles.withdrawDisabled]}
-          onPress={confirmWithdrawal}>
-          {withdrawing ? <ActivityIndicator size="small" color="#A33F36" /> : <Ionicons name="trash-outline" size={17} color="#A33F36" />}
-          <Text style={styles.deleteEditText}>{withdrawing ? t("common.pleaseWait") : t("plantWithdrawal.action")}</Text>
-        </TouchableOpacity></View>}
         </View>
 
         {/* =========================================== */}
@@ -1144,16 +1177,16 @@ const styles = StyleSheet.create({
   },
 
   editHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  headingActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   changeNotice: { padding: 12, borderRadius: 12, backgroundColor: "#FFF1D6", marginBottom: 12, gap: 4 },
   rejectedBanner: { flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 12, backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318", marginBottom: 12 },
   rejectedBannerText: { flex: 1, flexShrink: 1, color: "#8F1D16", fontSize: 15, fontWeight: "800", lineHeight: 21 },
   rejectedFeedbackPanel: { backgroundColor: "#FEF2F1", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318" },
   rejectedFeedbackHeading: { color: "#8F1D16", fontWeight: "800" },
   rejectedFeedbackText: { color: "#6F302B" },
-  deleteEditButton: { minHeight: 44, alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 7, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#E8B9B2" },
-  withdrawButton: { minHeight: 48, alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 7, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#E8B9B2" },
+  deleteEditButton: { width: 44, height: 44, alignSelf: "flex-end", alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4" },
+  withdrawButton: { width: 44, height: 44, alignSelf: "flex-end", alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4" },
   withdrawDisabled: { opacity: 0.65 },
-  deleteEditText: { color: "#A33F36", fontSize: 13, fontWeight: "700" },
   editAvailabilityNote: { padding: 10, borderRadius: 10, backgroundColor: "#FFF7E8", borderWidth: 1, borderColor: "#EAD9B5", marginBottom: 10, gap: 3 },
   pendingEditLabel: { color: "#77501D", fontSize: 12, fontWeight: "700" },
   changeNoticeText: { color: "#52665A", lineHeight: 20 },
@@ -1186,7 +1219,6 @@ const styles = StyleSheet.create({
   rejectedRecordMeta: { backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0" },
 
   recordMetaSummary: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cancelEditAction: { borderTopWidth: 1, borderTopColor: "#C9DEC9", marginTop: 12, paddingTop: 10, alignItems: "flex-end" },
   recordMetaText: {
     flex: 1,
   },

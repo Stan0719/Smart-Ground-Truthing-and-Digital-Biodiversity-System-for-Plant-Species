@@ -621,7 +621,7 @@ export default function App({ homeRequest }) {
           }
         }
       } catch (error) {
-        if (error.transient === true || [502, 503, 504].includes(error.status)) return;
+        if (error.code !== "AUTH_SESSION_INVALID") return;
         if (active && generation === authGeneration.current) {
           const hadAuthenticatedUser = Boolean(userRef.current);
           userRef.current = null;

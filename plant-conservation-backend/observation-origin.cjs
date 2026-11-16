@@ -29,7 +29,8 @@ function validReceipt(receipt, plant, observations, species, requests) {
   // A genuine proposal must still bind to its original request and proposed species.
   if (result.species_request_id !== null) {
     const request = requests.get(String(result.species_request_id));
-    if (!request || request.owner_subject !== receipt.owner_subject || request.client_key !== receipt.client_key ||
+    if (!request || request.owner_subject !== receipt.owner_subject ||
+        request.client_key !== (result.species_request_client_key ?? receipt.client_key) ||
         String(plant.species_id) !== String(result.species_id) ||
         (request.proposed_species_id == null && request.approved_species_id == null) ||
         (request.proposed_species_id != null && String(request.proposed_species_id) !== String(result.species_id)) ||

@@ -120,7 +120,13 @@ function createPlantApp({
     if (status >= 500)
       console.error("Plant API request failed:", error.code ?? error.name);
     res.status(status).json({
-      ...(["SUBMISSION_REJECTED", "SPECIES_REQUEST_LINK_CONFLICT", "SPECIES_REQUEST_REVIEW_BUSY"].includes(error.code) ? { code: error.code } : {}),
+      ...(["SUBMISSION_REJECTED", "SPECIES_REQUEST_LINK_CONFLICT", "SPECIES_REQUEST_REVIEW_BUSY",
+        "SPECIES_DUPLICATE_APPROVED", "SPECIES_DUPLICATE_PENDING", "SPECIES_DUPLICATE_CORRECTION"].includes(error.code)
+        ? { code: error.code } : {}),
+      ...(typeof error.duplicate_type === "string" ? { duplicate_type: error.duplicate_type } : {}),
+      ...(error.species_id ? { species_id: error.species_id } : {}),
+      ...(error.request_id ? { request_id: error.request_id } : {}),
+      ...(error.request_status ? { request_status: error.request_status } : {}),
       error:
         status >= 500
           ? "Service unavailable. Please try again."

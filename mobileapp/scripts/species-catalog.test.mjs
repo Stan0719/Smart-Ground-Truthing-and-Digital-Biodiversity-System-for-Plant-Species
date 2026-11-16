@@ -16,9 +16,9 @@ test('successful species are visible even if secondary plant counts fail; networ
 
 test('late catalogue results cannot replace a newer focus visit and account changes hide old data',async()=>{let resolveOld,reads=0;const old=new Promise(r=>resolveOld=r);const f=fixture({fetchSpeciesCatalog:async()=>++reads===1?old:[{id:'fresh'}],fetchPlantRecords:async()=>[]});f.render();const first=f.focus();const pending=f.render().refresh();first();const second=f.focus();await f.render().refresh();resolveOld([{id:'stale'}]);await pending;assert.equal(f.render().species[0].id,'fresh');assert.equal(f.render('different').species.length,0);second();});
 
-test('family filter options are derived from backend species, deduplicated, sorted, and omit empty values',()=>{
+test('species search and sort retain records from every family',()=>{
   const source=readFileSync(new URL('../utils/speciesFilters.js',import.meta.url),'utf8').replace(/export /g,'');
-  const context=vm.createContext({});vm.runInContext(`${source};this.getSpeciesFamilyOptions=getSpeciesFamilyOptions;this.filterAndSortSpecies=filterAndSortSpecies;this.resetMissingSpeciesFamily=resetMissingSpeciesFamily;`,context);
+  const context=vm.createContext({});vm.runInContext(`${source};this.filterAndSortSpecies=filterAndSortSpecies;this.getSpeciesFamilyOptions=getSpeciesFamilyOptions;this.resetMissingSpeciesFamily=resetMissingSpeciesFamily;`,context);
   const rows=[
     {id:'1',name:'Zed',scientificName:'Zeta one',family:'Zingiberaceae',description:'Ginger'},
     {id:'2',name:'Bean',scientificName:'Alpha bean',family:'Fabaceae',description:'Legume'},
@@ -26,18 +26,13 @@ test('family filter options are derived from backend species, deduplicated, sort
     {id:'4',name:'No family',scientificName:'Unknown plant',family:'  ',description:''},
     {id:'5',name:'No family field',scientificName:'Unknown plant',description:''},
   ];
-  assert.deepEqual(JSON.parse(JSON.stringify(context.getSpeciesFamilyOptions(rows))),['Fabaceae','Zingiberaceae']);
-  assert.equal(context.getSpeciesFamilyOptions([]).length,0);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.filterAndSortSpecies(rows).map(row=>row.id))),['1','2','3','4','5']);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.filterAndSortSpecies(rows,{query:'beta'}).map(row=>row.id))),['3']);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.filterAndSortSpecies(rows,{query:'faba'}).map(row=>row.id))),['2','3']);
   assert.deepEqual(JSON.parse(JSON.stringify(context.filterAndSortSpecies(rows,{family:'Fabaceae'}).map(row=>row.id))),['2','3']);
-  assert.deepEqual(JSON.parse(JSON.stringify(context.filterAndSortSpecies(rows,{family:'Fabaceae',query:'beta'}).map(row=>row.id))),['3']);
   assert.deepEqual(JSON.parse(JSON.stringify(context.filterAndSortSpecies(rows,{sortOption:'name-asc'}).map(row=>row.name))),['Another bean','Bean','No family','No family field','Zed']);
   assert.deepEqual(JSON.parse(JSON.stringify(context.filterAndSortSpecies(rows,{sortOption:'name-desc'}).map(row=>row.name))),['Zed','No family field','No family','Bean','Another bean']);
   assert.deepEqual(JSON.parse(JSON.stringify(context.filterAndSortSpecies(rows,{sortOption:'scientific-asc'}).map(row=>row.scientificName))),['Alpha bean','Beta bean','Unknown plant','Unknown plant','Zeta one']);
-  const refreshed=[{id:'6',family:'Orchidaceae'}];
-  const refreshedOptions=JSON.parse(JSON.stringify(context.getSpeciesFamilyOptions(refreshed)));
-  assert.deepEqual(refreshedOptions,['Orchidaceae']);
-  assert.equal(context.resetMissingSpeciesFamily('Fabaceae',refreshedOptions),null);
-  assert.equal(context.resetMissingSpeciesFamily('Orchidaceae',refreshedOptions),'Orchidaceae');
   const labels=['en','ms','zh'].map(language=>JSON.parse(readFileSync(new URL(`../translations/${language}.json`,import.meta.url),'utf8')).common.all);
   assert.deepEqual(labels,['All','Semua','全部']);
 });
@@ -153,7 +148,7 @@ test('actual catalogue renders an approved species and both refresh actions', ()
     '../components/FavouriteHeart': { default: 'FavouriteHeart' },
     '../data/speciesImages': { getSpeciesImageSource: species => species.image },
     '../hooks/useVisitorFavourites': { default: () => ({ isFavourite: () => false, isPending: () => false, loading: false, refreshing: false, mutationError: '', error: '', refresh: async () => {}, toggle: async () => {} }) },
-    '../utils/speciesFilters': { filterAndSortSpecies: (species, options) => species, getSpeciesFamilyOptions: species => [...new Set(species.map(item => item.family).filter(Boolean))], resetMissingSpeciesFamily: (family, options) => family !== null && !options.includes(family) ? null : family },
+    '../utils/speciesFilters': { filterAndSortSpecies: species => species, getSpeciesFamilyOptions: species => [...new Set(species.map(item => item.family).filter(Boolean))], resetMissingSpeciesFamily: (family, options) => family !== null && !options.includes(family) ? null : family },
     '../utils/useSpeciesCatalog': { useSpeciesCatalog: id => {
       assert.equal(id, 'owner');
       return { species: [{ id: '6', slug: 'api-species-6', name: 'Actual common name', scientificName: 'Actual approved species', family: 'Fabaceae', description: 'Actual description', image: { uri: 'https://example.invalid/api/assets/real-upload', headers: { Authorization: 'Bearer fixture' } } }], counts: {}, loading: false, error: '', refresh() { refreshes++; } };
@@ -161,7 +156,7 @@ test('actual catalogue renders an approved species and both refresh actions', ()
   });
   const tree = screen.default({ user: { id: 'owner', role: 'botanist' }, navigation: { navigate: (...args) => navigations.push(args) } });
   const catalogueSource = readFileSync(new URL('../screens/Species.js', import.meta.url), 'utf8');
-  assert.match(catalogueSource, /setSearchQuery\(""\);\s*setActiveFamily\(null\)/);
+  assert.match(catalogueSource, /!isBotanist && <FlatList/);
   assert.doesNotMatch(catalogueSource, /setActiveCategory/);
   const list = React.Children.toArray(tree.props.children)[0];
   assert.equal(list.props.data.length, 1);
@@ -169,9 +164,10 @@ test('actual catalogue renders an approved species and both refresh actions', ()
   assert.doesNotMatch(readFileSync(new URL('../screens/Species.js', import.meta.url), 'utf8'), /const categories\s*=|item\.category/);
   const walk = n => !n || typeof n !== 'object' ? [] : typeof n.type === 'function' ? walk(n.type(n.props)) : [n, ...React.Children.toArray(n.props?.children).flatMap(walk)];
   const children = n => React.Children.toArray(n?.props?.children);
-  const familyFilter = walk(list.props.ListHeaderComponent).find(n => n.type === 'FlatList' && n.props.horizontal);
-  assert.deepEqual(familyFilter.props.data, [null, 'Fabaceae']);
-  assert.equal(familyFilter.props.keyExtractor('Fabaceae'), 'Fabaceae');
+  assert.equal(walk(list.props.ListHeaderComponent).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 0);
+  const visitorTree = screen.default({ user: { id: 'owner', role: 'visitor' }, navigation: { navigate: (...args) => navigations.push(args) } });
+  const visitorList = React.Children.toArray(visitorTree.props.children)[0];
+  assert.equal(walk(visitorList.props.ListHeaderComponent).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 1);
   const controls = walk(list.props.ListHeaderComponent).find(n => n.type === 'View' && children(n).map(child => child.type).join(',') === 'TextInput,RefreshButton,TouchableOpacity');
   assert.ok(controls, 'search, icon refresh, and sort share one aligned row in that order');
   assert.ok(walk(list.props.ListHeaderComponent).some(n => n.type === 'LanguageSelector'));

@@ -10,6 +10,7 @@ const { initialVersionAvailable, appendInitialVersion } = require("./record-vers
 
 const { requireReviewCycle } = require("./species-review-cycle.cjs");
 const { rejectLinkedRegistration } = require("./linked-species-rejection.cjs");
+const { normalizeSpeciesName, sqlSpeciesName } = require("./species-name.cjs");
 const fields = ["scientific_name", "common_name", "genus_name", "family_name",
   "conservation_status", "description", "habitat"];
 const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id,(to_jsonb(species_request_submission)->>'content_revision')::integer AS content_revision,to_jsonb(species_request_submission)->>'content_updated_at' AS content_updated_at,(to_jsonb(species_request_submission)->>'review_cycle')::integer AS review_cycle,to_jsonb(species_request_submission)->>'withdrawn_by' AS withdrawn_by,to_jsonb(species_request_submission)->>'withdrawn_at' AS withdrawn_at";
@@ -58,7 +59,8 @@ function observationRequestSql(available, hasProvenance = false) {
     select: `CASE WHEN ${linked} THEN ${requestId} ELSE NULL END AS species_request_id,
       CASE WHEN ${linked} THEN CASE
         WHEN origin_request.request_id IS NULL THEN jsonb_build_object('request_id',${requestId},'request_status','Unavailable')
-        WHEN origin_request.owner_subject<>origin.receipt->>'owner' OR origin_request.client_key<>origin.receipt->>'client_key'
+        WHEN origin_request.owner_subject<>origin.receipt->>'owner'
+          OR origin_request.client_key<>COALESCE(${result}->>'species_request_client_key',origin.receipt->>'client_key')
           OR ${result}->>'species_id'<>p.species_id::text
           OR (origin_request.proposed_species_id IS NOT NULL AND origin_request.proposed_species_id<>p.species_id)
           OR (origin_request.request_status='Approved' AND origin_request.approved_species_id IS DISTINCT FROM p.species_id)
@@ -129,7 +131,8 @@ async function assertSpeciesResolved(c, plantId, fail, observationId) {
       if (typeof observationId === 'string' && result.id !== observationId) return;
       const requests = (await c.query("SELECT request_status,proposed_species_id,approved_species_id,owner_subject,client_key FROM species_request_submission WHERE request_id::text=$1 FOR UPDATE", [String(result.species_request_id)])).rows;
       if (String(result.species_id)!==String(plant.species_id) || requests.length!==1 ||
-          requests[0].owner_subject!==receipt.owner_subject || requests[0].client_key!==receipt.client_key ||
+          requests[0].owner_subject!==receipt.owner_subject ||
+          requests[0].client_key!==(result.species_request_client_key ?? receipt.client_key) ||
           requests[0].request_status!=='Approved' || String(requests[0].approved_species_id || '')!==String(plant.species_id) ||
           (requests[0].proposed_species_id!=null && String(requests[0].proposed_species_id)!==String(plant.species_id)) || !plant.scientific_name?.trim())
         fail(409, "Resolve the linked species request before reviewing this plant submission.");
@@ -144,7 +147,7 @@ async function assertSpeciesResolved(c, plantId, fail, observationId) {
     fail(409, "Species request provenance cannot be verified. Resolve the legacy dependency before review.");
 }
 
-function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, assertNewSpecies, officerNotifications = null }) {
+function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, assertNewSpecies, speciesRow, officerNotifications = null }) {
   const requestId = (value) => {
     if (typeof value !== "string" || !/^[1-9][0-9]{0,9}$/.test(value) || BigInt(value) > 2147483647n)
       fail(400, "Invalid species request identifier.");
@@ -205,7 +208,8 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
         .jpeg({ quality: 85 }).toBuffer();
     } catch { fail(400, "Invalid or oversized species photo."); }
     const result = await transaction(pool, async (c) => {
-      await c.query("SELECT pg_advisory_xact_lock(hashtext(lower(btrim($1))))", [data.scientific_name]);
+      const normalizedName = normalizeSpeciesName(data.scientific_name);
+      await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [normalizedName]);
       const previous = (await c.query(`SELECT ${columns},payload_hash FROM species_request_submission WHERE owner_subject=$1 AND client_key=$2`,
         [subject(req.user), clientKey])).rows[0];
       if (previous) {
@@ -213,9 +217,28 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
         delete previous.payload_hash;
         return previous;
       }
-      await assertNewSpecies(c, data.scientific_name);
-      if ((await c.query("SELECT request_id FROM species_request_submission WHERE lower(btrim(scientific_name))=lower(btrim($1)) AND request_status='Pending Review'",
-        [data.scientific_name])).rows.length) fail(409, "A request for this scientific name is already pending review.");
+      const approved = (await c.query(`SELECT species_id,scientific_name,common_name
+        FROM species WHERE ${sqlSpeciesName("scientific_name")}=$1 AND COALESCE(rbac_data->>'approvalStatus','Approved')='Approved' LIMIT 1`, [normalizedName])).rows[0];
+      if (approved) {
+        await speciesRow(c, approved.species_id, req.user);
+        throw Object.assign(Error("An approved species already has this scientific name."), {
+          status: 409, code: "SPECIES_DUPLICATE_APPROVED", duplicate_type: "approved", species_id: approved.species_id,
+        });
+      }
+      const active = (await c.query(`SELECT request_id,owner_subject,request_status,scientific_name
+        FROM species_request_submission WHERE ${sqlSpeciesName("scientific_name")}=$1
+          AND request_status IN ('Pending Review','Correction Required')
+        ORDER BY (owner_subject=$2) DESC,submitted_at DESC,request_id DESC LIMIT 1`, [normalizedName, subject(req.user)])).rows[0];
+      if (active) {
+        const isOwn = active.owner_subject === subject(req.user);
+        const correction = isOwn && active.request_status === "Correction Required";
+        throw Object.assign(Error(correction ? "An existing species request requires correction." : "A request for this scientific name is already pending review."), {
+          status: 409, code: correction ? "SPECIES_DUPLICATE_CORRECTION" : "SPECIES_DUPLICATE_PENDING",
+          duplicate_type: correction ? "correction_required" : "pending",
+          ...(isOwn ? { request_id: active.request_id, request_status: active.request_status } : {}),
+        });
+      }
+      await assertNewSpecies(c, data.scientific_name, { approvedOnly: true });
       const row = (await c.query(`INSERT INTO species_request_submission(owner_subject,client_key,payload_hash,${fields.join(",")},photo)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${columns}`,
         [subject(req.user), clientKey, payloadHash, ...fields.map((key) => data[key]), bytes])).rows[0];
@@ -230,6 +253,12 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
     res.status(201).json({ species_request: project(result) });
   });
   app.get("/api/species-requests", read, async (req, res) => {
+    if (req.query.scope === "mine-pending" || req.query.scope === "mine-active") {
+      const rows = (await pool.query(`SELECT ${columns} FROM species_request_submission
+        WHERE owner_subject=$1 AND request_status ${req.query.scope === "mine-pending" ? "= 'Pending Review'" : "IN ('Pending Review','Correction Required')"}
+        ORDER BY submitted_at DESC,request_id DESC`, [subject(req.user)])).rows;
+      return res.json({ species_requests: rows.map(project) });
+    }
     const rows = (await pool.query(`SELECT ${columns} FROM species_request_submission
       WHERE ($1 OR owner_subject=$2) ORDER BY submitted_at DESC,request_id DESC LIMIT 500`,
       [permitted(req.user, "species.manage"), subject(req.user)])).rows;
@@ -332,7 +361,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
         }
         await c.query("UPDATE species SET rbac_data=rbac_data || $1::jsonb WHERE species_id=$2", [{ approvalStatus: b.decision }, row.proposed_species_id]);
       } else if (b.decision === "Approved") {
-        await assertNewSpecies(c, row.scientific_name);
+        await assertNewSpecies(c, row.scientific_name, { approvedOnly: true });
         const family = (await c.query("SELECT family_id FROM family WHERE lower(btrim(family_name))=lower(btrim($1)) ORDER BY family_id LIMIT 1", [row.family_name])).rows[0]
           || (await c.query("INSERT INTO family(family_name) VALUES($1) RETURNING family_id", [row.family_name])).rows[0];
         const genus = (await c.query("SELECT genus_id FROM genus WHERE lower(btrim(genus_name))=lower(btrim($1)) AND family_id=$2 ORDER BY genus_id LIMIT 1", [row.genus_name, family.family_id])).rows[0]

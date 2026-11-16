@@ -10,7 +10,9 @@ export function validateSpeciesRequest(data) {
 }
 
 export function validatePlantDetails({ species, newSpecies = false, plantScientificName, height, healthStatus, growthStage, morphology }) {
-  if (!newSpecies && (!species || !/^[1-9]\d*$/.test(String(species.id)))) return "chooseExistingSpecies";
+  if (!newSpecies && (!species || !(species.source === "pending"
+    ? /^[1-9]\d*$/.test(String(species.requestId)) && species.id === `request:${species.requestId}`
+    : /^[1-9]\d*$/.test(String(species.id))))) return "chooseExistingSpecies";
   if (typeof plantScientificName !== "string" || !plantScientificName.trim()) return "plantScientificNameRequired";
   if (plantScientificName.trim().length > 200) return "plantScientificNameTooLong";
   if (!Number.isFinite(Number(height)) || Number(height) <= 0 || Number(height) > 100000) return "invalidHeight";

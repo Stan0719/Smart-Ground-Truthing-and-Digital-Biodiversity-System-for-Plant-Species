@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { createLocalization, createDisplayTranslator, createFieldValueTranslator, flattenTranslations, LANGUAGE_STORAGE_KEY, supportedLanguages } from "../translations/core.js";
 import { A4_PRINT_OPTIONS, buildQRPrintHtml } from "../utils/qrPrint.js";
 import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation.js";
+import { normalizeSpeciesName } from "../utils/speciesNameNormalization.js";
 
 const require = createRequire(import.meta.url);
 const parser = require("@babel/parser");
@@ -185,6 +186,7 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
     "../utils/botanistDraftAutosave": { useBotanistDraftAutosave: () => ({ stop: async () => {}, flush: async () => {} }) },
     "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" }, "../utils/faceSession": { faceSession: {} },
     "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails },
+    "../utils/speciesNameNormalization": { normalizeSpeciesName },
     "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }), refresh: async () => { network.push(["inventory-refresh"]); return true; }, addGenerated: () => 1, retire: (id) => network.push(["inventory-retire", id]) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
     "../utils/qrPrint": { A4_PRINT_OPTIONS, buildQRPrintHtml }, "../data/mockData": { botanistPlantRecords: [] },
     "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ items: notificationItems, loading: false, loaded: true, error: "", unreadCount: notificationItems.filter((item) => !item.read).length, refresh: async () => {} }) },

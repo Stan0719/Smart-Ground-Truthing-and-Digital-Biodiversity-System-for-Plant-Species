@@ -110,12 +110,15 @@ test("Observation Details renders the Plant-style summary, numbered sections, ph
     children(node).some((child) => child?.type === "Image" && child.props.source?.uri?.endsWith("photo-1")))?.props.onPress, "function");
   const activeRequest = renderObservationDetails(row, [{ id: "edit-20", status: "Pending Review", revision: 1, owner_subject: "staff:owner" }]);
   const activeSummary = find(activeRequest, (node) => node?.props?.testID === "observation-record-meta");
-  assert.ok(find(activeSummary, (node) => node?.type === "TouchableOpacity" && text(node).includes("recordEdits.cancelEditRequest")));
+  assert.ok(find(find(activeRequest, (node) => node?.props?.testID === "observation-detail-heading"),
+    (node) => node?.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.cancelEditRequest"));
+  assert.equal(find(activeSummary, (node) => node?.type === "TouchableOpacity" &&
+    node.props.accessibilityLabel === "recordEdits.cancelEditRequest"), undefined);
   assert.ok(!find(activeRequest, (node) => node?.type === "EditAction"));
   const correctedPending = renderObservationDetails(row, [{ id: "edit-20", status: "Pending Review", revision: 2, owner_subject: "staff:owner" }]);
-  assert.ok(!find(correctedPending, (node) => node?.type === "TouchableOpacity" && text(node).includes("recordEdits.cancelEditRequest")));
+  assert.ok(!find(correctedPending, (node) => node?.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.cancelEditRequest"));
   const correctionRequired = renderObservationDetails(row, [{ id: "edit-20", status: "Correction Required", revision: 2, owner_subject: "staff:owner" }]);
-  assert.ok(find(correctionRequired, (node) => node?.type === "TouchableOpacity" && text(node).includes("recordEdits.cancelEditRequest")));
+  assert.ok(find(correctionRequired, (node) => node?.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.cancelEditRequest"));
   const historical = renderObservationDetails(row, [], { observationVersionSnapshot: {
     content: { heightCm: 25, zone: "Old zone" }, status: "Rejected", reviewComment: "Historical feedback",
     original: true, current: false, createdAt: "2026-11-12T00:00:00Z", photoIds: [],
@@ -329,6 +332,10 @@ test("Observation withdrawal is rendered only for an eligible current field requ
   const find = (node, id) => node && typeof node === "object" && (node.props?.testID === id ? node : children(node).map((child) => find(child, id)).find(Boolean));
   const button = find(tree, "withdraw-original-observation");
   assert.ok(button, "the actual eligible Observation Details screen renders Withdraw");
+  assert.ok(find(find(tree, "observation-detail-heading"), "withdraw-original-observation"),
+    "record withdrawal sits beside the Observation title");
+  assert.equal(find(find(tree, "observation-record-meta"), "withdraw-original-observation"), undefined,
+    "the Record ID card has no withdrawal icon");
   button.props.onPress();
   assert.equal(alerts[0][0], "observationWithdrawal.confirmTitle");
   assert.equal(requests.length, 0, "opening confirmation does not withdraw");
@@ -385,15 +392,15 @@ test("Cancel Edit Request is owner-scoped and available only for active non-hist
   const species = source("../screens/BotanistSpeciesRequestDetail.js");
   for (const detail of [observation, plant, species]) {
     assert.ok(detail.includes('"Pending Review", "Correction Required"'));
-    assert.ok(detail.includes("deleteEditTitle"));
-    assert.ok(detail.includes("deleteEditMessage"));
-    assert.ok(detail.includes('t("recordEdits.cancelEditRequest")'));
+    assert.ok(detail.includes(detail === plant ? "plantWithdrawal.editConfirmTitle" : "recordEdits.deleteEditTitle"));
+    assert.ok(detail.includes(detail === plant ? "plantWithdrawal.editConfirmMessage" : "recordEdits.deleteEditMessage"));
+    assert.ok(detail.includes(detail === plant ? 't("plantWithdrawal.editAction")' : 't("recordEdits.cancelEditRequest")'));
   }
   assert.ok(observation.includes("selectedEdit.owner_subject === `staff:${accountId}`"));
   assert.ok(observation.includes("/observation-edits/${encodeURIComponent(selectedEdit.id)}/cancel"));
   assert.ok(plant.includes("changeInfo.owner_subject === `staff:${botanistId}`"));
   assert.ok(plant.includes("activeSelectedChangeId === String(route.params.selectedChangeId)"));
-  assert.ok(plant.includes("result.pending && String(result.pending.id) === selectedChangeId"));
+  assert.ok(plant.includes("String(selected.id) === selectedChangeId"));
   assert.ok(plant.includes("/record-changes/${encodeURIComponent(changeInfo.id)}/cancel"));
   assert.ok(species.includes("changeInfo.owner_subject === `staff:${accountId}`"));
   assert.ok(species.includes("activeSelectedChangeId === String(route.params.selectedChangeId)"));

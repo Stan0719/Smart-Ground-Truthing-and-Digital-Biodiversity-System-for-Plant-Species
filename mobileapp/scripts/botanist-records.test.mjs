@@ -397,7 +397,7 @@ test("My Submissions renders the resolved label while keeping the Original revie
   assert.ok(text(current).includes("Current Version"));
 });
 
-test("My Submissions Edit 3 route renders Cancel Edit Request on its historical Plant Details screen", async () => {
+test("Plant history shows withdrawal only for the exact active edit and never for Superseded Original", async () => {
   const dashboard = submissionsUtils();
   const changes = [
     { id: "plant24-edit-2", plant_id: 24, owner_subject: "staff:owner", status: "Rejected", revision: 1 },
@@ -405,8 +405,8 @@ test("My Submissions Edit 3 route renders Cancel Edit Request on its historical 
   ];
   const history = dashboard.mergeRecordChangeSubmissions("plant", 24, { history_available: true,
     versions: [
-      { id: "v24-1", version_number: 1, status: "Approved", created_at: "2026-01-01", snapshot: { plant_id: 24, scientific_name: "Plant 24", species_details: { scientific_name: "Species 24" } } },
-      { id: "v24-3", change_id: "plant24-edit-3", version_number: 3, status: "Correction Required", created_at: "2026-11-13", snapshot: { plant_id: 24, scientific_name: "Plant 24 Edit 3", species_details: { scientific_name: "Species 24" } } },
+      { id: "v24-1", version_number: 1, status: "Superseded", created_at: "2026-01-01", snapshot: { plant_id: 24, observation_id: "original-24", scientific_name: "Plant 24", species_details: { scientific_name: "Species 24" } } },
+      { id: "v24-3", change_id: "plant24-edit-3", change_revision: 1, owner_subject: "staff:owner", version_number: 3, status: "Correction Required", created_at: "2026-11-13", snapshot: { plant_id: 24, scientific_name: "Plant 24 Edit 3", species_details: { scientific_name: "Species 24" } } },
     ], prior_changes: [] }, changes);
   const cards = dashboard.versionCardItems("plant", 24, history);
   const group = dashboard.buildSubmissionGroups([{ id: 24, status: "Approved", registeredAt: "2026-01-01" }], "plant", { "plant:24": cards })[0];
@@ -416,6 +416,7 @@ test("My Submissions Edit 3 route renders Cancel Edit Request on its historical 
   assert.equal(params.plantId, 24);
   assert.equal(params.versionId, "v24-3", "version ID remains distinct from request ID");
   assert.equal(params.selectedChangeId, "plant24-edit-3");
+  assert.equal(params.selectedChangeRevision, 1);
   assert.equal(params.historicalRecordDetail, true);
 
   let index = 0, slots = [], focus;
@@ -423,7 +424,8 @@ test("My Submissions Edit 3 route renders Cancel Edit Request on its historical 
     const i = index++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
     return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }];
   } };
-  const native = { StyleSheet: { create: (value) => value }, Alert: { alert() {} }, Platform: { OS: "ios" }, UIManager: {}, LayoutAnimation: { Presets: { easeInEaseOut: "ease" }, configureNext() {} } };
+  let alertArgs, cancelFails = false, requestReadFails = false, originalEditable = false; const calls = [], navigations = [];
+  const native = { StyleSheet: { create: (value) => value }, Alert: { alert: (...args) => { alertArgs = args; } }, Platform: { OS: "ios" }, UIManager: {}, LayoutAnimation: { Presets: { easeInEaseOut: "ease" }, configureNext() {} } };
   for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "ScrollView", "Image", "Modal", "ActivityIndicator", "RefreshControl"]) native[name] = name;
   const screen = moduleFrom("screens/BotanistPlantDetail.js", { react: hooks, "react-native": native,
     "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
@@ -433,8 +435,13 @@ test("My Submissions Edit 3 route renders Cancel Edit Request on its historical 
         assert.equal(kind, "plant"); assert.equal(String(target), "24");
         return { available: true, pending: changes.find((change) => change.id === params.selectedChangeId), latest: changes[1] };
       } },
-    "../utils/plantApi": { plantApi: async (path) => path.endsWith("/withdrawal")
-      ? { eligible: true, observation_id: "original-24" } : {}, fetchSpeciesDetail: async () => ({}),
+    "../utils/plantApi": { plantApi: async (path) => { calls.push(path); if (path.endsWith("/withdrawal")) return { eligible: true, editable: originalEditable, observation_id: "original-24" };
+      if (path === "/record-changes/plant24-edit-3") {
+        if (requestReadFails) throw Error("request lookup failed");
+        return { change: changes[1] };
+      }
+      if (path.endsWith("/cancel")) { if (cancelFails) throw Error("cancel failed"); changes[1].status = "Cancelled"; }
+      return {}; }, fetchSpeciesDetail: async () => ({}),
       getPlantRegisteredByDisplayName: (_plant, _user, fallback) => fallback },
     "../utils/plantPhotoGallery": { stepPhotoIndex: () => 0 },
     "../translations/i18n": { useAppTranslation() {}, t: (key) => key, translateLabel: (value) => value,
@@ -444,23 +451,126 @@ test("My Submissions Edit 3 route renders Cancel Edit Request on its historical 
     "../components/OriginalUpdatedField": { default: ({ children }) => React.createElement("View", null, children) },
   });
   const route = { params: { ...params, botanist: { id: "owner", name: "Botanist" } } };
-  const render = () => { index = 0; return screen.default({ route, navigation: { navigate() {}, goBack() {} } }); };
-  render(); const cleanup = focus(); await new Promise((resolve) => setImmediate(resolve)); const tree = render();
+  const render = () => { index = 0; return screen.default({ route, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } }); };
   const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
   const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
   function find(node, predicate) { if (!node || typeof node !== "object") return null; if (predicate(node)) return node;
     for (const child of children(node)) { const match = find(child, predicate); if (match) return match; } return null; }
-  const cancelButton = find(tree, (node) => node?.type === "TouchableOpacity" && text(node).includes("recordEdits.cancelEditRequest"));
-  assert.ok(cancelButton, "owner's exact active Pending Review request renders its Cancel Edit Request button");
+  render(); const cleanup = focus();
+  assert.equal(find(render(), (node) => node?.props?.testID === "withdraw-pending-plant-edit"), null,
+    "the button waits for the exact owned request response");
+  await new Promise((resolve) => setImmediate(resolve)); const tree = render();
+  const cancelButton = find(tree, (node) => node?.props?.testID === "withdraw-pending-plant-edit");
+  assert.ok(cancelButton, "owner's exact active Pending Review request renders its withdrawal button");
+  assert.equal(find(tree, (node) => node?.props?.testID === "edit-own-plant"), null,
+    "an approved-record edit proposal remains read-only while awaiting Officer review");
+  assert.ok(find(find(tree, (node) => node?.props?.testID === "historical-plant-heading"),
+    (node) => node?.props?.testID === "withdraw-pending-plant-edit"), "edit withdrawal is beside the Plant Record title");
+  assert.equal(find(find(tree, (node) => node?.props?.testID === "historical-plant-record-meta"),
+    (node) => node?.props?.testID === "withdraw-pending-plant-edit"), null, "the Record ID card contains no trash icon");
+  assert.equal(cancelButton.props.accessibilityLabel, "plantWithdrawal.editAction");
   assert.ok(text(tree).includes("Plant 24 Edit 3"));
+  cancelButton.props.onPress();
+  assert.equal(alertArgs[0], "plantWithdrawal.editConfirmTitle");
+  assert.equal(alertArgs[1], "plantWithdrawal.editConfirmMessage");
+  assert.equal(calls.some((path) => path.endsWith("/cancel")), false);
+  cancelFails = true; await alertArgs[2][1].onPress();
+  assert.ok(find(render(), (node) => node?.props?.testID === "withdraw-pending-plant-edit"), "failed cancellation leaves the request actionable");
+  cancelFails = false; cancelButton.props.onPress(); await alertArgs[2][1].onPress();
+  assert.ok(calls.includes("/record-changes/plant24-edit-3/cancel"), "the exact request ID, not the Plant or version ID, is submitted");
+  assert.equal(find(render(), (node) => node?.props?.testID === "withdraw-pending-plant-edit"), null);
+  assert.ok(text(render()).includes("Cancelled"));
   cleanup();
+  requestReadFails = true;
+  route.params = { ...params, botanist: { id: "owner", name: "Botanist" } };
+  render(); const failedReadCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(find(render(), (node) => node?.props?.testID === "withdraw-pending-plant-edit"), null,
+    "a failed request lookup cannot grant cancellation");
+  failedReadCleanup(); requestReadFails = false;
+  changes[1].revision = 2;
+  route.params = { ...params, botanist: { id: "owner", name: "Botanist" } };
+  render(); const staleCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(find(render(), (node) => node?.props?.testID === "withdraw-pending-plant-edit"), null,
+    "a newer request revision cannot be withdrawn from an older version card");
+  staleCleanup();
   route.params = { ...route.params, selectedChangeId: undefined, historicalOriginal: true,
+    historicalOriginalSubmissionWithdrawalCandidate: false,
     historicalSnapshot: { plant_id: 24, observation_id: "original-24", scientific_name: "Plant 24 Original" },
-    historicalVersionStatus: "Pending Review", submissionVersionLabel: "Original" };
+    historicalVersionStatus: "Superseded", historicalSuperseded: true, submissionVersionLabel: "Original" };
   render(); const originalCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(find(render(), (node) => node?.props?.testID === "withdraw-original-plant"),
-    "the active Original history row shows withdrawal after its owner-scoped availability check");
+  assert.equal(find(render(), (node) => node?.props?.testID === "withdraw-original-plant"), null,
+    "Superseded Original never shows withdrawal even when the live Plant is eligible");
+  assert.equal(find(render(), (node) => node?.props?.testID === "edit-own-plant"), null);
   originalCleanup();
+  route.params = { ...route.params, historicalOriginal: false,
+    historicalOriginalSubmissionWithdrawalCandidate: true, historicalVersionStatus: "Pending Review",
+    historicalSuperseded: false, historicalVersionNumber: 3, submissionVersionLabel: "Edit 2" };
+  render(); const pendingOriginalCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(find(render(), (node) => node?.props?.testID === "edit-own-plant"), null,
+    "the current Pending Review revision remains read-only when the backend says it is not editable");
+  pendingOriginalCleanup(); originalEditable = true;
+  render(); const editableCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  const editButton = find(render(), (node) => node?.props?.testID === "edit-own-plant");
+  assert.ok(editButton, "the newest backend-authorized Pending Review revision shows Edit");
+  editButton.props.onPress();
+  assert.deepEqual(navigations.at(-1), ["EditPlant", { plantId: "24", botanist: { id: "owner", name: "Botanist" },
+    pendingObservationId: "original-24", pendingRevision: 3, pendingStatus: "Pending Review", correction: false }]);
+  const originalRevisionButton = find(render(), (node) => node?.props?.testID === "withdraw-original-plant");
+  assert.ok(originalRevisionButton, "the active pending revision of an original submission uses original withdrawal eligibility");
+  assert.ok(find(find(render(), (node) => node?.props?.testID === "historical-plant-heading"),
+    (node) => node?.props?.testID === "withdraw-original-plant"));
+  assert.equal(find(render(), (node) => node?.props?.testID === "withdraw-pending-plant-edit"), null);
+  originalRevisionButton.props.onPress();
+  assert.equal(alertArgs[0], "plantWithdrawal.confirmTitle", "an original revision is not described as an edit request");
+  await alertArgs[2][1].onPress();
+  assert.ok(calls.includes("/plant-submissions/24/withdraw"));
+  editableCleanup();
+});
+
+test("real Plant history shape marks only the newest unlinked pending original revision", () => {
+  const dashboard = submissionsUtils();
+  const record = { id: 13, registeredBy: "staff:owner", status: "Pending Review",
+    initialObservationId: "original-13", initialObservation: { id: "original-13", revision: 3 } };
+  const response = { history_available: true, versions: [
+    { id: "v3", plant_id: 13, version_number: 3, status: "Pending Review", change_id: null,
+      owner_subject: "staff:owner", snapshot: { plant_id: 13, observation_id: "original-13" } },
+    { id: "v1", plant_id: 13, version_number: 1, status: "Superseded", change_id: null,
+      owner_subject: "staff:owner", snapshot: { plant_id: 13, observation_id: "original-13" } },
+    { id: "v2", plant_id: 13, version_number: 2, status: "Superseded", change_id: null,
+      owner_subject: "staff:owner", snapshot: { plant_id: 13, observation_id: "original-13" } },
+  ] };
+  const group = dashboard.buildSubmissionGroups([record], "plant", { "plant:13": dashboard.versionCardItems("plant", 13, response) })[0];
+  assert.deepEqual(group.versions.filter((row) => row.originalSubmissionWithdrawalCandidate).map((row) => row.versionNumber), [3]);
+  const pending = group.versions.find((row) => row.versionNumber === 3);
+  const original = group.versions.find((row) => row.versionNumber === 1);
+  const previousEdit = group.versions.find((row) => row.versionNumber === 2);
+  assert.equal(dashboard.submissionVersionRoute(pending, { id: "owner" })[1].historicalOriginalSubmissionWithdrawalCandidate, true);
+  assert.equal(dashboard.submissionVersionRoute(pending, { id: "owner" })[1].selectedChangeId, undefined);
+  assert.equal(dashboard.submissionVersionRoute(pending, { id: "other" })[1].historicalOriginalSubmissionWithdrawalCandidate, false);
+  assert.equal(dashboard.submissionVersionRoute(original, { id: "owner" })[1].historicalOriginalSubmissionWithdrawalCandidate, false);
+  assert.equal(dashboard.submissionVersionRoute(previousEdit, { id: "owner" })[1].historicalOriginalSubmissionWithdrawalCandidate, false);
+  assert.equal(dashboard.submissionVersionRoute(pending, { id: "other" })[1].selectedChangeId, undefined);
+});
+
+test("Plant version route identifies only owner-linked active edit versions", () => {
+  const dashboard = submissionsUtils();
+  const owner = { id: "owner" };
+  const base = { kind: "plant", targetId: 24, priorChangeId: "edit-2", changeRevision: 1,
+    versionId: "version-2", versionNumber: 2, status: "Pending Review",
+    raw: { owner_subject: "staff:owner" }, snapshot: { plant_id: 24 } };
+  const route = (row, botanist = owner) => dashboard.submissionVersionRoute({ ...base, ...row }, botanist)[1];
+  assert.equal(route({}).selectedChangeId, "edit-2");
+  assert.equal(route({}).selectedChangeRevision, 1);
+  for (const status of ["Withdrawn", "Approved", "Rejected", "Superseded", "Cancelled"])
+    assert.equal(route({ status }).selectedChangeId, undefined, status);
+  assert.equal(route({ superseded: true }).selectedChangeId, undefined);
+  assert.equal(route({ original: true }).selectedChangeId, undefined);
+  assert.equal(route({}, { id: "other" }).selectedChangeId, undefined);
+  assert.equal(route({ priorChangeId: undefined }).selectedChangeId, undefined,
+    "an unlinked version cannot use its version ID as a request ID");
+  const newer = route({ priorChangeId: "edit-3", versionId: "version-3", versionNumber: 3 });
+  assert.equal(newer.selectedChangeId, "edit-3");
+  assert.equal(newer.versionId, "version-3");
 });
 
 test("Plant 13 legacy Pending Review Edit 1 remains read-only without a linked change request", async () => {
@@ -902,7 +1012,11 @@ test("actual plant detail loads the existing owned ID from API and displays its 
   blockedCleanup(); originalEditable = true;
   render(); const resumedCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
   const withdrawAction = find((node) => node?.props?.testID === "withdraw-original-plant", render());
-  assert.ok(withdrawAction, "eligible Original Plant shows withdrawal inside its summary card");
+  assert.ok(withdrawAction, "eligible Original Plant shows withdrawal beside its heading");
+  const heading = find((node) => node?.props?.testID === "plant-detail-heading", render());
+  assert.ok(find((node) => node?.props?.testID === "withdraw-original-plant", heading));
+  assert.equal(find((node) => node?.props?.testID === "withdraw-original-plant",
+    find((node) => node?.props?.testID === "plant-record-meta", render())), undefined);
   assert.ok(find((node) => node?.props?.testID === "plant-record-meta", tree));
   withdrawAction.props.onPress();
   assert.equal(alertArgs[0], "Withdraw Plant Submission?");
@@ -1315,6 +1429,8 @@ test("read-only request detail renders actual fields, review metadata and authen
   assert.deepEqual(requested, ["owner", "1"]); assert.ok(!text(tree).includes("Delete"));
   const withdrawButton = find((node) => node?.props?.testID === "withdraw-original-species", tree);
   assert.ok(withdrawButton, "eligible owner sees Withdraw Submission");
+  assert.ok(find((node) => node?.props?.testID === "withdraw-original-species",
+    find((node) => node?.props?.testID === "species-detail-heading", tree)));
   withdrawButton.props.onPress();
   assert.equal(alerts[0][0], "speciesWithdrawal.confirmTitle");
   assert.equal(withdrawalCalls.length, 0, "opening confirmation does not withdraw");

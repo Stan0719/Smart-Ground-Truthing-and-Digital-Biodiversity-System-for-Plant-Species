@@ -126,6 +126,12 @@ export default function NotificationObservation({ route, navigation, user }) {
     canWithdrawOriginalObservation(row, activeEdit, selectedDetail && !activeOriginalSnapshot, accountId);
   const mustWithdrawPlant = !readOnlyApproved && (!selectedDetail || activeOriginalSnapshot) && row?.owner_subject === `staff:${accountId}` &&
     row.origin_type !== "subsequent_observation" && !row.withdrawn_at && ["Pending Review", "Correction Required"].includes(row.status);
+  const canCancelSelectedEdit = selectedEdit && selectedEdit.owner_subject === `staff:${accountId}` && activeEdit?.id === selectedEdit.id &&
+    (!selectedVersion || (selectedVersion.request_revision != null
+      ? Number(selectedVersion.request_revision) === Number(selectedEdit.revision)
+      : Number(selectedEdit.revision) === 1)) &&
+    ["Pending Review", "Correction Required"].includes(selectedEdit.status) &&
+    (selectedEdit.status === "Correction Required" || selectedEdit.revision === 1);
   const confirmWithdrawal = () => Alert.alert(t("observationWithdrawal.confirmTitle"), t("observationWithdrawal.confirmMessage"), [
     { text: t("observationWithdrawal.keepSubmission"), style: "cancel" },
     { text: t("observationWithdrawal.action"), style: "destructive", onPress: async () => {
@@ -165,9 +171,32 @@ export default function NotificationObservation({ route, navigation, user }) {
       <TouchableOpacity style={styles.button} onPress={() => setRetry((value) => value + 1)}><Text style={styles.buttonText}>{t("common.tryAgain")}</Text></TouchableOpacity>
     </View>}
     {row && <>
-    <View style={styles.titleRow}>
+    <View style={styles.titleRow} testID="observation-detail-heading">
       <Text style={styles.title}>{t("notificationObservation.recordTitle")}</Text>
+      {(canEdit || canWithdraw || canCancelSelectedEdit) && <View style={styles.headingActions}>
       {canEdit && <EditAction testID="edit-own-observation" onPress={() => navigation.navigate("FieldCollectionEdit", { observation: row, plantId: row.plant_id, editRequestMode: true })} />}
+      {canWithdraw && <TouchableOpacity testID="withdraw-original-observation"
+        accessibilityRole="button" accessibilityLabel={t("observationWithdrawal.action")} disabled={withdrawing}
+        style={[styles.deleteEditButton, withdrawing && styles.disabledButton]} onPress={confirmWithdrawal}>
+        {withdrawing ? <ActivityIndicator size="small" color="#B42318" /> : <Ionicons name="trash-outline" size={21} color="#B42318" />}
+      </TouchableOpacity>}
+      {canCancelSelectedEdit && <TouchableOpacity
+        style={[styles.deleteEditButton, cancellingEdit && styles.disabledButton]} disabled={cancellingEdit} accessibilityRole="button" accessibilityLabel={t("recordEdits.cancelEditRequest")}
+        onPress={() => Alert.alert(t("recordEdits.deleteEditTitle"), t("recordEdits.deleteEditMessage"), [
+          { text: t("common.cancel"), style: "cancel" },
+          { text: t("recordEdits.cancelEditRequest"), style: "destructive", onPress: async () => {
+            setCancelEditError(""); setCancellingEdit(true);
+            try {
+              await plantApi(`/observation-edits/${encodeURIComponent(selectedEdit.id)}/cancel`, { method: "POST", expectedAccountId: accountId, body: {} });
+              Alert.alert(t("recordEdits.cancelEditRequest"), t("recordEdits.editCancelled"));
+              setRetry((value) => value + 1);
+            } catch (error) { setCancelEditError(translateUIMessage(error.message || t("recordEdits.cancelEditFailed"))); }
+            finally { setCancellingEdit(false); }
+          } },
+        ])}>
+        {cancellingEdit ? <ActivityIndicator size="small" color="#B42318" /> : <Ionicons name="trash-outline" size={21} color="#B42318" />}
+      </TouchableOpacity>}
+      </View>}
     </View>
     <Text style={styles.subtitle}>{selectedDetail ? t("botanistPlantDetail.readOnlyVersionSubtitle") : t("notificationObservation.recordSubtitle")}</Text>
     {displayStatus === "Rejected" && <View style={styles.rejectedBanner} testID="observation-rejected-banner">
@@ -192,12 +221,6 @@ export default function NotificationObservation({ route, navigation, user }) {
         {!selectedSnapshot?.current && displayStatus === "Approved" && <Text style={styles.supersededVersionPill}>{t("recordEdits.supersededLabel")}</Text>}
       </View>}
       {!!withdrawError && <Text accessibilityRole="alert" style={styles.error}>{withdrawError}</Text>}
-      {canWithdraw && <View style={styles.withdrawAction}><TouchableOpacity testID="withdraw-original-observation"
-        accessibilityRole="button" accessibilityLabel={t("observationWithdrawal.action")} disabled={withdrawing}
-        style={[styles.deleteEditButton, withdrawing && styles.disabledButton]} onPress={confirmWithdrawal}>
-        {withdrawing ? <ActivityIndicator size="small" color="#A33F36" /> : <Ionicons name="arrow-undo-outline" size={17} color="#A33F36" />}
-        <Text style={styles.deleteEditText}>{withdrawing ? t("common.pleaseWait") : t("observationWithdrawal.action")}</Text>
-      </TouchableOpacity></View>}
       {mustWithdrawPlant && <View style={styles.parentWithdrawalNotice}>
         <Text style={styles.parentWithdrawalText}>{t("observationWithdrawal.parentRequired")}</Text>
         <TouchableOpacity testID="open-parent-plant-submission" accessibilityRole="button"
@@ -208,24 +231,6 @@ export default function NotificationObservation({ route, navigation, user }) {
           <Ionicons name="chevron-forward" size={17} color="#2F6B4F" />
         </TouchableOpacity>
       </View>}
-      {selectedEdit && selectedEdit.owner_subject === `staff:${accountId}` && activeEdit?.id === selectedEdit.id && ["Pending Review", "Correction Required"].includes(selectedEdit.status) &&
-        (selectedEdit.status === "Correction Required" || selectedEdit.revision === 1) && <View style={styles.cancelEditAction}><TouchableOpacity
-        style={[styles.deleteEditButton, cancellingEdit && styles.disabledButton]} disabled={cancellingEdit} accessibilityRole="button"
-        onPress={() => Alert.alert(t("recordEdits.deleteEditTitle"), t("recordEdits.deleteEditMessage"), [
-          { text: t("common.cancel"), style: "cancel" },
-          { text: t("recordEdits.cancelEditRequest"), style: "destructive", onPress: async () => {
-            setCancelEditError(""); setCancellingEdit(true);
-            try {
-              await plantApi(`/observation-edits/${encodeURIComponent(selectedEdit.id)}/cancel`, { method: "POST", expectedAccountId: accountId, body: {} });
-              Alert.alert(t("recordEdits.cancelEditRequest"), t("recordEdits.editCancelled"));
-              setRetry((value) => value + 1);
-            } catch (error) { setCancelEditError(translateUIMessage(error.message || t("recordEdits.cancelEditFailed"))); }
-            finally { setCancellingEdit(false); }
-          } },
-        ])}>
-        {cancellingEdit ? <ActivityIndicator size="small" color="#A33F36" /> : <Ionicons name="trash-outline" size={17} color="#A33F36" />}
-        <Text style={styles.deleteEditText}>{cancellingEdit ? t("common.loading") : t("recordEdits.cancelEditRequest")}</Text>
-      </TouchableOpacity></View>}
       {!!state.editHistoryError && <TouchableOpacity onPress={() => setRetry((value) => value + 1)} accessibilityRole="button"><Text style={styles.error}>{t("observationEdits.historyUnavailable")} · {t("common.tryAgain")}</Text></TouchableOpacity>}
     </View>
     <View style={styles.card} testID="observation-section-01">
@@ -319,6 +324,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#F7FBF4" },
   content: { padding: 20, paddingBottom: 20, width: "100%", maxWidth: 820, alignSelf: "center" },
   titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  headingActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   title: { fontSize: 25, fontWeight: "700", color: "#234B3A", flexShrink: 1 },
   subtitle: { marginTop: 6, marginBottom: 18, fontSize: 13, lineHeight: 19, color: "#718078" },
   rejectedBanner: { flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 12, backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318", marginBottom: 12 },
@@ -374,13 +380,10 @@ const styles = StyleSheet.create({
   error: { color: "#A34740", fontSize: 14, lineHeight: 21 },
   button: { minHeight: 46, borderRadius: 12, backgroundColor: "#35786F", alignItems: "center", justifyContent: "center", marginTop: 18 },
   buttonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  cancelEditAction: { borderTopWidth: 1, borderTopColor: "#C9DEC9", marginTop: 12, paddingTop: 10, alignItems: "flex-end" },
-  withdrawAction: { borderTopWidth: 1, borderTopColor: "#C9DEC9", marginTop: 12, paddingTop: 10, alignItems: "flex-end" },
   parentWithdrawalNotice: { marginTop: 12, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "#D8E7D5", backgroundColor: "#F1F7EE", gap: 8 },
   parentWithdrawalText: { color: "#52665A", fontSize: 13, lineHeight: 20 },
   parentPlantButton: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", alignSelf: "flex-start", gap: 6, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#E5F0E1", borderWidth: 1, borderColor: "#B7CFB5" },
   parentPlantButtonText: { color: "#2F6B4F", fontSize: 14, fontWeight: "700" },
-  deleteEditButton: { minHeight: 44, alignSelf: "flex-end", flexDirection: "row", alignItems: "center", gap: 7, justifyContent: "center", paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFF8F7", borderWidth: 1, borderColor: "#E8B9B2" },
+  deleteEditButton: { width: 44, height: 44, alignSelf: "flex-end", alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4" },
   disabledButton: { opacity: 0.65 },
-  deleteEditText: { color: "#A33F36", fontSize: 13, fontWeight: "700" },
 });

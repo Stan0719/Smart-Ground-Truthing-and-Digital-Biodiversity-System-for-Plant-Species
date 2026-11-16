@@ -30,6 +30,13 @@ test('empty gateway and tunnel responses have specific errors', async () => {
     await assert.rejects(createFaceClient({url,fetchImpl:async()=>response(status,'')} )('/challenge'),pattern);
   }
 });
+test('only the account service session rejection identifies an invalid saved token', async () => {
+ const api = (text) => createMobileApi({ resolveUrl: () => 'https://auth.example.invalid/api/mobile', fetchImpl: async () => response(401, text) });
+ await assert.rejects(api('{"error":"Unable to sign in. Check your email and password or contact the administrator."}')('/me', {}, 'a'.repeat(64)), error => error.code === 'AUTH_SESSION_INVALID');
+ for (const body of ['', '<html>Gateway sign-in</html>', '{"error":"Gateway access denied"}'])
+  await assert.rejects(api(body)('/me', {}, 'a'.repeat(64)), error => error.code !== 'AUTH_SESSION_INVALID');
+ await assert.rejects(api('{"error":"Unable to sign in. Check your email and password or contact the administrator."}')('/password', {}, undefined), error => error.code !== 'AUTH_SESSION_INVALID');
+});
 test('malformed JSON and invalid response shapes fail safely', async () => {
   for (const text of ['<html>Login</html>','null','[]']) await assert.rejects(createFaceClient({url,fetchImpl:async()=>response(200,text)})('/challenge'));
 });

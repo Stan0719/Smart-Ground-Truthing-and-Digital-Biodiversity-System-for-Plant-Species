@@ -17,7 +17,7 @@ function screen(file, dependencies) {
   }, module, module.exports);
   return module.exports.default;
 }
-function harness(file, { record, approved, species = false, locationDenied = false, failReuseOnce = false, photoSourceFailsOnce = false, pendingEdit = false, editAvailabilityError = false, conflictOnChange = false, draftSaveError = false, savedDraft = null, findDraftCandidate = null, speciesRequestId = null, speciesRequest = null, correctionChange = null, acknowledgement = undefined, catalog = [{ id: "6", scientificName: "Species name", commonName: "Common name" }], qrCodes = [{ qr_id: 2, qr_code: "current-token", plant_id: 8, status: "assigned" }, { qr_id: 3, qr_code: "free-token", plant_id: null, status: "generated" }] }) {
+function harness(file, { record, approved, species = false, locationDenied = false, failReuseOnce = false, photoSourceFailsOnce = false, pendingEdit = false, editAvailabilityError = false, conflictOnChange = false, draftSaveError = false, savedDraft = null, findDraftCandidate = null, speciesRequestId = null, speciesRequest = null, correctionChange = null, pendingVersionSelection = null, acknowledgement = undefined, catalog = [{ id: "6", scientificName: "Species name", commonName: "Common name" }], qrCodes = [{ qr_id: 2, qr_code: "current-token", plant_id: 8, status: "assigned" }, { qr_id: 3, qr_code: "free-token", plant_id: null, status: "generated" }] }) {
   let stateIndex = 0, refIndex = 0, states = [], refs = [], focus, alert, calls = [], draftSaves = [], navigations = [], photoReads = 0;
   const hooks = { ...React, useCallback: (fn) => fn, useRef: (initial) => {
     const index = refIndex++; if (!(index in refs)) refs[index] = { current: initial }; return refs[index];
@@ -52,7 +52,7 @@ function harness(file, { record, approved, species = false, locationDenied = fal
     "expo-location": { Accuracy: { High: 4 }, requestForegroundPermissionsAsync: async () => ({ status: locationDenied ? "denied" : "granted" }),
       getCurrentPositionAsync: async () => ({ coords: { latitude: 4.6, longitude: 113.8, altitude: 25.34, accuracy: 6.78 } }) },
     "expo-file-system/legacy": { readAsStringAsync: async () => { photoReads++; return "aGVsbG8="; }, EncodingType: { Base64: "base64" } },
-    "@expo/vector-icons": { Ionicons: "Ionicons" },
+    "@expo/vector-icons": { Ionicons: "Ionicons" }, "@expo/vector-icons/Ionicons": { default: "Ionicons" },
     "../components/OriginalUpdatedField": { default: ({ children, label, originalContent, originalValue }) =>
       React.createElement("View", null,
         label ? React.createElement("Text", null, label) : null,
@@ -78,7 +78,7 @@ function harness(file, { record, approved, species = false, locationDenied = fal
     "../translations/i18n": { useAppTranslation() {}, t: (key) => key, translateUIMessage: (value) => value },
   };
   const component = screen(file, deps);
-  const route = { params: { botanist: { id: "owner" }, ...(correctionChange ? { correctionChangeId: correctionChange.id, correction: true } : {}), ...(species ? { requestId: "1" } : { plantId: "8", ...(savedDraft ? { formDraftKey: savedDraft.client_key } : {}), ...(speciesRequestId ? { speciesRequestId } : {}) }) } };
+  const route = { params: { botanist: { id: "owner" }, ...(correctionChange ? { correctionChangeId: correctionChange.id, correction: true } : {}), ...(species ? { requestId: "1" } : { plantId: "8", ...(pendingVersionSelection || {}), ...(savedDraft ? { formDraftKey: savedDraft.client_key } : {}), ...(speciesRequestId ? { speciesRequestId } : {}) }) } };
   const navigation = { goBack() {}, setParams(params) { navigations.push(["setParams", params]); }, navigate(...args) { navigations.push(args); } };
   const render = () => { stateIndex = 0; refIndex = 0; return component({ route, navigation }); };
   function walk(node, predicate) {
@@ -106,6 +106,36 @@ const plant = (status) => ({ id: "8", speciesId: "6", scientificName: "Manual pl
 const request = (status) => ({ request_id: 1, content_revision: 1, request_status: status, scientific_name: "Species A", common_name: "Common A",
   genus_name: "Genus A", family_name: "Family A", conservation_status: "Least Concern", description: "Original", habitat: "Forest",
   photo: { uri: "https://example.invalid/species" } });
+
+test("Plant edit and correction labels mark only required inputs", async () => {
+  for (const status of ["Pending Review", "Approved"]) {
+    const h = harness("screens/EditPlantRecord.js", { record: plant(status) });
+    h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+    const labels = h.collect(h.render(), (node) => node.type === "Text").map((node) => h.text(node));
+    for (const field of ["plantScientificName", "heightCm", "healthStatus", "lifeStage", "morphology", "latitude", "longitude"])
+      assert.ok(labels.includes(`recordEdits.${field} *`), `${status}: ${field}`);
+    assert.ok(labels.includes("addPlantWorkflow.approvedSpecies *"), `${status}: approved species`);
+    for (const field of ["notes", "zone", "accuracy_m", "altitudeM", "qr_id", "plantPhotos"])
+      assert.ok(!labels.includes(`recordEdits.${field} *`), `${status}: ${field} remains optional or reusable`);
+  }
+});
+
+test("Species edit and correction labels mark seven required fields, not replacement photo", async () => {
+  const h = harness("screens/EditSpeciesRequest.js", { record: request("Pending Review"), species: true });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  const labels = h.collect(h.render(), (node) => node.type === "Text").map((node) => h.text(node));
+  for (const field of ["genus_name", "family_name", "conservation_status", "description", "habitat"])
+    assert.ok(labels.includes(`recordEdits.${field} *`), field);
+  assert.ok(labels.includes("addPlant.scientificName"));
+  assert.ok(labels.includes("addPlant.commonName"));
+  assert.ok(!labels.includes("recordEdits.speciesPhoto *"));
+  for (const language of ["en", "ms", "zh"]) {
+    const translations = JSON.parse(readFileSync(new URL(`../translations/${language}.json`, import.meta.url), "utf8"));
+    assert.ok(translations.addPlant.scientificName.endsWith(" *"), `${language}: scientific name`);
+    assert.ok(translations.addPlant.commonName.endsWith(" *"), `${language}: common name`);
+    assert.ok(translations.addPlantWorkflow.approvedSpecies, `${language}: approved species`);
+  }
+});
 
 test("Plant correction keeps a selected species in a bounded, searchable list", async () => {
   const catalog = Array.from({ length: 24 }, (_, index) => ({ id: String(index + 1), scientificName: `Species ${index + 1}`, commonName: `Common ${index + 1}` }));
@@ -307,6 +337,36 @@ for (const approved of [false, true]) {
     assert.deepEqual(h.navigations.at(-1), ["BotanistSubmissions", { botanist: { id: "owner" }, openTarget: { kind: "species", recordId: "1" } }]);
   });
 }
+
+test("latest Pending Review Plant history revision opens its current owned data and saves with that revision", async () => {
+  const current = plant("Pending Review");
+  current.scientificName = "Latest Edit 2 plant";
+  current.latestObservation = { ...current.latestObservation, id: "initial-8", revision: 3,
+    content: { ...current.latestObservation.content, heightCm: 37, zone: "Latest zone" } };
+  const selection = { pendingObservationId: "initial-8", pendingRevision: 3, pendingStatus: "Pending Review" };
+  const h = harness("screens/EditPlantRecord.js", { record: current, pendingVersionSelection: selection });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  const tree = h.render();
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Latest Edit 2 plant"));
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "37"));
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Latest zone"));
+  assert.ok(h.walk(tree, (node) => node.type === "Image" && node.props.source.uri.includes("existing")));
+  h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.onPress();
+  await h.alert[2][1].onPress();
+  const saved = h.calls.find(([path]) => path === "/my-plants/8");
+  assert.equal(saved[1].body.expected_revision, 3);
+  assert.equal(saved[1].body.scientific_name, "Latest Edit 2 plant");
+  assert.equal(saved[1].body.species_id, 6);
+  assert.equal(saved[1].body.content.heightCm, 37);
+  assert.equal(saved[1].body.content.zone, "Latest zone");
+  assert.equal(Object.hasOwn(saved[1].body, "photo_ids"), false, "unchanged photos remain attached");
+
+  const stale = harness("screens/EditPlantRecord.js", { record: current,
+    pendingVersionSelection: { ...selection, pendingRevision: 2 } });
+  stale.render(); stale.focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(stale.text(stale.render()).includes("botanistDrafts.editConflict"));
+  assert.equal(stale.calls.some(([path]) => path === "/my-plants/8"), false);
+});
 
 test("approved plant edit with a pending reviewed change blocks before reading selected photo files", async () => {
   const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), pendingEdit: true });

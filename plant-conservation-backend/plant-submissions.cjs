@@ -6,6 +6,7 @@ const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { originColumnAvailable } = require("./observation-origin.cjs");
 const { transaction, audit, subject, fail, text, id, fieldContent, assertNewSpecies, speciesRow } = require("./domain.cjs");
+const { normalizeSpeciesName, sqlSpeciesName } = require("./species-name.cjs");
 const { assertQrAssignmentAllowed, normalizeQrPlantSchema } = require("./qr-plant-mode.cjs");
 const { initialVersionAvailable, appendInitialVersion, plantPhotoRefs } = require("./record-version-history.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
@@ -25,10 +26,23 @@ async function preparePhoto(photo) {
       .resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
   } catch { fail(400, "Invalid or oversized photo. Choose a different image and retry."); }
 }
-async function createSpecies(c, data, user) {
-  await assertNewSpecies(c, data.scientific_name);
-  if ((await c.query("SELECT request_id FROM species_request_submission WHERE lower(btrim(scientific_name))=lower(btrim($1)) AND request_status='Pending Review'", [data.scientific_name])).rows.length)
-    fail(409, "A request for this scientific name is already pending review.");
+async function createSpecies(c, data, user, existingRequestId = null) {
+  await assertNewSpecies(c, data.scientific_name, { approvedOnly: true });
+  const normalizedName = normalizeSpeciesName(data.scientific_name);
+  const active = (await c.query(`SELECT request_id,owner_subject,request_status FROM species_request_submission
+    WHERE ${sqlSpeciesName("scientific_name")}=$1 AND request_status IN ('Pending Review','Correction Required')
+      AND ($2::integer IS NULL OR request_id<>$2)
+    ORDER BY (owner_subject=$3) DESC,submitted_at DESC,request_id DESC LIMIT 1`,
+    [normalizedName, existingRequestId, subject(user)])).rows[0];
+  if (active) {
+    const isOwn = active.owner_subject === subject(user);
+    const correction = isOwn && active.request_status === "Correction Required";
+    throw Object.assign(Error("A species request with this name is already active."), {
+      status: 409, code: correction ? "SPECIES_DUPLICATE_CORRECTION" : "SPECIES_DUPLICATE_PENDING",
+      duplicate_type: correction ? "correction_required" : "pending",
+      ...(isOwn ? { request_id: active.request_id, request_status: active.request_status } : {}),
+    });
+  }
   const family = (await c.query("SELECT family_id FROM family WHERE lower(btrim(family_name))=lower(btrim($1)) ORDER BY family_id LIMIT 1", [data.family_name])).rows[0]
     || (await c.query("INSERT INTO family(family_name) VALUES($1) RETURNING family_id", [data.family_name])).rows[0];
   const genus = (await c.query("SELECT genus_id FROM genus WHERE lower(btrim(genus_name))=lower(btrim($1)) AND family_id=$2 ORDER BY genus_id LIMIT 1", [data.genus_name, family.family_id])).rows[0]
@@ -126,9 +140,10 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
   app.post("/api/plant-submissions", allow("plants.create"), async (req, res) => {
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b) || Object.keys(b).some((key) =>
-      !["species_id", "new_species", "scientific_name", "content", "latitude", "longitude", "accuracy_m", "qr_id", "client_key", "photos"].includes(key)))
+      !["species_id", "species_request_id", "new_species", "scientific_name", "content", "latitude", "longitude", "accuracy_m", "qr_id", "client_key", "photos"].includes(key)))
       fail(400, "Invalid plant submission fields.");
-    if ((b.species_id !== undefined) === (b.new_species !== undefined)) fail(400, "Select an existing species or provide new species details.");
+    if ([b.species_id, b.species_request_id, b.new_species].filter((value) => value !== undefined).length !== 1)
+      fail(400, "Select one existing, pending, or new species source.");
     const clientKey = text(b.client_key, 100), name = text(b.scientific_name, 200);
     id(String(b.qr_id));
     assertQrAssignmentAllowed(qrPlantSchema);
@@ -141,7 +156,8 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
       if (!b.new_species || typeof b.new_species !== "object" || Array.isArray(b.new_species) ||
         Object.keys(b.new_species).some((key) => ![...speciesFields, "photo"].includes(key))) fail(400, "Invalid new species fields.");
       speciesData = Object.fromEntries(speciesFields.map((key) => [key, text(b.new_species[key], ["description", "habitat"].includes(key) ? 4000 : 200)]));
-    } else id(String(b.species_id));
+    } else if (b.species_id !== undefined) id(String(b.species_id));
+    else id(String(b.species_request_id));
     const payloadHash = createHash("sha256").update(JSON.stringify(canonical(b))).digest("hex");
     const semanticRoles = validateRoles(b.photos);
     const photos = [];
@@ -155,9 +171,28 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
         return previous.result;
       }
       if (semanticRoles.some(Boolean) && !await rolesAvailable(c)) fail(503,"Semantic photo roles require migration 015.");
-      let speciesId;
+      let speciesId, requestId = null, pendingRequestClientKey = null;
       if (speciesData) speciesId = await createSpecies(c, speciesData, req.user);
-      else { await speciesRow(c, b.species_id, req.user); speciesId = b.species_id; }
+      else if (b.species_id !== undefined) { await speciesRow(c, b.species_id, req.user); speciesId = b.species_id; }
+      else {
+        const pending = (await c.query(`SELECT * FROM species_request_submission WHERE request_id=$1 FOR UPDATE`, [b.species_request_id])).rows[0];
+        if (!pending || pending.owner_subject !== subject(req.user) || pending.request_status !== 'Pending Review' || pending.approved_species_id)
+          fail(409, "This pending species request is no longer available. Refresh the species list.");
+        requestId = pending.request_id;
+        pendingRequestClientKey = pending.client_key;
+        if (pending.proposed_species_id) {
+          const proposed = (await c.query("SELECT species_id,rbac_data FROM species WHERE species_id=$1 FOR UPDATE", [pending.proposed_species_id])).rows[0];
+          if (!proposed || proposed.rbac_data?.approvalStatus !== 'Pending Review') fail(409, "The pending species request is inconsistent.");
+          speciesId = proposed.species_id;
+        } else {
+          speciesId = await createSpecies(c, pending, req.user, requestId);
+          await c.query("UPDATE species_request_submission SET proposed_species_id=$2 WHERE request_id=$1 AND proposed_species_id IS NULL", [requestId, speciesId]);
+          const photoId = randomUUID();
+          await c.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,FALSE,'image/jpeg',$5)",
+            [photoId, speciesId, subject(req.user), `species-request:${requestId}`, pending.photo]);
+          await setPointer(c, requestId, photoId);
+        }
+      }
       // Same inventory lock and assignment contract as existing plant registration.
       const qr = (await c.query("SELECT qr_id,qr_code FROM plant_app.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE", [b.qr_id])).rows[0];
       if (!qr) fail(409, "The selected QR code is no longer available.");
@@ -176,7 +211,6 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
         await recordRole(c,{assetId,plantId:plant.plant_id,observationId,role:semanticRoles[index],owner:subject(req.user)});
         if(semanticRoles[index]==='whole_plant')wholePlantAsset=assetId;
       }
-      let requestId = null;
       if (speciesData) {
         const request = (await c.query(`INSERT INTO species_request_submission(owner_subject,client_key,payload_hash,${speciesFields.join(",")},photo,proposed_species_id)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING request_id`, [subject(req.user), clientKey, payloadHash, ...speciesFields.map((key) => speciesData[key]), speciesPhoto, speciesId])).rows[0];
@@ -200,7 +234,8 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
         } });
       await audit(c, req.user, "plant_submitted", plant.plant_id);
       const response = { plant_id: plant.plant_id, id: observationId, species_id: speciesId, qr_token: qr.qr_code,
-        status: "Pending Review", species_request_id: requestId };
+        status: "Pending Review", species_request_id: requestId,
+        ...(b.species_request_id !== undefined ? { species_request_client_key: pendingRequestClientKey } : {}) };
       await c.query("INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES($1,$2,$3,$4)", [subject(req.user), clientKey, payloadHash, response]);
       if (officerNotifications) await officerNotifications.enqueue(c, observationId, requestId !== null);
       return response;

@@ -672,7 +672,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
               <TouchableOpacity style={styles.removePhotoButton}
                 accessibilityRole="button" accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
                 onPress={() => setPhotos((old) => old.filter((photo) => photo.client_key !== p.client_key))}>
-                <Ionicons name="close" size={18} color="#C85C5C" />
+                <Ionicons name="trash-outline" size={21} color="#B42318" />
               </TouchableOpacity>
             </View>
           ))}

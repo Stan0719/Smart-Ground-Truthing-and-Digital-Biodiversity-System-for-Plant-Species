@@ -214,6 +214,15 @@ export function buildSubmissionGroups(records, kind, versionRows = {}, historyAv
         version.superseded = version !== latestApproved;
       }
     }
+    if (kind === "plant" && ["Pending Review", "Correction Required"].includes(record.status) &&
+        record.initialObservationId != null && Number.isInteger(Number(record.initialObservation?.revision))) {
+      const candidates = versions.filter((version) => version.versionId && version.priorChangeId == null &&
+        ["Pending Review", "Correction Required"].includes(version.status) &&
+        String(version.snapshot?.observation_id) === String(record.initialObservationId) &&
+        version.raw?.owner_subject === record.registeredBy &&
+        version.versionNumber === Number(record.initialObservation.revision));
+      if (candidates.length === 1) candidates[0].originalSubmissionWithdrawalCandidate = true;
+    }
     markResolvedCorrections(versions, kind);
     const fallback = versions.length ? null : { key: `record:${key}`, kind, targetId: id,
       status: kind === "plant" ? (record.status !== "Approved" ? record.initialSubmissionStatus || record.status : record.status) : record.request_status,
@@ -260,6 +269,8 @@ export function versionDetailParams(row, botanist) {
     historicalVersionDate: row.createdAt, historicalReviewedAt: row.priorBase ? "" : row.raw?.reviewed_at || "",
     historicalReviewComment: row.priorBase ? "" : row.raw?.review_comment || "",
     historicalVersionNumber: row.versionNumber, historicalOriginal: Boolean(row.original),
+    historicalOriginalSubmissionWithdrawalCandidate: Boolean(row.originalSubmissionWithdrawalCandidate &&
+      row.raw?.owner_subject === `staff:${botanist?.id}`),
     historicalCurrent: Boolean(row.current), historicalSuperseded: Boolean(row.superseded),
     historicalSubmittedBy: row.raw?.owner_subject === `staff:${botanist?.id}`
       ? botanist?.name || "" : "", historicalPhotos: row.historicalPhotos || [] };
@@ -275,12 +286,15 @@ export function submissionVersionRoute(row, botanist) {
   if (row.current && row.status === "Approved") return row.kind === "plant"
     ? ["BotanistPlantDetail", { plantId: row.targetId, botanist }]
     : ["BotanistSpeciesRequestDetail", { requestId: String(row.targetId), botanist }];
+  const selectedChangeRevision = row.changeRevision ?? row.raw?.revision ?? null;
   const selectedChangeId = row.priorChangeId != null &&
+    !row.original && !row.superseded &&
     row.raw?.owner_subject === `staff:${botanist?.id}` &&
     ["Pending Review", "Correction Required"].includes(row.status)
     ? String(row.priorChangeId) : undefined;
   const params = { ...versionDetailParams(row, botanist), historicalRecordDetail: true,
-    ...(selectedChangeId ? { selectedChangeId } : {}) };
+    ...(selectedChangeId ? { selectedChangeId,
+      ...(selectedChangeRevision != null ? { selectedChangeRevision: Number(selectedChangeRevision) } : {}) } : {}) };
   return row.kind === "plant"
     ? ["BotanistPlantDetail", { ...params, plantId: row.targetId }]
     : ["BotanistSpeciesRequestDetail", { ...params, requestId: String(row.targetId) }];

@@ -1,5 +1,6 @@
 const diagnostics = typeof __DEV__ === "boolean" && __DEV__;
 import { mobileApiUrl, classifyConnectivityFailure } from "./apiConfiguration.js";
+const AUTH_SESSION_REJECTION = "Unable to sign in. Check your email and password or contact the administrator.";
 
 function responseError(message, status, code = "API_RESPONSE_FORMAT") {
   return Object.assign(new Error(message), { status, code });
@@ -16,7 +17,7 @@ export function faceCameraConfigured() {
   try { return Boolean(mobileApiUrl("face")); } catch { return false; }
 }
 
-export async function parseFaceResponse(response) {
+export async function parseFaceResponse(response, { sessionCheck = false } = {}) {
   const raw = await response.text();
   const status = response.status;
   if (!raw.trim()) {
@@ -33,7 +34,9 @@ export async function parseFaceResponse(response) {
     const reference = /^[a-f0-9]{12}$/.test(result.requestId || "") ? ` Reference: ${result.requestId}` : "";
     const error = new Error(message + reference);
     error.status = status;
-    error.code = typeof result.code === "string" && /^[a-zA-Z0-9_]{1,64}$/.test(result.code) ? result.code : "API_HTTP_ERROR";
+    error.code = sessionCheck && status === 401 && result.error === AUTH_SESSION_REJECTION
+      ? "AUTH_SESSION_INVALID"
+      : typeof result.code === "string" && /^[a-zA-Z0-9_]{1,64}$/.test(result.code) ? result.code : "API_HTTP_ERROR";
     error.requestId = reference ? result.requestId : undefined;
     throw error;
   }
@@ -95,7 +98,8 @@ export function createFaceClient({ url, fetchImpl = fetch, timeoutMs = 120000, b
       log("response_completed", { status: response.status, bodyLength: raw.length });
       if (service === "auth" && response.status === 404)
         throw Object.assign(new Error("Authentication endpoint not found. Set the auth API base to the Node authentication service /api/mobile path."), {status:404, code:"API_WRONG_SERVICE"});
-      return parseFaceResponse({ status: response.status, ok: response.ok, text: async () => raw });
+      return parseFaceResponse({ status: response.status, ok: response.ok, text: async () => raw },
+        { sessionCheck: service === "auth" && path === "/me" });
     };
     try { return await Promise.race([operation(), timeout]); }
     catch (error) {

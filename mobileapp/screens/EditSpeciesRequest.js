@@ -3,6 +3,7 @@ import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity
 import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, fetchBotanistRecordChange } from "../utils/botanistRecords";
 import { plantApi, recordChangePhotoSource } from "../utils/plantApi";
 import { downloadPhotoForReuse } from "../utils/photoReuse";
@@ -340,7 +341,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
     {autoSaveState === "saving" ? <Text style={styles.note}>{t("botanistDrafts.autoSaving")}</Text> : null}{autoSaveState === "saved" ? <Text style={styles.note}>{t("botanistDrafts.autoSaved")}</Text> : null}{draftMessage ? <Text style={styles.draftSuccess}>{draftMessage}</Text> : null}{draftError ? <Text style={styles.error}>{draftError}</Text> : null}
     {autoSaveState === "error" ? <TouchableOpacity onPress={() => { setDraftError(""); void autosave.retry().catch(() => {}); }} style={{ minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 4 }} accessibilityRole="button"><Text style={styles.secondaryText}>{t("common.tryAgain")}</Text></TouchableOpacity> : null}
     {state.request.request_status === "Approved" && !state.available && <Text style={styles.error}>{t("recordEdits.migrationRequired")}</Text>}
-    <View style={styles.card}>{fields.map((field) => <OriginalUpdatedField key={field} label={t(`recordEdits.${field}`)} originalValue={state.request[field]}>
+    <View style={styles.card}>{fields.map((field) => <OriginalUpdatedField key={field} label={["scientific_name", "common_name"].includes(field) ? t(field === "scientific_name" ? "addPlant.scientificName" : "addPlant.commonName") : `${t(`recordEdits.${field}`)} *`} originalValue={state.request[field]}>
       <TextInput style={[styles.input, ["description", "habitat"].includes(field) && styles.multiline]} value={form[field]}
         onChangeText={(next) => setForm((old) => ({ ...old, [field]: next }))} multiline={["description", "habitat"].includes(field)} />
     </OriginalUpdatedField>)}
@@ -356,7 +357,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
         <Text style={styles.photoNote}>{t("recordEdits.speciesPhotoSingleLimit")}</Text>
         {(photo || reuseOriginalPhoto || state.correctionPhoto) && <View style={styles.photoCard}><View style={[styles.photoFrame, reuseOriginalPhoto && !photo && styles.photoFrameSelected]}>
           <Image source={photo ? { uri: photo } : state.correctionPhoto || state.request.photo} style={styles.photo} resizeMode="cover" /></View>
-          <TouchableOpacity style={styles.removeSelection} onPress={() => { setPhoto(null); setReuseOriginalPhoto(false); }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Text style={styles.removeSelectionText}>×</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.removeSelection} onPress={() => { setPhoto(null); setReuseOriginalPhoto(false); }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
         </View>}
         <View style={styles.photoActions}>
           <TouchableOpacity style={styles.photoActionButton} onPress={() => pickPhoto(true)} accessibilityRole="button" accessibilityLabel={t("recordEdits.takePhoto")}><Text style={styles.secondaryText}>{t("recordEdits.takePhoto")}</Text></TouchableOpacity>
@@ -383,7 +384,7 @@ const styles = StyleSheet.create({
   label: { color: "#52665A", fontSize: 13, fontWeight: "600", marginTop: 6 },
   input: { borderWidth: 1, borderColor: "#CDE3DC", backgroundColor: "#FFFFFF", borderRadius: 11, padding: 12, color: "#234B3A", minHeight: 44 },
   multiline: { minHeight: 90, textAlignVertical: "top" }, photo: { width: "100%", height: "100%", borderRadius: 12 },
-  photoCard: { position: "relative", width: 140 }, photoFrame: { width: 140, height: 126, borderRadius: 14, borderWidth: 2, borderColor: "#E2EDE0", overflow: "hidden", position: "relative" }, photoFrameSelected: { borderColor: "#468585" }, photoSelectionMark: { ...StyleSheet.absoluteFillObject, backgroundColor: "#234B3A35", alignItems: "flex-end", padding: 8 }, photoSelectionCheck: { color: "#FFFFFF", fontSize: 22, fontWeight: "800" }, removeSelection: { position: "absolute", right: -7, top: -7, backgroundColor: "#A34436", width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" }, removeSelectionText: { color: "#FFFFFF", fontSize: 20, fontWeight: "600" }, photoActions: { flexDirection: "row", gap: 9 }, photoActionButton: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: "#F3F8F2", borderWidth: 1, borderColor: "#CDE3DC", borderRadius: 11, paddingHorizontal: 10 },
+  photoCard: { position: "relative", width: 140 }, photoFrame: { width: 140, height: 126, borderRadius: 14, borderWidth: 2, borderColor: "#E2EDE0", overflow: "hidden", position: "relative" }, photoFrameSelected: { borderColor: "#468585" }, photoSelectionMark: { ...StyleSheet.absoluteFillObject, backgroundColor: "#234B3A35", alignItems: "flex-end", padding: 8 }, photoSelectionCheck: { color: "#FFFFFF", fontSize: 22, fontWeight: "800" }, removeSelection: { position: "absolute", right: -7, top: -7, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4", width: 44, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center" }, photoActions: { flexDirection: "row", gap: 9 }, photoActionButton: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: "#F3F8F2", borderWidth: 1, borderColor: "#CDE3DC", borderRadius: 11, paddingHorizontal: 10 },
   formActionRow: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
   primary: { flexGrow: 1, flexBasis: "45%", minWidth: 145, backgroundColor: "#2F6B4F", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, minHeight: 48, alignItems: "center", justifyContent: "center" }, primaryText: { color: "#FFFFFF", fontWeight: "700", textAlign: "center" },
   secondary: { flexGrow: 1, flexBasis: "45%", minWidth: 145, borderWidth: 1, borderColor: "#AFCBB7", backgroundColor: "#E8EDDA", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, minHeight: 48, alignItems: "center", justifyContent: "center" }, secondaryText: { color: "#2F6B4F", fontWeight: "700", textAlign: "center" },

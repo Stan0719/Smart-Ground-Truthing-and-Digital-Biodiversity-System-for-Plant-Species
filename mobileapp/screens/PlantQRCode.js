@@ -356,8 +356,7 @@ export default function PlantQRCodeScreen({ route }) {
                             accessibilityLabel={t("plantQRCode.deleteQrCode", { label: qr.label })}
                             accessibilityState={{ disabled: loadingRecords || generating || deletingId !== null, busy: deletingId === qr.id }}
                           >
-                            {deletingId === qr.id ? <ActivityIndicator size="small" color="#A34740" /> : <Ionicons name="trash-outline" size={17} color="#A34740" />}
-                            <Text style={styles.deleteButtonText}>{t("plantQRCode.deleteAction")}</Text>
+                            {deletingId === qr.id ? <ActivityIndicator size="small" color="#B42318" /> : <Ionicons name="trash-outline" size={21} color="#B42318" />}
                           </TouchableOpacity>}
                         </View>
                       </View>
@@ -438,12 +437,11 @@ const styles = StyleSheet.create({
   statusText: { color: "#426454", fontSize: 10, lineHeight: 13, fontWeight: "700" },
   expandedContent: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 12, padding: 12, borderTopWidth: 1, borderTopColor: "#EAF0E6", backgroundColor: "#FCFDFC" },
   qrPreview: { width: 120, height: 120, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#E3EBE3", borderRadius: 12, backgroundColor: "#FFFFFF" },
-  qrActions: { flex: 1, minWidth: 132, flexDirection: "row", gap: 7 },
+  qrActions: { flex: 1, minWidth: 132, flexDirection: "row", alignItems: "center", gap: 9 },
   actionButton: { flex: 1, minWidth: 62, minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 6, borderWidth: 1, borderRadius: 10 },
   printButton: { borderColor: "#2F6B4F", backgroundColor: "#2F6B4F" },
-  deleteButton: { borderColor: "#EDD1CC", backgroundColor: "#FFF2F0" },
+  deleteButton: { flex: 0, minWidth: 44, width: 44, height: 44, paddingHorizontal: 0, borderRadius: 11, borderColor: "#F2B9B4", backgroundColor: "#FDE9E7" },
   actionButtonText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
-  deleteButtonText: { color: "#A34740", fontSize: 11, fontWeight: "700" },
   printAllButton: { minHeight: 46, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 2, paddingHorizontal: 12, borderRadius: 11, backgroundColor: "#2F6B4F" },
   printAllText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
 

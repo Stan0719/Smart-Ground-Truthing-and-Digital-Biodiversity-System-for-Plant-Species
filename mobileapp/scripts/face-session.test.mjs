@@ -5,11 +5,11 @@ const source = readFileSync(new URL('../utils/faceSessionLifecycle.js', import.m
 const { createFaceSessionManager } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 const user = { id: 'account-a', email: 'a@example.com', role: 'botanist' }, token = 'a'.repeat(64);
 function fixture() {
- let saved = null, fail = false; const calls = [];
+ let saved = null, failure = null; const calls = [];
  const storage = { get: async () => saved, set: async (_, v) => { saved = v; }, remove: async () => { saved = null; } };
- const api = async (path, _, bearer) => { calls.push({path, bearer}); if(fail) throw Error('Expired or unavailable'); return {user}; };
+ const api = async (path, _, bearer) => { calls.push({path, bearer}); if(failure) throw failure; return {user}; };
  const make = () => createFaceSessionManager({storage, api, backend:'https://backend.example', validUser: v => v?.id === user.id});
- return {make, calls, stored:()=>saved, fail:()=>{fail=true;}, seed:v=>{saved=JSON.stringify(v);}};
+ return {make, calls, stored:()=>saved, fail:(error=Error('Service unavailable'))=>{failure=error;}, seed:v=>{saved=JSON.stringify(v);}};
 }
 test('persist secure token and bounded draft lease; restore online authority from backend', async()=>{
  const f=fixture(), m=f.make(); assert.deepEqual(await m.establish({token,user}),user);
@@ -17,7 +17,8 @@ test('persist secure token and bounded draft lease; restore online authority fro
  assert.deepEqual(await f.make().restore(),user); assert.equal(f.calls.every(c=>c.path==='/me'&&c.bearer===token),true);
 });
 test('reject identity mismatch',async()=>{const f=fixture();await assert.rejects(f.make().establish({token,user:{id:'other'}}),/does not match/);assert.equal(f.stored(),null);});
-test('expired or unavailable session clears access',async()=>{const f=fixture(),m=f.make();await m.establish({token,user});f.fail();await assert.rejects(m.restore());assert.equal(m.hasSession(),false);assert.equal(f.stored(),null);});
+test('only expired-session rejection clears access; unavailable service preserves it',async()=>{const f=fixture(),m=f.make();await m.establish({token,user});f.fail(Object.assign(Error('Expired'),{status:401,code:'AUTH_SESSION_INVALID'}));await assert.rejects(m.restore());assert.equal(m.hasSession(),false);assert.equal(f.stored(),null);});
+test('403 and service errors preserve the persisted session',async()=>{for(const error of [Object.assign(Error('Forbidden'),{status:403}),Object.assign(Error('Unavailable'),{status:503}),Error('Malformed response')]){const f=fixture(),m=f.make();await m.establish({token,user});f.fail(error);await assert.rejects(m.restore());assert.equal(m.hasSession(),true);assert.equal(JSON.parse(f.stored()).token,token);}});
 test('logout revokes; subsequent verified face session can sign in',async()=>{const f=fixture(),m=f.make();await m.establish({token,user});await m.logout();assert.equal(f.stored(),null);assert.equal(await m.restore(),null);assert.deepEqual(f.calls.at(-1),{path:'/logout',bearer:token});assert.deepEqual(await m.establish({token:'b'.repeat(64),user}),user);});
 test('offline logout still clears local access',async()=>{const f=fixture(),m=f.make();await m.establish({token,user});f.fail();await assert.rejects(m.logout());assert.equal(f.stored(),null);assert.equal(m.hasSession(),false);});
 test('wrong backend or forged token never grants access',async()=>{for(const saved of [{backend:'https://other',token},{backend:'https://backend.example',token:'forged',role:'botanist'}]){const f=fixture();f.seed(saved);assert.equal(await f.make().restore(),null);assert.equal(f.calls.length,0);}});

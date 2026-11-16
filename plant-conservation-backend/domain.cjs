@@ -29,6 +29,7 @@ const {
 const fail = (status, message) => {
   throw Object.assign(Error(message), { status });
 };
+const { normalizeSpeciesName, sqlSpeciesName } = require("./species-name.cjs");
 const subject = (user) =>
   `${user.role === "Visitor" ? "visitor" : "staff"}:${user.id}`;
 const id = (value) => {
@@ -274,10 +275,14 @@ async function statusReference(c, body) {
     )
   ).rows[0].status_id;
 }
-async function assertNewSpecies(c, scientificName) {
-  await c.query("SELECT pg_advisory_xact_lock(hashtext(lower(btrim($1))))", [scientificName]);
-  if ((await c.query("SELECT species_id FROM species WHERE lower(btrim(scientific_name))=lower(btrim($1)) LIMIT 1", [scientificName])).rows.length)
-    fail(409, "This scientific name already exists. Select the existing species.");
+async function assertNewSpecies(c, scientificName, { approvedOnly = false } = {}) {
+  const normalized = normalizeSpeciesName(scientificName);
+  await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [normalized]);
+  if ((await c.query(`SELECT species_id FROM species WHERE ${sqlSpeciesName("scientific_name")}=$1
+    AND (NOT $2::boolean OR COALESCE(rbac_data->>'approvalStatus','Approved')='Approved') LIMIT 1`, [normalized, approvedOnly])).rows.length)
+    throw Object.assign(Error("This scientific name already exists. Select the existing species."), {
+      status: 409, code: "SPECIES_DUPLICATE_APPROVED", duplicate_type: "approved",
+    });
 }
 function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPlantSchema = "plant_app" }) {
   qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
@@ -351,7 +356,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     });
     res.status(201).json({ qr_codes: qrCodes });
   });
-  mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, id, assertNewSpecies, officerNotifications });
+  mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, id, assertNewSpecies, speciesRow, officerNotifications });
   app.get("/api/species", allow("plants.catalogue.read"), async (req, res) => {
     const scientific = req.query.scope === "scientific";
     if (scientific && !canReadScientificCatalogue(req.user))

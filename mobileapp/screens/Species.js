@@ -73,10 +73,10 @@ export default function Species({ navigation, user }) {
   // =====================================================
 
   const filteredSpecies = useMemo(() => filterAndSortSpecies(plants, {
-    family: selectedFamily,
+    family: isBotanist ? null : selectedFamily,
     query: searchQuery,
     sortOption,
-  }), [plants, selectedFamily, searchQuery, sortOption]);
+  }), [plants, isBotanist, selectedFamily, searchQuery, sortOption]);
 
   // =====================================================
   // SPECIES CARD
@@ -285,9 +285,7 @@ export default function Species({ navigation, user }) {
               </View>
             )}
 
-            {/* CATEGORY FILTER */}
-
-            <FlatList
+            {!isBotanist && <FlatList
               horizontal
               data={[null, ...familyOptions]}
               keyExtractor={(item) => item ?? "all-families"}
@@ -313,7 +311,8 @@ export default function Species({ navigation, user }) {
                   </Text>
                 </TouchableOpacity>
               )}
-            />
+            />}
+
           </>
         }
         ListEmptyComponent={
@@ -323,7 +322,7 @@ export default function Species({ navigation, user }) {
 
               <Text style={styles.emptyTitle}>{t("species.noMatchingSpecies")}</Text>
 
-              <Text style={styles.emptyDescription}>{t("species.tryAnotherSearchTermOrSelectADifferentCategory")}</Text>
+              <Text style={styles.emptyDescription}>{t(isBotanist ? "species.tryAnotherSearchTerm" : "species.tryAnotherSearchTermOrSelectADifferentCategory")}</Text>
 
               <TouchableOpacity
                 style={styles.clearButton}
@@ -530,7 +529,6 @@ const styles = StyleSheet.create({
     fontSize: SCREEN_WIDTH < 500 ? 10 : 11,
     fontWeight: "600",
   },
-
   categoryTextActive: {
     color: "#FFFFFF",
   },

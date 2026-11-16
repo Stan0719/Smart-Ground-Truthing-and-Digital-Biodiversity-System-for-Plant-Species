@@ -13,7 +13,7 @@ function fixture(api = async () => ({ user })) {
   let saved = null; const events = [];
   const manager = createFaceSessionManager({ backend: "https://api.example.invalid/api/mobile", validUser: (v) => v?.id === user.id, api,
     storage: { get: async () => saved, set: async (_, v) => { saved = v; }, remove: async () => { saved = null; } }, diagnostic: (e) => events.push(e) });
-  return { manager, events, seed: (value) => { saved = JSON.stringify(value); } };
+  return { manager, events, seed: (value) => { saved = JSON.stringify(value); }, stored: () => saved };
 }
 test("missing credentials emit signed-out state and typed authentication error before any plant request", async () => {
   const { manager, events } = fixture(); let called = false, state;
@@ -38,14 +38,33 @@ test("parallel dashboard requests share verification but each retain bearer and 
   await tick(); assert.equal(checks, 2); gate.resolve();
   assert.deepEqual(await Promise.all(requests), ["true:owner", "true:owner", "true:owner"]);
 });
-test("network failures preserve credentials; authoritative rejection and logout invalidate observers", async () => {
+test("only a definitive authentication rejection and manual logout invalidate credentials", async () => {
   let failure; const { manager } = fixture(async () => { if (failure) throw failure; return { user }; });
   await manager.establish({ token, user }); let invalidations = 0; manager.subscribe((e) => { if (!e.authenticated) invalidations++; });
   failure = Object.assign(Error("Offline"), { transient: true }); await assert.rejects(manager.withToken(() => {}));
   assert.equal(manager.hasSession(), true); assert.equal(invalidations, 0);
-  failure = Object.assign(Error("Expired"), { status: 401 }); await assert.rejects(manager.withToken(() => {}));
+  failure = Object.assign(Error("Expired"), { status: 401, code: "AUTH_SESSION_INVALID" }); await assert.rejects(manager.withToken(() => {}));
   assert.equal(manager.hasSession(), false); assert.equal(invalidations, 1);
   failure = null; await manager.establish({ token, user }); await manager.logout(); assert.equal(invalidations, 2);
+});
+test("authorization and service failures never erase a saved login", async () => {
+  let failure; const { manager, stored } = fixture(async () => { if (failure) throw failure; return { user }; });
+  await manager.establish({ token, user }); const invalidations = [];
+  manager.subscribe((event) => { if (!event.authenticated) invalidations.push(event.reason); });
+  for (const error of [
+    Object.assign(Error("Forbidden"), { status: 403 }),
+    Object.assign(Error("Gateway login"), { status: 401, code: "API_HTTP_ERROR" }),
+    Object.assign(Error("Service unavailable"), { status: 503 }),
+    Object.assign(Error("Rate limited"), { status: 429 }),
+    Error("Unexpected verification response"),
+  ]) {
+    failure = error;
+    await assert.rejects(manager.restore());
+    assert.equal(manager.hasSession(), true);
+    assert.equal(JSON.parse(stored()).token, token);
+  }
+  assert.deepEqual(invalidations, []);
+  failure = null; assert.equal((await manager.restore()).id, user.id);
 });
 test("restore cannot reload a token while logout is deleting secure storage", async () => {
   let saved, gate;
@@ -105,12 +124,16 @@ test("actual App effect checks persistent storage even when in-memory hasSession
   assert.equal(live.resets.length, 1); live.cleanup();
 });
 test("foreground revalidation removes stale identity for missing/rejected sessions, but preserves it on network failure", async () => {
-  for (const restore of [async () => null, async () => { throw Object.assign(Error("Expired"), { status: 401 }); }]) {
+  for (const restore of [async () => null, async () => { throw Object.assign(Error("Expired"), { status: 401, code: "AUTH_SESSION_INVALID" }); }]) {
     const live = runSessionEffect(restore); await live.revalidate();
     assert.equal(live.user(), null); assert.equal(live.resets[0].routes[0].name, "Login"); live.cleanup();
   }
   const network = runSessionEffect(async () => { throw Object.assign(Error("Offline"), { transient: true }); }); await network.revalidate();
   assert.equal(network.user(), user); assert.equal(network.resets.length, 0);
+  const forbidden = runSessionEffect(async () => { throw Object.assign(Error("Forbidden"), { status: 403 }); }); await forbidden.revalidate();
+  assert.equal(forbidden.user(), user); assert.equal(forbidden.resets.length, 0);
+  const gateway = runSessionEffect(async () => { throw Object.assign(Error("Gateway login"), { status: 401, code: "API_HTTP_ERROR" }); }); await gateway.revalidate();
+  assert.equal(gateway.user(), user); assert.equal(gateway.resets.length, 0);
   network.emit({ authenticated: false, reason: "cleared" }); assert.equal(network.user(), null);
   assert.equal(network.resets[0].routes[0].name, "Login"); network.cleanup(); assert.equal(network.removed(), true);
 });

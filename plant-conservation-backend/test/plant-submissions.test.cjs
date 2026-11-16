@@ -134,6 +134,12 @@ test("one atomic submission supports existing and pending species without partia
   });
   await t.test("required fields, invalid images and unavailable QR fail without writes", async () => {
     const before = await count("species");
+    const approvedDuplicate = await call("/plant-submissions", "bot", "POST", { ...plant, client_key: "approved-species-name-duplicate",
+      new_species: { ...species, scientific_name: "  EXISTING   SPECIES " } });
+    assert.equal(approvedDuplicate.status, 409);
+    assert.equal(approvedDuplicate.data.code, "SPECIES_DUPLICATE_APPROVED");
+    assert.equal(approvedDuplicate.data.duplicate_type, "approved");
+    assert.equal(await count("species"), before);
     for (const key of ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat", "photo"]) {
       const data = { ...species }; delete data[key];
       assert.equal((await call("/plant-submissions", "bot", "POST", { ...proposed, client_key: "invalid", new_species: data })).status, 400, key);
@@ -255,5 +261,64 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal((await call(`/observations/${pendingVisit.data.id}`, "bot")).status, 404);
     assert.equal((await call("/observations", "bot")).data.observations.some((row) => row.id === pendingVisit.data.id), false);
     assert.equal((await call(`/observations/${pendingVisit.data.id}`, "visitor")).status, 403);
+  });
+  await t.test("a standalone pending request can be reused by two owned plants without a duplicate request", async () => {
+    const request = await call('/species-requests', 'bot', 'POST', { ...species, scientific_name: 'Shared standalone species', client_key: 'shared-standalone' });
+    assert.equal(request.status, 201, JSON.stringify(request.data));
+    const requestId = request.data.species_request.request_id;
+    const blockedDuplicate = await call('/plant-submissions', 'bot', 'POST', { ...plant, client_key: 'duplicate-new-species',
+      qr_id: 999998, new_species: { ...species, scientific_name: ' shared   standalone species ' } });
+    assert.equal(blockedDuplicate.status, 409);
+    assert.equal(blockedDuplicate.data.code, 'SPECIES_DUPLICATE_PENDING');
+    assert.equal(String(blockedDuplicate.data.request_id), String(requestId));
+    assert.ok(!(await call('/species-requests', 'other')).data.species_requests.some((row) => row.request_id === requestId));
+    assert.ok((await call('/species-requests?scope=mine-pending', 'bot')).data.species_requests.some((row) => row.request_id === requestId));
+    assert.ok(!(await call('/species-requests?scope=mine-pending', 'other')).data.species_requests.some((row) => row.request_id === requestId));
+    const beforeRequests = await count('species_request_submission');
+    const beforeSpecies = await count('species');
+    assert.equal((await call('/plant-submissions', 'bot', 'POST', { ...plant, client_key: 'shared-no-qr',
+      qr_id: 999999, species_request_id: requestId })).status, 409);
+    assert.equal(await count('species'), beforeSpecies);
+    assert.equal((await database.query('SELECT proposed_species_id FROM species_request_submission WHERE request_id=$1', [requestId])).rows[0].proposed_species_id, null);
+    const created = [];
+    for (let index = 0; index < 2; index++) {
+      const qr = (await database.query("INSERT INTO plant_app.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id", [`shared-standalone-${index}`])).rows[0];
+      const body = { ...plant, qr_id: qr.qr_id, client_key: `shared-standalone-plant-${index}`, species_request_id: requestId };
+      assert.equal((await call('/plant-submissions', 'other', 'POST', body)).status, 409);
+      const result = await call('/plant-submissions', 'bot', 'POST', body);
+      assert.equal(result.status, 201, JSON.stringify(result.data));
+      assert.equal(result.data.species_request_id, requestId);
+      assert.equal((await call('/plant-submissions', 'bot', 'POST', body)).data.plant_id, result.data.plant_id);
+      created.push(result.data);
+      if (index === 0) {
+        const privateDuplicate = await call('/plant-submissions', 'other', 'POST', { ...plant,
+          client_key: 'other-new-species-same-pending', qr_id: 999999,
+          new_species: { ...species, scientific_name: 'SHARED   STANDALONE SPECIES' } });
+        assert.equal(privateDuplicate.status, 409);
+        assert.equal(privateDuplicate.data.code, 'SPECIES_DUPLICATE_PENDING');
+        assert.equal(privateDuplicate.data.request_id, undefined);
+        assert.equal(privateDuplicate.data.species_id, undefined);
+        await database.query("UPDATE species_request_submission SET request_status='Correction Required' WHERE request_id=$1", [requestId]);
+        const privateCorrection = await call('/plant-submissions', 'other', 'POST', { ...plant,
+          client_key: 'other-new-species-private-correction', qr_id: 999999,
+          new_species: { ...species, scientific_name: 'shared standalone species' } });
+        assert.equal(privateCorrection.status, 409);
+        assert.equal(privateCorrection.data.code, 'SPECIES_DUPLICATE_PENDING');
+        assert.equal(privateCorrection.data.duplicate_type, 'pending');
+        assert.equal(privateCorrection.data.request_id, undefined);
+        await database.query("UPDATE species_request_submission SET request_status='Pending Review' WHERE request_id=$1", [requestId]);
+      }
+    }
+    assert.equal(await count('species_request_submission'), beforeRequests);
+    assert.equal(created[0].species_id, created[1].species_id);
+    assert.notEqual(created[0].plant_id, created[1].plant_id);
+    assert.equal((await call(`/observations/${created[0].id}/review`, 'officer', 'POST', { decision: 'Approved', comment: 'Verify', revision: 1 })).status, 409);
+    const approved = await call(`/species-requests/${requestId}/review`, 'officer', 'POST', { decision: 'Approved', comment: 'Verified', visibility: 'internal' });
+    assert.equal(approved.status, 200, JSON.stringify(approved.data));
+    assert.ok(!(await call('/species-requests?scope=mine-pending', 'bot')).data.species_requests.some((row) => row.request_id === requestId));
+    for (const item of created) {
+      assert.equal((await call(`/observations/${item.id}/review`, 'officer', 'POST', { decision: 'Approved', comment: 'Verified', revision: 1 })).status, 200);
+      assert.equal((await database.query('SELECT species_id FROM plant_record WHERE plant_id=$1', [item.plant_id])).rows[0].species_id, item.species_id);
+    }
   });
 });
