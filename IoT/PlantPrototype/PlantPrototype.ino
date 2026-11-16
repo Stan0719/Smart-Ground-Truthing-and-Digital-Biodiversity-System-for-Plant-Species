@@ -10,6 +10,9 @@
 #include <time.h>
 #include <esp_sntp.h>
 #include <sys/time.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 
 // Create wifi_config.h from wifi_config.example.h. It is ignored by Git.
 #if __has_include("wifi_config.h")
@@ -124,33 +127,88 @@ volatile bool wifiNtpSynced = false;
 unsigned long lastWifiAttempt = 0;
 const unsigned long WIFI_RETRY_INTERVAL = 10000;
 
+struct WifiReadingSnapshot {
+    int soilValue;
+    int rainValue;
+    float temperature;
+    float humidity;
+    bool soilHasReading;
+    bool rainHasReading;
+    bool dhtHasReading;
+    bool movementActive;
+    bool mpuReady;
+    uint32_t movementEventSequence;
+};
+
+QueueHandle_t wifiReadingQueue = nullptr;
+portMUX_TYPE wifiMovementEventMux = portMUX_INITIALIZER_UNLOCKED;
+uint32_t movementEventSequence = 0;
+uint32_t movementEventAcknowledged = 0;
+
 void onWifiTimeSync(struct timeval *tv) {
     (void)tv;
     wifiNtpSynced = true;
 }
 
-void sendReadingsOverWifi() {
-    if (WiFi.status() != WL_CONNECTED || !wifiNtpSynced) return;
+int sendReadingsOverWifi(const WifiReadingSnapshot &reading) {
+    if (WiFi.status() != WL_CONNECTED || !wifiNtpSynced) return -1;
     wifiTls.setCACert(LAPTOP_CA_CERT);
     HTTPClient https;
     String url = String("https://") + LAPTOP_HOST + ":" + LAPTOP_PORT + "/readings";
-    if (!https.begin(wifiTls, url)) return;
+    if (!https.begin(wifiTls, url)) return -1;
     https.addHeader("Content-Type", "application/json");
     https.addHeader("Authorization", String("Bearer ") + INGRESS_TOKEN);
     String body = "{\"values\":{";
     bool separator = false;
-    if (soilHasReading) { body += "\"soilMoisture\":" + String(soilValue); separator = true; }
-    if (rainHasReading) { if (separator) body += ","; body += "\"rainfall\":" + String(rainValue); separator = true; }
-    if (dhtHasReading) {
+    if (reading.soilHasReading) { body += "\"soilMoisture\":" + String(reading.soilValue); separator = true; }
+    if (reading.rainHasReading) { if (separator) body += ","; body += "\"rainfall\":" + String(reading.rainValue); separator = true; }
+    if (reading.dhtHasReading) {
         if (separator) body += ",";
-        body += "\"temperature\":" + String(temperature, 1) + ",\"humidity\":" + String(humidity, 1);
+        body += "\"temperature\":" + String(reading.temperature, 1) + ",\"humidity\":" + String(reading.humidity, 1);
         separator = true;
     }
     if (separator) body += ",";
-    body += "\"movement\":" + String(movementActive ? 1 : 0) +
-        "},\"capture\":{\"mpu_connected\":" + String(mpuReady ? "true" : "false") + "}}";
-    https.POST(body);
+    body += "\"movement\":" + String(reading.movementActive ? 1 : 0) +
+        "},\"capture\":{\"mpu_connected\":" + String(reading.mpuReady ? "true" : "false") + "}}";
+    int status = https.POST(body);
     https.end();
+    return status;
+}
+
+void wifiSenderTask(void *parameter) {
+    (void)parameter;
+    WifiReadingSnapshot reading;
+    for (;;) {
+        if (xQueueReceive(wifiReadingQueue, &reading, portMAX_DELAY) != pdTRUE) continue;
+        int status = sendReadingsOverWifi(reading);
+        if (status >= 200 && status < 300) {
+            portENTER_CRITICAL(&wifiMovementEventMux);
+            movementEventAcknowledged = reading.movementEventSequence;
+            portEXIT_CRITICAL(&wifiMovementEventMux);
+        }
+    }
+}
+
+void queueReadingsForWifi() {
+    if (wifiReadingQueue == nullptr) return;
+    WifiReadingSnapshot reading = {
+        soilValue,
+        rainValue,
+        temperature,
+        humidity,
+        soilHasReading,
+        rainHasReading,
+        dhtHasReading,
+        false,
+        mpuReady,
+        0
+    };
+    portENTER_CRITICAL(&wifiMovementEventMux);
+    reading.movementEventSequence = movementEventSequence;
+    reading.movementActive = movementActive ||
+        movementEventSequence != movementEventAcknowledged;
+    portEXIT_CRITICAL(&wifiMovementEventMux);
+    xQueueOverwrite(wifiReadingQueue, &reading);
 }
 #endif
 
@@ -518,6 +576,12 @@ void monitorMovement() {
             movementActive = true;
 
             movementCount++;
+
+#if PLANT_TRANSPORT_WIFI
+            portENTER_CRITICAL(&wifiMovementEventMux);
+            movementEventSequence++;
+            portEXIT_CRITICAL(&wifiMovementEventMux);
+#endif
 
             digitalWrite(LED_PIN, HIGH);
         }
@@ -922,6 +986,16 @@ void setup() {
             utcTime.tm_hour, utcTime.tm_min, utcTime.tm_sec);
     }
     Serial.printf("Clock sync: %s\r\n", wifiNtpSynced ? "ready" : "failed");
+
+    wifiReadingQueue = xQueueCreate(1, sizeof(WifiReadingSnapshot));
+    if (wifiReadingQueue == nullptr ||
+        xTaskCreatePinnedToCore(wifiSenderTask, "wifiSender", 8192, nullptr, 1, nullptr, 0) != pdPASS) {
+        Serial.println("WiFi sender task could not start");
+        if (wifiReadingQueue != nullptr) {
+            vQueueDelete(wifiReadingQueue);
+            wifiReadingQueue = nullptr;
+        }
+    }
 #endif
 }
 
@@ -985,7 +1059,7 @@ void loop() {
 
         displayDashboard();
 #if PLANT_TRANSPORT_WIFI
-        sendReadingsOverWifi();
+        queueReadingsForWifi();
 #endif
     }
 }
