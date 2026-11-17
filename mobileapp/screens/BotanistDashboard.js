@@ -237,11 +237,19 @@ export function buildSubmissionGroups(records, kind, versionRows = {}, historyAv
 
 export function filterSubmissionGroups(groups, filter) {
   if (filter === "all") return groups;
-  return groups.filter((group) => group.versions.some((version) => statusMatches(version.status, filter)));
+  return groups.filter((group) =>
+    (group.kind === "plant" && statusMatches(group.record?.status, filter)) ||
+    group.versions.some((version) => statusMatches(version.status, filter)));
 }
 
 export function groupStatusSummary(group) {
   const rows = group.versions;
+  // The owner-scoped live Plant projection follows the current Observation
+  // decision. Prefer it for the group badge when stored version history is
+  // stale; expanded rows continue to show each persisted version status.
+  const currentPlantStatus = group.kind === "plant" ? group.record?.status : null;
+  if (["Rejected", "Withdrawn"].includes(currentPlantStatus))
+    return { status: currentPlantStatus };
   const approved = rows.filter((row) => submissionStatus(row.status) === "approved");
   const pendingCount = rows.filter((row) => submissionStatus(row.status) === "pending").length;
   const rejectedCount = rows.filter((row) => submissionStatus(row.status) === "rejected").length;
@@ -252,6 +260,8 @@ export function groupStatusSummary(group) {
     if (current?.edited) return { status: "Approved", detailKey: "currentEditSummary", edit: current };
     return { status: "Approved" };
   }
+  if (currentPlantStatus && currentPlantStatus !== "Approved")
+    return { status: currentPlantStatus };
   const latest = rows.slice().reverse().find((row) => row.status);
   return { status: latest?.status || rows[0]?.status || "" };
 }

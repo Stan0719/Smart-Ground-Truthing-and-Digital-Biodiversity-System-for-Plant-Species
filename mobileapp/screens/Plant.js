@@ -1,4 +1,4 @@
-import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, translateFieldValue } from "../translations/i18n";
+import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/Species.js
 import LanguageSelector from "../components/LanguageSelector";
 
@@ -22,8 +22,8 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButton from "../components/BackButton";
-import { fetchPlantRecords, fetchSpeciesCatalog, filterUniqueSpeciesPlantRecords, filterPlantRecordsForRole, getPlantDisplayObservation, getScopedPlantRecords, isOwnedPendingPlant, mergeOwnedPendingPlantZones } from "../utils/plantApi";
-import { getPlantCardZoneLabel, getPlantCardZoneValue } from "../utils/plantCardDisplay";
+import { fetchPlantRecords, fetchSpeciesCatalog, filterUniqueSpeciesPlantRecords, filterPlantRecordsForRole, getPlantDisplayObservation, getScopedPlantRecords, isOwnedPendingPlant, isOwnedRejectedPlant, mergeOwnedPendingPlantZones } from "../utils/plantApi";
+import { getPlantCardZoneValue } from "../utils/plantCardDisplay";
 import RefreshButton from "../components/RefreshButton";
 import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
@@ -132,8 +132,12 @@ export default function Species({
       try {
         const catalog = await fetchSpeciesCatalog({ accountId, publicOnly });
         let records = await fetchPlantRecords(catalog, { accountId, publicOnly });
-        if (isBotanist && records.some((record) => isOwnedPendingPlant(record, accountId))) {
+        if (isBotanist) {
           const ownerRecords = await fetchPlantRecords(catalog, { accountId, scopeMine: true });
+          records = [
+            ...ownerRecords.filter((record) => isOwnedRejectedPlant(record, accountId)),
+            ...records,
+          ];
           records = mergeOwnedPendingPlantZones(records, ownerRecords, accountId);
         }
         const matchedSpecies = catalog.find((item) =>
@@ -143,7 +147,10 @@ export default function Species({
         ) || routeParams.species || getSpeciesBySlug(currentSlug) || null;
         const matchedId = matchedSpecies?.id ?? currentSpeciesId;
         const recordsForSpecies = filterUniqueSpeciesPlantRecords(records, matchedId, currentSlug);
-        const visibleRecords = filterPlantRecordsForRole(recordsForSpecies, role, accountId, { publicOnly });
+        const roleVisibleRecords = filterPlantRecordsForRole(recordsForSpecies, role, accountId, { publicOnly });
+        const visibleRecords = publicOnly
+          ? roleVisibleRecords
+          : [...roleVisibleRecords, ...recordsForSpecies.filter((record) => isOwnedRejectedPlant(record, accountId))];
 
         if (requestRef.current?.id === requestId) {
           setSelectedSpecies(matchedSpecies);
@@ -209,7 +216,8 @@ export default function Species({
 
         const matchesStatus = !isBotanist || plantStatusFilter === "allVisible" ||
           (plantStatusFilter === "approved" && plant.currentStatus === "Approved") ||
-          (plantStatusFilter === "myPending" && isOwnedPendingPlant(plant, user?.id));
+          (plantStatusFilter === "myPending" && isOwnedPendingPlant(plant, user?.id)) ||
+          (plantStatusFilter === "myRejected" && isOwnedRejectedPlant(plant, user?.id));
 
 
         const matchesHealth =
@@ -460,6 +468,7 @@ export default function Species({
           ["allVisible", t("plant.allVisible")],
           ["approved", t("plant.approvedOnly")],
           ["myPending", t("plant.myPending")],
+          ["myRejected", t("plant.myRejected")],
         ].map(([value, label]) => {
           const selected = plantStatusFilter === value;
           return <TouchableOpacity
@@ -727,14 +736,7 @@ function PlantCard({
   const sourceKey = (source) => typeof source === "number" ? `local:${source}` : source?.uri || null;
   const imageSource = plant.plantImage && sourceKey(plant.plantImage) !== failedImageKey ? plant.plantImage : null;
   const observation = getPlantDisplayObservation(plant);
-  const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isPublicViewer = !user || isVisitor || user?.role?.toLowerCase() === "guest";
-  const zoneLabel = getPlantCardZoneLabel(plant, user?.role, {
-    restricted: t("map.locationRestricted"),
-    missing: t("plant.notRecorded"),
-    allowOwnedPending: isBotanist && isOwnedPendingPlant(plant, user?.id),
-  });
-
   return (
     <View style={styles.card}>
       <TouchableOpacity
@@ -762,7 +764,6 @@ function PlantCard({
           <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, plantStatusStyle(plant.currentStatus)]}>
             {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
-          <Text numberOfLines={2} style={[styles.imageBadge, styles.zoneBadge, styles.imageZoneBadge]}>{zoneLabel}</Text>
         </View>}
 
       </View>
@@ -771,69 +772,17 @@ function PlantCard({
       {/* CONTENT */}
       <View style={styles.cardContent}>
 
-        <Text style={styles.species}>
+        <Text style={styles.species} numberOfLines={2}>
           {plant.plantScientificName || t("plant.unnamedPlant")}
         </Text>
         <Text style={styles.plantId}>{t("plantDetail.plantId")}: {plant.plantId}</Text>
-        {!!plant.plantCommonName && <Text style={styles.infoValue}>{plant.plantCommonName}</Text>}
-
-
         <View style={styles.infoGrid}>
-
-          {isBotanist ? (
-            <>
-              <Info
-                label={t("plant.health")}
-                value={observation?.healthStatus || t("plant.notRecorded")}
-              />
-
-              <Info
-                label={t("plant.lifeStage2")}
-                value={observation?.lifeStage || t("plant.notRecorded")}
-              />
-
-              <Info
-                label={t("plant.qrStatus2")}
-                value={plant.qr?.status || t("plant.notRecorded")}
-              />
-
-              <Info
-                label={t("plant.height")}
-                value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
-              />
-              <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
-              <Info label={t("plant.locationZone")} value={zoneLabel} />
-            </>
-          ) : (
-            <>
-              <Info
-                label={t("plant.height")}
-                value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
-              />
-
-              <Info
-                label={t("plant.lifeStage2")}
-                value={observation?.lifeStage || t("plant.notRecorded")}
-              />
-
-              <Info
-                label={t("plant.lastVerified")}
-                value={formatDate(plant.latestApproved?.date)}
-              />
-              <Info label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
-              <Info label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
-              {!isPublicViewer && <Info label={t("plant.locationZone")} value={zoneLabel} />}
-            </>
-          )}
+          <Info label={t("plant.height")} value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")} />
+          <Info label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
+          <Info label={t("botanistPlantDetail.growthStage")} value={observation?.lifeStage || t("plant.notRecorded")} />
+          <Info label={t("plant.qrStatus2")} value={plant.qr?.status || t("plant.notRecorded")} />
 
         </View>
-
-        {isBotanist && plant.latestSubmission?.status ? (
-          <Text style={styles.infoValue}>{t("botanistRecords.observationStatus")}{translateLabel(plant.latestSubmission.status)}</Text>
-        ) : null}
-        {isBotanist && plant.currentStatus === "Pending Review" ? (
-          <Text accessibilityRole="text" style={styles.pendingApprovalHint}>{t("plant.awaitingOfficerApproval")}</Text>
-        ) : null}
 
         <View style={styles.viewRecord}>
 
@@ -883,17 +832,6 @@ function Info({ label, value }) {
       </Text>
     </View>
   );
-}
-
-function formatDate(dateString) {
-  if (!dateString) return "-";
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return dateString;
-  return date.toLocaleDateString(dateLocale(), {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
 }
 
 
@@ -995,14 +933,6 @@ statusFilterText: {
 statusFilterTextSelected: {
   color: "#2F6B4F",
   fontWeight: "700",
-},
-
-pendingApprovalHint: {
-  marginTop: 10,
-  color: "#805B16",
-  fontSize: 12,
-  lineHeight: 17,
-  fontWeight: "600",
 },
 
 search: {
@@ -1202,9 +1132,6 @@ filterToggle: {
     plantIcon: {
     fontSize: 45,
     },
-
-  zoneBadge: { backgroundColor: "#143625DD" },
-  imageZoneBadge: { marginLeft: "auto" },
 
   cardContent: {
     padding: 14,

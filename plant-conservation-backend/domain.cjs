@@ -442,13 +442,17 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
                   AND a.owner_subject=$2
                   AND image_observation.id IS NOT NULL
                   AND (image_observation.status='Pending Review' OR
+                    ($5 AND image_observation.status='Rejected' AND image_observation.owner_subject=$2
+                      AND image_observation.id=(SELECT latest_submission.id FROM plant_observation latest_submission
+                        WHERE latest_submission.plant_id=p.plant_id AND latest_submission.owner_subject=$2
+                        ORDER BY latest_submission.created_at DESC,latest_submission.id DESC LIMIT 1)) OR
                     (image_observation.status='Approved' AND image_observation.id=(
                       SELECT current_observation.id FROM plant_observation current_observation
                       WHERE current_observation.plant_id=p.plant_id AND current_observation.status='Approved'
                       ORDER BY current_observation.updated_at DESC,current_observation.id DESC LIMIT 1
                     ))))
               )
-            ORDER BY a.created_at,a.id
+            ORDER BY CASE WHEN image_observation.status='Rejected' THEN 0 ELSE 1 END,a.created_at,a.id
             LIMIT 1
           ) plant_preview ON true
           LEFT JOIN genus g ON g.genus_id=s.genus_id LEFT JOIN family f ON f.family_id=g.family_id

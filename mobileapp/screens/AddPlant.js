@@ -22,7 +22,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import RefreshButton from "../components/RefreshButton";
 import { fieldFormStyles } from "../components/fieldFormStyles";
 import { plantApi, fetchSpeciesCatalog, fetchSpeciesDetail } from "../utils/plantApi";
-import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation";
+import { validateSpeciesRequest, validatePlantDetails, validatePlantGps } from "../utils/addPlantValidation";
 import { normalizeSpeciesName } from "../utils/speciesNameNormalization";
 import { useFocusEffect } from "@react-navigation/native";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft, hasMeaningfulAddPlantDraft } from "../utils/botanistFormDrafts";
@@ -873,8 +873,9 @@ function handleRemoveSpeciesPhoto(index) {
       Alert.alert(t("addPlant.selectAQrCode"), t("addPlant.generateAndPrintAQrCodeFirstThenSelectIt"));
       return;
     }
-    if (!latitude || !longitude) {
-      Alert.alert(t("addPlant.missingLocation"), t("addPlant.pleaseGetTheCurrentGpsLocationBeforeSubmitting"));
+    const gpsProblem = validatePlantGps(latitude, longitude);
+    if (gpsProblem) {
+      Alert.alert(t("addPlant.missingLocation"), t(`addPlantWorkflow.${gpsProblem}`));
       return;
     }
     if (!Number.isFinite(Number(height)) || Number(height) <= 0) {

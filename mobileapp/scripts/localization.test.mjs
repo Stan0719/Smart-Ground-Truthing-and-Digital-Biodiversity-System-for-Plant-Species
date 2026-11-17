@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createLocalization, createDisplayTranslator, createFieldValueTranslator, flattenTranslations, LANGUAGE_STORAGE_KEY, supportedLanguages } from "../translations/core.js";
 import { A4_PRINT_OPTIONS, buildQRPrintHtml } from "../utils/qrPrint.js";
-import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation.js";
+import { validateSpeciesRequest, validatePlantDetails, validatePlantGps } from "../utils/addPlantValidation.js";
 import { normalizeSpeciesName } from "../utils/speciesNameNormalization.js";
 
 const require = createRequire(import.meta.url);
@@ -185,7 +185,7 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
     "../utils/botanistFormDrafts": { getBotanistFormDraft: async () => null, findBotanistFormDraft: async () => null, hasMeaningfulAddPlantDraft: () => false, saveBotanistFormDraft: async (_accountId, draft) => ({ ...draft, saved_at: "test" }), deleteBotanistFormDraft: async () => true },
     "../utils/botanistDraftAutosave": { useBotanistDraftAutosave: () => ({ stop: async () => {}, flush: async () => {} }) },
     "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" }, "../utils/faceSession": { faceSession: {} },
-    "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails },
+    "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails, validatePlantGps },
     "../utils/speciesNameNormalization": { normalizeSpeciesName },
     "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }), refresh: async () => { network.push(["inventory-refresh"]); return true; }, addGenerated: () => 1, retire: (id) => network.push(["inventory-retire", id]) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
     "../utils/qrPrint": { A4_PRINT_OPTIONS, buildQRPrintHtml }, "../data/mockData": { botanistPlantRecords: [] },

@@ -35,6 +35,8 @@ test("an authorized Conservation Officer sees actual valid approved coordinates"
 test("an authorized viewer sees not recorded when no approved GPS pair is returned", () => {
   assert.deepEqual(display({ latitude: null, longitude: null }, "Conservation Officer"), { status: "not_recorded" });
   assert.deepEqual(display({ latitude: 4, longitude: null }, "Conservation Officer"), { status: "not_recorded" });
+  assert.deepEqual(display({ latitude: "   ", longitude: 113 }, "Botanist"), { status: "not_recorded" });
+  assert.deepEqual(display({ latitude: true, longitude: 113 }, "Botanist"), { status: "not_recorded" });
 });
 
 test("Visitors remain restricted even if the client object contains location fields", () => {

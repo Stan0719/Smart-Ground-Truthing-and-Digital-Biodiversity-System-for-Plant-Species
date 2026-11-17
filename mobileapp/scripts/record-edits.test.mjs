@@ -17,7 +17,7 @@ function screen(file, dependencies) {
   }, module, module.exports);
   return module.exports.default;
 }
-function harness(file, { record, approved, species = false, locationDenied = false, failReuseOnce = false, photoSourceFailsOnce = false, pendingEdit = false, editAvailabilityError = false, conflictOnChange = false, draftSaveError = false, savedDraft = null, findDraftCandidate = null, speciesRequestId = null, speciesRequest = null, correctionChange = null, pendingVersionSelection = null, acknowledgement = undefined, catalog = [{ id: "6", scientificName: "Species name", commonName: "Common name" }], qrCodes = [{ qr_id: 2, qr_code: "current-token", plant_id: 8, status: "assigned" }, { qr_id: 3, qr_code: "free-token", plant_id: null, status: "generated" }] }) {
+function harness(file, { record, approved, species = false, correction = false, locationDenied = false, failReuseOnce = false, photoSourceFailsOnce = false, pendingEdit = false, editAvailabilityError = false, conflictOnChange = false, draftSaveError = false, savedDraft = null, findDraftCandidate = null, speciesRequestId = null, speciesRequest = null, correctionChange = null, refreshedRecord = null, refreshError = false, refreshedCorrectionChange = undefined, pendingVersionSelection = null, acknowledgement = undefined, catalog = [{ id: "6", scientificName: "Species name", commonName: "Common name" }], qrCodes = [{ qr_id: 2, qr_code: "current-token", plant_id: 8, status: "assigned" }, { qr_id: 3, qr_code: "free-token", plant_id: null, status: "generated" }] }) {
   let stateIndex = 0, refIndex = 0, states = [], refs = [], focus, alert, calls = [], draftSaves = [], navigations = [], photoReads = 0;
   const hooks = { ...React, useCallback: (fn) => fn, useRef: (initial) => {
     const index = refIndex++; if (!(index in refs)) refs[index] = { current: initial }; return refs[index];
@@ -27,7 +27,7 @@ function harness(file, { record, approved, species = false, locationDenied = fal
   } };
   const native = { StyleSheet: { create: (value) => value }, Alert: { alert: (...args) => { alert = args; } } };
   for (const name of ["ActivityIndicator", "Image", "ScrollView", "Text", "TextInput", "TouchableOpacity", "View"]) native[name] = name;
-  let speciesEditCount = 0, speciesFetchCount = 0;
+  let speciesEditCount = 0, speciesFetchCount = 0, plantFetchCount = 0, correctionFetchCount = 0;
   const api = async (path, options) => {
     calls.push([path, options]);
     if (path.startsWith("/my-species-requests/") && record.editConflict && speciesEditCount++ === 0) throw Object.assign(Error("internal error detail"), { status: 409, code: "SPECIES_REQUEST_EDIT_VERSION_CONFLICT" });
@@ -52,15 +52,15 @@ function harness(file, { record, approved, species = false, locationDenied = fal
     "expo-location": { Accuracy: { High: 4 }, requestForegroundPermissionsAsync: async () => ({ status: locationDenied ? "denied" : "granted" }),
       getCurrentPositionAsync: async () => ({ coords: { latitude: 4.6, longitude: 113.8, altitude: 25.34, accuracy: 6.78 } }) },
     "expo-file-system/legacy": { readAsStringAsync: async () => { photoReads++; return "aGVsbG8="; }, EncodingType: { Base64: "base64" } },
-    "@expo/vector-icons": { Ionicons: "Ionicons" }, "@expo/vector-icons/Ionicons": { default: "Ionicons" },
+    "@expo/vector-icons": { Feather: "Feather", Ionicons: "Ionicons" }, "@expo/vector-icons/Ionicons": { default: "Ionicons" },
     "../components/OriginalUpdatedField": { default: ({ children, label, originalContent, originalValue }) =>
       React.createElement("View", null,
         label ? React.createElement("Text", null, label) : null,
         React.createElement("Text", null, originalContent || String(originalValue ?? "")),
         children) },
     "../utils/qrInventory": { normalizeQRCodes: (payload) => payload.qr_codes.map((qr) => ({ id: String(qr.qr_id), label: `QR-${String(qr.qr_id).padStart(4, "0")}`, plantId: qr.plant_id == null ? null : String(qr.plant_id), status: qr.status })) },
-    "../utils/botanistRecords": { ...(species ? { fetchBotanistSpeciesRequest: async () => { if (speciesFetchCount++ > 0 && record.failReload) throw Error("offline"); return { ...record }; } } : { fetchBotanistPlant: async () => record }),
-      fetchBotanistRecordChange: async (_accountId, changeId, options) => { assert.equal(String(changeId), String(correctionChange?.id)); assert.equal(options.kind, species ? "species" : "plant"); return correctionChange; },
+    "../utils/botanistRecords": { ...(species ? { fetchBotanistSpeciesRequest: async () => { if (speciesFetchCount++ > 0 && record.failReload) throw Error("offline"); return { ...record }; } } : { fetchBotanistPlant: async () => { if (plantFetchCount++ > 0 && refreshError) throw Error("network unavailable"); return plantFetchCount > 1 && refreshedRecord ? refreshedRecord : record; } }),
+      fetchBotanistRecordChange: async (_accountId, changeId, options) => { assert.equal(String(changeId), String(correctionChange?.id)); assert.equal(options.kind, species ? "species" : "plant"); correctionFetchCount++; return correctionFetchCount > 1 && refreshedCorrectionChange !== undefined ? refreshedCorrectionChange : correctionChange; },
       fetchBotanistRecordChangeStatus: async () => {
         if (editAvailabilityError) throw Error("offline");
         return { available: true, pending: pendingEdit ? { status: "Pending Review" } : null, latest: null };
@@ -78,7 +78,7 @@ function harness(file, { record, approved, species = false, locationDenied = fal
     "../translations/i18n": { useAppTranslation() {}, t: (key) => key, translateUIMessage: (value) => value },
   };
   const component = screen(file, deps);
-  const route = { params: { botanist: { id: "owner" }, ...(correctionChange ? { correctionChangeId: correctionChange.id, correction: true } : {}), ...(species ? { requestId: "1" } : { plantId: "8", ...(pendingVersionSelection || {}), ...(savedDraft ? { formDraftKey: savedDraft.client_key } : {}), ...(speciesRequestId ? { speciesRequestId } : {}) }) } };
+  const route = { params: { botanist: { id: "owner" }, ...(correctionChange ? { correctionChangeId: correctionChange.id, correction: true } : correction ? { correction: true } : {}), ...(species ? { requestId: "1" } : { plantId: "8", ...(pendingVersionSelection || {}), ...(savedDraft ? { formDraftKey: savedDraft.client_key } : {}), ...(speciesRequestId ? { speciesRequestId } : {}) }) } };
   const navigation = { goBack() {}, setParams(params) { navigations.push(["setParams", params]); }, navigate(...args) { navigations.push(args); } };
   const render = () => { stateIndex = 0; refIndex = 0; return component({ route, navigation }); };
   function walk(node, predicate) {
@@ -118,6 +118,113 @@ test("Plant edit and correction labels mark only required inputs", async () => {
     for (const field of ["notes", "zone", "accuracy_m", "altitudeM", "qr_id", "plantPhotos"])
       assert.ok(!labels.includes(`recordEdits.${field} *`), `${status}: ${field} remains optional or reusable`);
   }
+});
+
+test("Plant edit and correction reject height above 100000 before any API write", async () => {
+  for (const status of ["Pending Review", "Approved"]) {
+    const h = harness("screens/EditPlantRecord.js", { record: plant(status), correction: status === "Pending Review" });
+    h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+    let tree = h.render();
+    const height = h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "20");
+    assert.ok(height);
+    height.props.onChangeText("100001");
+    tree = h.render();
+    h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.onPress();
+    assert.equal(h.alert?.[1], "addPlantWorkflow.invalidHeight");
+    assert.equal(h.calls.some(([path, options]) => path === "/record-changes" && options?.method === "POST"), false);
+  }
+});
+
+test("Plant correction refresh preserves the live form and photos, then requires review before rebasing", async () => {
+  const correctionChange = { id: "change-8", status: "Correction Required", revision: 1, review_comment: "Please clarify the location.",
+    base_snapshot: { photo_ids: ["photo-1", "photo-2", "photo-3"] }, proposed_snapshot: {}, proposal_photo_count: 0 };
+  const original = plant("Approved"), latest = { ...plant("Approved"), scientificName: "Latest server name", latestObservation: { ...plant("Approved").latestObservation, revision: 2 } };
+  const savedDraft = { client_key: "draft-8", correction_change_id: correctionChange.id,
+    base_signature: JSON.stringify({ status: "Approved", revision: null, scientific_name: original.scientificName, species_id: original.speciesId,
+      qr_id: original.qrId, content: original.observations[0].content, photo_ids: ["photo-1", "photo-2", "photo-3"] }),
+    form: { scientific_name: "Manual plant name", species_id: "6", qr_id: "2", heightCm: "20", healthStatus: "Healthy", lifeStage: "Mature",
+      morphology: "Leaves", notes: "", zone: "", latitude: "4.5", longitude: "113.7", accuracy_m: "", altitudeM: "", selectedOriginalPhotos: [], photoSelectionTouched: false }, photo_refs: [] };
+  const h = harness("screens/EditPlantRecord.js", { record: original, refreshedRecord: latest, correctionChange, savedDraft });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  let tree = h.render();
+  const refresh = h.walk(tree, (node) => node.type === "TouchableOpacity" && node.props.testID === "plant-correction-refresh");
+  assert.ok(refresh, "refresh control appears on correction form");
+  assert.equal(refresh.props.style.width, 44);
+  assert.equal(refresh.props.style.height, 44);
+  assert.equal(h.walk(refresh, (node) => node.type === "Feather")?.props.name, "refresh-cw");
+  const name = h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Manual plant name");
+  name.props.onChangeText("Unsaved correction name");
+  const addPhoto = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.addGallery");
+  await addPhoto.props.onPress();
+  await refresh.props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  tree = h.render();
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Unsaved correction name"), "typed correction remains in the form");
+  assert.ok(h.walk(tree, (node) => node.type === "Image" && node.props.source?.uri === "file://gallery.jpg"), "new photo selection remains in the form");
+  assert.ok(h.text(tree).includes("botanistDrafts.editConflict"), `changed revision raises the existing conflict warning: ${h.text(tree)}`);
+  const submit = h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges");
+  assert.equal(submit.props.disabled, true, "submission remains blocked until latest baseline is reviewed");
+  const review = h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node).includes("recordEdits.reviewLatestAndContinue"));
+  assert.ok(review, "review and explicit continue action is offered");
+  await review.props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  tree = h.render();
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Unsaved correction name"), "rebasing does not replace edited values");
+  assert.ok(h.walk(tree, (node) => node.type === "Image" && node.props.source?.uri === "file://gallery.jpg"), "rebasing does not discard selected photos");
+  assert.equal(h.draftSaves.length, 1, "the explicitly accepted baseline is persisted with the saved draft");
+  assert.equal(h.draftSaves[0].draft.base_revision, latest.latestObservation.revision);
+  assert.equal(h.draftSaves[0].draft.form.scientific_name, "Unsaved correction name");
+  assert.equal(h.draftSaves[0].draft.photos[0].uri, "file://gallery.jpg");
+  assert.equal(h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.disabled, false);
+});
+
+test("Plant correction refresh merges non-overlapping server changes and rebases its saved draft", async () => {
+  const original = plant("Pending Review");
+  original.latestObservation = { ...original.latestObservation, id: "observation-8", status: "Correction Required" };
+  const latest = { ...original, latestObservation: { ...original.latestObservation, revision: 2,
+    content: { ...original.latestObservation.content, healthStatus: "Recovering" } } };
+  const savedDraft = { client_key: "correction-draft-8", base_signature: JSON.stringify({ status: "Pending Review", revision: 1,
+      scientific_name: original.scientificName, species_id: original.speciesId, qr_id: original.qrId,
+      content: original.latestObservation.content, photo_ids: ["photo-1", "photo-2", "photo-3"] }),
+    baseline: { plant: original }, form: { scientific_name: "Manual plant name", species_id: "6", qr_id: "2", heightCm: "20", healthStatus: "Healthy",
+      lifeStage: "Mature", morphology: "Leaves", notes: "", zone: "", latitude: "4.5", longitude: "113.7", accuracy_m: "", altitudeM: "",
+      selectedOriginalPhotos: [], photoSelectionTouched: false }, photo_refs: [] };
+  const h = harness("screens/EditPlantRecord.js", { record: original, refreshedRecord: latest, savedDraft, correction: true });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  let tree = h.render();
+  let refresh = h.walk(tree, (node) => node.type === "TouchableOpacity" && node.props.testID === "plant-correction-refresh");
+  assert.ok(refresh);
+  h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Manual plant name").props.onChangeText("Keep this correction");
+  tree = h.render();
+  refresh = h.walk(tree, (node) => node.type === "TouchableOpacity" && node.props.testID === "plant-correction-refresh");
+  await refresh.props.onPress(); await new Promise((resolve) => setImmediate(resolve));
+  tree = h.render();
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Keep this correction"), "entered correction is retained");
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Recovering"), "untouched field is updated from the latest record");
+  assert.equal(h.text(tree).includes("botanistDrafts.editConflict"), false, "non-overlapping change is safely reconciled");
+  assert.equal(h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node).includes("recordEdits.reviewLatestAndContinue")), null,
+    "no unnecessary review confirmation remains");
+  assert.equal(h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.disabled, false);
+  assert.equal(h.draftSaves.length, 1, "saved draft baseline is updated");
+  assert.match(h.draftSaves[0].draft.base_signature, /"revision":2/);
+  assert.equal(h.draftSaves[0].draft.base_revision, 2);
+  h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.onPress();
+  await h.alert[2][1].onPress();
+  const submission = h.calls.find(([path, options]) => path === "/my-plants/8" && options?.method === "PATCH");
+  assert.equal(submission[1].body.expected_revision, 2, "backend revision validation receives the refreshed revision");
+});
+
+test("Plant correction refresh failure leaves the draft untouched and reports an error", async () => {
+  const correctionChange = { id: "change-8", status: "Correction Required", revision: 1, review_comment: "Please clarify the location.", base_snapshot: { photo_ids: [] }, proposed_snapshot: {}, proposal_photo_count: 0 };
+  const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), correctionChange, refreshError: true });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "Manual plant name").props.onChangeText("Keep my correction");
+  const refresh = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && node.props.testID === "plant-correction-refresh");
+  await refresh.props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  const tree = h.render();
+  assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Keep my correction"));
+  assert.ok(h.text(tree).includes("recordEdits.correctionRefreshFailed"));
 });
 
 test("Species edit and correction labels mark seven required fields, not replacement photo", async () => {

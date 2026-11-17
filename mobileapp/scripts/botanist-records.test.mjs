@@ -803,20 +803,25 @@ test("Field Record Timeline resolves the signed-in profile name only for its con
   const staffSectionIndex = detailSource.indexOf("STAFF RECORD");
   const addObservationIndex = detailSource.indexOf('<View style={styles.addObservationSection}>');
   const latestVerifiedIndex = detailSource.indexOf("LATEST VERIFIED OBSERVATION");
-  assert.ok(staffSectionIndex < addObservationIndex && addObservationIndex < latestVerifiedIndex);
-  assert.match(detailSource, /const isPendingInitialReview = plant\?\.currentStatus === "Pending Review";/);
-  assert.match(detailSource, /const showObservationHistory = isBotanist && !isPendingInitialReview;/);
-  assert.match(detailSource, /\{isBotanist && plant\.currentStatus === "Approved" && \(/);
+  const historyIndex = detailSource.indexOf("OBSERVATION HISTORY", addObservationIndex);
+  assert.ok(staffSectionIndex < latestVerifiedIndex && latestVerifiedIndex < addObservationIndex && addObservationIndex < historyIndex);
+  assert.match(detailSource, /const showLatestVerifiedObservation = isBotanist && \["approved", "pending review"\]\.includes\(currentPlantStatus\);/);
+  assert.match(detailSource, /const showObservationHistory = isBotanist && currentPlantStatus === "approved";/);
+  assert.equal((detailSource.match(/\{showLatestVerifiedObservation && \(/g) || []).length, 1);
   assert.equal((detailSource.match(/\{showObservationHistory && \(/g) || []).length, 2);
   assert.match(detailSource, /disabled=\{!canAddObservation\}/);
   assert.match(detailSource, /key=\{observation\.observationId\}/);
   assert.match(detailSource, /getObservationRecorderDisplayName\(observation, user/);
-  assert.match(detailSource, /getObservationRecorderDisplayName\(latestApprovedObservation, user/);
+  assert.match(detailSource, /getObservationRecorderDisplayName\(detailsObservation, user/);
   assert.match(detailSource, /selectLatestApprovedObservation\(plant\.observations \|\| \[\]\)/);
-  assert.match(detailSource, /<ObservationPhotos photos=\{latestApprovedObservation\.photos\}/);
+  assert.match(detailSource, /selectOwnedPendingPlantObservation\(plant, user\?\.id\)/);
+  assert.match(detailSource, /<ObservationPhotos photos=\{detailsObservation\.photos\}/);
   assert.match(detailSource, /<ObservationPhotos photos=\{observation\.photos\}/);
   assert.match(detailSource, /observation\.taxonomy/);
-  assert.match(detailSource, /latestApprovedObservation \? \(/);
+  assert.match(detailSource, /detailsObservation \? \(/);
+  assert.match(detailSource, /plantDetail\.latestSubmittedObservation/);
+  assert.match(detailSource, /plantDetail\.noSubmittedObservationAvailable/);
+  assert.match(detailSource, /styles\.pendingBadge, styles\.pendingText, styles\.submittedObservationBadge/);
   assert.match(detailSource, /noVerifiedObservationAvailable/);
   assert.match(detailSource, /\{isBotanist && \(/);
   assert.match(detailSource, /t\("plantDetail\.fieldObservation"\)/);
@@ -885,6 +890,54 @@ test("projection uses immutable subject ownership and keeps pending plant, obser
   assert.equal(result.plants[0].speciesRequestId, 1); assert.equal(result.requests.length, 1);
   assert.equal(result.plants[0].latestObservation.id, "observation-8");
   assert.equal(api.projectBotanistRecords("another-account", rows, observations, requests).plants.length, 0);
+});
+
+test("My Submissions keeps the Botanist's own Pending Review and Rejected Species requests", () => {
+  const owned = [
+    { request_id: 31, requested_by: "staff:owner", request_status: "Pending Review", scientific_name: "Pending species" },
+    { request_id: 32, requested_by: "staff:owner", request_status: "Rejected", scientific_name: "Rejected species" },
+    { request_id: 33, requested_by: "staff:other", request_status: "Pending Review", scientific_name: "Private species" },
+  ];
+  const projection = fixture().projectBotanistRecords("owner", [], [], owned);
+  assert.deepEqual(projection.requests.map((request) => [request.request_id, request.request_status]), [
+    [31, "Pending Review"], [32, "Rejected"],
+  ]);
+  const dashboard = submissionsUtils();
+  const groups = dashboard.buildSubmissionGroups(projection.requests, "species");
+  assert.deepEqual(groups.map((group) => dashboard.groupStatusSummary(group).status), ["Rejected", "Pending Review"],
+    "the Requests tab retains each owned request's real status; display order follows recent record activity");
+  assert.equal(groups.some((group) => String(group.id) === "33"), false,
+    "another Botanist's private Species submission never enters this owner's view");
+});
+
+test("Plant status falls back to the authorized current Observation status if the separate Observation read is unavailable", () => {
+  const plant = { ...rows[0], observation_status: "Rejected" };
+  const result = fixture().projectBotanistRecords("owner", [plant], [], []);
+  assert.equal(result.plants[0].currentStatus, "Rejected");
+  assert.equal(result.plants[0].status, "Rejected");
+});
+
+test("Rejected owner Plant remains in My Submissions when stored version rows are stale", () => {
+  const ownerPlant = fixture().projectBotanistRecords("owner", [{
+    plant_id: 42, species_id: 6, registered_subject: "staff:owner", scientific_name: "Rejected plant",
+    rbac_status: "Pending Review", observation_status: "Rejected",
+  }], [], []).plants[0];
+  const dashboard = submissionsUtils();
+  const groups = dashboard.buildSubmissionGroups([ownerPlant], "plant", {
+    "plant:42": dashboard.versionCardItems("plant", 42, { history_available: true, versions: [
+      { id: "v1", version_number: 1, status: "Pending Review", snapshot: { observation_id: "obs-42" } },
+      { id: "v2", version_number: 2, status: "Pending Review", snapshot: { observation_id: "obs-42" } },
+    ] }),
+  });
+  assert.equal(groups.length, 1);
+  assert.equal(dashboard.groupStatusSummary(groups[0]).status, "Rejected");
+  assert.deepEqual(dashboard.filterSubmissionGroups(groups, "rejected").map((group) => group.record.id), ["42"]);
+  assert.equal(dashboard.filterSubmissionGroups(groups, "approved").length, 0);
+
+  const otherOwner = fixture().projectBotanistRecords("other", [{
+    plant_id: 42, species_id: 6, registered_subject: "staff:owner", rbac_status: "Pending Review", observation_status: "Rejected",
+  }], [], []).plants;
+  assert.equal(otherOwner.length, 0, "the live status override does not bypass Botanist ownership filtering");
 });
 test("loader binds every API call to the account and detail loads owned photo sources", async () => {
   const calls = [];

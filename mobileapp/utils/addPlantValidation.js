@@ -20,3 +20,12 @@ export function validatePlantDetails({ species, newSpecies = false, plantScienti
   if (healthStatus.trim().length > 100 || growthStage.trim().length > 100 || morphology.trim().length > 4000) return "plantTextTooLong";
   return null;
 }
+
+export function validatePlantGps(latitude, longitude) {
+  const valid = (value, limit) => typeof value !== "boolean" &&
+    value !== null && value !== undefined && String(value).trim() !== "" &&
+    Number.isFinite(Number(value)) && Math.abs(Number(value)) <= limit;
+  if (!valid(latitude, 90)) return "invalidLatitude";
+  if (!valid(longitude, 180)) return "invalidLongitude";
+  return null;
+}

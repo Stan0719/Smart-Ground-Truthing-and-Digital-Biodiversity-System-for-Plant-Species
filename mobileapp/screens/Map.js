@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import PlantExplorerMap from "../components/PlantExplorerMap";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
-import { fetchPlantRecords, isPlantVisibleInRoleCatalog } from "../utils/plantApi";
+import { fetchPlantRecords, filterMapPlantsByStatus, isMapPlantVisible } from "../utils/plantApi";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 
 const statusColors = {
@@ -49,6 +49,8 @@ function PlantCard({ plant, onPress }) {
 export default function MapScreen({ navigation, user }) {
   useAppTranslation();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("allVisible");
+  const isBotanist = String(user?.role || "").toLowerCase() === "botanist";
   const [plants, setPlants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,7 +78,7 @@ export default function MapScreen({ navigation, user }) {
       for (const record of ownedRecords) recordsById.set(record.plantId, record);
       if (isCurrent()) setPlants([...recordsById.values()].filter((record) =>
         record.plantId && record.plantId !== "Unknown ID" &&
-        isPlantVisibleInRoleCatalog(record, user.role, user.id)
+        isMapPlantVisible(record, user.role, user.id)
       ));
     } catch (loadError) {
       if (isCurrent()) {
@@ -103,10 +105,10 @@ export default function MapScreen({ navigation, user }) {
   })), [plants, user?.role]);
   const filteredPlants = useMemo(() => {
     const query = search.toLowerCase().trim();
-    return documentedPlants.filter((plant) => !query || [
+    return filterMapPlantsByStatus(documentedPlants, user?.role, user?.id, statusFilter).filter((plant) => !query || [
       plant.plantCommonName, plant.plantScientificName, plant.family, plant.plantId,
     ].some((value) => String(value || "").toLowerCase().includes(query)));
-  }, [documentedPlants, search]);
+  }, [documentedPlants, search, statusFilter, user?.role, user?.id]);
   const mappedPlants = useMemo(() => filteredPlants.filter((plant) => plant.mapLocation.status === "available"), [filteredPlants]);
   const openPlant = (plant) => navigation?.navigate("PlantDetails", { plantId: plant.plantId });
 
@@ -139,7 +141,8 @@ export default function MapScreen({ navigation, user }) {
               <Text style={styles.sectionTitle}>{t("map.biodiversityMap")}</Text>
               <Text style={styles.sectionSubtitle}>{t("map.tapAMarkerForDetails")}</Text>
             </View>
-            <PlantExplorerMap plants={mappedPlants} onViewDetails={openPlant} />
+            <PlantExplorerMap key={isBotanist ? `${statusFilter}:${search}` : "default"}
+              plants={mappedPlants} onViewDetails={openPlant} />
             {!mappedPlants.length && <Text style={styles.mapEmpty}>{t("map.noMappedPlants")}</Text>}
             <View style={styles.listHeading}>
               <View>
@@ -148,6 +151,18 @@ export default function MapScreen({ navigation, user }) {
               </View>
               <View style={styles.count}><Text style={styles.countText}>{filteredPlants.length}</Text></View>
             </View>
+            {isBotanist && <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.statusFilters} accessibilityLabel={t("plant.recordVisibilityFilters")}>
+              {[["allVisible", t("plant.allVisible")], ["approved", t("plant.approvedOnly")],
+                ["myPending", t("plant.myPending")], ["myRejected", t("plant.myRejected")]].map(([value, label]) => {
+                const selected = statusFilter === value;
+                return <TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{ selected }}
+                  onPress={() => setStatusFilter(value)}
+                  style={[styles.statusFilterChip, selected && styles.statusFilterChipSelected]}>
+                  <Text style={[styles.statusFilterText, selected && styles.statusFilterTextSelected]}>{label}</Text>
+                </TouchableOpacity>;
+              })}
+            </ScrollView>}
             {filteredPlants.length ? (
               <FlatList data={filteredPlants} keyExtractor={(item) => item.plantId} numColumns={2}
                 scrollEnabled={false} columnWrapperStyle={styles.plantGrid}
@@ -157,7 +172,7 @@ export default function MapScreen({ navigation, user }) {
                 <Ionicons name="leaf-outline" size={34} color="#6A9E76" />
                 <Text style={styles.messageTitle}>{t("map.noRecordsFound")}</Text>
                 <Text style={styles.messageText}>{t("map.tryAnotherSearchOrClearYourSearch")}</Text>
-                <TouchableOpacity onPress={() => setSearch("")} style={styles.retryButton}>
+                <TouchableOpacity onPress={() => { setSearch(""); setStatusFilter("allVisible"); }} style={styles.retryButton}>
                   <Text style={styles.retryText}>{t("map.clearSearch")}</Text>
                 </TouchableOpacity>
               </View>
@@ -183,6 +198,12 @@ const styles = StyleSheet.create({
   sectionSubtitle: { marginTop: 3, fontSize: 12, color: "#718575" },
   mapEmpty: { marginTop: 8, fontSize: 12, color: "#687E6D" },
   listHeading: { marginTop: 28, marginBottom: 13, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  statusFilters: { paddingBottom: 12, gap: 8 },
+  statusFilterChip: { minHeight: 44, justifyContent: "center", paddingHorizontal: 14, borderRadius: 20,
+    borderWidth: 1, borderColor: "#D6E9D9", backgroundColor: "#FFFFFF" },
+  statusFilterChipSelected: { borderColor: "#2F6B4F", backgroundColor: "#D6E9D9" },
+  statusFilterText: { color: "#52665C", fontSize: 12, fontWeight: "600" },
+  statusFilterTextSelected: { color: "#2F6B4F", fontWeight: "700" },
   count: { minWidth: 34, height: 34, borderRadius: 17, paddingHorizontal: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#DDEFD9" },
   countText: { fontSize: 13, fontWeight: "700", color: "#286C42" },
   plantGrid: { justifyContent: "space-between" },

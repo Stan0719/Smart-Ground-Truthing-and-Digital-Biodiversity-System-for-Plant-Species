@@ -120,4 +120,14 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
     assert.equal((await call('/plants/999/detail/history','officer')).status,404);
     assert.equal((await call('/plants/3/detail/history','officer')).data.observations.length,0);
   });
+  await t.test('legacy location row without an approved Observation is not silently projected', async () => {
+    await pool.query('INSERT INTO plant_location(plant_id,latitude,longitude) VALUES(2,4.25,113.75)');
+    const detail = await call('/plants/2/detail','officer');
+    assert.equal(detail.status,200);
+    assert.equal(detail.data.staff.approved_location,null);
+    const list = await call('/plants','officer');
+    const legacy = list.data.plants.find(row => Number(row.plant_id)===2);
+    assert.equal(legacy.latitude,null);
+    assert.equal(legacy.longitude,null);
+  });
 });

@@ -46,7 +46,7 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
     "@react-navigation/native": { useFocusEffect: (callback) => { focus = callback; } },
     "../data/speciesImages": { getSpeciesImageSource: () => null },
     "../components/BackButton": { default: "TouchableOpacity" },
-    "../utils/plantApi": { fetchPlantRecords: async () => [], fetchSpeciesDetail, filterUniqueSpeciesPlantRecords: (records) => records, isPlantVisibleInRoleCatalog: () => true },
+    "../utils/plantApi": { fetchPlantRecords: async () => [], fetchSpeciesDetail, filterUniqueSpeciesPlantRecords: (records) => records, isPlantVisibleInRoleCatalog: () => true, isOwnedRejectedPlant: () => false },
     "../components/PlantCard": { default: "PlantCard" },
     "../components/RefreshButton": { default: "RefreshButton" },
     "../components/FavouriteHeart": { default: "FavouriteHeart" },
@@ -118,6 +118,19 @@ test("Species Detail stacks keep native headers hidden so the screen renders no 
   const app = read("../App.js");
   const matches = app.match(/name="SpeciesDetail"[\s\S]{0,100}?headerShown: false/g) || [];
   assert.ok(matches.length >= 2, "Plants and Account stacks use the in-screen Back control without native headers");
+});
+
+test("public Species Detail does not trust a protected Species passed through navigation params", async () => {
+  for (const user of [null, { role: "Guest" }, { role: "Visitor" }]) {
+    const fixture = makeScreen({ user, species: { id: "99", name: "Private request", scientificName: "Private species" },
+      fetchSpeciesDetail: async () => null });
+    let tree = fixture.render();
+    assert.equal(fixture.allNodes(tree).some((node) => node?.props?.children === "Private species"), false);
+    fixture.focus();
+    await new Promise((resolve) => setImmediate(resolve));
+    tree = fixture.render();
+    assert.equal(fixture.allNodes(tree).some((node) => node?.props?.children === "Private species"), false);
+  }
 });
 
 test("Species Detail shares one safe-area header row with working right-aligned actions for every role", async () => {

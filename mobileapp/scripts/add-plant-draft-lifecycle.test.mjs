@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation.js";
+import { validateSpeciesRequest, validatePlantDetails, validatePlantGps } from "../utils/addPlantValidation.js";
 import { normalizeSpeciesName } from "../utils/speciesNameNormalization.js";
 
 const require = createRequire(import.meta.url), React = require("react"), ts = require("typescript");
@@ -73,7 +73,7 @@ function environment() {
     "expo-location": {}, "expo-image-picker": {}, "expo-file-system/legacy": fs,
     "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" },
     "../components/RefreshButton": { default: "RefreshButton" }, "../components/fieldFormStyles": { fieldFormStyles: {} },
-    "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails },
+    "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails, validatePlantGps },
     "../utils/speciesNameNormalization": { normalizeSpeciesName },
     "../utils/botanistFormDrafts": draftApi, "../utils/botanistDraftAutosave": autosave,
     "../utils/plantApi": { fetchSpeciesCatalog: async () => [species], fetchSpeciesDetail: async () => species, plantApi: async (path, options) => {

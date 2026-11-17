@@ -3,6 +3,68 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
+test('Plant My Rejected chip filters only current owner Rejected records without changing other status chips', () => {
+  const screen = readFileSync(new URL('../screens/Plant.js', import.meta.url), 'utf8')
+  const api = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\r?\n/gm, '').replace(/export /g, '')
+  const match = screen.match(/const matchesStatus = ([\s\S]*?);/)
+  assert.ok(match)
+  const context = vm.createContext({})
+  vm.runInContext(api, context)
+  const eligible = (plant, filter, accountId = 'owner', isBotanist = true) => {
+    Object.assign(context, { plant, plantStatusFilter: filter, user: { id: accountId }, isBotanist })
+    return vm.runInContext(`Boolean(${match[1]})`, context)
+  }
+  const ownedRejected = { currentStatus: 'Rejected', registeredBy: 'staff:owner' }
+  const otherRejected = { currentStatus: 'Rejected', registeredBy: 'staff:other' }
+  const ownedPending = { currentStatus: 'Pending Review', registeredBy: 'staff:owner' }
+  const approved = { currentStatus: 'Approved', registeredBy: 'staff:other' }
+  assert.equal(eligible(ownedRejected, 'myRejected'), true)
+  for (const row of [otherRejected, ownedPending, approved]) assert.equal(eligible(row, 'myRejected'), false)
+  assert.equal(eligible(approved, 'approved'), true)
+  assert.equal(eligible(ownedPending, 'myPending'), true)
+  assert.equal(eligible(ownedRejected, 'allVisible'), true)
+  assert.equal(eligible(otherRejected, 'myRejected', 'owner', false), true, 'non-Botanist filtering remains unchanged after role visibility rules')
+  const chipSection = screen.slice(screen.indexOf('contentContainerStyle={styles.statusFilters}'), screen.indexOf('</ScrollView>}', screen.indexOf('contentContainerStyle={styles.statusFilters}')))
+  assert.deepEqual(Array.from(chipSection.matchAll(/\["(allVisible|approved|myPending|myRejected)",/g), (item) => item[1]),
+    ['allVisible', 'approved', 'myPending', 'myRejected'])
+  assert.match(chipSection, /accessibilityState=\{\{ selected \}\}/)
+  for (const language of ['en', 'ms', 'zh']) {
+    const catalog = JSON.parse(readFileSync(new URL(`../translations/${language}.json`, import.meta.url), 'utf8'))
+    assert.ok(catalog.plant.myRejected, language)
+  }
+})
+
+test('pending Plant details select only the owner’s exact current submitted Observation', () => {
+  const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\r?\n/gm, '')
+    .replace(/export /g, '')
+  const context = vm.createContext({ mobileApiUrl: () => 'https://example.invalid', faceSession: {} })
+  vm.runInContext(source, context)
+  const selected = vm.runInContext(`(() => {
+    const current = mapBackendObservation({ id: 91, plant_id: 20, owner_subject: 'staff:owner', status: 'Pending Review', revision: 3, height_cm: 42 });
+    const plant = { plantId: '20', registeredBy: 'staff:owner', latest_observation_id: 91, observations: [
+      mapBackendObservation({ id: 90, plant_id: 20, owner_subject: 'staff:owner', status: 'Pending Review', revision: 2 }),
+      mapBackendObservation({ id: 91, plant_id: 20, owner_subject: 'staff:other', status: 'Pending Review', revision: 3 }),
+      current,
+    ] };
+    return {
+      selected: selectOwnedPendingPlantObservation(plant, 'owner'),
+      otherAccount: selectOwnedPendingPlantObservation(plant, 'other'),
+      wrongLatest: selectOwnedPendingPlantObservation({ ...plant, latest_observation_id: 92 }, 'owner'),
+      rejected: selectOwnedPendingPlantObservation({ ...plant, observations: [{ ...current, status: 'Rejected' }] }, 'owner'),
+      wrongPlant: selectOwnedPendingPlantObservation({ ...plant, observations: [{ ...current, plantId: '21' }] }, 'owner'),
+      missingOwner: selectOwnedPendingPlantObservation({ ...plant, registeredBy: 'Not recorded' }, 'owner'),
+    };
+  })()`, context)
+  assert.equal(selected.selected.observationId, '91')
+  assert.equal(selected.selected.revision, 3)
+  assert.equal(selected.selected.heightCm, 42)
+  for (const key of ['otherAccount', 'wrongLatest', 'rejected', 'wrongPlant', 'missingOwner']) {
+    assert.equal(selected[key], null)
+  }
+})
+
 test('plant adapters normalize private-schema records without inventing redacted fields', async () => {
   const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gm, '')
@@ -44,6 +106,13 @@ test('plant adapters normalize private-schema records without inventing redacted
   })
   const species = await vm.runInContext('mapBackendSpecies({species_id: 18, common_name: "Pea family plant", scientific_name: "Example plant", family_name: "Fabaceae", category: "Trees"})', context)
   assert.equal(species.family, 'Fabaceae')
+  assert.equal(species.approvalStatus, 'Approved')
+  assert.equal(species.conservationStatus, 'Not recorded')
+  const pendingSpecies = await vm.runInContext('mapBackendSpecies({species_id: 19, conservation_status: "Not Assessed", rbac_data: {approvalStatus: "Pending Review"}})', context)
+  const rejectedSpecies = await vm.runInContext('mapBackendSpecies({species_id: 20, conservation_status: "Endangered", rbac_data: {approvalStatus: "Rejected"}})', context)
+  assert.equal(pendingSpecies.approvalStatus, 'Pending Review')
+  assert.equal(rejectedSpecies.approvalStatus, 'Rejected')
+  assert.equal(pendingSpecies.conservationStatus, 'Not Assessed')
   assert.equal(species.category, undefined)
   const speciesImage = await vm.runInContext('mapBackendSpecies({species_id: 24, common_name: "Verified", scientific_name: "Verified species", image_asset_id: "asset/24"})', context)
   assert.equal(speciesImage.speciesImageVerified, true)
@@ -168,6 +237,39 @@ test('Plant Detail keeps the authenticated approved-plant photo source returned 
   assert.equal(plant.photos[0].uri, 'https://example.invalid/api/assets/approved-photo')
   assert.deepEqual(JSON.parse(JSON.stringify(plant.photos[0].headers)), { Authorization: 'Bearer fixture-token' })
   assert.ok(requests.some(request => request.url.endsWith('/api/assets?plant_id=1') && request.authorization === 'Bearer fixture-token'))
+})
+
+test('Plant 20 rejected owner detail maps the owner-scoped photo to an authenticated source', async () => {
+  const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\r?\n/gm, '')
+    .replace(/export /g, '')
+  const requests = []
+  const context = vm.createContext({
+    mobileApiUrl: () => 'https://example.invalid',
+    AbortSignal: { timeout: () => undefined },
+    faceSession: { hasSession: () => true, withToken: async operation => operation('owner-token', { id: 'owner', role: 'Botanist' }) },
+    fetch: async (url, init) => {
+      requests.push({ url, authorization: init?.headers?.Authorization })
+      const data = url.endsWith('/api/plants/20?scope=mine')
+        ? { plant: { plant_id: 20, species_id: 6, rbac_status: 'Pending Review', observation_status: 'Rejected', registered_subject: 'staff:owner', latest_observation_id: 'rejected-revision' } }
+        : url.includes('/api/species')
+          ? { species: [{ species_id: 6, scientific_name: 'Synthetic species' }] }
+          : { assets: [{ id: 'synthetic-rejected-photo', content_type: 'image/jpeg' }] }
+      return { ok: true, status: 200, text: async () => JSON.stringify(data) }
+    },
+  })
+  vm.runInContext(source, context)
+  const plant = await vm.runInContext('fetchPlantDetail("20", { accountId: "owner", scopeMine: true })', context)
+  assert.equal(plant.currentStatus, 'Rejected')
+  assert.deepEqual(JSON.parse(JSON.stringify(plant.photos)), [{
+    id: 'synthetic-rejected-photo',
+    uri: 'https://example.invalid/api/assets/synthetic-rejected-photo?scope=mine',
+    headers: { Authorization: 'Bearer owner-token' },
+  }])
+  assert.ok(requests.some(({ url, authorization }) => url.endsWith('/api/assets?plant_id=20&scope=mine') && authorization === 'Bearer owner-token'))
+  const detailScreen = readFileSync(new URL('../screens/PlantDetail.js', import.meta.url), 'utf8')
+  assert.match(detailScreen, /source=\{\{ uri: selectedPhoto\.uri, \...\(selectedPhoto\.headers/)
+  assert.match(detailScreen, /t\("plantDetail\.fieldPhotographComingSoon"\)/)
 })
 
 test('Plant Detail preserves distinct authenticated photo URLs for a multi-photo plant record', async () => {
@@ -523,7 +625,7 @@ test('owner pending plant cards receive only their authenticated plant-photo pre
   assert.equal(plants[0].plantCommonName, null)
 })
 
-test('plant IDs 11, 13 and 17 keep their own submitted data and photo asset identifiers', async () => {
+test('plant IDs 11, 13 and 17 keep their data and map initial Observation decisions over stale Plant status', async () => {
   const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
     .replace(/^import .*;\r?\n/gm, '')
     .replace(/export /g, '')
@@ -544,6 +646,13 @@ test('plant IDs 11, 13 and 17 keep their own submitted data and photo asset iden
     ['13', 'Plant 13', 'asset-13', 10],
     ['17', 'Plant 17', 'asset-17', 64],
   ])
+  assert.deepEqual(JSON.parse(JSON.stringify(plants.map((plant) => plant.currentStatus))), [
+    'Rejected', 'Pending Review', 'Pending Review',
+  ])
+  assert.equal(vm.runInContext(`mapBackendPlant({ plant_id: 8, rbac_status: 'Approved', observation_status: 'Rejected' }).currentStatus`, context),
+    'Approved', 'a rejected subsequent Observation must not downgrade the already-approved Plant')
+  assert.equal(vm.runInContext(`mapBackendPlant({ plant_id: 9, rbac_status: 'Withdrawn', observation_status: 'Pending Review' }).currentStatus`, context),
+    'Withdrawn', 'withdrawal remains the canonical Plant status')
   const cardSource = readFileSync(new URL('../components/PlantCard.js', import.meta.url), 'utf8')
   assert.match(cardSource, /const imageSource = plant\.plantImage \|\| null/)
   assert.doesNotMatch(cardSource, /getSpeciesImageSource/)
@@ -590,7 +699,66 @@ test('plant catalog visibility includes approved records and only the signed-in 
   assert.match(plantList, /plantStatusFilter === "myPending" && isOwnedPendingPlant/)
   assert.match(plantList, /filterPlantRecordsForRole\(recordsForSpecies, role, accountId, \{ publicOnly \}\)/)
   assert.match(speciesDetail, /filter\(\(record\) => isPlantVisibleInRoleCatalog/)
-  assert.match(map, /isPlantVisibleInRoleCatalog\(record, user\.role, user\.id\)/)
+  assert.match(map, /isMapPlantVisible\(record, user\.role, user\.id\)/)
+})
+
+test('Botanist Plants record lists add only their own rejected records from the owner-scoped endpoint', async () => {
+  const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\r?\n/gm, '')
+    .replace(/export /g, '')
+  const calls = []
+  const context = vm.createContext({
+    mobileApiUrl: () => 'https://example.invalid',
+    AbortSignal: { timeout: () => undefined },
+    faceSession: { hasSession: () => true, withToken: async operation => operation('token', { id: 'owner', role: 'Botanist' }) },
+    fetch: async (url) => {
+      calls.push(url)
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ plants: url.endsWith('?scope=mine') ? [
+          { plant_id: 20, species_id: 2, registered_subject: 'staff:owner', rbac_status: 'Pending Review', observation_status: 'Rejected', plant_image_asset_id: 'rejected-photo' },
+          { plant_id: 13, species_id: 2, registered_subject: 'staff:other', rbac_status: 'Rejected' },
+          { plant_id: 14, species_id: 2, registered_subject: 'staff:owner', rbac_status: 'Rejected' },
+        ] : [] }),
+      }
+    },
+  })
+  vm.runInContext(source, context)
+  const rows = await vm.runInContext('fetchPlantRecords([], { accountId: "owner", scopeMine: true })', context)
+  assert.deepEqual(calls, ['https://example.invalid/api/plants?scope=mine'])
+  assert.deepEqual(JSON.parse(JSON.stringify(rows.map((row) => [row.plantId, row.currentStatus]))), [
+    ['20', 'Rejected'], ['13', 'Rejected'], ['14', 'Rejected'],
+  ])
+  assert.equal(rows[0].plantImage.uri, 'https://example.invalid/api/assets/rejected-photo?scope=mine')
+  assert.deepEqual(JSON.parse(JSON.stringify(rows[0].plantImage.headers)), { Authorization: 'Bearer token' })
+  const eligible = rows.filter((row) => vm.runInContext(
+    `isOwnedRejectedPlant(${JSON.stringify(row)}, "owner")`, context,
+  ))
+  assert.deepEqual(Array.from(eligible, (row) => row.plantId), ['20', '14'])
+  assert.equal(vm.runInContext('isOwnedRejectedPlant({ currentStatus: "Rejected", registeredBy: "staff:other" }, "owner")', context), false)
+  assert.equal(vm.runInContext('isOwnedRejectedPlant({ currentStatus: "Rejected", registeredBy: "staff:owner" }, "other")', context), false)
+
+  const speciesDetail = readFileSync(new URL('../screens/SpeciesDetail.js', import.meta.url), 'utf8')
+  const plantList = readFileSync(new URL('../screens/Plant.js', import.meta.url), 'utf8')
+  for (const screen of [speciesDetail, plantList]) {
+    assert.match(screen, /scopeMine: true/)
+    assert.match(screen, /isOwnedRejectedPlant/)
+  }
+  assert.match(speciesDetail, /isPlantVisibleInRoleCatalog\(record, user\?\.role, user\?\.id\)\s*\|\|\s*isOwnedRejectedPlant/)
+  assert.match(plantList, /filterPlantRecordsForRole\(recordsForSpecies, role, accountId, \{ publicOnly \}\)/)
+  assert.match(plantList, /recordsForSpecies\.filter\(\(record\) => isOwnedRejectedPlant/)
+  const app = readFileSync(new URL('../App.js', import.meta.url), 'utf8')
+  assert.match(app, /name="PlantsTab"[\s\S]*?<PlantsStack/)
+  assert.match(app, /name="Plants"[\s\S]*?<SpeciesScreen/)
+  assert.match(app, /name="SpeciesDetail"[\s\S]*?<SpeciesDetailScreen/)
+  const plantCard = readFileSync(new URL('../components/PlantCard.js', import.meta.url), 'utf8')
+  const plantDetail = readFileSync(new URL('../screens/PlantDetail.js', import.meta.url), 'utf8')
+  assert.match(plantCard, /imageSource && !imageFailed \? \(/)
+  assert.match(plantCard, /styles\.placeholder/)
+  assert.match(plantCard, /navigation\.navigate\(\s*"PlantDetails",\s*\{\s*plantId: plant\.plantId,?\s*\}\)/)
+  assert.match(plantCard, /case "rejected": return styles\.statusRejected/)
+  assert.match(plantDetail, /fetchPlantDetail\(plantId, \{ \.\.\.options, scopeMine: true \}\)/)
 })
 
 

@@ -18,7 +18,7 @@ test("Species 6 list includes distinct owner-visible Botanist records and only a
     (13,6,'staff:botA','Pending Review','plant-13'),(14,6,'staff:botB','Pending Review','plant-14'),
     (15,6,'staff:botB','Pending Review','plant-15'),(17,6,'staff:botA','Pending Review','plant-17'),
     (18,6,'staff:botA','Rejected','plant-18'),(19,6,'staff:botA','Correction Required','plant-19'),
-    (20,7,'staff:botA','Pending Review','plant-20')`);
+    (20,7,'staff:botA','Pending Review','plant-20'),(21,6,'staff:botB','Rejected','plant-21')`);
   await pool.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES
     ('approved-8',8,'staff:botA','Approved','{"heightCm":10,"lifeStage":"Mature"}','a8'),
     ('rejected-8',8,'staff:botA','Rejected','{"heightCm":99,"lifeStage":"Pending edit"}','r8'),
@@ -26,8 +26,13 @@ test("Species 6 list includes distinct owner-visible Botanist records and only a
     ('pending-13',13,'staff:botA','Pending Review','{"latitude":11.1,"longitude":22.2,"accuracy_m":5,"altitudeM":30,"zone":"Zone B"}','p13'),
     ('pending-14',14,'staff:botB','Pending Review','{}','p14'),
     ('correction-15',15,'staff:botB','Correction Required','{}','c15'),
+    ('rejected-18',18,'staff:botA','Rejected','{}','r18'),
+    ('rejected-18-other-owner',18,'staff:botB','Rejected','{}','r18-other'),
+    ('rejected-21',21,'staff:botB','Rejected','{}','r21'),
     ('pending-17',17,'staff:botA','Pending Review','{}','p17'),
     ('pending-20',20,'staff:botA','Pending Review','{"heightCm":22,"lifeStage":"Seedling","notes":"Submitted plant notes"}','p20')`);
+  await pool.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,created_at)
+    VALUES('rejected-18-older',18,'staff:botA','Rejected','{}','r18-older',NOW()-INTERVAL '1 day')`);
   await pool.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,created_at,updated_at)
     VALUES('approved-8-current',8,'staff:botA','Approved','{"heightCm":10,"lifeStage":"Mature"}','a8-current',NOW()+INTERVAL '1 second',NOW()+INTERVAL '1 second')`);
   await pool.query(`INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES
@@ -35,6 +40,10 @@ test("Species 6 list includes distinct owner-visible Botanist records and only a
     ('asset-8-current',8,'staff:botA','asset-8-current','approved-8-current',false,'image/jpeg',decode('ffd8ff','hex')),
     ('asset-11-owner',11,'staff:botA','asset-11','rejected-11',false,'image/jpeg',decode('ffd8ff','hex')),
     ('asset-13-owner',13,'staff:botA','asset-13','pending-13',false,'image/jpeg',decode('ffd8ff','hex')),
+    ('asset-18-rejected',18,'staff:botA','asset-18','rejected-18',false,'image/jpeg',decode('ffd8ff','hex')),
+    ('asset-18-older-rejected',18,'staff:botA','asset-18-older','rejected-18-older',false,'image/jpeg',decode('ffd8ff','hex')),
+    ('asset-18-wrong-observation-owner',18,'staff:botA','asset-18-mismatch','rejected-18-other-owner',false,'image/jpeg',decode('ffd8ff','hex')),
+    ('asset-21-not-owned-plant',21,'staff:botA','asset-21-mismatch','rejected-21',false,'image/jpeg',decode('ffd8ff','hex')),
     ('asset-17-owner',17,'staff:botA','asset-17','pending-17',false,'image/jpeg',decode('ffd8ff','hex')),
     ('asset-20-pending-species',20,'staff:botA','asset-20','pending-20',false,'image/jpeg',decode('ffd8ff','hex'))`);
   await pool.query(`CREATE TABLE plant_app.qr_code(
@@ -92,6 +101,10 @@ test("Species 6 list includes distinct owner-visible Botanist records and only a
   }).then((response) => response.json());
   assert.equal(ownerPlantList.plants.find((plant) => String(plant.plant_id) === "13").zone, "Zone B",
     "the owner-scoped list includes the submitted Zone even without approved coordinates");
+  assert.equal(ownerPlantList.plants.find((plant) => String(plant.plant_id) === "18").plant_image_asset_id, "asset-18-rejected",
+    "the owner-scoped Plant projection exposes the current rejected Observation photo to its owner");
+  assert.equal(ownerPlantList.plants.find((plant) => String(plant.plant_id) === "11").plant_image_asset_id, "asset-11-owner",
+    "a rejected current Observation also exposes its photo when status is derived from that Observation");
   assert.equal(ownerPlantList.plants.some((plant) => String(plant.plant_id) === "14"), false);
   assert.equal((await fetch(`http://127.0.0.1:${server.address().port}/api/plants?scope=mine`, {
     headers: { Authorization: `Bearer ${tokens.visitor}` },
@@ -155,8 +168,12 @@ test("Species 6 list includes distinct owner-visible Botanist records and only a
     });
     return (await response.json()).assets;
   }
-  assert.deepEqual(await getPlantPhotos("botA", 11, "&scope=mine"), []);
+  assert.deepEqual((await getPlantPhotos("botA", 11, "&scope=mine")).map((asset) => asset.id), ["asset-11-owner"]);
   assert.deepEqual(await getPlantPhotos("visitor", 11, "&scope=mine"), []);
+  assert.deepEqual((await getPlantPhotos("botA", 18, "&scope=mine")).map((asset) => asset.id), ["asset-18-rejected"]);
+  assert.deepEqual(await getPlantPhotos("botA", 18), [], "the private rejected photo list requires explicit owner scope");
+  assert.deepEqual(await getPlantPhotos("botB", 18, "&scope=mine"), [], "another Botanist cannot list rejected Plant photos");
+  assert.deepEqual(await getPlantPhotos("visitor", 18, "&scope=mine"), [], "Visitors cannot list rejected Plant photos");
   assert.deepEqual((await getPlantPhotos("visitor", 8)).map((asset) => asset.id), ["asset-8-current"]);
   async function getAsset(account, assetId, scope = "") {
     return fetch(`http://127.0.0.1:${server.address().port}/api/assets/${assetId}${scope}`, {
@@ -166,5 +183,22 @@ test("Species 6 list includes distinct owner-visible Botanist records and only a
   assert.equal((await getAsset("visitor", "asset-8-current")).status, 200);
   assert.equal((await getAsset("visitor", "asset-8-approved")).status, 404);
   assert.equal((await getAsset("botA", "asset-13-owner", "?scope=mine")).status, 200);
-  assert.equal((await getAsset("botA", "asset-11-owner", "?scope=mine")).status, 404);
+  assert.equal((await getAsset("botA", "asset-11-owner", "?scope=mine")).status, 200);
+  assert.equal((await getAsset("botA", "asset-18-rejected", "?scope=mine")).status, 200,
+    "the owner can retrieve the actual bytes for their current rejected photo");
+  assert.equal((await getAsset("botA", "asset-18-older-rejected", "?scope=mine")).status, 404,
+    "an older rejected Observation revision is not substituted for the current photo");
+  assert.equal((await getAsset("botA", "asset-18-wrong-observation-owner", "?scope=mine")).status, 404,
+    "asset and Plant ownership cannot override a different Observation owner");
+  assert.equal((await getAsset("botA", "asset-21-not-owned-plant", "?scope=mine")).status, 404,
+    "asset and Observation ownership cannot override a different Plant owner");
+  assert.equal((await getAsset("botB", "asset-18-rejected", "?scope=mine")).status, 404);
+  assert.equal((await getAsset("visitor", "asset-18-rejected", "?scope=mine")).status, 404);
+  assert.equal((await getAsset("botA", "asset-11-owner")).status, 404,
+    "the rejected Observation photo is unavailable without the owner scope");
+  assert.equal((await getAsset("botA", "asset-18-rejected")).status, 404,
+    "the rejected private photo still requires the explicit owner scope");
+  assert.equal((await getAsset("botA", "unrelated-rejected-asset", "?scope=mine")).status, 404);
+  assert.equal((await getAsset("officer", "asset-18-rejected")).status, 200,
+    "existing authorized Officer image access remains available");
 });

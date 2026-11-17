@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
-import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation.js";
+import { validateSpeciesRequest, validatePlantDetails, validatePlantGps } from "../utils/addPlantValidation.js";
 import { normalizeSpeciesName } from "../utils/speciesNameNormalization.js";
 import { createLocalization, createDisplayTranslator } from "../translations/core.js";
 const require = createRequire(import.meta.url), React = require("react"), ts = require("typescript");
@@ -59,7 +59,7 @@ async function fixture(language = "en", initial = {}, api) {
   for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "ScrollView", "ActivityIndicator", "Image"]) native[name] = name;
   const deps = { react: hooks, "react-native": native, "@react-navigation/native": { useFocusEffect: (fn) => { focusEffect = fn; } },
     "../translations/i18n": { useAppTranslation: () => {}, t, translateLabel: display.label, translateUIMessage: display.message },
-    "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails },
+    "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails, validatePlantGps },
     "../utils/speciesNameNormalization": { normalizeSpeciesName },
     "../utils/botanistFormDrafts": { hasMeaningfulAddPlantDraft: () => true, deleteBotanistFormDraft: async () => true,
       saveBotanistFormDraft: async (_owner, draft) => { savedDrafts.push(structuredClone(draft)); return { ...draft, saved_at: "saved" }; } },
@@ -145,6 +145,21 @@ test("mode-aware validators keep manual plant names required without a hidden se
   assert.equal(validatePlantDetails({ newSpecies: true, plantScientificName: "", height: "80", healthStatus: "Healthy", growthStage: "Juvenile", morphology: "Leaves" }), "plantScientificNameRequired");
   assert.equal(validatePlantDetails({ plantScientificName: "Plant", height: "80", healthStatus: "Healthy", growthStage: "Juvenile", morphology: "Leaves" }), "chooseExistingSpecies");
   for (const key of Object.keys(proposal)) assert.ok(validateSpeciesRequest({ ...proposal, [key]: "" }), key);
+});
+test("Add Plant GPS rejects missing, malformed and out-of-range values before submission", () => {
+  assert.equal(validatePlantGps("0", 0), null);
+  assert.equal(validatePlantGps("-90", "180"), null);
+  assert.equal(validatePlantGps("90.0001", "113"), "invalidLatitude");
+  assert.equal(validatePlantGps("1", "-180.0001"), "invalidLongitude");
+  assert.equal(validatePlantGps("", "113"), "invalidLatitude");
+  assert.equal(validatePlantGps("1", "   "), "invalidLongitude");
+  assert.equal(validatePlantGps("NaN", "113"), "invalidLatitude");
+  assert.equal(validatePlantGps("1", "Infinity"), "invalidLongitude");
+  assert.equal(validatePlantGps(true, 113), "invalidLatitude");
+  for (const language of [en, ms, zh]) {
+    assert.ok(language.addPlantWorkflow.invalidLatitude);
+    assert.ok(language.addPlantWorkflow.invalidLongitude);
+  }
 });
 test("existing species picker scrolls a short or long list and selects the last species", async () => {
   for (const count of [2, 24]) {
@@ -374,6 +389,23 @@ test("generated QR stays unused until normal Plant submission assigns its ID", a
   fillPlant(app); await app.press("addPlantWorkflow.addPlantRecord");
   const submission = app.network.find(([path]) => path === "/plant-submissions");
   assert.equal(submission[1].body.qr_id, 51);
+});
+test("Add Plant blocks invalid GPS locally and accepts numeric zero coordinates", async () => {
+  const app = await fixture("en", { ...plantValues, selectedSpecies: species });
+  fillPlant(app);
+  app.fill("setLatitude", "91");
+  await app.press("addPlantWorkflow.addPlantRecord");
+  assert.equal(app.alerts.at(-1)[1], app.t("addPlantWorkflow.invalidLatitude"));
+  assert.equal(app.network.length, 0);
+  app.fill("setLatitude", "0");
+  app.fill("setLongitude", "181");
+  await app.press("addPlantWorkflow.addPlantRecord");
+  assert.equal(app.alerts.at(-1)[1], app.t("addPlantWorkflow.invalidLongitude"));
+  assert.equal(app.network.length, 0);
+  app.fill("setLongitude", "0");
+  await app.press("addPlantWorkflow.addPlantRecord");
+  assert.equal(app.network[0][1].body.latitude, 0);
+  assert.equal(app.network[0][1].body.longitude, 0);
 });
 for (const language of ["en", "ms"]) {
   test(`${language}: new mode has no separate submit; Cancel restores selector and preserves independent plant input`, async () => {

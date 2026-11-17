@@ -15,12 +15,13 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Feather } from "@expo/vector-icons";
 
 import {
   getPlantById,
   getSpeciesBySlug,
 } from "../data/mockData";
-import { fetchPlantDetail, getPlantDisplayObservation, getObservationRecorderDisplayName, getPlantRegisteredByDisplayName, isOwnedPendingPlant, selectLatestApprovedObservation } from "../utils/plantApi";
+import { fetchPlantDetail, getPlantDisplayObservation, getObservationRecorderDisplayName, getPlantRegisteredByDisplayName, isOwnedPendingPlant, selectLatestApprovedObservation, selectOwnedPendingPlantObservation } from "../utils/plantApi";
 import RefreshButton from "../components/RefreshButton";
 import BackButton from "../components/BackButton";
 import FavouriteHeart from "../components/FavouriteHeart";
@@ -66,8 +67,9 @@ export default function PlantDetail({
     ? plant?.currentStatus || "checking"
     : observationEligibility).trim().toLowerCase();
   const canAddObservation = plantApprovalStatus === "approved";
-  const isPendingInitialReview = plant?.currentStatus === "Pending Review";
-  const showObservationHistory = isBotanist && !isPendingInitialReview;
+  const currentPlantStatus = String(plant?.currentStatus || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const showLatestVerifiedObservation = isBotanist && ["approved", "pending review"].includes(currentPlantStatus);
+  const showObservationHistory = isBotanist && currentPlantStatus === "approved";
   const observationBlockedMessageKey = plantApprovalStatus === "pending review" || plantApprovalStatus === "pending"
     ? "fieldCollection.plantObservationPendingApproval"
     : plantApprovalStatus === "rejected"
@@ -246,6 +248,9 @@ export default function PlantDetail({
   // =====================================================
 
   const latestApprovedObservation = selectLatestApprovedObservation(plant.observations || []);
+  const detailsObservation = currentPlantStatus === "approved"
+    ? latestApprovedObservation
+    : currentPlantStatus === "pending review" ? selectOwnedPendingPlantObservation(plant, user?.id) : null;
 
 
   // =====================================================
@@ -321,11 +326,11 @@ export default function PlantDetail({
           </ScrollView>
           <View style={styles.photoNavigation}>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.previousPhoto")} onPress={() => changePhoto(-1)} style={styles.photoNavButton}>
-              <Text style={styles.photoNavText}>‹</Text>
+              <Feather name="chevron-left" size={24} color="#315B49" />
             </TouchableOpacity>
             <Text style={styles.photoCounter}>{activePhotoIndex + 1} / {displayablePhotos.length}</Text>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("plantDetail.nextPhoto")} onPress={() => changePhoto(1)} style={styles.photoNavButton}>
-              <Text style={styles.photoNavText}>›</Text>
+              <Feather name="chevron-right" size={24} color="#315B49" />
             </TouchableOpacity>
           </View>
         </>
@@ -357,10 +362,12 @@ export default function PlantDetail({
           <Text numberOfLines={2} style={[
             styles.heroBadge,
             styles.approvalHeroBadge,
-            plant.currentStatus === "Approved" ? styles.approvedBadge :
-              plant.currentStatus === "Pending Review" ? styles.pendingBadge : styles.otherStatusBadge,
-            plant.currentStatus === "Approved" ? styles.approvedText :
-              plant.currentStatus === "Pending Review" ? styles.pendingText : styles.otherStatusText,
+            String(plant.currentStatus || "").trim().toLowerCase() === "approved" ? styles.approvedBadge :
+              String(plant.currentStatus || "").trim().toLowerCase() === "pending review" ? styles.pendingBadge :
+                String(plant.currentStatus || "").trim().toLowerCase() === "rejected" ? styles.rejectedBadge : styles.otherStatusBadge,
+            String(plant.currentStatus || "").trim().toLowerCase() === "approved" ? styles.approvedText :
+              String(plant.currentStatus || "").trim().toLowerCase() === "pending review" ? styles.pendingText :
+                String(plant.currentStatus || "").trim().toLowerCase() === "rejected" ? styles.rejectedText : styles.otherStatusText,
           ]}>
             {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
@@ -580,7 +587,103 @@ export default function PlantDetail({
       </View>
       )}
 
-      {isBotanist && plant.currentStatus === "Approved" && (
+      {/* =================================================
+          LATEST VERIFIED OBSERVATION
+      ================================================= */}
+
+      {showLatestVerifiedObservation && (
+        <View style={styles.observesection}>
+
+          <Text style={styles.sectionLabel}>{t(currentPlantStatus === "pending review" ? "plantDetail.latestSubmittedObservation" : "plantDetail.latestVerifiedObservation")}</Text>
+
+          <Text style={styles.sectionTitle}>{t("plantDetail.observationDetails")}</Text>
+
+          {detailsObservation ? (
+          <View style={styles.observationCard}>
+
+            <InfoRow label={t("myObservations.observationId")} value={detailsObservation.observationId} />
+            <InfoRow label={t("myObservations.plantId")} value={detailsObservation.plantId} />
+            {currentPlantStatus === "pending review" ? (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>{t("notificationObservation.reviewStatus")}</Text>
+                <Text style={[styles.heroBadge, styles.approvalHeroBadge, styles.pendingBadge, styles.pendingText, styles.submittedObservationBadge]}>
+                  {translateLabel(detailsObservation.status)}
+                </Text>
+              </View>
+            ) : (
+              <InfoRow label={t("notificationObservation.reviewStatus")} value={translateLabel(detailsObservation.status)} />
+            )}
+
+            <InfoRow
+              label={t("plantDetail.recordedBy")}
+              value={
+                getObservationRecorderDisplayName(detailsObservation, user, t("plantDetail.unknownBotanist"))
+              }
+            />
+
+            <InfoRow
+              label={t("plantDetail.date")}
+              value={detailsObservation.date ? formatDateTime(detailsObservation.date) : t("plant.notRecorded")}
+            />
+
+            <InfoRow
+              label={t("plant.height")}
+              value={detailsObservation.heightCm != null ? `${detailsObservation.heightCm} cm` : t("plant.notRecorded")}
+            />
+
+            <InfoRow
+              label={t("plantDetail.healthStatus")}
+              value={
+                detailsObservation.healthStatus
+              }
+            />
+
+            <InfoRow
+              label={t("plant.lifeStage")}
+              value={
+                detailsObservation.lifeStage
+              }
+            />
+
+            <InfoRow
+              label={t("botanistPlantDetail.morphology")}
+              value={
+                detailsObservation.morphology
+              }
+            />
+
+            <InfoRow
+              label={t("plantDetail.notes")}
+              value={
+                detailsObservation.notes
+              }
+            />
+
+            {detailsObservation.taxonomy ? (
+              <InfoRow label={t("recordEdits.taxonomy")} value={detailsObservation.taxonomy} />
+            ) : null}
+
+            {detailsObservation.latitude != null && <InfoRow label={t("fieldCollection.latitude")} value={String(detailsObservation.latitude)} />}
+            {detailsObservation.longitude != null && <InfoRow label={t("fieldCollection.longitude")} value={String(detailsObservation.longitude)} />}
+            {detailsObservation.accuracyM != null && <InfoRow label={t("fieldCollection.gpsAccuracyM")} value={String(detailsObservation.accuracyM)} />}
+            {detailsObservation.zone && <InfoRow label={t("recordEdits.zone")} value={detailsObservation.zone} />}
+            {detailsObservation.altitudeM != null && <InfoRow label={t("recordEdits.altitudeM")} value={`${detailsObservation.altitudeM} m`} />}
+            {detailsObservation.reviewComment && <InfoRow label={t("notificationObservation.officerFeedback")} value={detailsObservation.reviewComment} />}
+            {detailsObservation.reviewedAt && <InfoRow label={t("recordEdits.reviewedAt")} value={formatDateTime(detailsObservation.reviewedAt)} />}
+
+            <ObservationPhotos photos={detailsObservation.photos} />
+
+          </View>
+          ) : (
+            <View style={styles.emptyHistory}>
+              <Text style={styles.emptyText}>{t(currentPlantStatus === "pending review" ? "plantDetail.noSubmittedObservationAvailable" : "plantDetail.noVerifiedObservationAvailable")}</Text>
+            </View>
+          )}
+
+        </View>
+      )}
+
+      {showObservationHistory && (
         <View style={styles.addObservationSection}>
           <TouchableOpacity
             style={[styles.addObservationButton, !canAddObservation && styles.addObservationButtonDisabled]}
@@ -597,93 +700,6 @@ export default function PlantDetail({
             <Text style={styles.addObservationButtonText}>{t("plantDetail.addNewObservation")}</Text>
           </TouchableOpacity>
           {!canAddObservation && <Text style={styles.addObservationUnavailableText}>{t(observationBlockedMessageKey)}</Text>}
-        </View>
-      )}
-
-      {/* =================================================
-          LATEST VERIFIED OBSERVATION
-      ================================================= */}
-
-      {showObservationHistory && (
-        <View style={styles.observesection}>
-
-          <Text style={styles.sectionLabel}>{t("plantDetail.latestVerifiedObservation")}</Text>
-
-          <Text style={styles.sectionTitle}>{t("plantDetail.observationDetails")}</Text>
-
-          {latestApprovedObservation ? (
-          <View style={styles.observationCard}>
-
-            <InfoRow label={t("myObservations.observationId")} value={latestApprovedObservation.observationId} />
-            <InfoRow label={t("myObservations.plantId")} value={latestApprovedObservation.plantId} />
-            <InfoRow label={t("notificationObservation.reviewStatus")} value={translateLabel(latestApprovedObservation.status)} />
-
-            <InfoRow
-              label={t("plantDetail.recordedBy")}
-              value={
-                getObservationRecorderDisplayName(latestApprovedObservation, user, t("plantDetail.unknownBotanist"))
-              }
-            />
-
-            <InfoRow
-              label={t("plantDetail.date")}
-              value={latestApprovedObservation.date ? formatDateTime(latestApprovedObservation.date) : t("plant.notRecorded")}
-            />
-
-            <InfoRow
-              label={t("plant.height")}
-              value={latestApprovedObservation.heightCm != null ? `${latestApprovedObservation.heightCm} cm` : t("plant.notRecorded")}
-            />
-
-            <InfoRow
-              label={t("plantDetail.healthStatus")}
-              value={
-                latestApprovedObservation.healthStatus
-              }
-            />
-
-            <InfoRow
-              label={t("plant.lifeStage")}
-              value={
-                latestApprovedObservation.lifeStage
-              }
-            />
-
-            <InfoRow
-              label={t("botanistPlantDetail.morphology")}
-              value={
-                latestApprovedObservation.morphology
-              }
-            />
-
-            <InfoRow
-              label={t("plantDetail.notes")}
-              value={
-                latestApprovedObservation.notes
-              }
-            />
-
-            {latestApprovedObservation.taxonomy ? (
-              <InfoRow label={t("recordEdits.taxonomy")} value={latestApprovedObservation.taxonomy} />
-            ) : null}
-
-            {latestApprovedObservation.latitude != null && <InfoRow label={t("fieldCollection.latitude")} value={String(latestApprovedObservation.latitude)} />}
-            {latestApprovedObservation.longitude != null && <InfoRow label={t("fieldCollection.longitude")} value={String(latestApprovedObservation.longitude)} />}
-            {latestApprovedObservation.accuracyM != null && <InfoRow label={t("fieldCollection.gpsAccuracyM")} value={String(latestApprovedObservation.accuracyM)} />}
-            {latestApprovedObservation.zone && <InfoRow label={t("recordEdits.zone")} value={latestApprovedObservation.zone} />}
-            {latestApprovedObservation.altitudeM != null && <InfoRow label={t("recordEdits.altitudeM")} value={`${latestApprovedObservation.altitudeM} m`} />}
-            {latestApprovedObservation.reviewComment && <InfoRow label={t("notificationObservation.officerFeedback")} value={latestApprovedObservation.reviewComment} />}
-            {latestApprovedObservation.reviewedAt && <InfoRow label={t("recordEdits.reviewedAt")} value={formatDateTime(latestApprovedObservation.reviewedAt)} />}
-
-            <ObservationPhotos photos={latestApprovedObservation.photos} />
-
-          </View>
-          ) : (
-            <View style={styles.emptyHistory}>
-              <Text style={styles.emptyText}>{t("plantDetail.noVerifiedObservationAvailable")}</Text>
-            </View>
-          )}
-
         </View>
       )}
 
@@ -975,8 +991,7 @@ const styles = StyleSheet.create({
   thumbnailSelected: { borderColor: "#468585" },
   thumbnailImage: { width: "100%", height: "100%" },
   photoNavigation: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18, paddingTop: 7 },
-  photoNavButton: { width: 38, height: 34, alignItems: "center", justifyContent: "center", borderRadius: 17, backgroundColor: "#DCE8D6" },
-  photoNavText: { color: "#315B49", fontSize: 24, lineHeight: 28, fontWeight: "700" },
+  photoNavButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22, backgroundColor: "#DCE8D6" },
   photoCounter: { minWidth: 42, color: "#405F56", textAlign: "center", fontSize: 13, fontWeight: "700" },
   imageViewer: { flex: 1, paddingHorizontal: 12, paddingTop: 30, paddingBottom: 18, backgroundColor: "#101812" },
   viewerTopBar: { height: 48, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
@@ -1251,7 +1266,7 @@ heroBadge: {
   },
 
   qrActive: {
-    backgroundColor: "#D8EBD9",
+    backgroundColor: "#E3F4E9",
   },
 
   qrInactive: {
@@ -1351,9 +1366,10 @@ observationArrow: {
   },
 
   pendingBadge: {
-    backgroundColor: "#F4E7D2",
+    backgroundColor: "#FFF0D8",
   },
-  rejectedBadge: { backgroundColor: "#FCE2E2" },
+  submittedObservationBadge: { alignSelf: "flex-start" },
+  rejectedBadge: { backgroundColor: "#FDE7E7" },
 
   statusText: {
     fontSize: 8,
@@ -1362,19 +1378,19 @@ observationArrow: {
   },
 
   approvedText: {
-    color: "#34785D",
+    color: "#247344",
   },
 
   pendingText: {
-    color: "#8A6939",
+    color: "#965C12",
   },
-  rejectedText: { color: "#A33F36" },
+  rejectedText: { color: "#B42318" },
   observationViewDetails: { minHeight: 44, alignSelf: "flex-end", justifyContent: "center", paddingHorizontal: 8, marginTop: 6 },
   observationViewDetailsText: { color: "#28665E", fontSize: 13, fontWeight: "700" },
 
   otherStatusBadge: { backgroundColor: "#E7EBE6" },
   otherStatusText: { color: "#52645A" },
-  approvalHeroBadge: { maxWidth: "100%", flexShrink: 1, paddingHorizontal: 9, paddingVertical: 5, fontSize: 10 },
+  approvalHeroBadge: { maxWidth: "100%", flexShrink: 1 },
 
   divider: {
     height: 1,

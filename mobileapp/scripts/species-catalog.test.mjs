@@ -55,7 +55,7 @@ test('species-specific Plants reloads are scoped to the selected route and API f
   assert.match(list,/listViewState === "error" \? <View style=\{styles\.loadError\}/);
   assert.match(list,/listViewState === "loading" \? <View style=\{styles\.loadingState\}/);
   assert.match(list,/t\("common\.retry"\)/);
-  assert.match(species,/useSpeciesCatalog\(user\?\.id, \{ publicOnly: !user \|\| isVisitor \}\)/);
+  assert.match(species,/useSpeciesCatalog\(user\?\.id, \{ publicOnly: isPublicViewer, includeOwnedRequests: isBotanist \}\)/);
   assert.match(list,/const publicOnly = !user \|\| isVisitor/);
   assert.doesNotMatch(list,/diagnostic|__DEV__/i);
   assert.match(list,/fetchPlantRecords\(catalog, \{ accountId, publicOnly \}\)/);
@@ -137,7 +137,7 @@ test('actual catalogue renders an approved species and both refresh actions', ()
   const navigations = [];
   let refreshes = 0;
   const native = { StyleSheet: { create: x => x }, Dimensions: { get: () => ({ width: 390 }) } };
-  for (const type of ['View', 'Text', 'TextInput', 'TouchableOpacity', 'FlatList', 'Image']) native[type] = type;
+  for (const type of ['View', 'Text', 'TextInput', 'TouchableOpacity', 'FlatList', 'ScrollView', 'Image']) native[type] = type;
   const screen = load('screens/Species.js', {
     react: { ...React, useState: initial => [initial, () => {}], useMemo: fn => fn(), useCallback: fn => fn, useEffect() {} },
     'react-native': native,
@@ -148,37 +148,68 @@ test('actual catalogue renders an approved species and both refresh actions', ()
     '../components/FavouriteHeart': { default: 'FavouriteHeart' },
     '../data/speciesImages': { getSpeciesImageSource: species => species.image },
     '../hooks/useVisitorFavourites': { default: () => ({ isFavourite: () => false, isPending: () => false, loading: false, refreshing: false, mutationError: '', error: '', refresh: async () => {}, toggle: async () => {} }) },
-    '../utils/speciesFilters': { filterAndSortSpecies: species => species, getSpeciesFamilyOptions: species => [...new Set(species.map(item => item.family).filter(Boolean))], resetMissingSpeciesFamily: (family, options) => family !== null && !options.includes(family) ? null : family },
-    '../utils/useSpeciesCatalog': { useSpeciesCatalog: id => {
-      assert.equal(id, 'owner');
-      return { species: [{ id: '6', slug: 'api-species-6', name: 'Actual common name', scientificName: 'Actual approved species', family: 'Fabaceae', description: 'Actual description', image: { uri: 'https://example.invalid/api/assets/real-upload', headers: { Authorization: 'Bearer fixture' } } }], counts: {}, loading: false, error: '', refresh() { refreshes++; } };
+    '../utils/speciesFilters': { combineBotanistSpecies: (species, requests) => [...species, ...(requests || [])], filterAndSortSpecies: species => species, getSpeciesFamilyOptions: species => [...new Set(species.map(item => item.family).filter(Boolean))], resetMissingSpeciesFamily: (family, options) => family !== null && !options.includes(family) ? null : family },
+    '../utils/useSpeciesCatalog': { useSpeciesCatalog: (id, options) => {
+      assert.ok(id === 'owner' || id == null);
+      const approved = { id: '6', slug: 'api-species-6', name: 'Actual common name', scientificName: 'Actual approved species', approvalStatus: 'Approved', genus: 'Actual genus', family: 'Fabaceae', conservationStatus: 'Not Assessed', description: 'Actual description', image: { uri: 'https://example.invalid/api/assets/real-upload', headers: { Authorization: 'Bearer fixture' } } };
+      return { species: options.publicOnly ? [approved, { id: '7', slug: 'pending', approvalStatus: 'Pending Review' }, { id: '8', slug: 'rejected', approvalStatus: 'Rejected' }, { id: 'request:9', slug: 'private', privateRequest: true, approvalStatus: 'Approved' }] : [approved], ownedRequests: [], counts: {}, loading: false, error: '', refresh() { refreshes++; } };
     } },
   });
   const tree = screen.default({ user: { id: 'owner', role: 'botanist' }, navigation: { navigate: (...args) => navigations.push(args) } });
   const catalogueSource = readFileSync(new URL('../screens/Species.js', import.meta.url), 'utf8');
-  assert.match(catalogueSource, /!isBotanist && <FlatList/);
+  assert.match(catalogueSource, /!isBotanist && !isPublicViewer && <FlatList/);
   assert.doesNotMatch(catalogueSource, /setActiveCategory/);
-  const list = React.Children.toArray(tree.props.children)[0];
+  const [header, list] = React.Children.toArray(tree.props.children);
+  assert.equal(header.type, 'View');
+  assert.equal(list.type, 'FlatList');
+  assert.equal(list.props.style.flex, 1, 'only the results list occupies the remaining scroll area');
+  assert.equal(list.props.ListHeaderComponent, undefined, 'controls remain outside the scrolling list');
+  assert.ok(list.props.contentContainerStyle.paddingBottom > 0, 'last card clears the bottom tabs');
   assert.equal(list.props.data.length, 1);
   assert.equal(list.props.data[0].id, '6');
   assert.doesNotMatch(readFileSync(new URL('../screens/Species.js', import.meta.url), 'utf8'), /const categories\s*=|item\.category/);
   const walk = n => !n || typeof n !== 'object' ? [] : typeof n.type === 'function' ? walk(n.type(n.props)) : [n, ...React.Children.toArray(n.props?.children).flatMap(walk)];
   const children = n => React.Children.toArray(n?.props?.children);
-  assert.equal(walk(list.props.ListHeaderComponent).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 0);
+  assert.equal(walk(header).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 0);
   const visitorTree = screen.default({ user: { id: 'owner', role: 'visitor' }, navigation: { navigate: (...args) => navigations.push(args) } });
-  const visitorList = React.Children.toArray(visitorTree.props.children)[0];
-  assert.equal(walk(visitorList.props.ListHeaderComponent).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 1);
-  const controls = walk(list.props.ListHeaderComponent).find(n => n.type === 'View' && children(n).map(child => child.type).join(',') === 'TextInput,RefreshButton,TouchableOpacity');
-  assert.ok(controls, 'search, icon refresh, and sort share one aligned row in that order');
-  assert.ok(walk(list.props.ListHeaderComponent).some(n => n.type === 'LanguageSelector'));
-  assert.equal(walk(list.props.ListHeaderComponent).filter(n => n.type === 'RefreshButton' && n.props.testID === 'catalogue-species-refresh').length, 1);
+  const [visitorHeader, visitorList] = React.Children.toArray(visitorTree.props.children);
+  assert.deepEqual(visitorList.props.data.map(item => item.id), ['6'], 'public search, sort and refresh operate on approved records only');
+  assert.equal(walk(visitorHeader).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 0);
+  const guestTree = screen.default({ user: null, navigation: { navigate: (...args) => navigations.push(args) } });
+  const [guestHeader, guestList] = React.Children.toArray(guestTree.props.children);
+  assert.deepEqual(guestList.props.data.map(item => item.id), ['6']);
+  assert.equal(walk(guestHeader).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 0);
+  for (const role of ['Officer', 'Admin']) {
+    const roleTree = screen.default({ user: { id: 'owner', role }, navigation: { navigate: (...args) => navigations.push(args) } });
+    const [roleHeader, roleList] = React.Children.toArray(roleTree.props.children);
+    assert.equal(walk(roleHeader).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 1, `${role} Family control stays fixed`);
+    assert.equal(walk(roleList.props.renderItem({ item: roleList.props.data[0] })).filter(n => n.props?.children === 'Approved').length, 1, `${role} badge remains`);
+  }
+  for (const publicList of [visitorList, guestList]) {
+    const publicCard = publicList.props.renderItem({ item: publicList.props.data[0] });
+    assert.equal(walk(publicCard).filter(n => n.props?.children === 'Approved').length, 0, 'public cards omit approval badges');
+    assert.ok(walk(publicCard).some(n => children(n).includes('species.family')), 'family information remains in the card');
+    const publicActions = walk(publicCard).filter(n => n.type === 'TouchableOpacity');
+    publicActions[0].props.onPress();
+    assert.equal(navigations.at(-1)[0], 'SpeciesDetail');
+  }
+  navigations.length = 0;
+  const controls = walk(header).find(n => n.type === 'View' && children(n).map(child => child.type).join(',') === 'TextInput,RefreshButton,TouchableOpacity');
+  assert.ok(controls, 'search, refresh and Filters share the first row');
+  assert.equal(walk(header).filter(n => n.type === 'ScrollView' && n.props.horizontal).length, 1);
+  assert.ok(walk(header).some(n => n.type === 'LanguageSelector'));
+  assert.equal(walk(header).filter(n => n.type === 'RefreshButton' && n.props.testID === 'catalogue-species-refresh').length, 1);
   list.props.onRefresh();
   assert.equal(refreshes, 1);
-  const button = walk(list.props.ListHeaderComponent).find(n => n.type === 'RefreshButton' && n.props.testID === 'catalogue-species-refresh');
+  const button = walk(header).find(n => n.type === 'RefreshButton' && n.props.testID === 'catalogue-species-refresh');
   assert.ok(button);
   button.props.onPress();
   assert.equal(refreshes, 2);
   const card = list.props.renderItem({ item: list.props.data[0] });
+  for (const value of ['Actual approved species', 'Actual common name', 'Actual genus', 'Fabaceae', 'Not Assessed']) {
+    assert.ok(walk(card).some(n => children(n).includes(value)), `${value} remains on the card`);
+  }
+  assert.equal(walk(card).some(n => children(n).includes('Actual description')), false, 'long description remains in Species Details');
   const picture = walk(card).find(n => n.type === 'Image');
   assert.equal(picture.props.source.uri, 'https://example.invalid/api/assets/real-upload');
   assert.equal(picture.props.source.headers.Authorization, 'Bearer fixture');
@@ -189,4 +220,13 @@ test('actual catalogue renders an approved species and both refresh actions', ()
   assert.equal(navigations[0][1].speciesId, '6');
   assert.equal(navigations[1][0], 'Species');
   assert.equal(navigations[1][1].speciesId, '6');
+  const pendingCard = list.props.renderItem({ item: { id: 'request:12', requestId: '12', slug: 'species-request-12',
+    privateRequest: true, name: 'Own request', scientificName: 'Example species', family: 'Fabaceae',
+    approvalStatus: 'Pending Review', description: 'Submitted description' } });
+  const pendingActions = walk(pendingCard).filter(n => n.type === 'TouchableOpacity');
+  assert.equal(pendingActions.length, 1, 'protected requests cannot navigate to the approved Plant list');
+  pendingActions[0].props.onPress();
+  assert.equal(navigations[2][0], 'BotanistSpeciesRequestDetail');
+  assert.equal(navigations[2][1].requestId, '12');
+  assert.equal(navigations[2][1].botanist.id, 'owner');
 });

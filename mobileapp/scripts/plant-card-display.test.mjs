@@ -57,10 +57,10 @@ test("the Plants page may show Zone only for an authenticated owner's pending pl
   assert.equal(label({ currentStatus: "Approved", location: { zone: "Zone A" } }, "Botanist", normalOptions), "Zone A");
 });
 
-test("the Plants page hydrates Zones with one owner-scoped list read only when own pending plants are present", () => {
+test("the Plants page uses one owner-scoped read for own pending Zones and rejected records", () => {
   const list = read("../screens/Plant.js");
-  assert.match(list, /records\.some\(\(record\) => isOwnedPendingPlant\(record, accountId\)\)/);
   assert.match(list, /fetchPlantRecords\(catalog, \{ accountId, scopeMine: true \}\)/);
+  assert.match(list, /ownerRecords\.filter\(\(record\) => isOwnedRejectedPlant\(record, accountId\)\)/);
   assert.match(list, /mergeOwnedPendingPlantZones\(records, ownerRecords, accountId\)/);
   assert.match(list, /allowOwnedPending: isBotanist && isOwnedPendingPlant\(plant, user\?\.id\)/);
 });
@@ -99,17 +99,17 @@ test("Plant card displays plant-record status separately from observation status
     assert.match(source, /t\("plantDetail\.plantId"\)\}: \{plant\.plantId\}/);
     assert.match(source, /plantStatusStyle\(plant\.currentStatus\)|statusStyle\(plant\.currentStatus\)/);
     for (const value of ["approved", "pending review", "rejected", "correction required"]) assert.ok(source.includes(`case "${value}"`));
-    assert.match(source, /plant\.latestSubmission\?\.status/);
-    assert.match(source, /t\("plant\.morphology"\)/);
-    assert.match(source, /t\("plant\.locationZone"\)/);
   }
+  for (const key of ["height", "health", "qrStatus2"]) assert.match(list, new RegExp(`t\\("plant\\.${key}"\\)`));
+  assert.match(list, /label=\{t\("botanistPlantDetail\.growthStage"\)\} value=\{observation\?\.lifeStage \|\| t\("plant\.notRecorded"\)\}/);
+  assert.doesNotMatch(list.slice(list.indexOf("function PlantCard("), list.indexOf("function plantStatusStyle(")), /t\("plant\.(morphology|locationZone|lastVerified)"\)|plant\.latestSubmission\?\.status/);
   assert.doesNotMatch(shared, /getSpeciesImageSource/);
   assert.doesNotMatch(list, /getSpeciesImageSource/);
   assert.match(shared, /failedImageUri/);
   assert.match(list, /failedImageKey/);
 });
 
-function renderListCard(user, language = "en", status = "Approved") {
+function renderListCard(user, language = "en", status = "Approved", overrides = {}) {
   const source = read("../screens/Plant.js");
   const cardSource = source.slice(source.indexOf("function PlantCard("));
   const catalog = JSON.parse(read(`../translations/${language}.json`));
@@ -118,12 +118,13 @@ function renderListCard(user, language = "en", status = "Approved") {
   const plant = {
     plantId: "17", currentStatus: status, plantImage: { uri: "plant-17.jpg" },
     plantScientificName: "Plant 17", latestApproved: { date: "2026-11-12", heightCm: 64, lifeStage: "Mature", healthStatus: "Healthy", morphology: "Leaves" },
+    ...overrides,
   };
   const scope = {
     React, useState: (value) => [value, () => {}], useAppTranslation() {}, t,
     translateLabel: (value) => value, translateFieldValue: (_label, value) => value,
     dateLocale: () => ({ en: "en-GB", ms: "ms-MY", zh: "zh-CN" })[language],
-    getPlantDisplayObservation: (record) => record.latestApproved,
+    getPlantDisplayObservation: (record) => record.currentStatus === "Approved" ? record.latestApproved : record.latestSubmission || record.latestApproved,
     getPlantCardZoneLabel: () => t("map.locationRestricted"), isOwnedPendingPlant: () => false,
     StyleSheet: { create: (styles) => styles },
   };
@@ -151,9 +152,11 @@ test("Visitor and Guest cards omit all badges and Location Zone in EN/MS/ZH whil
       assert.equal(all.some((node) => node.props.label === t("plant.locationZone")), false);
       assert.equal(all.some((node) => node.props.children === t("map.locationRestricted")), false);
       assert.equal(all.some((node) => node.props.children === "Approved"), false);
-      for (const key of ["height", "lifeStage2", "lastVerified", "health", "morphology"]) {
+      for (const key of ["height", "health", "qrStatus2"]) {
         assert.ok(all.some((node) => node.props.label === t(`plant.${key}`)), key);
       }
+      assert.ok(all.some((node) => node.props.label === t("botanistPlantDetail.growthStage") && node.props.value === "Mature"));
+      assert.equal(all.some((node) => node.props.label === t("plant.lifeStage2")), false);
       assert.equal(all.find((node) => node.type === "Image").props.source, plant.plantImage);
       assert.ok(all.some((node) => node.props.children === plant.plantScientificName));
       assert.ok(all.some((node) => node.props.children === t("plant.viewPlantRecord")));
@@ -174,14 +177,30 @@ test("Visitor and Guest cards omit all badges and Location Zone in EN/MS/ZH whil
   }
 });
 
-test("Botanist and Officer keep their existing location field and image badges", () => {
+test("Botanist and Officer keep approval badges while detailed location stays in Plant Details", () => {
   for (const role of ["Botanist", "Officer"]) {
     const { all, styles, t } = renderListCard({ role });
     assert.ok(all.some((node) => node.props.style === styles.imageBadges));
-    assert.ok(all.some((node) => node.props.label === t("plant.locationZone")));
-    assert.ok(all.some((node) => node.props.children === t("map.locationRestricted")));
+    assert.equal(all.some((node) => node.props.label === t("plant.locationZone")), false);
+    assert.equal(all.some((node) => node.props.children === t("map.locationRestricted")), false);
     assert.equal(all.some((node) => node.props.children === "Approved"), true);
   }
+});
+
+test("Growth Stage uses the approved observation, an owned submission, or an honest missing value", () => {
+  const label = JSON.parse(read("../translations/en.json")).botanistPlantDetail.growthStage;
+  const stage = (result) => result.all.find((node) => node.props.label === label)?.props.value;
+  assert.equal(stage(renderListCard({ role: "Botanist" }, "en", "Approved", {
+    latestApproved: { lifeStage: "Mature" }, latestSubmission: { lifeStage: "Unreviewed seedling" },
+  })), "Mature", "approved cards do not expose a pending observation");
+  for (const status of ["Pending Review", "Rejected"]) {
+    assert.equal(stage(renderListCard({ role: "Botanist" }, "en", status, {
+      latestApproved: { lifeStage: "Old stage" }, latestSubmission: { lifeStage: "Young" },
+    })), "Young", `${status} owner card uses its submitted observation`);
+  }
+  assert.equal(stage(renderListCard({ role: "Visitor" }, "en", "Approved", {
+    latestApproved: { lifeStage: "Not recorded" },
+  })), JSON.parse(read("../translations/en.json")).plant.notRecorded);
 });
 
 test("Botanist list cards render exactly the backend plant status, independently of observation status", () => {

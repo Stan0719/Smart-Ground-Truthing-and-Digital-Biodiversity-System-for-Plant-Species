@@ -20,7 +20,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { getSpeciesImageSource } from "../data/speciesImages";
 import BackButton from "../components/BackButton";
-import { fetchPlantRecords, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords, isPlantVisibleInRoleCatalog } from "../utils/plantApi";
+import { fetchPlantRecords, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords, isPlantVisibleInRoleCatalog, isOwnedRejectedPlant } from "../utils/plantApi";
 
 import PlantCard from "../components/PlantCard";
 import RefreshButton from "../components/RefreshButton";
@@ -38,11 +38,12 @@ export default function SpeciesDetail({
   const { slug, speciesId } = route.params || {};
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isVisitor = user?.role?.toLowerCase() === "visitor";
-  const publicOnly = !user || isVisitor;
+  const isGuest = user?.role?.toLowerCase() === "guest";
+  const publicOnly = !user || isGuest || isVisitor;
   const favourites = useVisitorFavourites(user);
 
   const [selectedSpecies, setSelectedSpecies] = useState(
-    route.params?.species || getSpeciesBySlug(slug) || null
+    publicOnly ? null : route.params?.species || getSpeciesBySlug(slug) || null
   );
   const [failedPrimaryImageKey, setFailedPrimaryImageKey] = useState(null);
   const [speciesPlants, setSpeciesPlants] = useState([]);
@@ -58,14 +59,19 @@ export default function SpeciesDetail({
     setErrorMessage("");
     const request = (async () => {
       try {
-        const [backendSpecies, records] = await Promise.all([
+        const [backendSpecies, records, ownerRecords] = await Promise.all([
           fetchSpeciesDetail(speciesId, slug, { accountId: user?.id, publicOnly }),
           fetchPlantRecords([], { accountId: user?.id, publicOnly }),
+          isBotanist ? fetchPlantRecords([], { accountId: user?.id, scopeMine: true }) : Promise.resolve([]),
         ]);
-        const resolvedSpecies = backendSpecies || route.params?.species || getSpeciesBySlug(slug) || null;
+        const resolvedSpecies = backendSpecies || (publicOnly ? null : route.params?.species || getSpeciesBySlug(slug) || null);
         const resolvedId = resolvedSpecies?.id ?? speciesId;
-        const recordsForSpecies = filterUniqueSpeciesPlantRecords(records, resolvedId, slug)
-          .filter((record) => isPlantVisibleInRoleCatalog(record, user?.role, user?.id));
+        const visibleSource = publicOnly
+          ? records
+          : [...ownerRecords.filter((record) => isOwnedRejectedPlant(record, user?.id)), ...records];
+        const recordsForSpecies = filterUniqueSpeciesPlantRecords(visibleSource, resolvedId, slug)
+          .filter((record) => isPlantVisibleInRoleCatalog(record, user?.role, user?.id)
+            || isOwnedRejectedPlant(record, user?.id));
 
         setSelectedSpecies(resolvedSpecies);
         setSpeciesPlants(recordsForSpecies);
@@ -79,7 +85,7 @@ export default function SpeciesDetail({
     })();
     requestRef.current = request;
     return request;
-  }, [route.params, user, slug, speciesId, publicOnly]);
+  }, [route.params, user, slug, speciesId, publicOnly, isBotanist]);
 
   useFocusEffect(useCallback(() => {
     void loadSpeciesDetails(false);

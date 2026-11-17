@@ -61,6 +61,10 @@ export function mapBackendSpecies(species) {
   const imageAssetId = typeof species.image_asset_id === "string" && species.image_asset_id.trim()
     ? species.image_asset_id.trim()
     : null;
+  const rawApprovalStatus = species.approval_status ?? species.approvalStatus ?? species.rbac_data?.approvalStatus;
+  const normalizedApprovalStatus = String(rawApprovalStatus ?? "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const approvalStatus = { approved: "Approved", "pending review": "Pending Review", rejected: "Rejected" }[normalizedApprovalStatus]
+    ?? (rawApprovalStatus ? String(rawApprovalStatus).trim() : "Approved");
 
   return {
     ...existingSpecies,
@@ -77,6 +81,9 @@ export function mapBackendSpecies(species) {
       species.conservationStatus ??
       existingSpecies?.conservationStatus ??
       "Not recorded",
+    // The catalogue endpoint includes only Approved Species; its SQL treats
+    // older rows without an approvalStatus value as Approved.
+    approvalStatus,
     description: species.description ?? existingSpecies?.description ?? "",
     image: imageAssetId ? { uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(imageAssetId) } : undefined,
     speciesImageVerified: Boolean(imageAssetId),
@@ -87,6 +94,33 @@ export function mapBackendSpecies(species) {
 export async function fetchSpeciesCatalog(options = {}) {
   const payload = await getJson("/api/species", options);
   return speciesImageSources(unwrapList(payload, ["species", "data", "results"]).map(mapBackendSpecies), options);
+}
+
+export async function fetchOwnedSpeciesRequests(accountId) {
+  if (!accountId) return [];
+  const payload = await plantApi("/species-requests", { expectedAccountId: accountId });
+  const rows = unwrapList(payload, ["species_requests"])
+    .filter((row) => row.requested_by === `staff:${accountId}` &&
+      ["Pending Review", "Rejected"].includes(row.request_status));
+  const photos = await speciesRequestPhotoSources(rows, accountId);
+  return rows.map((row, index) => ({
+    id: `request:${row.request_id}`,
+    requestId: String(row.request_id),
+    proposedSpeciesId: row.proposed_species_id == null ? null : String(row.proposed_species_id),
+    name: row.common_name || row.scientific_name || "",
+    commonName: row.common_name || "",
+    scientificName: row.scientific_name || "",
+    genus: row.genus_name || "",
+    family: row.family_name || "",
+    conservationStatus: row.conservation_status || "Not recorded",
+    description: row.description || "",
+    approvalStatus: row.request_status,
+    image: photos[index],
+    speciesImageVerified: true,
+    privateRequest: true,
+    submittedAt: row.submitted_at,
+    slug: `species-request-${row.request_id}`,
+  }));
 }
 
 async function speciesImageSources(species, { accountId, publicOnly = false } = {}) {
@@ -124,6 +158,7 @@ function mapBackendObservation(record) {
 
   return {
     observationId: String(record.observation_id ?? record.observationId ?? ""),
+    revision: record.revision ?? null,
     plantId: String(record.plant_id ?? record.plantId ?? ""),
     recordedBy: record.recorded_by ?? record.recordedBy ?? "Not recorded",
     recordedByName: record.recorded_by_name ?? record.recordedByName ?? record.recorder_name ?? null,
@@ -187,12 +222,34 @@ export function selectLatestApprovedObservation(observations) {
       || String(b.observationId || "").localeCompare(String(a.observationId || "")))[0] || null;
 }
 
+export function selectOwnedPendingPlantObservation(plant, accountId) {
+  const owner = accountId == null ? null : `staff:${accountId}`;
+  const observationId = plant?.latest_observation_id ?? plant?.latestObservationId;
+  if (!owner || plant?.registeredBy !== owner || observationId == null) return null;
+  return (plant.observations || []).find((observation) =>
+    observation.observationId === String(observationId) &&
+    observation.plantId === String(plant.plantId) &&
+    observation.recordedBy === owner &&
+    String(observation.status || "").trim().toLowerCase() === "pending review"
+  ) || null;
+}
+
 export function getScopedPlantRecords(state, scope) {
   return state?.scope === scope && Array.isArray(state.records) ? state.records : [];
 }
 
 export function mapBackendPlant(record, speciesById = new Map()) {
   const plantStatus = record.rbac_status ?? record.status ?? record.current_status ?? record.currentStatus;
+  const latestObservationStatus = record.observation_status ?? record.latest_submission?.status;
+  // A Plant's stored status can remain Pending Review after the Officer makes
+  // a decision on its initial Observation. For unapproved Plant submissions,
+  // the current Observation status is the authoritative Botanist-facing state.
+  // Keep Approved and Withdrawn Plant states canonical so later Observation
+  // activity cannot relabel an already approved or withdrawn Plant.
+  const currentStatus = ["Approved", "Withdrawn"].includes(plantStatus)
+    ? plantStatus
+    : ["Draft", "Pending Review", "Approved", "Rejected", "Flagged", "Correction Required", "Withdrawn"]
+      .includes(latestObservationStatus) ? latestObservationStatus : plantStatus;
   const approvedContent = record.latest_approved?.content && typeof record.latest_approved.content === "object"
     ? record.latest_approved.content
     : record.latest_approved;
@@ -240,7 +297,7 @@ export function mapBackendPlant(record, speciesById = new Map()) {
     qrId: record.qr_id == null ? null : String(record.qr_id),
     genus: record.genus_name ?? record.genus ?? species?.genus ?? "",
     family: record.family_name ?? record.family ?? species?.family ?? "",
-    currentStatus: record.rbac_status ?? record.status ?? record.current_status ?? record.currentStatus ?? "Not recorded",
+    currentStatus: currentStatus ?? "Not recorded",
     plantImageAssetId: record.plant_image_asset_id == null ? null : String(record.plant_image_asset_id),
     latestApproved: {
       heightCm: record.height_cm ?? record.heightCm ?? null,
@@ -294,6 +351,11 @@ export function isOwnedPendingPlant(plant, accountId) {
     String(plant.registeredBy) === `staff:${accountId}`;
 }
 
+export function isOwnedRejectedPlant(plant, accountId) {
+  return accountId != null && plant?.currentStatus === "Rejected" &&
+    String(plant.registeredBy) === `staff:${accountId}`;
+}
+
 // The public/role catalogue projects approved location only. Reuse the
 // owner-scoped list projection solely for the submitting Botanist's initial
 // pending records; never replace data on approved or other-owned plants.
@@ -326,6 +388,19 @@ export function isPlantVisibleInRoleCatalog(plant, role, accountId) {
   if (normalizedRole === "visitor") return plant?.currentStatus === "Approved";
   if (normalizedRole === "botanist") return plant?.currentStatus === "Approved" || isOwnedPendingPlant(plant, accountId);
   return true;
+}
+
+export function isMapPlantVisible(plant, role, accountId) {
+  return isPlantVisibleInRoleCatalog(plant, role, accountId) ||
+    (String(role || "").toLowerCase() === "botanist" && isOwnedRejectedPlant(plant, accountId));
+}
+
+export function filterMapPlantsByStatus(plants, role, accountId, statusFilter) {
+  if (String(role || "").toLowerCase() !== "botanist" || statusFilter === "allVisible") return plants;
+  return plants.filter((plant) =>
+    statusFilter === "approved" ? plant.currentStatus === "Approved" :
+    statusFilter === "myPending" ? isOwnedPendingPlant(plant, accountId) :
+    statusFilter === "myRejected" ? isOwnedRejectedPlant(plant, accountId) : false);
 }
 
 // Public catalogue endpoints already enforce approval and species visibility

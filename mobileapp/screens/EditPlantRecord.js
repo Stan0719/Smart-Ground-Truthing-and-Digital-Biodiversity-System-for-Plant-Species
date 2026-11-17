@@ -4,7 +4,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system/legacy";
-import { Ionicons } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { fetchBotanistPlant, fetchBotanistRecordChangeStatus, fetchBotanistRecordChange } from "../utils/botanistRecords";
 import { fetchSpeciesCatalog, plantApi, plantAssetSources, recordChangePhotoSource } from "../utils/plantApi";
 import { normalizeQRCodes } from "../utils/qrInventory";
@@ -27,6 +27,29 @@ const baseSnapshot = (plant) => {
     photo_ids: (observation?.assets || []).map((asset) => asset.id) };
 };
 const plantSignature = (plant) => JSON.stringify(baseSnapshot(plant));
+const plantContentSignature = (plant) => {
+  const snapshot = baseSnapshot(plant);
+  delete snapshot.revision;
+  return JSON.stringify({ snapshot, common_name: plant.commonName ?? null, location: plant.location ?? null,
+    latest_submission: plant.latest_submission ?? null, latest_approved: plant.latest_approved ?? null });
+};
+const plantFormValues = (plant) => {
+  const snapshot = baseSnapshot(plant), content = snapshot.content || {};
+  const fallback = { latitude: plant.location?.latitude, longitude: plant.location?.longitude,
+    accuracy_m: plant.location?.accuracyM, altitudeM: plant.location?.altitudeM };
+  return { scientific_name: str(plant.plantScientificNameValue ?? snapshot.scientific_name), species_id: str(snapshot.species_id), qr_id: str(snapshot.qr_id),
+    ...Object.fromEntries(fields.slice(1).map((field) => [field, str(content[field] ?? fallback[field])])) };
+};
+const reviewedObservationIdentity = (plant) => {
+  const observation = plant.status === "Approved" ? plant.observations?.find((row) => row.status === "Approved") : plant.latestObservation;
+  return JSON.stringify({ id: observation?.id ?? null, status: observation?.status ?? null });
+};
+const draftPlantBaseline = (plant) => ({ id: plant.id, plantId: plant.plantId, scientificName: plant.scientificName, commonName: plant.commonName,
+  speciesId: plant.speciesId, speciesDetails: plant.speciesDetails, status: plant.status, qrId: plant.qrId, qrCode: plant.qrCode,
+  location: plant.location, latest_submission: plant.latest_submission, latest_approved: plant.latest_approved,
+  latestObservation: plant.latestObservation ? { ...plant.latestObservation, assets: (plant.latestObservation.assets || []).map(({ id }) => ({ id })) } : null,
+  observations: (plant.observations || []).map((observation) => ({ ...observation, assets: (observation.assets || []).map(({ id }) => ({ id })) })),
+});
 
 export default function EditPlantRecord({ route, navigation }) {
   useAppTranslation();
@@ -39,13 +62,14 @@ export default function EditPlantRecord({ route, navigation }) {
   const [submitted, setSubmitted] = useState(false);
   const [draftMessage, setDraftMessage] = useState(""), [draftError, setDraftError] = useState(""), [draftConflict, setDraftConflict] = useState(false);
   const [reload, setReload] = useState(0);
+  const [recordRefreshing, setRecordRefreshing] = useState(false), [recordRefreshError, setRecordRefreshError] = useState(""), [refreshReview, setRefreshReview] = useState(null);
   const [editAvailability, setEditAvailability] = useState("checking");
   const [speciesAction, setSpeciesAction] = useState("existing");
   const [speciesSearch, setSpeciesSearch] = useState("");
   const [originalPhotoRetry, setOriginalPhotoRetry] = useState(0);
   const [speciesRequestId, setSpeciesRequestId] = useState(null), [speciesRequestStatus, setSpeciesRequestStatus] = useState("none"), [speciesRequestApprovedId, setSpeciesRequestApprovedId] = useState(null);
   const [recoveryResolved, setRecoveryResolved] = useState(Boolean(route.params?.formDraftKey)), [autoSaveState, setAutoSaveState] = useState("");
-  const busy = useRef(false), clientKey = useRef(key()), formDraftKey = useRef(route.params?.formDraftKey || `edit-plant-${accountId}-${plantId}`), restoredDraftRef = useRef(null), recoveryPromptedRef = useRef(false), initialFormRef = useRef(null);
+  const busy = useRef(false), refreshBusy = useRef(false), formMutationRef = useRef(0), clientKey = useRef(key()), formDraftKey = useRef(route.params?.formDraftKey || `edit-plant-${accountId}-${plantId}`), restoredDraftRef = useRef(null), recoveryPromptedRef = useRef(false), initialFormRef = useRef(null), formBaseSignatureRef = useRef(null), formBasePlantRef = useRef(null);
   const activeFormDraftKey = route.params?.formDraftKey || formDraftKey.current;
   const originalObservation = state.plant?.status === "Approved"
     ? state.plant.observations?.find((observation) => observation.status === "Approved")
@@ -79,6 +103,108 @@ export default function EditPlantRecord({ route, navigation }) {
     catch (error) { setQrError(error.message || t("recordEdits.qrLoadFailed")); }
     finally { setQrLoading(false); }
   }, [accountId]);
+  const isCorrectionPage = Boolean(state.correctionChange || (route.params?.correction && state.plant?.status !== "Approved"));
+  const correctionChangeSignature = (change) => JSON.stringify(change ? { id: change.id, revision: change.revision, status: change.status,
+    review_comment: change.review_comment, base_snapshot: change.base_snapshot, proposed_snapshot: change.proposed_snapshot,
+    proposal_photo_count: change.proposal_photo_count } : null);
+  async function refreshCorrectionRecord() {
+    if (refreshBusy.current || saving || !isCorrectionPage || !state.plant) return;
+    refreshBusy.current = true;
+    const startingMutation = formMutationRef.current;
+    setRecordRefreshing(true); setRecordRefreshError("");
+    try {
+      const latestPlant = await fetchBotanistPlant(accountId, plantId);
+      const changeId = state.correctionChange?.id || route.params?.correctionChangeId;
+      const latestChange = changeId ? await fetchBotanistRecordChange(accountId, changeId, { kind: "plant", targetId: plantId }) : state.correctionChange;
+      const basePhotoIds = latestChange?.base_snapshot?.photo_ids || (latestPlant.status === "Approved"
+        ? latestPlant.observations?.find((observation) => observation.status === "Approved")?.assets || []
+        : latestPlant.latestObservation?.assets || []).map((photo) => typeof photo === "object" ? photo.id : photo);
+      const proposalPhotoIds = latestChange?.proposed_snapshot?.photo_ids || [];
+      const referencedPhotoIds = [...new Set([...basePhotoIds, ...proposalPhotoIds].filter((id) => id != null).map(String))];
+      let latestPhotoSources = {}, latestPhotoError = "";
+      try {
+        const sources = await plantAssetSources(referencedPhotoIds.map((id) => ({ id })), accountId, { ownSubmission: true });
+        latestPhotoSources = Object.fromEntries(referencedPhotoIds.map((id, index) => [id, sources[index]]));
+      } catch (photoError) { latestPhotoError = photoError.message || t("recordEdits.originalPhotoUnavailable"); }
+      const latestCorrectionPhotos = latestChange ? [
+        ...proposalPhotoIds.map((id) => latestPhotoSources[String(id)]).filter(Boolean),
+        ...await Promise.all(Array.from({ length: Number(latestChange.proposal_photo_count) || 0 }, (_, index) => recordChangePhotoSource(latestChange.id, index, accountId))),
+      ] : [];
+      const oldSignature = plantSignature(state.plant);
+      const latestSignature = plantSignature(latestPlant);
+      const expectedSignature = restoredDraftRef.current?.base_signature || formBaseSignatureRef.current || oldSignature;
+      const draftBasePlant = restoredDraftRef.current?.baseline?.plant || formBasePlantRef.current || state.plant;
+      const oldChangeSignature = correctionChangeSignature(state.correctionChange);
+      const latestChangeSignature = correctionChangeSignature(latestChange);
+      const mutationDuringRefresh = formMutationRef.current !== startingMutation;
+      const baseValues = plantFormValues(draftBasePlant), latestValues = plantFormValues(latestPlant);
+      const mergedForm = { ...(form || {}) }, mergedInitial = { ...(initialFormRef.current || {}) };
+      const remoteFieldChanges = [];
+      let fieldConflict = baseSnapshot(draftBasePlant).status !== baseSnapshot(latestPlant).status ||
+        reviewedObservationIdentity(draftBasePlant) !== reviewedObservationIdentity(latestPlant);
+      for (const field of ["scientific_name", "species_id", "qr_id", ...fields.slice(1)]) {
+        if (baseValues[field] === latestValues[field]) continue;
+        remoteFieldChanges.push(field);
+        if (form?.[field] === baseValues[field]) {
+          mergedForm[field] = latestValues[field];
+          mergedInitial[field] = latestValues[field];
+        } else if (form?.[field] !== latestValues[field]) fieldConflict = true;
+      }
+      const oldPhotoIds = baseSnapshot(draftBasePlant).photo_ids.map(String), latestPhotoIds = baseSnapshot(latestPlant).photo_ids.map(String);
+      const photoContentChanged = JSON.stringify(oldPhotoIds) !== JSON.stringify(latestPhotoIds);
+      const photoSelectionConflict = photoContentChanged && photoSelectionTouched &&
+        !(newPhotos.length === 0 && JSON.stringify(selectedOriginalPhotos.map(String)) === JSON.stringify(latestPhotoIds));
+      if (photoSelectionConflict) fieldConflict = true;
+      if (state.correctionChange && plantContentSignature(draftBasePlant) !== plantContentSignature(latestPlant)) fieldConflict = true;
+      const remoteChanged = oldSignature !== latestSignature || expectedSignature !== latestSignature ||
+        plantContentSignature(draftBasePlant) !== plantContentSignature(latestPlant) || oldChangeSignature !== latestChangeSignature;
+      if (mutationDuringRefresh && remoteChanged) fieldConflict = true;
+      setState((old) => ({ ...old, plant: latestPlant, correctionChange: latestChange, originalPhotoSources: latestPhotoSources,
+        originalPhotoError: latestPhotoError, correctionPhotos: latestCorrectionPhotos }));
+      if (remoteChanged && !fieldConflict && oldChangeSignature === latestChangeSignature) {
+        try {
+          if (remoteFieldChanges.length) {
+            initialFormRef.current = mergedInitial;
+            setForm(mergedForm);
+          }
+          if (restoredDraftRef.current) {
+            const rebased = await saveBotanistFormDraft(accountId, { ...makeDraftInput(false), base_signature: latestSignature,
+              base_revision: latestPlant.latestObservation?.revision ?? null, baseline: { ...(restoredDraftRef.current.baseline || {}), plant: draftPlantBaseline(latestPlant) } });
+            restoredDraftRef.current = rebased;
+          }
+          formBaseSignatureRef.current = latestSignature;
+          formBasePlantRef.current = draftPlantBaseline(latestPlant);
+          setDraftConflict(false); setRefreshReview(null); setDraftError("");
+          return;
+        } catch (error) {
+          setDraftError(translateUIMessage(error.message) || t("botanistDrafts.saveFailed"));
+        }
+      }
+      if (remoteChanged) {
+        setDraftConflict(true);
+        setRefreshReview({ plantSignature: latestSignature, changeSignature: latestChangeSignature });
+      }
+    } catch {
+      setRecordRefreshError(t("recordEdits.correctionRefreshFailed"));
+    } finally { refreshBusy.current = false; setRecordRefreshing(false); }
+  }
+  async function continueWithRefreshedRecord() {
+    if (!refreshReview || !state.plant || plantSignature(state.plant) !== refreshReview.plantSignature ||
+      correctionChangeSignature(state.correctionChange) !== refreshReview.changeSignature) {
+      setDraftConflict(true);
+      setRecordRefreshError(t("recordEdits.correctionRefreshChangedAgain"));
+      return;
+    }
+    try {
+      if (restoredDraftRef.current) {
+        const rebased = await saveBotanistFormDraft(accountId, { ...makeDraftInput(false), base_signature: refreshReview.plantSignature,
+          base_revision: state.plant.latestObservation?.revision ?? null });
+        restoredDraftRef.current = rebased;
+      }
+      formBaseSignatureRef.current = refreshReview.plantSignature;
+      setDraftConflict(false); setRefreshReview(null); setRecordRefreshError(""); setDraftError("");
+    } catch (error) { setDraftError(translateUIMessage(error.message) || t("botanistDrafts.saveFailed")); }
+  }
   useFocusEffect(useCallback(() => {
     let active = true;
     (async () => {
@@ -117,6 +243,8 @@ export default function EditPlantRecord({ route, navigation }) {
               accuracy_m: plant.location?.accuracyM, altitudeM: plant.location?.altitudeM })[field])])) };
         const sameDraft = Boolean(route.params?.formDraftKey && restoredDraftRef.current?.client_key === route.params.formDraftKey);
         initialFormRef.current = initialForm;
+        if (!formBaseSignatureRef.current) formBaseSignatureRef.current = plantSignature(plant);
+        if (!formBasePlantRef.current) formBasePlantRef.current = draftPlantBaseline(plant);
         if (!sameDraft) {
           setForm(initialForm);
           setSelectedOriginalPhotos([]); setPhotoSelectionTouched(false); setNewPhotos([]); setUnavailableOriginalPhotos([]);
@@ -132,6 +260,8 @@ export default function EditPlantRecord({ route, navigation }) {
               String(restored.baseline?.plant?.latestObservation?.id || "") === String(plant.latestObservation?.id || ""));
           if (belongsToCorrection) {
             if (!sameDraft) restoreDraft(restored);
+            formBaseSignatureRef.current = restored.base_signature || plantSignature(plant);
+            formBasePlantRef.current = restored.baseline?.plant || draftPlantBaseline(plant);
             setDraftConflict(restored.base_signature !== plantSignature(plant));
           } else {
             restored = null;
@@ -162,6 +292,8 @@ export default function EditPlantRecord({ route, navigation }) {
                     String(saved.baseline?.plant?.latestObservation?.id || "") !== String(plant.latestObservation?.id || ""))
                   throw Error("This draft does not belong to the selected correction request.");
                 restoreDraft(saved);
+                formBaseSignatureRef.current = saved.base_signature || plantSignature(plant);
+                formBasePlantRef.current = saved.baseline?.plant || draftPlantBaseline(plant);
                 setDraftConflict(saved.base_signature !== plantSignature(plant));
               } catch (restoreError) {
                 setDraftError(translateUIMessage(restoreError.message) || t("botanistDrafts.restoreFailed"));
@@ -232,7 +364,7 @@ export default function EditPlantRecord({ route, navigation }) {
     return () => { active = false; };
   // `reload` intentionally changes the focus callback when the user presses Retry.
   }, [accountId, plantId, reload, route.params?.formDraftKey, route.params?.speciesRequestId, route.params?.correctionChangeId, refreshQr])); // eslint-disable-line react-hooks/exhaustive-deps
-  const change = (field, value) => setForm((old) => ({ ...old, [field]: value }));
+  const change = (field, value) => { formMutationRef.current += 1; setForm((old) => ({ ...old, [field]: value })); };
   async function retryOriginalPhotos() {
     setUnavailableOriginalPhotos([]);
     setLoadingOriginalPhotos([]);
@@ -250,6 +382,7 @@ export default function EditPlantRecord({ route, navigation }) {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== "granted") return Alert.alert(t("addPlant.permissionRequired"), t("addPlant.locationPermissionIsRequiredToGetThePlantLocation"));
       const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      formMutationRef.current += 1;
       setForm((old) => ({ ...old, latitude: location.coords.latitude.toFixed(6), longitude: location.coords.longitude.toFixed(6),
         altitudeM: location.coords.altitude == null ? old.altitudeM : location.coords.altitude.toFixed(2),
         accuracy_m: location.coords.accuracy == null ? old.accuracy_m : location.coords.accuracy.toFixed(2) }));
@@ -260,10 +393,12 @@ export default function EditPlantRecord({ route, navigation }) {
     const retainedCount = photoSelectionTouched ? selectedOriginalPhotos.length : originalPhotoIds.length;
     const existingCount = retainedCount + newPhotos.length;
     if (existingCount + assets.length > 8) return Alert.alert(t("common.error"), t("recordEdits.maxPhotos"));
+    formMutationRef.current += 1;
     setNewPhotos((current) => [...current, ...assets.map((asset) => asset.uri)]);
   }
   function reusePhoto(id) {
     if (selectedOriginalPhotos.includes(id)) return;
+    formMutationRef.current += 1;
     setSelectedOriginalPhotos((current) => {
       if (current.includes(id)) return current;
       if (current.length + newPhotos.length >= 8) {
@@ -286,7 +421,9 @@ export default function EditPlantRecord({ route, navigation }) {
   function validate() {
     if (!form?.species_id || !state.species.some((item) => String(item.id) === form.species_id)) return t("recordEdits.selectSpecies");
     if (!form.scientific_name.trim() || form.scientific_name.length > 200) return t("recordEdits.plantNameRequired");
-    if (!Number.isFinite(Number(form.heightCm)) || Number(form.heightCm) <= 0 || !form.healthStatus.trim() || !form.lifeStage.trim() || !form.morphology.trim()) return t("recordEdits.plantFieldsRequired");
+    if (!form.heightCm.trim() || !Number.isFinite(Number(form.heightCm)) || Number(form.heightCm) <= 0 || Number(form.heightCm) > 100000)
+      return t("addPlantWorkflow.invalidHeight");
+    if (!form.healthStatus.trim() || !form.lifeStage.trim() || !form.morphology.trim()) return t("recordEdits.plantFieldsRequired");
     if (!form.latitude.trim() || !form.longitude.trim() || !Number.isFinite(Number(form.latitude)) || Math.abs(Number(form.latitude)) > 90 ||
       !Number.isFinite(Number(form.longitude)) || Math.abs(Number(form.longitude)) > 180) return t("recordEdits.locationRequired");
     if ((form.altitudeM.trim() && !Number.isFinite(Number(form.altitudeM))) ||
@@ -315,12 +452,7 @@ export default function EditPlantRecord({ route, navigation }) {
   }
   const makeDraftInput = (autoSaved = false) => {
     const plant = state.plant;
-    const baseline = { plant: { id: plant.id, plantId: plant.plantId, scientificName: plant.scientificName, commonName: plant.commonName,
-      speciesId: plant.speciesId, speciesDetails: plant.speciesDetails, status: plant.status, qrId: plant.qrId, qrCode: plant.qrCode,
-      location: plant.location, latest_submission: plant.latest_submission, latest_approved: plant.latest_approved,
-      latestObservation: plant.latestObservation ? { ...plant.latestObservation, assets: (plant.latestObservation.assets || []).map(({ id }) => ({ id })) } : null,
-      observations: (plant.observations || []).map((observation) => ({ ...observation, assets: (observation.assets || []).map(({ id }) => ({ id })) })),
-    }, species: state.species.filter((item) => String(item.id) === String(form.species_id)).map(({ id, scientificName, commonName, name, genus, family }) => ({ id, scientificName, commonName, name, genus, family })) };
+    const baseline = { plant: draftPlantBaseline(plant), species: state.species.filter((item) => String(item.id) === String(form.species_id)).map(({ id, scientificName, commonName, name, genus, family }) => ({ id, scientificName, commonName, name, genus, family })) };
     return { client_key: activeFormDraftKey, form_type: "edit-plant", target_id: plantId, correction_change_id: state.correctionChange?.id || restoredDraftRef.current?.correction_change_id || null, title: plant.scientificName || `Plant ${plantId}`,
       auto_saved: autoSaved, base_signature: restoredDraftRef.current?.base_signature || plantSignature(plant),
       base_revision: plant.latestObservation?.revision ?? null, baseline, submission_client_key: clientKey.current,
@@ -453,7 +585,15 @@ export default function EditPlantRecord({ route, navigation }) {
   if (currentQrId && !qrOptions.some((qr) => qr.id === currentQrId))
     qrOptions.unshift({ id: currentQrId, label: `QR-${currentQrId.padStart(4, "0")}` });
   return <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-    <Text style={styles.title}>{t(state.correctionChange || (route.params?.correction && state.plant.status !== "Approved") ? "recordEdits.correctPlantRegistration" : "recordEdits.editPlant")}</Text>
+    <View style={styles.titleRow}>
+      <Text style={styles.title}>{t(isCorrectionPage ? "recordEdits.correctPlantRegistration" : "recordEdits.editPlant")}</Text>
+      {isCorrectionPage && <TouchableOpacity testID="plant-correction-refresh" style={styles.correctionRefreshButton} onPress={() => { void refreshCorrectionRecord(); }}
+        disabled={recordRefreshing || saving} accessibilityRole="button" accessibilityLabel={t("common.refresh")}
+        accessibilityState={{ disabled: recordRefreshing || saving, busy: recordRefreshing }}>
+        {recordRefreshing ? <ActivityIndicator size="small" color="#397C69" /> : <Feather name="refresh-cw" size={19} color="#397C69" />}
+      </TouchableOpacity>}
+    </View>
+    {!!recordRefreshError && <Text style={styles.error} accessibilityRole="alert">{recordRefreshError}</Text>}
     {(state.correctionChange?.review_comment || (route.params?.correction && state.plant.status !== "Approved" && state.plant.latestObservation?.review_comment)) ? <View style={styles.feedbackPanel}>
       <View style={styles.feedbackHeading}><Ionicons name="chatbox-ellipses-outline" size={19} color="#8A5A13" /><Text style={styles.feedbackTitle}>{t("recordEdits.officerFeedback")}</Text></View>
       <Text style={styles.feedbackText}>{state.correctionChange?.review_comment || state.plant.latestObservation.review_comment}</Text>
@@ -461,7 +601,13 @@ export default function EditPlantRecord({ route, navigation }) {
     {state.plant.status === "Approved" && editAvailability === "pending" && <View style={styles.pendingEditNote}><Text style={styles.pendingEditLabel}>{t("recordEdits.pendingEdit")}</Text><Text style={styles.note}>{t("recordEdits.pendingEditExplanation")}</Text></View>}
     {state.plant.status === "Approved" && editAvailability === "checking" && <Text style={styles.note}>{t("recordEdits.checkingEditAvailability")}</Text>}
     {state.plant.status === "Approved" && editAvailability === "unavailable" && <Text style={styles.error}>{t("recordEdits.editAvailabilityUnavailable")}</Text>}
-    {(state.offlineDraft || draftConflict) && <Text style={styles.error}>{t(state.offlineDraft ? "botanistDrafts.offlineReadOnlyNotice" : "botanistDrafts.editConflict")}</Text>}
+    {(state.offlineDraft || draftConflict) && <View>
+      <Text style={styles.error}>{t(state.offlineDraft ? "botanistDrafts.offlineReadOnlyNotice" : "botanistDrafts.editConflict")}</Text>
+      {draftConflict && refreshReview && <TouchableOpacity onPress={() => { void continueWithRefreshedRecord(); }} disabled={recordRefreshing || saving}
+        accessibilityRole="button" accessibilityState={{ disabled: recordRefreshing || saving }} style={styles.reviewLatestButton}>
+        <Text style={styles.reviewLatestText}>{t("recordEdits.reviewLatestAndContinue")}</Text>
+      </TouchableOpacity>}
+    </View>}
     {autoSaveState === "saving" ? <Text style={styles.draftSuccess}>{t("botanistDrafts.autoSaving")}</Text> : null}{autoSaveState === "saved" ? <Text style={styles.draftSuccess}>{t("botanistDrafts.autoSaved")}</Text> : null}{draftMessage ? <Text style={styles.draftSuccess}>{draftMessage}</Text> : null}{draftError ? <Text style={styles.error}>{draftError}</Text> : null}
     {autoSaveState === "error" ? <TouchableOpacity onPress={() => { setDraftError(""); void autosave.retry().catch(() => {}); }} style={{ minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 4 }} accessibilityRole="button"><Text style={styles.pendingEditLabel}>{t("common.tryAgain")}</Text></TouchableOpacity> : null}
     {speciesRequestStatus !== "none" && <View style={styles.speciesRequestInfo}>
@@ -550,10 +696,10 @@ export default function EditPlantRecord({ route, navigation }) {
           : null}>
       <View style={styles.updatedPhotoGrid}>{originalPhotoAssets.map((asset) => !selectedOriginalPhotos.includes(asset.id) ? null :
         <View key={asset.id} style={styles.updatedPhotoTile}>{state.originalPhotoSources?.[String(asset.id)] && <Image source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" />}
-          <TouchableOpacity style={styles.removePhoto} onPress={() => setSelectedOriginalPhotos((current) => current.filter((id) => id !== asset.id))} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
+          <TouchableOpacity style={styles.removePhoto} onPress={() => { formMutationRef.current += 1; setSelectedOriginalPhotos((current) => current.filter((id) => id !== asset.id)); }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
             <Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity></View>)}
         {newPhotos.map((uri, index) => <View key={`${uri}-${index}`} style={styles.updatedPhotoTile}><Image source={{ uri }} style={styles.photo} resizeMode="cover" />
-          <TouchableOpacity style={styles.removePhoto} onPress={() => setNewPhotos((current) => current.filter((_, item) => item !== index))} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
+          <TouchableOpacity style={styles.removePhoto} onPress={() => { formMutationRef.current += 1; setNewPhotos((current) => current.filter((_, item) => item !== index)); }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
             <Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity></View>)}</View>
       <View style={styles.photoActions}><TouchableOpacity style={styles.photoActionButton} onPress={() => pickPhotos(true)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={t("recordEdits.takePhoto")}><Text style={styles.photoActionText}>{t("recordEdits.takePhoto")}</Text></TouchableOpacity>
         <TouchableOpacity style={styles.photoActionButton} onPress={() => pickPhotos(false)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={t("recordEdits.addGallery")}><Text style={styles.photoActionText}>{t("recordEdits.addGallery")}</Text></TouchableOpacity></View>
@@ -570,7 +716,12 @@ export default function EditPlantRecord({ route, navigation }) {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#F7FBF4" }, content: { padding: 20, paddingBottom: 50, gap: 16, width: "100%", maxWidth: 820, alignSelf: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#F7FBF4" },
-  title: { color: "#234B3A", fontSize: 26, fontWeight: "800" }, note: { color: "#52665A", lineHeight: 21 },
+  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  title: { color: "#234B3A", fontSize: 26, fontWeight: "800", flex: 1, flexShrink: 1 },
+  correctionRefreshButton: { width: 44, height: 44, borderRadius: 11, backgroundColor: "#EDF6F1", borderWidth: 1, borderColor: "#C9E2D6", alignItems: "center", justifyContent: "center" },
+  reviewLatestButton: { alignSelf: "flex-start", minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
+  reviewLatestText: { color: "#2F6B4F", fontWeight: "700" },
+  note: { color: "#52665A", lineHeight: 21 },
   pendingEditNote: { backgroundColor: "#FFF7E8", borderWidth: 1, borderColor: "#EAD9B5", borderRadius: 12, padding: 12, gap: 5 },
   pendingEditLabel: { color: "#77501D", fontSize: 12, fontWeight: "700" },
   card: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E2EDE0", borderRadius: 18, padding: 18, gap: 10 },

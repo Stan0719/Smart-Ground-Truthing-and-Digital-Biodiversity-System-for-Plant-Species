@@ -7,6 +7,23 @@ const require = createRequire(import.meta.url);
 const React = require("react");
 const ts = require("typescript");
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+
+test("Species catalogue cards show one approval badge over the image and retain Family below it", () => {
+  const source = read("../screens/Species.js");
+  const card = source.slice(source.indexOf("const renderSpeciesCard ="), source.indexOf("const renderSpeciesCard =") + 2500);
+  assert.match(card, /<SpeciesCardImage species=\{item\} \/>/);
+  assert.equal((card.match(/styles\.badgeContainer/g) || []).length, 1);
+  assert.match(card, /speciesApprovalBadgeStyle\(item\.approvalStatus\)/);
+  assert.match(card, /translateLabel\(item\.approvalStatus\)/);
+  assert.doesNotMatch(card, /styles\.categoryBadge|item\.description/);
+  assert.match(card, /!!item\.family &&/);
+  assert.match(card, /!!item\.genus &&/);
+  assert.match(card, /!!item\.conservationStatus &&/);
+  assert.match(source, /approvalApproved: \{ backgroundColor: "#E3F4E9", color: "#247344" \}/);
+  assert.match(source, /approvalPending: \{ backgroundColor: "#FFF0D8", color: "#965C12" \}/);
+  assert.match(source, /approvalRejected: \{ backgroundColor: "#FDE7E7", color: "#B42318" \}/);
+  assert.match(source, /right: SCREEN_WIDTH < 500 \? 8 : 10/);
+});
 const compiled = ts.transpileModule(read("../components/PlantCard.js"), {
   fileName: "PlantCard.jsx",
   compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 },
@@ -116,7 +133,7 @@ test("Plant Detail hero shows exactly the actual status for Botanists and none f
       assert.equal(statuses.length, role === "Botanist" ? 1 : 0);
       if (statuses.length) {
         const style = Object.assign({}, ...statuses[0].props.style);
-        assert.equal(style.backgroundColor, status === "Approved" ? "#D8EBD9" : status === "Pending Review" ? "#F4E7D2" : "#E7EBE6");
+        assert.equal(style.backgroundColor, status === "Approved" ? "#D8EBD9" : status === "Pending Review" ? "#FFF0D8" : status === "Rejected" ? "#FDE7E7" : "#E7EBE6");
         assert.equal(style.maxWidth, "100%");
       }
     }

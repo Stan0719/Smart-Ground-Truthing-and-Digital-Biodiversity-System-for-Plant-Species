@@ -164,7 +164,10 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
                     SELECT current_observation.id FROM plant_observation current_observation
                     WHERE current_observation.plant_id=p.plant_id AND current_observation.status='Approved'
                     ORDER BY current_observation.updated_at DESC,current_observation.id DESC LIMIT 1
-                  )))
+                  )) OR (p.registered_subject=$4 AND p.rbac_status<>'Approved' AND o.status='Rejected'
+                    AND o.id=(SELECT latest_submission.id FROM plant_observation latest_submission
+                      WHERE latest_submission.plant_id=p.plant_id AND latest_submission.owner_subject=$4
+                      ORDER BY latest_submission.created_at DESC,latest_submission.id DESC LIMIT 1)))
               ))
            )
          ORDER BY a.created_at,a.id`,
@@ -202,6 +205,9 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
           (SELECT current_observation.id FROM plant_observation current_observation
             WHERE current_observation.plant_id=p.plant_id AND current_observation.status='Approved'
             ORDER BY current_observation.updated_at DESC,current_observation.id DESC LIMIT 1) AS latest_approved_observation_id
+          ,(SELECT latest_submission.id FROM plant_observation latest_submission
+            WHERE latest_submission.plant_id=p.plant_id AND latest_submission.owner_subject=a.owner_subject
+            ORDER BY latest_submission.created_at DESC,latest_submission.id DESC LIMIT 1) AS latest_submission_observation_id
          FROM plant_asset a
          LEFT JOIN plant_record p ON p.plant_id=a.plant_id
          LEFT JOIN plant_observation o ON o.id=a.observation_id AND o.plant_id=a.plant_id
@@ -230,6 +236,11 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
       ["Pending Review", "Approved"].includes(row.observation_status) &&
       (row.observation_status !== "Approved" || row.observation_id === row.latest_approved_observation_id) &&
       row.observation_plant_id != null && row.owner_subject === owner && row.registered_subject === owner;
+    const ownRejectedPlantPhoto = req.query.scope === "mine" && permitted(req.user, "plants.create") &&
+      row.plant_id && row.rbac_status !== "Approved" && row.observation_id &&
+      row.observation_status === "Rejected" && row.observation_id === row.latest_submission_observation_id &&
+      row.observation_plant_id === row.plant_id && row.registered_subject === owner &&
+      row.owner_subject === owner && row.observation_owner_subject === owner;
     const ownObservationPhoto = Boolean(row.plant_id && row.observation_id && row.observation_plant_id != null &&
       row.owner_subject === owner && row.observation_owner_subject === owner &&
       ["Draft", "Pending Review", "Correction Required"].includes(row.observation_status));
@@ -244,7 +255,7 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
           row.observation_id === row.latest_approved_observation_id
         : row.approved)
       : row.approved;
-    if (!catalogueVisibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto && !ownObservationPhoto)
+    if (!catalogueVisibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto && !ownRejectedPlantPhoto && !ownObservationPhoto)
       fail(404, "Asset unavailable.");
     if (!classification) fail(404, "Asset unavailable.");
     if (row.species_id && (!row.approved || (classification.rbac_data?.approvalStatus || "Approved") !== "Approved") &&
@@ -259,6 +270,7 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
       !approvedPlantPhoto &&
       !ownProposalPhoto &&
       !ownSubmissionPhoto &&
+      !ownRejectedPlantPhoto &&
        !ownObservationPhoto &&
       !ownHistoricalObservationPhoto &&
       req.user?.role !== "Conservation Officer" && !permitted(req.user, "plants.catalogue.scientific.read")
