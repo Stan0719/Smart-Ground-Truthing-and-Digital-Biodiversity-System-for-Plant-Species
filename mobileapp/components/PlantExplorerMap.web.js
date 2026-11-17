@@ -1,13 +1,12 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 
 // The Botanist map uses native markers on iOS and Android. Keep the Expo web
 // preview functional without loading react-native-maps in a browser bundle.
-export default function PlantExplorerMap({ plants, onViewDetails }) {
+export default function PlantExplorerMap({ plants, onViewDetails, selectedPlantId, onSelectPlant }) {
   useAppTranslation();
-  const [selectedId, setSelectedId] = useState(null);
-  const selected = plants.find((plant) => plant.plantId === selectedId) || plants[0];
+  const selected = plants.find((plant) => plant.plantId === selectedPlantId) || plants[0];
   const mapUrl = useMemo(() => {
     const latitude = selected?.mapLocation.latitude ?? 3.82;
     const longitude = selected?.mapLocation.longitude ?? 113.78;
@@ -22,7 +21,7 @@ export default function PlantExplorerMap({ plants, onViewDetails }) {
         <View style={styles.row}>
           <View style={styles.markerList}>
             {plants.map((plant) => (
-              <TouchableOpacity key={plant.plantId} onPress={() => setSelectedId(plant.plantId)}
+              <TouchableOpacity key={plant.plantId} onPress={() => onSelectPlant(plant.plantId)}
                 style={[styles.markerChoice, selected?.plantId === plant.plantId && styles.activeChoice]}>
                 <Text style={styles.choiceText} numberOfLines={1}>{plant.plantScientificName || plant.plantId}</Text>
               </TouchableOpacity>

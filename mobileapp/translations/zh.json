@@ -13,6 +13,7 @@
     "requestCorrection": "要求更正",
     "correctionConfirm": "要求植物学家更正此观察记录修改吗？",
     "notificationUpdate": "观察记录 {{observationId}}：打开修改申请以查看当前状态。",
+    "cancelConfirmation": "仅取消此编辑请求。您提交的修改将被丢弃；原已批准的观察记录保持不变。",
     "events": {
       "submitted": "已提交修改",
       "correction_required": "要求更正",
@@ -52,6 +53,8 @@
   },
   "myObservations": {
     "title": "我的观察记录",
+    "searchPlaceholder": "搜索观察记录...",
+    "noMatchingObservations": "没有匹配的观察记录",
     "subtitle": "由您的植物学家账户提交的观察记录。",
     "count": "{{count}} 条观察记录",
     "plantRecord": "植物记录",
@@ -815,6 +818,22 @@
     "unableToSecurelyStoreYourSession": "无法安全保存您的会话。",
     "unlockSavedLogin": "解锁已保存的尼亚登录信息"
   },
+  "gpsPicker": {
+    "loadingMap": "正在加载地图…",
+    "mapUnavailable": "无法加载地图。请重试或手动输入坐标。",
+    "retryMap": "重新加载地图",
+    "blankMapRetry": "地图空白？点击重新加载。您仍可手动输入坐标。",
+    "chooseLocationOnMap": "在地图上选择位置",
+    "notAvailable": "暂无数据",
+    "selectLocation": "选择位置",
+    "moveMap": "移动地图，将定位针放在正确的位置。",
+    "confirmLocation": "确认位置",
+    "currentLocation": "当前位置",
+    "unableToGetLocation": "无法获取 GPS 位置。请重试。",
+    "permissionDenied": "位置权限被拒绝。请在设备设置中允许位置访问后重试。",
+    "latitude": "纬度",
+    "longitude": "经度"
+  },
   "mandatoryPasswordChange": {
     "unableToConfirmSignOutPleaseTryAgain": "无法确认已退出，请重试。",
     "changeYourTemporaryPassword": "更改临时密码",
@@ -835,6 +854,7 @@
     "tapAMarkerForDetails": "点击标记查看植物详情",
     "noMappedPlants": "地图上暂无植物位置。",
     "viewDetails": "查看详情",
+    "details": "详情",
     "unknown": "未知",
     "plantMap": "植物地图",
     "exploreDocumentedPlantLocationsInNiahNationalPark": "探索尼亚国家公园已记录的植物位置",
@@ -1141,6 +1161,7 @@
     "loadingSpeciesRecords": "正在加载物种记录…",
     "noPlantRecordsAreLinkedToThisSpeciesYet": "此物种尚未关联植物记录。",
     "viewAllPlants": "查看所有植物 →",
+    "scrollToSeeMorePlants": "向下滚动查看更多植物",
     "botanicalPhotographs": "植物学照片",
     "identificationFromDifferentViews": "不同视角的识别信息",
     "photographsSupportSpeciesIdentificationByShowingImportantBotanicalFeaturesAnd": "照片展示重要的植物特征和生长形态，有助于物种识别。",
@@ -1469,13 +1490,17 @@
     "successTitle": "观察记录已撤回",
     "successMessage": "您的观察记录已撤回。",
     "failed": "无法撤回此观察记录。请刷新后重试。",
-    "parentRequired": "此观察记录属于原始植物提交。请在植物提交页面管理撤回。",
-    "openPlant": "打开植物提交"
+    "openPlant": "查看植物提交"
   },
   "submissions": {
+    "approvalSnapshot": "审批快照",
+    "historicalSnapshot": "历史快照",
     "withdrawn": "已撤回",
     "countsUnavailable": "物种已加载，但无法刷新植物数量。请下拉刷新并重试。",
     "title": "我的提交",
+    "searchPlaceholder": "搜索提交...",
+    "noMatchingSubmissions": "没有匹配的提交",
+    "searchEmptyHint": "请尝试其他搜索内容或更改所选筛选条件。",
     "requestDetails": "物种申请详情",
     "loadingRequestDetails": "正在加载物种申请详情…",
     "requestDetailsUnavailable": "未找到此物种申请。",
@@ -1518,6 +1543,7 @@
     "reviewComments": "审核意见"
   },
   "recordEdits": {
+    "registrationUnavailable": "????????????????????????",
     "finalRejected": "拒绝为最终决定。此提交仅供查看，无法编辑或重新提交。",
     "automaticRejection": "因物种审核决定而自动拒绝关联植株登记",
     "draftFinal": "被拒绝提交的草稿会保留供参考，无法重新提交。",

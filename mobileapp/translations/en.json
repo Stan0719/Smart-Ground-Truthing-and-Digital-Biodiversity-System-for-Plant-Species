@@ -13,6 +13,7 @@
     "requestCorrection": "Request Correction",
     "correctionConfirm": "Ask the Botanist to correct this observation edit?",
     "notificationUpdate": "Observation {{observationId}}: open its edit request for the current status.",
+    "cancelConfirmation": "Only this edit request will be cancelled. Your proposed changes will be discarded; the original approved Observation will remain unchanged.",
     "events": {
       "submitted": "Edit submitted",
       "correction_required": "Correction requested",
@@ -52,6 +53,8 @@
   },
   "myObservations": {
     "title": "My Observations",
+    "searchPlaceholder": "Search observations...",
+    "noMatchingObservations": "No matching observations",
     "subtitle": "Observations recorded by your Botanist account.",
     "count": "{{count}} observations",
     "plantRecord": "Plant record",
@@ -815,6 +818,22 @@
     "unableToSecurelyStoreYourSession": "Unable to securely store your session.",
     "unlockSavedLogin": "Unlock your saved Niah login"
   },
+  "gpsPicker": {
+    "loadingMap": "Loading map…",
+    "mapUnavailable": "The map could not load. Retry or enter the coordinates manually.",
+    "retryMap": "Retry Map",
+    "blankMapRetry": "Map blank? Tap to reload. Manual entry is still available.",
+    "chooseLocationOnMap": "Choose Location on Map",
+    "notAvailable": "Not available",
+    "selectLocation": "Select Location",
+    "moveMap": "Move the map to position the pin on the correct location.",
+    "confirmLocation": "Confirm Location",
+    "currentLocation": "Current Location",
+    "unableToGetLocation": "Unable to obtain GPS location. Please try again.",
+    "permissionDenied": "Location permission was denied. Allow location access in device settings, then retry.",
+    "latitude": "Latitude",
+    "longitude": "Longitude"
+  },
   "mandatoryPasswordChange": {
     "unableToConfirmSignOutPleaseTryAgain": "Unable to confirm sign out. Please try again.",
     "changeYourTemporaryPassword": "Change your temporary password",
@@ -836,6 +855,7 @@
     "tapAMarkerForDetails": "Tap a marker to explore a plant",
     "noMappedPlants": "No plant locations are available on the map.",
     "viewDetails": "View Details",
+    "details": "Details",
     "plantMap": "Plant Map",
     "exploreDocumentedPlantLocationsInNiahNationalPark": "Explore documented plant locations in Niah National Park",
     "searchPlants": "Search plants...",
@@ -1141,6 +1161,7 @@
     "loadingSpeciesRecords": "Loading species records...",
     "noPlantRecordsAreLinkedToThisSpeciesYet": "No plant records are linked to this species yet.",
     "viewAllPlants": "View All Plants →",
+    "scrollToSeeMorePlants": "Scroll to see more plants",
     "botanicalPhotographs": "BOTANICAL PHOTOGRAPHS",
     "identificationFromDifferentViews": "Identification from different views",
     "photographsSupportSpeciesIdentificationByShowingImportantBotanicalFeaturesAnd": "Photographs support species identification by showing important botanical features and growth form.",
@@ -1469,13 +1490,17 @@
     "successTitle": "Observation Withdrawn",
     "successMessage": "Your Observation has been withdrawn.",
     "failed": "Unable to withdraw this Observation. Please refresh and try again.",
-    "parentRequired": "This Observation is part of the original Plant submission. Manage its withdrawal from the Plant submission.",
-    "openPlant": "Open Plant Submission"
+    "openPlant": "View Plant Submission"
   },
   "submissions": {
+    "approvalSnapshot": "Approval snapshot",
+    "historicalSnapshot": "Historical snapshot",
     "withdrawn": "Withdrawn",
     "countsUnavailable": "Species loaded, but plant counts could not be refreshed. Pull to refresh and retry.",
     "title": "My Submissions",
+    "searchPlaceholder": "Search submissions...",
+    "noMatchingSubmissions": "No matching submissions",
+    "searchEmptyHint": "Try a different search or change the selected filters.",
     "requestDetails": "Species Request Details",
     "loadingRequestDetails": "Loading species request details...",
     "requestDetailsUnavailable": "This species request could not be found.",
@@ -1518,6 +1543,7 @@
     "reviewComments": "Reviewer Comments"
   },
   "recordEdits": {
+    "registrationUnavailable": "The current approved Plant registration could not be verified. Your draft has not been changed.",
     "finalRejected": "Rejected is final. This submission is read-only and cannot be edited or resubmitted.",
     "automaticRejection": "Automatic linked registration rejection caused by the species decision",
     "draftFinal": "Drafts for rejected submissions are kept for reference and cannot be resubmitted.",

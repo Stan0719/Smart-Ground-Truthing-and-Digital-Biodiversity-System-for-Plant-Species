@@ -24,6 +24,8 @@ import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import { fieldFormStyles } from "../components/fieldFormStyles";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
 import RefreshButton from "../components/RefreshButton";
+import GpsLocationPicker from "../components/GpsLocationPicker";
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
 const fieldCapture = createFieldCapture({
   imagePicker: ImagePicker,
   location: Location,
@@ -31,9 +33,9 @@ const fieldCapture = createFieldCapture({
 const newFieldDraftKey = () => `field-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const blankForm = (plantId = "") => ({
   species_id: "", plant_id: String(plantId || ""), heightCm: "", healthStatus: "",
-  lifeStage: "", morphology: "", taxonomy: "", notes: "", latitude: "", longitude: "", accuracy_m: "",
+  lifeStage: "", morphology: "", taxonomy: "", notes: "", latitude: "", longitude: "", altitudeM: "", accuracy_m: "",
 });
-const observationFields = ["heightCm", "healthStatus", "lifeStage", "morphology", "taxonomy", "notes", "latitude", "longitude", "accuracy_m"];
+const observationFields = ["heightCm", "healthStatus", "lifeStage", "morphology", "taxonomy", "notes", "latitude", "longitude", "altitudeM", "accuracy_m"];
 const requiredObservationFields = new Set(["heightCm", "healthStatus", "lifeStage", "morphology"]);
 export default function FieldCollection({ route, navigation, onLogout }) {
   useAppTranslation();
@@ -52,6 +54,9 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     [plantRecord, setPlantRecord] = useState(null),
     [locating, setLocating] = useState(false);
   const [form, setForm] = useState(() => blankForm(route.params?.plantId));
+  const [mapInteracting, setMapInteracting] = useState(false), [gpsEditing, setGpsEditing] = useState(false);
+  const gpsBusy = useRef(false);
+  const [gpsRevision, setGpsRevision] = useState(0);
   const [initialForm, setInitialForm] = useState(() => blankForm(route.params?.plantId));
   const [invalidField, setInvalidField] = useState("");
   const [plantEligibility, setPlantEligibility] = useState("checking");
@@ -274,16 +279,15 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     };
   }, [user?.id]);
   async function locate() {
-    setLocating(true);
+    if (gpsBusy.current) return;
+    gpsBusy.current = true; setLocating(true);
     try {
-      const coordinates = await fieldCapture.coordinates();
-      setForm((old) => ({ ...old, ...coordinates }));
+      const point = await readGpsLocation(Location, t);
+      setGpsRevision((revision) => revision + 1);
+      setForm((old) => ({ ...old, latitude: point.latitude, longitude: point.longitude, altitudeM: point.altitude_m, accuracy_m: point.accuracy_m }));
       setInvalidField("");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLocating(false);
-    }
+    } catch (e) { setError(e.message || t("gpsPicker.unableToGetLocation")); }
+    finally { gpsBusy.current = false; setLocating(false); }
   }
   async function capture(camera) {
     if (capturing.current) return;
@@ -522,7 +526,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     ]);
   };
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.scrollContent}
+    <ScrollView scrollEnabled={!mapInteracting} style={styles.screen} contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
       <View style={[styles.page, isNewObservation && styles.observationPage]}>
       <View style={styles.pageHeadingRow}>
@@ -632,17 +636,21 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           </View>
           <View style={[styles.card, isNewObservation && styles.observationCard]}>
           {observationSectionTitle("03", observationForm ? "fieldCollection.observationLocation" : "fieldCollection.locationSection")}
-          {["latitude", "longitude", "accuracy_m"].map((field) => {
-            const label = fieldLabel(field, newPlant && ["latitude", "longitude"].includes(field));
+          {["latitude", "longitude", "altitudeM", "accuracy_m"].map((field) => {
+            const label = field === "altitudeM" ? t("addPlant.altitudeM") : fieldLabel(field, newPlant && ["latitude", "longitude"].includes(field));
+            const input = <TextInput accessibilityLabel={label} style={[styles.input, invalidField === field && styles.invalidInput]}
+              placeholder={t("gpsPicker.notAvailable")} value={form[field] ?? ""}
+              onFocus={() => setGpsEditing(true)} onBlur={() => setGpsEditing(false)}
+              onChangeText={(v) => change(field, v)} keyboardType="decimal-pad" />;
             return <View key={field} style={styles.fieldGroup}>
-              {edit ? <OriginalUpdatedField label={label} originalValue={originalObservationContent[field] ?? originalObservation?.[field]}>
-                <TextInput accessibilityLabel={label} style={[styles.input, invalidField === field && styles.invalidInput]} value={form[field]} onChangeText={(v) => change(field, v)} keyboardType="decimal-pad" />
-              </OriginalUpdatedField> : <>
+              {edit ? <OriginalUpdatedField label={label} originalValue={originalObservationContent[field] ?? originalObservation?.[field]}>{input}</OriginalUpdatedField> : <>
                 <Text style={[styles.label, invalidField === field && styles.invalidLabel]}>{label}</Text>
-                <TextInput accessibilityLabel={label} style={[styles.input, invalidField === field && styles.invalidInput]} value={form[field]} onChangeText={(v) => change(field, v)} keyboardType="decimal-pad" />
+                {input}
               </>}
             </View>;
           })}
+          {validGpsPoint(form) && <GpsLocationPicker key={gpsRevision} location={form} inputActive={gpsEditing} onInteractionChange={setMapInteracting}
+            onChange={(point) => { setForm((old) => ({ ...old, latitude: point.latitude, longitude: point.longitude, accuracy_m: "" })); setInvalidField(""); }} />}
           <TouchableOpacity style={styles.locationButton} onPress={locate} disabled={locating} accessibilityRole="button" accessibilityState={{ disabled: locating }}>
             {locating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.locationButtonText}>{t("addPlant.getCurrentLocation")}</Text>}
           </TouchableOpacity>
@@ -740,6 +748,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
         })}
       {!!qr && <QrDisplay value={qr} />}
       </View>
+
     </ScrollView>
   );
 }

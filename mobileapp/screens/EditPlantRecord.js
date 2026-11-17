@@ -10,6 +10,8 @@ import { fetchSpeciesCatalog, plantApi, plantAssetSources, recordChangePhotoSour
 import { normalizeQRCodes } from "../utils/qrInventory";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
+import GpsLocationPicker from "../components/GpsLocationPicker";
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
@@ -21,6 +23,12 @@ const numeric = new Set(["heightCm", "latitude", "longitude", "accuracy_m", "alt
 const str = (value) => value == null ? "" : String(value);
 const key = () => `edit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const baseSnapshot = (plant) => {
+  if (plant.status === "Approved") return {
+    status: plant.status, revision: plant.current_registration?.observation_revision ?? null,
+    scientific_name: plant.scientificName, species_id: plant.speciesId, qr_id: plant.qrId,
+    content: plant.registration || {}, photo_ids: plant.registrationPhotoIds || [],
+    version_id: plant.current_registration?.version_id ?? null,
+  };
   const observation = plant.status === "Approved" ? plant.observations?.find((row) => row.status === "Approved") : plant.latestObservation;
   return { status: plant.status, revision: observation?.revision ?? null, scientific_name: plant.scientificName,
     species_id: plant.speciesId, qr_id: plant.qrId, content: observation?.content || plant.latest_submission || plant.latest_approved || {},
@@ -31,7 +39,7 @@ const plantContentSignature = (plant) => {
   const snapshot = baseSnapshot(plant);
   delete snapshot.revision;
   return JSON.stringify({ snapshot, common_name: plant.commonName ?? null, location: plant.location ?? null,
-    latest_submission: plant.latest_submission ?? null, latest_approved: plant.latest_approved ?? null });
+    ...(plant.status === "Approved" ? {} : { latest_submission: plant.latest_submission ?? null, latest_approved: plant.latest_approved ?? null }) });
 };
 const plantFormValues = (plant) => {
   const snapshot = baseSnapshot(plant), content = snapshot.content || {};
@@ -41,11 +49,14 @@ const plantFormValues = (plant) => {
     ...Object.fromEntries(fields.slice(1).map((field) => [field, str(content[field] ?? fallback[field])])) };
 };
 const reviewedObservationIdentity = (plant) => {
+  if (plant.status === "Approved") return JSON.stringify({ id: plant.current_registration?.observation_id ?? null,
+    version_id: plant.current_registration?.version_id ?? null, status: plant.status });
   const observation = plant.status === "Approved" ? plant.observations?.find((row) => row.status === "Approved") : plant.latestObservation;
   return JSON.stringify({ id: observation?.id ?? null, status: observation?.status ?? null });
 };
 const draftPlantBaseline = (plant) => ({ id: plant.id, plantId: plant.plantId, scientificName: plant.scientificName, commonName: plant.commonName,
   speciesId: plant.speciesId, speciesDetails: plant.speciesDetails, status: plant.status, qrId: plant.qrId, qrCode: plant.qrCode,
+  registration: plant.registration, registrationPhotoIds: plant.registrationPhotoIds, current_registration: plant.current_registration,
   location: plant.location, latest_submission: plant.latest_submission, latest_approved: plant.latest_approved,
   latestObservation: plant.latestObservation ? { ...plant.latestObservation, assets: (plant.latestObservation.assets || []).map(({ id }) => ({ id })) } : null,
   observations: (plant.observations || []).map((observation) => ({ ...observation, assets: (observation.assets || []).map(({ id }) => ({ id })) })),
@@ -59,6 +70,10 @@ export default function EditPlantRecord({ route, navigation }) {
   const [loadingOriginalPhotos, setLoadingOriginalPhotos] = useState([]);
   const [qrList, setQrList] = useState([]), [qrError, setQrError] = useState(""), [qrLoading, setQrLoading] = useState(false);
   const [saving, setSaving] = useState(false), [locating, setLocating] = useState(false), [draftSaving, setDraftSaving] = useState(false);
+  const [mapInteracting, setMapInteracting] = useState(false);
+  const [gpsEditing, setGpsEditing] = useState(false);
+  const gpsBusy = useRef(false);
+  const [gpsRevision, setGpsRevision] = useState(0);
   const [submitted, setSubmitted] = useState(false);
   const [draftMessage, setDraftMessage] = useState(""), [draftError, setDraftError] = useState(""), [draftConflict, setDraftConflict] = useState(false);
   const [reload, setReload] = useState(0);
@@ -74,9 +89,9 @@ export default function EditPlantRecord({ route, navigation }) {
   const originalObservation = state.plant?.status === "Approved"
     ? state.plant.observations?.find((observation) => observation.status === "Approved")
     : state.plant?.latestObservation;
-  const originalPhotoIds = state.correctionChange?.base_snapshot?.photo_ids || (originalObservation?.assets || []).map((asset) => asset.id);
+  const originalPhotoIds = state.correctionChange?.base_snapshot?.photo_ids || (state.plant?.status === "Approved" ? state.plant.registrationPhotoIds || [] : (originalObservation?.assets || []).map((asset) => asset.id));
   const originalPhotoAssets = originalPhotoIds.map((id) => ({ id }));
-  const originalContent = originalObservation?.content || state.plant?.latest_submission || state.plant?.latest_approved || {};
+  const originalContent = state.plant?.status === "Approved" ? state.plant.registration || {} : originalObservation?.content || state.plant?.latest_submission || {};
   const originalFallbacks = {
     latitude: state.plant?.location?.latitude,
     longitude: state.plant?.location?.longitude,
@@ -117,7 +132,7 @@ export default function EditPlantRecord({ route, navigation }) {
       const changeId = state.correctionChange?.id || route.params?.correctionChangeId;
       const latestChange = changeId ? await fetchBotanistRecordChange(accountId, changeId, { kind: "plant", targetId: plantId }) : state.correctionChange;
       const basePhotoIds = latestChange?.base_snapshot?.photo_ids || (latestPlant.status === "Approved"
-        ? latestPlant.observations?.find((observation) => observation.status === "Approved")?.assets || []
+        ? latestPlant.registrationPhotoIds || []
         : latestPlant.latestObservation?.assets || []).map((photo) => typeof photo === "object" ? photo.id : photo);
       const proposalPhotoIds = latestChange?.proposed_snapshot?.photo_ids || [];
       const referencedPhotoIds = [...new Set([...basePhotoIds, ...proposalPhotoIds].filter((id) => id != null).map(String))];
@@ -169,7 +184,7 @@ export default function EditPlantRecord({ route, navigation }) {
           }
           if (restoredDraftRef.current) {
             const rebased = await saveBotanistFormDraft(accountId, { ...makeDraftInput(false), base_signature: latestSignature,
-              base_revision: latestPlant.latestObservation?.revision ?? null, baseline: { ...(restoredDraftRef.current.baseline || {}), plant: draftPlantBaseline(latestPlant) } });
+              base_revision: baseSnapshot(latestPlant).revision, baseline: { ...(restoredDraftRef.current.baseline || {}), plant: draftPlantBaseline(latestPlant) } });
             restoredDraftRef.current = rebased;
           }
           formBaseSignatureRef.current = latestSignature;
@@ -198,7 +213,7 @@ export default function EditPlantRecord({ route, navigation }) {
     try {
       if (restoredDraftRef.current) {
         const rebased = await saveBotanistFormDraft(accountId, { ...makeDraftInput(false), base_signature: refreshReview.plantSignature,
-          base_revision: state.plant.latestObservation?.revision ?? null });
+          base_revision: baseSnapshot(state.plant).revision });
         restoredDraftRef.current = rebased;
       }
       formBaseSignatureRef.current = refreshReview.plantSignature;
@@ -218,15 +233,14 @@ export default function EditPlantRecord({ route, navigation }) {
           throw Error(t("botanistDrafts.editConflict"));
         const [species, capabilities] = await Promise.all([fetchSpeciesCatalog({ accountId }), plantApi("/record-changes/capabilities", { expectedAccountId: accountId })]);
         if (!active) return;
-        const content = (plant.status === "Approved"
-          ? plant.observations?.find((observation) => observation.status === "Approved")?.content
-          : plant.latestObservation?.content) || plant.latest_submission || plant.latest_approved || {};
+        if (plant.status === "Approved" && plant.registrationState !== "available") throw Error(t("recordEdits.registrationUnavailable"));
+        const content = plant.status === "Approved" ? plant.registration : plant.latestObservation?.content || plant.latest_submission || {};
         const correctionChange = route.params?.correctionChangeId ? await fetchBotanistRecordChange(accountId, route.params.correctionChangeId, { kind: "plant", targetId: plantId }) : null;
         const correctionWorkflow = Boolean(correctionChange || route.params?.correction);
         const proposal = correctionChange?.proposed_snapshot || {};
         const baselineObservation = plant.status === "Approved"
           ? plant.observations?.find((observation) => observation.status === "Approved") : plant.latestObservation;
-        const baselinePhotoIds = correctionChange?.base_snapshot?.photo_ids || (baselineObservation?.assets || []).map((asset) => asset.id);
+        const baselinePhotoIds = correctionChange?.base_snapshot?.photo_ids || (plant.status === "Approved" ? plant.registrationPhotoIds : (baselineObservation?.assets || []).map((asset) => asset.id));
         let originalPhotoSources = {}, originalPhotoError = "";
         try {
           const sources = await plantAssetSources(baselinePhotoIds.map((id) => ({ id })), accountId, { ownSubmission: true });
@@ -376,18 +390,16 @@ export default function EditPlantRecord({ route, navigation }) {
     } catch (error) { setState((old) => ({ ...old, originalPhotoLoading: false, originalPhotoError: error.message || t("recordEdits.originalPhotoUnavailable") })); }
   }
   async function detectLocation() {
-    if (locating) return;
-    setLocating(true);
+    if (gpsBusy.current) return;
+    gpsBusy.current = true; setLocating(true);
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== "granted") return Alert.alert(t("addPlant.permissionRequired"), t("addPlant.locationPermissionIsRequiredToGetThePlantLocation"));
-      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const point = await readGpsLocation(Location, t);
+      setGpsRevision((revision) => revision + 1);
       formMutationRef.current += 1;
-      setForm((old) => ({ ...old, latitude: location.coords.latitude.toFixed(6), longitude: location.coords.longitude.toFixed(6),
-        altitudeM: location.coords.altitude == null ? old.altitudeM : location.coords.altitude.toFixed(2),
-        accuracy_m: location.coords.accuracy == null ? old.accuracy_m : location.coords.accuracy.toFixed(2) }));
-    } catch { Alert.alert(t("addPlant.locationError"), t("addPlant.unableToGetYourCurrentLocation")); }
-    finally { setLocating(false); }
+      setForm((old) => ({ ...old, latitude: point.latitude, longitude: point.longitude,
+        accuracy_m: point.accuracy_m, altitudeM: point.altitude_m }));
+    } catch (error) { Alert.alert(t("addPlant.locationError"), error.message || t("gpsPicker.unableToGetLocation")); }
+    finally { gpsBusy.current = false; setLocating(false); }
   }
   function addPicked(assets) {
     const retainedCount = photoSelectionTouched ? selectedOriginalPhotos.length : originalPhotoIds.length;
@@ -455,7 +467,7 @@ export default function EditPlantRecord({ route, navigation }) {
     const baseline = { plant: draftPlantBaseline(plant), species: state.species.filter((item) => String(item.id) === String(form.species_id)).map(({ id, scientificName, commonName, name, genus, family }) => ({ id, scientificName, commonName, name, genus, family })) };
     return { client_key: activeFormDraftKey, form_type: "edit-plant", target_id: plantId, correction_change_id: state.correctionChange?.id || restoredDraftRef.current?.correction_change_id || null, title: plant.scientificName || `Plant ${plantId}`,
       auto_saved: autoSaved, base_signature: restoredDraftRef.current?.base_signature || plantSignature(plant),
-      base_revision: plant.latestObservation?.revision ?? null, baseline, submission_client_key: clientKey.current,
+      base_revision: baseSnapshot(plant).revision, baseline, submission_client_key: clientKey.current,
       species_request_id: speciesRequestId || route.params?.speciesRequestId || restoredDraftRef.current?.species_request_id || null,
       form: { ...form, selectedOriginalPhotos, photoSelectionTouched },
       photos: newPhotos.map((uri, index) => ({ slot: `new:${String(index).padStart(2, "0")}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })) };
@@ -573,7 +585,7 @@ export default function EditPlantRecord({ route, navigation }) {
     }
     finally { busy.current = false; setSaving(false); }
   }
-  if (state.loading) return <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+  if (state.loading) return <ScrollView scrollEnabled={!mapInteracting} style={styles.page} contentContainerStyle={styles.content}>
     <DetailSkeletonContent label={t("plantDetail.loadingPlantRecord")} sections={4} />
   </ScrollView>;
   if (state.error || !form) return <View style={styles.center}><Text style={styles.error}>{translateUIMessage(state.error)}</Text>
@@ -584,7 +596,7 @@ export default function EditPlantRecord({ route, navigation }) {
   const qrOptions = qrList.filter((qr) => qr.id === currentQrId || (qr.status === "generated" && qr.plantId == null));
   if (currentQrId && !qrOptions.some((qr) => qr.id === currentQrId))
     qrOptions.unshift({ id: currentQrId, label: `QR-${currentQrId.padStart(4, "0")}` });
-  return <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <ScrollView scrollEnabled={!mapInteracting} style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <View style={styles.titleRow}>
       <Text style={styles.title}>{t(isCorrectionPage ? "recordEdits.correctPlantRegistration" : "recordEdits.editPlant")}</Text>
       {isCorrectionPage && <TouchableOpacity testID="plant-correction-refresh" style={styles.correctionRefreshButton} onPress={() => { void refreshCorrectionRecord(); }}
@@ -639,16 +651,29 @@ export default function EditPlantRecord({ route, navigation }) {
       <ScrollView style={styles.optionList} nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
       {(state.catalogSpecies || []).filter((item) => !speciesSearch.trim() || `${item.scientificName} ${item.commonName}`.toLocaleLowerCase().includes(speciesSearch.trim().toLocaleLowerCase()) || form.species_id === String(item.id)).map((item) => <TouchableOpacity key={item.id} style={[styles.speciesOption, form.species_id === String(item.id) && styles.selected]} onPress={() => change("species_id", String(item.id))} accessibilityRole="radio" accessibilityState={{ selected: form.species_id === String(item.id) }}>
         <Text style={styles.optionText}>{item.scientificName} · {item.commonName}</Text></TouchableOpacity>)}
-      </ScrollView>
+    </ScrollView>
       </OriginalUpdatedField>}
       <Text style={styles.note}>{t("recordEdits.associatedSpeciesName")}: {state.plant.speciesScientificName || state.plant.speciesDetails?.scientificName || t("recordEdits.informationNotAvailable")}</Text>
-      {fields.map((field) => <OriginalUpdatedField key={field} label={`${t(field === "scientific_name" ? "recordEdits.plantScientificName" : `recordEdits.${field}`)}${requiredFields.has(field) ? " *" : ""}`} originalValue={originalFieldValue(field)}>
+      {fields.filter((field) => !["latitude", "longitude", "altitudeM", "accuracy_m"].includes(field)).map((field) => <OriginalUpdatedField key={field} label={`${t(field === "scientific_name" ? "recordEdits.plantScientificName" : `recordEdits.${field}`)}${requiredFields.has(field) ? " *" : ""}`} originalValue={originalFieldValue(field)}>
         <TextInput style={[styles.input, ["morphology", "notes"].includes(field) && styles.multiline]} value={form[field]} onChangeText={(next) => change(field, next)}
           multiline={["morphology", "notes"].includes(field)} keyboardType={numeric.has(field) ? "decimal-pad" : "default"} />
-        {field === "altitudeM" && <TouchableOpacity style={fieldFormStyles.locationButton} onPress={detectLocation} disabled={locating} accessibilityRole="button" accessibilityLabel={t("addPlant.getCurrentLocation")} accessibilityState={{ disabled: locating, busy: locating }}>
-          {locating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={fieldFormStyles.locationButtonText}>{t("addPlant.getCurrentLocation")}</Text>}
-        </TouchableOpacity>}
       </OriginalUpdatedField>)}
+      {["latitude", "longitude", "altitudeM", "accuracy_m"].map((field) => {
+        const label = `${t(`recordEdits.${field}`)}${requiredFields.has(field) ? " *" : ""}`;
+        return <OriginalUpdatedField key={field} label={label} originalValue={originalFieldValue(field)}>
+              <TextInput style={styles.input} accessibilityLabel={label} value={form[field]}
+                placeholder={t("gpsPicker.notAvailable")} keyboardType="decimal-pad"
+                onFocus={() => setGpsEditing(true)} onBlur={() => setGpsEditing(false)}
+                onChangeText={(next) => change(field, next)} />
+            </OriginalUpdatedField>;
+      })}
+      {validGpsPoint(form) && <GpsLocationPicker key={gpsRevision} location={form} inputActive={gpsEditing} onInteractionChange={setMapInteracting}
+        onChange={(point) => { formMutationRef.current += 1;
+          setForm((old) => ({ ...old, latitude: point.latitude, longitude: point.longitude, accuracy_m: "" })); }} />}
+      <TouchableOpacity style={fieldFormStyles.locationButton} onPress={detectLocation} disabled={locating}
+        accessibilityRole="button" accessibilityLabel={t("addPlant.getCurrentLocation")} accessibilityState={{ disabled: locating, busy: locating }}>
+        {locating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={fieldFormStyles.locationButtonText}>{t("addPlant.getCurrentLocation")}</Text>}
+      </TouchableOpacity>
     </View>
     <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.qrAssignment")}</Text>
       <Text style={styles.note}>{t("recordEdits.currentQr")}: {state.plant.qrCode || t("botanistPlantDetail.notAssigned")}</Text>
@@ -710,6 +735,7 @@ export default function EditPlantRecord({ route, navigation }) {
       <TouchableOpacity style={[styles.primary, (saving || submitted || state.offlineDraft || draftConflict) && styles.disabled]} onPress={submit} disabled={saving || submitted || state.offlineDraft || draftConflict} accessibilityRole="button" accessibilityState={{ disabled: saving || submitted || state.offlineDraft || draftConflict }}><Text style={styles.primaryText}>{saving ? t("recordEdits.saving") : t("recordEdits.submitChanges")}</Text></TouchableOpacity>
     </View>
     <TouchableOpacity style={styles.secondary} onPress={confirmLeave} disabled={saving}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity>
+
   </ScrollView>;
 }
 

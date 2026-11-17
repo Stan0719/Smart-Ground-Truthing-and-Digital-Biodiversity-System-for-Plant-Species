@@ -475,7 +475,7 @@ export default function PlantDetail({
             }
           />
 
-          {plant.currentStatus !== "Approved" && displayedObservation?.notes ? (
+          {displayedObservation?.notes ? (
             <InfoRow label={t("plantDetail.notes")} value={displayedObservation.notes} />
           ) : null}
 
@@ -663,8 +663,8 @@ export default function PlantDetail({
               <InfoRow label={t("recordEdits.taxonomy")} value={detailsObservation.taxonomy} />
             ) : null}
 
-            {detailsObservation.latitude != null && <InfoRow label={t("fieldCollection.latitude")} value={String(detailsObservation.latitude)} />}
-            {detailsObservation.longitude != null && <InfoRow label={t("fieldCollection.longitude")} value={String(detailsObservation.longitude)} />}
+            <InfoRow label={t("fieldCollection.latitude")} value={detailsObservation.latitude == null ? t("plant.notRecorded") : String(detailsObservation.latitude)} />
+            <InfoRow label={t("fieldCollection.longitude")} value={detailsObservation.longitude == null ? t("plant.notRecorded") : String(detailsObservation.longitude)} />
             {detailsObservation.accuracyM != null && <InfoRow label={t("fieldCollection.gpsAccuracyM")} value={String(detailsObservation.accuracyM)} />}
             {detailsObservation.zone && <InfoRow label={t("recordEdits.zone")} value={detailsObservation.zone} />}
             {detailsObservation.altitudeM != null && <InfoRow label={t("recordEdits.altitudeM")} value={`${detailsObservation.altitudeM} m`} />}

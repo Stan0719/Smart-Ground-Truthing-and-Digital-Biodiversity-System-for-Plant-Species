@@ -5,22 +5,20 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-nati
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 import { initialMapCluster, SARAWAK_REGION, validMapPoint } from "../utils/mapCamera";
 
-export default function PlantExplorerMap({ plants, onViewDetails }) {
+export default function PlantExplorerMap({ plants, onViewDetails, focusRequest, selectedPlantId, onSelectPlant }) {
   useAppTranslation();
   const mapRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
   const validPlants = useMemo(() => (plants || []).filter(validMapPoint), [plants]);
   const initialGroup = useMemo(() => initialMapCluster(validPlants), [validPlants]);
   const coordinates = useMemo(() => initialGroup.map((item) => item.coordinate), [initialGroup]);
   const localIds = new Set(initialGroup.map((item) => item.plant.plantId));
   const distantPlants = validPlants.filter((plant) => !localIds.has(plant.plantId));
-  const selected = validPlants.find((plant) => plant.plantId === selectedId);
+  const selected = validPlants.find((plant) => plant.plantId === selectedPlantId);
 
   const focusPlant = (plant) => {
     const coordinate = validMapPoint(plant);
     if (!coordinate) return;
-    setSelectedId(plant.plantId);
     mapRef.current?.animateToRegion({ ...coordinate, latitudeDelta: 0.025, longitudeDelta: 0.025 }, 350);
   };
 
@@ -39,6 +37,14 @@ export default function PlantExplorerMap({ plants, onViewDetails }) {
     }
   }, [mapReady, coordinates]);
 
+  useEffect(() => {
+    const requestedPlantId = focusRequest?.plantId;
+    if (!mapReady || !requestedPlantId) return;
+    const plant = validPlants.find((item) => item.plantId === requestedPlantId);
+    const coordinate = plant && validMapPoint(plant);
+    if (coordinate) mapRef.current?.animateToRegion({ ...coordinate, latitudeDelta: 0.025, longitudeDelta: 0.025 }, 350);
+  }, [mapReady, focusRequest?.sequence, focusRequest?.plantId, validPlants]);
+
   return (
     <View style={styles.container}>
       <MapView ref={mapRef} style={styles.map} initialRegion={SARAWAK_REGION}
@@ -46,9 +52,9 @@ export default function PlantExplorerMap({ plants, onViewDetails }) {
         zoomEnabled zoomControlEnabled scrollEnabled rotateEnabled={false} pitchEnabled={false}
         accessibilityLabel={t("map.biodiversityMap")}>
         {validPlants.map((plant) => (
-          <Marker key={plant.plantId} coordinate={validMapPoint(plant)} onPress={() => setSelectedId(plant.plantId)}
+          <Marker key={plant.plantId} coordinate={validMapPoint(plant)} onPress={() => onSelectPlant(plant.plantId)}
             accessibilityLabel={plant.plantScientificName || t("plant.notRecorded")}>
-            <View style={styles.marker}><Ionicons name="leaf" size={17} color="#FFFFFF" /></View>
+            <View style={[styles.marker, selectedPlantId === plant.plantId && styles.selectedMarker]}><Ionicons name="leaf" size={17} color="#FFFFFF" /></View>
           </Marker>
         ))}
       </MapView>
@@ -56,7 +62,7 @@ export default function PlantExplorerMap({ plants, onViewDetails }) {
         <Text style={styles.distantLabel}>{t("map.otherMappedLocations")}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.distantChoices}
           contentContainerStyle={styles.distantChoiceContent}>
-          {distantPlants.map((plant) => <TouchableOpacity key={plant.plantId} onPress={() => focusPlant(plant)}
+          {distantPlants.map((plant) => <TouchableOpacity key={plant.plantId} onPress={() => { onSelectPlant(plant.plantId); focusPlant(plant); }}
             accessibilityRole="button" accessibilityLabel={`${t("map.showPlantOnMap")} ${plant.plantId}`} style={styles.distantChoice}>
             <Text style={styles.distantChoiceText} numberOfLines={1}>{plant.plantId}</Text>
           </TouchableOpacity>)}
@@ -93,6 +99,7 @@ const styles = StyleSheet.create({
   distantChoiceText: { maxWidth: 52, color: "#247344", fontSize: 11, fontWeight: "700" },
   marker: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center",
     backgroundColor: "#278051", borderWidth: 2, borderColor: "#FFFFFF", elevation: 3 },
+  selectedMarker: { backgroundColor: "#174D30", borderColor: "#C8F2A8", borderWidth: 3, transform: [{ scale: 1.18 }] },
   selectedCard: { position: "absolute", bottom: 10, left: 10, right: 10, flexDirection: "row",
     alignItems: "center", gap: 9, padding: 11, borderRadius: 13, backgroundColor: "#FFFFFF",
     shadowColor: "#123D27", shadowOpacity: 0.15, shadowRadius: 7, elevation: 4 },

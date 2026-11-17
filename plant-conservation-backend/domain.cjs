@@ -1,5 +1,6 @@
 ﻿"use strict";
 const { observationHistory, captureApprovedReview } = require("./historical-reviews.cjs");
+const { resolvePlantRegistrations, registrationLocation } = require("./plant-registration.cjs");
 const { finalRejection } = require("./final-rejection.cjs");
 const { withSubmissionUpdates } = require("./submission-updates.cjs");
 const { withResubmissionEvidence } = require('./observation-resubmission.cjs');
@@ -239,7 +240,7 @@ function readablePublicPlant(row) {
   // QR, or unreviewed submission fields through this projection.
   const result = Object.fromEntries([
     "plant_id", "species_id", "scientific_name", "common_name",
-    "rbac_status", "observed_at",
+    "rbac_status", "observed_at", "current_registration", "latest_verified_observation",
   ].filter((key) => Object.hasOwn(row, key)).map((key) => [key, row[key]]));
   if (row.plant_image_asset_id != null)
     result.plant_image_asset_id = String(row.plant_image_asset_id);
@@ -410,6 +411,11 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) OR ($5 AND p.registered_subject=$2)
             THEN approved_location.zone END AS zone,
           o.content AS latest_approved,o.updated_at AS observed_at,
+          verified.id AS verified_observation_id,verified.created_at AS verified_observation_date,
+          verified.content AS verified_observation_content,
+          (SELECT jsonb_agg(a.id ORDER BY a.created_at,a.id) FROM plant_asset a
+            WHERE a.plant_id=p.plant_id AND a.observation_id=verified.id AND a.species_id IS NULL
+              AND a.content_type IN ('image/jpeg','image/png')) AS verified_photo_ids,
           submitted.content AS latest_submission,submitted.id AS latest_observation_id,submitted.status AS observation_status,
           CASE WHEN NOT $5 OR COALESCE(v.visibility,'protected') = ANY($1::text[]) OR
             ($5 AND $8 AND p.registered_subject=$2 AND s.rbac_data->>'submittedBy'=$2
@@ -498,6 +504,9 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
               WHERE observation_visibility.species_id=p.species_id
                 AND observation_visibility.visibility=ANY($1::text[])
             )) ORDER BY updated_at DESC,id DESC LIMIT 1)
+          LEFT JOIN LATERAL (SELECT id,created_at,content FROM plant_observation
+            WHERE plant_id=p.plant_id AND status='Approved'
+            ORDER BY created_at DESC,id DESC LIMIT 1) verified ON true
           LEFT JOIN LATERAL (SELECT id,content,status FROM plant_observation WHERE plant_id=p.plant_id AND (owner_subject=$2 OR $3) ORDER BY created_at DESC,id DESC LIMIT 1) submitted ON true
           LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
           WHERE (CASE WHEN $5 THEN p.registered_subject=$2 ELSE (COALESCE(v.visibility,'protected') = ANY($1::text[]) OR
@@ -521,6 +530,44 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
         ],
       )
     ).rows;
+    // Parent authorization above runs before resolving any private history.
+    const registrations = await resolvePlantRegistrations(pool, rows.filter(r => r.rbac_status === "Approved").map(r => r.plant_id));
+    for (const row of rows) {
+      if (row.rbac_status !== "Approved") continue;
+      const registration = registrations.get(String(row.plant_id));
+      const fields = staff ? ["heightCm", "healthStatus", "lifeStage", "morphology", "notes", "taxonomy"] :
+        ["heightCm", "healthStatus", "lifeStage", "morphology"];
+      row.current_registration = registration?.state === "available" ? {
+        state: "available", observation_id: registration.observation_id,
+        ...(staff ? { observation_revision: registration.observation_revision, version_id: registration.version_id, version_number: registration.version_number } : {}),
+        content: Object.fromEntries(fields.filter(key => Object.hasOwn(registration.content, key)).map(key => [key, registration.content[key]])),
+        photo_ids: registration.photo_ids,
+      } : { state: "unavailable" };
+      row.plant_image_asset_id = registration?.photo_ids?.[0] ?? null;
+      const canLocate = catalogueVisibilityFor(req.user).includes(row.species_visibility) || (mine && row.registered_subject === subject(req.user));
+      Object.assign(row, canLocate ? registrationLocation(registration) : registrationLocation(null));
+    }
+    for (const row of rows) {
+      const content = row.verified_observation_content;
+      row.latest_verified_observation = content ? {
+        id: row.verified_observation_id, date: row.verified_observation_date, status: "Approved",
+        photo_ids: row.verified_photo_ids || [],
+        content: Object.fromEntries(["heightCm", "healthStatus", "lifeStage", "morphology", ...(staff ? ["notes", "taxonomy"] : [])]
+          .filter(key => Object.hasOwn(content, key)).map(key => [key, content[key]])),
+      } : null;
+      if (content && staff) {
+        const visible = catalogueVisibilityFor(req.user).includes(row.species_visibility) || (mine && row.registered_subject === subject(req.user));
+        const source = { ...row, ...registrationLocation(visible ? { state: "available", content } : null) };
+        const safe = req.user?.role === "Botanist" ? projectApprovedPlantGps([source], req.user)[0] :
+          permitted(req.user, "plants.catalogue.scientific.read") ? source : projectGps([source], req.user)[0];
+        row.latest_verified_observation.location = Object.fromEntries(["latitude", "longitude", "accuracy_m", "altitude_m", "zone"]
+          .map(key => [key, safe[key] ?? null]));
+      }
+      delete row.verified_photo_ids;
+      delete row.verified_observation_content;
+      delete row.verified_observation_id;
+      delete row.verified_observation_date;
+    }
     const plants = rows.map((r) => {
       if (publicWeb) return {
         plant_id: r.plant_id, species_id: r.species_id,

@@ -122,6 +122,9 @@ test("My Draft classifies supported form types and combines category and text se
   focus(); await new Promise((resolve) => setImmediate(resolve));
   tree = render();
   assert.ok(!text(tree).includes("common.goBack"));
+  assert.ok(!text(tree).includes("recordEdits.draftFinal"), "My Drafts omits the rejected-draft informational sentence");
+  assert.ok(text(tree).includes("botanistDrafts.title"));
+  assert.ok(text(tree).includes("botanistDrafts.subtitle"));
   assert.ok(find((node) => node?.props?.testID === "draft-filter-all"));
   find((node) => node?.props?.testID === "draft-filter-plant-records").props.onPress();
   tree = render(); assert.ok(find((node) => node?.props?.testID === "my-draft-plant-1")); assert.ok(!find((node) => node?.props?.testID === "my-draft-species-1"));

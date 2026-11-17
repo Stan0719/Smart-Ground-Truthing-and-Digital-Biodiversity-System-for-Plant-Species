@@ -1,3 +1,4 @@
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -42,6 +43,7 @@ function harness(file, { record, approved, species = false, correction = false, 
   };
   let failDownload = failReuseOnce, failPhotoSource = photoSourceFailsOnce;
   const deps = { react: hooks, "react-native": native,
+    "../components/GpsLocationPicker": { default: "GpsLocationPicker" }, "../utils/gpsLocation": { validGpsPoint, readGpsLocation },
     "../components/OriginalUpdatedField": { default: (props) => React.createElement("View", {}, React.createElement("Text", {}, props.label), props.originalContent, props.children) },
     "../components/fieldFormStyles": { fieldFormStyles: { photoButtonRow: {}, photoButton: {}, photoButtonText: {}, qrRefreshButton: {}, qrRefreshText: {} } },
     "../components/BotanicalSkeleton": { DetailSkeletonContent: "DetailSkeletonContent" },
@@ -99,7 +101,12 @@ function harness(file, { record, approved, species = false, correction = false, 
     ? text(node.type(node.props)) : React.Children.toArray(node?.props?.children).map(text).join(" ");
   return { render, walk, collect, text, get focus() { return focus; }, get alert() { return alert; }, calls, draftSaves, navigations, get photoReads() { return photoReads; } };
 }
-const plant = (status) => ({ id: "8", speciesId: "6", scientificName: "Manual plant name", status, qrId: "2", qrCode: "QR-0002",
+const plant = (status) => ({
+  registrationState: status === "Approved" ? "available" : "unavailable",
+  registration: status === "Approved" ? { heightCm:20,healthStatus:"Healthy",lifeStage:"Mature",morphology:"Leaves",notes:"",latitude:4.5,longitude:113.7 } : null,
+  registrationPhotoIds: ["photo-1","photo-2","photo-3"],
+  current_registration: { state:"available", observation_id:"registration", observation_revision:1, version_id:null },
+  id: "8", speciesId: "6", scientificName: "Manual plant name", status, qrId: "2", qrCode: "QR-0002",
   latestObservation: { revision: 1, assets: [{ id: "photo-1" }, { id: "photo-2" }, { id: "photo-3" }], content: { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Leaves", notes: "", latitude: 4.5, longitude: 113.7 } },
   observations: [{ status: "Approved", assets: [{ id: "photo-1" }, { id: "photo-2" }, { id: "photo-3" }], content: { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Leaves", notes: "", latitude: 4.5, longitude: 113.7 } }],
   photos: [1, 2, 3].map((index) => ({ uri: `https://example.invalid/existing-${index}` })) });
@@ -172,7 +179,7 @@ test("Plant correction refresh preserves the live form and photos, then requires
   assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === "Unsaved correction name"), "rebasing does not replace edited values");
   assert.ok(h.walk(tree, (node) => node.type === "Image" && node.props.source?.uri === "file://gallery.jpg"), "rebasing does not discard selected photos");
   assert.equal(h.draftSaves.length, 1, "the explicitly accepted baseline is persisted with the saved draft");
-  assert.equal(h.draftSaves[0].draft.base_revision, latest.latestObservation.revision);
+  assert.equal(h.draftSaves[0].draft.base_revision, latest.current_registration.observation_revision);
   assert.equal(h.draftSaves[0].draft.form.scientific_name, "Unsaved correction name");
   assert.equal(h.draftSaves[0].draft.photos[0].uri, "file://gallery.jpg");
   assert.equal(h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.disabled, false);
@@ -631,7 +638,7 @@ test("species photo download failure keeps the selection and a retry submits onc
   assert.equal(h.calls.filter(([path]) => path === "/my-species-requests/1").length, 1);
 });
 
-test("plant editor shows assigned QR, four GPS values and fills them from device location", async () => {
+test("plant editor preloads its inline map, captures fresh GPS, then applies a manual center without losing altitude", async () => {
   const h = harness("screens/EditPlantRecord.js", { record: plant("Approved") });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
   let tree = h.render();
@@ -640,9 +647,16 @@ test("plant editor shows assigned QR, four GPS values and fills them from device
     assert.ok(h.text(tree).includes(`recordEdits.${field}`));
   const detect = h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "addPlant.getCurrentLocation");
   assert.ok(detect);
+  assert.equal(h.walk(tree, (node) => node.type === "GpsLocationPicker").props.location.latitude, "4.5");
   await detect.props.onPress();
   tree = h.render();
-  for (const value of ["4.600000", "113.800000", "25.34", "6.78"])
+  const picker = h.walk(tree, (node) => node.type === "GpsLocationPicker");
+  assert.ok(picker);
+  assert.equal(picker.props.location.latitude, "4.6");
+  assert.equal(picker.props.location.accuracy_m, "6.78");
+  picker.props.onChange({ latitude: "4.700000", longitude: "113.900000", accuracy_m: "" });
+  tree = h.render();
+  for (const value of ["4.700000", "113.900000", "25.34"])
     assert.ok(h.walk(tree, (node) => node.type === "TextInput" && node.props.value === value));
   const freeQr = h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node).includes("QR-0003"));
   assert.ok(freeQr && !freeQr.props.disabled);
@@ -651,19 +665,50 @@ test("plant editor shows assigned QR, four GPS values and fills them from device
   button.props.onPress(); await h.alert[2][1].onPress();
   const sent = h.calls.find(([path]) => path === "/record-changes");
   assert.equal(sent[1].body.proposed.qr_id, 3);
-  assert.equal(sent[1].body.proposed.content.latitude, 4.6);
+  assert.equal(sent[1].body.proposed.content.latitude, 4.7);
   assert.equal(sent[1].body.proposed.content.altitudeM, 25.34);
-  assert.equal(sent[1].body.proposed.content.accuracy_m, 6.78);
+  assert.equal(sent[1].body.proposed.content.accuracy_m, null, "manual map placement clears stale measured accuracy");
 });
 
-test("denied GPS permission leaves existing plant coordinates unchanged", async () => {
-  const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), locationDenied: true });
+test("denied GPS permission leaves an unlocated plant form unchanged", async () => {
+  const record = plant("Approved");
+  delete record.registration.latitude; delete record.registration.longitude;
+  delete record.latestObservation.content.latitude; delete record.latestObservation.content.longitude;
+  delete record.observations[0].content.latitude; delete record.observations[0].content.longitude;
+  const h = harness("screens/EditPlantRecord.js", { record, locationDenied: true });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
   const tree = h.render();
   const detect = h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "addPlant.getCurrentLocation");
   await detect.props.onPress();
-  assert.equal(h.alert[0], "addPlant.permissionRequired");
-  assert.ok(h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "4.5"));
+  assert.equal(h.alert[0], "addPlant.locationError");
+  assert.equal(h.alert[1], "gpsPicker.permissionDenied");
+  assert.equal(h.walk(h.render(), (node) => node.type === "GpsLocationPicker"), null);
+  for (const field of ["latitude", "longitude", "altitudeM", "accuracy_m"]) {
+    const input = h.walk(h.render(), (node) => node.type === "TextInput" && node.props.accessibilityLabel?.startsWith(`recordEdits.${field}`));
+    assert.ok(input, `${field} is still manually editable after permission denial`);
+    assert.equal(input.props.value, "");
+  }
+});
+
+test("Plant editing and correction retain measurements during manual coordinate entry", async () => {
+  for (const status of ["Approved", "Correction Required"]) {
+    const record = plant(status);
+    if (record.registration) { record.registration.accuracy_m = 6; record.registration.altitudeM = 0; }
+    for (const observation of [record.latestObservation, ...record.observations]) {
+      observation.content.accuracy_m = 6; observation.content.altitudeM = 0;
+    }
+    const h = harness("screens/EditPlantRecord.js", { record, correction: status === "Correction Required" });
+    h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+    let tree = h.render();
+    const input = (field) => h.walk(tree, (node) => node.type === "TextInput" && node.props.accessibilityLabel?.startsWith(`recordEdits.${field}`));
+    assert.equal(input("accuracy_m").props.value, "6"); assert.equal(input("altitudeM").props.value, "0");
+    input("latitude").props.onChangeText("-"); tree = h.render();
+    assert.equal(h.walk(tree, (node) => node.type === "GpsLocationPicker"), null);
+    assert.equal(input("latitude").props.value, "-");
+    input("latitude").props.onChangeText("0"); tree = h.render();
+    assert.ok(h.walk(tree, (node) => node.type === "GpsLocationPicker"));
+    assert.equal(input("accuracy_m").props.value, "6"); assert.equal(input("altitudeM").props.value, "0");
+  }
 });
 
 test("plant editor reuses originals, removes one only from the selection, and mixes a camera photo", async () => {
@@ -915,3 +960,19 @@ for (const species of [false,true]) for (const acknowledgement of [{}, {change:{
     assert.ok(h.walk(h.render(),node=>node.type==='TextInput'&&Boolean(node.props.value)));
   });
 }
+
+
+test("approved Plant edit prefills registration A rather than newer Observation B", async () => {
+  const record = plant("Approved");
+  record.registration.heightCm = 30;
+  record.observations.unshift({ id:"visit-B",status:"Approved",revision:4,
+    content:{heightCm:10,healthStatus:"Poor",lifeStage:"Seedling",latitude:37,longitude:-122},assets:[] });
+  record.latestObservation = record.observations[0];
+  const h = harness("screens/EditPlantRecord.js", { record });
+  h.render(); h.focus(); await new Promise(resolve => setImmediate(resolve));
+  const input = name => h.walk(h.render(), node => node.type === "TextInput" && node.props.accessibilityLabel?.startsWith(`recordEdits.${name}`));
+  assert.ok(h.walk(h.render(), node => node.type === "TextInput" && node.props.value === "30"));
+  assert.ok(h.walk(h.render(), node => node.type === "TextInput" && node.props.value === "Mature"));
+  assert.equal(input("latitude").props.value,"4.5");
+  assert.equal(input("longitude").props.value,"113.7");
+});

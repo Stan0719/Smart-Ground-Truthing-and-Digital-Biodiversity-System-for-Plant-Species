@@ -13,6 +13,7 @@
     "requestCorrection": "Minta Pembetulan",
     "correctionConfirm": "Minta Ahli Botani membetulkan edit pemerhatian ini?",
     "notificationUpdate": "Pemerhatian {{observationId}}: buka permintaan edit untuk status semasa.",
+    "cancelConfirmation": "Hanya permintaan suntingan ini akan dibatalkan. Perubahan yang dicadangkan akan dibuang; Pemerhatian asal yang diluluskan kekal tanpa perubahan.",
     "events": {
       "submitted": "Edit dihantar",
       "correction_required": "Pembetulan diminta",
@@ -52,6 +53,8 @@
   },
   "myObservations": {
     "title": "Pemerhatian Saya",
+    "searchPlaceholder": "Cari pemerhatian...",
+    "noMatchingObservations": "Tiada pemerhatian yang sepadan",
     "subtitle": "Pemerhatian yang direkodkan oleh akaun Ahli Botani anda.",
     "count": "{{count}} pemerhatian",
     "plantRecord": "Rekod tumbuhan",
@@ -815,6 +818,22 @@
     "unableToSecurelyStoreYourSession": "Sesi anda tidak dapat disimpan dengan selamat.",
     "unlockSavedLogin": "Buka log masuk Niah tersimpan anda"
   },
+  "gpsPicker": {
+    "loadingMap": "Memuatkan peta…",
+    "mapUnavailable": "Peta tidak dapat dimuatkan. Cuba semula atau masukkan koordinat secara manual.",
+    "retryMap": "Cuba Semula Peta",
+    "blankMapRetry": "Peta kosong? Ketik untuk muat semula. Koordinat masih boleh dimasukkan secara manual.",
+    "chooseLocationOnMap": "Pilih Lokasi pada Peta",
+    "notAvailable": "Tidak tersedia",
+    "selectLocation": "Pilih Lokasi",
+    "moveMap": "Gerakkan peta untuk meletakkan pin pada lokasi yang betul.",
+    "confirmLocation": "Sahkan Lokasi",
+    "currentLocation": "Lokasi Semasa",
+    "unableToGetLocation": "Tidak dapat memperoleh lokasi GPS. Sila cuba lagi.",
+    "permissionDenied": "Kebenaran lokasi ditolak. Benarkan akses lokasi dalam tetapan peranti, kemudian cuba lagi.",
+    "latitude": "Latitud",
+    "longitude": "Longitud"
+  },
   "mandatoryPasswordChange": {
     "unableToConfirmSignOutPleaseTryAgain": "Log keluar tidak dapat disahkan. Sila cuba lagi.",
     "changeYourTemporaryPassword": "Tukar kata laluan sementara anda",
@@ -836,6 +855,7 @@
     "tapAMarkerForDetails": "Tekan penanda untuk melihat tumbuhan",
     "noMappedPlants": "Tiada lokasi tumbuhan tersedia pada peta.",
     "viewDetails": "Lihat Butiran",
+    "details": "Butiran",
     "plantMap": "Peta Tumbuhan",
     "exploreDocumentedPlantLocationsInNiahNationalPark": "Terokai lokasi tumbuhan yang didokumentasikan di Taman Negara Niah",
     "searchPlants": "Cari tumbuhan...",
@@ -1141,6 +1161,7 @@
     "loadingSpeciesRecords": "Memuatkan rekod spesies...",
     "noPlantRecordsAreLinkedToThisSpeciesYet": "Belum ada rekod tumbuhan yang dipautkan kepada spesies ini.",
     "viewAllPlants": "Lihat Semua Tumbuhan →",
+    "scrollToSeeMorePlants": "Tatal untuk melihat lebih banyak tumbuhan",
     "botanicalPhotographs": "FOTO BOTANI",
     "identificationFromDifferentViews": "Pengenalpastian daripada pelbagai sudut",
     "photographsSupportSpeciesIdentificationByShowingImportantBotanicalFeaturesAnd": "Foto menyokong pengenalpastian spesies dengan menunjukkan ciri botani dan bentuk pertumbuhan yang penting.",
@@ -1469,13 +1490,17 @@
     "successTitle": "Pemerhatian Ditarik Balik",
     "successMessage": "Pemerhatian anda telah ditarik balik.",
     "failed": "Tidak dapat menarik balik pemerhatian ini. Muat semula dan cuba lagi.",
-    "parentRequired": "Pemerhatian ini sebahagian daripada penyerahan tumbuhan asal. Urus penarikannya melalui penyerahan tumbuhan.",
-    "openPlant": "Buka Penyerahan Tumbuhan"
+    "openPlant": "Lihat Penyerahan Tumbuhan"
   },
   "submissions": {
+    "approvalSnapshot": "Petikan kelulusan",
+    "historicalSnapshot": "Petikan sejarah",
     "withdrawn": "Ditarik Balik",
     "countsUnavailable": "Spesies berjaya dimuatkan, tetapi bilangan tumbuhan tidak dapat dimuat semula. Tarik untuk memuat semula dan cuba lagi.",
     "title": "Penyerahan Saya",
+    "searchPlaceholder": "Cari penyerahan...",
+    "noMatchingSubmissions": "Tiada penyerahan yang sepadan",
+    "searchEmptyHint": "Cuba carian lain atau ubah penapis yang dipilih.",
     "requestDetails": "Butiran Permohonan Spesies",
     "loadingRequestDetails": "Memuatkan butiran permohonan spesies...",
     "requestDetailsUnavailable": "Permohonan spesies ini tidak dapat ditemui.",
@@ -1518,6 +1543,7 @@
     "reviewComments": "Ulasan Penyemak"
   },
   "recordEdits": {
+    "registrationUnavailable": "Pendaftaran Tumbuhan diluluskan semasa tidak dapat disahkan. Draf anda tidak diubah.",
     "finalRejected": "Penolakan adalah muktamad. Penyerahan ini hanya boleh dibaca dan tidak boleh disunting atau dihantar semula.",
     "automaticRejection": "Penolakan pendaftaran berkaitan secara automatik akibat keputusan spesies",
     "draftFinal": "Draf penyerahan yang ditolak disimpan untuk rujukan dan tidak boleh dihantar semula.",

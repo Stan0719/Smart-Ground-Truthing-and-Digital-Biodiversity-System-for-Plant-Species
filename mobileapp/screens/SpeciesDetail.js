@@ -1,7 +1,7 @@
 import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/SpeciesDetail.js
 
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 
 import {
   View,
@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   Image,
   RefreshControl,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -24,6 +25,7 @@ import RefreshButton from "../components/RefreshButton";
 import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
+import { orderSpeciesPlantRecords } from "../utils/speciesPlantOrdering";
 
 const hasRecordedValue = (value) => value !== null && value !== undefined &&
   (typeof value !== "string" || (value.trim().length > 0 && value.trim().toLowerCase() !== "not recorded"));
@@ -36,6 +38,7 @@ export default function SpeciesDetail({
   useAppTranslation();
 
   const { slug, speciesId } = route.params || {};
+  const { height: windowHeight } = useWindowDimensions();
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isVisitor = user?.role?.toLowerCase() === "visitor";
   const isGuest = user?.role?.toLowerCase() === "guest";
@@ -45,6 +48,7 @@ export default function SpeciesDetail({
   const [selectedSpecies, setSelectedSpecies] = useState(null);
   const [failedPrimaryImageKey, setFailedPrimaryImageKey] = useState(null);
   const [speciesPlants, setSpeciesPlants] = useState([]);
+  const [plantCardLayouts, setPlantCardLayouts] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -90,6 +94,10 @@ export default function SpeciesDetail({
   }, [loadSpeciesDetails]));
 
   const primaryImageSource = selectedSpecies?.speciesImageVerified ? getSpeciesImageSource(selectedSpecies) : null;
+  const orderedSpeciesPlants = useMemo(() => orderSpeciesPlantRecords(speciesPlants), [speciesPlants]);
+  const visibleCardHeight = orderedSpeciesPlants.slice(0, 3).reduce((total, plant) =>
+    total + (plantCardLayouts[String(plant.plantId)] || 0), 0);
+  const registeredPlantsViewportHeight = visibleCardHeight || Math.round(windowHeight * 0.72);
   const primaryImageKey = typeof primaryImageSource === "number" ? `local:${primaryImageSource}` : primaryImageSource?.uri || null;
   const galleryImages = Array.isArray(selectedSpecies?.images)
     ? selectedSpecies.images.filter((image) => hasRecordedValue(image?.path) && getSpeciesImageSource(selectedSpecies, image.path))
@@ -307,18 +315,35 @@ export default function SpeciesDetail({
             </Text>
           </View>
         ) : (
-          <>
-            {speciesPlants
-              .slice(0, 3)
-              .map((plant) => (
-                <PlantCard
-                  key={plant.plantId}
-                  plant={plant}
-                  navigation={navigation}
-                user={user}
-                  speciesDetailCard
-                />
+          orderedSpeciesPlants.length <= 3 ? orderedSpeciesPlants.map((plant) => (
+            <PlantCard
+              key={plant.plantId}
+              plant={plant}
+              navigation={navigation}
+              user={user}
+              speciesDetailCard
+            />
+          )) : <>
+            <ScrollView
+              style={[styles.registeredPlantsScroll, { height: registeredPlantsViewportHeight }]}
+              contentContainerStyle={styles.registeredPlantsContent}
+              nestedScrollEnabled
+              directionalLockEnabled
+              showsVerticalScrollIndicator
+            >
+              {orderedSpeciesPlants.map((plant) => (
+                <View key={plant.plantId} style={styles.registeredPlantRow}
+                  onLayout={(event) => {
+                    const height = event.nativeEvent.layout.height;
+                    const key = String(plant.plantId);
+                    setPlantCardLayouts((current) => Math.abs((current[key] || 0) - height) < 1
+                      ? current : { ...current, [key]: height });
+                  }}>
+                  <PlantCard plant={plant} navigation={navigation} user={user} speciesDetailCard />
+                </View>
               ))}
+            </ScrollView>
+            <Text style={styles.registeredPlantsScrollHint}>{t("speciesDetail.scrollToSeeMorePlants")}</Text>
           </>
         )}
 
@@ -642,6 +667,10 @@ const styles = StyleSheet.create({
 
   plantsHeadingRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", columnGap: 12, rowGap: 6, marginBottom: 8 },
   plantsHeading: { flexShrink: 1, marginBottom: 0 },
+  registeredPlantsScroll: { width: "100%" },
+  registeredPlantsContent: { paddingBottom: 1 },
+  registeredPlantRow: { width: "100%" },
+  registeredPlantsScrollHint: { marginTop: -4, marginBottom: 10, color: "#63776D", fontSize: 11, textAlign: "center" },
 
   sectionDescription: {
     marginBottom: 18,

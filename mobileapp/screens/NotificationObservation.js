@@ -33,6 +33,7 @@ export default function NotificationObservation({ route, navigation, user }) {
   const [withdrawing, setWithdrawing] = useState(false);
   const [withdrawError, setWithdrawError] = useState("");
   const withdrawalInFlight = useRef(false);
+  const cancelEditInFlight = useRef(false);
   const accountId = user?.role === "botanist" ? user.id : null;
   const observationId = route.params?.observationId;
   const readOnlyApproved = route.params?.readOnlyApproved === true;
@@ -62,7 +63,8 @@ export default function NotificationObservation({ route, navigation, user }) {
         try { editHistory = await plantApi(`/observations/${encodeURIComponent(observationId)}/edit-history`, { expectedAccountId: accountId }); }
         catch (error) { if (![404, 503].includes(error?.status)) editHistoryError = error?.message || t("observationEdits.historyUnavailable"); }
       }
-      const photoToken = (editHistory?.versions?.some((version) => version.photo_ids?.length) ||
+      const selectedPhotoContext = Boolean(route.params?.observationVersionId || route.params?.editRequestId || route.params?.observationVersionSnapshot);
+      const photoToken = selectedPhotoContext && (editHistory?.versions?.some((version) => version.photo_ids?.length) ||
         editHistory?.edits?.some((edit) => edit.retained_photo_ids?.length || edit.added_photo_count) ||
         route.params?.observationVersionSnapshot?.photoIds?.length)
         ? await faceSession.withToken(async (token) => token).catch(() => "") : "";
@@ -73,7 +75,7 @@ export default function NotificationObservation({ route, navigation, user }) {
         versioningActive: true, editCapabilityVerified: false });
     });
     return () => { active = false; };
-  }, [accountId, observationId, retry, readOnlyApproved, route.params?.observationVersionSnapshot]));
+  }, [accountId, observationId, retry, readOnlyApproved, route.params?.observationVersionSnapshot, route.params?.observationVersionId, route.params?.editRequestId]));
 
   const row = state.observation?.owner_subject === `staff:${accountId}` ||
     (readOnlyApproved && state.observation?.status === "Approved") ? state.observation : null;
@@ -81,27 +83,34 @@ export default function NotificationObservation({ route, navigation, user }) {
   const activeEdit = edits.find((edit) => ["Pending Review", "Correction Required"].includes(edit.status));
   const selectedVersion = state.editHistory?.versions?.find((version) => String(version.id) === String(route.params?.observationVersionId));
   const selectedSnapshot = route.params?.observationVersionSnapshot;
+  const originalSelection = Boolean(selectedSnapshot?.original || (selectedVersion &&
+    (["original", "legacy_baseline"].includes(selectedVersion.submission_type) || Number(selectedVersion.version_number) === 0)));
   const historicalSelection = Boolean(selectedSnapshot || selectedVersion);
-  const selectedEdit = route.params?.editRequestId
+  const selectedEdit = originalSelection ? null : route.params?.editRequestId
     ? edits.find((edit) => String(edit.id) === String(route.params.editRequestId))
-    : selectedVersion?.edit_request_id ? edits.find((edit) => String(edit.id) === String(selectedVersion.edit_request_id))
-      : historicalSelection ? null : activeEdit;
-  const requestSelection = Boolean(route.params?.editRequestId);
+    : selectedVersion?.edit_request_id ? edits.find((edit) => String(edit.id) === String(selectedVersion.edit_request_id)) : null;
+  const selectedEditIsCurrentRequest = Boolean(!originalSelection && selectedEdit && activeEdit?.id === selectedEdit.id &&
+    (!selectedVersion || (selectedVersion.request_revision != null
+      ? Number(selectedVersion.request_revision) === Number(selectedEdit.revision)
+      : Number(selectedEdit.revision) === 1)));
+  const requestSelection = !originalSelection && Boolean(route.params?.editRequestId);
   const selectedDetail = historicalSelection || requestSelection;
   const activeOriginalSnapshot = Boolean(selectedSnapshot?.original && selectedSnapshot.status === row?.status &&
     ["Pending Review", "Correction Required"].includes(row?.status));
   const displayContent = observationDetailContent(row, selectedSnapshot, selectedVersion, selectedEdit, selectedDetail);
   const displayStatus = selectedDetail
-    ? (activeOriginalSnapshot && row?.status === "Withdrawn" ? "Withdrawn" : selectedVersion?.status || selectedEdit?.status || selectedSnapshot?.status || row?.status)
+    ? (activeOriginalSnapshot && row?.status === "Withdrawn" ? "Withdrawn"
+      : selectedEditIsCurrentRequest ? selectedEdit.status : selectedVersion?.status || selectedEdit?.status || selectedSnapshot?.status || row?.status)
     : row?.status;
   const displayDate = selectedDetail
     ? selectedSnapshot?.createdAt || selectedVersion?.submitted_at || selectedVersion?.baseline_captured_at ||
       selectedVersion?.created_at || selectedEdit?.created_at || selectedVersion?.approved_at || row?.observed_at || row?.created_at
     : row?.observed_at || row?.created_at;
-  const reviewStatus = selectedEdit?.status || displayStatus;
-  const reviewComment = selectedVersion?.review_comment || selectedEdit?.review_comment || selectedSnapshot?.reviewComment || (!selectedDetail ? row?.review_comment : "");
-  const reviewedAt = selectedVersion?.reviewed_at || selectedEdit?.reviewed_at || (!selectedDetail ? row?.reviewed_at : null);
-  const reviewedBy = selectedVersion?.reviewed_by || selectedEdit?.reviewed_by || (!selectedDetail ? row?.reviewed_by : null);
+  // An active edit request has a separate review from the current Observation.
+  const reviewStatus = selectedDetail ? displayStatus : row?.status;
+  const reviewComment = selectedDetail ? selectedVersion?.review_comment || selectedEdit?.review_comment || selectedSnapshot?.reviewComment || "" : row?.review_comment;
+  const reviewedAt = selectedDetail ? selectedVersion?.reviewed_at || selectedEdit?.reviewed_at || selectedSnapshot?.reviewedAt || null : row?.reviewed_at;
+  const reviewedBy = selectedDetail ? selectedVersion?.reviewed_by || selectedEdit?.reviewed_by || selectedSnapshot?.reviewedBy || null : row?.reviewed_by;
   const photoApi = `${mobileApiUrl("plant")}/api`;
   const photoHeaders = state.photoToken ? { Authorization: `Bearer ${state.photoToken}` } : undefined;
   const displayPhotos = selectedDetail
@@ -124,12 +133,10 @@ export default function NotificationObservation({ route, navigation, user }) {
     canStartObservationEdit(row, state.editHistory, activeEdit, selectedDetail, accountId, state.versioningActive);
   const canWithdraw = !readOnlyApproved && Boolean(state.editHistory) &&
     canWithdrawOriginalObservation(row, activeEdit, selectedDetail && !activeOriginalSnapshot, accountId);
-  const mustWithdrawPlant = !readOnlyApproved && (!selectedDetail || activeOriginalSnapshot) && row?.owner_subject === `staff:${accountId}` &&
-    row.origin_type !== "subsequent_observation" && !row.withdrawn_at && ["Pending Review", "Correction Required"].includes(row.status);
-  const canCancelSelectedEdit = selectedEdit && selectedEdit.owner_subject === `staff:${accountId}` && activeEdit?.id === selectedEdit.id &&
-    (!selectedVersion || (selectedVersion.request_revision != null
-      ? Number(selectedVersion.request_revision) === Number(selectedEdit.revision)
-      : Number(selectedEdit.revision) === 1)) &&
+  const canViewPlantSubmission = row?.origin_type === "initial_registration" && row.owner_subject === `staff:${accountId}` &&
+    (!selectedDetail || originalSelection);
+  const canCancelSelectedEdit = selectedDetail && row?.status === "Approved" && selectedEditIsCurrentRequest &&
+    selectedEdit.owner_subject === `staff:${accountId}` &&
     ["Pending Review", "Correction Required"].includes(selectedEdit.status) &&
     (selectedEdit.status === "Correction Required" || selectedEdit.revision === 1);
   const confirmWithdrawal = () => Alert.alert(t("observationWithdrawal.confirmTitle"), t("observationWithdrawal.confirmMessage"), [
@@ -150,6 +157,20 @@ export default function NotificationObservation({ route, navigation, user }) {
         withdrawalInFlight.current = false;
         setWithdrawing(false);
       }
+    } },
+  ]);
+  const confirmCancelEdit = () => Alert.alert(t("recordEdits.deleteEditTitle"), t("observationEdits.cancelConfirmation"), [
+    { text: t("common.cancel"), style: "cancel" },
+    { text: t("recordEdits.cancelEditRequest"), style: "destructive", onPress: async () => {
+      if (cancelEditInFlight.current || !canCancelSelectedEdit) return;
+      cancelEditInFlight.current = true;
+      setCancelEditError(""); setCancellingEdit(true);
+      try {
+        await plantApi(`/observation-edits/${encodeURIComponent(selectedEdit.id)}/cancel`, { method: "POST", expectedAccountId: accountId, body: {} });
+        Alert.alert(t("recordEdits.cancelEditRequest"), t("recordEdits.editCancelled"));
+        setRetry((value) => value + 1);
+      } catch (error) { setCancelEditError(translateUIMessage(error.message || t("recordEdits.cancelEditFailed"))); }
+      finally { cancelEditInFlight.current = false; setCancellingEdit(false); }
     } },
   ]);
   const sectionHeader = (number, title, subtitle) => <View style={styles.sectionHeader}>
@@ -180,57 +201,51 @@ export default function NotificationObservation({ route, navigation, user }) {
         style={[styles.deleteEditButton, withdrawing && styles.disabledButton]} onPress={confirmWithdrawal}>
         {withdrawing ? <ActivityIndicator size="small" color="#B42318" /> : <Ionicons name="trash-outline" size={21} color="#B42318" />}
       </TouchableOpacity>}
-      {canCancelSelectedEdit && <TouchableOpacity
-        style={[styles.deleteEditButton, cancellingEdit && styles.disabledButton]} disabled={cancellingEdit} accessibilityRole="button" accessibilityLabel={t("recordEdits.cancelEditRequest")}
-        onPress={() => Alert.alert(t("recordEdits.deleteEditTitle"), t("recordEdits.deleteEditMessage"), [
-          { text: t("common.cancel"), style: "cancel" },
-          { text: t("recordEdits.cancelEditRequest"), style: "destructive", onPress: async () => {
-            setCancelEditError(""); setCancellingEdit(true);
-            try {
-              await plantApi(`/observation-edits/${encodeURIComponent(selectedEdit.id)}/cancel`, { method: "POST", expectedAccountId: accountId, body: {} });
-              Alert.alert(t("recordEdits.cancelEditRequest"), t("recordEdits.editCancelled"));
-              setRetry((value) => value + 1);
-            } catch (error) { setCancelEditError(translateUIMessage(error.message || t("recordEdits.cancelEditFailed"))); }
-            finally { setCancellingEdit(false); }
-          } },
-        ])}>
+      {canCancelSelectedEdit && <TouchableOpacity testID="cancel-observation-edit-request"
+        style={[styles.deleteEditButton, cancellingEdit && styles.disabledButton]} disabled={cancellingEdit}
+        accessibilityRole="button" accessibilityLabel={t("recordEdits.cancelEditRequest")} onPress={confirmCancelEdit}>
         {cancellingEdit ? <ActivityIndicator size="small" color="#B42318" /> : <Ionicons name="trash-outline" size={21} color="#B42318" />}
       </TouchableOpacity>}
       </View>}
     </View>
     <Text style={styles.subtitle}>{selectedDetail ? t("botanistPlantDetail.readOnlyVersionSubtitle") : t("notificationObservation.recordSubtitle")}</Text>
+    {!!cancelEditError && <Text style={styles.error} accessibilityRole="alert">{cancelEditError}</Text>}
     {displayStatus === "Rejected" && <View style={styles.rejectedBanner} testID="observation-rejected-banner">
       <Ionicons name="close-circle" size={22} color="#B42318" />
       <Text style={styles.rejectedBannerText}>{t("notificationObservation.rejectedTitle")}</Text>
     </View>}
     <View style={[styles.recordMeta, displayStatus === "Rejected" && styles.rejectedRecordMeta]} testID="observation-record-meta">
-      <View style={styles.recordMetaSummary}>
-        <View style={styles.recordMetaText}>
-          <Text style={styles.recordId}>{t("myObservations.observationId")}</Text>
-          <Text style={styles.recordIdValue} numberOfLines={2}>{row.id}</Text>
-        </View>
+      <View style={styles.recordIdHeader}>
+        <Text style={styles.recordId}>{t("myObservations.observationId")}</Text>
+        {selectedDetail && <View style={styles.versionMetaRow}>
+          <Text style={styles.versionPill}>{selectedSnapshot?.original ? t("recordEdits.originalLabel")
+            : selectedSnapshot?.editNumber ? t("recordEdits.editNumber", { number: selectedSnapshot.editNumber })
+              : t("observationEdits.versionLabel", { number: selectedSnapshot?.versionNumber || selectedVersion?.version_number || selectedEdit?.version_number || 1 })}</Text>
+          {selectedSnapshot?.current && <Text style={styles.currentVersionPill}>{t("recordEdits.currentVersionLabel")}</Text>}
+          {!selectedSnapshot?.current && displayStatus === "Approved" && <Text style={styles.supersededVersionPill}>{t("recordEdits.supersededLabel")}</Text>}
+        </View>}
+      </View>
+      <Text testID="observation-id-value" style={styles.recordIdValue} selectable>{row.id}</Text>
+      <View style={styles.recordMetaSummary} testID="plant-id-status-row">
+        <Text style={styles.recordMetaPlantId}>{t("myObservations.plantId")}: {row.plant_id}</Text>
         {!!displayStatus && <StatusBadge status={displayStatus} />}
       </View>
-      <Text style={styles.reference}>{t("myObservations.plantId")}: {row.plant_id}</Text>
       {!!(row.common_name || row.scientific_name) && <Text style={styles.reference}>{row.common_name || row.scientific_name}</Text>}
-      {selectedDetail && <View style={styles.versionMetaRow}>
-        <Text style={styles.versionPill}>{selectedSnapshot?.original ? t("recordEdits.originalLabel")
-          : selectedSnapshot?.editNumber ? t("recordEdits.editNumber", { number: selectedSnapshot.editNumber })
-            : t("observationEdits.versionLabel", { number: selectedSnapshot?.versionNumber || selectedVersion?.version_number || selectedEdit?.version_number || 1 })}</Text>
-        {selectedSnapshot?.current && <Text style={styles.currentVersionPill}>{t("recordEdits.currentVersionLabel")}</Text>}
-        {!selectedSnapshot?.current && displayStatus === "Approved" && <Text style={styles.supersededVersionPill}>{t("recordEdits.supersededLabel")}</Text>}
-      </View>}
       {!!withdrawError && <Text accessibilityRole="alert" style={styles.error}>{withdrawError}</Text>}
-      {mustWithdrawPlant && <View style={styles.parentWithdrawalNotice}>
-        <Text style={styles.parentWithdrawalText}>{t("observationWithdrawal.parentRequired")}</Text>
+      {canViewPlantSubmission && <>
+        <View style={styles.summaryDivider} />
         <TouchableOpacity testID="open-parent-plant-submission" accessibilityRole="button"
-          style={styles.parentPlantButton} onPress={() => navigation.navigate("BotanistPlantDetail", {
+          accessibilityLabel={t("observationWithdrawal.openPlant")} style={styles.plantSubmissionRow}
+          onPress={() => navigation.navigate("BotanistPlantDetail", {
             plantId: row.plant_id, botanist: { id: accountId, role: "Botanist" },
           })}>
-          <Text style={styles.parentPlantButtonText}>{t("observationWithdrawal.openPlant")}</Text>
-          <Ionicons name="chevron-forward" size={17} color="#2F6B4F" />
+          <View style={styles.plantSubmissionLabel}>
+            <Ionicons name="leaf-outline" size={19} color="#2F6B4F" />
+            <Text style={styles.plantSubmissionText}>{t("observationWithdrawal.openPlant")}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={19} color="#2F6B4F" />
         </TouchableOpacity>
-      </View>}
+      </>}
       {!!state.editHistoryError && <TouchableOpacity onPress={() => setRetry((value) => value + 1)} accessibilityRole="button"><Text style={styles.error}>{t("observationEdits.historyUnavailable")} · {t("common.tryAgain")}</Text></TouchableOpacity>}
     </View>
     <View style={styles.card} testID="observation-section-01">
@@ -268,46 +283,14 @@ export default function NotificationObservation({ route, navigation, user }) {
         : <View style={styles.field}><Text style={styles.label}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.text}>{reviewComment}</Text></View>)}
       {!!reviewedAt && <View style={styles.field}><Text style={styles.label}>{t("recordEdits.reviewedAt")}</Text><Text style={styles.text}>{formatDateTime(reviewedAt)}</Text></View>}
       {!!reviewedBy && <View style={styles.field}><Text style={styles.label}>{t("recordEdits.reviewedBy")}</Text><Text style={styles.text}>{reviewedBy}</Text></View>}
-    </View>
-    {(selectedEdit || state.editHistory?.events?.length > 0 || state.editHistory?.versions?.length > 0 ||
-      (!historicalSelection && ["Draft", "Correction Required"].includes(row.status))) && <View style={styles.card} testID="observation-section-05">
-      {sectionHeader("05", t("myObservations.history"), t("notificationObservation.historySubtitle"))}
-      {selectedEdit && <View style={styles.feedback}>
-        <Text style={styles.label}>{t("observationEdits.editProposal")} {selectedEdit.version_number}</Text>
-        {!!cancelEditError && <Text style={styles.error} accessibilityRole="alert">{cancelEditError}</Text>}
-        {selectedEdit.status === "Correction Required" && activeEdit?.id === selectedEdit.id && <TouchableOpacity style={styles.button}
-          onPress={() => navigation.navigate("FieldCollectionEdit", { observation: row, plantId: row.plant_id, editRequest: selectedEdit })}
-          accessibilityRole="button"><Text style={styles.buttonText}>{t("fieldCollection.correctObservation")}</Text></TouchableOpacity>}
-      </View>}
-      {state.editHistory?.events?.length > 0 && <View style={styles.photoSection}>
-        <Text style={styles.label}>{t("myObservations.history")}</Text>
-        {state.editHistory.events.map((event) => <Text key={event.id} style={styles.text}>{t(`observationEdits.events.${event.event_type}`)} · {String(event.created_at).slice(0, 10)}{event.comment ? ` · ${event.comment}` : ""}</Text>)}
-      </View>}
-      {state.editHistory?.versions?.length > 0 && <View style={styles.photoSection}>
-        <Text style={styles.label}>{t("observationEdits.versionHistory")}</Text>
-        {state.editHistory.versions.map((version) => <View key={version.id} style={styles.feedback}>
-          <Text style={styles.label}>{t("observationEdits.versionLabel", { number: version.version_number })}</Text>
-          {!!version.status && <Text style={styles.text}>{translateLabel(version.status)}</Text>}
-          {!!version.review_decision && version.review_decision !== version.status &&
-            <Text style={styles.text}>{translateLabel(version.review_decision)}</Text>}
-          {!!version.review_comment && <Text style={styles.text}>{version.review_comment}</Text>}
-          {!!version.reviewed_by && <Text style={styles.text}>{version.reviewed_by}</Text>}
-          {!!version.reviewed_at && <Text style={styles.text}>{String(version.reviewed_at).slice(0, 16).replace("T", " ")}</Text>}
-          {["heightCm", "healthStatus", "lifeStage", "morphology", "taxonomy", "notes", "latitude", "longitude", "accuracy_m", "zone", "altitudeM"].map((field) =>
-            version.content?.[field] != null && version.content[field] !== "" ? <Text key={field} style={styles.text}>{translateLabel(field)}: {String(version.content[field])}</Text> : null)}
-          {!!state.photoToken && version.photo_ids?.length > 0 && <ScrollView horizontal contentContainerStyle={styles.photoRow}>
-            {version.photo_ids.map((id, index) => <Image key={id} style={styles.photo}
-              source={{ uri: `${mobileApiUrl("plant")}/api/observation-versions/${encodeURIComponent(version.id)}/photos/${index}`,
-                headers: { Authorization: `Bearer ${state.photoToken}` } }} />)}
-          </ScrollView>}
-        </View>)}
-      </View>}
-      {!historicalSelection && ["Draft", "Correction Required"].includes(row.status) && <TouchableOpacity
-        style={styles.button}
+      {selectedEdit?.status === "Correction Required" && activeEdit?.id === selectedEdit.id && <TouchableOpacity style={styles.button}
+        onPress={() => navigation.navigate("FieldCollectionEdit", { observation: row, plantId: row.plant_id, editRequest: selectedEdit })}
+        accessibilityRole="button"><Text style={styles.buttonText}>{t("fieldCollection.correctObservation")}</Text></TouchableOpacity>}
+      {!historicalSelection && ["Draft", "Correction Required"].includes(row.status) && <TouchableOpacity style={styles.button}
         onPress={() => navigation.navigate("FieldCollectionEdit", { observation: row, plantId: row.plant_id })}
-        accessibilityRole="button"
-      ><Text style={styles.buttonText}>{t("fieldCollection.correctObservation")}</Text></TouchableOpacity>}
-    </View>}</>}
+        accessibilityRole="button"><Text style={styles.buttonText}>{t("fieldCollection.correctObservation")}</Text></TouchableOpacity>}
+    </View>
+    </>}
     <Modal visible={Boolean(selectedPhoto)} transparent animationType="fade" onRequestClose={() => setSelectedPhoto(null)}>
       <View style={styles.photoViewer}>
         <TouchableOpacity style={styles.photoViewerClose} accessibilityRole="button" accessibilityLabel={t("plantDetail.closeImageViewer")}
@@ -331,10 +314,11 @@ const styles = StyleSheet.create({
   rejectedBannerText: { flex: 1, flexShrink: 1, color: "#8F1D16", fontSize: 15, fontWeight: "800", lineHeight: 21 },
   recordMeta: { padding: 14, marginBottom: 18, borderRadius: 14, backgroundColor: "#E9F7E4" },
   rejectedRecordMeta: { backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0" },
-  recordMetaSummary: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  recordMetaText: { flex: 1, minWidth: 0 },
+  recordIdHeader: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
   recordId: { fontSize: 11, color: "#718078" },
-  recordIdValue: { marginTop: 4, fontSize: 14, fontWeight: "700", color: "#234B3A" },
+  recordIdValue: { marginTop: 5, fontSize: 14, lineHeight: 20, fontWeight: "700", color: "#234B3A", flexShrink: 1 },
+  recordMetaSummary: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 8 },
+  recordMetaPlantId: { color: "#52665A", fontSize: 12, flexShrink: 1 },
   reference: { color: "#52665A", fontSize: 12, marginTop: 6 },
   badge: { maxWidth: "58%", paddingVertical: 7, paddingHorizontal: 10, borderRadius: 9, backgroundColor: "#FFFFFF" },
   badgeText: { color: "#468585", fontSize: 11, fontWeight: "700" },
@@ -348,7 +332,7 @@ const styles = StyleSheet.create({
   terminalBadgeText: { color: "#884B43" },
   supersededBadge: { backgroundColor: "#E7EBE6" },
   supersededBadgeText: { color: "#56625A" },
-  versionMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 8 },
+  versionMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 5 },
   versionPill: { overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, color: "#234B3A", backgroundColor: "#FFFFFF", fontSize: 10, fontWeight: "700" },
   currentVersionPill: { overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, color: "#FFFFFF", backgroundColor: "#468585", fontSize: 10, fontWeight: "700" },
   supersededVersionPill: { overflow: "hidden", paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, color: "#56625A", backgroundColor: "#E7EBE6", fontSize: 10, fontWeight: "700" },
@@ -359,12 +343,10 @@ const styles = StyleSheet.create({
   sectionHeading: { flex: 1, marginLeft: 12 },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: "#234B3A" },
   sectionSubtitle: { marginTop: 4, fontSize: 11, lineHeight: 16, color: "#718078" },
-  feedback: { backgroundColor: "#EEF7EF", padding: 14, borderRadius: 12, marginBottom: 12 },
   rejectedFeedbackPanel: { padding: 14, borderRadius: 12, backgroundColor: "#FEF2F1", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318", marginBottom: 12, gap: 6 },
   rejectedFeedbackHeading: { fontSize: 12, fontWeight: "800", color: "#8F1D16" },
   rejectedFeedbackText: { color: "#6F302B", fontSize: 14, lineHeight: 21 },
   field: { marginBottom: 16 },
-  photoSection: { marginTop: 8, marginBottom: 10 },
   photoRow: { flexDirection: "row", gap: 8, paddingVertical: 6 },
   photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   photoCard: { width: "47%", overflow: "hidden", borderRadius: 12, borderWidth: 1, borderColor: "#DCE8D6", backgroundColor: "#F6FAF3" },
@@ -380,10 +362,10 @@ const styles = StyleSheet.create({
   error: { color: "#A34740", fontSize: 14, lineHeight: 21 },
   button: { minHeight: 46, borderRadius: 12, backgroundColor: "#35786F", alignItems: "center", justifyContent: "center", marginTop: 18 },
   buttonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
-  parentWithdrawalNotice: { marginTop: 12, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "#D8E7D5", backgroundColor: "#F1F7EE", gap: 8 },
-  parentWithdrawalText: { color: "#52665A", fontSize: 13, lineHeight: 20 },
-  parentPlantButton: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "center", alignSelf: "flex-start", gap: 6, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#E5F0E1", borderWidth: 1, borderColor: "#B7CFB5" },
-  parentPlantButtonText: { color: "#2F6B4F", fontSize: 14, fontWeight: "700" },
+  summaryDivider: { height: 1, marginTop: 12, backgroundColor: "#D6E6D1" },
+  plantSubmissionRow: { minHeight: 46, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingTop: 4 },
+  plantSubmissionLabel: { flex: 1, flexDirection: "row", alignItems: "center", gap: 9 },
+  plantSubmissionText: { color: "#2F6B4F", fontSize: 14, lineHeight: 20, fontWeight: "700", flexShrink: 1 },
   deleteEditButton: { width: 44, height: 44, alignSelf: "flex-end", alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4" },
   disabledButton: { opacity: 0.65 },
 });

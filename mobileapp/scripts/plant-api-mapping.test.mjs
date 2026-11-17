@@ -165,13 +165,14 @@ test('wrapped approved observation content maps to Visitor card facts without us
   vm.runInContext(source, context)
   const plant = vm.runInContext(`mapBackendPlant({ plant_id: 8, species_id: 2, rbac_status: 'Approved',
     latest_approved: { content: { heightCm: 10, healthStatus: 'Healthy', lifeStage: 'Mature', morphology: 'Broad leaves' } },
+    current_registration: { state: 'available', content: { heightCm: 30, lifeStage: 'Mature' } },
     latest_submission: { content: { heightCm: 99, healthStatus: 'Poor', lifeStage: 'Seedling', morphology: 'Unreviewed' } }
   }, new Map([['2', { scientificName: 'Species eight', name: 'Common eight' }]]))`, context)
   assert.equal(plant.plantScientificName, '')
   assert.deepEqual(JSON.parse(JSON.stringify(plant.latestApproved)), {
     heightCm: 10, healthStatus: 'Healthy', lifeStage: 'Mature', date: null, morphology: 'Broad leaves', notes: '',
   })
-  assert.equal(context.getPlantDisplayObservation(plant).heightCm, 10)
+  assert.equal(context.getPlantDisplayObservation(plant).heightCm, 30)
 })
 
 test('public Guest and Visitor plant projections map approved summary fields consistently', () => {
@@ -184,7 +185,7 @@ test('public Guest and Visitor plant projections map approved summary fields con
     plant_id: '19', species_id: '7', scientific_name: 'Plant Testing Trans JA',
     common_name: 'Testingcommon', rbac_status: 'Approved', observed_at: '2026-11-09T12:46:33Z',
     plant_image_asset_id: 'approved-plant-19-photo',
-    latest_approved: { heightCm: 80, lifeStage: 'Mature', healthStatus: 'Healthy', morphology: 'Very good, now grow up' },
+    current_registration: { state: 'available', content: { heightCm: 80, lifeStage: 'Mature', healthStatus: 'Healthy', morphology: 'Very good, now grow up' } },
   }
   const result = vm.runInContext(`(() => {
     const guest = mapBackendPlant(${JSON.stringify(publicResponse)});
@@ -428,7 +429,7 @@ test('plant mapper keeps plant names distinct and selects approved versus submit
   assert.equal(mapped.latestSubmission.heightCm, 64)
   assert.equal(mapped.latestSubmission.status, 'Pending Review')
   const values = await vm.runInContext(`({
-    approved: getPlantDisplayObservation(mapBackendPlant({ plant_id: 8, rbac_status: 'Approved', latest_approved: { heightCm: 150 }, latest_submission: { content: { heightCm: 131 } }, observation_status: 'Rejected' })),
+    approved: getPlantDisplayObservation(mapBackendPlant({ plant_id: 8, rbac_status: 'Approved', current_registration: { state: 'available', content: { heightCm: 150 } }, latest_approved: { heightCm: 155 }, latest_submission: { content: { heightCm: 131 } }, observation_status: 'Rejected' })),
     pending: getPlantDisplayObservation(mapBackendPlant({ plant_id: 17, rbac_status: 'Pending Review', latest_approved: { heightCm: 10 }, latest_submission: { content: { heightCm: 64 } } }))
   })`, context)
   assert.equal(values.approved.heightCm, 150)

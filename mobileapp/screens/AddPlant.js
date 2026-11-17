@@ -20,6 +20,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import QRCode from "react-native-qrcode-svg";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import RefreshButton from "../components/RefreshButton";
+import GpsLocationPicker from "../components/GpsLocationPicker";
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
 import { fieldFormStyles } from "../components/fieldFormStyles";
 import { plantApi, fetchSpeciesCatalog, fetchSpeciesDetail } from "../utils/plantApi";
 import { validateSpeciesRequest, validatePlantDetails, validatePlantGps } from "../utils/addPlantValidation";
@@ -288,6 +290,10 @@ export function AddPlantForm({
   
   const [altitude, setAltitude] = useState("");
   const [gpsAccuracy, setGpsAccuracy] = useState("");
+  const [mapInteracting, setMapInteracting] = useState(false);
+  const [gpsEditing, setGpsEditing] = useState(false);
+  const gpsBusy = useRef(false);
+  const [gpsRevision, setGpsRevision] = useState(0);
 
   // ===================================================
   // PHOTOS
@@ -466,72 +472,18 @@ export function AddPlantForm({
   // ===================================================
 
   async function handleGetLocation() {
-
+    if (gpsBusy.current) return;
+    gpsBusy.current = true;
+    setLoadingLocation(true);
     try {
-
-      setLoadingLocation(true);
-
-
-      const {
-        status,
-      } =
-        await Location.requestForegroundPermissionsAsync();
-
-
-      if (status !== "granted") {
-
-        Alert.alert(
-          t("addPlant.permissionRequired"),
-          t("addPlant.locationPermissionIsRequiredToGetThePlantLocation")
-        );
-
-        return;
-      }
-
-
-      const location =
-        await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-
-
-      const lat = location.coords.latitude.toFixed(6);
-      const lng = location.coords.longitude.toFixed(6);
-
-      setLatitude(lat);
-      setLongitude(lng);
-
-      setAltitude(
-        location.coords.altitude != null
-          ? location.coords.altitude.toFixed(2)
-          : ""
-      );
-
-      setGpsAccuracy(
-        location.coords.accuracy != null
-          ? location.coords.accuracy.toFixed(2)
-          : ""
-      );
-
+      const point = await readGpsLocation(Location, t);
+      setGpsRevision((revision) => revision + 1);
+      setLatitude(point.latitude); setLongitude(point.longitude);
+      setGpsAccuracy(point.accuracy_m); setAltitude(point.altitude_m);
     } catch (error) {
-
-      console.log(
-        "Location error:",
-        error
-      );
-
-      Alert.alert(
-        t("addPlant.locationError"),
-        t("addPlant.unableToGetYourCurrentLocation")
-      );
-
-    } finally {
-
-      setLoadingLocation(false);
-
-    }
+      Alert.alert(t("addPlant.locationError"), error.message || t("gpsPicker.unableToGetLocation"));
+    } finally { gpsBusy.current = false; setLoadingLocation(false); }
   }
-
 
   // ===================================================
   // TAKE PHOTO
@@ -1044,7 +996,7 @@ function handleRemoveSpeciesPhoto(index) {
           SCROLL FORM
       ================================================= */}
 
-      <ScrollView ref={formScrollRef}
+      <ScrollView scrollEnabled={!mapInteracting} ref={formScrollRef}
         style={styles.scrollView}
         contentContainerStyle={
           styles.scrollContent
@@ -1680,59 +1632,22 @@ function handleRemoveSpeciesPhoto(index) {
           >{t("addPlant.useYourCurrentGpsLocationToRecordWhereThisPlant")}</Text>
 
 
-          {/* Latitude */}
-
-          <Text style={styles.label}>{t("addPlant.latitude")}</Text>
-
-          <TextInput
-            style={styles.input}
-            value={latitude}
-            onChangeText={
-              setLatitude
-            }
-            placeholder="e.g. 3.812345"
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-
-          {/* Longitude */}
-
-          <Text style={styles.label}>{t("addPlant.longitude")}</Text>
-
-          <TextInput
-            style={styles.input}
-            value={longitude}
-            onChangeText={
-              setLongitude
-            }
-            placeholder="e.g. 113.812345"
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-          <Text style={styles.label}>{t("addPlant.altitudeM")}</Text>
-
-          <TextInput
-            style={styles.input}
-            value={altitude}
-            onChangeText={setAltitude}
-            placeholder={t("addPlant.gpsAltitudeInMetres")}
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-          <Text style={styles.label}>{t("addPlant.gpsAccuracyM")}</Text>
-
-          <TextInput
-            style={styles.input}
-            value={gpsAccuracy}
-            onChangeText={setGpsAccuracy}
-            placeholder={t("addPlant.gpsAccuracyInMetres")}
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
+          {[
+            ["latitude", t("addPlant.latitude"), latitude, setLatitude],
+            ["longitude", t("addPlant.longitude"), longitude, setLongitude],
+            ["altitude", t("addPlant.altitudeM"), altitude, setAltitude],
+            ["accuracy", t("addPlant.gpsAccuracyM"), gpsAccuracy, setGpsAccuracy],
+          ].map(([key, label, value, setter]) => <View key={key}>
+            <Text style={styles.label}>{label}</Text>
+            <TextInput
+              style={styles.input} accessibilityLabel={label} value={value}
+              onFocus={() => setGpsEditing(true)} onBlur={() => setGpsEditing(false)}
+              onChangeText={setter}
+              placeholder={t("gpsPicker.notAvailable")} placeholderTextColor="#9AA7A0" keyboardType="decimal-pad" />
+          </View>)}
+          {validGpsPoint({ latitude, longitude }) && <GpsLocationPicker key={gpsRevision}
+            location={{ latitude, longitude }} inputActive={gpsEditing} onInteractionChange={setMapInteracting}
+            onChange={(point) => { setLatitude(point.latitude); setLongitude(point.longitude); setGpsAccuracy(""); }} />}
 
           <TouchableOpacity
             style={
@@ -2156,6 +2071,7 @@ function handleRemoveSpeciesPhoto(index) {
 
 
       </ScrollView>
+
 
     </View>
   );

@@ -47,11 +47,10 @@ export function projectBotanistRecords(accountId, rows, observations, requests) 
     const initialObservation = history.find((observation) => observation.origin_type === "initial_registration") ||
       (history.length === 1 ? history[0] : null);
     const currentStatus = resolvePlantRecordStatus(mapped.currentStatus, initialObservation);
-    const latestApproved = history.find((observation) => observation.status === "Approved") || mapped.latestApproved;
     // A pending edit must not replace the live, approved values on Plant Details.
     // For an unapproved initial registration, show the owner's latest submitted data.
     const content = currentStatus === "Approved"
-      ? latestApproved?.content || latestApproved || {}
+      ? mapped.registration || {}
       : latest?.content || row.latest_submission || row.latest_approved || {};
     const request = ownedRequests.find((r) => String(r.proposed_species_id ?? r.approved_species_id) === String(row.species_id));
     // For a restricted catalogue entry, use only the botanist's own submitted request snapshot.
@@ -111,7 +110,8 @@ async function fetchRecords(accountId, plantId) {
   if (recordChangesResult.status === "rejected") delete result.recordChanges;
   const photoResults = await Promise.allSettled([
     Promise.all((result.plants || []).map(async (plant) => {
-      const assets = plant.latestObservation?.assets || [];
+      const assets = plant.status === "Approved"
+        ? plant.registrationPhotoIds.map(id => ({ id })) : plant.latestObservation?.assets || [];
       if (assets.length) plant.thumbnail = (await plantAssetSources(assets.slice(0, 1), accountId, { ownSubmission: true }))[0];
     })),
     result.requests?.length ? speciesRequestPhotoSources(result.requests, accountId).then((sources) => {

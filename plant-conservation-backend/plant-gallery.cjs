@@ -1,4 +1,5 @@
 "use strict";
+const { resolvePlantRegistration } = require("./plant-registration.cjs");
 const {permitted,visibilityFor}=require('../shared/rbac.cjs');
 const {classifyObservations}=require('./observation-origin.cjs');
 const {detailParent}=require('./plant-detail.cjs');
@@ -34,17 +35,11 @@ function mountPlantGallery(app,{pool,allow}){
       await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       await c.query("SET LOCAL statement_timeout='5000ms'");
       if(detail)await detailParent(c,plantId,req.user);
-      let registrationIds=[];
-      if(detail && (await c.query("SELECT to_regclass('plant_submission_receipt') IS NOT NULL AS available")).rows[0]?.available){
-        // Use receipt-backed provenance before pagination so registration photos
-        // never hide behind pages of subsequent observations or guessed origins.
-        const candidates=(await c.query(`SELECT o.* FROM plant_observation o WHERE o.plant_id=$1 AND o.id IN
-          (SELECT result->>'id' FROM plant_submission_receipt WHERE result->>'plant_id'=$1::text)`,[plantId])).rows;
-        registrationIds=(await classifyObservations(c,candidates)).filter(o=>o.origin_type==='initial_registration').map(o=>o.id);
-      }
+      const registration = await resolvePlantRegistration(c, plantId);
+      let registrationPhotos = registration.photo_ids || [];
       // Same parent visibility/status contract as readPlants; no hidden-asset
       // totals or cursor is issued when the plant itself is unavailable.
-      const plant=(await c.query(`SELECT p.plant_id FROM plant_record p JOIN species s ON s.species_id=p.species_id
+      const plant=(await c.query(`SELECT p.plant_id,p.rbac_status FROM plant_record p JOIN species s ON s.species_id=p.species_id
         LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id
         WHERE p.plant_id=$1 AND (CASE WHEN $6 THEN p.registered_subject=$3 ELSE
           (COALESCE(v.visibility,'protected')=ANY($2::text[]) OR (p.registered_subject=$3 AND p.rbac_status<>'Approved'
@@ -52,6 +47,15 @@ function mountPlantGallery(app,{pool,allow}){
         AND (p.rbac_status='Approved' OR p.registered_subject=$3 OR $4)
         AND ($5 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')`,args)).rows[0];
       if(!plant)throw Object.assign(Error('Plant unavailable.'),{status:404});
+      // Staff review of an unapproved registration remains evidence access,
+      // separate from the current approved registration resolver.
+      if (detail && plant.rbac_status !== 'Approved') {
+        const candidates = await classifyObservations(c, (await c.query(
+          'SELECT * FROM plant_observation WHERE plant_id=$1', [plantId])).rows);
+        const initial = candidates.filter(o => o.origin_type === 'initial_registration');
+        if (initial.length === 1) registrationPhotos = (await c.query(
+          'SELECT id FROM plant_asset WHERE plant_id=$1 AND observation_id=$2', [plantId, initial[0].id])).rows.map(a => a.id);
+      }
       // Match /api/assets/:id for plant images: visibility (including its owner
       // exceptions), species approval, then approved evidence OR owner OR Officer.
       // Filter BEFORE pagination. Corrupt cross-plant links are excluded, never
@@ -68,20 +72,19 @@ function mountPlantGallery(app,{pool,allow}){
         LEFT JOIN plant_observation o ON o.id=a.observation_id AND o.plant_id=a.plant_id
         WHERE a.plant_id=$1 AND a.species_id IS NULL AND a.content_type IN ('image/jpeg','image/png')
           AND (a.observation_id IS NULL OR o.id IS NOT NULL)
+          AND (p.rbac_status<>'Approved' OR a.id=ANY($12::text[]))
           AND (COALESCE(v.visibility,'protected')=ANY($2::text[])
             OR (a.owner_subject=$3 AND p.registered_subject=$3 AND p.rbac_status<>'Approved'
               AND s.rbac_data->>'submittedBy'=$3 AND s.rbac_data->>'approvalStatus' IN ('Pending Review','Rejected','Correction Required'))
             OR ($6 AND a.owner_subject=$3 AND p.registered_subject=$3 AND o.id IS NOT NULL))
           AND ($5 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
-          AND ((p.rbac_status='Approved' AND (CASE WHEN a.observation_id IS NULL THEN a.approved ELSE o.status='Approved' END))
+          AND ((p.rbac_status='Approved' AND a.id=ANY($12::text[]))
             OR a.owner_subject=$3 OR $4)
-          ${detail ? 'AND o.id=ANY($12::text[])' : `
+          ${detail ? 'AND a.id=ANY($12::text[])' : `
           -- Match the existing byte endpoint exactly: historical approved images
-          -- remain staff evidence; ordinary reads use the latest approved set.
+          -- remain staff evidence; this gallery uses the current registration set.
           AND ($4 OR
-            (p.rbac_status='Approved' AND (CASE WHEN a.observation_id IS NULL THEN a.approved ELSE
-              o.status='Approved' AND o.id=(SELECT current.id FROM plant_observation current
-                WHERE current.plant_id=p.plant_id AND current.status='Approved' ORDER BY current.updated_at DESC,current.id DESC LIMIT 1) END))
+            (p.rbac_status='Approved' AND a.id=ANY($12::text[]))
             OR (a.owner_subject=$3 AND o.owner_subject=$3 AND o.status IN ('Draft','Pending Review','Correction Required'))
             OR (a.owner_subject=$3 AND p.registered_subject=$3 AND p.rbac_status<>'Approved'
               AND o.status IN ('Pending Review','Approved')
@@ -97,7 +100,7 @@ function mountPlantGallery(app,{pool,allow}){
         ) eligible
         WHERE ($7::text IS NULL OR (group_key,order_kind,order_value,id)>($7::text,$8::integer,$9::numeric,$10::text))
         ORDER BY group_key,order_kind,order_value,id LIMIT $11`,
-      [...args,cursor?.group??null,cursor?.kind??0,cursor?.order??'0',cursor?.id??'',limit+1,...(detail?[registrationIds]:[])])).rows;
+      [...args,cursor?.group??null,cursor?.kind??0,cursor?.order??'0',cursor?.id??'',limit+1,registrationPhotos])).rows;
       const page=rows.slice(0,limit),observations=[...new Map(page.filter(r=>r.observation).map(r=>[r.observation.id,r.observation])).values()];
       const classified=new Map((await classifyObservations(c,observations)).map(o=>[o.id,o]));
       const assets=page.map(row=>{

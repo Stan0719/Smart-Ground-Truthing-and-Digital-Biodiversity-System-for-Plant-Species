@@ -14,6 +14,7 @@ import { useBotanistNotifications } from "../utils/useBotanistNotifications";
 import { CardListSkeleton } from "../components/BotanicalSkeleton";
 import { ownedNotificationObservation } from "../utils/botanistNotifications";
 import { fieldFormStyles } from "../components/fieldFormStyles";
+import { submissionGroupMatchesSearch } from "../utils/submissionSearch";
 
 export function correctionTasks(plants, observations, requests, botanistId, edits = [], recordChanges = []) {
   if (!botanistId) return [];
@@ -57,15 +58,70 @@ function stableSnapshot(value) {
 
 function markResolvedCorrections(rows, kind) {
   for (const original of rows.filter((row) => row.original && row.versionNumber === 1 && row.status === "Correction Required" && row.versionId)) {
-    const corrected = rows.find((row) => row.versionNumber === 2 && row.versionId && row.status === "Approved" &&
+    const corrected = rows.find((row) => (kind === "plant" ? row.versionNumber > original.versionNumber : row.versionNumber === 2) && row.versionId && row.status === "Approved" &&
       row.raw?.change_id == null && row.raw?.previous_snapshot && row.raw?.owner_subject &&
-      row.raw.owner_subject === original.raw?.owner_subject && row.raw.edited_by === original.raw.owner_subject);
+      row.raw.owner_subject === original.raw?.owner_subject && row.raw.edited_by === original.raw.owner_subject &&
+      String(row.snapshot?.[kind === "plant" ? "observation_id" : "request_id"]) === String(original.snapshot?.[kind === "plant" ? "observation_id" : "request_id"]) &&
+      JSON.stringify(stableSnapshot(original.snapshot)) === JSON.stringify(stableSnapshot(row.raw.previous_snapshot)));
     const recordKey = kind === "plant" ? "observation_id" : "request_id";
     if (!corrected || original.snapshot?.[recordKey] == null ||
         String(original.snapshot[recordKey]) !== String(corrected.snapshot?.[recordKey]) ||
         JSON.stringify(stableSnapshot(original.snapshot)) !== JSON.stringify(stableSnapshot(corrected.raw.previous_snapshot))) continue;
     original.correctionResolved = true;
   }
+}
+
+function plantRegistrationHistory(rows) {
+  const isApprovalCapture = (row) => {
+    const provenance = row.snapshot?.review_provenance;
+    return row.priorChangeId == null && row.status === "Approved" &&
+      provenance?.kind === "plant" && typeof provenance.review_id === "string" && provenance.review_id.length > 0 &&
+      row.snapshot?.observation_id != null && String(provenance.submission_id) === String(row.snapshot.observation_id);
+  };
+  const registration = rows.find((row) => row.original && !isApprovalCapture(row));
+  const registrationObservationId = registration?.snapshot?.observation_id;
+  const hiddenCaptures = new Set();
+  for (const row of rows.filter(isApprovalCapture)) {
+    row.original = false; row.edited = false; row.historyType = "approvalSnapshot";
+    const provenance = row.snapshot.review_provenance;
+    const source = rows.find((candidate) => candidate !== row && !isApprovalCapture(candidate) && candidate.priorChangeId == null &&
+      candidate.versionNumber < row.versionNumber &&
+      candidate.raw?.owner_subject && candidate.raw.owner_subject === row.raw?.owner_subject &&
+      String(candidate.snapshot?.observation_id) === String(row.snapshot.observation_id) &&
+      (provenance.source_submitted_history_id != null
+        ? String(candidate.versionId) === String(provenance.source_submitted_history_id)
+        : candidate.snapshot?.content != null && row.snapshot.content != null &&
+          String(candidate.snapshot.species_id ?? "") === String(row.snapshot.species_id ?? "") &&
+          candidate.snapshot.scientific_name === row.snapshot.scientific_name &&
+          JSON.stringify(stableSnapshot(candidate.snapshot.content)) === JSON.stringify(stableSnapshot(row.snapshot.content))));
+    if (source && ["Approved", "Pending Review"].includes(source.status)) {
+      // One submission, two stored snapshots: retain the exact submitted-version
+      // identifier and fold only the explicit approval metadata into its row.
+      source.status = "Approved";
+      source.raw = { ...source.raw, reviewed_by: row.raw.reviewed_by,
+        reviewed_at: row.raw.reviewed_at, review_comment: row.raw.review_comment };
+      hiddenCaptures.add(row);
+    } else if (registrationObservationId != null &&
+      String(row.snapshot.observation_id) !== String(registrationObservationId)) {
+      // Subsequent Observation approvals remain available through Observation
+      // history; they do not constitute Plant registration edits.
+      hiddenCaptures.add(row);
+    }
+  }
+  const visible = rows.filter((row) => !hiddenCaptures.has(row));
+  for (const row of visible) {
+    if (row.historyType === "approvalSnapshot") continue;
+    if (row.original) { row.historyType = "registration"; row.edited = false; continue; }
+    const previous = row.raw?.previous_snapshot;
+    const directBase = previous && row.snapshot?.observation_id != null &&
+      String(previous.observation_id) === String(row.snapshot.observation_id) &&
+      row.raw?.owner_subject && row.raw.edited_by === row.raw.owner_subject &&
+      rows.find((candidate) => candidate !== row && candidate.versionNumber < row.versionNumber && candidate.raw?.owner_subject === row.raw.owner_subject &&
+        JSON.stringify(stableSnapshot(candidate.snapshot)) === JSON.stringify(stableSnapshot(previous)));
+    row.edited = row.priorChangeId != null || Boolean(directBase);
+    row.historyType = row.edited ? (directBase?.status === "Correction Required" || Number(row.changeRevision) > 1 ? "plantCorrection" : "plantEdit") : "historicalSnapshot";
+  }
+  return visible;
 }
 
 export function versionCardItems(kind, targetId, response) {
@@ -100,7 +156,7 @@ export function versionCardItems(kind, targetId, response) {
           ] }
         : { ...(change.base_snapshot || {}), ...(change.proposed_snapshot || {}) } });
   }
-  const rows = [...byKey.values()];
+  const rows = kind === "plant" ? plantRegistrationHistory([...byKey.values()]) : [...byKey.values()];
   const compareChronological = (left, right) => {
     if (left.versionNumber && right.versionNumber && left.versionNumber !== right.versionNumber)
       return left.versionNumber - right.versionNumber;
@@ -108,12 +164,18 @@ export function versionCardItems(kind, targetId, response) {
     if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return leftTime - rightTime;
     return (left.versionNumber || 0) - (right.versionNumber || 0);
   };
-  const approvedRows = rows.filter((row) => submissionStatus(row.status) === "approved").sort((left, right) =>
+  const approvedRows = rows.filter((row) => row.historyType !== "approvalSnapshot" && submissionStatus(row.status) === "approved").sort((left, right) =>
     compareChronological(left, right));
   const latestApproved = approvedRows[approvedRows.length - 1];
+  let editNumber = 0;
+  let numberingKnown = rows.some((row) => row.original);
+  if (kind === "plant") for (const row of rows.slice().sort(compareChronological)) {
+    if (row.historyType === "historicalSnapshot") numberingKnown = false;
+    if (row.edited && numberingKnown) row.plantEditNumber = ++editNumber;
+  }
   for (const row of rows) {
-    row.current = row === latestApproved;
-    row.superseded = Boolean(latestApproved && submissionStatus(row.status) === "approved" && row !== latestApproved);
+    row.current = row.historyType !== "approvalSnapshot" && row === latestApproved;
+    row.superseded = Boolean(row.historyType !== "approvalSnapshot" && latestApproved && submissionStatus(row.status) === "approved" && row !== latestApproved);
   }
   return rows.sort(compareChronological);
 }
@@ -203,7 +265,7 @@ export function buildSubmissionGroups(records, kind, versionRows = {}, historyAv
           raw: baseSource.raw });
       }
     }
-    const approvedRows = versions.filter((version) => submissionStatus(version.status) === "approved").sort((left, right) => {
+    const approvedRows = versions.filter((version) => version.historyType !== "approvalSnapshot" && submissionStatus(version.status) === "approved").sort((left, right) => {
       if (left.original !== right.original) return left.original ? -1 : 1;
       return (Date.parse(left.createdAt || "") || 0) - (Date.parse(right.createdAt || "") || 0);
     });
@@ -266,8 +328,14 @@ export function groupStatusSummary(group) {
   return { status: latest?.status || rows[0]?.status || "" };
 }
 
-function versionDisplayLabel(row) {
+export function versionDisplayLabel(row) {
   if (row.original) return t("recordEdits.originalLabel");
+  if (row.kind === "plant") {
+    if (row.plantEditNumber) return t("recordEdits.editNumber", { number: row.plantEditNumber });
+    if (row.edited) return t("submissions.editWithoutNumber");
+    if (row.historyType === "approvalSnapshot") return t("submissions.approvalSnapshot");
+    if (row.historyType === "historicalSnapshot") return t("submissions.historicalSnapshot");
+  }
   if (row.versionNumber > 1) return t("recordEdits.editNumber", { number: row.versionNumber - 1 });
   if (row.edited) return t("submissions.editWithoutNumber");
   return t("submissions.currentRecord");
@@ -426,6 +494,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   const activeTabRef = useRef("plants");
   const [tab, setTab] = useState("plants");
   const [filter, setFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -500,6 +569,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   const kind = tab === "plants" ? "plant" : "species";
   const groups = buildSubmissionGroups(records, kind, versionRows, versionHistoryAvailable);
   const data = filterSubmissionGroups(groups, filter);
+  const searchedData = data.filter((group) => submissionGroupMatchesSearch(group, tab, searchQuery));
   const selectFilter = (value) => {
     setFilter(value);
     if (value === "all") { expandMatchesRef.current = null; return; }
@@ -621,23 +691,31 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   };
   const empty = loading && !loaded ? t("botanistRecords.loading")
     : error ? error.split("\n").map(translateUIMessage).join("\n")
-      : filter !== "all" ? t("submissions.noMatchingRecords")
+      : searchQuery.trim() ? t("submissions.noMatchingSubmissions")
+        : filter !== "all" ? t("submissions.noMatchingRecords")
         : t(tab === "plants" ? "submissions.noPlants" : "submissions.noRequests");
   const plantCount = buildSubmissionGroups(plants, "plant").length;
   const requestCount = buildSubmissionGroups(requests, "species").length;
 
   return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><FlatList
-    data={data} keyExtractor={(item) => item.key} renderItem={record} refreshing={loading} onRefresh={() => { void refresh(); }}
-    contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent, !data.length && styles.emptyList]}
+    data={searchedData} keyExtractor={(item) => item.key} renderItem={record} refreshing={loading} onRefresh={() => { void refresh(); }}
+    contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent, !searchedData.length && styles.emptyList]}
     ListHeaderComponent={<View style={styles.pageHeaderContent}><View style={styles.pageHeading}><Text style={styles.pageTitle}>{t("submissions.title")}</Text></View>
-      <View style={styles.tabs} accessibilityRole="tablist">{["plants", "requests"].map((value) => <TouchableOpacity key={value} testID={"submissions-tab-" + value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => { activeTabRef.current = value; expandMatchesRef.current = null; setTab(value); setFilter("all"); }} style={[styles.tab, tab === value && styles.activeTab]}><Ionicons name={value === "plants" ? "leaf-outline" : "flask-outline"} size={17} color={tab === value ? "#FFFFFF" : "#2F6B4F"} /><Text style={[styles.tabLabel, tab === value && styles.activeTabLabel]}>{t(value === "plants" ? "botanistDashboard.myPlantRecords" : "botanistRecords.speciesRequests")}</Text><Text style={[styles.tabCount, tab === value && styles.activeTabLabel]}>{value === "plants" ? plantCount : requestCount}</Text></TouchableOpacity>)}</View>
+      <View style={styles.tabs} accessibilityRole="tablist">{["plants", "requests"].map((value) => <TouchableOpacity key={value} testID={"submissions-tab-" + value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => { activeTabRef.current = value; expandMatchesRef.current = null; setTab(value); setFilter("all"); }} style={[styles.tab, tab === value && styles.activeTab]}><Ionicons name={value === "plants" ? "leaf-outline" : "flask-outline"} size={17} color={tab === value ? "#FFFFFF" : "#2F6B4F"} /><Text style={[styles.tabLabel, tab === value && styles.activeTabLabel]}>{t(value === "plants" ? "botanistDashboard.myPlantRecords" : "botanistRecords.speciesRequests")}</Text><Text style={[styles.tabCount, tab === value && styles.activeTabLabel]}>{loaded ? (value === "plants" ? plantCount : requestCount) : "—"}</Text></TouchableOpacity>)}</View>
+      <View testID="submissions-search" style={styles.searchContainer}>
+        <Ionicons name="search-outline" size={20} color="#668271" />
+        <TextInput value={searchQuery} onChangeText={setSearchQuery} placeholder={t("submissions.searchPlaceholder")}
+          placeholderTextColor="#87998B" style={styles.searchInput} returnKeyType="search" accessibilityLabel={t("submissions.searchPlaceholder")} />
+        {!!searchQuery && <TouchableOpacity onPress={() => setSearchQuery("")} accessibilityRole="button"
+          accessibilityLabel={t("map.clearSearch")}><Ionicons name="close-circle" size={20} color="#789181" /></TouchableOpacity>}
+      </View>
       <View style={styles.filters}>{["all", "pending", "approved", "rejected", ...(tab === "plants" ? ["withdrawn"] : [])].map((value) => <TouchableOpacity key={value} testID={"submissions-filter-" + value} accessibilityRole="button" accessibilityState={{ selected: filter === value }} onPress={() => selectFilter(value)} style={[styles.filterChip, filter === value && styles.selectedFilter]}><Text style={[styles.filterLabel, filter === value && styles.selectedFilterLabel]}>{t("submissions." + value)}</Text></TouchableOpacity>)}</View>
       {!!error && <Text style={styles.errorText} accessibilityRole="alert">{error.split("\n").map(translateUIMessage).join("\n")}</Text>}
       {versionLoadFailed && <Text style={styles.errorText} accessibilityRole="alert">{t("recordEdits.listHistoryLoadFailed")}</Text>}
     </View>}
     ListEmptyComponent={loading && !loaded && !error
       ? <CardListSkeleton label={t("botanistRecords.loading")} count={3} />
-      : <View style={styles.emptyContainer}><Text style={styles.emptyTitle}>{empty}</Text>{error && <TouchableOpacity style={styles.emptyButton} onPress={() => { void refresh(); }}><Text style={styles.emptyButtonText}>{t("common.tryAgain")}</Text></TouchableOpacity>}{!loading && !error && <Text style={styles.emptyText}>{t("submissions.emptyHint")}</Text>}</View>}
+      : <View style={styles.emptyContainer}><Text style={styles.emptyTitle}>{empty}</Text>{error && <TouchableOpacity style={styles.emptyButton} onPress={() => { void refresh(); }}><Text style={styles.emptyButtonText}>{t("common.tryAgain")}</Text></TouchableOpacity>}{!loading && !error && <Text style={styles.emptyText}>{searchQuery.trim() ? t("submissions.searchEmptyHint") : t("submissions.emptyHint")}</Text>}</View>}
     showsVerticalScrollIndicator={false}
   /></SafeAreaView>;
 }
@@ -792,6 +870,9 @@ const styles = StyleSheet.create({
   selectedFilter: { backgroundColor: "#DCEBDD", borderColor: "#2F6B4F" },
   filterLabel: { color: "#718078", fontSize: 12 },
   selectedFilterLabel: { color: "#2F6B4F", fontWeight: "700" },
+  searchContainer: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 13,
+    marginBottom: 12, borderRadius: 14, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCEBDD" },
+  searchInput: { flex: 1, minWidth: 0, paddingVertical: 10, color: "#2F6B4F", fontSize: 14 },
   groupCard: { backgroundColor: "#FFFFFF", borderRadius: 16, padding: 13, marginBottom: 10, borderWidth: 1, borderColor: "#DCEBDD", shadowColor: "#2F6B4F", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
   groupHeader: { gap: 10 },
   groupTop: { flexDirection: "row", alignItems: "center", gap: 11 },

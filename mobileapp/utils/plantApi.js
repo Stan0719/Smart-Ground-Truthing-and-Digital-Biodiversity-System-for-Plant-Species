@@ -267,7 +267,8 @@ export function mapBackendPlant(record, speciesById = new Map()) {
       .map((field) => [field, record[field]]),
   );
   const hasProjectedField = (field) => Object.prototype.hasOwnProperty.call(projectedLocation, field);
-  record = { ...record, ...approvedContent };
+  // Keep registration and Observation payloads distinct.
+  record = { ...record };
   // The backend's top-level location fields are the authorized, approved
   // location projection. Do not let a different latest-observation payload
   // overwrite them during the general observation-field merge.
@@ -301,13 +302,20 @@ export function mapBackendPlant(record, speciesById = new Map()) {
     family: record.family_name ?? record.family ?? species?.family ?? "",
     currentStatus: currentStatus ?? "Not recorded",
     plantImageAssetId: record.plant_image_asset_id == null ? null : String(record.plant_image_asset_id),
+    registration: record.current_registration?.state === "available" ? {
+      ...record.current_registration.content,
+      lifeStage: record.current_registration.content?.lifeStage ?? record.current_registration.content?.growth_stage ?? null,
+    } : null,
+    latestVerifiedObservation: record.latest_verified_observation ?? null,
+    registrationState: record.current_registration?.state ?? "unavailable",
+    registrationPhotoIds: record.current_registration?.photo_ids || [],
     latestApproved: {
-      heightCm: record.height_cm ?? record.heightCm ?? null,
-      healthStatus: record.health_status ?? record.healthStatus ?? "Not recorded",
-      lifeStage: record.life_stage ?? record.lifeStage ?? "Not recorded",
+      heightCm: approvedContent?.height_cm ?? approvedContent?.heightCm ?? null,
+      healthStatus: approvedContent?.health_status ?? approvedContent?.healthStatus ?? "Not recorded",
+      lifeStage: approvedContent?.life_stage ?? approvedContent?.lifeStage ?? "Not recorded",
       date: record.observed_at ?? record.observation_date ?? record.verified_at ?? null,
-      morphology: record.morphology ?? "",
-      notes: record.notes ?? "",
+      morphology: approvedContent?.morphology ?? "",
+      notes: approvedContent?.notes ?? "",
     },
     hasApprovedObservation: record.latest_approved !== null && typeof record.latest_approved === "object",
     // The API exposes this only to authorized staff. For a plant without an
@@ -344,7 +352,7 @@ export function mapBackendPlant(record, speciesById = new Map()) {
 
 export function getPlantDisplayObservation(plant) {
   return plant?.currentStatus === "Approved"
-    ? plant.latestApproved
+    ? plant.registration
     : plant?.latestSubmission || plant?.latestApproved;
 }
 
@@ -393,16 +401,18 @@ export function isPlantVisibleInRoleCatalog(plant, role, accountId) {
 }
 
 export function isMapPlantVisible(plant, role, accountId) {
-  return isPlantVisibleInRoleCatalog(plant, role, accountId) ||
-    (String(role || "").toLowerCase() === "botanist" && isOwnedRejectedPlant(plant, accountId));
+  return plant?.currentStatus === "Approved" ||
+    (String(role || "").toLowerCase() === "botanist" && isOwnedPendingPlant(plant, accountId));
 }
 
 export function filterMapPlantsByStatus(plants, role, accountId, statusFilter) {
-  if (String(role || "").toLowerCase() !== "botanist" || statusFilter === "allVisible") return plants;
-  return plants.filter((plant) =>
-    statusFilter === "approved" ? plant.currentStatus === "Approved" :
-    statusFilter === "myPending" ? isOwnedPendingPlant(plant, accountId) :
-    statusFilter === "myRejected" ? isOwnedRejectedPlant(plant, accountId) : false);
+  const roleIsBotanist = String(role || "").toLowerCase() === "botanist";
+  if (statusFilter === "allVisible") return plants.filter((plant) => isMapPlantVisible(plant, role, accountId));
+  if (statusFilter === "approved") return plants.filter((plant) => plant.currentStatus === "Approved");
+  if (statusFilter === "myPending" && roleIsBotanist) {
+    return plants.filter((plant) => isOwnedPendingPlant(plant, accountId));
+  }
+  return [];
 }
 
 // Public catalogue endpoints already enforce approval and species visibility

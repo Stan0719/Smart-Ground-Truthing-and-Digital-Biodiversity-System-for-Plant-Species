@@ -1,11 +1,11 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage, formatDateTime } from "../translations/i18n";
 import React, { useCallback, useRef, useState } from "react";
-import { FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { FlatList, Image, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { CardListSkeleton } from "../components/BotanicalSkeleton";
-import { fetchMyObservations, observationHistoryRoute, observationMatchesFilter, observationStatusMatchesFilter, observationStatusSummary, withObservationPhotoSources } from "../utils/myObservations";
+import { fetchMyObservations, observationHistoryRoute, observationMatchesFilter, observationMatchesSearch, observationStatusMatchesFilter, observationStatusSummary, retainVisibleObservationExpansion, toggleObservationExpansion, withObservationPhotoSources } from "../utils/myObservations";
 import { plantApi, plantAssetSources } from "../utils/plantApi";
 
 const observationFilters = ["all", "pending", "approved", "rejected"];
@@ -38,9 +38,12 @@ export default function BotanistMyObservations({ navigation, user }) {
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [expandedId, setExpandedId] = useState(null);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [filter, setFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const requestId = useRef(0);
+  const filterRef = useRef(filter);
+  const searchRef = useRef(searchQuery);
 
   const load = useCallback(async (refresh = false) => {
     const currentRequest = ++requestId.current;
@@ -49,6 +52,7 @@ export default function BotanistMyObservations({ navigation, user }) {
     setError("");
     if (!accountId) {
       setItems([]);
+      setExpandedIds(new Set());
       setError(t("myObservations.botanistAccountRequired"));
       setLoading(false);
       setRefreshing(false);
@@ -61,6 +65,7 @@ export default function BotanistMyObservations({ navigation, user }) {
       const observations = await withObservationPhotoSources(result.observations, accountId, plantAssetSources);
       if (currentRequest !== requestId.current) return;
       setItems(observations);
+      setExpandedIds((currentIds) => retainVisibleObservationExpansion(currentIds, observations, filterRef.current, searchRef.current));
       setVersionHistoryError(result.versionHistoryError);
     } catch (cause) {
       if (currentRequest === requestId.current) setError(cause instanceof Error ? cause.message : t("myObservations.loadFailed"));
@@ -78,9 +83,10 @@ export default function BotanistMyObservations({ navigation, user }) {
     return () => { requestId.current += 1; };
   }, [load]));
 
-  const visibleItems = items.filter((item) => observationMatchesFilter(item, filter));
+  const visibleItems = items.filter((item) => observationMatchesFilter(item, filter) && observationMatchesSearch(item, searchQuery));
+  const hasNoMatchingObservations = items.length > 0 || Boolean(searchQuery.trim()) || filter !== "all";
   const renderItem = ({ item }) => {
-    const expanded = expandedId === item.id;
+    const expanded = expandedIds.has(item.id);
     const summary = observationStatusSummary(item);
     const summaryDetail = ["pendingEditOne", "pendingEditMany", "rejectedEditOne", "rejectedEditMany"].includes(summary.detailKey)
       ? t(`submissions.${summary.detailKey}`, { count: summary.count })
@@ -91,7 +97,7 @@ export default function BotanistMyObservations({ navigation, user }) {
       <TouchableOpacity testID={`observation-group-toggle-${item.id}`} style={styles.groupHeader} activeOpacity={0.78}
         accessibilityRole="button" accessibilityState={{ expanded }}
         accessibilityLabel={`${recordLabel}, ${t("submissions.plantId")} ${item.plantId}, ${item.plantName || t("myObservations.plantRecord")}, ${t(item.historyRows.length === 1 ? "submissions.oneVersion" : "submissions.versionCount", { count: item.historyRows.length })}`}
-        accessibilityHint={t("submissions.viewVersions")} onPress={() => setExpandedId(expanded ? null : item.id)}>
+        accessibilityHint={t("submissions.viewVersions")} onPress={() => setExpandedIds((currentIds) => toggleObservationExpansion(currentIds, item.id))}>
         <View style={styles.groupTop}>
           <ObservationThumbnail key={item.thumbnailSources?.map((source) => source.uri).join("|") || "none"} sources={item.thumbnailSources} />
           <View style={styles.recordInfo}>
@@ -139,17 +145,37 @@ export default function BotanistMyObservations({ navigation, user }) {
     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void load(true); }} tintColor="#2F6B4F" colors={["#2F6B4F"]} />}
     ListHeaderComponent={<View style={styles.pageHeaderContent}>
       <View style={styles.pageHeading}><Text style={styles.pageTitle}>{t("myObservations.title")}</Text></View>
+      <View testID="observations-search" style={styles.searchContainer}>
+        <Ionicons name="search-outline" size={20} color="#668271" />
+        <TextInput value={searchQuery} onChangeText={(value) => {
+          searchRef.current = value;
+          setSearchQuery(value);
+          setExpandedIds((currentIds) => retainVisibleObservationExpansion(currentIds, items, filterRef.current, value));
+        }} placeholder={t("myObservations.searchPlaceholder")} placeholderTextColor="#87998B"
+          style={styles.searchInput} returnKeyType="search" accessibilityLabel={t("myObservations.searchPlaceholder")} />
+        {!!searchQuery && <TouchableOpacity onPress={() => {
+          searchRef.current = "";
+          setSearchQuery("");
+          setExpandedIds((currentIds) => retainVisibleObservationExpansion(currentIds, items, filterRef.current, ""));
+        }} accessibilityRole="button" accessibilityLabel={t("map.clearSearch")}>
+          <Ionicons name="close-circle" size={20} color="#789181" />
+        </TouchableOpacity>}
+      </View>
       <View style={styles.filters} accessibilityRole="tablist">{observationFilters.map((value) => <TouchableOpacity key={value}
         testID={`observations-filter-${value}`} accessibilityRole="button" accessibilityState={{ selected: filter === value }}
-        onPress={() => setFilter(value)} style={[styles.filterChip, filter === value && styles.selectedFilter]}>
+        onPress={() => {
+          filterRef.current = value;
+          setFilter(value);
+          setExpandedIds((currentIds) => retainVisibleObservationExpansion(currentIds, items, value, searchRef.current));
+        }} style={[styles.filterChip, filter === value && styles.selectedFilter]}>
         <Text style={[styles.filterLabel, filter === value && styles.selectedFilterLabel]}>{t(`submissions.${value}`)}</Text>
       </TouchableOpacity>)}</View>
       {versionHistoryError && <Text style={styles.inlineNotice}>{t("myObservations.historyUnavailable")}</Text>}
       {!!error && items.length > 0 && <View style={styles.inlineError}><Text style={styles.errorText}>{translateUIMessage(error)}</Text><TouchableOpacity onPress={() => { void load(true); }} accessibilityRole="button"><Text style={styles.retryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>}
     </View>}
-    ListEmptyComponent={loading ? <CardListSkeleton label={t("myObservations.loading")} count={3} />
+    ListEmptyComponent={loading && !loaded ? <CardListSkeleton label={t("myObservations.loading")} count={3} />
       : error ? <View style={styles.state}><Ionicons name="cloud-offline-outline" size={30} color="#B84F43" /><Text style={styles.errorText}>{translateUIMessage(error)}</Text><TouchableOpacity style={styles.retry} onPress={() => { void load(true); }} accessibilityRole="button"><Text style={styles.retryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>
-        : loaded ? <View style={styles.state}><Ionicons name="leaf-outline" size={32} color="#86A88E" /><Text style={styles.emptyTitle}>{items.length ? t("submissions.noMatchingRecords") : t("myObservations.noObservations")}</Text><Text style={styles.muted}>{items.length ? t("submissions.emptyHint") : t("myObservations.noObservationsHint")}</Text></View> : null}
+        : loaded ? <View style={styles.state}><Ionicons name="leaf-outline" size={32} color="#86A88E" /><Text style={styles.emptyTitle}>{hasNoMatchingObservations ? t("myObservations.noMatchingObservations") : t("myObservations.noObservations")}</Text><Text style={styles.muted}>{hasNoMatchingObservations ? t("submissions.searchEmptyHint") : t("myObservations.noObservationsHint")}</Text></View> : null}
     showsVerticalScrollIndicator={false}
   /></SafeAreaView>;
 }
@@ -163,6 +189,9 @@ const styles = StyleSheet.create({
   pageHeading: { marginBottom: 18 },
   pageTitle: { color: "#2F6B4F", fontSize: 24, fontWeight: "800" },
   filters: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 14 },
+  searchContainer: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 13,
+    marginBottom: 12, borderRadius: 14, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCEBDD" },
+  searchInput: { flex: 1, minWidth: 0, paddingVertical: 10, color: "#2F6B4F", fontSize: 14 },
   filterChip: { borderRadius: 20, paddingHorizontal: 13, paddingVertical: 10, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCE8D6", minHeight: 40 },
   selectedFilter: { backgroundColor: "#DCEBDD", borderColor: "#2F6B4F" },
   filterLabel: { color: "#718078", fontSize: 12 },

@@ -33,7 +33,7 @@ test('public plant, species, QR and assets use safe projections while staff/owne
  const call=async(path,role)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}/api${path}`,{headers:role?{Authorization:`Bearer ${tokens[role]}`}:{}});return {status:r.status,data:r.headers.get('content-type')?.includes('json')?await r.json():null}};
  for(const role of [undefined,'visitor']) {
   const r=await call('/plants/1',role);assert.equal(r.status,200);
-  assert.deepEqual(Object.keys(r.data.plant).sort(),['common_name','latest_approved','observed_at','plant_id','rbac_status','scientific_name','species_id']);
+  assert.deepEqual(Object.keys(r.data.plant).sort(),['common_name','current_registration','latest_approved','latest_verified_observation','observed_at','plant_id','rbac_status','scientific_name','species_id']);
   assert.equal(r.data.plant.rbac_status,'Approved');
   assert.equal(r.data.plant.common_name,'Public common');
   assert.deepEqual(r.data.plant.latest_approved,{heightCm:10,healthStatus:'Healthy',lifeStage:'Mature',morphology:'Broad leaves'});
@@ -56,14 +56,14 @@ test('public plant, species, QR and assets use safe projections while staff/owne
   assert.deepEqual((await call('/assets?plant_id=5',role)).data.assets,[]);
  }
  const officer=(await call('/plants/1','officer')).data.plant;
- assert.equal(officer.latitude,1);assert.equal(officer.accuracy_m,3);assert.equal(officer.registered_subject,'staff:bot');assert.ok(officer.registered_at);assert.equal(officer.rbac_status,'Approved');assert.equal(officer.latest_approved.heightCm,10);
+ assert.equal(officer.latitude,null);assert.equal(officer.accuracy_m,null);assert.equal(officer.current_registration.state,'unavailable');assert.equal(officer.registered_subject,'staff:bot');assert.ok(officer.registered_at);assert.equal(officer.rbac_status,'Approved');assert.equal(officer.latest_approved.heightCm,10);
  for(const id of [2,3,4])assert.equal((await call('/plants/'+id,'officer')).status,200);
  assert.equal((await call('/assets/pending-image','officer')).status,200);assert.equal((await call('/assets/private-photo','officer')).status,200);
  const bot=(await call('/plants/2?scope=mine','bot')).data.plant;
  assert.equal(bot.registered_subject,'staff:bot');assert.equal(bot.rbac_status,'Pending Review');assert.ok(bot.registered_at);assert.equal(bot.qr_token,'pending-qr');
  assert.equal((await call('/plants/3','bot')).status,200);assert.equal((await call('/plants/4?scope=mine','bot')).status,200);
  assert.equal((await call('/assets/private-photo?scope=mine','bot')).status,200);assert.equal((await call('/assets/pending-image','bot')).status,200);
- assert.equal((await call('/plants/1','bot')).data.plant.latitude,1);
+ assert.equal((await call('/plants/1','bot')).data.plant.latitude,null);
  assert.equal((await call('/plants/1','bot')).data.plant.latest_approved.latitude,undefined);
  assert.equal((await call('/assets/pending-image','other')).status,404);
  assert.deepEqual((await call('/assets?species_id=1','other')).data.assets.map(a=>a.id),['public-image']);
@@ -82,9 +82,9 @@ test('public plant, species, QR and assets use safe projections while staff/owne
  });
 
  await t.test('Guest gallery list and image bytes agree on current approved/public assets with no evidence metadata',async()=>{
-  await pool.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,updated_at) VALUES
-   ('older',1,'staff:bot','Approved','{}','older','2020-01-01'),
-   ('rejected',1,'staff:bot','Rejected','{}','rejected','2020-01-01');
+  await pool.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,created_at,updated_at) VALUES
+   ('older',1,'staff:bot','Approved','{}','older','2020-01-01','2020-01-01'),
+   ('rejected',1,'staff:bot','Rejected','{}','rejected','2020-01-01','2020-01-01');
    INSERT INTO species(species_id,scientific_name,rbac_data) VALUES(5,'Missing visibility','{}');
    INSERT INTO plant_record(plant_id,species_id,registered_subject,rbac_status,qr_token) VALUES
     (6,5,'staff:bot','Approved','missing-visibility'),(7,1,'staff:bot','Rejected','rejected-plant');`);
@@ -94,8 +94,13 @@ test('public plant, species, QR and assets use safe projections while staff/owne
    ['pending-plant',2,true,null],['internal-photo',3,true,null],['protected-photo',4,true,null],
    ['missing-visibility-photo',6,true,null],['rejected-plant-photo',7,true,null],['bad-link',1,true,'inconsistent']])
    await pool.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,approved,content_type,content,observation_id) VALUES($1,$2,'staff:bot',$1,$3,'image/jpeg',$4,$5)",[id,plant,approved,Buffer.from('isolated image'),observation]);
+  // Add explicit receipt provenance only for the registration gallery scenario.
+  await pool.query(`CREATE TABLE plant_submission_receipt(owner_subject text,client_key text,payload_hash text,result jsonb);
+    INSERT INTO plant_submission_receipt VALUES('staff:bot','approved',repeat('a',64),
+    '{"id":"approved","plant_id":1,"species_id":1,"qr_token":"public-qr","status":"Pending Review","species_request_id":null}');
+    UPDATE plant_asset SET approved=TRUE WHERE id='current-a'`);
   const images=(await call('/assets?plant_id=1')).data.assets;
-  assert.deepEqual(images.map(a=>a.id).sort(),['current-a','current-b','standalone']);
+  assert.deepEqual(images.map(a=>a.id).sort(),['current-a','current-b']);
   for(const image of images){assert.deepEqual(Object.keys(image).sort(),['content_type','id']);assert.equal((await call('/assets/'+image.id)).status,200);}
   for(const id of ['not-published','older-photo','rejected-photo','pending-plant','internal-photo','protected-photo','missing-visibility-photo','rejected-plant-photo','bad-link','private-photo'])assert.equal((await call('/assets/'+id)).status,404);
   for(const id of [2,3,4,5,6,7])assert.deepEqual((await call('/assets?plant_id='+id)).data.assets,[]);

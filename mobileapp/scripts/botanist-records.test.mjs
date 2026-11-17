@@ -88,12 +88,12 @@ test("Original Plant withdrawal eligibility and history filter use the live owne
   assert.match(speciesDetail, /plantApi\(`\/species-requests\/\$\{encodeURIComponent\(request\.request_id\)\}\/withdraw`/);
 });
 
-function submissionsUtils() {
+function submissionsUtils(translate = (key) => key) {
   return moduleFrom("screens/BotanistDashboard.js", {
     react: React,
     "../components/LanguageSelector": { default: "LanguageSelector" },
     "../components/fieldFormStyles": { fieldFormStyles: { submitButton: {}, submitButtonText: {} } },
-    "../translations/i18n": { useAppTranslation() {}, t: (key) => key, translateLabel: (value) => value, translateUIMessage: (value) => value },
+    "../translations/i18n": { useAppTranslation() {}, t: translate, translateLabel: (value) => value, translateUIMessage: (value) => value },
     "react-native": { StyleSheet: { create: (value) => value } },
     "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
     "@react-navigation/native": { useFocusEffect() {} },
@@ -105,6 +105,108 @@ function submissionsUtils() {
     "../utils/botanistNotifications": { ownedNotificationObservation() {} },
   });
 }
+
+const plant30History = () => ({ history_available: true, versions: [
+  { id: "registration-30", plant_id: 30, version_number: 1, status: "Approved", owner_subject: "staff:owner", edited_by: "staff:owner",
+    created_at: "2026-11-16T09:40:42.561Z", reviewed_at: "2026-11-16T13:09:55.394Z", reviewed_by: "staff:officer",
+    change_id: null, snapshot: { plant_id: 30, observation_id: "registration-observation", observation_revision: 1,
+      scientific_name: "Recorded plant", content: { heightCm: 10 } } },
+  { id: "registration-approval-30", plant_id: 30, version_number: 2, status: "Approved", owner_subject: "staff:owner", edited_by: "staff:owner",
+    created_at: "2026-11-16T13:09:55.394Z", reviewed_at: "2026-11-16T13:09:55.394Z", reviewed_by: "staff:officer",
+    change_id: null, snapshot: { plant_id: 30, observation_id: "registration-observation", observation_revision: 2,
+      scientific_name: "Recorded plant", content: { heightCm: 10 }, review_provenance: { kind: "plant",
+        submission_id: "registration-observation", review_id: "registration-review", evidence_type: "approval_capture",
+        source_submitted_history_id: "registration-30" } } },
+  { id: "observation-approval-30", plant_id: 30, version_number: 3, status: "Approved", owner_subject: "staff:owner", edited_by: "staff:owner",
+    created_at: "2026-11-17T01:29:45.299Z", reviewed_at: "2026-11-17T01:29:45.299Z", reviewed_by: "staff:officer",
+    change_id: null, snapshot: { plant_id: 30, observation_id: "subsequent-observation", observation_revision: 3,
+      scientific_name: "Recorded plant", content: { heightCm: 20 }, review_provenance: { kind: "plant",
+        submission_id: "subsequent-observation", review_id: "observation-review", evidence_type: "approval_capture",
+        source_submitted_history_id: null } } },
+], prior_changes: [] });
+
+function translatedSubmissions(language = "en") {
+  const catalog = JSON.parse(read(`translations/${language}.json`));
+  return submissionsUtils((key, options) => {
+    let value = key.split(".").reduce((object, part) => object?.[part], catalog) || key;
+    for (const [name, replacement] of Object.entries(options || {})) value = value.replace(`{{${name}}}`, String(replacement));
+    return value;
+  });
+}
+
+test("Plant 30 approval-capture response presents one Original and keeps subsequent Observations out of Plant edits", () => {
+  for (const language of ["en", "ms", "zh"]) {
+    const dashboard = translatedSubmissions(language), response = plant30History(), before = JSON.stringify(response);
+    const rows = dashboard.versionCardItems("plant", 30, response);
+    const group = dashboard.buildSubmissionGroups([{ id: 30, status: "Approved" }], "plant", { "plant:30": rows })[0];
+    assert.equal(rows.length, 1); assert.equal(group.versionCount, 1);
+    assert.equal(rows[0].versionId, "registration-30"); assert.equal(rows[0].original, true);
+    assert.equal(rows[0].current, true); assert.equal(rows[0].superseded, false); assert.equal(rows[0].edited, false);
+    assert.equal(dashboard.groupStatusSummary(group).detailKey, undefined);
+    const catalog = JSON.parse(read(`translations/${language}.json`));
+    assert.equal(dashboard.versionDisplayLabel(rows[0]), catalog.recordEdits.originalLabel);
+    assert.equal(dashboard.versionDetailParams(rows[0], { id: "owner" }).versionId, "registration-30");
+    assert.equal(JSON.stringify(response), before, "API history is never mutated or deleted");
+    assert.deepEqual(dashboard.submissionVersionRoute(rows[0], { id: "owner" }), ["BotanistPlantDetail", { plantId: 30, botanist: { id: "owner" } }]);
+  }
+});
+
+test("actual Plant edits and correction revisions retain exact identifiers and dense Edit numbering despite approval snapshots", () => {
+  const dashboard = translatedSubmissions(), response = plant30History();
+  response.versions.push(
+    { id: "edit-a-r1", version_number: 4, change_id: "edit-a", change_revision: 1, status: "Superseded", owner_subject: "staff:owner", snapshot: { observation_id: "registration-observation" } },
+    { id: "edit-a-r2", version_number: 5, change_id: "edit-a", change_revision: 2, status: "Approved", owner_subject: "staff:owner", snapshot: { observation_id: "registration-observation" } },
+    { id: "edit-b-r1", version_number: 6, change_id: "edit-b", change_revision: 1, status: "Pending Review", owner_subject: "staff:owner", snapshot: { observation_id: "registration-observation" } },
+  );
+  const rows = dashboard.versionCardItems("plant", 30, response);
+  assert.deepEqual(rows.map(dashboard.versionDisplayLabel), ["Original", "Edit 1", "Edit 2", "Edit 3"]);
+  assert.equal(rows[2].historyType, "plantCorrection");
+  assert.equal(rows[0].superseded, true); assert.equal(rows[2].current, true);
+  assert.equal(rows[3].current, false);
+  const params = dashboard.submissionVersionRoute(rows[3], { id: "owner" })[1];
+  assert.equal(params.versionId, "edit-b-r1"); assert.equal(params.selectedChangeId, "edit-b"); assert.equal(params.selectedChangeRevision, 1);
+  assert.equal(dashboard.submissionVersionRoute(rows[3], { id: "other" })[1].selectedChangeId, undefined);
+  const corrected = dashboard.versionDetailParams(rows[2], { id: "owner" });
+  assert.equal(corrected.versionId, "edit-a-r2"); assert.equal(corrected.historicalVersionNumber, 5);
+});
+
+test("direct Plant correction is recognized from its owned same-Observation snapshot chain, not from null change_id", () => {
+  const dashboard = translatedSubmissions();
+  const original = { observation_id: "initial", scientific_name: "Plant", content: { heightCm: 10 } };
+  const rows = dashboard.versionCardItems("plant", 8, { history_available: true, versions: [
+    { id: "v1", version_number: 1, owner_subject: "staff:owner", edited_by: "staff:owner", status: "Correction Required", snapshot: original },
+    { id: "v2", version_number: 2, owner_subject: "staff:owner", edited_by: "staff:owner", status: "Approved", previous_snapshot: original,
+      snapshot: { ...original, content: { heightCm: 12 } } },
+  ] });
+  assert.deepEqual(rows.map(dashboard.versionDisplayLabel), ["Original", "Edit 1"]);
+  assert.equal(rows[1].historyType, "plantCorrection");
+  const response = { history_available: true, versions: [rows[0].raw,
+    { ...plant30History().versions[2], plant_id: 8, id: "intervening-observation-approval", version_number: 2,
+      snapshot: { ...plant30History().versions[2].snapshot, plant_id: 8 } },
+    { ...rows[1].raw, id: "corrected-v3", version_number: 3 },
+  ] };
+  const corrected = dashboard.versionCardItems("plant", 8, response);
+  const group = dashboard.buildSubmissionGroups([{ id: 8, status: "Approved" }], "plant", { "plant:8": corrected })[0];
+  assert.equal(group.versions[0].correctionResolved, true);
+  assert.equal(dashboard.versionDisplayLabel(group.versions.at(-1)), "Edit 1");
+});
+
+test("missing or contradictory provenance remains a neutral snapshot and never fabricates a Plant edit", () => {
+  const dashboard = translatedSubmissions(), response = plant30History();
+  const capture = response.versions[2];
+  const orphan = dashboard.versionCardItems("plant", 30, { history_available: true, versions: [capture] });
+  assert.equal(dashboard.versionDisplayLabel(orphan[0]), "Approval snapshot");
+  assert.equal(orphan[0].current, false); assert.equal(orphan[0].edited, false);
+  response.versions[2].snapshot.review_provenance.submission_id = "different-observation";
+  const rows = dashboard.versionCardItems("plant", 30, response);
+  assert.equal(dashboard.versionDisplayLabel(rows.at(-1)), "Historical snapshot");
+  assert.equal(rows.at(-1).edited, false);
+  const partial = dashboard.versionCardItems("plant", 30, { history_available: true, versions: [
+    { id: "late-edit", version_number: 55, change_id: "known-edit", status: "Pending Review", snapshot: {} },
+  ] });
+  assert.equal(partial[0].plantEditNumber, undefined, "a truncated history cannot establish an edit ordinal");
+  assert.equal(dashboard.versionDisplayLabel(partial[0]), "Edit");
+});
 
 test("separate version cards preserve API status and only mark the latest approved version current", () => {
   const dashboard = submissionsUtils();
@@ -299,7 +401,7 @@ test("Plant 21 correction and approved Edit 1 stay distinct; only the current ve
   const record = { id: 21, status: "Approved", registeredAt: "2026-11-12T00:00:00Z", initialSubmissionStatus: "Approved" };
   const rows = dashboard.versionCardItems("plant", "21", { history_available: true, versions: [
     { id: "plant21-v1", version_number: 1, status: "Correction Required", created_at: "2026-11-12T00:00:00Z", snapshot: { scientific_name: "JN NEW New" } },
-    { id: "plant21-v2", version_number: 2, status: "Approved", created_at: "2026-11-13T00:00:00Z", snapshot: { scientific_name: "JN NEW New" } },
+    { id: "plant21-v2", version_number: 2, change_id: "plant21-edit", change_revision: 1, status: "Approved", created_at: "2026-11-13T00:00:00Z", snapshot: { scientific_name: "JN NEW New" } },
   ] });
   const group = dashboard.buildSubmissionGroups([record], "plant", { "plant:21": rows })[0];
   assert.equal(group.versionCount, 2);
@@ -651,8 +753,8 @@ test("submission versions group only by their reliable record IDs and status fil
   assert.equal(rejectedEdit[0].current, true, "rejected edit leaves the approved original current");
   const approvedEdits = dashboard.versionCardItems("plant", 17, { history_available: true, versions: [
     { id: "a17-v1", version_number: 1, status: "Approved", snapshot: {} },
-    { id: "a17-v2", version_number: 2, status: "Approved", snapshot: {} },
-    { id: "a17-v3", version_number: 3, status: "Approved", snapshot: {} },
+    { id: "a17-v2", version_number: 2, change_id: "a17-edit", change_revision: 1, status: "Approved", snapshot: {} },
+    { id: "a17-v3", version_number: 3, change_id: "a17-second-edit", change_revision: 1, status: "Approved", snapshot: {} },
   ] });
   assert.equal(approvedEdits[0].superseded, true);
   assert.equal(approvedEdits[1].superseded, true);
@@ -948,9 +1050,9 @@ test("loader binds every API call to the account and detail loads owned photo so
   assert.equal(detail.photos[0].owner, "owner"); assert.equal(detail.photos[0].uri, "https://example.invalid/assets/asset-8");
   assert.ok(calls.some(([path, options]) => path === "/assets?plant_id=8&scope=mine" && options.expectedAccountId === "owner"));
 });
-test("approved Plant Details use approved observation values rather than the Botanist's pending edit", () => {
+test("approved Plant Details use registration values rather than later Observation values", () => {
   const result = fixture().projectBotanistRecords("owner", [
-    { plant_id: "8", species_id: "6", registered_subject: "staff:owner", rbac_status: "Approved", latest_approved: { heightCm: 52, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Approved leaf form" } },
+    { plant_id: "8", species_id: "6", registered_subject: "staff:owner", rbac_status: "Approved", latest_approved: { heightCm: 52, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Approved leaf form" }, current_registration: { state: "available", content: { heightCm: 52, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Approved leaf form" }, photo_ids: [] } },
   ], [
     { id: "pending-edit", plant_id: "8", owner_subject: "staff:owner", status: "Pending Review", content: { heightCm: 99, healthStatus: "Poor", lifeStage: "Seedling", morphology: "Unreviewed proposal" }, created_at: "2026-11-09T00:00:00Z" },
     { id: "approved-observation", plant_id: "8", owner_subject: "staff:owner", status: "Approved", content: { heightCm: 52, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Approved leaf form" }, created_at: "2026-11-01T00:00:00Z" },

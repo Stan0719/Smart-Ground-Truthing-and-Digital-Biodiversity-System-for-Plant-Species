@@ -171,6 +171,14 @@ export function observationMatchesFilter(observation, filter) {
   return statuses.some((status) => observationStatusMatchesFilter(status, filter));
 }
 
+export function observationMatchesSearch(observation, searchText) {
+  const query = String(searchText ?? "").trim().toLowerCase();
+  if (!query) return true;
+  return [observation?.scientificName, observation?.plantName, observation?.plantId,
+    observation?.id, observation?.displayId]
+    .some((value) => String(value ?? "").toLowerCase().includes(query));
+}
+
 export function observationStatusMatchesFilter(status, filter) {
   if (filter === "all") return true;
   if (filter === "pending") return ["Pending Review", "Correction Required"].includes(status);
@@ -188,6 +196,21 @@ export function observationHistoryRoute(observation, row) {
       original: row.original, current: row.current, versionNumber: row.versionNumber,
       editNumber: row.editNumber, createdAt: row.createdAt, useCurrentPhotos: row.original && !(observation.editRequests || []).length },
   }];
+}
+
+export function toggleObservationExpansion(expandedIds, observationId) {
+  const next = new Set(expandedIds);
+  if (next.has(observationId)) next.delete(observationId);
+  else next.add(observationId);
+  return next;
+}
+
+export function retainVisibleObservationExpansion(expandedIds, observations, filter, searchText = "") {
+  const visibleIds = new Set(observations
+    .filter((observation) => observationMatchesFilter(observation, filter) && observationMatchesSearch(observation, searchText))
+    .map((observation) => observation.id));
+  const retained = [...expandedIds].filter((id) => visibleIds.has(id));
+  return retained.length === expandedIds.size ? expandedIds : new Set(retained);
 }
 
 export async function fetchMyObservations(accountId, botanistName, api) {

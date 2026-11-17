@@ -42,6 +42,12 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
   const content = { heightCm: 20, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Original", taxonomy: "Existing taxonomy", latitude: 4.5, longitude: 113.7, altitudeM: 14, zone: "Original zone", notes: "" };
   await pool.query("INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES('approved-observation',$1,'staff:bot','Approved',$2,'approved-obs-key'),('pending-observation',$3,'staff:bot','Pending Review',$2,'pending-obs-key')", [approvedPlant, content, pendingPlant]);
   await pool.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES('old-photo',$1,'staff:bot','old-photo-key','approved-observation',TRUE,'image/jpeg',$2)", [approvedPlant, photo]);
+  // Explicit atomic-registration provenance for this approved fixture.
+  await pool.query(`INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result)
+    SELECT o.owner_subject,o.client_key,$1,jsonb_build_object('id',o.id,'plant_id',p.plant_id,
+      'species_id',p.species_id,'qr_token',p.qr_token,'status','Pending Review','species_request_id',NULL)
+    FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id
+    WHERE o.id='approved-observation'`, ['a'.repeat(64)]);
   const roles = { bot: "Botanist", other: "Botanist", officer: "Conservation Officer" };
   const tokens = Object.fromEntries(Object.keys(roles).map((key, index) => [key, String(index + 1).repeat(64)]));
   const auth = { session: async (token) => {

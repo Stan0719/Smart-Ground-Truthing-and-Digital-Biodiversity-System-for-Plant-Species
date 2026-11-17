@@ -1,4 +1,5 @@
 "use strict";
+const { resolvePlantRegistration } = require("./plant-registration.cjs");
 const { randomUUID } = require("node:crypto");
 const sharp = require("sharp");
 const { permitted, visibilityFor, catalogueVisibilityFor, canReadScientificCatalogue } = require("../shared/rbac.cjs");
@@ -140,6 +141,7 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
     if (req.query.plant_id !== undefined) {
       const plantId = id(String(req.query.plant_id));
       const ownPreview = req.query.scope === "mine" && permitted(req.user, "plants.create");
+      const registration = await resolvePlantRegistration(pool, plantId);
       const rows = (await pool.query(
         `SELECT a.id,a.content_type FROM plant_asset a
          JOIN plant_record p ON p.plant_id=a.plant_id
@@ -149,13 +151,7 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
            AND (
              (p.rbac_status='Approved'
                AND COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved'
-               AND ((a.observation_id IS NULL AND a.approved=TRUE) OR EXISTS (
-                 SELECT 1 FROM plant_observation o
-                 WHERE o.id=a.observation_id AND o.plant_id=a.plant_id AND o.status='Approved'
-                   AND o.id=(SELECT current_observation.id FROM plant_observation current_observation
-                     WHERE current_observation.plant_id=p.plant_id AND current_observation.status='Approved'
-                     ORDER BY current_observation.updated_at DESC,current_observation.id DESC LIMIT 1)
-               ))
+               AND a.id=ANY($5::text[])
                AND COALESCE(v.visibility,'protected') = ANY($2::text[]))
               OR ($3 AND a.owner_subject=$4 AND EXISTS (
                 SELECT 1 FROM plant_observation o
@@ -170,8 +166,9 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
                       ORDER BY latest_submission.created_at DESC,latest_submission.id DESC LIMIT 1)))
               ))
            )
+         AND (p.rbac_status<>'Approved' OR a.id=ANY($5::text[]))
          ORDER BY a.created_at,a.id`,
-        [plantId, catalogueVisibilityFor(req.user), ownPreview, req.user ? subject(req.user) : ""],
+        [plantId, catalogueVisibilityFor(req.user), ownPreview, req.user ? subject(req.user) : "", registration.photo_ids || []],
       )).rows;
       return res.json({ assets: rows });
     }
@@ -205,6 +202,9 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
           (SELECT current_observation.id FROM plant_observation current_observation
             WHERE current_observation.plant_id=p.plant_id AND current_observation.status='Approved'
             ORDER BY current_observation.updated_at DESC,current_observation.id DESC LIMIT 1) AS latest_approved_observation_id
+          ,(SELECT verified.id FROM plant_observation verified
+            WHERE verified.plant_id=p.plant_id AND verified.status='Approved'
+            ORDER BY verified.created_at DESC,verified.id DESC LIMIT 1) AS latest_verified_observation_id
           ,(SELECT latest_submission.id FROM plant_observation latest_submission
             WHERE latest_submission.plant_id=p.plant_id AND latest_submission.owner_subject=a.owner_subject
             ORDER BY latest_submission.created_at DESC,latest_submission.id DESC LIMIT 1) AS latest_submission_observation_id
@@ -249,12 +249,14 @@ function mountUploads(app, { pool, allow, speciesPhotoWritesEnabled = false }) {
       row.observation_plant_id != null && row.rbac_status === "Approved" &&
       row.observation_status === "Approved" &&
       (row.registered_subject === owner || row.observation_owner_subject === owner));
-    const approvedPlantPhoto = row.plant_id
+    const registration = row.plant_id ? await resolvePlantRegistration(pool, row.plant_id) : null;
+    const registrationPhoto = row.plant_id && row.rbac_status === "Approved" && registration?.photo_ids?.includes(row.id);
+    const approvedPlantPhoto = registrationPhoto || (row.plant_id
       ? row.rbac_status === "Approved" && (row.observation_id
         ? row.observation_plant_id != null && row.observation_status === "Approved" &&
-          row.observation_id === row.latest_approved_observation_id
+          row.observation_id === row.latest_verified_observation_id
         : row.approved)
-      : row.approved;
+      : row.approved);
     if (!catalogueVisibilityFor(req.user).includes(visibility) && !ownProposalPhoto && !ownSubmissionPhoto && !ownRejectedPlantPhoto && !ownObservationPhoto)
       fail(404, "Asset unavailable.");
     if (!classification) fail(404, "Asset unavailable.");

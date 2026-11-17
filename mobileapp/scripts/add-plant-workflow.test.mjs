@@ -1,3 +1,4 @@
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -37,6 +38,50 @@ test("Add Plant marks QR as required and Location Zone as optional in all langua
     assert.ok(!text.includes(`${zone} *`), `${language}: optional zone`);
   }
 });
+
+test("all GPS inputs stay editable before and after capture, map movement, and a failed refresh", async () => {
+  for (const language of ["en", "ms", "zh"]) {
+    const app = await fixture(language, { plantScientificName: "Saved plant", gpsSamples: [
+      { latitude: 0, longitude: 110.123456789, altitude: null, accuracy: null },
+      { latitude: 1.55, longitude: 110.35, altitude: 20, accuracy: 5 }, new Error("GPS unavailable"),
+    ] });
+    for (const key of ["latitude", "longitude", "altitudeM", "gpsAccuracyM"]) {
+      assert.ok(app.text().includes(app.t(`addPlant.${key}`)));
+      const input = app.byLabel(`addPlant.${key}`);
+      assert.equal(input.type, "TextInput"); assert.equal(input.props.value, "");
+      assert.notEqual(input.props.editable, false);
+    }
+    assert.equal(app.find((node) => node?.type === "GpsLocationPicker"), undefined);
+    await app.press("addPlant.getCurrentLocation");
+    assert.equal(app.state.latitude, "0"); assert.equal(app.state.longitude, "110.123456789");
+    assert.equal(app.state.altitude, ""); assert.equal(app.state.gpsAccuracy, "");
+    const map = app.find((node) => node?.type === "GpsLocationPicker"); assert.ok(map);
+    assert.ok(app.byLabel("addPlant.latitude"));
+    await app.press("addPlant.getCurrentLocation");
+    assert.equal(app.state.latitude, "1.55"); assert.equal(app.state.gpsAccuracy, "5");
+    app.find((node) => node?.type === "GpsLocationPicker").props.onChange({ latitude: "1.56", longitude: "110.36", accuracy_m: "" }); app.render();
+    assert.equal(app.state.latitude, "1.56"); assert.equal(app.state.longitude, "110.36");
+    assert.equal(app.state.gpsAccuracy, ""); assert.equal(app.state.altitude, "20");
+    await app.press("addPlant.getCurrentLocation");
+    assert.equal(app.state.latitude, "1.56"); assert.equal(app.state.altitude, "20");
+    assert.equal(app.state.plantScientificName, "Saved plant"); assert.ok(app.alerts.length);
+  }
+});
+
+test("manual GPS entry initializes the map without permission and preserves other manually entered measurements", async () => {
+  const app = await fixture("en");
+  app.fill("setAltitude", "0"); app.fill("setGpsAccuracy", "9");
+  app.fill("setLatitude", "-"); app.fill("setLongitude", "110.35");
+  assert.equal(app.find((node) => node?.type === "GpsLocationPicker"), undefined);
+  app.fill("setLatitude", "0");
+  assert.ok(app.find((node) => node?.type === "GpsLocationPicker"));
+  assert.equal(app.state.gpsAccuracy, "9"); assert.equal(app.state.altitude, "0");
+  app.byLabel("addPlant.latitude").props.onFocus(); app.render();
+  assert.equal(app.find((node) => node?.type === "GpsLocationPicker").props.inputActive, true);
+  app.fill("setLatitude", "");
+  assert.equal(app.find((node) => node?.type === "GpsLocationPicker"), undefined);
+  assert.equal(app.byLabel("addPlant.latitude").props.value, "");
+});
 test("species scientific-name normalization handles case, whitespace and Unicode canonical forms", () => {
   const forms = ["Agave sisalana", "agave sisalana", "AGAVE SISALANA", " Agave  sisalana ", "Agave\u00a0sisalana"];
   assert.ok(forms.every((name) => normalizeSpeciesName(name) === normalizeSpeciesName(forms[0])));
@@ -64,9 +109,11 @@ async function fixture(language = "en", initial = {}, api) {
     "../utils/botanistFormDrafts": { hasMeaningfulAddPlantDraft: () => true, deleteBotanistFormDraft: async () => true,
       saveBotanistFormDraft: async (_owner, draft) => { savedDrafts.push(structuredClone(draft)); return { ...draft, saved_at: "saved" }; } },
     "../utils/botanistDraftAutosave": { useBotanistDraftAutosave: () => ({ stop: async () => {}, flush: async () => {}, retry: async () => {} }), stopBotanistDraftAutosave: async () => {} },
-    "expo-location": {}, "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => ({ status: "granted" }), launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: proposal.photoUri }] }) },
+    "expo-location": { Accuracy: { High: 4 }, requestForegroundPermissionsAsync: async () => ({ status: "granted" }),
+      getCurrentPositionAsync: async () => { const sample = initial.gpsSamples?.shift() ?? { latitude: 4.5, longitude: 113.7, altitude: null, accuracy: null };
+        if (sample instanceof Error) throw sample; return { coords: sample }; } }, "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => ({ status: "granted" }), launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: proposal.photoUri }] }) },
     "expo-file-system/legacy": { EncodingType: { Base64: "base64" }, readAsStringAsync: async () => "cGhvdG8=" },
-    "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" }, "../components/QRRefreshButton": { default: "QRRefreshButton" }, "../components/RefreshButton": { default: "RefreshButton" },
+    "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" }, "../components/QRRefreshButton": { default: "QRRefreshButton" }, "../components/RefreshButton": { default: "RefreshButton" }, "../components/GpsLocationPicker": { default: "GpsLocationPicker" }, "../utils/gpsLocation": { validGpsPoint, readGpsLocation },
     "../components/fieldFormStyles": { fieldFormStyles: native.StyleSheet.create({ ...Object.fromEntries(["container", "scrollView", "scrollContent", "card", "sectionTitle", "label", "input", "textArea", "locationButton", "locationButtonText", "photoButtonRow", "photoButton", "photoButtonText", "submitButton", "submitButtonText"].map((key) => [key, {}])), qrRefreshButton: { minHeight: 48 }, qrRefreshText: {} }) },
     "../utils/plantApi": { fetchSpeciesCatalog: async (options) => { speciesReads.push(options); return initial.catalogSpecies || [species]; },
       fetchSpeciesDetail: async () => initial.speciesDetail || species, plantApi: async (...args) => {
@@ -86,7 +133,9 @@ async function fixture(language = "en", initial = {}, api) {
   const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
   function find(predicate, node = tree) { if (predicate(node)) return node; for (const child of children(node)) { const found = find(predicate, child); if (found) return found; } }
   async function press(key) { const node = find((n) => n?.type === "TouchableOpacity" && text(n).trim() === t(key)); assert.ok(node, key); assert.ok(!node.props.disabled, key); await node.props.onPress(); render(); }
-  function fill(setter, value) { const node = find((n) => n?.type === "TextInput" && n.props.onChangeText?.name === setter); assert.ok(node, setter); node.props.onChangeText(value); render(); }
+  function fill(setter, value) {
+    const node = find((n) => n?.type === "TextInput" && n.props.onChangeText?.name === setter); assert.ok(node, setter); node.props.onChangeText(value); render();
+  }
   const byLabel = (key) => find((n) => n?.props?.accessibilityLabel === t(key) || (n?.type === "RefreshButton" && n.props.label === t(key)));
   render(); return { state, alerts, network, speciesReads, navigationCalls, savedDrafts, render, find, text: () => text(tree), textOf: text, t, press, fill, byLabel,
     startDuplicateCheck() { const check = effects[0]; assert.equal(typeof check, "function"); return check(); },

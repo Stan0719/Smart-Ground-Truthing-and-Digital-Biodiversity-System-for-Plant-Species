@@ -42,7 +42,7 @@ test("native map keeps all valid markers, offers individual access to outliers a
   assert.match(native, /initialRegion=\{SARAWAK_REGION\}/);
   assert.match(native, /validPlants\.map\(\(plant\) => \(/);
   assert.match(native, /distantPlants\.map\(\(plant\) =>/);
-  assert.match(native, /onPress=\{\(\) => focusPlant\(plant\)\}/);
+  assert.match(native, /onPress=\{\(\) => \{ onSelectPlant\(plant\.plantId\); focusPlant\(plant\); \}\}/);
   assert.match(native, /onViewDetails\(selected\)/);
   assert.match(screen, /plants=\{mappedPlants\}/);
   assert.match(screen, /filterMapPlantsByStatus\(documentedPlants/);

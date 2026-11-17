@@ -1,4 +1,5 @@
 "use strict";
+const { resolvePlantRegistration } = require("./plant-registration.cjs");
 const { canCancelEdit, canModifyOriginalSpecies, canModifyPendingObservation } = require("./status-permissions.cjs");
 const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
@@ -106,11 +107,12 @@ async function ownedSpeciesRequest(c, requestId, user, lock = false) {
   return row;
 }
 async function approvedPlantSnapshot(c, row, qrPlantSchema) {
-  const observation = (await c.query("SELECT id,content,revision FROM plant_observation WHERE plant_id=$1 AND status='Approved' ORDER BY updated_at DESC,id DESC LIMIT 1",
-    [row.plant_id])).rows[0];
-  if (!observation) fail(409, "Approve the plant observation before editing its public information.");
-  const photoIds = (await c.query("SELECT id FROM plant_asset WHERE observation_id=$1 AND approved=TRUE AND content_type='image/jpeg' ORDER BY created_at,id",
-    [observation.id])).rows.map((asset) => asset.id);
+  const registration = await resolvePlantRegistration(c, row.plant_id);
+  if (registration.state !== "available") fail(409, "Current approved Plant registration cannot be verified. No changes were saved.");
+  if (registration.observation_id !== registration.registration_observation_id)
+    fail(409, "This legacy Plant edit targeted a separate Observation. Registration reconciliation is required before further editing.");
+  const observation = { id: registration.observation_id, revision: registration.observation_revision, content: registration.content };
+  const photoIds = registration.photo_ids;
   const qr = (await c.query("SELECT qr_id FROM plant_app.qr_code WHERE plant_id=$1 AND qr_code=$2", [row.plant_id, row.qr_token])).rows[0];
   return { plant_id: row.plant_id, species_id: row.species_id, scientific_name: row.scientific_name,
     qr_token: row.qr_token, qr_id: qr?.qr_id ?? null,

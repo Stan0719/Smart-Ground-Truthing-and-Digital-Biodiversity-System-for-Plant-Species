@@ -150,24 +150,20 @@ function getPlantFieldValue(plant, field) {
       return (
         plant.scientificName ||
         plant.speciesName ||
-        plant.latestApproved?.scientificName
+        plant.registration?.scientificName
       );
 
     case "height":
       return (
         plant.height ??
-        plant.latestApproved?.heightCm
+        plant.registration?.heightCm
       );
 
     
 case "healthStatus":
   return (
     plant.healthStatus?.trim() ||
-    plant.latestApproved?.healthStatus?.trim() ||
-    plant.observations
-      ?.filter((observation) => observation.status === "Approved")
-      ?.slice(-1)[0]
-      ?.healthStatus ||
+    plant.registration?.healthStatus?.trim() ||
     ""
   );
 
@@ -175,13 +171,13 @@ case "healthStatus":
     case "growthStage":
       return (
         plant.growthStage ||
-        plant.latestApproved?.lifeStage
+        plant.registration?.lifeStage
       );
 
     case "morphology":
       return (
         plant.morphology ||
-        plant.latestApproved?.morphology
+        plant.registration?.morphology
       );
 
     case "zone":
@@ -479,7 +475,7 @@ function findPlant() {
       height: String(item?.height ?? ""),
       healthStatus:
         item?.healthStatus?.trim() ||
-        item?.latestApproved?.healthStatus?.trim() ||
+        item?.registration?.healthStatus?.trim() ||
         "",
       growthStage: item?.growthStage || "",
       morphology: item?.morphology || "",
@@ -526,7 +522,7 @@ function findPlant() {
       height: String(currentPlant.height ?? ""),
       healthStatus:
         currentPlant.healthStatus?.trim() ||
-        currentPlant.latestApproved?.healthStatus?.trim() ||
+        currentPlant.registration?.healthStatus?.trim() ||
         "",
       growthStage: currentPlant.growthStage || "",
       morphology: currentPlant.morphology || "",

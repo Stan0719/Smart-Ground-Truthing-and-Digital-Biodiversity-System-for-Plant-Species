@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildObservationHistoryRows, displayObservationId, fetchMyObservations, observationHistoryRoute, observationMatchesFilter, observationStatusSummary, withObservationPhotoSources } from "../utils/myObservations.js";
+import { buildObservationHistoryRows, displayObservationId, fetchMyObservations, observationHistoryRoute, observationMatchesFilter, observationMatchesSearch, observationStatusSummary, retainVisibleObservationExpansion, toggleObservationExpansion, withObservationPhotoSources } from "../utils/myObservations.js";
 
 const dashboard = readFileSync(new URL("../screens/BotanistDashboard.js", import.meta.url), "utf8");
 const app = readFileSync(new URL("../App.js", import.meta.url), "utf8");
@@ -23,7 +23,11 @@ test("verified Observation revisions keep their own statuses, reviews, and navig
     [["original-1", "Superseded", "Correct this"], ["correction-2", "Approved", "Accepted"]]);
   assert.equal(rows.length, 2, "verified history must not invent another original");
   assert.equal(rows[1].current, true);
-  assert.equal(observationHistoryRoute(observation, rows[0])[1].observationVersionId, "original-1");
+  const [originalRoute, originalParams] = observationHistoryRoute(observation, rows[0]);
+  assert.equal(originalRoute, "NotificationObservation");
+  assert.equal(originalParams.observationVersionId, "original-1");
+  assert.equal(originalParams.editRequestId, undefined, "Original navigation never routes through an edit request");
+  assert.equal(originalParams.observationVersionSnapshot.original, true);
   assert.match(detail, /selectedVersion\?\.status \|\| selectedEdit\?\.status/);
 });
 
@@ -108,6 +112,49 @@ test("page refreshes on pull, and offers distinct loading, empty and error state
   assert.match(screen, /common\.tryAgain/);
 });
 
+test("My Observations cards expand independently and retain expansion only while visible", () => {
+  const observations = [
+    { id: "a", status: "Approved" },
+    { id: "b", status: "Pending Review" },
+    { id: "c", status: "Rejected" },
+  ];
+  let expandedIds = new Set();
+  expandedIds = toggleObservationExpansion(expandedIds, "a");
+  assert.deepEqual([...expandedIds], ["a"], "opening A expands A");
+  expandedIds = toggleObservationExpansion(expandedIds, "b");
+  assert.deepEqual([...expandedIds], ["a", "b"], "opening B leaves A expanded");
+  expandedIds = toggleObservationExpansion(expandedIds, "c");
+  assert.deepEqual([...expandedIds], ["a", "b", "c"], "opening C leaves A and B expanded");
+  expandedIds = toggleObservationExpansion(expandedIds, "b");
+  assert.deepEqual([...expandedIds], ["a", "c"], "tapping B again collapses only B");
+  assert.deepEqual([...retainVisibleObservationExpansion(expandedIds, observations, "all")], ["a", "c"], "refresh retains visible expansions");
+  assert.deepEqual([...retainVisibleObservationExpansion(new Set(["a", "b", "c"]), observations, "pending")], ["b"], "filtering removes expansions for hidden cards");
+  assert.deepEqual([...retainVisibleObservationExpansion(new Set(["missing", "a"]), observations, "all")], ["a"], "removed records collapse on refresh");
+  assert.deepEqual([...retainVisibleObservationExpansion(new Set(["a", "b"]), observations, "all", "plant 22")], [], "search hides and collapses nonmatching cards");
+  assert.equal(observationMatchesSearch({ scientificName: "Shorea leprosula", plantId: "22", id: "obs-abc", displayId: "OBS-ABC" }, "  SHOREA LEP "), true);
+  assert.equal(observationMatchesSearch({ scientificName: "Shorea leprosula", plantId: "22", id: "obs-abc" }, "22"), true);
+  assert.equal(observationMatchesSearch({ id: "abc-123" }, "123"), true, "Observation ID can be searched by partial match");
+  assert.equal(observationMatchesSearch({ id: "abc-123" }, "missing"), false);
+  assert.match(screen, /setExpandedIds\(\(currentIds\) => toggleObservationExpansion\(currentIds, item\.id\)\)/);
+  assert.match(screen, /retainVisibleObservationExpansion\(currentIds, observations, filterRef\.current, searchRef\.current\)/);
+  assert.match(screen, /retainVisibleObservationExpansion\(currentIds, items, value, searchRef\.current\)/);
+  assert.match(screen, /observationMatchesSearch\(item, searchQuery\)/);
+  assert.match(screen, /testID="observations-search"/);
+  assert.equal((screen.match(/testID="observations-search"/g) || []).length, 1);
+  assert.ok(screen.indexOf('testID="observations-search"') < screen.indexOf('testID={`observations-filter-${value}`}'));
+  assert.match(screen, /setSearchQuery\(""\)/);
+  assert.match(screen, /const expanded = expandedIds\.has\(item\.id\)/);
+  assert.match(screen, /keyExtractor=\{\(item\) => item\.id\}/);
+});
+
+test("My Observations search strings are localized in English, Malay and Chinese", () => {
+  for (const languageCode of ["en", "ms", "zh"]) {
+    const language = JSON.parse(readFileSync(new URL(`../translations/${languageCode}.json`, import.meta.url), "utf8"));
+    assert.ok(language.myObservations.searchPlaceholder);
+    assert.ok(language.myObservations.noMatchingObservations);
+  }
+});
+
 test("each Observation card keeps only its own ordered photos, including observations on the same Plant", async () => {
   const row = (id, assets) => ({ id, plant_id: 24, owner_subject: "staff:bot-a", status: "Approved",
     created_at: "2026-11-10T10:00:00Z", assets });
@@ -136,7 +183,7 @@ test("each Observation card keeps only its own ordered photos, including observa
   assert.equal(byId.one.plantId, byId.other.plantId, "the two observations share a Plant but not a photo");
   assert.match(screen, /<ObservationThumbnail key=\{item\.thumbnailSources\?\.map\(\(source\) => source\.uri\)\.join\("\|"\) \|\| "none"\} sources=\{item\.thumbnailSources\}/);
   assert.match(screen, /onError=\{\(\) => setPhotoIndex\(\(index\) => index \+ 1\)\}/);
-  assert.match(screen, /setExpandedId\(expanded \? null : item\.id\)/);
+  assert.match(screen, /setExpandedIds\(\(currentIds\) => toggleObservationExpansion\(currentIds, item\.id\)\)/);
   assert.ok(screen.indexOf("<ObservationThumbnail") < screen.indexOf("{expanded && <View style={styles.versionList}>"),
     "the thumbnail remains in the card header when version rows expand or collapse");
   assert.match(screen, /thumbnail: \{ width: 58, height: 68, borderRadius: 12 \}/);
@@ -277,9 +324,9 @@ test("My Observations labels have matching EN/MS/ZH keys", () => {
   for (const language of languages) for (const key of keys) assert.ok(language[key], `Missing translation ${key}`);
 });
 
-test("observation history and feedback remain available in Observation Details, not expanded list cards", () => {
-  assert.match(detail, /editHistory\?\.events\?\.length/);
-  assert.match(detail, /observationEdits\.events\.\$\{event\.event_type\}/);
+test("Observation history stays in My Observations while details ends at Officer Review", () => {
+  assert.doesNotMatch(detail, /observation-section-05|observationEdits\.events\.\$\{event\.event_type\}/);
+  assert.match(detail, /observation-section-04/);
   assert.match(screen, /item\.historyRows\.map\(\(row\) =>/);
   assert.doesNotMatch(screen, /item\.reviewComment|item\.recordedBy|item\.healthStatus|eventTranslationKeys/);
   const uuid = "19b902b4-1c6d-48d5-aaba-f16a8a2b6a55";

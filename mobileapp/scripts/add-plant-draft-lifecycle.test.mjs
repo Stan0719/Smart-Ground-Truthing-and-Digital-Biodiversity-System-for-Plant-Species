@@ -1,3 +1,4 @@
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -72,7 +73,7 @@ function environment() {
     "@react-navigation/native": { useFocusEffect: (callback) => { const h = rendering; hooks.useEffect(() => { h.focusListeners.add(callback); const cleanup = callback(); return () => { cleanup?.(); h.focusListeners.delete(callback); }; }, [callback]); } },
     "expo-location": {}, "expo-image-picker": {}, "expo-file-system/legacy": fs,
     "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" },
-    "../components/RefreshButton": { default: "RefreshButton" }, "../components/fieldFormStyles": { fieldFormStyles: {} },
+    "../components/RefreshButton": { default: "RefreshButton" }, "../components/GpsLocationPicker": { default: "GpsLocationPicker" }, "../utils/gpsLocation": { validGpsPoint, readGpsLocation }, "../components/fieldFormStyles": { fieldFormStyles: {} },
     "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails, validatePlantGps },
     "../utils/speciesNameNormalization": { normalizeSpeciesName },
     "../utils/botanistFormDrafts": draftApi, "../utils/botanistDraftAutosave": autosave,
