@@ -15,9 +15,6 @@ import {
 import { getPlantDisplayObservation } from "../utils/plantApi";
 import { getPlantCardZoneLabel } from "../utils/plantCardDisplay";
 
-const CARD_CONTENT_PADDING = 13;
-
-
 export default function PlantCard({
   plant,
   navigation,
@@ -32,7 +29,6 @@ export default function PlantCard({
   );
   const isTabletLayout = speciesDetailCard && isTabletDevice;
   const tabletImageWidth = Math.min(Math.round(windowWidth * 0.3), 280);
-  const [measuredCardHeight, setMeasuredCardHeight] = useState(0);
   const [failedImageUri, setFailedImageUri] = useState(null);
   const imageSource = plant.plantImage || null;
   const imageUri = typeof imageSource === "number" ? `local:${imageSource}` : imageSource?.uri || null;
@@ -45,10 +41,37 @@ export default function PlantCard({
     restricted: t("map.locationRestricted"),
     missing: t("plant.notRecorded"),
   });
-  const handleContentLayout = (event) => {
-    const nextHeight = Math.round(event.nativeEvent.layout.height + CARD_CONTENT_PADDING * 2);
-    setMeasuredCardHeight((currentHeight) => currentHeight === nextHeight ? currentHeight : nextHeight);
-  };
+  const openPlant = () => navigation.navigate("PlantDetails", { plantId: plant.plantId });
+
+  if (speciesDetailCard) return (
+    <View style={[styles.card, styles.speciesDetailCard, windowWidth < 390 && styles.stackedDetailCard]}>
+      <View style={[styles.imageContainer, styles.detailImageContainer,
+        windowWidth < 390 ? styles.stackedDetailImage : { width: isTabletLayout ? tabletImageWidth : 110 }]}>
+        {imageSource && !imageFailed ? (
+          <Image source={imageSource} style={styles.detailImage} onError={() => setFailedImageUri(imageUri)} />
+        ) : <View style={[styles.placeholder, styles.detailImage]}><Text style={styles.placeholderIcon}>🌿</Text></View>}
+      </View>
+      <View style={styles.content}>
+        {!isPublicViewer && <View style={styles.speciesDetailBadges}>
+          <Text style={[styles.speciesDetailBadge, isTabletLayout && styles.tabletBadge, styles.statusBadge, statusStyle(plant.currentStatus)]}>
+            {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
+          </Text>
+        </View>}
+        <Text style={styles.plantName}>{plant.plantScientificName || t("plant.unnamedPlant")}</Text>
+        <Text style={styles.plantId}>{t("plantDetail.plantId")}: {plant.plantId}</Text>
+        <View style={styles.infoGrid}>
+          <PublicFact label={t("plant.height")} value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")} />
+          <PublicFact label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
+          <PublicFact label={t("botanistPlantDetail.growthStage")} value={observation?.lifeStage || t("plant.notRecorded")} />
+        </View>
+        <TouchableOpacity style={styles.detailAction} onPress={openPlant} accessibilityRole="button"
+          accessibilityLabel={t("speciesDetail.viewPlantRecord")}>
+          <Text style={styles.detailActionText}>{t("speciesDetail.viewPlantRecord")}</Text>
+          <Text style={styles.detailActionArrow} accessibilityElementsHidden importantForAccessibility="no">→</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   return (
     <TouchableOpacity
@@ -66,7 +89,7 @@ export default function PlantCard({
         !speciesDetailCard && styles.phoneImageContainer,
         speciesDetailCard && {
           width: isTabletLayout ? tabletImageWidth : 110,
-          height: measuredCardHeight || undefined,
+          height: undefined,
           alignSelf: "stretch",
           overflow: "hidden",
         },
@@ -75,7 +98,7 @@ export default function PlantCard({
         {imageSource && !imageFailed ? (
           <Image
             source={imageSource}
-            style={speciesDetailCard ? [styles.speciesDetailImage, measuredCardHeight > 0 && { height: measuredCardHeight }] : styles.image}
+            style={speciesDetailCard ? styles.speciesDetailImage : styles.image}
             onError={() => setFailedImageUri(imageUri)}
           />
         ) : (
@@ -100,7 +123,7 @@ export default function PlantCard({
 
       {/* CONTENT */}
       <View style={styles.content}>
-        <View onLayout={speciesDetailCard ? handleContentLayout : undefined}>
+        <View>
 
         {speciesDetailCard && !isPublicViewer && <View style={styles.speciesDetailBadges}>
           <Text style={[styles.speciesDetailBadge, isTabletLayout && styles.tabletBadge, styles.statusBadge, statusStyle(plant.currentStatus)]}>
@@ -214,6 +237,10 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
   },
   speciesDetailCard: { alignItems: "stretch" },
+  stackedDetailCard: { flexDirection: "column" },
+  detailImageContainer: { minHeight: 150, alignSelf: "stretch", overflow: "hidden" },
+  stackedDetailImage: { width: "100%", height: 150 },
+  detailImage: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, width: "100%", height: "100%", resizeMode: "cover" },
 
   imageContainer: {
     width: 110,
@@ -258,7 +285,7 @@ const styles = StyleSheet.create({
 
   content: {
     flex: 1,
-    padding: CARD_CONTENT_PADDING,
+    padding: 13,
   },
 
   plantId: {
@@ -319,6 +346,9 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
   },
+  detailAction: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, minHeight: 44, marginTop: 12, paddingHorizontal: 14, borderRadius: 10, backgroundColor: "#468585" },
+  detailActionText: { color: "#FFFFFF", fontSize: 12, lineHeight: 17, fontWeight: "700", flexShrink: 1, textAlign: "center" },
+  detailActionArrow: { color: "#FFFFFF", fontSize: 17, lineHeight: 20, fontWeight: "700" },
   observationStatus: {
     marginTop: 5,
     color: "#75867E",

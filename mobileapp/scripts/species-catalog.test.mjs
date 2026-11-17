@@ -206,9 +206,10 @@ test('actual catalogue renders an approved species and both refresh actions', ()
   button.props.onPress();
   assert.equal(refreshes, 2);
   const card = list.props.renderItem({ item: list.props.data[0] });
-  for (const value of ['Actual approved species', 'Actual common name', 'Actual genus', 'Fabaceae', 'Not Assessed']) {
+  for (const value of ['Actual approved species', 'Actual common name', 'Actual genus', 'Fabaceae']) {
     assert.ok(walk(card).some(n => children(n).includes(value)), `${value} remains on the card`);
   }
+  assert.equal(walk(card).some(n => children(n).includes('Not Assessed')), false, 'conservation status stays in Species Details');
   assert.equal(walk(card).some(n => children(n).includes('Actual description')), false, 'long description remains in Species Details');
   const picture = walk(card).find(n => n.type === 'Image');
   assert.equal(picture.props.source.uri, 'https://example.invalid/api/assets/real-upload');

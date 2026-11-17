@@ -85,6 +85,8 @@ export function mapBackendSpecies(species) {
     // older rows without an approvalStatus value as Approved.
     approvalStatus,
     description: species.description ?? existingSpecies?.description ?? "",
+    habitat: species.habitat ?? "",
+    culturalSignificance: species.culturalSignificance ?? "",
     image: imageAssetId ? { uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(imageAssetId) } : undefined,
     speciesImageVerified: Boolean(imageAssetId),
     registeredAt: species.registered_at ?? species.registeredAt ?? null,

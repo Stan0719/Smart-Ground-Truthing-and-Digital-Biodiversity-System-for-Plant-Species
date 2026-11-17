@@ -127,10 +127,6 @@ export default function Species({ navigation, user }) {
 
           {!!item.genus && <Text style={styles.family} numberOfLines={1}>{t("plant.genus")}: {item.genus}</Text>}
           {!!item.family && <Text style={styles.family} numberOfLines={1}>{t("species.family")}{item.family}</Text>}
-          {!!item.conservationStatus && <Text style={styles.family} numberOfLines={2}>
-            {t("speciesDetail.conservationStatus")}: {translateLabel(item.conservationStatus)}
-          </Text>}
-
           {!item.privateRequest && plantCounts !== null && <Text style={styles.recordCount}>
             {plantCount}{t("species.verified")}{" "}
             {plantCount === 1 ? t("plant.plant") : t("plant.plants")}

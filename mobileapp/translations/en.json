@@ -1109,6 +1109,8 @@
     "tryAnotherSearchTermOrSelectADifferentCategory": "Try another search term or select a different category."
   },
   "speciesDetail": {
+    "description": "Description",
+    "viewPlantRecord": "View Plant Record",
     "theSpeciesYouAreLookingForIsNotInThe": "The species you are looking for is not in the collection.",
     "plantImageComingSoon": "Plant image coming soon",
     "noDescriptionHasBeenRecorded": "No description has been recorded.",

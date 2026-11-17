@@ -1109,6 +1109,8 @@
     "tryAnotherSearchTermOrSelectADifferentCategory": "请尝试其他搜索词或选择其他类别。"
   },
   "speciesDetail": {
+    "description": "\u63cf\u8ff0",
+    "viewPlantRecord": "\u67e5\u770b\u690d\u7269\u8bb0\u5f55",
     "theSpeciesYouAreLookingForIsNotInThe": "您查找的物种不在收藏中。",
     "plantImageComingSoon": "植物图片即将推出",
     "noDescriptionHasBeenRecorded": "尚未记录描述。",

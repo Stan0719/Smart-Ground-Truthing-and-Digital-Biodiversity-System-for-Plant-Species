@@ -8,7 +8,8 @@ const ts = require("typescript");
 const React = require("react");
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-function makeScreen({ language = "en", species = null, fetchSpeciesDetail = async () => null, user = null } = {}) {
+function makeScreen({ language = "en", species = null, fetchSpeciesDetail = async () => null, user = null,
+  records = [], imageSource = () => null } = {}) {
   const state = [];
   const refs = [];
   let stateIndex = 0;
@@ -44,9 +45,9 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
     "../translations/i18n": { t: (key) => key === "plant.back" ? ({ en: "Back", ms: "Kembali", zh: "返回" })[language] : key, useAppTranslation() {}, translateLabel: (value) => value, translateUIMessage: (value) => value, translateFieldValue: (_label, value) => value },
     "../data/mockData": { getSpeciesBySlug: () => null },
     "@react-navigation/native": { useFocusEffect: (callback) => { focus = callback; } },
-    "../data/speciesImages": { getSpeciesImageSource: () => null },
+    "../data/speciesImages": { getSpeciesImageSource: imageSource },
     "../components/BackButton": { default: "TouchableOpacity" },
-    "../utils/plantApi": { fetchPlantRecords: async () => [], fetchSpeciesDetail, filterUniqueSpeciesPlantRecords: (records) => records, isPlantVisibleInRoleCatalog: () => true, isOwnedRejectedPlant: () => false },
+    "../utils/plantApi": { fetchPlantRecords: async () => records, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords: (items) => items, isPlantVisibleInRoleCatalog: () => true, isOwnedRejectedPlant: () => false },
     "../components/PlantCard": { default: "PlantCard" },
     "../components/RefreshButton": { default: "RefreshButton" },
     "../components/FavouriteHeart": { default: "FavouriteHeart" },
@@ -130,6 +131,62 @@ test("public Species Detail does not trust a protected Species passed through na
     await new Promise((resolve) => setImmediate(resolve));
     tree = fixture.render();
     assert.equal(fixture.allNodes(tree).some((node) => node?.props?.children === "Private species"), false);
+  }
+});
+
+test("Species Details uses authorized botanical fields and hides unsupported or blank optional sections", async () => {
+  const actual = { id: "6", slug: "api-species-6", name: "Common name", scientificName: "Scientific name",
+    genus: "Genus", family: "Family", conservationStatus: "Not Assessed",
+    description: "Recorded description", habitat: "  ", culturalSignificance: "Recorded cultural use",
+    speciesImageVerified: true, image: { uri: "authorized-photo" } };
+  const fixture = makeScreen({ user: { id: "botanist", role: "Botanist" },
+    species: { ...actual, name: "Stale route name", characteristics: ["Invented characteristic"] },
+    fetchSpeciesDetail: async () => actual, imageSource: (item) => item.image });
+  assert.equal(fixture.allNodes(fixture.render()).some((node) => node?.props?.children === "Stale route name"), false);
+  fixture.focus(); await new Promise((resolve) => setImmediate(resolve));
+  const nodes = fixture.allNodes(fixture.render());
+  const has = (value) => nodes.some((node) => node?.props?.children === value);
+  assert.ok(has("Recorded description"));
+  assert.ok(has("Recorded cultural use"));
+  assert.equal(has("Stale route name"), false);
+  assert.equal(has("Invented characteristic"), false);
+  assert.equal(has("speciesDetail.keyCharacteristics"), false);
+  assert.equal(has("speciesDetail.naturalHabitat"), false, "whitespace habitat does not leave an empty subsection");
+  assert.equal(has("speciesDetail.ecologicalImportance"), false);
+  assert.equal(has("speciesDetail.botanicalPhotographs"), false, "no empty gallery section");
+  assert.equal(nodes.filter((node) => node?.props?.children === "Recorded description").length, 1);
+  assert.ok(nodes.some((node) => node?.type === "Image" && node.props.source.uri === "authorized-photo"));
+  const facts = nodes.filter((node) => typeof node?.type === "function" && node.props?.label);
+  assert.ok(facts.some((node) => node.props.value === "Family"));
+  assert.ok(facts.some((node) => node.props.value === "Genus"));
+  assert.ok(facts.some((node) => node.props.value === "Not Assessed"));
+});
+
+test("Species Details groups recorded facts, shows only Botanist approval, and moves View All above cards", async () => {
+  const species = { id: "6", slug: "api-species-6", name: "Common", scientificName: "Scientific",
+    approvalStatus: "Approved", description: "Description", habitat: "Recorded habitat", family: "Family", genus: "Genus",
+    conservationStatus: "Not Assessed" };
+  const records = [{ plantId: "17", speciesId: "6", currentStatus: "Approved" }];
+  for (const role of ["Botanist", "Visitor", "Guest", "Officer"]) {
+    const fixture = makeScreen({ user: { id: "owner", role }, fetchSpeciesDetail: async () => species, records });
+    fixture.render(); fixture.focus(); await new Promise((resolve) => setImmediate(resolve));
+    const nodes = fixture.allNodes(fixture.render());
+    const about = nodes.find((node) => node?.props?.style?.backgroundColor === "#FFFFFF" && node.props.style.borderRadius === 18);
+    assert.ok(about, "one white About box");
+    const insideAbout = fixture.allNodes(about);
+    for (const value of ["Description", "Recorded habitat", "Family", "Genus"])
+      assert.ok(insideAbout.some((node) => node?.props?.children === value || node?.props?.value === value), value);
+    assert.equal(nodes.filter((node) => node?.props?.children === "speciesDetail.aboutThisSpecies").length, 1);
+    const badge = nodes.filter((node) => node?.props?.children === "Approved" &&
+      Array.isArray(node.props.style) && node.props.style.some((style) => style?.fontWeight === "700"));
+    assert.equal(badge.length, role === "Botanist" ? 1 : 0);
+    const button = nodes.find((node) => node?.type === "TouchableOpacity" && node.props.accessibilityLabel === "speciesDetail.viewAllPlants");
+    assert.ok(button);
+    assert.equal(button.props.style.minHeight, 44);
+    assert.ok(nodes.indexOf(button) < nodes.findIndex((node) => node?.type === "PlantCard"));
+    assert.equal(nodes.filter((node) => node?.props?.children === "speciesDetail.viewAllPlants").length, 1);
+    button.props.onPress();
+    assert.equal(fixture.navigations.at(-1)[0], "Species");
   }
 });
 

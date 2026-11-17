@@ -1109,6 +1109,8 @@
     "tryAnotherSearchTermOrSelectADifferentCategory": "Cuba istilah carian lain atau pilih kategori yang berbeza."
   },
   "speciesDetail": {
+    "description": "Huraian",
+    "viewPlantRecord": "Lihat Rekod Tumbuhan",
     "theSpeciesYouAreLookingForIsNotInThe": "Spesies yang anda cari tiada dalam koleksi.",
     "plantImageComingSoon": "Imej tumbuhan akan datang",
     "noDescriptionHasBeenRecorded": "Belum ada huraian direkodkan.",
