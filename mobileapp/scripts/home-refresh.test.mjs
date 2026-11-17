@@ -42,9 +42,10 @@ function collect(node) {
 }
 
 for (const width of [390, 820, 1194]) {
-  test(`Home Species of Niah heading has an adjacent refresh icon at width ${width}`, async () => {
+  test(`Home Species of Niah heading has no adjacent refresh icon and retains pull/focus refresh at width ${width}`, async () => {
     const effects = [];
     let reads = 0;
+    let focusListener;
     const native = {
       StyleSheet: { create: styles => styles }, Dimensions: { get: () => ({ width }) },
       Animated: { Value: class { constructor(value) { this.value = value; } }, View: "AnimatedView" },
@@ -58,25 +59,20 @@ for (const width of [390, 820, 1194]) {
       "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 0 }) },
       "../translations/i18n": { t: key => key, useAppTranslation() {}, translateLabel: value => value, translateUIMessage: value => value },
       "../components/LanguageSelector": { default: "LanguageSelector" },
-      "../components/RefreshButton": { default: "RefreshButton" },
       "../data/speciesImages": { getSpeciesImageSource: () => null },
       "../utils/plantApi": { fetchSpeciesCatalog: async () => { reads++; return [{ id: "6", scientificName: "Actual species" }]; } },
     });
-    const tree = screen({ navigation: { addListener: () => () => {}, navigate() {} } });
+    const tree = screen({ navigation: { addListener: (_event, listener) => { focusListener = listener; return () => {}; }, navigate() {} } });
     const scroll = walk(tree, node => node.type === "ScrollView");
     assert.ok(scroll.props.refreshControl);
     const heading = walk(tree, node => node.type === "Text" && node.props.children === "home.speciesOfNiah");
     assert.ok(heading);
-    const titleRow = walk(tree, node => node.type === "View" && React.Children.toArray(node.props.children).some(child => child.type === "Text" && child.props.children === "home.speciesOfNiah"));
-    assert.ok(titleRow);
-    assert.equal(titleRow.props.style.flexDirection, "row");
-    const button = React.Children.toArray(titleRow.props.children).find(node => node.type === "RefreshButton");
-    assert.equal(button?.props.testID, "home-species-refresh");
+    assert.equal(collect(tree).some(node => node.type === "RefreshButton"), false);
     assert.equal(heading.props.style.flexShrink, 1);
     effects[0]();
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(reads, 1);
-    await button.props.onPress();
+    focusListener();
     assert.equal(reads, 2);
     await new Promise(resolve => setImmediate(resolve));
     await scroll.props.refreshControl.props.onRefresh();

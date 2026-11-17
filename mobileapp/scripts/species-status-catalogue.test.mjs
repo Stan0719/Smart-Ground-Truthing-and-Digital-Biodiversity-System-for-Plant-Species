@@ -68,7 +68,7 @@ test('catalogue filter and protected request navigation stay Botanist-only', () 
   assert.match(source, /statusFilterChip: \{ minHeight: 40, justifyContent: "center", paddingHorizontal: 14, borderRadius: 20/)
   assert.match(source, /statusFilterChipSelected: \{ borderColor: "#2F6B4F", backgroundColor: "#D6E9D9" \}/)
   assert.match(source, /item\.privateRequest\s*\? navigation\.navigate\("BotanistSpeciesRequestDetail", \{ requestId: item\.requestId, botanist: user \}\)/)
-  assert.match(source, /!item\.privateRequest && <TouchableOpacity/)
+  assert.match(source, /\(!item\.privateRequest \|\| pendingRequest\) && <TouchableOpacity/)
   assert.match(source, /speciesApprovalBadgeStyle\(item\.approvalStatus\)/)
   assert.doesNotMatch(source, /translateLabel\(item\.conservationStatus\)/)
   for (const language of ['en', 'ms', 'zh']) {

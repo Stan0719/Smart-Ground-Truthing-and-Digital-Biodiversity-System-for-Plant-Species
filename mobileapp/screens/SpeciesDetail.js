@@ -37,7 +37,7 @@ export default function SpeciesDetail({
 }) {
   useAppTranslation();
 
-  const { slug, speciesId } = route.params || {};
+  const { slug, speciesId, requestId } = route.params || {};
   const { height: windowHeight } = useWindowDimensions();
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isVisitor = user?.role?.toLowerCase() === "visitor";
@@ -62,7 +62,7 @@ export default function SpeciesDetail({
     const request = (async () => {
       try {
         const [backendSpecies, records, ownerRecords] = await Promise.all([
-          fetchSpeciesDetail(speciesId, slug, { accountId: user?.id, publicOnly }),
+          fetchSpeciesDetail(speciesId, slug, { accountId: user?.id, publicOnly, requestId }),
           fetchPlantRecords([], { accountId: user?.id, publicOnly }),
           isBotanist ? fetchPlantRecords([], { accountId: user?.id, scopeMine: true }) : Promise.resolve([]),
         ]);
@@ -87,7 +87,7 @@ export default function SpeciesDetail({
     })();
     requestRef.current = request;
     return request;
-  }, [user, slug, speciesId, publicOnly, isBotanist]);
+  }, [user, slug, speciesId, requestId, publicOnly, isBotanist]);
 
   useFocusEffect(useCallback(() => {
     void loadSpeciesDetails(false);

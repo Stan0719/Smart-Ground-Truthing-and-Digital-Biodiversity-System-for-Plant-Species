@@ -23,7 +23,6 @@ import {
 
 import { getSpeciesImageSource } from '../data/speciesImages';
 import { fetchSpeciesCatalog } from '../utils/plantApi';
-import RefreshButton from '../components/RefreshButton';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1039,15 +1038,7 @@ const renderPlant = ({ item }) => {
                 </RevealView>
 
                 <RevealView delay={100}>
-                  <View style={styles.exploreTitleRow}>
-                    <Text style={styles.exploreTitle}>{t("home.speciesOfNiah")}</Text>
-                    <RefreshButton
-                      onPress={() => void loadSpecies()}
-                      loading={speciesLoading}
-                      label={t("species.refreshSpecies")}
-                      testID="home-species-refresh"
-                    />
-                  </View>
+                  <Text style={styles.exploreTitle}>{t("home.speciesOfNiah")}</Text>
                 </RevealView>
 
                 <RevealView delay={200}>
@@ -2315,12 +2306,6 @@ exploreHeader: {
         ? 36
         : 60,
     fontWeight: '800',
-  },
-
-  exploreTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SCREEN_WIDTH < 500 ? 12 : 16,
   },
 
 exploreDescription: {

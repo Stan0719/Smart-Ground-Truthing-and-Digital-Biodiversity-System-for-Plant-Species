@@ -44,7 +44,7 @@ test('species-specific Plants reloads are scoped to the selected route and API f
   const app=readFileSync(new URL('../App.js',import.meta.url),'utf8');
   assert.match(app,/name="Plants"[\s\S]*?<SpeciesScreen[\s\S]*?name="Species"[\s\S]*?<PlantsScreen/);
   assert.match(app,/<PlantsStack\s+\{\.\.\.props\}\s+user=\{user\}/);
-  assert.match(species,/navigation\.navigate\("Species",\s*\{\s*slug:\s*item\.slug,\s*speciesId:\s*item\.id/);
+  assert.match(species,/navigation\.navigate\("Species",\s*\{\s*slug:\s*item\.slug,\s*speciesId:\s*pendingRequest \? item\.proposedSpeciesId : item\.id/);
   assert.match(detail,/slug:\s*selectedSpecies\.slug,\s*speciesId:\s*selectedSpecies\.id/);
   assert.match(list,/const requestKey = .*currentSpeciesId.*currentSlug/);
   assert.match(list,/activeRequest\?\.key === requestKey && activeRequest\.promise/);
@@ -221,13 +221,15 @@ test('actual catalogue renders an approved species and both refresh actions', ()
   assert.equal(navigations[0][1].speciesId, '6');
   assert.equal(navigations[1][0], 'Species');
   assert.equal(navigations[1][1].speciesId, '6');
-  const pendingCard = list.props.renderItem({ item: { id: 'request:12', requestId: '12', slug: 'species-request-12',
+  const pendingCard = list.props.renderItem({ item: { id: 'request:12', requestId: '12', proposedSpeciesId: '8', slug: 'species-request-12',
     privateRequest: true, name: 'Own request', scientificName: 'Example species', family: 'Fabaceae',
     approvalStatus: 'Pending Review', description: 'Submitted description' } });
   const pendingActions = walk(pendingCard).filter(n => n.type === 'TouchableOpacity');
-  assert.equal(pendingActions.length, 1, 'protected requests cannot navigate to the approved Plant list');
+  assert.equal(pendingActions.length, 2, 'owner pending requests reuse both catalogue actions');
   pendingActions[0].props.onPress();
-  assert.equal(navigations[2][0], 'BotanistSpeciesRequestDetail');
+  assert.equal(navigations[2][0], 'SpeciesDetail');
   assert.equal(navigations[2][1].requestId, '12');
-  assert.equal(navigations[2][1].botanist.id, 'owner');
+  pendingActions[1].props.onPress();
+  assert.equal(navigations[3][0], 'Species');
+  assert.equal(navigations[3][1].speciesId, '8');
 });

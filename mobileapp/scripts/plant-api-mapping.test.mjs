@@ -25,10 +25,15 @@ test('Plant My Rejected chip filters only current owner Rejected records without
   assert.equal(eligible(ownedPending, 'myPending'), true)
   assert.equal(eligible(ownedRejected, 'allVisible'), true)
   assert.equal(eligible(otherRejected, 'myRejected', 'owner', false), true, 'non-Botanist filtering remains unchanged after role visibility rules')
-  const chipSection = screen.slice(screen.indexOf('contentContainerStyle={styles.statusFilters}'), screen.indexOf('</ScrollView>}', screen.indexOf('contentContainerStyle={styles.statusFilters}')))
+  const chipStart = screen.indexOf('style={styles.statusFilters}')
+  const chipSectionStart = screen.lastIndexOf('{isBotanist && <View', chipStart)
+  const chipSection = screen.slice(chipSectionStart, screen.indexOf('{/* FILTERS */}', chipStart))
   assert.deepEqual(Array.from(chipSection.matchAll(/\["(allVisible|approved|myPending|myRejected)",/g), (item) => item[1]),
     ['allVisible', 'approved', 'myPending', 'myRejected'])
   assert.match(chipSection, /accessibilityState=\{\{ selected \}\}/)
+  assert.match(chipSection, /\{isBotanist && <View/)
+  assert.doesNotMatch(chipSection, /horizontal|ScrollView/)
+  assert.match(screen, /statusFilters: \{[\s\S]*?flexWrap: "wrap"/)
   for (const language of ['en', 'ms', 'zh']) {
     const catalog = JSON.parse(readFileSync(new URL(`../translations/${language}.json`, import.meta.url), 'utf8'))
     assert.ok(catalog.plant.myRejected, language)

@@ -181,9 +181,46 @@ test("Botanist and Officer keep approval badges while detailed location stays in
   for (const role of ["Botanist", "Officer"]) {
     const { all, styles, t } = renderListCard({ role });
     assert.ok(all.some((node) => node.props.style === styles.imageBadges));
+    assert.equal(styles.imageBadges.position, "absolute");
+    assert.equal(styles.imageBadges.top, 12);
+    assert.equal(styles.imageBadges.left, 12);
+    assert.equal(styles.imageBadges.right, 12);
+    assert.equal(styles.imageBadges.alignItems, "flex-end");
     assert.equal(all.some((node) => node.props.label === t("plant.locationZone")), false);
     assert.equal(all.some((node) => node.props.children === t("map.locationRestricted")), false);
     assert.equal(all.some((node) => node.props.children === "Approved"), true);
+  }
+});
+
+test("Plant status badge remains at the image top-right for each status and missing-image placeholder", () => {
+  for (const status of ["Approved", "Pending Review", "Rejected"]) {
+    const { all, styles } = renderListCard({ role: "Botanist" }, "en", status, { plantImage: null });
+    const badgeRow = all.find((node) => node.props.style === styles.imageBadges);
+    assert.ok(badgeRow, `${status} badge row remains visible`);
+    assert.ok(all.some((node) => node.props.style === styles.plantIcon), "missing photo placeholder remains visible");
+    const badge = React.Children.toArray(badgeRow.props.children)[0];
+    assert.ok(badge.props.style.includes(styles.statusBadge));
+    assert.equal(badge.props.children, status);
+    if (status === "Approved") assert.ok(badge.props.style.includes(styles.statusApproved));
+    if (status === "Pending Review") assert.ok(badge.props.style.includes(styles.statusPending));
+    if (status === "Rejected") assert.ok(badge.props.style.includes(styles.statusRejected));
+  }
+});
+
+test("Plant image status badge does not ellipsize labels and accommodates localized text", () => {
+  const source = read("../screens/Plant.js");
+  const cardSource = source.slice(source.indexOf("function PlantCard("), source.indexOf("function plantStatusStyle("));
+  const badgeSource = cardSource.slice(cardSource.indexOf('<View pointerEvents="none" style={styles.imageBadges}>'), cardSource.indexOf("</View>}", cardSource.indexOf('<View pointerEvents="none" style={styles.imageBadges}>')));
+  assert.match(badgeSource, /<Text style=\{\[styles\.imageBadge, styles\.statusBadge, plantStatusStyle\(plant\.currentStatus\)\]\}>/);
+  assert.doesNotMatch(badgeSource, /numberOfLines|ellipsizeMode/);
+  assert.match(source, /imageBadges: \{ position: "absolute", top: 12, left: 12, right: 12, alignItems: "flex-end" \}/);
+  assert.match(source, /imageBadge: \{ alignSelf: "flex-end", maxWidth: "100%", paddingHorizontal: 8, paddingVertical: 5/);
+  assert.doesNotMatch(source.match(/imageBadge: \{[^\n]+/)?.[0] || "", /overflow: "hidden"|maxWidth: "48%"/);
+
+  for (const language of ["en", "ms", "zh"]) {
+    const catalog = JSON.parse(read(`../translations/${language}.json`));
+    const labels = catalog.recordEdits.versionStatus;
+    for (const key of ["Approved", "PendingReview", "Rejected"]) assert.ok(labels[key], `${language} ${key}`);
   }
 });
 

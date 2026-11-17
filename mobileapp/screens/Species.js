@@ -14,6 +14,7 @@ import {
   ScrollView,
   Image,
   Dimensions,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -93,7 +94,10 @@ export default function Species({ navigation, user }) {
 
   const renderSpeciesCard = ({ item }) => {
     const plantCount = item.privateRequest ? 0 : plantCounts?.[item.id] || 0;
-    const openDetails = () => item.privateRequest
+    const pendingRequest = isBotanist && item.privateRequest && item.approvalStatus === "Pending Review";
+    const openDetails = () => pendingRequest
+      ? navigation.navigate("SpeciesDetail", { requestId: item.requestId, speciesId: item.proposedSpeciesId, slug: item.slug })
+      : item.privateRequest
       ? navigation.navigate("BotanistSpeciesRequestDetail", { requestId: item.requestId, botanist: user })
       : navigation.navigate("SpeciesDetail", { slug: item.slug, speciesId: item.id });
 
@@ -137,18 +141,22 @@ export default function Species({ navigation, user }) {
               style={styles.secondaryButton}
               onPress={openDetails}
             >
-              <Text style={styles.secondaryText}>{t(item.privateRequest ? "species.viewRequest" : "species.viewSpecies")}</Text>
+              <Text style={styles.secondaryText}>{t(item.privateRequest && !pendingRequest ? "species.viewRequest" : "species.viewSpecies")}</Text>
             </TouchableOpacity>
 
-            {!item.privateRequest && <TouchableOpacity
+            {(!item.privateRequest || pendingRequest) && <TouchableOpacity
               style={styles.primaryButton}
-              onPress={() =>
+              onPress={() => {
+                if (pendingRequest && !item.proposedSpeciesId) {
+                  Alert.alert(t("species.viewPlants"), t("plant.speciesDetailsUnavailable"));
+                  return;
+                }
                 navigation.navigate("Species", {
                   slug: item.slug,
-                  speciesId: item.id,
-                  species: item,
-                })
-              }
+                  speciesId: pendingRequest ? item.proposedSpeciesId : item.id,
+                  species: pendingRequest ? { ...item, id: item.proposedSpeciesId } : item,
+                });
+              }}
             >
               <Text style={styles.primaryText}>{t("species.viewPlants")}</Text>
             </TouchableOpacity>}

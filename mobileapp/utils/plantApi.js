@@ -116,6 +116,7 @@ export async function fetchOwnedSpeciesRequests(accountId) {
     family: row.family_name || "",
     conservationStatus: row.conservation_status || "Not recorded",
     description: row.description || "",
+    habitat: row.habitat || "",
     approvalStatus: row.request_status,
     image: photos[index],
     speciesImageVerified: true,
@@ -135,6 +136,14 @@ async function speciesImageSources(species, { accountId, publicOnly = false } = 
 }
 
 export async function fetchSpeciesDetail(speciesId, slug, options = {}) {
+  if (options.requestId != null) {
+    if (options.publicOnly || !options.accountId) throw Error("Sign in with the correct account.");
+    const requests = await fetchOwnedSpeciesRequests(options.accountId);
+    const request = requests.find((row) => String(row.requestId) === String(options.requestId));
+    if (!request) throw Error("Species request unavailable.");
+    return { ...request, id: request.proposedSpeciesId ?? request.id };
+  }
+
   const id = String(speciesId ?? "");
   if (/^\d+$/.test(id)) {
     const payload = await getJson(`/api/species/${encodeURIComponent(id)}`, options);

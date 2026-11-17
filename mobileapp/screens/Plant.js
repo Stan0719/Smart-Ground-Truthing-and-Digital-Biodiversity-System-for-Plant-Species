@@ -10,7 +10,7 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   Image,
   RefreshControl,
   ActivityIndicator,
@@ -407,19 +407,6 @@ export default function Species({
       </View>
 
 
-    <ScrollView
-      style={styles.page}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing || favourites.refreshing}
-          onRefresh={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
-          tintColor="#468585"
-          colors={["#468585"]}
-        />
-      }
-    >
-
       {/* SEARCH */}
 
       <View style={styles.controls}>
@@ -458,14 +445,12 @@ export default function Species({
 
       </View>
 
-      {isBotanist && <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.statusFilters}
+      {isBotanist && <View
+        style={styles.statusFilters}
         accessibilityLabel={t("plant.recordVisibilityFilters")}
       >
         {[
-          ["allVisible", t("plant.allVisible")],
+          ["allVisible", t("plant.allFilter")],
           ["approved", t("plant.approvedOnly")],
           ["myPending", t("plant.myPending")],
           ["myRejected", t("plant.myRejected")],
@@ -481,7 +466,7 @@ export default function Species({
             <Text style={[styles.statusFilterText, selected && styles.statusFilterTextSelected]}>{label}</Text>
           </TouchableOpacity>;
         })}
-      </ScrollView>}
+      </View>}
 
 
       {/* FILTERS */}
@@ -583,43 +568,52 @@ export default function Species({
 
       {/* PLANT LIST */}
 
-      <View style={styles.list}>
-
-        {listViewState === "loading" ? <View style={styles.loadingState} testID="plant-list-loading">
-          <ActivityIndicator size="small" color="#2F6B4F" />
-          <Text style={styles.loadingText}>{t("plant.loadingPlantRecords")}</Text>
-        </View> : listViewState === "error" ? <View style={styles.loadError} testID="plant-list-error">
-          <Text accessibilityRole="alert" style={styles.loadErrorText}>{translateUIMessage(errorMessage)}</Text>
-          <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => { void loadSpeciesPlants(true); }}>
-            <Text style={styles.retryText}>{t("common.retry")}</Text>
-          </TouchableOpacity>
-        </View> : listViewState === "results" ? (
-
-          filteredPlants.map((plant) => (
-            <PlantCard
-              key={plant.plantId}
-              plant={plant}
-              navigation={navigation}
-              user={user}
-              isVisitor={isVisitor}
-              favourites={favourites}
-            />
-          ))
-
+      <FlatList
+        testID="plant-record-list"
+        style={styles.listViewport}
+        contentContainerStyle={[styles.list, filteredPlants.length === 0 && styles.listEmptyContent]}
+        data={listViewState === "results" ? filteredPlants : []}
+        keyExtractor={(plant) => String(plant.plantId)}
+        renderItem={({ item: plant }) => (
+          <PlantCard
+            plant={plant}
+            navigation={navigation}
+            user={user}
+            isVisitor={isVisitor}
+            favourites={favourites}
+          />
+        )}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        alwaysBounceVertical
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing || favourites.refreshing}
+            onRefresh={() => { void loadSpeciesPlants(true); void favourites.refresh(true); }}
+            tintColor="#468585"
+            colors={["#468585"]}
+          />
+        }
+        ListEmptyComponent={listViewState === "loading" ? (
+          <View style={styles.loadingState} testID="plant-list-loading">
+            <ActivityIndicator size="small" color="#2F6B4F" />
+            <Text style={styles.loadingText}>{t("plant.loadingPlants")}</Text>
+          </View>
+        ) : listViewState === "error" ? (
+          <View style={styles.loadError} testID="plant-list-error">
+            <Text accessibilityRole="alert" style={styles.loadErrorText}>{translateUIMessage(errorMessage)}</Text>
+            <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => { void loadSpeciesPlants(true); }}>
+              <Text style={styles.retryText}>{t("common.retry")}</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-
           <View style={styles.empty}>
-
-            <Text style={styles.emptyIcon}>
-              🌿
-            </Text>
-
+            <Text style={styles.emptyIcon}>????</Text>
             <Text style={styles.emptyTitle}>
               {listViewState === "filtered-empty"
                 ? t("plant.noPlantsMatchYourCurrentSearchOrFilters")
                 : t("plant.noPlantRecordsForThisSpeciesYet")}
             </Text>
-
             {listViewState === "filtered-empty" && hasActiveResultFilters && (
               <TouchableOpacity
                 testID="plant-list-clear-filters"
@@ -629,13 +623,9 @@ export default function Species({
                 <Text style={styles.clearText}>{t("map.clearFilters")}</Text>
               </TouchableOpacity>
             )}
-
           </View>
         )}
-
-      </View>
-
-    </ScrollView>
+      />
     </SafeAreaView>
   );
 }
@@ -761,7 +751,7 @@ function PlantCard({
         )}
 
         {!isPublicViewer && <View pointerEvents="none" style={styles.imageBadges}>
-          <Text numberOfLines={2} style={[styles.imageBadge, styles.statusBadge, plantStatusStyle(plant.currentStatus)]}>
+          <Text style={[styles.imageBadge, styles.statusBadge, plantStatusStyle(plant.currentStatus)]}>
             {translateLabel(plant.currentStatus || t("plant.notRecorded"))}
           </Text>
         </View>}
@@ -850,14 +840,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F7FBF4",
   },
+  listViewport: { flex: 1, backgroundColor: "#F7FBF4" },
 
   header: {
-    padding: 22,
-    paddingTop: 8,
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 8,
     backgroundColor: "#E7F2E2",
   },
 
-  headerToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20 },
+  headerToolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 8 },
   backButton: { alignSelf: "flex-start", maxWidth: "100%" },
   headingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   unavailableLanguageHeader: { position: "absolute", top: 50, right: 22 },
@@ -876,21 +868,21 @@ const styles = StyleSheet.create({
 
   heading: {
     flexShrink: 1,
-    marginTop: 7,
+    marginTop: 3,
     color: "#234B3A",
     fontSize: 30,
     fontWeight: "600",
   },
 
   speciesName: {
-    marginTop: 7,
+    marginTop: 3,
     color: "#6D7F75",
     fontSize: 15,
     fontStyle: "italic",
   },
 
   count: {
-    marginTop: 10,
+    marginTop: 4,
     color: "#6D7F75",
     fontSize: 11,
   },
@@ -900,12 +892,15 @@ controls: {
   alignItems: "center",
   gap: 8,
   paddingHorizontal: 20,
-  paddingVertical: 20,
+  paddingVertical: 10,
 },
 
 statusFilters: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  alignItems: "center",
   paddingHorizontal: 20,
-  paddingBottom: 12,
+  paddingBottom: 8,
   gap: 8,
 },
 
@@ -1055,16 +1050,11 @@ filterToggle: {
   },
 
   loadingState: {
-    minHeight: 92,
-    padding: 20,
+    paddingVertical: 16,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     gap: 10,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E2EDE0",
-    borderRadius: 15,
   },
   loadingText: { color: "#52665C", fontSize: 14 },
   loadError: { padding: 20, alignItems: "center", borderWidth: 1, borderColor: "#F0D7D4", borderRadius: 15, backgroundColor: "#FFF9F8" },
@@ -1092,13 +1082,16 @@ filterToggle: {
   },
 
   list: {
+    flexGrow: 1,
     paddingHorizontal: 20,
     paddingBottom: 30,
   },
+  listEmptyContent: { flexGrow: 1 },
 
   card: {
     position: "relative",
     marginBottom: 14,
+    marginTop: 24,
     overflow: "hidden",
     borderRadius: 16,
     backgroundColor: "#FFFFFF",
@@ -1120,8 +1113,8 @@ filterToggle: {
     backgroundColor: "#DCE8D6",
     },
 
-  imageBadges: { position: "absolute", top: 9, left: 10, right: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 6 },
-  imageBadge: { maxWidth: "48%", overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, color: "#FFFFFF", fontSize: 9, lineHeight: 12, fontWeight: "700", textAlign: "center" },
+  imageBadges: { position: "absolute", top: 12, left: 12, right: 12, alignItems: "flex-end" },
+  imageBadge: { alignSelf: "flex-end", maxWidth: "100%", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, color: "#FFFFFF", fontSize: 9, lineHeight: 12, fontWeight: "700", textAlign: "center" },
   statusBadge: { backgroundColor: "#315B49" },
   statusApproved: { backgroundColor: "#23734D" },
   statusPending: { backgroundColor: "#A76512" },
@@ -1190,12 +1183,9 @@ filterToggle: {
   },
 
   empty: {
-    padding: 40,
+    paddingVertical: 20,
+    paddingHorizontal: 12,
     alignItems: "center",
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderColor: "#E2EDE0",
-    borderRadius: 15,
   },
 
   emptyIcon: {
