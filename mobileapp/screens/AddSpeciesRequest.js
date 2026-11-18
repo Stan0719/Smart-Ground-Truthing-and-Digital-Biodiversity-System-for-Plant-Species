@@ -8,6 +8,7 @@ import { validateSpeciesRequest } from "../utils/addPlantValidation";
 import { plantApi } from "../utils/plantApi";
 import { deleteBotanistFormDraft, findBotanistFormDraft, getBotanistFormDraft, saveBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
+import SpeciesDictionary from "../components/SpeciesDictionary";
 
 const conservationStatuses = ["Not Assessed", "Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered"];
 const makeKey = () => `species-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -123,6 +124,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
     <Text style={styles.note}>{t("speciesRequestForm.description")}</Text>
     <View style={styles.card}>
       <Text style={styles.sectionTitle}>{t("addPlant.newSpeciesInformation")}</Text>
+      <SpeciesDictionary fields={{ scientificName: { value: form.scientific_name, setValue: (value) => change("scientific_name", value), label: t("addPlant.scientificName") }, commonName: { value: form.common_name, setValue: (value) => change("common_name", value), label: t("addPlant.commonName") }, genus: { value: form.genus_name, setValue: (value) => change("genus_name", value), label: t("addPlant.genus") }, family: { value: form.family_name, setValue: (value) => change("family_name", value), label: t("addPlant.family") }, description: { value: form.description, setValue: (value) => change("description", value), label: t("addPlant.description") }, habitat: { value: form.habitat, setValue: (value) => change("habitat", value), label: t("addPlant.habitatEcologicalInformation") } }} />
       {textFields.map(([field, label, placeholder]) => <View key={field} style={styles.field}>
         <Text style={styles.label}>{requiredLabel(t(`addPlant.${label}`))}</Text>
         <TextInput style={styles.input} value={form[field]} onChangeText={(value) => change(field, value)} editable={!saving}
@@ -150,7 +152,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
       </View>
       {photo && <View style={styles.photoPreview}>
         <Image source={{ uri: photo }} style={styles.photo} resizeMode="cover" />
-        <TouchableOpacity style={styles.removePhoto} onPress={() => setPhoto(null)} disabled={saving} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="close" size={19} color="#FFFFFF" /></TouchableOpacity>
+        <TouchableOpacity style={styles.removePhoto} onPress={() => setPhoto(null)} disabled={saving} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
       </View>}
       <View style={styles.approvalInfo}><Text style={styles.approvalTitle}>{t("addPlant.speciesApprovalRequired")}</Text><Text style={styles.note}>{t("speciesRequestForm.approvalNotice")}</Text></View>
     </View>
@@ -176,7 +178,7 @@ const styles = StyleSheet.create({
   multiline: { minHeight: 105, textAlignVertical: "top" }, statusList: { flexDirection: "row", flexWrap: "wrap", gap: 7 }, statusOption: { minHeight: 40, justifyContent: "center", borderWidth: 1, borderColor: "#CDE3DC", borderRadius: 10, paddingHorizontal: 11, backgroundColor: "#FAFBF7" },
   statusSelected: { backgroundColor: "#D6E9D9", borderColor: "#2F6B4F" }, statusText: { color: "#52665A" }, statusTextSelected: { color: "#2F6B4F", fontWeight: "700" },
   photoActions: { flexDirection: "row", gap: 9 }, secondary: { minHeight: 46, flexGrow: 1, flexBasis: 130, borderWidth: 1, borderColor: "#AFCBB7", borderRadius: 11, backgroundColor: "#E8EDDA", flexDirection: "row", gap: 7, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 }, secondaryText: { color: "#2F6B4F", fontWeight: "700" },
-  photoPreview: { width: 120, height: 120, borderRadius: 13, overflow: "visible", position: "relative" }, photo: { width: "100%", height: "100%", borderRadius: 13 }, removePhoto: { position: "absolute", top: -7, right: -7, width: 34, height: 34, borderRadius: 17, backgroundColor: "#A34436", alignItems: "center", justifyContent: "center" },
+  photoPreview: { width: 120, height: 120, borderRadius: 13, overflow: "visible", position: "relative" }, photo: { width: "100%", height: "100%", borderRadius: 13 }, removePhoto: { position: "absolute", top: -7, right: -7, width: 44, height: 44, borderRadius: 11, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4", alignItems: "center", justifyContent: "center" },
   approvalInfo: { backgroundColor: "#F5F8F1", borderRadius: 11, padding: 12, gap: 5 }, approvalTitle: { color: "#2F6B4F", fontWeight: "700" }, error: { color: "#A34436", lineHeight: 21 },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 9 }, primary: { flexGrow: 1, flexBasis: 220, minHeight: 48, alignItems: "center", justifyContent: "center", paddingHorizontal: 14, borderRadius: 12, backgroundColor: "#2F6B4F" }, primaryText: { color: "#FFFFFF", fontWeight: "700" }, cancel: { flexGrow: 1, flexBasis: 130, minHeight: 48, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#AFCBB7", borderRadius: 12, backgroundColor: "#E8EDDA" }, cancelText: { color: "#2F6B4F", fontWeight: "700" },
 });

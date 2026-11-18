@@ -12,8 +12,8 @@ export function getPlantLocationDisplay(location, role) {
 
   const latitude = location?.latitude;
   const longitude = location?.longitude;
-  const hasPair = latitude !== null && latitude !== undefined && latitude !== "" &&
-    longitude !== null && longitude !== undefined && longitude !== "" &&
+  const hasPair = latitude !== null && latitude !== undefined && typeof latitude !== "boolean" && String(latitude).trim() !== "" &&
+    longitude !== null && longitude !== undefined && typeof longitude !== "boolean" && String(longitude).trim() !== "" &&
     Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude)) &&
     Math.abs(Number(latitude)) <= 90 && Math.abs(Number(longitude)) <= 180;
 

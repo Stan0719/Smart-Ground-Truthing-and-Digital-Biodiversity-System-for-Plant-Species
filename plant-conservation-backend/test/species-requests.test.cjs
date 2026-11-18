@@ -82,7 +82,31 @@ test("species proposals remain separate from plants until officer approval", asy
   await t.test("retries are idempotent, altered retries and duplicate names fail", async () => {
     assert.equal((await call("/species-requests", "bot", "POST", proposal)).data.species_request.request_id, requestId);
     assert.equal((await call("/species-requests", "bot", "POST", { ...proposal, common_name: "Changed" })).status, 409);
-    assert.equal((await call("/species-requests", "other", "POST", { ...proposal, scientific_name: " NEPENTHES MIRABILIS ", client_key: "other" })).status, 409);
+    const ownDuplicate = await call("/species-requests", "bot", "POST", { ...proposal,
+      scientific_name: " NEPENTHES   MIRABILIS ", client_key: "own-normalized-duplicate" });
+    assert.equal(ownDuplicate.status, 409);
+    assert.equal(ownDuplicate.data.code, "SPECIES_DUPLICATE_PENDING");
+    assert.equal(String(ownDuplicate.data.request_id), String(requestId));
+    const privateDuplicate = await call("/species-requests", "other", "POST", { ...proposal,
+      scientific_name: " NEPENTHES MIRABILIS ", client_key: "other" });
+    assert.equal(privateDuplicate.status, 409);
+    assert.equal(privateDuplicate.data.code, "SPECIES_DUPLICATE_PENDING");
+    assert.equal(privateDuplicate.data.request_id, undefined, "do not reveal another Botanist's request identifier");
+    assert.equal(privateDuplicate.data.request_status, undefined);
+    await pool.query("UPDATE species_request_submission SET request_status='Correction Required' WHERE request_id=$1", [requestId]);
+    const correctionDuplicate = await call("/species-requests", "bot", "POST", { ...proposal,
+      scientific_name: "Nepenthes MIRABILIS", client_key: "correction-duplicate" });
+    assert.equal(correctionDuplicate.status, 409);
+    assert.equal(correctionDuplicate.data.code, "SPECIES_DUPLICATE_CORRECTION");
+    assert.equal(String(correctionDuplicate.data.request_id), String(requestId));
+    const privateCorrection = await call("/species-requests", "other", "POST", { ...proposal,
+      scientific_name: "Nepenthes mirabilis", client_key: "private-correction-duplicate" });
+    assert.equal(privateCorrection.status, 409);
+    assert.equal(privateCorrection.data.code, "SPECIES_DUPLICATE_PENDING");
+    assert.equal(privateCorrection.data.duplicate_type, "pending");
+    assert.equal(privateCorrection.data.request_id, undefined);
+    assert.equal(privateCorrection.data.request_status, undefined);
+    await pool.query("UPDATE species_request_submission SET request_status='Pending Review' WHERE request_id=$1", [requestId]);
   });
   await t.test("ownership and officer-only review are enforced", async () => {
     assert.equal((await call("/species-requests", "visitor", "POST", proposal)).status, 403);
@@ -113,6 +137,11 @@ test("species proposals remain separate from plants until officer approval", asy
     assert.equal((await pool.query("SELECT * FROM plant_record")).rows.length, 0);
     assert.equal((await call(`/species-requests/${requestId}/review`, "officer", "POST", { decision: "Approved", comment: "Again", visibility: "internal" })).status, 409);
     assert.equal((await call("/species-requests", "other", "POST", { ...proposal, client_key: "duplicate" })).status, 409);
+    const normalizedDuplicate = await call("/species-requests", "bot", "POST", { ...proposal,
+      scientific_name: "  NEPENTHES   MIRABILIS  ", client_key: "normalized-duplicate" });
+    assert.equal(normalizedDuplicate.status, 409);
+    assert.equal(normalizedDuplicate.data.code, "SPECIES_DUPLICATE_APPROVED");
+    assert.equal(String(normalizedDuplicate.data.species_id), String(speciesId));
     assert.equal((await call("/species", "officer", "POST", { scientific_name: proposal.scientific_name.toUpperCase(), common_name: "Another common name", description: "Duplicate", visibility: "public" })).status, 409);
   });
   await t.test("plant registration keeps species FK, QR assignment, location, photo upload and pending observation submission", async () => {
@@ -147,5 +176,38 @@ test("species proposals remain separate from plants until officer approval", asy
     assert.equal(review.status, 200);
     assert.equal(review.data.species_request.approved_species_id, null);
     assert.equal((await pool.query("SELECT * FROM species")).rows.length, 1);
+  });
+  await t.test("concurrent normalized duplicate submissions create only one active request", async () => {
+    const requests = await Promise.all([
+      call("/species-requests", "bot", "POST", { ...proposal, scientific_name: "Concurrent exact species", client_key: "concurrent-a" }),
+      call("/species-requests", "bot", "POST", { ...proposal, scientific_name: "  CONCURRENT   EXACT SPECIES  ", client_key: "concurrent-b" }),
+    ]);
+    assert.deepEqual(requests.map((result) => result.status).sort(), [201, 409]);
+    assert.equal((await pool.query("SELECT count(*)::integer AS count FROM species_request_submission WHERE lower(regexp_replace(btrim(normalize(scientific_name,NFC)),'[[:space:]]+',' ','g'))=lower(regexp_replace(btrim(normalize('Concurrent exact species',NFC)),'[[:space:]]+',' ','g')) AND request_status='Pending Review'")).rows[0].count, 1);
+  });
+  await t.test("a rejected request does not block a new active request with the same normalized name", async () => {
+    const rejected = await call("/species-requests", "bot", "POST", { ...proposal, scientific_name: "Rejected name retry", client_key: "rejected-before" });
+    assert.equal(rejected.status, 201, JSON.stringify(rejected.data));
+    await pool.query("UPDATE species_request_submission SET request_status='Rejected' WHERE request_id=$1", [rejected.data.species_request.request_id]);
+    const retry = await call("/species-requests", "bot", "POST", { ...proposal, scientific_name: " REJECTED   NAME RETRY ", client_key: "rejected-after" });
+    assert.equal(retry.status, 201, JSON.stringify(retry.data));
+    assert.notEqual(String(retry.data.species_request.request_id), String(rejected.data.species_request.request_id));
+  });
+  await t.test("database duplicate lookup treats canonically equivalent Unicode names as equal", async () => {
+    const composed = await call("/species-requests", "bot", "POST", { ...proposal,
+      scientific_name: "Café plant", client_key: "unicode-composed" });
+    assert.equal(composed.status, 201, JSON.stringify(composed.data));
+    const decomposed = await call("/species-requests", "bot", "POST", { ...proposal,
+      scientific_name: "Cafe\u0301 plant", client_key: "unicode-decomposed" });
+    assert.equal(decomposed.status, 409);
+    assert.equal(decomposed.data.code, "SPECIES_DUPLICATE_PENDING");
+    assert.equal(String(decomposed.data.request_id), String(composed.data.species_request.request_id));
+    const spaced = await call("/species-requests", "bot", "POST", { ...proposal,
+      scientific_name: "Agave sisalana", client_key: "unicode-space-base" });
+    assert.equal(spaced.status, 201, JSON.stringify(spaced.data));
+    const nonBreakingSpace = await call("/species-requests", "bot", "POST", { ...proposal,
+      scientific_name: "Agave\u00a0sisalana", client_key: "unicode-space-duplicate" });
+    assert.equal(nonBreakingSpace.status, 409);
+    assert.equal(nonBreakingSpace.data.code, "SPECIES_DUPLICATE_PENDING");
   });
 });

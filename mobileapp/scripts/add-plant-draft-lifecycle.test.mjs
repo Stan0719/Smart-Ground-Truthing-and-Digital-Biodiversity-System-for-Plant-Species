@@ -1,8 +1,10 @@
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation.js";
+import { validateSpeciesRequest, validatePlantDetails, validatePlantGps } from "../utils/addPlantValidation.js";
+import { normalizeSpeciesName } from "../utils/speciesNameNormalization.js";
 
 const require = createRequire(import.meta.url), React = require("react"), ts = require("typescript");
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -53,7 +55,8 @@ function environment() {
       h.effects.push({ layout, run() { prior?.cleanup?.(); h.cells[index] = { deps, effect, cleanup: effect() }; } });
     }
   }
-  const native = { StyleSheet: { create: (styles) => styles }, Alert: { alert: (...args) => alerts.push(args) }, AppState: { addEventListener: () => ({ remove() {} }) } };
+  const native = { StyleSheet: { create: (styles) => styles }, Alert: { alert: (...args) => alerts.push(args) },
+    useWindowDimensions: () => ({ height: 900, width: 400 }), AppState: { addEventListener: () => ({ remove() {} }) } };
   for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "ScrollView", "ActivityIndicator", "Image"]) native[name] = name;
   const fs = { documentDirectory: "file:///private/", EncodingType: { Base64: "base64" }, readAsStringAsync: async () => "cGhvdG8=",
     makeDirectoryAsync: async () => {}, getInfoAsync: async (uri) => ({ exists: files.has(uri) || !uri.startsWith("file:///private/"), isDirectory: false }),
@@ -70,10 +73,11 @@ function environment() {
     "@react-navigation/native": { useFocusEffect: (callback) => { const h = rendering; hooks.useEffect(() => { h.focusListeners.add(callback); const cleanup = callback(); return () => { cleanup?.(); h.focusListeners.delete(callback); }; }, [callback]); } },
     "expo-location": {}, "expo-image-picker": {}, "expo-file-system/legacy": fs,
     "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" },
-    "../components/RefreshButton": { default: "RefreshButton" }, "../components/fieldFormStyles": { fieldFormStyles: {} },
-    "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails },
+    "../components/RefreshButton": { default: "RefreshButton" }, "../components/GpsLocationPicker": { default: "GpsLocationPicker" }, "../utils/gpsLocation": { validGpsPoint, readGpsLocation }, "../components/fieldFormStyles": { fieldFormStyles: {} },
+    "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails, validatePlantGps },
+    "../utils/speciesNameNormalization": { normalizeSpeciesName },
     "../utils/botanistFormDrafts": draftApi, "../utils/botanistDraftAutosave": autosave,
-    "../utils/plantApi": { fetchSpeciesCatalog: async () => [species], plantApi: async (path, options) => {
+    "../utils/plantApi": { fetchSpeciesCatalog: async () => [species], fetchSpeciesDetail: async () => species, plantApi: async (path, options) => {
       if (path === "/plant-submissions") { calls.push(options.body); if (failSubmit) throw Error("submission failed"); return { plant_id: 42, qr_token: "qr-42" }; }
       return { qr_codes: [{ qr_id: 17, status: "generated", plant_id: null }] };
     } },

@@ -13,7 +13,7 @@ function fixture(api = async () => ({ user })) {
   let saved = null; const events = [];
   const manager = createFaceSessionManager({ backend: "https://api.example.invalid/api/mobile", validUser: (v) => v?.id === user.id, api,
     storage: { get: async () => saved, set: async (_, v) => { saved = v; }, remove: async () => { saved = null; } }, diagnostic: (e) => events.push(e) });
-  return { manager, events, seed: (value) => { saved = JSON.stringify(value); } };
+  return { manager, events, seed: (value) => { saved = JSON.stringify(value); }, stored: () => saved };
 }
 test("missing credentials emit signed-out state and typed authentication error before any plant request", async () => {
   const { manager, events } = fixture(); let called = false, state;
@@ -38,14 +38,33 @@ test("parallel dashboard requests share verification but each retain bearer and 
   await tick(); assert.equal(checks, 2); gate.resolve();
   assert.deepEqual(await Promise.all(requests), ["true:owner", "true:owner", "true:owner"]);
 });
-test("network failures preserve credentials; authoritative rejection and logout invalidate observers", async () => {
+test("only a definitive authentication rejection and manual logout invalidate credentials", async () => {
   let failure; const { manager } = fixture(async () => { if (failure) throw failure; return { user }; });
   await manager.establish({ token, user }); let invalidations = 0; manager.subscribe((e) => { if (!e.authenticated) invalidations++; });
   failure = Object.assign(Error("Offline"), { transient: true }); await assert.rejects(manager.withToken(() => {}));
   assert.equal(manager.hasSession(), true); assert.equal(invalidations, 0);
-  failure = Object.assign(Error("Expired"), { status: 401 }); await assert.rejects(manager.withToken(() => {}));
+  failure = Object.assign(Error("Expired"), { status: 401, code: "AUTH_SESSION_INVALID" }); await assert.rejects(manager.withToken(() => {}));
   assert.equal(manager.hasSession(), false); assert.equal(invalidations, 1);
   failure = null; await manager.establish({ token, user }); await manager.logout(); assert.equal(invalidations, 2);
+});
+test("authorization and service failures never erase a saved login", async () => {
+  let failure; const { manager, stored } = fixture(async () => { if (failure) throw failure; return { user }; });
+  await manager.establish({ token, user }); const invalidations = [];
+  manager.subscribe((event) => { if (!event.authenticated) invalidations.push(event.reason); });
+  for (const error of [
+    Object.assign(Error("Forbidden"), { status: 403 }),
+    Object.assign(Error("Gateway login"), { status: 401, code: "API_HTTP_ERROR" }),
+    Object.assign(Error("Service unavailable"), { status: 503 }),
+    Object.assign(Error("Rate limited"), { status: 429 }),
+    Error("Unexpected verification response"),
+  ]) {
+    failure = error;
+    await assert.rejects(manager.restore());
+    assert.equal(manager.hasSession(), true);
+    assert.equal(JSON.parse(stored()).token, token);
+  }
+  assert.deepEqual(invalidations, []);
+  failure = null; assert.equal((await manager.restore()).id, user.id);
 });
 test("restore cannot reload a token while logout is deleting secure storage", async () => {
   let saved, gate;
@@ -57,26 +76,64 @@ test("restore cannot reload a token while logout is deleting secure storage", as
 });
 
 const app = readFileSync(new URL("../App.js", import.meta.url), "utf8");
-let effect;
+let restoreEffect, sessionEffect;
 traverse(parser.parse(app, { sourceType: "module", plugins: ["jsx"] }), { CallExpression(path) {
-  if (path.node.callee.name === "useEffect" && generate(path.node.arguments[0]).code.includes("faceSession.subscribe")) effect = generate(path.node.arguments[0]).code;
+  if (path.node.callee.name !== "useEffect") return;
+  const code = generate(path.node.arguments[0]).code;
+  if (code.includes("setRestoringSession(false)")) restoreEffect = code;
+  if (code.includes("faceSession.subscribe")) sessionEffect = code;
 } });
-function runAppEffect(restore) {
-  assert.ok(effect); let current = user, resets = [], subscriber, removed = false;
-  const session = { hasSession: () => false, restore, subscribe: (fn) => { subscriber = fn; return () => { removed = true; }; } };
+function runRestoreEffect(restore) {
+  assert.ok(restoreEffect);
+  let current = null, restoring = true, resets = [];
+  const navigation = { isReady: () => true, reset: (value) => resets.push(value) };
+  const applyServerUser = (verifiedUser) => {
+    current = verifiedUser;
+    navigation.reset({ index: 0, routes: [{ name: "MainTabs" }] });
+  };
+  const fn = new Function("faceSession", "navigationRef", "authGeneration", "applyServerUser", "setRestoringSession", `return (${restoreEffect});`)(
+    { hasSession: () => false, restore }, navigation, { current: 0 }, applyServerUser, (value) => { restoring = value; },
+  );
+  const cleanup = fn();
+  return { user: () => current, restoring: () => restoring, resets, cleanup };
+}
+function runSessionEffect(restore, initialUser = user) {
+  assert.ok(sessionEffect);
+  let current = initialUser, subscriber, removeListener, timerCallback, removed = false;
+  const userRef = { current: initialUser };
+  const resets = [];
+  const session = { restore, subscribe: (fn) => { subscriber = fn; return () => { removed = true; }; } };
   const navigation = { isReady: () => true, getCurrentRoute: () => ({ name: "AccountTab" }), reset: (value) => resets.push(value) };
-  const fn = new Function("faceSession", "navigationRef", "authGeneration", "setUser", "AppState", "setInterval", "clearInterval", `return (${effect});`)(session, navigation, { current: 0 }, (v) => { current = v; }, { addEventListener: () => ({ remove: () => {} }) }, () => 1, () => {});
-  const cleanup = fn(); return { user: () => current, resets, emit: (event) => subscriber(event), cleanup, removed: () => removed };
+  const fn = new Function("faceSession", "navigationRef", "authGeneration", "userRef", "setUser", "AppState", "setInterval", "clearInterval", `return (${sessionEffect});`)(
+    session, navigation, { current: 0 }, userRef, (value) => { current = value; },
+    { addEventListener: (_event, listener) => { removeListener = () => {}; return { remove: () => removeListener() }; } },
+    (callback) => { timerCallback = callback; return 1; }, () => {},
+  );
+  const cleanup = fn();
+  return {
+    user: () => current, resets,
+    revalidate: () => timerCallback(),
+    emit: (event) => subscriber(event),
+    cleanup,
+    removed: () => removed,
+  };
 }
 test("actual App effect checks persistent storage even when in-memory hasSession is false", async () => {
-  let reads = 0; const live = runAppEffect(async () => { reads++; return user; }); await tick();
-  assert.equal(reads, 1); assert.equal(live.user(), user); assert.equal(live.resets.length, 0); live.cleanup(); assert.equal(live.removed(), true);
+  let reads = 0; const live = runRestoreEffect(async () => { reads++; return user; }); await tick();
+  assert.equal(reads, 1); assert.equal(live.user(), user); assert.equal(live.restoring(), false);
+  assert.equal(live.resets.length, 1); live.cleanup();
 });
-test("actual App effect removes stale dashboard identity for missing/rejected sessions, not network failures", async () => {
-  for (const restore of [async () => null, async () => { throw Object.assign(Error("Expired"), { status: 401 }); }]) {
-    const live = runAppEffect(restore); await tick(); assert.equal(live.user(), null); assert.equal(live.resets[0].routes[0].name, "Login"); live.cleanup();
+test("foreground revalidation removes stale identity for missing/rejected sessions, but preserves it on network failure", async () => {
+  for (const restore of [async () => null, async () => { throw Object.assign(Error("Expired"), { status: 401, code: "AUTH_SESSION_INVALID" }); }]) {
+    const live = runSessionEffect(restore); await live.revalidate();
+    assert.equal(live.user(), null); assert.equal(live.resets[0].routes[0].name, "Login"); live.cleanup();
   }
-  const network = runAppEffect(async () => { throw Object.assign(Error("Offline"), { transient: true }); }); await tick();
+  const network = runSessionEffect(async () => { throw Object.assign(Error("Offline"), { transient: true }); }); await network.revalidate();
   assert.equal(network.user(), user); assert.equal(network.resets.length, 0);
-  network.emit({ authenticated: false, reason: "cleared" }); assert.equal(network.user(), null); network.cleanup();
+  const forbidden = runSessionEffect(async () => { throw Object.assign(Error("Forbidden"), { status: 403 }); }); await forbidden.revalidate();
+  assert.equal(forbidden.user(), user); assert.equal(forbidden.resets.length, 0);
+  const gateway = runSessionEffect(async () => { throw Object.assign(Error("Gateway login"), { status: 401, code: "API_HTTP_ERROR" }); }); await gateway.revalidate();
+  assert.equal(gateway.user(), user); assert.equal(gateway.resets.length, 0);
+  network.emit({ authenticated: false, reason: "cleared" }); assert.equal(network.user(), null);
+  assert.equal(network.resets[0].routes[0].name, "Login"); network.cleanup(); assert.equal(network.removed(), true);
 });

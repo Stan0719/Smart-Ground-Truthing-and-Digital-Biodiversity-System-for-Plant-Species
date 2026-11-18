@@ -36,10 +36,10 @@ test('Expo recovery screen keeps the existing endpoints and provides localized r
  assert.match(screen,/heroIcon/);
  assert.match(screen,/styles\.formCard/);
  assert.match(screen,/styles\.primaryButton/);
- assert.match(screen,/variant="plain"/,'compact shared chevron link');
+ assert.match(screen,/variant="dark"/,'dark-theme shared chevron button');
  assert.match(screen,/backLink:\s*\{[^}]*alignSelf:\s*"flex-start"/,'Back link aligns to the card edge');
- assert.match(screen,/backgroundColor:\s*"#FFFFFF"/,'light card surface');
- assert.match(screen,/textAlign:\s*"left"/,'left aligned form content');
+ assert.match(screen,/backgroundColor:\s*"#2B5651"/,'shared dark green authentication card');
+ assert.match(screen,/color:\s*"#FFF6DC"/,'cream authentication heading and fields');
  for(const language of ['en','ms','zh']) {
   const catalogue=JSON.parse(readFileSync(new URL(`../translations/${language}.json`,import.meta.url),'utf8'));
   for(const key of ['forgotPasswordHeading','recoveryIntro','recoveryStepTitle','passwordUpdatedTitle','rememberYourPassword','signIn'])
@@ -53,7 +53,7 @@ test('Expo recovery card stays compact and centered at phone and tablet widths',
  const scrollStyle=screen.match(/scrollContent:\s*\{([^}]*)\}/)?.[1]||'';
  const maxWidth=Number(pageStyle.match(/maxWidth:\s*(\d+)/)?.[1]);
  const sidePadding=Number(scrollStyle.match(/paddingHorizontal:\s*(\d+)/)?.[1]);
- assert.equal(maxWidth,420,'tablet card cap');
+ assert.equal(maxWidth,390,'matches Login card width on tablets');
  assert.equal(sidePadding,20,'comfortable viewport margins');
  assert.match(pageStyle,/alignSelf:\s*"center"/);
  assert.doesNotMatch(pageStyle,/flexGrow|minHeight/,'card height must follow its content');
@@ -61,7 +61,7 @@ test('Expo recovery card stays compact and centered at phone and tablet widths',
  assert.match(scrollStyle,/justifyContent:\s*"center"/);
  const cardWidth=(viewportWidth)=>Math.min(maxWidth,viewportWidth-(sidePadding*2));
  assert.equal(cardWidth(375),335,'iPhone card leaves 20pt side margins');
- assert.equal(cardWidth(834),420,'iPad card uses a wider cap and remains centered');
+ assert.equal(cardWidth(834),390,'iPad card matches Login width and remains centered');
  assert.match(screen,/behavior=\{Platform\.OS === "ios" \? "padding"/,'iPhone keyboard resizes the available form viewport');
  assert.match(screen,/keyboardShouldPersistTaps="handled"/);
 });

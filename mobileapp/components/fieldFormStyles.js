@@ -15,8 +15,10 @@ export const fieldFormStyles = StyleSheet.create({
   photoButtonRow: { flexDirection: "row", gap: 10, marginTop: 5 },
   photoButton: { flex: 1, minHeight: 46, borderRadius: 12, backgroundColor: "#EAF6E7", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#D5E8D1" },
   photoButtonText: { color: "#2F6B4F", fontSize: 13, fontWeight: "700" },
+  qrRefreshButton: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingHorizontal: 12, borderWidth: 1, borderColor: "#CDE3DC", borderRadius: 12, backgroundColor: "#EFF8F4", marginTop: 6, marginBottom: 8 },
+  qrRefreshText: { color: "#28665E", fontSize: 14, fontWeight: "700" },
   photoPreview: { width: 112, height: 112, borderRadius: 10, backgroundColor: "#E8EEE6" },
-  removePhotoButton: { position: "absolute", top: -6, right: -6, width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E0EADF", elevation: 2 },
+  removePhotoButton: { position: "absolute", top: -6, right: -6, width: 44, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4" },
   submitButton: { minHeight: 48, borderRadius: 12, backgroundColor: "#2F6B4F", alignItems: "center", justifyContent: "center" },
   submitButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700", textAlign: "center" },
 });

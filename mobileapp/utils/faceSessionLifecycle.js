@@ -74,11 +74,15 @@ export function createFaceSessionManager({ storage, api, backend, validUser, now
           const transient=error.transient===true||[502,503,504].includes(error.status);
           if(transient){
             if(!allowOffline)throw error;
-            const time=now();if(!lease||!validUser(lease.user)||lease.user.role!=='botanist'||!Number.isFinite(lease.verifiedAt)||time<lease.verifiedAt||time<lastSeen||time-lease.verifiedAt>=15*60*1000){await clear();throw error}
+            const time=now();if(!lease||!validUser(lease.user)||lease.user.role!=='botanist'||!Number.isFinite(lease.verifiedAt)||time<lease.verifiedAt||time<lastSeen||time-lease.verifiedAt>=15*60*1000)throw error;
             if(!unlocked){if(!await authorizeOffline()){throw Error('Unlock your device to access offline drafts.')}unlocked=true}
-            if(attempt!==generation)return null;if(!lease||now()<time||now()-lease.verifiedAt>=15*60*1000){await clear();throw error}lastSeen=now();return {...lease.user,offline:true};
+            if(attempt!==generation)return null;if(!lease||now()<time||now()-lease.verifiedAt>=15*60*1000)throw error;lastSeen=now();return {...lease.user,offline:true};
           }
-          await clear("verification_rejected");throw error;
+          // Only the account service's explicit authentication rejection proves
+          // this credential is invalid. Authorization denials, server errors,
+          // malformed responses and transport failures must not erase it.
+          if(error.code==="AUTH_SESSION_INVALID")await clear("verification_rejected");
+          throw error;
         }
         return null;
       }

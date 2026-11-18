@@ -12,6 +12,7 @@ import { CardListSkeleton } from "../components/BotanicalSkeleton";
 
 function draftType(draft) {
   if (draft.kind === "botanist-form") return draft.form_type;
+  if (draft.method === "OBSERVATION_EDIT") return "observation-edit";
   if (draft.method === "PATCH") return "correct-observation";
   if (draft.path === "/plants") return "field-plant";
   return "observation";
@@ -21,7 +22,7 @@ export function draftCategory(draft) {
   if (["add-plant", "edit-plant", "field-plant"].includes(type)) return "plant-records";
   if (["add-species", "edit-species"].includes(type)) return "species-requests";
   if (type === "correct-observation") return "corrections";
-  if (type === "observation") return "observations";
+  if (["observation", "observation-edit"].includes(type)) return "observations";
   return "other";
 }
 export function filterBotanistDrafts(drafts, category = "all", query = "") {
@@ -32,7 +33,7 @@ export function filterBotanistDrafts(drafts, category = "all", query = "") {
 function draftLabel(draft) {
   const keys = { "add-plant": "botanistDrafts.addPlant", "add-species": "botanistDrafts.addSpecies", "edit-plant": "botanistDrafts.editPlant",
     "edit-species": "botanistDrafts.editSpecies", "correct-observation": "botanistDrafts.correctObservation",
-    "field-plant": "botanistDrafts.fieldPlant", observation: "botanistDrafts.observation" };
+    "field-plant": "botanistDrafts.fieldPlant", observation: "botanistDrafts.observation", "observation-edit": "observationEdits.editObservation" };
   return t(keys[draftType(draft)] || "botanistDrafts.observation");
 }
 function draftDescription(draft) {
@@ -84,11 +85,11 @@ export default function BotanistMyDrafts({ route, navigation }) {
     if (draft.kind === "botanist-form") {
       if (draft.form_type === "add-plant") navigation.navigate("AddPlant", { botanist, formDraftKey: draft.client_key });
       else if (draft.form_type === "add-species") navigation.navigate("AddSpeciesRequest", { botanist, formDraftKey: draft.client_key });
-      else if (draft.form_type === "edit-plant") navigation.navigate("EditPlant", { botanist, plantId: draft.target_id, formDraftKey: draft.client_key });
-      else if (draft.form_type === "edit-species") navigation.navigate("EditSpeciesRequest", { botanist, requestId: String(draft.target_id), formDraftKey: draft.client_key });
+      else if (draft.form_type === "edit-plant") navigation.navigate("EditPlant", { botanist, plantId: draft.target_id, formDraftKey: draft.client_key, ...(draft.correction_change_id ? { correctionChangeId: draft.correction_change_id, correction: true } : {}) });
+      else if (draft.form_type === "edit-species") navigation.navigate("EditSpeciesRequest", { botanist, requestId: String(draft.target_id), formDraftKey: draft.client_key, ...(draft.correction_change_id ? { correctionChangeId: draft.correction_change_id, correction: true } : {}) });
       return;
     }
-    navigation.navigate(draft.method === "PATCH" ? "FieldCollectionEdit" : draft.path === "/plants" ? "FieldCollectionPlant" : "FieldCollection", { botanist, draft });
+    navigation.navigate(["PATCH", "OBSERVATION_EDIT"].includes(draft.method) ? "FieldCollectionEdit" : draft.path === "/plants" ? "FieldCollectionPlant" : "FieldCollection", { botanist, draft });
   }, [route.params?.botanist, navigation]);
   useEffect(() => {
     const draftKey = route.params?.openDraftKey;
@@ -118,7 +119,6 @@ export default function BotanistMyDrafts({ route, navigation }) {
   const categories = ["all", "plant-records", "species-requests", "observations", "corrections"];
 
   return <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
-    <Text accessibilityRole="text">{t("recordEdits.draftFinal")}</Text>
     <ScrollView contentContainerStyle={[styles.content, tablet && styles.tabletContent]}
       refreshControl={<RefreshControl refreshing={state.loading} onRefresh={() => { void load(); }} tintColor="#2F6B4F" />}>
       <View style={styles.header}>
@@ -156,7 +156,7 @@ export default function BotanistMyDrafts({ route, navigation }) {
             {(draft.photo_refs?.length || draft.assets?.length) > 0 && <Text style={styles.photoCount}>{t("botanistDrafts.photoCount", { count: draft.photo_refs?.length || draft.assets?.length })}</Text>}
             <View style={styles.actions}>
               <TouchableOpacity style={styles.resume} onPress={() => resume(draft)} accessibilityRole="button"><Ionicons name="play-outline" size={17} color="#FFFFFF" /><Text style={styles.resumeText}>{t("botanistDrafts.resume")}</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.delete} onPress={() => confirmDelete(draft)} accessibilityRole="button" accessibilityLabel={t("fieldCollection.deleteDraft")}><Ionicons name="trash-outline" size={18} color="#A34436" /><Text style={styles.deleteText}>{t("fieldCollection.deleteDraft")}</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.delete} onPress={() => confirmDelete(draft)} accessibilityRole="button" accessibilityLabel={t("fieldCollection.deleteDraft")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
             </View>
           </View>)}
     </ScrollView>
@@ -172,6 +172,6 @@ const styles = StyleSheet.create({
   filterChipSelected: { backgroundColor: "#D6E9D9", borderColor: "#2F6B4F" }, filterLabel: { color: "#64766B", fontSize: 12 }, filterLabelSelected: { color: "#2F6B4F", fontWeight: "700" },
   resultCount: { color: "#64766B", fontSize: 12, marginTop: -5 },
   card: { padding: 15, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCEBDD", borderRadius: 17, marginBottom: 2 }, cardTop: { flexDirection: "row", alignItems: "center", gap: 10 }, icon: { width: 42, height: 42, borderRadius: 13, backgroundColor: "#E8EDDA", alignItems: "center", justifyContent: "center" }, cardHeading: { flex: 1, minWidth: 0 }, formType: { color: "#2F6B4F", fontSize: 15, fontWeight: "750" }, identifier: { color: "#66776C", fontSize: 13, marginTop: 3 }, status: { backgroundColor: "#F5EBD6", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10 }, statusText: { color: "#77501D", fontSize: 11, fontWeight: "700" },
-  date: { color: "#718078", fontSize: 12, marginTop: 11 }, photoCount: { color: "#718078", fontSize: 12, marginTop: 5 }, actions: { flexDirection: "row", gap: 9, marginTop: 13 }, resume: { flex: 1, minHeight: 44, borderRadius: 11, backgroundColor: "#2F6B4F", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 }, resumeText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" }, delete: { minHeight: 44, paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: "#E5C8C3", backgroundColor: "#FFF8F6", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }, deleteText: { color: "#A34436", fontSize: 12, fontWeight: "700" },
+  date: { color: "#718078", fontSize: 12, marginTop: 11 }, photoCount: { color: "#718078", fontSize: 12, marginTop: 5 }, actions: { flexDirection: "row", gap: 9, marginTop: 13 }, resume: { flex: 1, minHeight: 44, borderRadius: 11, backgroundColor: "#2F6B4F", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 }, resumeText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" }, delete: { width: 44, height: 44, borderRadius: 11, borderWidth: 1, borderColor: "#F2B9B4", backgroundColor: "#FDE9E7", alignItems: "center", justifyContent: "center" },
   empty: { padding: 28, minHeight: 150, alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 16, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCEBDD" }, emptyTitle: { color: "#2F6B4F", fontSize: 16, fontWeight: "700", textAlign: "center" }, muted: { color: "#718078", textAlign: "center", lineHeight: 20 }, errorBox: { padding: 13, backgroundColor: "#FFF2EB", borderRadius: 12 }, errorText: { color: "#A34436", lineHeight: 20 }, retry: { minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 3 }, retryText: { color: "#2F6B4F", fontWeight: "700" },
 });

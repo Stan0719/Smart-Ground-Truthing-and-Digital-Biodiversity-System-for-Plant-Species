@@ -279,6 +279,16 @@ test("subsequent observations may omit GPS, but new plant registration requires 
   assert.equal(checked.body.longitude, 114.1);
 });
 
+test("optional Observation altitude uses the existing payload, including zero, without requiring GPS", () => {
+  const observation = validDraft();
+  observation.body.content.altitudeM = "0";
+  const checked = validate(observation);
+  assert.equal(checked.body.content.altitudeM, 0);
+  assert.equal(checked.body.content.latitude, undefined);
+  const empty = validDraft(); empty.body.content.altitudeM = "";
+  assert.equal(validate(empty).body.content.altitudeM, undefined);
+});
+
 test("invalid coordinates and correction revision metadata fail validation without losing multiline taxonomy", () => {
   const badGps = validDraft();
   badGps.body.content.latitude = "91";

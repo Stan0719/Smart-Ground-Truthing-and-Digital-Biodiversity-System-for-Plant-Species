@@ -18,8 +18,6 @@ const migration = (name) => readFileSync(join(__dirname, "../migrations", name),
 test("private startup inspection uses the supplied scoped pool, not SQL Editor state", async (t) => {
   const raw = await createPlantDatabase();
   t.after(() => raw.end());
-  await raw.query("CREATE SCHEMA plant_app; SET search_path TO plant_app,pg_catalog;");
-  await raw.query(readFileSync(join(__dirname, "../schema.postgres.sql"), "utf8"));
   for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql",
     "008-record-change-submissions.sql", "009-record-version-history.sql"])
     await raw.query(migration(name));
@@ -252,7 +250,7 @@ test("production startup opts in before listening and closes existing resources 
     const events = [];
     const pool = { query: async () => events.push("preflight"), end: async () => events.push("pool-closed") };
     const auth = { db: { close: async () => events.push("auth-closed") } };
-    const run = new AsyncFunction("auth", "pool", "process", "require", "speciesPhotoWritesRequested", code);
+    const run = new AsyncFunction("auth", "pool", "process", "require", "speciesPhotoWritesRequested", "qrPlantRecord", code);
     const result = run(auth, pool, { argv: enabled ? ["--verify-species-photo-startup"] : [] }, () => ({
       verifySpeciesPhotoStartup: async (options) => {
         assert.equal(options.pool, pool);
@@ -260,13 +258,13 @@ test("production startup opts in before listening and closes existing resources 
         events.push("diagnostic");
         throw Object.assign(Error("Expected offline failure"), { code: "PHOTO_STARTUP_CHECK_FAILED" });
       },
-    }), () => false);
+    }), () => false, "plant_app.plant_record");
     if (enabled) {
       await assert.rejects(result, { code: "PHOTO_STARTUP_CHECK_FAILED" });
       assert.deepEqual(events, ["diagnostic", "auth-closed", "pool-closed"]);
     } else {
       await result;
-      assert.deepEqual(events, ["preflight", "preflight", "preflight", "preflight"]);
+      assert.deepEqual(events, ["preflight", "preflight", "preflight", "preflight", "preflight"]);
     }
   }
 });

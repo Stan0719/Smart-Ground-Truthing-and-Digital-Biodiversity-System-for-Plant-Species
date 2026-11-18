@@ -7,6 +7,7 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  useWindowDimensions,
   StyleSheet,
   Alert,
   ActivityIndicator,
@@ -19,12 +20,16 @@ import * as FileSystem from "expo-file-system/legacy";
 import QRCode from "react-native-qrcode-svg";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import RefreshButton from "../components/RefreshButton";
+import GpsLocationPicker from "../components/GpsLocationPicker";
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
 import { fieldFormStyles } from "../components/fieldFormStyles";
-import { plantApi, fetchSpeciesCatalog } from "../utils/plantApi";
-import { validateSpeciesRequest, validatePlantDetails } from "../utils/addPlantValidation";
+import { plantApi, fetchSpeciesCatalog, fetchSpeciesDetail } from "../utils/plantApi";
+import { validateSpeciesRequest, validatePlantDetails, validatePlantGps } from "../utils/addPlantValidation";
+import { normalizeSpeciesName } from "../utils/speciesNameNormalization";
 import { useFocusEffect } from "@react-navigation/native";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft, hasMeaningfulAddPlantDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave, stopBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
+import SpeciesDictionary from "../components/SpeciesDictionary";
 
 const createPlantClientKey = () =>
   `plant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -105,6 +110,7 @@ export function AddPlantForm({
   onSubmitted,
 }) {
   useAppTranslation();
+  const { height: screenHeight } = useWindowDimensions();
 
   const botanist = route.params?.botanist;
   const accountId = botanist?.id;
@@ -124,22 +130,63 @@ export function AddPlantForm({
   const [showQRDropdown, setShowQRDropdown] = useState(false);
   const [loadingQRCodes, setLoadingQRCodes] = useState(true);
   const [qrLoadError, setQrLoadError] = useState("");
+  const qrLoadPromiseRef = useRef(null);
+  const [generatingQR, setGeneratingQR] = useState(false);
+  const generatingQRRef = useRef(false);
+  const [qrGenerationMessage, setQrGenerationMessage] = useState("");
+  const [qrGenerationFailed, setQrGenerationFailed] = useState(false);
 
-  const loadAvailableQRCodes = useCallback(async () => {
-    setLoadingQRCodes(true);
-    setQrLoadError("");
-    try {
-      const result = await plantApi("/qr-codes");
-      const codes = Array.isArray(result.qr_codes) ? result.qr_codes : [];
-      setAvailableQRCodes(codes.filter((code) => code.status === "generated" && code.plant_id == null));
-    } catch (error) {
-      setQrLoadError(
-        error instanceof Error ? error.message : "Could not load your QR inventory.",
-      );
-    } finally {
-      setLoadingQRCodes(false);
-    }
+  const loadAvailableQRCodes = useCallback(() => {
+    if (qrLoadPromiseRef.current) return qrLoadPromiseRef.current;
+    const pending = (async () => {
+      setLoadingQRCodes(true);
+      setQrLoadError("");
+      try {
+        const result = await plantApi("/qr-codes");
+        const codes = Array.isArray(result.qr_codes) ? result.qr_codes : [];
+        const available = codes.filter((code) => code.status === "generated" && code.plant_id == null);
+        setAvailableQRCodes(available);
+        return available;
+      } catch (error) {
+        setQrLoadError(error instanceof Error ? error.message : "Could not load your QR inventory.");
+        return null;
+      } finally {
+        setLoadingQRCodes(false);
+      }
+    })();
+    qrLoadPromiseRef.current = pending;
+    pending.then(() => { if (qrLoadPromiseRef.current === pending) qrLoadPromiseRef.current = null; });
+    return pending;
   }, []);
+
+  async function generateQRInForm() {
+    if (generatingQRRef.current || loadingQRCodes || submitting || submittedQr || !accountId) return;
+    generatingQRRef.current = true;
+    setGeneratingQR(true);
+    setQrGenerationMessage("");
+    setQrGenerationFailed(false);
+    try {
+      const result = await plantApi("/qr-codes", {
+        method: "POST", body: { count: 1 }, expectedAccountId: accountId,
+      });
+      const created = result?.qr_codes;
+      if (!Array.isArray(created) || created.length !== 1 || created[0]?.qr_id == null ||
+          !created[0]?.qr_code || created[0]?.status !== "generated" || created[0]?.plant_id != null)
+        throw new Error(t("addPlantWorkflow.qrGenerationUnconfirmed"));
+      const available = await loadAvailableQRCodes();
+      const generated = available?.find((code) => String(code.qr_id) === String(created[0].qr_id));
+      if (!generated) throw new Error(t("addPlantWorkflow.qrGenerationUnconfirmed"));
+      setSelectedQRCode(generated);
+      setShowQRDropdown(false);
+      setQrGenerationMessage(t("addPlantWorkflow.qrGeneratedAndSelected", { id: qrLabel(generated.qr_id) }));
+    } catch (error) {
+      setQrGenerationFailed(true);
+      setQrGenerationMessage(error instanceof Error ? translateUIMessage(error.message) : t("addPlantWorkflow.qrGenerationUnconfirmed"));
+    } finally {
+      generatingQRRef.current = false;
+      setGeneratingQR(false);
+    }
+  }
 
 
   // ===================================================
@@ -152,15 +199,37 @@ export function AddPlantForm({
   const [showSpeciesPicker, setShowSpeciesPicker] = useState(true);
   const [loadingSpeciesCatalog, setLoadingSpeciesCatalog] = useState(true);
   const [speciesCatalogError, setSpeciesCatalogError] = useState("");
+  const [pendingSpeciesError, setPendingSpeciesError] = useState(false);
+  const [speciesDuplicate, setSpeciesDuplicate] = useState(null);
+  const [checkingSpeciesDuplicate, setCheckingSpeciesDuplicate] = useState(false);
+  const duplicateCheckSequence = useRef(0);
+  const formScrollRef = useRef(null);
+  const speciesWarningOffset = useRef(0);
   const speciesRequestRef = useRef(null);
 
   const loadSpeciesCatalog = useCallback(() => {
     if (speciesRequestRef.current) return speciesRequestRef.current;
     setLoadingSpeciesCatalog(true);
     setSpeciesCatalogError("");
+    setPendingSpeciesError(false);
     const request = (async () => {
       try {
-        const catalog = await fetchSpeciesCatalog({ accountId });
+        const [approved, pendingResponse] = await Promise.all([
+          fetchSpeciesCatalog({ accountId }),
+          plantApi("/species-requests?scope=mine-pending", { expectedAccountId: accountId })
+            .catch(() => { setPendingSpeciesError(true); return { species_requests: [] }; }),
+        ]);
+        const catalog = [
+          ...approved.map((species) => ({ ...species, source: "approved" })),
+          ...(pendingResponse.species_requests || [])
+            .filter((request) => request.request_status === "Pending Review" && request.requested_by === `staff:${accountId}`)
+            .map((request) => ({
+              id: `request:${request.request_id}`, source: request.request_status === "Pending Review" ? "pending" : "correction",
+              requestId: request.request_id, requestStatus: request.request_status,
+              scientificName: request.scientific_name || "", name: request.common_name || "",
+              commonName: request.common_name || "", family: request.family_name || "",
+            })),
+        ];
         setSpeciesCatalog(catalog);
         setSelectedSpecies((current) => current
           ? catalog.find((species) => String(species.id) === String(current.id)) || null : null);
@@ -188,8 +257,7 @@ export function AddPlantForm({
       return !term ||
         species.scientificName.toLowerCase().includes(term) ||
         species.name.toLowerCase().includes(term);
-    })
-    .slice(0, 8);
+    });
 
   // const [category, setCategory] =
   //   useState("");
@@ -223,6 +291,10 @@ export function AddPlantForm({
   
   const [altitude, setAltitude] = useState("");
   const [gpsAccuracy, setGpsAccuracy] = useState("");
+  const [mapInteracting, setMapInteracting] = useState(false);
+  const [gpsEditing, setGpsEditing] = useState(false);
+  const gpsBusy = useRef(false);
+  const [gpsRevision, setGpsRevision] = useState(0);
 
   // ===================================================
   // PHOTOS
@@ -269,6 +341,37 @@ export function AddPlantForm({
   const [autoSaveState, setAutoSaveState] = useState("");
 
   useEffect(() => {
+    const name = speciesScientificName;
+    const normalized = normalizeSpeciesName(name);
+    const sequence = ++duplicateCheckSequence.current;
+    setSpeciesDuplicate(null);
+    if (!showSpeciesForm || !normalized) { setCheckingSpeciesDuplicate(false); return undefined; }
+    const timer = setTimeout(async () => {
+      setCheckingSpeciesDuplicate(true);
+      try {
+        const catalog = await fetchSpeciesCatalog({ accountId });
+        const requestResponse = await plantApi("/species-requests?scope=mine-active", { expectedAccountId: accountId });
+        if (sequence !== duplicateCheckSequence.current) return;
+        const approved = catalog.find((row) => normalizeSpeciesName(row.scientificName) === normalized);
+        const ownRequests = (requestResponse.species_requests || [])
+          .filter((row) => row.requested_by === `staff:${accountId}` &&
+            ["Pending Review", "Correction Required"].includes(row.request_status) &&
+            normalizeSpeciesName(row.scientific_name) === normalized)
+          .sort((a, b) => (a.request_status === "Correction Required" ? -1 : 1) - (b.request_status === "Correction Required" ? -1 : 1));
+        if (approved) setSpeciesDuplicate({ type: "approved", species: approved, normalizedName: normalized });
+        else if (ownRequests.length) setSpeciesDuplicate({
+          type: ownRequests[0].request_status === "Correction Required" ? "correction" : "pending", request: ownRequests[0], normalizedName: normalized,
+        });
+      } catch {
+        if (sequence === duplicateCheckSequence.current) setSpeciesDuplicate({ type: "unavailable" });
+      } finally {
+        if (sequence === duplicateCheckSequence.current) setCheckingSpeciesDuplicate(false);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [accountId, showSpeciesForm, speciesScientificName]);
+
+  useEffect(() => {
     let active = true;
     if (!route.params?.formDraftKey || !botanist?.id) return () => { active = false; };
     (async () => {
@@ -297,7 +400,8 @@ export function AddPlantForm({
   }, [botanist?.id, route.params?.formDraftKey]);
 
   const draftForm = {
-    selectedSpecies: selectedSpecies ? { id: selectedSpecies.id, scientificName: selectedSpecies.scientificName, commonName: selectedSpecies.commonName, name: selectedSpecies.name } : null,
+    selectedSpecies: selectedSpecies ? { id: selectedSpecies.id, source: selectedSpecies.source, requestId: selectedSpecies.requestId,
+      scientificName: selectedSpecies.scientificName, commonName: selectedSpecies.commonName, name: selectedSpecies.name, family: selectedSpecies.family } : null,
     speciesSearch, plantScientificName, height, description, healthStatus, growthStage, morphology, zone, latitude, longitude, altitude, gpsAccuracy,
     selectedQRCode: selectedQRCode ? { qr_id: selectedQRCode.qr_id, qr_code: selectedQRCode.qr_code, label: selectedQRCode.label } : null,
     showSpeciesForm, speciesScientificName, speciesCommonName, speciesGenus, speciesFamily, speciesConservationStatus, speciesDescription, speciesHabitat,
@@ -369,72 +473,18 @@ export function AddPlantForm({
   // ===================================================
 
   async function handleGetLocation() {
-
+    if (gpsBusy.current) return;
+    gpsBusy.current = true;
+    setLoadingLocation(true);
     try {
-
-      setLoadingLocation(true);
-
-
-      const {
-        status,
-      } =
-        await Location.requestForegroundPermissionsAsync();
-
-
-      if (status !== "granted") {
-
-        Alert.alert(
-          t("addPlant.permissionRequired"),
-          t("addPlant.locationPermissionIsRequiredToGetThePlantLocation")
-        );
-
-        return;
-      }
-
-
-      const location =
-        await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-
-
-      const lat = location.coords.latitude.toFixed(6);
-      const lng = location.coords.longitude.toFixed(6);
-
-      setLatitude(lat);
-      setLongitude(lng);
-
-      setAltitude(
-        location.coords.altitude != null
-          ? location.coords.altitude.toFixed(2)
-          : ""
-      );
-
-      setGpsAccuracy(
-        location.coords.accuracy != null
-          ? location.coords.accuracy.toFixed(2)
-          : ""
-      );
-
+      const point = await readGpsLocation(Location, t);
+      setGpsRevision((revision) => revision + 1);
+      setLatitude(point.latitude); setLongitude(point.longitude);
+      setGpsAccuracy(point.accuracy_m); setAltitude(point.altitude_m);
     } catch (error) {
-
-      console.log(
-        "Location error:",
-        error
-      );
-
-      Alert.alert(
-        t("addPlant.locationError"),
-        t("addPlant.unableToGetYourCurrentLocation")
-      );
-
-    } finally {
-
-      setLoadingLocation(false);
-
-    }
+      Alert.alert(t("addPlant.locationError"), error.message || t("gpsPicker.unableToGetLocation"));
+    } finally { gpsBusy.current = false; setLoadingLocation(false); }
   }
-
 
   // ===================================================
   // TAKE PHOTO
@@ -722,8 +772,34 @@ function handleRemoveSpeciesPhoto(index) {
     finally { setDraftSaving(false); }
   }
 
+  function selectSpeciesForPlant(species) {
+    setSelectedSpecies(species);
+    setSpeciesSearch(species.scientificName);
+    setShowSpeciesForm(false);
+    setShowSpeciesPicker(false);
+    setSpeciesScientificName(""); setSpeciesCommonName(""); setSpeciesGenus(""); setSpeciesFamily("");
+    setSpeciesDescription(""); setSpeciesHabitat(""); setSpeciesImages([]);
+  }
+
+  async function openSpeciesCorrection(request) {
+    try {
+      const draft = await saveBotanistFormDraft(accountId, buildDraftInput(false));
+      restoredDraftRef.current = draft;
+      await autosave.stop();
+      navigation.navigate("EditSpeciesRequest", { botanist, requestId: String(request.request_id), correction: true });
+    } catch (error) {
+      Alert.alert(t("botanistDrafts.savedStatus"), translateUIMessage(error?.message) || t("botanistDrafts.saveFailed"));
+    }
+  }
+
   async function handleSubmitPlant() {
     if (submissionBusyRef.current || submittedQr || !recoveryResolved || draftEndedRef.current) return;
+    if (showSpeciesForm && speciesDuplicate?.normalizedName === normalizeSpeciesName(speciesScientificName) &&
+        ["approved", "pending", "correction", "pending-private"].includes(speciesDuplicate.type)) {
+      formScrollRef.current?.scrollTo({ y: Math.max(0, speciesWarningOffset.current - 24), animated: true });
+      Alert.alert(t("addPlantWorkflow.duplicateSubmissionBlocked"), t("addPlantWorkflow.duplicateSubmissionBlockedMessage"));
+      return;
+    }
     const speciesData = showSpeciesForm ? {
       scientific_name: speciesScientificName.trim(), common_name: speciesCommonName.trim(),
       genus_name: speciesGenus.trim(), family_name: speciesFamily.trim(),
@@ -750,8 +826,9 @@ function handleRemoveSpeciesPhoto(index) {
       Alert.alert(t("addPlant.selectAQrCode"), t("addPlant.generateAndPrintAQrCodeFirstThenSelectIt"));
       return;
     }
-    if (!latitude || !longitude) {
-      Alert.alert(t("addPlant.missingLocation"), t("addPlant.pleaseGetTheCurrentGpsLocationBeforeSubmitting"));
+    const gpsProblem = validatePlantGps(latitude, longitude);
+    if (gpsProblem) {
+      Alert.alert(t("addPlant.missingLocation"), t(`addPlantWorkflow.${gpsProblem}`));
       return;
     }
     if (!Number.isFinite(Number(height)) || Number(height) <= 0) {
@@ -815,7 +892,8 @@ function handleRemoveSpeciesPhoto(index) {
       const created = await plantApi("/plant-submissions", {
         method: "POST",
         body: {
-          ...(newSpecies ? { new_species: newSpecies } : { species_id: Number(selectedSpecies.id) }),
+          ...(newSpecies ? { new_species: newSpecies } : selectedSpecies.source === "pending"
+            ? { species_request_id: Number(selectedSpecies.requestId) } : { species_id: Number(selectedSpecies.id) }),
           scientific_name: plantScientificName.trim(), latitude: latitudeValue, longitude: longitudeValue,
           ...(accuracyValue === undefined ? {} : { accuracy_m: accuracyValue }),
           content, photos, client_key: clientKeyRef.current, qr_id: selectedQRCode.qr_id,
@@ -843,6 +921,32 @@ function handleRemoveSpeciesPhoto(index) {
       );
     } catch (error) {
       await autosave.flush().catch(() => {});
+      if (error?.duplicateType) {
+        let match = error.speciesId ? speciesCatalog.find((row) => String(row.id) === String(error.speciesId)) :
+          error.duplicateType === "approved" ? speciesCatalog.find((row) => normalizeSpeciesName(row.scientificName) === normalizeSpeciesName(speciesScientificName)) :
+          error.requestId ? speciesCatalog.find((row) => String(row.requestId) === String(error.requestId)) : null;
+        if (error.duplicateType === "approved" && error.speciesId && !match) {
+          try { match = await fetchSpeciesDetail(error.speciesId, undefined, { accountId }); } catch { /* Keep the authoritative conflict; the catalog may be unavailable. */ }
+        }
+        let request = match?.requestId ? { request_id: match.requestId, request_status: match.requestStatus,
+          requested_by: `staff:${accountId}`, scientific_name: match.scientificName, common_name: match.commonName, family_name: match.family } : null;
+        if (error.requestId && !request) {
+          try {
+            const response = await plantApi(`/species-requests/${encodeURIComponent(error.requestId)}`, { expectedAccountId: accountId });
+            const candidate = response?.species_request;
+            if (String(candidate?.request_id) === String(error.requestId) && candidate.requested_by === `staff:${accountId}` &&
+                ["Pending Review", "Correction Required"].includes(candidate.request_status)) request = candidate;
+          } catch { /* Never expose or infer another owner's request from a duplicate response. */ }
+        }
+        setSpeciesDuplicate({
+          type: error.duplicateType === "approved" ? "approved" : error.duplicateType === "correction_required" ? (request ? "correction" : "unavailable") : request ? "pending" : "pending-private",
+          normalizedName: normalizeSpeciesName(speciesScientificName),
+          ...(match?.id && error.duplicateType === "approved" ? { species: match } : {}),
+          ...(request && error.duplicateType !== "approved" ? { request } : {}),
+        });
+        formScrollRef.current?.scrollTo({ y: Math.max(0, speciesWarningOffset.current - 24), animated: true });
+        return;
+      }
       Alert.alert(
         t("addPlant.submissionFailed"),
         error instanceof Error ? translateUIMessage(error.message) : t("addPlant.thePlantCouldNotBeSavedCheckYourConnectionAnd")
@@ -893,7 +997,7 @@ function handleRemoveSpeciesPhoto(index) {
           SCROLL FORM
       ================================================= */}
 
-      <ScrollView 
+      <ScrollView scrollEnabled={!mapInteracting} ref={formScrollRef}
         style={styles.scrollView}
         contentContainerStyle={
           styles.scrollContent
@@ -1001,13 +1105,26 @@ function handleRemoveSpeciesPhoto(index) {
                 </TouchableOpacity>
               </View>
             )}
+            {pendingSpeciesError && (
+              <View style={styles.speciesPickerMessage}>
+                <Text style={styles.speciesPickerError}>{t("addPlantWorkflow.pendingUnavailable")}</Text>
+                <TouchableOpacity onPress={loadSpeciesCatalog} activeOpacity={0.8}>
+                  <Text style={styles.speciesPickerRetry}>{t("addPlant.retryLoadingSpecies")}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {showSpeciesPicker && !loadingSpeciesCatalog && !speciesCatalogError && (
-              <View style={styles.speciesPickerList}>
+              <ScrollView style={[styles.speciesPickerList, { maxHeight: Math.min(280, Math.max(220, screenHeight * 0.32)) }]}
+                nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
                 {filteredSpecies.length ? (
-                  filteredSpecies.map((species) => (
+                  filteredSpecies.map((species, index) => (
+                    <React.Fragment key={species.id}>
+                    {(index === 0 || filteredSpecies[index - 1].source !== species.source) && (
+                      <Text style={styles.speciesPickerGroup}>{t(species.source === "pending"
+                        ? "addPlantWorkflow.myPendingSpeciesRequests" : "addPlantWorkflow.approvedSpecies")}</Text>
+                    )}
                     <TouchableOpacity
-                      key={species.id}
                       style={styles.speciesPickerOption}
                       onPress={() => {
                         setSelectedSpecies(species);
@@ -1016,18 +1133,22 @@ function handleRemoveSpeciesPhoto(index) {
                       }}
                       activeOpacity={0.8}
                     >
-                      <Text style={styles.speciesPickerScientific}>
-                        {species.scientificName}
-                      </Text>
+                      <View style={styles.speciesPickerTitleRow}>
+                        <Text style={styles.speciesPickerScientific} numberOfLines={1}>{species.scientificName}</Text>
+                        <Text style={[styles.speciesPickerBadge, species.source === "pending" && styles.speciesPickerBadgePending]}>
+                          {t(species.source === "pending" ? "common.pendingReview" : "addPlantWorkflow.approvedBadge")}
+                        </Text>
+                      </View>
                       <Text style={styles.speciesPickerCommon}>
                         {species.name}{species.family ? t("addPlant.label", { family: species.family }) : ""}
                       </Text>
                     </TouchableOpacity>
+                    </React.Fragment>
                   ))
                 ) : (
                   <Text style={styles.speciesPickerEmpty}>{t("addPlant.noMatchingSpeciesInTheDatabaseAskAConservationOfficer")}</Text>
                 )}
-              </View>
+              </ScrollView>
             )}
 
             {selectedSpecies && (
@@ -1035,6 +1156,9 @@ function handleRemoveSpeciesPhoto(index) {
                 <Text style={styles.selectedSpeciesName}>{selectedSpecies.scientificName}</Text>
                 <Text style={styles.speciesPickerCommon}>
                   {selectedSpecies.name}{selectedSpecies.family ? t("addPlant.label", { family: selectedSpecies.family }) : ""}
+                </Text>
+                <Text style={[styles.speciesPickerBadge, selectedSpecies.source === "pending" && styles.speciesPickerBadgePending]}>
+                  {t(selectedSpecies.source === "pending" ? "common.pendingReview" : "addPlantWorkflow.approvedBadge")}
                 </Text>
               </View>
             )}
@@ -1084,6 +1208,7 @@ function handleRemoveSpeciesPhoto(index) {
               style={
                 styles.speciesRequestCard
               }
+              onLayout={(event) => { speciesWarningOffset.current = event.nativeEvent.layout.y; }}
             >
 
               <Text
@@ -1098,7 +1223,6 @@ function handleRemoveSpeciesPhoto(index) {
                   styles.speciesRequestSubtitle
                 }
               >{t("addPlant.enterInformationAboutTheSpeciesThatIsNotCurrentlyAvailable")}</Text>
-
 
               {/* -------------------------------------------
                   Species Scientific Name
@@ -1119,6 +1243,78 @@ function handleRemoveSpeciesPhoto(index) {
                 placeholderTextColor="#9AA7A0"
               />
 
+              {checkingSpeciesDuplicate && <Text style={styles.speciesDuplicateChecking}>{t("addPlantWorkflow.checkingDuplicate")}</Text>}
+              {speciesDuplicate?.type === "unavailable" && <Text style={styles.speciesDuplicateChecking}>{t("addPlantWorkflow.duplicateCheckUnavailable")}</Text>}
+              {speciesDuplicate?.type === "approved" && speciesDuplicate.species && (
+                <View style={styles.speciesDuplicateCard}>
+                  <View style={styles.approvedDuplicateHeading}>
+                    <Ionicons name="alert-circle-outline" size={17} color="#795514" />
+                    <Text style={styles.speciesDuplicateTitle}>{t("addPlantWorkflow.speciesAlreadyExists")}</Text>
+                  </View>
+                  <Text style={styles.speciesDuplicateMessage}>{t("addPlantWorkflow.approvedDuplicateMessage")}</Text>
+                  <View style={styles.approvedSpeciesInfoCard}>
+                    <View style={styles.approvedSpeciesInfoTop}>
+                      <Text style={styles.approvedSpeciesName} numberOfLines={2}>{speciesDuplicate.species.scientificName}</Text>
+                      <Text style={styles.approvedSpeciesBadge}>{t("addPlantWorkflow.approvedBadge")}</Text>
+                    </View>
+                    <Text style={styles.approvedSpeciesDetails}>{speciesDuplicate.species.name}{speciesDuplicate.species.family ? ` · ${speciesDuplicate.species.family}` : ""}</Text>
+                  </View>
+                  <TouchableOpacity style={styles.approvedSpeciesAction} onPress={() => selectSpeciesForPlant({ ...speciesDuplicate.species, source: "approved" })}
+                    activeOpacity={0.8} accessibilityRole="button">
+                    <Text style={styles.approvedSpeciesActionText}>{t("addPlantWorkflow.selectExistingSpeciesAction")}</Text>
+                    <Ionicons name="arrow-forward" size={16} color="#20583D" />
+                  </TouchableOpacity>
+                </View>
+              )}
+              {speciesDuplicate?.type === "approved" && !speciesDuplicate.species && (
+                <View style={styles.speciesDuplicateCard}>
+                  <Text style={styles.speciesDuplicateTitle}>{t("addPlantWorkflow.speciesAlreadyExists")}</Text>
+                  <Text style={styles.speciesDuplicateMessage}>{t("addPlantWorkflow.approvedDuplicateMessage")}</Text>
+                </View>
+              )}
+              {speciesDuplicate?.type === "pending" && (
+                <View style={styles.speciesDuplicateCard}>
+                  <View style={styles.approvedDuplicateHeading}>
+                    <Ionicons name="alert-circle-outline" size={17} color="#795514" />
+                    <Text style={styles.speciesDuplicateTitle}>{t("addPlantWorkflow.speciesRequestAlreadyPending")}</Text>
+                  </View>
+                  <Text style={styles.speciesDuplicateMessage}>{t("addPlantWorkflow.pendingDuplicateMessage")}</Text>
+                  <View style={styles.approvedSpeciesInfoCard}>
+                    <View style={styles.approvedSpeciesInfoTop}>
+                      <Text style={styles.approvedSpeciesName} numberOfLines={2}>{speciesDuplicate.request.scientific_name}</Text>
+                      <Text style={styles.pendingSpeciesBadge}>{translateLabel(speciesDuplicate.request.request_status)}</Text>
+                    </View>
+                    <Text style={styles.approvedSpeciesDetails}>{t("addPlantWorkflow.requestReference", { id: speciesDuplicate.request.request_id })}</Text>
+                  </View>
+                  <TouchableOpacity style={styles.approvedSpeciesAction} activeOpacity={0.8} accessibilityRole="button" onPress={() => selectSpeciesForPlant({
+                    id: `request:${speciesDuplicate.request.request_id}`, source: "pending", requestId: speciesDuplicate.request.request_id,
+                    scientificName: speciesDuplicate.request.scientific_name, name: speciesDuplicate.request.common_name || "",
+                    family: speciesDuplicate.request.family_name || "",
+                  })}>
+                    <Text style={styles.approvedSpeciesActionText}>{t("addPlantWorkflow.usePendingSpecies")}</Text>
+                    <Ionicons name="arrow-forward" size={16} color="#20583D" />
+                  </TouchableOpacity>
+                </View>
+              )}
+              {speciesDuplicate?.type === "pending-private" && (
+                <View style={styles.speciesDuplicateCard}>
+                  <Text style={styles.speciesDuplicateTitle}>{t("addPlantWorkflow.speciesRequestAlreadyPending")}</Text>
+                  <Text style={styles.speciesDuplicateMessage}>{t("addPlantWorkflow.duplicatePendingUnavailable")}</Text>
+                </View>
+              )}
+              {speciesDuplicate?.type === "correction" && (
+                <View style={styles.speciesDuplicateCard}>
+                  <Text style={styles.speciesDuplicateTitle}>{t("addPlantWorkflow.speciesRequestRequiresCorrection")}</Text>
+                  <Text style={styles.speciesDuplicateMessage}>{t("addPlantWorkflow.correctionDuplicateMessage")}</Text>
+                  <Text style={styles.speciesDuplicateDetails}>{t("addPlantWorkflow.requestReference", { id: speciesDuplicate.request.request_id })} · {translateLabel("Correction Required")}</Text>
+                  <TouchableOpacity style={styles.speciesDuplicateAction} onPress={() => openSpeciesCorrection(speciesDuplicate.request)}>
+                    <Text style={styles.speciesDuplicateActionText}>{t("addPlantWorkflow.viewCorrectSpeciesRequest")}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {!(speciesDuplicate?.normalizedName === normalizeSpeciesName(speciesScientificName) &&
+                ["approved", "pending", "correction"].includes(speciesDuplicate.type)) && <>
 
               {/* -------------------------------------------
                   Species Common Name
@@ -1297,38 +1493,18 @@ function handleRemoveSpeciesPhoto(index) {
                         disabled={submitting}
                         onPress={() => handleRemoveSpeciesPhoto(index)}
                         activeOpacity={0.8}
+                        accessibilityRole="button"
+                        accessibilityLabel={t("recordEdits.removePhoto")}
                       >
-                        <Text style={styles.removeSpeciesPhotoText}>{t("addPlant.remove")}</Text>
+                        <Ionicons name="trash-outline" size={21} color="#B42318" />
                       </TouchableOpacity>
                     </View>
                   ))}
                 </ScrollView>
               )}
+              </>}
 
 
-
-
-              {/* -------------------------------------------
-                  SPECIES APPROVAL INFO
-              ------------------------------------------- */}
-
-              <View
-                style={styles.approvalInfo}
-              >
-
-                <Text
-                  style={
-                    styles.approvalTitle
-                  }
-                >{t("addPlant.speciesApprovalRequired")}</Text>
-
-                <Text
-                  style={
-                    styles.approvalText
-                  }
-                >{t("addPlantWorkflow.requestApprovalInfo")}</Text>
-
-              </View>
 
 
               {/* -------------------------------------------
@@ -1345,10 +1521,24 @@ function handleRemoveSpeciesPhoto(index) {
 
           )}
 
+          <View
+            style={styles.speciesDivider}
+          />
+
 
           {/* =================================================
               SPECIES REQUEST SUMMARY
           ================================================= */}
+
+            <SpeciesDictionary reviewPresentation="modal" fields={{
+              plantScientificName: { value: plantScientificName, setValue: setPlantScientificName, label: t("addPlantWorkflow.plantScientificName") },
+              ...(showSpeciesForm ? {
+                speciesScientificName: { value: speciesScientificName, setValue: setSpeciesScientificName, label: t("addPlant.scientificName") },
+                speciesCommonName: { value: speciesCommonName, setValue: setSpeciesCommonName, label: t("addPlant.commonName") },
+                speciesGenus: { value: speciesGenus, setValue: setSpeciesGenus, label: t("addPlant.genus") },
+                speciesFamily: { value: speciesFamily, setValue: setSpeciesFamily, label: t("addPlant.family") },
+              } : {}),
+            }} />
 
             <Text style={styles.label}>{t("addPlantWorkflow.plantScientificName")}</Text>
             <TextInput style={styles.input} value={plantScientificName}
@@ -1452,59 +1642,22 @@ function handleRemoveSpeciesPhoto(index) {
           >{t("addPlant.useYourCurrentGpsLocationToRecordWhereThisPlant")}</Text>
 
 
-          {/* Latitude */}
-
-          <Text style={styles.label}>{t("addPlant.latitude")}</Text>
-
-          <TextInput
-            style={styles.input}
-            value={latitude}
-            onChangeText={
-              setLatitude
-            }
-            placeholder="e.g. 3.812345"
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-
-          {/* Longitude */}
-
-          <Text style={styles.label}>{t("addPlant.longitude")}</Text>
-
-          <TextInput
-            style={styles.input}
-            value={longitude}
-            onChangeText={
-              setLongitude
-            }
-            placeholder="e.g. 113.812345"
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-          <Text style={styles.label}>{t("addPlant.altitudeM")}</Text>
-
-          <TextInput
-            style={styles.input}
-            value={altitude}
-            onChangeText={setAltitude}
-            placeholder={t("addPlant.gpsAltitudeInMetres")}
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
-          <Text style={styles.label}>{t("addPlant.gpsAccuracyM")}</Text>
-
-          <TextInput
-            style={styles.input}
-            value={gpsAccuracy}
-            onChangeText={setGpsAccuracy}
-            placeholder={t("addPlant.gpsAccuracyInMetres")}
-            placeholderTextColor="#9AA7A0"
-            keyboardType="numeric"
-          />
-
+          {[
+            ["latitude", t("addPlant.latitude"), latitude, setLatitude],
+            ["longitude", t("addPlant.longitude"), longitude, setLongitude],
+            ["altitude", t("addPlant.altitudeM"), altitude, setAltitude],
+            ["accuracy", t("addPlant.gpsAccuracyM"), gpsAccuracy, setGpsAccuracy],
+          ].map(([key, label, value, setter]) => <View key={key}>
+            <Text style={styles.label}>{label}</Text>
+            <TextInput
+              style={styles.input} accessibilityLabel={label} value={value}
+              onFocus={() => setGpsEditing(true)} onBlur={() => setGpsEditing(false)}
+              onChangeText={setter}
+              placeholder={t("gpsPicker.notAvailable")} placeholderTextColor="#9AA7A0" keyboardType="decimal-pad" />
+          </View>)}
+          {validGpsPoint({ latitude, longitude }) && <GpsLocationPicker key={gpsRevision}
+            location={{ latitude, longitude }} inputActive={gpsEditing} onInteractionChange={setMapInteracting}
+            onChange={(point) => { setLatitude(point.latitude); setLongitude(point.longitude); setGpsAccuracy(""); }} />}
 
           <TouchableOpacity
             style={
@@ -1546,7 +1699,22 @@ function handleRemoveSpeciesPhoto(index) {
         ================================================= */}
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>{t("navigation.plantQrCode")}</Text>
+          <View style={styles.qrHeadingRow}>
+            <Text style={[styles.sectionTitle, styles.qrHeadingTitle]}>{t("navigation.plantQrCode")} *</Text>
+            <TouchableOpacity
+              style={styles.qrRefreshButton}
+              onPress={loadAvailableQRCodes}
+              disabled={loadingQRCodes || generatingQR || submitting}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={t("addPlant.refreshQrInventory")}
+              accessibilityState={{ disabled: loadingQRCodes || generatingQR || submitting, busy: loadingQRCodes }}
+              testID="add-plant-qr-refresh"
+            >
+              {loadingQRCodes ? <ActivityIndicator size="small" color="#397C69" />
+                : <Ionicons name="refresh-outline" size={20} color="#397C69" />}
+            </TouchableOpacity>
+          </View>
           <Text style={styles.sectionDescription}>{t("addPlant.chooseAQrCodeYouGeneratedAndPrintedBeforeThe")}</Text>
           {!submittedQr && (
             <>
@@ -1572,35 +1740,44 @@ function handleRemoveSpeciesPhoto(index) {
 
               {showQRDropdown && (
                 <View style={styles.qrDropdown}>
-                  {availableQRCodes.length === 0 ? (
-                    <Text style={styles.noQRText}>
-                      {qrLoadError || t("addPlant.noUnusedCodesGenerateAndPrintOneFromQrCode")}
-                    </Text>
-                  ) : (
-                    availableQRCodes.map((qr) => (
-                      <TouchableOpacity
-                        key={qr.qr_id}
-                        style={styles.qrOption}
-                        onPress={() => {
-                          setSelectedQRCode(qr);
-                          setShowQRDropdown(false);
-                        }}
-                      >
-                        <Text style={styles.qrOptionText}>
-                          {qrLabel(qr.qr_id)}
-                        </Text>
-                        <QRCode value={qr.qr_code} size={44} />
-                      </TouchableOpacity>
-                    ))
-                  )}
-                  <RefreshButton
-                    style={styles.qrRefreshSpacing}
-                    onPress={loadAvailableQRCodes}
-                    loading={loadingQRCodes}
-                    label={t("addPlant.refreshQrInventory")}
-                  />
+                  <ScrollView style={[styles.qrOptionsList, { maxHeight: Math.min(270, Math.max(240, screenHeight * 0.3)) }]}
+                    nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
+                    {availableQRCodes.length === 0 ? (
+                      <Text style={styles.noQRText}>
+                        {qrLoadError || t("addPlant.noUnusedCodesGenerateAndPrintOneFromQrCode")}
+                      </Text>
+                    ) : (
+                      availableQRCodes.map((qr) => (
+                        <TouchableOpacity
+                          key={qr.qr_id}
+                          style={styles.qrOption}
+                          onPress={() => {
+                            setSelectedQRCode(qr);
+                            setShowQRDropdown(false);
+                          }}
+                        >
+                          <Text style={styles.qrOptionText}>{qrLabel(qr.qr_id)}</Text>
+                          <QRCode value={qr.qr_code} size={44} />
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </ScrollView>
+                  <TouchableOpacity
+                    style={[styles.qrGenerateButton, (generatingQR || submitting) && styles.disabledAction]}
+                    onPress={generateQRInForm}
+                    disabled={generatingQR || loadingQRCodes || submitting || !accountId}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("addPlantWorkflow.generateQrCode")}
+                    accessibilityState={{ disabled: generatingQR || loadingQRCodes || submitting || !accountId, busy: generatingQR }}
+                    testID="add-plant-generate-qr"
+                  >
+                    {generatingQR ? <ActivityIndicator size="small" color="#20583D" />
+                      : <Ionicons name="add" size={17} color="#20583D" />}
+                    <Text style={styles.qrGenerateButtonText}>{generatingQR ? t("addPlantWorkflow.generatingQrCode") : t("addPlantWorkflow.generateQrCode")}</Text>
+                  </TouchableOpacity>
                 </View>
               )}
+              {!!qrGenerationMessage && <Text accessibilityRole="alert" style={qrGenerationFailed ? styles.qrGenerationError : styles.qrGenerationSuccess}>{qrGenerationMessage}</Text>}
             </>
           )}
           {submittedQr ? (
@@ -1702,8 +1879,10 @@ function handleRemoveSpeciesPhoto(index) {
                     style={styles.removeGuidedPhotoButton}
                     onPress={() => handleRemoveGuidedPhoto(item.key)}
                     activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("recordEdits.removePhoto")}
                   >
-                    <Text style={styles.removePhotoText}>{t("common.remove")}</Text>
+                    <Ionicons name="trash-outline" size={21} color="#B42318" />
                   </TouchableOpacity>
                 )}
               </View>
@@ -1788,6 +1967,9 @@ function handleRemoveSpeciesPhoto(index) {
 
 
                     <TouchableOpacity
+                      style={styles.removeAdditionalPhotoButton}
+                      accessibilityRole="button"
+                      accessibilityLabel={t("recordEdits.removePhoto")}
                       onPress={() =>
                         handleRemovePhoto(
                           index
@@ -1795,11 +1977,7 @@ function handleRemoveSpeciesPhoto(index) {
                       }
                     >
 
-                      <Text
-                        style={
-                          styles.removePhotoText
-                        }
-                      >{t("common.remove")}</Text>
+                      <Ionicons name="trash-outline" size={21} color="#B42318" />
 
                     </TouchableOpacity>
 
@@ -1861,12 +2039,12 @@ function handleRemoveSpeciesPhoto(index) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.submitButton, (submitting || Boolean(submittedQr)) && styles.disabledAction]}
+            style={[styles.submitButton, (submitting || Boolean(submittedQr) || (showSpeciesForm && speciesDuplicate?.normalizedName === normalizeSpeciesName(speciesScientificName) && ["approved", "pending", "correction", "pending-private"].includes(speciesDuplicate.type))) && styles.disabledAction]}
             onPress={handleSubmitPlant}
             disabled={submitting || Boolean(submittedQr)}
             activeOpacity={0.8}
             accessibilityRole="button"
-            accessibilityState={{ disabled: submitting || Boolean(submittedQr) }}
+            accessibilityState={{ disabled: submitting || Boolean(submittedQr) || (showSpeciesForm && speciesDuplicate?.normalizedName === normalizeSpeciesName(speciesScientificName) && ["approved", "pending", "correction", "pending-private"].includes(speciesDuplicate.type)) }}
           >
             {submitting ? (
               <ActivityIndicator color="#FFFFFF" />
@@ -1903,6 +2081,7 @@ function handleRemoveSpeciesPhoto(index) {
 
 
       </ScrollView>
+
 
     </View>
   );
@@ -2037,6 +2216,7 @@ const styles = StyleSheet.create({
 
   speciesPickerList: {
     marginTop: 6,
+    marginRight: 52,
     borderWidth: 1,
     borderColor: "#DCE8D6",
     borderRadius: 10,
@@ -2046,7 +2226,7 @@ const styles = StyleSheet.create({
 
   speciesPickerOption: {
     paddingHorizontal: 13,
-    paddingVertical: 11,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: "#EDF2EA",
   },
@@ -2055,7 +2235,43 @@ const styles = StyleSheet.create({
     color: "#234B3A",
     fontSize: 14,
     fontWeight: "700",
+    flexShrink: 1,
   },
+
+  speciesPickerGroup: {
+    paddingHorizontal: 13, paddingTop: 9, paddingBottom: 5,
+    color: "#356C5F", fontSize: 12, fontWeight: "700", backgroundColor: "#F3F8F1",
+  },
+  speciesPickerTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  speciesPickerBadge: {
+    color: "#226843", backgroundColor: "#DFF2E4", overflow: "hidden",
+    borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3, fontSize: 11, fontWeight: "700",
+  },
+  speciesPickerBadgePending: { color: "#8A5712", backgroundColor: "#FFF0CC" },
+  speciesDuplicateCard: { marginTop: 7, marginBottom: 9, padding: 10, borderRadius: 9, borderWidth: 1,
+    borderColor: "#E7C985", backgroundColor: "#FFF8E8" },
+  speciesDuplicateTitle: { color: "#795514", fontSize: 13, fontWeight: "800" },
+  speciesDuplicateMessage: { color: "#67573A", fontSize: 12, lineHeight: 17, marginTop: 3 },
+  speciesDuplicateName: { color: "#234B3A", fontSize: 13, fontWeight: "700", marginTop: 5 },
+  speciesDuplicateDetails: { color: "#6D6658", fontSize: 11, marginTop: 2 },
+  speciesDuplicateChecking: { color: "#6D7F75", fontSize: 11, marginTop: 4 },
+  speciesDuplicateAction: { alignSelf: "flex-start", marginTop: 7, paddingHorizontal: 10, paddingVertical: 7,
+    borderRadius: 7, backgroundColor: "#DCEED9" },
+  speciesDuplicateActionText: { color: "#285840", fontWeight: "700", fontSize: 12 },
+  approvedDuplicateHeading: { flexDirection: "row", alignItems: "center", gap: 6 },
+  approvedSpeciesInfoCard: { marginTop: 9, paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: 10, backgroundColor: "#FFFFFF" },
+  approvedSpeciesInfoTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
+  approvedSpeciesName: { flex: 1, color: "#20583D", fontSize: 13, fontWeight: "600" },
+  approvedSpeciesDetails: { color: "#6D7F75", fontSize: 11, marginTop: 4 },
+  approvedSpeciesBadge: { color: "#226843", backgroundColor: "#DFF2E4", overflow: "hidden",
+    borderRadius: 7, paddingHorizontal: 7, paddingVertical: 3, fontSize: 10, fontWeight: "700" },
+  pendingSpeciesBadge: { color: "#8A5712", backgroundColor: "#FFF0CC", overflow: "hidden",
+    borderRadius: 7, paddingHorizontal: 7, paddingVertical: 3, fontSize: 10, fontWeight: "700" },
+  approvedSpeciesAction: { alignSelf: "flex-end", flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 7, minHeight: 44, marginTop: 8, paddingHorizontal: 16, paddingVertical: 10,
+    borderWidth: 1, borderColor: "#468B67", borderRadius: 11, backgroundColor: "#B7E2C5" },
+  approvedSpeciesActionText: { color: "#20583D", fontWeight: "600", fontSize: 13 },
 
   speciesPickerCommon: {
     color: "#6D7F75",
@@ -2156,31 +2372,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: "#6D7F75",
-  },
-
-
-  approvalInfo: {
-    marginTop: 20,
-    padding: 14,
-    backgroundColor: "#E9F7E4",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#D4EBD0",
-  },
-
-
-  approvalTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#234B3A",
-  },
-
-
-  approvalText: {
-    marginTop: 5,
-    fontSize: 12,
-    lineHeight: 18,
-    color: "#5F7067",
   },
 
 
@@ -2341,18 +2532,10 @@ const styles = StyleSheet.create({
       },
 
       removeSpeciesPhotoButton: {
-        marginTop: 10,
-        minHeight: 38,
-        borderRadius: 8,
-        backgroundColor: "#FFF0F0",
+        marginTop: 10, width: 44, height: 44, alignSelf: "flex-end",
+        borderRadius: 11, borderWidth: 1, borderColor: "#F2B9B4", backgroundColor: "#FDE9E7",
         alignItems: "center",
         justifyContent: "center",
-      },
-
-      removeSpeciesPhotoText: {
-        color: "#C85C5C",
-        fontSize: 12,
-        fontWeight: "600",
       },
 
 
@@ -2475,11 +2658,11 @@ const styles = StyleSheet.create({
   },
 
   removeGuidedPhotoButton: {
-    minHeight: 44,
-    marginTop: 8,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 44, height: 44, marginTop: 8, alignSelf: "flex-end",
+    alignItems: "center", justifyContent: "center", borderRadius: 11,
+    backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4",
   },
+  removeAdditionalPhotoButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4" },
 
   additionalPhotosHeader: {
     marginTop: 6,
@@ -2533,16 +2716,14 @@ const styles = StyleSheet.create({
   },
 
 
-  removePhotoText: {
-    color: "#C85C5C",
-    fontSize: 12,
-    fontWeight: "600",
-  },
 
 
   // ===================================================
   // QR CODE
   // ===================================================
+
+  qrHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 },
+  qrHeadingTitle: { flex: 1, marginBottom: 0 },
 
   qrSelector: {
     minHeight: 50,
@@ -2555,6 +2736,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+
+  qrGenerateButton: {
+    alignSelf: "flex-end", minHeight: 44, margin: 9, paddingHorizontal: 14,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    backgroundColor: "#B7E2C5", borderColor: "#468B67", borderWidth: 1, borderRadius: 11,
+  },
+  qrGenerateButtonText: { color: "#20583D", fontWeight: "600", fontSize: 13 },
+  qrGenerationSuccess: { color: "#20583D", fontSize: 12, marginTop: 6 },
+  qrGenerationError: { color: "#A34436", fontSize: 12, marginTop: 6 },
 
   qrResult: {
     alignItems: "center",
@@ -2600,9 +2790,9 @@ const styles = StyleSheet.create({
   },
 
 
-  qrRefreshSpacing: {
-    alignSelf: "flex-start",
-    marginTop: 8,
+  qrRefreshButton: {
+    width: 44, height: 44, alignItems: "center", justifyContent: "center",
+    backgroundColor: "#EDF6F1", borderColor: "#C9E2D6", borderWidth: 1, borderRadius: 11,
   },
 
   qrDropdown: {
@@ -2613,6 +2803,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     overflow: "hidden",
   },
+  qrOptionsList: { flexGrow: 0 },
 
 
   qrOption: {

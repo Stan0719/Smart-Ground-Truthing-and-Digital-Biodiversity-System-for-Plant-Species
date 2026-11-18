@@ -1,5 +1,6 @@
 "use strict";
 const { permitted } = require('../shared/rbac.cjs');
+const { resolvePlantRegistration } = require("./plant-registration.cjs");
 const { classifyObservations } = require('./observation-origin.cjs');
 const fail = (status, message) => { throw Object.assign(Error(message), { status }); };
 function plantId(value) {
@@ -72,20 +73,19 @@ function mountPlantDetail(app, { pool, allow, auth }) {
         common_name: p.common_name, genus_name: p.genus_name, family_name: p.family_name, description: p.description,
         ...(!req.user ? { habitat: string(p.rbac_data?.habitat) } : {}) };
       if (!permitted(req.user, 'plants.detail.read')) return { information, staff: null };
-      const approved = (await c.query(`SELECT content FROM plant_observation WHERE plant_id=$1 AND status='Approved'
-        AND jsonb_typeof(content->'latitude')='number' AND jsonb_typeof(content->'longitude')='number'
-        AND (CASE WHEN jsonb_typeof(content->'latitude')='number' THEN (content->>'latitude')::numeric END) BETWEEN -90 AND 90
-        AND (CASE WHEN jsonb_typeof(content->'longitude')='number' THEN (content->>'longitude')::numeric END) BETWEEN -180 AND 180
-        ORDER BY updated_at DESC,id DESC LIMIT 1`, [p.plant_id])).rows[0];
-      const latest = (await c.query(`SELECT status,content,created_at FROM plant_observation
+      const registration = await resolvePlantRegistration(c, p.plant_id);
+      const approved = registration.state === 'available' ? registration : null;
+      const latest = (await c.query(`SELECT id,status,content,created_at FROM plant_observation
         WHERE plant_id=$1 ORDER BY updated_at DESC,id DESC LIMIT 1`, [p.plant_id])).rows[0];
-      const latestApproved = (await c.query(`SELECT status,content,created_at FROM plant_observation
-        WHERE plant_id=$1 AND status='Approved' ORDER BY updated_at DESC,id DESC LIMIT 1`, [p.plant_id])).rows[0];
-      const detailObservation = row => row ? { status: row.status, created_at: row.created_at,
+      const latestApproved = (await c.query(`SELECT id,status,content,created_at FROM plant_observation
+        WHERE plant_id=$1 AND status='Approved' ORDER BY created_at DESC,id DESC LIMIT 1`, [p.plant_id])).rows[0];
+      const detailObservation = row => row ? { id: row.id, status: row.status, created_at: row.created_at,
         content: observationContent(row.content) } : null;
       return { information, staff: { status: p.rbac_status, registered_at: p.registered_at,
         conservation_status: p.conservation_status, habitat: string(p.rbac_data?.habitat),
         approved_location: approved ? location(approved.content) : null,
+        current_registration: approved ? { state: 'available', observation_id: approved.observation_id, version_id: approved.version_id,
+          content: observationContent(approved.content), photo_ids: approved.photo_ids } : { state: 'unavailable' },
         latest_observation: detailObservation(latest), latest_approved_observation: detailObservation(latestApproved) } };
     });
     res.json(result);

@@ -218,7 +218,7 @@ test('pages wire display-only labels and dates while actions, keys and filters r
   const alerts = read('views/conservation/ThreatAlertsView.vue')
   for (const source of [iot, alerts]) {
     if (source === iot) assert.match(source, /const dt = iotDate/)
-    else assert.match(source, /monitoringDate\(value, locale.value\)/)
+    else assert.match(source, /threatAlertDate\(value, locale.value\)/)
     assert.match(source, /<MonitoringIdentifier/)
     const { descriptor } = parse(source)
     assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename: 'monitoring.vue', id: 'monitoring' }).errors, [])
@@ -230,7 +230,9 @@ test('pages wire display-only labels and dates while actions, keys and filters r
   assert.match(alerts, /await saveAlertResponse\(id, responseNote.value, responseStatus.value\)/)
   assert.match(alerts, /detectionDate\(alert.detectedAt\) === date.value/)
   assert.match(alerts, /alert.deviceId === deviceQuery/)
-  for (const [value, labels] of [['alert.readingId', 'readingLabels'], ['selectedAlert.readingId', 'readingLabels'], ['selectedAlert.cameraId', 'cameraLabels']]) assert.ok(alerts.includes(`:value="${value}" :labels="${labels}"`))
+  // Reading references moved to the inspector; source-specific table references retain raw IDs.
+  for (const [value, labels] of [['selectedAlert.readingId', 'readingLabels'], ['selectedAlert.cameraId', 'cameraLabels']]) assert.ok(alerts.includes(`:value="${value}" :labels="${labels}"`))
+  assert.match(alerts, /alertSource\(alert\) === 'Camera' \? alert.cameraId : alert.deviceId/)
   assert.match(read('components/CameraMonitoringSection.vue'), /monitoringDate\(value, locale.value\)/)
 })
 

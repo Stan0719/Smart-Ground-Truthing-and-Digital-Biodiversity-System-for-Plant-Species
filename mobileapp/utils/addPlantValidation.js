@@ -10,11 +10,22 @@ export function validateSpeciesRequest(data) {
 }
 
 export function validatePlantDetails({ species, newSpecies = false, plantScientificName, height, healthStatus, growthStage, morphology }) {
-  if (!newSpecies && (!species || !/^[1-9]\d*$/.test(String(species.id)))) return "chooseExistingSpecies";
+  if (!newSpecies && (!species || !(species.source === "pending"
+    ? /^[1-9]\d*$/.test(String(species.requestId)) && species.id === `request:${species.requestId}`
+    : /^[1-9]\d*$/.test(String(species.id))))) return "chooseExistingSpecies";
   if (typeof plantScientificName !== "string" || !plantScientificName.trim()) return "plantScientificNameRequired";
   if (plantScientificName.trim().length > 200) return "plantScientificNameTooLong";
   if (!Number.isFinite(Number(height)) || Number(height) <= 0 || Number(height) > 100000) return "invalidHeight";
   if (!healthStatus.trim() || !growthStage.trim() || !morphology.trim()) return "plantFieldsRequired";
   if (healthStatus.trim().length > 100 || growthStage.trim().length > 100 || morphology.trim().length > 4000) return "plantTextTooLong";
+  return null;
+}
+
+export function validatePlantGps(latitude, longitude) {
+  const valid = (value, limit) => typeof value !== "boolean" &&
+    value !== null && value !== undefined && String(value).trim() !== "" &&
+    Number.isFinite(Number(value)) && Math.abs(Number(value)) <= limit;
+  if (!valid(latitude, 90)) return "invalidLatitude";
+  if (!valid(longitude, 180)) return "invalidLongitude";
   return null;
 }

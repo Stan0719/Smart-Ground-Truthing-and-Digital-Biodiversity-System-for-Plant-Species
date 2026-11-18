@@ -501,7 +501,7 @@ test('motion/device badge classes retain the original labels and fallback mappin
       assert.equal(badge.children, status)
       assert.ok(badge.props.class.includes(status.toLowerCase()))
     }
-    for (const [value, label, badgeClass] of [[0, 'No motion', 'approved'], [1, 'Detected', 'high'], [2, 'No motion', 'approved'], [null, '—', 'approved'], [undefined, '—', 'approved'], ['1', '—', 'approved']]) {
+    for (const [value, label, badgeClass] of [[0, 'No motion', 'approved'], [1, 'Detected', 'high'], [2, '\u2014', 'approved'], [null, '—', 'approved'], [undefined, '—', 'approved'], ['1', '—', 'approved']]) {
       h.state.readingDevices.value = [service.mapCanonicalDevice({ ...device(), latest_reading: reading('motion', { movement: value }) })]
       const table = h.render().find(n => n.type === 'table' && n.props?.class.includes('iot-reading-table'))
       const badge = flat(table).find(n => n.type === 'span' && n.props?.class.includes('badge'))
@@ -532,6 +532,7 @@ test('refresh reads only latest history rows, preserves inventory/filter/camera 
   try {
     await h.state.loadDevices()
     const inventory = h.state.devices.value
+    h.state.selectedDevice.value = inventory[0]
     h.state.search.value = 'Sensor'; h.state.status.value = 'Active'; h.state.type.value = 'Sensor'
     const refresh = h.state.refreshReadings()
     await h.state.refreshReadings()
@@ -542,7 +543,11 @@ test('refresh reads only latest history rows, preserves inventory/filter/camera 
     pending.resolve(Response.json({ readings: [reading('new')], page: 1, limit: 1, hasMore: true }))
     await refresh
     assert.equal(h.state.latestReadings.value[0].reading.reading_id, 'new')
-    assert.equal(h.state.devices.value, inventory)
+    assert.equal(h.state.devices.value[0].latest_reading.reading_id, 'new')
+    assert.equal(h.state.selectedDevice.value.latest_reading.reading_id, 'new')
+    const { latest_reading: previousReading, ...previousDevice } = inventory[0]
+    const { latest_reading: currentReading, ...currentDevice } = h.state.devices.value[0]
+    assert.deepEqual(currentDevice, previousDevice)
     assert.equal(inventory[0].latest_reading.reading_id, 'old')
     assert.equal(h.state.filteredDevices.value.length, 1)
     assert.equal(h.state.search.value, 'Sensor')
@@ -550,6 +555,7 @@ test('refresh reads only latest history rows, preserves inventory/filter/camera 
     assert.equal(calls[1].url, '/api/data/devices/11111111-1111-4111-8111-111111111111/readings?page=1&limit=1')
     for (const call of calls) { assert.equal(call.options.cache, 'no-store'); assert.equal(call.options.credentials, 'same-origin') }
     assert.equal(h.render().filter(n => n.type?.name === 'CameraMonitoringSection.vue').length, 1)
+    assert.equal(h.render().find(n => n.type?.name === 'CameraMonitoringSection.vue').props.devices[0].latest_reading.reading_id, 'new')
     assert.ok(calls.every(c => !c.url.includes('camera')))
   } finally { h.stop(); globalThis.fetch = original }
 })
@@ -599,7 +605,7 @@ test('logout, pending session, account change and unmount abort/invalidate late 
 })
 
 test('raw ADC presentation preserves motion mapping and inventory actions', async () => {
-  for (const [value, expected] of [[0,false], [1,true], [2,false], [-1,false], [true,null], ['1',null], [null,null]]) {
+  for (const [value, expected] of [[0,false], [1,true], [2,null], [-1,null], [true,null], ['1',null], [null,null]]) {
     assert.equal(service.mapCanonicalDevice({ ...device(), latest_reading: reading('motion', { movement: value }) }).latest_reading.motion_detected, expected)
   }
   const original = globalThis.fetch

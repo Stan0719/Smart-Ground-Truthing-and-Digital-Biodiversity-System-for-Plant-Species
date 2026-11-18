@@ -337,6 +337,13 @@ async function loadObservations(append = false) {
       skippedRecords.value += mapped.length - rows.length
       observations.value = [...new Map([...observations.value, ...rows].map(item => [item.id, item])).values()]
         .sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt))
+      const staffIds = [...new Set(observations.value.map(item => item.ownerSubject).filter(subject => subject.startsWith('staff:')).map(subject => subject.slice(6)))].slice(0, 100)
+      if (staffIds.length) {
+        try {
+          const directory = await request(`/api/conservation/submitter-names?ids=${encodeURIComponent(staffIds.join(','))}`, controller.signal)
+          if (current() && directory.names && typeof directory.names === 'object') submitterNames.value = { ...submitterNames.value, ...directory.names as Record<string, string> }
+        } catch { /* Keep the abbreviated identifier if the directory is unavailable. */ }
+      }
       hasMore.value = page.hasMore; nextCursor.value = page.cursor
       if (page.cursor !== null) seenCursors.add(page.cursor)
       scannedPages.value++
@@ -504,8 +511,11 @@ const observationLabels = computed(() => compactIdentifierTokens(observations.va
 const observationLabel = (id: string) => `OBS-${observationLabels.value.get(id) || compactIdentifierTokens([id]).get(id) || id}`
 const subjectPart = (subject: string) => /^(staff|visitor):/.test(subject) ? subject.slice(subject.indexOf(':') + 1) : subject
 const subjectTokens = computed(() => compactIdentifierTokens(observations.value.map(item => item.ownerSubject).filter(Boolean), subjectPart))
+const submitterNames = ref<Record<string, string>>({})
 const submitterLabel = (subject: string) => {
   if (!subject) return textOrUnavailable('')
+  const id = subject.startsWith('staff:') ? subject.slice(6) : ''
+  if (id && submitterNames.value[id]) return submitterNames.value[id]
   const account = session.value.user
   // The existing authenticated session can identify only this exact account.
   // Other submitters have no authorized name/directory mapping on this page.

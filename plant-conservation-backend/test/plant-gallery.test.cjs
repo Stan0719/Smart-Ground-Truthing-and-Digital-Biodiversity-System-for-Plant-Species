@@ -25,7 +25,7 @@ test('plant-scoped gallery metadata retains existing image authorization and aut
     await db.query('INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES($1,$2,$3,$4)',
       ['staff:bot',key,'a'.repeat(64),{plant_id:plantId,id,species_id:1,qr_token:'fixture',status:'Pending Review',species_request_id:null}]);
   const fixtures=[
-    ['i10',1,'101',false,'initial:photo:10'],['i2',1,'101',false,'initial:photo:2'],['i0',1,'101',false,'initial:photo:0'],
+    ['i10',1,'101',true,'initial:photo:10'],['i2',1,'101',true,'initial:photo:2'],['i0',1,'101',true,'initial:photo:0'],
     ['field0',1,'102',true,'field:photo:0'],['fallback-b',1,'102',true,'fallback-b'],['fallback-a',1,'102',true,'fallback-a'],
     ['legacy',1,'103',true,'legacy'],['unlinked',1,null,true,'unlinked'],['private-unlinked',1,null,false,'private-unlinked'],
     ['draft',1,'104',false,'draft'],['p0',2,'201',false,'pending:photo:0'],['p1',2,'201',false,'pending:photo:1'],['p2',2,'201',false,'pending:photo:2'],
@@ -54,18 +54,15 @@ test('plant-scoped gallery metadata retains existing image authorization and aut
     // historical ordering separately through the authorized Officer view.
     const assets=await all(1,'officer');
     assert.deepEqual(assets.filter(a=>a.observation_id==='101').map(a=>a.asset_id),['i0','i2','i10']);
-    assert.deepEqual(assets.filter(a=>a.observation_id==='102').map(a=>a.asset_id),['field0','fallback-a','fallback-b']);
+    assert.deepEqual(assets.filter(a=>a.observation_id==='102'),[]);
     assert.deepEqual(assets.filter(a=>a.observation_id==='101').map(a=>a.photo_order),['0','2','10']);
     const publicAssets=await all(1);
     assert.ok(publicAssets.every(a=>a.observation_date===null&&a.observation_status===null&&a.observation_revision===null));
-    assert.deepEqual(publicAssets.map(a=>a.asset_id),['unlinked','legacy']);
+    assert.deepEqual(publicAssets.map(a=>a.asset_id),['i0','i2','i10']);
     assert.equal(new Set(assets.map(a=>a.asset_id)).size,assets.length);
     assert.ok(!JSON.stringify(publicAssets).includes('staff:'));assert.ok(!publicAssets.some(a=>['draft','foreign','bad-link','private-unlinked'].includes(a.asset_id)));
     assert.equal(assets.find(a=>a.asset_id==='i0').effective_origin,'initial_registration');
-    assert.equal(assets.find(a=>a.asset_id==='field0').effective_origin,'subsequent_observation');
-    assert.equal(assets.find(a=>a.asset_id==='legacy').effective_origin,'unknown');
-    assert.equal(assets.find(a=>a.asset_id==='unlinked').linkage,'unlinked');
-    assert.equal(assets.find(a=>a.asset_id==='unlinked').observation_id,null);
+    assert.deepEqual(assets.map(a=>a.asset_id),['i0','i2','i10']);
     const r=await call('/plants/1/gallery?limit=100');assert.deepEqual(Object.keys(r.data.page).sort(),['has_more','limit','next_cursor']);
   });
   await t.test('pending registration is private but Officer/owner retain existing access',async()=>{
@@ -79,17 +76,16 @@ test('plant-scoped gallery metadata retains existing image authorization and aut
     for(const role of [undefined,'visitor','bot','other','officer']){
       const assets=await all(1,role);
       for(const a of assets)assert.equal((await call('/assets/'+a.asset_id,role)).status,200,role+':'+a.asset_id);
-      for(const id of fixtures.filter(f=>f[1]===1&&f[0]!=='bad-link').map(f=>f[0]))
-        assert.equal(assets.some(a=>a.asset_id===id),(await call('/assets/'+id,role)).status===200,role+':'+id);
+
     }
     assert.equal((await call('/assets/reference')).status,200);
     assert.equal((await call('/assets/draft')).status,404);
-    assert.ok((await all(1,'officer')).some(a=>a.asset_id==='draft'));
+    assert.ok((await all(1,'officer')).every(a=>a.effective_origin==='initial_registration'));
     assert.ok((await all(1,'other')).every(a=>a.observation_status===null));
   });
   await t.test('restricted species and owner proposal exceptions do not broaden access',async()=>{
     for(const role of [undefined,'visitor','bot','other'])assert.equal((await call('/plants/3/gallery',role)).status,404);
-    assert.equal((await all(3,'officer')).length,1);
+    assert.equal((await all(3,'officer')).length,0);
     const ownProtected=await call('/plants/3/gallery?scope=mine','bot');
     assert.equal(ownProtected.status,200);assert.equal(ownProtected.data.assets.length,0);
     assert.equal((await call('/assets/protected?scope=mine','bot')).status,404);

@@ -1,11 +1,14 @@
 "use strict";
+const { canModifyPendingObservation } = require("./status-permissions.cjs");
 const {rolesAvailable,validateRoles,recordRole}=require("./species-photo-library.cjs");
 const {setPointer}=require("./species-photo-provenance.cjs");
 const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { originColumnAvailable } = require("./observation-origin.cjs");
 const { transaction, audit, subject, fail, text, id, fieldContent, assertNewSpecies, speciesRow } = require("./domain.cjs");
+const { normalizeSpeciesName, sqlSpeciesName } = require("./species-name.cjs");
 const { assertQrAssignmentAllowed, normalizeQrPlantSchema } = require("./qr-plant-mode.cjs");
+const { initialVersionAvailable, appendInitialVersion, plantPhotoRefs } = require("./record-version-history.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const canonical = (value) => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
@@ -23,10 +26,23 @@ async function preparePhoto(photo) {
       .resize({ width: 2400, height: 2400, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
   } catch { fail(400, "Invalid or oversized photo. Choose a different image and retry."); }
 }
-async function createSpecies(c, data, user) {
-  await assertNewSpecies(c, data.scientific_name);
-  if ((await c.query("SELECT request_id FROM species_request_submission WHERE lower(btrim(scientific_name))=lower(btrim($1)) AND request_status='Pending Review'", [data.scientific_name])).rows.length)
-    fail(409, "A request for this scientific name is already pending review.");
+async function createSpecies(c, data, user, existingRequestId = null) {
+  await assertNewSpecies(c, data.scientific_name, { approvedOnly: true });
+  const normalizedName = normalizeSpeciesName(data.scientific_name);
+  const active = (await c.query(`SELECT request_id,owner_subject,request_status FROM species_request_submission
+    WHERE ${sqlSpeciesName("scientific_name")}=$1 AND request_status IN ('Pending Review','Correction Required')
+      AND ($2::integer IS NULL OR request_id<>$2)
+    ORDER BY (owner_subject=$3) DESC,submitted_at DESC,request_id DESC LIMIT 1`,
+    [normalizedName, existingRequestId, subject(user)])).rows[0];
+  if (active) {
+    const isOwn = active.owner_subject === subject(user);
+    const correction = isOwn && active.request_status === "Correction Required";
+    throw Object.assign(Error("A species request with this name is already active."), {
+      status: 409, code: correction ? "SPECIES_DUPLICATE_CORRECTION" : "SPECIES_DUPLICATE_PENDING",
+      duplicate_type: correction ? "correction_required" : "pending",
+      ...(isOwn ? { request_id: active.request_id, request_status: active.request_status } : {}),
+    });
+  }
   const family = (await c.query("SELECT family_id FROM family WHERE lower(btrim(family_name))=lower(btrim($1)) ORDER BY family_id LIMIT 1", [data.family_name])).rows[0]
     || (await c.query("INSERT INTO family(family_name) VALUES($1) RETURNING family_id", [data.family_name])).rows[0];
   const genus = (await c.query("SELECT genus_id FROM genus WHERE lower(btrim(genus_name))=lower(btrim($1)) AND family_id=$2 ORDER BY genus_id LIMIT 1", [data.genus_name, family.family_id])).rows[0]
@@ -43,12 +59,91 @@ async function createSpecies(c, data, user) {
 function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, qrPlantSchema = "plant_app" }) {
   qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
   app.get("/api/plant-submissions/capabilities",allow("plants.create"),async(_req,res)=>res.json({semantic_photo_roles_available:await rolesAvailable(pool),photo_roles:["whole_plant","leaf_close_up","stem_bark","flower_fruit","additional"]}));
+  const withdrawalReady = async () => Boolean((await pool.query(`SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
+      AND table_name='plant_record' AND column_name='withdrawn_at') AS ready`)).rows[0]?.ready);
+  app.get("/api/plant-submissions/:plantId/withdrawal", allow("plants.create"), async (req, res) => {
+    if (req.user?.role !== "Botanist") fail(403, "Botanist access required.");
+    const plantId = id(String(req.params.plantId));
+    if (!await withdrawalReady()) fail(503, "Plant withdrawal requires migration 025.");
+    const plant = (await pool.query(`SELECT plant_id,registered_subject,rbac_status,withdrawn_at FROM plant_record
+      WHERE plant_id=$1`, [plantId])).rows[0];
+    if (!plant) fail(404, "Plant submission not found.");
+    if (plant.registered_subject !== subject(req.user)) fail(403, "Only the submitting Botanist can view withdrawal availability.");
+    const original = (await pool.query(`SELECT id,owner_subject,status,origin_type,revision FROM plant_observation
+      WHERE plant_id=$1 ORDER BY created_at,id LIMIT 1`, [plantId])).rows[0];
+    if (!original || !["Pending Review", "Correction Required"].includes(plant.rbac_status) || plant.withdrawn_at ||
+        original.owner_subject !== subject(req.user) ||
+        !["initial_registration", "unknown"].includes(original.origin_type) ||
+        !["Pending Review", "Correction Required"].includes(original.status))
+      return res.json({ eligible: false, editable: false });
+    const editable = await canModifyPendingObservation(pool, original);
+    if (!editable) return res.json({ eligible: false, editable: false });
+    const blockers = (await pool.query(`SELECT
+      EXISTS(SELECT 1 FROM plant_observation WHERE plant_id=$1 AND id<>$2) AS other_observations,
+      EXISTS(SELECT 1 FROM observation_review WHERE observation_id=$2 AND decision IN ('Approved','Rejected','Flagged')) AS final_review,
+      EXISTS(SELECT 1 FROM record_change_submission WHERE plant_id=$1 AND status IN ('Pending Review','Correction Required')) AS active_change,
+      EXISTS(SELECT 1 FROM observation_edit_request WHERE observation_id=$2 AND status IN ('Pending Review','Correction Required')) AS active_observation_edit`,
+      [plantId, original.id])).rows[0];
+    res.json({ eligible: !Object.values(blockers).some(Boolean), editable,
+      ...(!Object.values(blockers).some(Boolean) ? { observation_id: original.id } : {}) });
+  });
+  app.post("/api/plant-submissions/:plantId/withdraw", allow("plants.create"), async (req, res) => {
+    if (req.user?.role !== "Botanist") fail(403, "Only the submitting Botanist can withdraw a Plant submission.");
+    if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length) fail(400, "Withdrawal does not accept submission changes.");
+    const plantId = id(String(req.params.plantId));
+    if (!await withdrawalReady()) fail(503, "Plant withdrawal requires migration 025.");
+    const result = await transaction(pool, async (c) => {
+      // Officer review locks the Observation first. Use the same order so a
+      // simultaneous decision and withdrawal cannot both commit.
+      const original = (await c.query(`SELECT id,plant_id,owner_subject,status,origin_type,revision,client_key
+        FROM plant_observation WHERE plant_id=$1 ORDER BY created_at,id LIMIT 1 FOR UPDATE`, [plantId])).rows[0];
+      const plant = (await c.query(`SELECT plant_id,registered_subject,rbac_status,withdrawn_at
+        FROM plant_record WHERE plant_id=$1 FOR UPDATE`, [plantId])).rows[0];
+      if (!plant) fail(404, "Plant submission not found.");
+      if (plant.registered_subject !== subject(req.user)) fail(403, "Only the submitting Botanist can withdraw this Plant.");
+      if (plant.rbac_status === "Withdrawn" || plant.withdrawn_at) fail(409, "Plant submission was already withdrawn.");
+      if (!original || original.owner_subject !== subject(req.user) ||
+          !["initial_registration", "unknown"].includes(original.origin_type))
+        fail(409, "Original Plant submission could not be verified.");
+      if (!["Pending Review", "Correction Required"].includes(plant.rbac_status) ||
+          !["Pending Review", "Correction Required"].includes(original.status))
+        fail(409, "Only an unapproved Pending Review or Correction Required Plant can be withdrawn.");
+      if (original.status === "Pending Review" &&
+          !await canModifyPendingObservation(c, original))
+        fail(409, "This correction resubmission is awaiting Officer review and cannot be withdrawn.");
+      const dependencies = (await c.query(`SELECT
+        EXISTS(SELECT 1 FROM plant_observation WHERE plant_id=$1 AND id<>$2) AS other_observations,
+        EXISTS(SELECT 1 FROM observation_review WHERE observation_id=$2 AND decision IN ('Approved','Rejected','Flagged')) AS final_review,
+        EXISTS(SELECT 1 FROM record_change_submission WHERE plant_id=$1 AND status IN ('Pending Review','Correction Required')) AS active_change,
+        EXISTS(SELECT 1 FROM observation_edit_request WHERE observation_id=$2 AND status IN ('Pending Review','Correction Required')) AS active_observation_edit`,
+        [plantId, original.id])).rows[0];
+      if (dependencies.other_observations || dependencies.active_change || dependencies.active_observation_edit)
+        fail(409, "This Plant has linked submissions that must be resolved before withdrawal.");
+      if (dependencies.final_review) fail(409, "The Officer has already finalized this Plant review.");
+      await c.query(`UPDATE plant_observation SET status='Withdrawn',revision=revision+1,
+        updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [original.id]);
+      const withdrawn = (await c.query(`UPDATE plant_record SET rbac_status='Withdrawn',
+        withdrawn_by=$2,withdrawn_at=CURRENT_TIMESTAMP WHERE plant_id=$1
+        RETURNING plant_id,rbac_status,withdrawn_by,withdrawn_at`, [plantId, subject(req.user)])).rows[0];
+      await c.query(`UPDATE record_version_history SET status='Withdrawn' WHERE plant_id=$1
+        AND record_type='plant' AND change_id IS NULL AND snapshot->>'observation_id'=$2
+        AND status IN ('Pending Review','Correction Required')`, [plantId, original.id]);
+      await c.query(`UPDATE plant_submission_receipt SET result=result || jsonb_build_object('status','Withdrawn')
+        WHERE owner_subject=$1 AND client_key=$2 AND result->>'id'=$3`,
+        [subject(req.user), original.client_key, original.id]);
+      await audit(c, req.user, "plant_submission_withdrawn", plantId);
+      return { withdrawn: true, plant: withdrawn };
+    });
+    res.json(result);
+  });
   app.post("/api/plant-submissions", allow("plants.create"), async (req, res) => {
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b) || Object.keys(b).some((key) =>
-      !["species_id", "new_species", "scientific_name", "content", "latitude", "longitude", "accuracy_m", "qr_id", "client_key", "photos"].includes(key)))
+      !["species_id", "species_request_id", "new_species", "scientific_name", "content", "latitude", "longitude", "accuracy_m", "qr_id", "client_key", "photos"].includes(key)))
       fail(400, "Invalid plant submission fields.");
-    if ((b.species_id !== undefined) === (b.new_species !== undefined)) fail(400, "Select an existing species or provide new species details.");
+    if ([b.species_id, b.species_request_id, b.new_species].filter((value) => value !== undefined).length !== 1)
+      fail(400, "Select one existing, pending, or new species source.");
     const clientKey = text(b.client_key, 100), name = text(b.scientific_name, 200);
     id(String(b.qr_id));
     assertQrAssignmentAllowed(qrPlantSchema);
@@ -61,7 +156,8 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
       if (!b.new_species || typeof b.new_species !== "object" || Array.isArray(b.new_species) ||
         Object.keys(b.new_species).some((key) => ![...speciesFields, "photo"].includes(key))) fail(400, "Invalid new species fields.");
       speciesData = Object.fromEntries(speciesFields.map((key) => [key, text(b.new_species[key], ["description", "habitat"].includes(key) ? 4000 : 200)]));
-    } else id(String(b.species_id));
+    } else if (b.species_id !== undefined) id(String(b.species_id));
+    else id(String(b.species_request_id));
     const payloadHash = createHash("sha256").update(JSON.stringify(canonical(b))).digest("hex");
     const semanticRoles = validateRoles(b.photos);
     const photos = [];
@@ -75,9 +171,28 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
         return previous.result;
       }
       if (semanticRoles.some(Boolean) && !await rolesAvailable(c)) fail(503,"Semantic photo roles require migration 015.");
-      let speciesId;
+      let speciesId, requestId = null, pendingRequestClientKey = null;
       if (speciesData) speciesId = await createSpecies(c, speciesData, req.user);
-      else { await speciesRow(c, b.species_id, req.user); speciesId = b.species_id; }
+      else if (b.species_id !== undefined) { await speciesRow(c, b.species_id, req.user); speciesId = b.species_id; }
+      else {
+        const pending = (await c.query(`SELECT * FROM species_request_submission WHERE request_id=$1 FOR UPDATE`, [b.species_request_id])).rows[0];
+        if (!pending || pending.owner_subject !== subject(req.user) || pending.request_status !== 'Pending Review' || pending.approved_species_id)
+          fail(409, "This pending species request is no longer available. Refresh the species list.");
+        requestId = pending.request_id;
+        pendingRequestClientKey = pending.client_key;
+        if (pending.proposed_species_id) {
+          const proposed = (await c.query("SELECT species_id,rbac_data FROM species WHERE species_id=$1 FOR UPDATE", [pending.proposed_species_id])).rows[0];
+          if (!proposed || proposed.rbac_data?.approvalStatus !== 'Pending Review') fail(409, "The pending species request is inconsistent.");
+          speciesId = proposed.species_id;
+        } else {
+          speciesId = await createSpecies(c, pending, req.user, requestId);
+          await c.query("UPDATE species_request_submission SET proposed_species_id=$2 WHERE request_id=$1 AND proposed_species_id IS NULL", [requestId, speciesId]);
+          const photoId = randomUUID();
+          await c.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,FALSE,'image/jpeg',$5)",
+            [photoId, speciesId, subject(req.user), `species-request:${requestId}`, pending.photo]);
+          await setPointer(c, requestId, photoId);
+        }
+      }
       // Same inventory lock and assignment contract as existing plant registration.
       const qr = (await c.query("SELECT qr_id,qr_code FROM plant_app.qr_code WHERE qr_id=$1 AND plant_id IS NULL AND status='generated' FOR UPDATE", [b.qr_id])).rows[0];
       if (!qr) fail(409, "The selected QR code is no longer available.");
@@ -88,13 +203,14 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
       const withOrigin = await originColumnAvailable(c);
       await c.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key${withOrigin ? ",origin_type" : ""}) VALUES($1,$2,$3,'Pending Review',$4,$5${withOrigin ? ",'initial_registration'" : ""})`, [observationId, plant.plant_id, subject(req.user), content, clientKey]);
       let wholePlantAsset = null;
+      const photoIds = [];
       for (const [index, bytes] of photos.entries()) {
         const assetId=randomUUID();
+        photoIds.push(assetId);
         await c.query("INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,approved,content_type,content) VALUES($1,$2,$3,$4,$5,FALSE,'image/jpeg',$6)", [assetId, plant.plant_id, subject(req.user), `${clientKey}:photo:${index}`, observationId, bytes]);
         await recordRole(c,{assetId,plantId:plant.plant_id,observationId,role:semanticRoles[index],owner:subject(req.user)});
         if(semanticRoles[index]==='whole_plant')wholePlantAsset=assetId;
       }
-      let requestId = null;
       if (speciesData) {
         const request = (await c.query(`INSERT INTO species_request_submission(owner_subject,client_key,payload_hash,${speciesFields.join(",")},photo,proposed_species_id)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING request_id`, [subject(req.user), clientKey, payloadHash, ...speciesFields.map((key) => speciesData[key]), speciesPhoto, speciesId])).rows[0];
@@ -102,12 +218,24 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
         const photoId=randomUUID();
         await c.query("INSERT INTO plant_asset(id,species_id,owner_subject,client_key,approved,content_type,content) VALUES($1,$2,$3,$4,FALSE,'image/jpeg',$5)", [photoId, speciesId, subject(req.user), `${clientKey}:species-photo`, speciesPhoto]);
         await setPointer(c,requestId,photoId);
+        if (await initialVersionAvailable(c))
+          await appendInitialVersion(c, { kind: "species", targetId: requestId, owner: subject(req.user),
+            snapshot: { request_id: requestId, species_id: speciesId, ...speciesData }, photo: speciesPhoto });
         if(wholePlantAsset)await c.query("INSERT INTO species_request_proposed_image(request_id,asset_id) VALUES($1,$2)",[requestId,wholePlantAsset]);
         await audit(c, req.user, "species_requested", requestId);
       }
+      const location = { ...content, latitude: b.latitude, longitude: b.longitude,
+        ...(b.accuracy_m === undefined ? {} : { accuracy_m: b.accuracy_m }) };
+      if (await initialVersionAvailable(c))
+        await appendInitialVersion(c, { kind: "plant", targetId: plant.plant_id, owner: subject(req.user), snapshot: {
+          plant_id: plant.plant_id, species_id: speciesId, scientific_name: name, qr_id: qr.qr_id,
+          qr_token: qr.qr_code, observation_id: observationId, observation_revision: 1,
+          photo_ids: photoIds, photo_refs: plantPhotoRefs(photoIds), content: location,
+        } });
       await audit(c, req.user, "plant_submitted", plant.plant_id);
       const response = { plant_id: plant.plant_id, id: observationId, species_id: speciesId, qr_token: qr.qr_code,
-        status: "Pending Review", species_request_id: requestId };
+        status: "Pending Review", species_request_id: requestId,
+        ...(b.species_request_id !== undefined ? { species_request_client_key: pendingRequestClientKey } : {}) };
       await c.query("INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result) VALUES($1,$2,$3,$4)", [subject(req.user), clientKey, payloadHash, response]);
       if (officerNotifications) await officerNotifications.enqueue(c, observationId, requestId !== null);
       return response;

@@ -205,7 +205,7 @@ const gpsValue = (reading: ApiSensorReading | null) =>
     : '—'
 const motionValue = (reading: ApiSensorReading) => {
   if (reading.motion_detected === null) return '—'
-  return reading.motion_detected ? 'Detected' : 'No motion'
+  return ct(reading.motion_detected ? 'Detected' : 'No motion')
 }
 
 const viewDeviceAlerts = async (device: ApiSensorDevice) => {

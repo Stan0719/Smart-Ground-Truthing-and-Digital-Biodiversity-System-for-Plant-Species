@@ -170,6 +170,7 @@ function mountDeviceIngestion(app, { pool }) {
   });
 }
 function mountIoT(app, { pool, allow }) {
+  require("./iot-alert-context.cjs").mountAlertContext(app, { pool, allow });
   app.get("/api/iot/devices", allow("devices.read"), async (req, res) => {
     const rows = (
       await pool.query(

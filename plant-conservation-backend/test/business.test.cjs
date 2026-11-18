@@ -226,6 +226,50 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
     ).status,
     409,
   );
+  const locationBeforeGpsFree = (await pg.query(
+    "SELECT latitude,longitude FROM plant_location WHERE plant_id=$1 ORDER BY location_id", [plantId],
+  )).rows;
+  const plantBeforeGpsFree = (await pg.query(
+    "SELECT scientific_name,species_id,qr_token FROM plant_record WHERE plant_id=$1", [plantId],
+  )).rows[0];
+  const gpsFreeContent = { heightCm: 18, healthStatus: "Healthy", lifeStage: "Mature", morphology: "New leaves" };
+  const gpsFree = await call(`/plants/${plantId}/observations`, "bot", "POST", {
+    content: gpsFreeContent, client_key: "field-without-gps",
+  });
+  assert.equal(gpsFree.status, 201, JSON.stringify(gpsFree.data));
+  assert.equal((await call(`/observations/${gpsFree.data.id}/submit`, "bot", "POST", {})).status, 200);
+  const gpsFreeApproval = await call(`/observations/${gpsFree.data.id}/review`, "officer", "POST", {
+    decision: "Approved", revision: 1, comment: "Verified without a new GPS reading",
+  });
+  assert.equal(gpsFreeApproval.status, 200, JSON.stringify(gpsFreeApproval.data));
+  const registeredLocations = (await pg.query(
+    "SELECT latitude,longitude FROM plant_location WHERE plant_id=$1 ORDER BY location_id", [plantId],
+  )).rows;
+  assert.deepEqual(registeredLocations, locationBeforeGpsFree, "GPS-free approval must not insert or erase a Plant location");
+  const savedGpsFree = (await pg.query(
+    "SELECT content,status FROM plant_observation WHERE id=$1", [gpsFree.data.id],
+  )).rows[0];
+  assert.equal(savedGpsFree.status, "Approved");
+  assert.equal(Object.hasOwn(savedGpsFree.content, "latitude"), false);
+  assert.equal(Object.hasOwn(savedGpsFree.content, "longitude"), false);
+  const afterGpsFree = await call("/plants", "officer");
+  const projectedPlant = afterGpsFree.data.plants.find((plant) => String(plant.plant_id) === String(plantId));
+  assert.equal(projectedPlant.rbac_status, "Approved");
+  assert.equal(projectedPlant.latest_approved.heightCm, 18);
+  assert.equal(Number(projectedPlant.latitude), 1);
+  assert.equal(Number(projectedPlant.longitude), 2);
+  assert.equal(projectedPlant.scientific_name, plantBeforeGpsFree.scientific_name);
+  assert.equal(Number(projectedPlant.species_id), Number(plantBeforeGpsFree.species_id));
+  assert.equal(projectedPlant.qr_token, plantBeforeGpsFree.qr_token);
+  const detailAfterGpsFree = await call(`/plants/${plantId}/detail`, "officer");
+  assert.equal(detailAfterGpsFree.status, 200, JSON.stringify(detailAfterGpsFree.data));
+  assert.equal(detailAfterGpsFree.data.staff.latest_approved_observation.content.heightCm, 18);
+  assert.equal(detailAfterGpsFree.data.staff.latest_approved_observation.content.latitude, null);
+  assert.equal(detailAfterGpsFree.data.staff.approved_location.latitude, 1);
+  const historyAfterGpsFree = await call(`/plants/${plantId}/detail/history`, "officer");
+  assert.equal(historyAfterGpsFree.status, 200, JSON.stringify(historyAfterGpsFree.data));
+  assert.ok(historyAfterGpsFree.data.observations.some((observation) => observation.id === created.data.id));
+  assert.ok(historyAfterGpsFree.data.observations.some((observation) => observation.id === gpsFree.data.id));
   const next = await call(`/plants/${plantId}/observations`, "bot", "POST", {
     content,
     client_key: "field-two",

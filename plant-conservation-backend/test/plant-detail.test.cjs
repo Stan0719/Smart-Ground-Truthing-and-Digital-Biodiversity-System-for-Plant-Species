@@ -36,6 +36,7 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
     await pool.query(`INSERT INTO plant_asset(id,plant_id,observation_id,species_id,owner_subject,client_key,content_type,content)
       VALUES($1,$2,$3,$4,'staff:bot',$1,'image/jpeg',$5)`,[id,plant,observation,species,Buffer.from(id)]);
   }
+  await pool.query("UPDATE plant_asset SET approved=TRUE WHERE observation_id='obs-0'");
   const users = Object.fromEntries(['officer','admin','bot','visitor','inactive','reset'].map(id => [id,{ id,
     role: id === 'admin' ? 'Administrator' : id === 'bot' ? 'Botanist' : id === 'visitor' ? 'Visitor' : 'Conservation Officer',
     status: id === 'inactive' ? 'Inactive' : 'Active', mustChangePassword: id === 'reset' }]));
@@ -65,7 +66,7 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
   });
   await t.test('Officer and Admin read protected records while catalogue reads retain independent write gates', async () => {
     for (const role of ['officer','admin']) {
-      const r = await call('/plants/1/detail',role); assert.equal(r.status,200); assert.equal(r.data.staff.approved_location.zone,'Approved');
+      const r = await call('/plants/1/detail',role); assert.equal(r.status,200); assert.equal(r.data.staff.approved_location.zone,'Submitted');
       assert.equal(r.data.staff.latest_observation.status, 'Approved');
       assert.equal(r.data.staff.latest_approved_observation.content.notes, 'latest approved notes');
       assert.deepEqual(r.data.staff.latest_approved_observation.content.taxonomy, { leaf: 'Broad' });
@@ -111,7 +112,7 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
       for(const a of r.data.assets) assert.equal((await call('/plants/1/detail/assets/'+a.asset_id,role)).status,200);
       for(const id of ['reference','foreign-photo','bad-link','missing']) assert.equal((await call('/plants/1/detail/assets/'+id,role)).status,404);
     }
-    assert.equal((await call('/assets/photo-0')).status,404); // Historical bytes were not globally loosened.
+    assert.equal((await call('/assets/photo-0')).status,200); // Only verified current registration references are public.
   });
   await t.test('history rejects invalid cursors and unavailable parents', async () => {
     const first = await call('/plants/1/detail/history?limit=1','officer');
@@ -119,5 +120,15 @@ test('Plant Detail page reads are scoped, paginated and private', async t => {
     for(const query of ['limit=0','limit=101','cursor=invalid','scope=mine','limit[]=2']) assert.equal((await call('/plants/1/detail/history?'+query,'officer')).status,400);
     assert.equal((await call('/plants/999/detail/history','officer')).status,404);
     assert.equal((await call('/plants/3/detail/history','officer')).data.observations.length,0);
+  });
+  await t.test('legacy location row without an approved Observation is not silently projected', async () => {
+    await pool.query('INSERT INTO plant_location(plant_id,latitude,longitude) VALUES(2,4.25,113.75)');
+    const detail = await call('/plants/2/detail','officer');
+    assert.equal(detail.status,200);
+    assert.equal(detail.data.staff.approved_location,null);
+    const list = await call('/plants','officer');
+    const legacy = list.data.plants.find(row => Number(row.plant_id)===2);
+    assert.equal(legacy.latitude,null);
+    assert.equal(legacy.longitude,null);
   });
 });

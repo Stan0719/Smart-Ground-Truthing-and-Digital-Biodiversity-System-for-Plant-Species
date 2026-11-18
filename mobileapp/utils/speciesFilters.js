@@ -9,6 +9,22 @@ export function resetMissingSpeciesFamily(family, options) {
   return family !== null && !options.includes(family) ? null : family;
 }
 
+export function combineBotanistSpecies(catalogue, ownedRequests) {
+  const approved = Array.isArray(catalogue) ? catalogue : [];
+  const seenSpecies = new Set(approved.map((row) => String(row.id)));
+  const seenRequests = new Set();
+  const protectedEntries = [];
+  for (const row of Array.isArray(ownedRequests) ? ownedRequests : []) {
+    if (!row?.privateRequest || !["Pending Review", "Rejected"].includes(row.approvalStatus) || !row.requestId) continue;
+    if (row.proposedSpeciesId && seenSpecies.has(String(row.proposedSpeciesId))) continue;
+    const key = row.proposedSpeciesId ? `species:${row.proposedSpeciesId}` : `request:${row.requestId}`;
+    if (seenRequests.has(key)) continue;
+    seenRequests.add(key);
+    protectedEntries.push(row);
+  }
+  return [...approved, ...protectedEntries];
+}
+
 export function filterAndSortSpecies(species, { family = null, query = "", sortOption = "default" } = {}) {
   const search = String(query).trim().toLowerCase();
   const filtered = (Array.isArray(species) ? species : []).filter((item) => {

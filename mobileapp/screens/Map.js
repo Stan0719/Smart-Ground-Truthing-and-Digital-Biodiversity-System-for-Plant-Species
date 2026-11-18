@@ -1,28 +1,90 @@
-import { useAppTranslation, t } from "../translations/i18n";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
-import { fetchPlantRecords, getPlantDisplayObservation, isPlantVisibleInRoleCatalog } from "../utils/plantApi";
+import { Ionicons } from "@expo/vector-icons";
+import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import PlantExplorerMap from "../components/PlantExplorerMap";
+import { t, translateLabel, useAppTranslation } from "../translations/i18n";
+import { fetchPlantRecords, filterMapPlantsByStatus, isMapPlantVisible } from "../utils/plantApi";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
+import LanguageSelector from "../components/LanguageSelector";
 
-import {
-  ActivityIndicator,
-  RefreshControl,
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-} from "react-native";
+const statusColors = {
+  approved: ["#E2F4E6", "#257344"],
+  "pending review": ["#FFF1D8", "#9A6210"],
+  "correction required": ["#FFF0D9", "#98601B"],
+  rejected: ["#FCE8E8", "#B42F35"],
+  withdrawn: ["#ECEFF1", "#52616A"],
+};
+
+function PlantCard({ plant, onPress, onMapPress }) {
+  useAppTranslation();
+  const [imageFailed, setImageFailed] = useState(false);
+  const status = plant.currentStatus || plant.status || "";
+  const [badgeBackground, badgeText] = statusColors[status.toLowerCase()] || ["#E9EFEA", "#466354"];
+  const zone = plant.mapLocation.zone || t("plant.notRecorded");
+  const canMap = plant.mapLocation.status === "available";
+  return (
+    <View style={styles.card}>
+      <TouchableOpacity style={styles.cardMain} onPress={onPress} activeOpacity={0.82} accessibilityRole="button"
+        accessibilityLabel={`${plant.plantScientificName || t("plant.notRecorded")}, ${t("plantDetail.plantId")} ${plant.plantId}`}>
+        <View style={styles.imageWrap}>
+          {plant.plantImage && !imageFailed ? (
+            <Image source={plant.plantImage} style={styles.image} resizeMode="cover" onError={() => setImageFailed(true)} />
+          ) : (
+            <View style={styles.imagePlaceholder}><Ionicons name="leaf-outline" size={34} color="#5C9B70" /></View>
+          )}
+        <View pointerEvents="none" style={[styles.imageStatusBadge, { backgroundColor: badgeBackground }]}>
+          <Text style={[styles.imageStatusBadgeText, { color: badgeText }]} numberOfLines={1}>
+            {status ? translateLabel(status) : t("map.unknown")}
+          </Text>
+        </View>
+        </View>
+        <View style={styles.cardBody}>
+          <Text style={styles.plantName} numberOfLines={2}>{plant.plantScientificName || t("plant.notRecorded")}</Text>
+          <Text style={styles.recordId} numberOfLines={1}>{t("plantDetail.plantId")}: {plant.plantId}</Text>
+          <View style={styles.zoneRow}>
+            <Ionicons name="location-outline" size={13} color="#668271" />
+            <Text style={styles.zoneText} numberOfLines={1}>{zone}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+      <View style={styles.cardActions}>
+        <TouchableOpacity testID={`plant-map-${plant.plantId}`} style={[styles.cardAction, styles.mapAction, !canMap && styles.disabledMapAction]}
+          onPress={() => onMapPress(plant)} disabled={!canMap} activeOpacity={0.8} accessibilityRole="button"
+          accessibilityLabel={canMap ? t("navigation.map") : `${t("navigation.map")}, ${plant.mapLocation.status === "restricted" ? t("map.locationRestricted") : t("map.locationNotRecorded")}`}
+          accessibilityState={{ disabled: !canMap }}>
+          <Ionicons name="location" size={15} color="#FFFFFF" /><Text style={styles.mapActionText}>{t("navigation.map")}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity testID={`plant-details-${plant.plantId}`} style={[styles.cardAction, styles.detailsAction]}
+          onPress={() => onPress(plant)} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel={t("map.details")}>
+          <Ionicons name="eye-outline" size={15} color="#267348" /><Text style={styles.detailsActionText}>{t("map.details")}</Text>
+        </TouchableOpacity>
+      </View>
+      {!canMap && <Text style={styles.mapUnavailableText}>{plant.mapLocation.status === "restricted" ? t("map.locationRestricted") : t("map.locationNotRecorded")}</Text>}
+    </View>
+  );
+}
+
+function matchesPlantSearch(plant, value) {
+  const query = String(value || "").toLowerCase().trim();
+  return !query || [plant.plantCommonName, plant.plantScientificName, plant.family, plant.plantId]
+    .some((field) => String(field || "").toLowerCase().includes(query));
+}
 
 export default function MapScreen({ navigation, user }) {
   useAppTranslation();
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("allVisible");
+  const isBotanist = String(user?.role || "").toLowerCase() === "botanist";
   const [plants, setPlants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [mapFocusRequest, setMapFocusRequest] = useState(null);
+  const [selectedMapPlantId, setSelectedMapPlantId] = useState(null);
+  const scrollRef = useRef(null);
+  const mapOffset = useRef(0);
+  const focusSequence = useRef(0);
 
   const loadPlants = useCallback(async (pullToRefresh = false, isCurrent = () => true) => {
     if (!user?.id) {
@@ -34,7 +96,6 @@ export default function MapScreen({ navigation, user }) {
       }
       return;
     }
-
     if (pullToRefresh) setRefreshing(true);
     else setLoading(true);
     setError("");
@@ -47,7 +108,7 @@ export default function MapScreen({ navigation, user }) {
       for (const record of ownedRecords) recordsById.set(record.plantId, record);
       if (isCurrent()) setPlants([...recordsById.values()].filter((record) =>
         record.plantId && record.plantId !== "Unknown ID" &&
-        isPlantVisibleInRoleCatalog(record, user.role, user.id)
+        isMapPlantVisible(record, user.role, user.id)
       ));
     } catch (loadError) {
       if (isCurrent()) {
@@ -68,714 +129,171 @@ export default function MapScreen({ navigation, user }) {
     return () => { current = false; };
   }, [loadPlants]));
 
-  // =====================================================
-  // MAP BACKEND RECORDS
-  // =====================================================
-
-  const documentedPlants = useMemo(() => plants.map((record) => {
-    return {
-      ...record,
-      name: record.plantCommonName || "",
-      scientificName: record.plantScientificName || "",
-      family: record.family ?? "",
-      id: record.plantId,
-      status: record.currentStatus ?? record.status,
-    };
-  }), [plants]);
-
-  // =====================================================
-  // FILTER RECORDS
-  // =====================================================
-
+  const documentedPlants = useMemo(() => plants.map((record) => ({
+    ...record,
+    mapLocation: getPlantLocationDisplay(record.location, user?.role),
+  })), [plants, user?.role]);
+  const effectiveStatusFilter = statusFilter === "myRejected" ? "allVisible" : statusFilter;
   const filteredPlants = useMemo(() => {
-    const searchText =
-      search.toLowerCase().trim();
-
-    return documentedPlants.filter(
-      (plant) => {
-        const matchesSearch =
-          !searchText ||
-          plant.name
-            ?.toLowerCase()
-            .includes(searchText) ||
-          plant.scientificName
-            ?.toLowerCase()
-            .includes(searchText) ||
-          plant.family
-            ?.toLowerCase()
-            .includes(searchText) ||
-          plant.plantId
-            ?.toLowerCase()
-            .includes(searchText);
-        return matchesSearch;
-      }
-    );
-  }, [documentedPlants, search]);
-
-  // =====================================================
-  // RECORD PRESS
-  // =====================================================
-
-  function handlePlantPress(record) {
-    navigation?.navigate(
-      "PlantDetails",
-      {
-        plantId: record.plantId || record.id,
-      }
-    );
-  }
-
-  // =====================================================
-  // CLEAR FILTERS
-  // =====================================================
-
-  function clearFilters() {
-    setSearch("");
-  }
-
-  // =====================================================
-  // RENDER CARD
-  // =====================================================
-
-  function renderPlantCard({
-    item,
-  }) {
-    const observation = getPlantDisplayObservation(item);
-    const photos =
-      item.images ||
-      item.photos ||
-      [];
-    const location = getPlantLocationDisplay(item.location, user?.role);
-    const locationText = location.status === "available"
-      ? [
-          `${t("map.latitude")}: ${location.latitude.toFixed(6)}`,
-          `${t("map.longitude")}: ${location.longitude.toFixed(6)}`,
-          `${t("plantDetail.gpsAccuracy")}: ${location.accuracyM != null ? `± ${location.accuracyM} m` : t("plant.notRecorded")}`,
-          `${t("plantDetail.altitude")}: ${location.altitudeM != null ? `${location.altitudeM} m` : t("plant.notRecorded")}`,
-          `${t("plantDetail.locationZone")}: ${location.zone || t("plant.notRecorded")}`,
-        ].join("\n")
-      : location.status === "restricted"
-        ? t("map.locationRestricted")
-        : t("map.locationNotRecorded");
-
-    return (
-      <TouchableOpacity
-        style={styles.locationCard}
-        onPress={() =>
-          handlePlantPress(item)
-        }
-        activeOpacity={0.85}
-      >
-        {/* ICON */}
-
-        <View
-          style={
-            styles.plantIconContainer
-          }
-        >
-          <Text style={styles.plantIcon}>
-            🌿
-          </Text>
-        </View>
-
-        {/* SCIENTIFIC NAME */}
-
-        <Text
-          style={styles.plantName}
-          numberOfLines={2}
-        >
-          {item.scientificName || t("plant.notRecorded")}
-        </Text>
-
-        {/* COMMON NAME */}
-
-        <Text
-          style={styles.commonName}
-          numberOfLines={1}
-        >
-          {item.name || t("plant.notRecorded")}
-        </Text>
-
-        {/* RECORD ID */}
-
-        <Text
-          style={styles.recordId}
-          numberOfLines={1}
-        >
-          {item.plantId}
-        </Text>
-
-        <Text style={styles.locationText} numberOfLines={2}>
-          {t("plant.height")}: {observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")}
-          {" · "}{t("plant.lifeStage2")}: {observation?.lifeStage || t("plant.notRecorded")}
-          {" · "}{t("plant.health")}: {observation?.healthStatus || t("plant.notRecorded")}
-        </Text>
-
-        <Text style={styles.locationText} numberOfLines={5}>
-          {t("map.location")}: {locationText}
-        </Text>
-
-        {/* STATUS */}
-
-        <View
-          style={styles.statusRow}
-        >
-          <View
-            style={[
-              styles.statusBadge,
-              String(item.status || "").toLowerCase() ===
-                "approved"
-                ? styles.statusApproved
-                : styles.statusPending,
-            ]}
-          >
-            <Text
-              style={[
-                styles.statusText,
-                String(item.status || "").toLowerCase() ===
-                  "approved"
-                  ? styles.statusApprovedText
-                  : styles.statusPendingText,
-              ]}
-            >
-              {item.status
-                ? item.status
-                    .charAt(0)
-                    .toUpperCase() +
-                  item.status.slice(1)
-                : t("map.unknown")}
-            </Text>
-          </View>
-
-          {photos.length > 0 && (
-            <Text
-              style={styles.photoCount}
-            >
-              📷 {photos.length}
-            </Text>
-          )}
-        </View>
-      </TouchableOpacity>
-    );
-  }
-
-  // =====================================================
-  // MAIN SCREEN
-  // =====================================================
+    return filterMapPlantsByStatus(documentedPlants, user?.role, user?.id, effectiveStatusFilter)
+      .filter((plant) => matchesPlantSearch(plant, search));
+  }, [documentedPlants, search, effectiveStatusFilter, user?.role, user?.id]);
+  const mappedPlants = useMemo(() => filteredPlants.filter((plant) => plant.mapLocation.status === "available"), [filteredPlants]);
+  const selectedMapPlantVisible = selectedMapPlantId != null && mappedPlants.some(
+    (plant) => String(plant.plantId) === String(selectedMapPlantId),
+  );
+  const updateSearch = (value) => {
+    setSearch(value);
+    if (selectedMapPlantId != null && !filterMapPlantsByStatus(documentedPlants, user?.role, user?.id, effectiveStatusFilter)
+      .some((plant) => String(plant.plantId) === String(selectedMapPlantId) && matchesPlantSearch(plant, value) && plant.mapLocation.status === "available")) {
+      setSelectedMapPlantId(null);
+    }
+  };
+  const updateStatusFilter = (value) => {
+    setStatusFilter(value);
+    if (selectedMapPlantId != null && !filterMapPlantsByStatus(documentedPlants, user?.role, user?.id, value)
+      .some((plant) => String(plant.plantId) === String(selectedMapPlantId) && matchesPlantSearch(plant, search) && plant.mapLocation.status === "available")) {
+      setSelectedMapPlantId(null);
+    }
+  };
+  const openPlant = (plant) => navigation?.navigate("PlantDetails", { plantId: plant.plantId });
+  const focusPlantOnMap = (plant) => {
+    if (plant.mapLocation.status !== "available") return;
+    setSelectedMapPlantId(plant.plantId);
+    setMapFocusRequest({ plantId: plant.plantId, sequence: ++focusSequence.current });
+    scrollRef.current?.scrollTo({ y: Math.max(0, mapOffset.current - 16), animated: true });
+  };
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        showsVerticalScrollIndicator={
-          false
-        }
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadPlants(true)} tintColor="#468585" colors={["#468585"]} />}
-        contentContainerStyle={
-          styles.content
-        }
-      >
-        {/* =====================================================
-            HEADER
-        ===================================================== */}
-
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadPlants(true)} tintColor="#267348" colors={["#267348"]} />}>
         <View style={styles.header}>
-          <Text style={styles.title}>{t("map.plantMap")}</Text>
-
-          <Text style={styles.subtitle}>{t("map.exploreDocumentedPlantLocationsInNiahNationalPark")}</Text>
+          <View style={styles.headerTop}>
+            <Text style={styles.title}>{t("map.plantExplorer")}</Text>
+            <LanguageSelector />
+          </View>
+          <Text style={styles.subtitle}>{t("map.discoverDocumentedPlantsInNiahNationalPark")}</Text>
         </View>
-
-        {/* =====================================================
-            SEARCH
-        ===================================================== */}
-
-        <View
-          style={
-            styles.searchContainer
-          }
-        >
-          <Text style={styles.searchIcon}>
-            🔍
-          </Text>
-
-          <TextInput
-            style={styles.searchInput}
-            placeholder={t("map.searchPlants")}
-            placeholderTextColor="#999"
-            value={search}
-            onChangeText={setSearch}
-          />
-
-          {search.length > 0 && (
-            <TouchableOpacity
-              onPress={() =>
-                setSearch("")
-              }
-              activeOpacity={0.7}
-            >
-              <Text
-                style={
-                  styles.clearButton
-                }
-              >
-                ×
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {loading ? (
-          <View style={styles.emptyContainer}>
-            <ActivityIndicator size="small" color="#468585" />
-            <Text style={styles.emptyText}>{t("plant.loadingPlantRecords")}</Text>
-          </View>
-        ) : error ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>{t("common.error")}</Text>
-            <Text style={styles.emptyText}>{error}</Text>
-            <TouchableOpacity style={styles.clearFiltersButton} onPress={() => void loadPlants(true)} activeOpacity={0.8}>
-              <Text style={styles.clearFiltersText}>{t("common.refresh")}</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-        
-        {!loading && !error && <>
-        {/* =====================================================
-            DOCUMENTED PLANTS
-        ===================================================== */}
-
-        <View
-          style={styles.sectionHeader}
-        >
-          <View
-            style={
-              styles.sectionHeaderText
-            }
-          >
-            <Text
-              style={
-                styles.sectionTitle
-              }
-            >{t("map.documentedPlants")}</Text>
-
-            <Text
-              style={
-                styles.sectionSubtitle
-              }
-            >{t("map.tapARecordToViewItsDetails")}</Text>
-          </View>
-
-          <View
-            style={
-              styles.resultCountContainer
-            }
-          >
-            <Text
-              style={
-                styles.resultCount
-              }
-            >
-              {filteredPlants.length}
-            </Text>
-          </View>
-        </View>
-
-        {/* =====================================================
-            PLANT GRID
-        ===================================================== */}
-
-        {filteredPlants.length === 0 ? (
-          <View
-            style={
-              styles.emptyContainer
-            }
-          >
-            <Text
-              style={styles.emptyIcon}
-            >
-              🌱
-            </Text>
-
-            <Text
-              style={styles.emptyTitle}
-            >{t("map.noRecordsFound")}</Text>
-
-            <Text
-              style={styles.emptyText}
-            >{t("map.tryAnotherSearchOrClearYourSearch")}</Text>
-
-            <TouchableOpacity
-              style={
-                styles.clearFiltersButton
-              }
-              onPress={clearFilters}
-              activeOpacity={0.8}
-            >
-              <Text
-                style={
-                  styles.clearFiltersText
-                }
-              >{t("map.clearSearch")}</Text>
-            </TouchableOpacity>
+        {loading || error ? (
+          <View style={styles.message}>
+            {loading ? <ActivityIndicator color="#267348" /> : <Text style={styles.messageTitle}>{t("common.error")}</Text>}
+            <Text style={styles.messageText}>{loading ? t("plant.loadingPlantRecords") : error}</Text>
+            {!!error && <TouchableOpacity onPress={() => void loadPlants(true)} style={styles.retryButton}>
+              <Text style={styles.retryText}>{t("common.refresh")}</Text>
+            </TouchableOpacity>}
           </View>
         ) : (
-          <FlatList
-            data={filteredPlants}
-            keyExtractor={(item) =>
-              item.plantId
-            }
-            numColumns={2}
-            scrollEnabled={false}
-            columnWrapperStyle={
-              styles.plantGrid
-            }
-            renderItem={
-              renderPlantCard
-            }
-          />
+          <>
+            <View style={styles.sectionHeading}>
+              <Text style={styles.sectionTitle}>{t("map.biodiversityMap")}</Text>
+              <Text style={styles.sectionSubtitle}>{t("map.tapAMarkerForDetails")}</Text>
+            </View>
+            <View onLayout={(event) => { mapOffset.current = event.nativeEvent.layout.y; }}>
+              <PlantExplorerMap key={isBotanist ? effectiveStatusFilter : "default"}
+                plants={mappedPlants} onViewDetails={openPlant} focusRequest={mapFocusRequest}
+                selectedPlantId={selectedMapPlantVisible ? selectedMapPlantId : null} onSelectPlant={setSelectedMapPlantId} />
+            </View>
+            {!mappedPlants.length && <Text style={styles.mapEmpty}>{t("map.noMappedPlants")}</Text>}
+            <View style={styles.listHeading}>
+              <View>
+                <Text style={styles.sectionTitle}>{t("map.documentedPlants")}</Text>
+                <Text style={styles.sectionSubtitle}>{t("map.tapARecordToViewItsDetails")}</Text>
+              </View>
+              <View style={styles.count}><Text style={styles.countText}>{filteredPlants.length}</Text></View>
+            </View>
+            <View style={styles.searchContainer}>
+              <Ionicons name="search-outline" size={20} color="#668271" />
+              <TextInput style={styles.searchInput} placeholder={t("map.searchByPlantName")}
+                placeholderTextColor="#87998B" value={search} onChangeText={updateSearch} returnKeyType="search" />
+              {!!search && <TouchableOpacity onPress={() => updateSearch("")} accessibilityRole="button"
+                accessibilityLabel={t("map.clearSearch")}><Ionicons name="close-circle" size={20} color="#789181" /></TouchableOpacity>}
+            </View>
+            {isBotanist && <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.statusFilters} accessibilityLabel={t("plant.recordVisibilityFilters")}>
+              {[["allVisible", t("plant.allVisible")], ["approved", t("plant.approvedOnly")],
+                ["myPending", t("plant.myPending")]].map(([value, label]) => {
+                const selected = effectiveStatusFilter === value;
+                return <TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{ selected }}
+                  onPress={() => updateStatusFilter(value)}
+                  style={[styles.statusFilterChip, selected && styles.statusFilterChipSelected]}>
+                  <Text style={[styles.statusFilterText, selected && styles.statusFilterTextSelected]}>{label}</Text>
+                </TouchableOpacity>;
+              })}
+            </ScrollView>}
+            {filteredPlants.length ? (
+              <FlatList data={filteredPlants} keyExtractor={(item) => item.plantId} numColumns={2}
+                scrollEnabled={false} columnWrapperStyle={styles.plantGrid}
+                renderItem={({ item }) => <PlantCard plant={item} onPress={() => openPlant(item)} onMapPress={focusPlantOnMap} />} />
+            ) : (
+              <View style={styles.message}>
+                <Ionicons name="leaf-outline" size={34} color="#6A9E76" />
+                <Text style={styles.messageTitle}>{t("map.noRecordsFound")}</Text>
+                <Text style={styles.messageText}>{t("map.tryAnotherSearchOrClearYourSearch")}</Text>
+                <TouchableOpacity onPress={() => updateSearch("")} style={styles.retryButton}>
+                  <Text style={styles.retryText}>{t("map.clearSearch")}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
         )}
-        </>}
       </ScrollView>
     </View>
   );
 }
 
-// =====================================================
-// STYLES
-// =====================================================
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F7FAF5",
-  },
-
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 35,
-  },
-
-  // =====================================================
-  // HEADER
-  // =====================================================
-
-  header: {
-    marginTop: 10,
-    marginBottom: 18,
-  },
-
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  subtitle: {
-    fontSize: 14,
-    color: "#687568",
-    marginTop: 5,
-    lineHeight: 20,
-  },
-
-  // =====================================================
-  // SEARCH
-  // =====================================================
-
-  searchContainer: {
-    height: 48,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: "#E2EBDD",
-    marginBottom: 14,
-  },
-
-  searchIcon: {
-    fontSize: 17,
-    marginRight: 9,
-  },
-
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: "#333",
-  },
-
-  clearButton: {
-    fontSize: 24,
-    color: "#888",
-    lineHeight: 24,
-  },
-
-  // =====================================================
-  // MAP
-  // =====================================================
-
-  mapContainer: {
-    height: 320,
-    marginTop: 18,
-    borderRadius: 20,
-    overflow: "hidden",
-    backgroundColor: "#DCE8D7",
-    position: "relative",
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-  },
-
-  map: {
-    flex: 1,
-  },
-
-  markerCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#468585",
-    borderWidth: 3,
-    borderColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 5,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-  },
-
-  markerIcon: {
-    fontSize: 17,
-  },
-
-  // =====================================================
-  // MAP HINT
-  // =====================================================
-
-  mapHint: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 7,
-    paddingHorizontal: 5,
-  },
-
-  mapHintIcon: {
-    fontSize: 13,
-    marginRight: 5,
-  },
-
-  mapHintText: {
-    fontSize: 10,
-    color: "#7A8278",
-  },
-
-  // =====================================================
-  // SECTION
-  // =====================================================
-
-  sectionHeader: {
-    marginTop: 8,
-    marginBottom: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  sectionHeaderText: {
-    flex: 1,
-  },
-
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#234D20",
-  },
-
-  sectionSubtitle: {
-    fontSize: 12,
-    color: "#7A8278",
-    marginTop: 3,
-  },
-
-  resultCountContainer: {
-    minWidth: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#DEF9C4",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  resultCount: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  // =====================================================
-  // PLANT GRID
-  // =====================================================
-
-  plantGrid: {
-    justifyContent: "space-between",
-  },
-
-  locationCard: {
-    width: "48%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 15,
-    padding: 13,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#EDF1EA",
-    elevation: 1,
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-  },
-
-  plantIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 13,
-    backgroundColor: "#EAF6E4",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 10,
-  },
-
-  plantIcon: {
-    fontSize: 23,
-  },
-
-  plantName: {
-    fontSize: 14,
-    fontWeight: "700",
-    fontStyle: "italic",
-    color: "#356859",
-    lineHeight: 19,
-  },
-
-  commonName: {
-    fontSize: 12,
-    color: "#777",
-    marginTop: 3,
-  },
-
-  recordId: {
-    fontSize: 9,
-    color: "#999",
-    marginTop: 7,
-    fontWeight: "600",
-  },
-
-  locationText: {
-    marginTop: 5,
-    color: "#687568",
-    fontSize: 9,
-    lineHeight: 13,
-  },
-
-  // =====================================================
-  // STATUS
-  // =====================================================
-
-  statusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
-  },
-
-  statusBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-    borderRadius: 7,
-  },
-
-  statusApproved: {
-    backgroundColor: "#E3F4E0",
-  },
-
-  statusPending: {
-    backgroundColor: "#FFF1D6",
-  },
-
-  statusText: {
-    fontSize: 8,
-    fontWeight: "700",
-  },
-
-  statusApprovedText: {
-    color: "#43804A",
-  },
-
-  statusPendingText: {
-    color: "#A66A13",
-  },
-
-  photoCount: {
-    fontSize: 9,
-    color: "#777",
-    marginLeft: "auto",
-  },
-
-  
-  // =====================================================
-  // EMPTY
-  // =====================================================
-
-  emptyContainer: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 15,
-    padding: 30,
-    alignItems: "center",
-    marginBottom: 20,
-  },
-
-  emptyIcon: {
-    fontSize: 40,
-    marginBottom: 10,
-  },
-
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#468585",
-  },
-
-  emptyText: {
-    fontSize: 13,
-    color: "#777",
-    textAlign: "center",
-    lineHeight: 19,
-    marginTop: 5,
-  },
-
-  clearFiltersButton: {
-    marginTop: 15,
-    backgroundColor: "#468585",
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 10,
-  },
-
-  clearFiltersText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "700",
-  },
+  container: { flex: 1, backgroundColor: "#F5F9F4" },
+  content: { width: "100%", maxWidth: 860, alignSelf: "center", paddingHorizontal: 18, paddingTop: 100, paddingBottom: 40 },
+  header: { marginBottom: 20 },
+  headerTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
+  title: { flex: 1, minWidth: 0, fontSize: 29, fontWeight: "800", color: "#214C37" },
+  subtitle: { marginTop: 5, fontSize: 14, lineHeight: 20, color: "#62796A" },
+  searchContainer: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14,
+    marginBottom: 15, borderRadius: 16, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E1ECE1" },
+  searchInput: { flex: 1, minWidth: 0, fontSize: 15, color: "#244C38" },
+  sectionHeading: { marginTop: 24, marginBottom: 11 },
+  sectionTitle: { fontSize: 20, fontWeight: "700", color: "#214C37" },
+  sectionSubtitle: { marginTop: 3, fontSize: 12, color: "#718575" },
+  mapEmpty: { marginTop: 8, fontSize: 12, color: "#687E6D" },
+  listHeading: { marginTop: 28, marginBottom: 13, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  statusFilters: { paddingBottom: 12, gap: 8 },
+  statusFilterChip: { minHeight: 44, justifyContent: "center", paddingHorizontal: 14, borderRadius: 20,
+    borderWidth: 1, borderColor: "#D6E9D9", backgroundColor: "#FFFFFF" },
+  statusFilterChipSelected: { borderColor: "#2F6B4F", backgroundColor: "#D6E9D9" },
+  statusFilterText: { color: "#52665C", fontSize: 12, fontWeight: "600" },
+  statusFilterTextSelected: { color: "#2F6B4F", fontWeight: "700" },
+  count: { minWidth: 34, height: 34, borderRadius: 17, paddingHorizontal: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#DDEFD9" },
+  countText: { fontSize: 13, fontWeight: "700", color: "#286C42" },
+  plantGrid: { justifyContent: "space-between" },
+  card: { width: "48%", marginBottom: 14, overflow: "hidden", borderRadius: 17, backgroundColor: "#FFFFFF",
+    borderWidth: 1, borderColor: "#E3EDE2", elevation: 2, shadowColor: "#173B27", shadowOpacity: 0.06,
+    shadowRadius: 7, shadowOffset: { width: 0, height: 3 } },
+  cardMain: { width: "100%", flexGrow: 1 },
+  imageWrap: { height: 116, position: "relative", backgroundColor: "#E7F1E5" },
+  image: { width: "100%", height: "100%" },
+  imagePlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
+  imageStatusBadge: { position: "absolute", top: 8, right: 8, maxWidth: "88%", borderRadius: 999,
+    paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: "rgba(35, 77, 56, 0.16)" },
+  imageStatusBadgeText: { fontSize: 10, lineHeight: 13, fontWeight: "700" },
+  cardBody: { padding: 11 },
+  plantName: { minHeight: 37, fontSize: 14, lineHeight: 18, fontWeight: "700", fontStyle: "italic", color: "#234D38" },
+  recordId: { marginTop: 5, fontSize: 11, color: "#62796A" },
+  zoneRow: { marginTop: 9, flexDirection: "row", alignItems: "center", gap: 4 },
+  zoneText: { flex: 1, fontSize: 11, color: "#607667" },
+  cardActions: { flexDirection: "row", gap: 7, paddingHorizontal: 9, paddingBottom: 10 },
+  cardAction: { flex: 1, minWidth: 0, minHeight: 44, flexDirection: "column", alignItems: "center", justifyContent: "center",
+    gap: 1, paddingHorizontal: 2, borderRadius: 12, borderWidth: 1 },
+  mapAction: { backgroundColor: "#267348", borderColor: "#267348" },
+  disabledMapAction: { backgroundColor: "#AAB8AE", borderColor: "#AAB8AE" },
+  mapActionText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
+  detailsAction: { backgroundColor: "#F2F8F1", borderColor: "#5A8C69" },
+  detailsActionText: { color: "#267348", fontSize: 11, fontWeight: "700" },
+  mapUnavailableText: { marginHorizontal: 9, marginTop: -4, marginBottom: 8, textAlign: "center", color: "#748278", fontSize: 10 },
+  message: { minHeight: 160, alignItems: "center", justifyContent: "center", marginTop: 22, padding: 24,
+    borderRadius: 17, backgroundColor: "#FFFFFF" },
+  messageTitle: { marginTop: 8, fontSize: 16, fontWeight: "700", color: "#244C38" },
+  messageText: { marginTop: 6, textAlign: "center", fontSize: 13, color: "#68806F" },
+  retryButton: { marginTop: 14, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: "#267348" },
+  retryText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
 });

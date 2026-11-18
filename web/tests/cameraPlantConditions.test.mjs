@@ -19,7 +19,7 @@ const reading = (id, plant = '1', timestamp = '2026-11-13T04:00:00Z', values = {
 const device = (value, overrides = {}) => ({ sensor_id: 'sensor-' + value.reading_id, plant_id: value.plant_id,
   device_type: 'Sensor', latest_reading: value, ...overrides })
 const location = (id, latitude) => ({ information: { plant_id: id, scientific_name: null, common_name: null, genus_name: null, family_name: null, description: null },
-  staff: { status: 'Approved', registered_at: '2026-11-01T00:00:00Z', conservation_status: null, habitat: null,
+  staff: { status: 'Approved', registered_at: '2026-11-01T00:00:00Z', conservation_status: null, habitat: null, latest_observation: null, latest_approved_observation: null,
     approved_location: { latitude, longitude: 113.7, accuracy_m: null, altitude_m: null, zone: 'North trail' } } })
 const cameraStatus = (plantId = '1') => ({ cameraId: 'registered-camera', plantId, name: 'Plant camera', status: 'Online' })
 const flush = () => new Promise(resolve => setImmediate(resolve))

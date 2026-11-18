@@ -59,6 +59,28 @@ test('Plant Detail selection, viewer navigation and plant-change reset use the s
   assert.match(botanistSource, /selectedPhotoIndex \+ 1\} \/ \{photos\.length/)
 })
 
+test('Plant Detail approval pill matches neighboring text metrics and carousel arrows use centered 44-point icons', () => {
+  const source = readFileSync(new URL('../screens/PlantDetail.js', import.meta.url), 'utf8')
+  const stylesSource = source.slice(source.indexOf('const styles = StyleSheet.create('))
+  const module = { exports: {} }
+  new Function('StyleSheet', 'module', `${stylesSource}\nmodule.exports = styles;`)(
+    { create: (styles) => styles }, module,
+  )
+  const styles = module.exports
+  for (const key of ['paddingHorizontal', 'paddingVertical', 'fontSize', 'lineHeight', 'textAlignVertical', 'includeFontPadding']) {
+    assert.equal(styles.approvalHeroBadge[key], undefined, `${key} inherits the same metric as Healthy, Growth Stage and Zone`)
+  }
+  assert.equal(styles.photoNavButton.width, 44)
+  assert.equal(styles.photoNavButton.height, 44)
+  assert.equal(styles.photoNavButton.borderRadius, 22)
+  assert.equal(styles.photoNavButton.alignItems, 'center')
+  assert.equal(styles.photoNavButton.justifyContent, 'center')
+  assert.match(source, /name="chevron-left" size=\{24\} color="#315B49"/)
+  assert.match(source, /name="chevron-right" size=\{24\} color="#315B49"/)
+  assert.match(source, /<Text style=\{styles\.photoCounter\}>\{activePhotoIndex \+ 1\} \/ \{displayablePhotos\.length\}<\/Text>/)
+  assert.doesNotMatch(source, /photoNavText/)
+})
+
 test('Plant Detail thumbnail taps select a distinct image and the viewer navigates the same photo list', () => {
   const source = readFileSync(new URL('../screens/PlantDetail.js', import.meta.url), 'utf8')
   const { functions: galleryFunctions } = loadGallery()
@@ -117,6 +139,7 @@ test('Plant Detail thumbnail taps select a distinct image and the viewer navigat
     react: hooks,
     'react-native': native,
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+    '@expo/vector-icons': { Feather: 'Feather' },
     '../translations/i18n': translations,
     '../data/mockData': { getPlantById: () => null, getSpeciesBySlug: () => null },
     '../utils/plantApi': { fetchPlantDetail: async () => plant, getPlantDisplayObservation: (record) => record.latestApproved,

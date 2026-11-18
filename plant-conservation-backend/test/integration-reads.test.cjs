@@ -176,10 +176,14 @@ test("detail visibility, observation ownership, latest readings and bounded devi
   assert.equal((await call("/plants/2")).status, 404);
   assert.equal((await call("/plants/2", "other")).status, 404);
   assert.equal((await call("/plants/2", "bot")).status, 200);
-  for (const path of ["/plants/3", "/observations/2"]) {
-    assert.equal((await call(path, "bot")).status, 404);
-    assert.equal((await call(path, "officer")).status, 200);
-  }
+  assert.equal((await call("/plants/3", "bot")).status, 404);
+  assert.equal((await call("/plants/3", "officer")).status, 200);
+  const ownProtectedObservation = await call("/observations/2", "bot");
+  assert.equal(ownProtectedObservation.status, 200);
+  assert.equal(ownProtectedObservation.data.observation.species_scientific_name, null);
+  assert.equal(ownProtectedObservation.data.observation.plant_scientific_name, null);
+  assert.equal((await call("/observations/2", "other")).status, 404);
+  assert.equal((await call("/observations/2", "officer")).status, 200);
   assert.equal((await call("/plants/3?scope=mine", "bot")).status, 200);
   assert.equal((await call("/observations/1")).status, 401);
   assert.equal((await call("/observations/1", "visitor")).status, 403);

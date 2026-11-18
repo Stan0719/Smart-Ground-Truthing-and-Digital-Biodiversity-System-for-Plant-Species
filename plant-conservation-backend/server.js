@@ -16,6 +16,8 @@ const { mountPlantGallery } = require("./plant-gallery.cjs");
 const { mountPlantDetail } = require("./plant-detail.cjs");
 const { mountPlantSubmissions } = require("./plant-submissions.cjs");
 const { mountRecordChanges } = require("./record-changes.cjs");
+const { mountObservationEdits } = require("./observation-edits.cjs");
+const { mountObservationWithdrawals } = require("./observation-withdrawals.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
 const { mountPlantSimilarity } = require("./plant-similarity.cjs");
 const { mountStaffNotifications } = require("./staff-notifications.cjs");
@@ -25,6 +27,7 @@ const {
   qrPlantRecordRelation,
 } = require("./qr-plant-mode.cjs");
 const { mountSpeciesPhotoLibrary } = require("./species-photo-library.cjs");
+const { mountSpeciesDictionary } = require("./species-dictionary.cjs");
 const { speciesPhotoWritesRequested } = require("./species-photo-activation.cjs");
 function createPlantApp({
   auth,
@@ -62,6 +65,7 @@ function createPlantApp({
   app.use("/api/my-plants", express.json({ limit: "64mb" }));
   app.use("/api/my-species-requests", express.json({ limit: "8mb" }));
   app.use("/api/record-changes", express.json({ limit: "64mb" }));
+  app.use("/api/observation-edits", express.json({ limit: "24mb" }));
   app.use(express.json({ limit: "6mb" }));
   mountDeviceIngestion(app, { pool });
   mountCameraIngestion(app, { pool, recordingsRoot });
@@ -69,10 +73,13 @@ function createPlantApp({
   const allow = (permission) => requirePermission(auth, permission);
   mountStaffNotifications(app, { pool });
   mountDomain(app, { auth, pool, allow, officerNotifications, qrPlantSchema });
+  mountSpeciesDictionary(app, { allow });
   mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountObservationReviewHistory(app, { pool, allow });
   require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
+  mountObservationEdits(app, { pool, allow });
+  mountObservationWithdrawals(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
   mountSpeciesPhotoLibrary(app, { pool, allow, writesEnabled: speciesPhotoWritesEnabled });
@@ -119,7 +126,13 @@ function createPlantApp({
     if (status >= 500)
       console.error("Plant API request failed:", error.code ?? error.name);
     res.status(status).json({
-      ...(["SUBMISSION_REJECTED", "SPECIES_REQUEST_LINK_CONFLICT", "SPECIES_REQUEST_REVIEW_BUSY"].includes(error.code) ? { code: error.code } : {}),
+      ...(["SUBMISSION_REJECTED", "SPECIES_REQUEST_LINK_CONFLICT", "SPECIES_REQUEST_REVIEW_BUSY",
+        "SPECIES_DUPLICATE_APPROVED", "SPECIES_DUPLICATE_PENDING", "SPECIES_DUPLICATE_CORRECTION"].includes(error.code)
+        ? { code: error.code } : {}),
+      ...(typeof error.duplicate_type === "string" ? { duplicate_type: error.duplicate_type } : {}),
+      ...(error.species_id ? { species_id: error.species_id } : {}),
+      ...(error.request_id ? { request_id: error.request_id } : {}),
+      ...(error.request_status ? { request_status: error.request_status } : {}),
       error:
         status >= 500
           ? "Service unavailable. Please try again."

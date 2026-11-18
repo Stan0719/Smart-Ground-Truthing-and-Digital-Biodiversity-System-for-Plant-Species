@@ -68,12 +68,13 @@ test("offline restart restores only a bounded owner draft lease, not API authori
   assert.equal(f.unlocks(), 1);
   f.advance(15 * 60 * 1000);
   await assert.rejects(fresh.restore({ allowOffline: true }));
+  assert.equal(f.saved.size, 1, "an expired offline lease blocks offline access without deleting the saved token");
 });
 test("revocation and clock rollback cannot restore offline access; logout clears the lease", async () => {
   const f = sessions();
   const m = f.make();
   await m.establish({ token, user });
-  f.fail(Object.assign(Error("revoked"), { status: 401 }));
+  f.fail(Object.assign(Error("revoked"), { status: 401, code: "AUTH_SESSION_INVALID" }));
   await assert.rejects(m.restore({ allowOffline: true }));
   assert.equal(f.saved.size, 0);
   f.fail(null);

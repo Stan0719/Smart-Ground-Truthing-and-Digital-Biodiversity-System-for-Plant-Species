@@ -81,6 +81,39 @@ test("final rejection, linked cascade and review cycles preserve submission iden
     for(const table of ['species_request_submission','species','plant_record','plant_observation','plant_asset','plant_submission_receipt','observation_review','business_audit','botanist_notification','plant_app.qr_code']) result[table]=(await pool.query('SELECT * FROM '+table)).rows;
     return result;
   }
+  await t.test('rejecting a shared pending species request closes both linked plant registrations', async () => {
+    const first = await linked();
+    const qr = (await pool.query("INSERT INTO plant_app.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id", ['shared-'+(++serial)])).rows[0];
+    const image = { content_type: 'image/jpeg', base64: photo.toString('base64') };
+    const second = await call('/plant-submissions', { scientific_name: 'Second individual', latitude: 4, longitude: 113,
+      qr_id: qr.qr_id, client_key: 'shared-'+serial, species_request_id: first.id,
+      photos: [image,image,image], content: { heightCm: 21, healthStatus: 'Healthy', lifeStage: 'Mature', morphology: 'Leaves' } }, 'bot');
+    assert.equal(second.status, 201, JSON.stringify(second.data));
+    assert.equal(second.data.species_request_id, first.id);
+    assert.notEqual(second.data.plant_id, first.plantId);
+    const result = await review({ id: first.id }, 'Rejected');
+    assert.equal(result.status, 200, JSON.stringify(result.data));
+    for (const plantId of [first.plantId, second.data.plant_id])
+      assert.equal((await pool.query('SELECT rbac_status FROM plant_record WHERE plant_id=$1', [plantId])).rows[0].rbac_status, 'Rejected');
+    for (const observationId of [first.observationId, second.data.id])
+      assert.equal((await pool.query('SELECT status FROM plant_observation WHERE id=$1', [observationId])).rows[0].status, 'Rejected');
+    assert.equal((await pool.query('SELECT count(*)::integer AS n FROM observation_review WHERE species_request_id=$1', [first.id])).rows[0].n, 2);
+  });
+  await t.test('shared request correction keeps both plants linked to one request', async () => {
+    const first = await linked();
+    const qr = (await pool.query("INSERT INTO plant_app.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id", ['correction-'+(++serial)])).rows[0];
+    const image = { content_type: 'image/jpeg', base64: photo.toString('base64') };
+    const second = await call('/plant-submissions', { scientific_name: 'Corrected partner', latitude: 4, longitude: 113,
+      qr_id: qr.qr_id, client_key: 'correction-'+serial, species_request_id: first.id,
+      photos: [image,image,image], content: { heightCm: 21, healthStatus: 'Healthy', lifeStage: 'Mature', morphology: 'Leaves' } }, 'bot');
+    assert.equal(second.status, 201, JSON.stringify(second.data));
+    assert.equal((await review({ id: first.id }, 'Correction Required')).status, 200);
+    assert.equal((await edit(first)).status, 200);
+    assert.equal((await stored(first.id)).request_status, 'Pending Review');
+    assert.equal((await pool.query('SELECT count(*)::integer AS n FROM species_request_submission WHERE request_id=$1', [first.id])).rows[0].n, 1);
+    assert.equal((await pool.query('SELECT species_id FROM plant_record WHERE plant_id=$1', [first.plantId])).rows[0].species_id,
+      (await pool.query('SELECT species_id FROM plant_record WHERE plant_id=$1', [second.data.plant_id])).rows[0].species_id);
+  });
   await t.test('unchanged correction resubmission opens a new review cycle and rejects every old/missing cycle',async()=>{
     const f=await create();
     assert.equal((await review(f,'Correction Required')).status,200);
