@@ -1,5 +1,9 @@
 {
   "adminDeviceAssignment": {
+    "assignedPlantOptional": "Assigned Plant (optional)",
+    "searchPlants": "Search Plant ID or name",
+    "noMatches": "No matching Approved Plants in the loaded results.",
+
     "currentPlant": "Current Assigned Plant",
     "deviceType": "Device Type",
     "Sensor": "Sensor",

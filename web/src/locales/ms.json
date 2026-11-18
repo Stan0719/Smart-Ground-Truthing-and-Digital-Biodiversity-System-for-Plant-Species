@@ -1,5 +1,9 @@
 {
   "adminDeviceAssignment": {
+    "assignedPlantOptional": "Pokok Ditetapkan (pilihan)",
+    "searchPlants": "Cari ID atau nama pokok",
+    "noMatches": "Tiada pokok diluluskan yang sepadan dalam hasil dimuatkan.",
+
     "currentPlant": "Pokok Ditetapkan Semasa",
     "deviceType": "Jenis Peranti",
     "Sensor": "Sensor",

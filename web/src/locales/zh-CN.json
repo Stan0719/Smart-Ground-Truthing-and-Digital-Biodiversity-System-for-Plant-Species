@@ -1,5 +1,9 @@
 {
   "adminDeviceAssignment": {
+    "assignedPlantOptional": "关联植物（可选）",
+    "searchPlants": "搜索植物编号或名称",
+    "noMatches": "已加载结果中没有匹配的已批准植物。",
+
     "currentPlant": "当前关联植物",
     "deviceType": "设备类型",
     "Sensor": "传感器",
