@@ -26,6 +26,7 @@ const {
   qrPlantRecordRelation,
 } = require("./qr-plant-mode.cjs");
 const { mountSpeciesPhotoLibrary } = require("./species-photo-library.cjs");
+const { mountSpeciesDictionary } = require("./species-dictionary.cjs");
 const { speciesPhotoWritesRequested } = require("./species-photo-activation.cjs");
 function createPlantApp({
   auth,
@@ -69,6 +70,7 @@ function createPlantApp({
   const allow = (permission) => requirePermission(auth, permission);
   mountStaffNotifications(app, { pool });
   mountDomain(app, { auth, pool, allow, officerNotifications, qrPlantSchema });
+  mountSpeciesDictionary(app, { allow });
   mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountObservationReviewHistory(app, { pool, allow });

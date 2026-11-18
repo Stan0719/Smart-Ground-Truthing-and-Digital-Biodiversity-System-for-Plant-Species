@@ -1453,6 +1453,7 @@
     "speciesMissing_habitat": "Masukkan habitat / maklumat ekologi spesies.",
     "speciesMissing_photo": "Tambah foto spesies."
   },
+  "speciesDictionary": { "title": "Kamus Spesies", "helper": "Cari nama tumbuhan dan maklumat rujukan dalam talian.", "placeholder": "Masukkan nama umum atau saintifik", "search": "Cari", "loading": "Sedang mencari spesies…", "empty": "Tiada padanan. Anda boleh terus mengisi rekod secara manual.", "error": "Carian spesies gagal. Semak sambungan dan cuba lagi.", "rateLimited": "Sumber menerima terlalu banyak carian. Tunggu sebentar dan cuba lagi.", "family": "Famili", "rank": "Peringkat taksonomi", "description": "Penerangan", "source": "Lihat sumber", "use": "Gunakan maklumat ini", "attribution": "Cadangan daripada iNaturalist. Semak maklumat sumber sebelum digunakan.", "reviewTitle": "Semak maklumat yang dicadangkan", "reviewMessage": "Semak medan berikut sebelum menggunakannya:", "fillEmpty": "Isi medan kosong", "applyListedFields": "Gunakan medan yang disenaraikan", "replaceExisting": "Gantikan medan yang disenaraikan", "noFieldsTitle": "Tiada maklumat untuk digunakan", "noFields": "Cadangan ini tiada butiran yang sesuai.", "fields": { "scientificName": "Nama saintifik", "commonName": "Nama umum", "genus": "Genus", "family": "Famili", "description": "Penerangan", "habitat": "Habitat" } },
   "speciesRequestForm": {
     "title": "Mohon Spesies Baharu",
     "description": "Hantar cadangan spesies berasingan untuk semakan Pegawai. Ia tidak akan mencipta atau mengubah rekod tumbuhan.",

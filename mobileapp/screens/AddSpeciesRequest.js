@@ -8,6 +8,7 @@ import { validateSpeciesRequest } from "../utils/addPlantValidation";
 import { plantApi } from "../utils/plantApi";
 import { deleteBotanistFormDraft, findBotanistFormDraft, getBotanistFormDraft, saveBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
+import SpeciesDictionary from "../components/SpeciesDictionary";
 
 const conservationStatuses = ["Not Assessed", "Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered"];
 const makeKey = () => `species-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -123,6 +124,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
     <Text style={styles.note}>{t("speciesRequestForm.description")}</Text>
     <View style={styles.card}>
       <Text style={styles.sectionTitle}>{t("addPlant.newSpeciesInformation")}</Text>
+      <SpeciesDictionary fields={{ scientificName: { value: form.scientific_name, setValue: (value) => change("scientific_name", value), label: t("addPlant.scientificName") }, commonName: { value: form.common_name, setValue: (value) => change("common_name", value), label: t("addPlant.commonName") }, genus: { value: form.genus_name, setValue: (value) => change("genus_name", value), label: t("addPlant.genus") }, family: { value: form.family_name, setValue: (value) => change("family_name", value), label: t("addPlant.family") }, description: { value: form.description, setValue: (value) => change("description", value), label: t("addPlant.description") }, habitat: { value: form.habitat, setValue: (value) => change("habitat", value), label: t("addPlant.habitatEcologicalInformation") } }} />
       {textFields.map(([field, label, placeholder]) => <View key={field} style={styles.field}>
         <Text style={styles.label}>{requiredLabel(t(`addPlant.${label}`))}</Text>
         <TextInput style={styles.input} value={form[field]} onChangeText={(value) => change(field, value)} editable={!saving}

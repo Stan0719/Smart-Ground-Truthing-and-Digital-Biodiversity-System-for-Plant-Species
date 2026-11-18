@@ -29,6 +29,7 @@ import { normalizeSpeciesName } from "../utils/speciesNameNormalization";
 import { useFocusEffect } from "@react-navigation/native";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft, hasMeaningfulAddPlantDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave, stopBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
+import SpeciesDictionary from "../components/SpeciesDictionary";
 
 const createPlantClientKey = () =>
   `plant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1223,7 +1224,6 @@ function handleRemoveSpeciesPhoto(index) {
                 }
               >{t("addPlant.enterInformationAboutTheSpeciesThatIsNotCurrentlyAvailable")}</Text>
 
-
               {/* -------------------------------------------
                   Species Scientific Name
               ------------------------------------------- */}
@@ -1529,6 +1529,16 @@ function handleRemoveSpeciesPhoto(index) {
           {/* =================================================
               SPECIES REQUEST SUMMARY
           ================================================= */}
+
+            <SpeciesDictionary reviewPresentation="modal" fields={{
+              plantScientificName: { value: plantScientificName, setValue: setPlantScientificName, label: t("addPlantWorkflow.plantScientificName") },
+              ...(showSpeciesForm ? {
+                speciesScientificName: { value: speciesScientificName, setValue: setSpeciesScientificName, label: t("addPlant.scientificName") },
+                speciesCommonName: { value: speciesCommonName, setValue: setSpeciesCommonName, label: t("addPlant.commonName") },
+                speciesGenus: { value: speciesGenus, setValue: setSpeciesGenus, label: t("addPlant.genus") },
+                speciesFamily: { value: speciesFamily, setValue: setSpeciesFamily, label: t("addPlant.family") },
+              } : {}),
+            }} />
 
             <Text style={styles.label}>{t("addPlantWorkflow.plantScientificName")}</Text>
             <TextInput style={styles.input} value={plantScientificName}

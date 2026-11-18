@@ -1453,6 +1453,7 @@
     "speciesMissing_habitat": "Enter the species habitat / ecological information.",
     "speciesMissing_photo": "Add a species photo."
   },
+  "speciesDictionary": { "title": "Species Dictionary", "helper": "Search online for plant names and reference details.", "placeholder": "Enter a common or scientific name", "search": "Search", "loading": "Searching species…", "empty": "No matches found. You can continue entering the record manually.", "error": "Species search failed. Check your connection and try again.", "rateLimited": "The source is receiving too many searches. Please wait a moment and try again.", "family": "Family", "rank": "Rank", "description": "Description", "source": "View source", "use": "Use this information", "attribution": "Suggestions from iNaturalist. Review source information before using.", "reviewTitle": "Review suggested information", "reviewMessage": "Review the fields below before applying:", "fillEmpty": "Fill empty fields", "applyListedFields": "Apply listed fields", "replaceExisting": "Replace listed fields", "noFieldsTitle": "No information to apply", "noFields": "This suggestion has no compatible details.", "fields": { "scientificName": "Scientific name", "commonName": "Common name", "genus": "Genus", "family": "Family", "description": "Description", "habitat": "Habitat" } },
   "speciesRequestForm": {
     "title": "Request New Species",
     "description": "Submit a separate species proposal for Officer review. It will not create or change a plant record.",

@@ -1453,6 +1453,7 @@
     "speciesMissing_habitat": "请输入物种栖息地／生态信息。",
     "speciesMissing_photo": "添加物种照片。"
   },
+  "speciesDictionary": { "title": "物种词典", "helper": "在线搜索植物名称和参考信息。", "placeholder": "输入常用名或学名", "search": "搜索", "loading": "正在搜索物种…", "empty": "没有找到匹配项。您可以继续手动填写记录。", "error": "物种搜索失败。请检查网络连接后重试。", "rateLimited": "来源服务收到过多搜索请求。请稍等片刻后重试。", "family": "科", "rank": "分类等级", "description": "描述", "source": "查看来源", "use": "使用此信息", "attribution": "建议来自 iNaturalist。使用前请查看来源信息。", "reviewTitle": "查看建议的信息", "reviewMessage": "应用前请查看以下字段：", "fillEmpty": "填写空字段", "applyListedFields": "应用所列字段", "replaceExisting": "替换列出的字段", "noFieldsTitle": "没有可应用的信息", "noFields": "此建议没有兼容的详细信息。", "fields": { "scientificName": "学名", "commonName": "常用名", "genus": "属", "family": "科", "description": "描述", "habitat": "栖息地" } },
   "speciesRequestForm": {
     "title": "申请新物种",
     "description": "提交独立的物种提案供官员审核。此操作不会创建或更改植物记录。",
