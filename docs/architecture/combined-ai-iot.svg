@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100">
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#64748b"/></marker></defs>
+<text x="55" y="76" font-family="Arial, sans-serif" font-size="36" fill="#0f172a" font-weight="700">AI + IoT | Combined System Architecture</text>
+<text x="55" y="115" font-family="Arial, sans-serif" font-size="20" fill="#475569" font-weight="400">Plant protection monitoring · ESP32 sensors + YOLO camera analysis · source-based design</text>
+<text x="55" y="185" font-family="Arial, sans-serif" font-size="20" fill="#0f766e" font-weight="700">01  SENSOR COLLECTION AND BACKEND</text>
+<rect x="55" y="215" width="300" height="145" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="75" y="255" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">Sensors + ESP32</text>
+<text x="75" y="291" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">DHT11, soil and rain probes</text>
+<text x="75" y="317" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">MPU6050 movement detection</text>
+<text x="75" y="343" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Local LED + serial dashboard</text>
+<rect x="445" y="215" width="300" height="145" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="465" y="255" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">Laptop IoT gateway</text>
+<text x="465" y="291" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">USB serial bridge OR</text>
+<text x="465" y="317" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Wi-Fi HTTPS receiver :8443</text>
+<text x="465" y="343" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">SQLite outbox + upload retry</text>
+<rect x="835" y="215" width="300" height="145" rx="14" fill="white" stroke="#2563eb" stroke-width="2"/>
+<text x="855" y="255" font-family="Arial, sans-serif" font-size="23" fill="#2563eb" font-weight="700">Plant API · Node.js</text>
+<text x="855" y="291" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Device authentication</text>
+<text x="855" y="317" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Readings + threshold alerts</text>
+<text x="855" y="343" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Fresh movement lookup</text>
+<rect x="1225" y="215" width="300" height="145" rx="14" fill="white" stroke="#b45309" stroke-width="2"/>
+<text x="1245" y="255" font-family="Arial, sans-serif" font-size="23" fill="#b45309" font-weight="700">Supabase PostgreSQL</text>
+<text x="1245" y="291" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Sensor readings / devices</text>
+<text x="1245" y="317" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Threat alerts + responses</text>
+<text x="1245" y="343" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Camera event metadata</text>
+<polyline points="355,285 445,285" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="745,285 835,285" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="1135,285 1225,285" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="55" y="455" font-family="Arial, sans-serif" font-size="20" fill="#6d28d9" font-weight="700">02  CAMERA ANALYSIS AND SENSOR FUSION</text>
+<rect x="55" y="490" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="75" y="530" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Camera input</text>
+<text x="75" y="566" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">OpenCV video capture</text>
+<text x="75" y="592" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Operator selects plant region</text>
+<text x="75" y="618" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Mapped to database plant ID</text>
+<rect x="445" y="490" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="465" y="530" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">YOLO models</text>
+<text x="465" y="566" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">YOLOv8: humans / animals</text>
+<text x="465" y="592" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">YOLO-World: plant boxes</text>
+<text x="465" y="618" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">YOLO pose: wrist keypoints</text>
+<rect x="835" y="490" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="855" y="530" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Sensor fusion gate</text>
+<text x="855" y="566" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Wrist proximity for 2 seconds</text>
+<text x="855" y="592" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">AND fresh MPU6050 movement</text>
+<text x="855" y="618" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Sensor assigned to same plant</text>
+<rect x="1225" y="490" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="1245" y="530" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Camera outputs</text>
+<text x="1245" y="566" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Possible-handling alert + sound</text>
+<text x="1245" y="592" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Annotated live feed :8001</text>
+<text x="1245" y="618" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Record clip + 5-second tail</text>
+<polyline points="355,560 445,560" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="745,560 835,560" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="1135,560 1225,560" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="985,360 985,490" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="1000" y="417" font-family="Arial, sans-serif" font-size="17" fill="#475569" font-weight="400">Movement state</text>
+<polyline points="1375,490 1375,410 1120,410 1120,360" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="1140" y="394" font-family="Arial, sans-serif" font-size="17" fill="#475569" font-weight="400">Event metadata via API</text>
+<text x="55" y="765" font-family="Arial, sans-serif" font-size="20" fill="#334155" font-weight="700">03  STORAGE AND OFFICER REVIEW</text>
+<rect x="835" y="805" width="300" height="145" rx="14" fill="white" stroke="#b45309" stroke-width="2"/>
+<text x="855" y="845" font-family="Arial, sans-serif" font-size="23" fill="#b45309" font-weight="700">Local recording storage</text>
+<text x="855" y="881" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">H.264 MP4 + JSON outbox</text>
+<text x="855" y="907" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Shared camera / backend folder</text>
+<text x="855" y="933" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Video bytes stay on local disk</text>
+<rect x="1225" y="805" width="300" height="145" rx="14" fill="white" stroke="#334155" stroke-width="2"/>
+<text x="1245" y="845" font-family="Arial, sans-serif" font-size="23" fill="#334155" font-weight="700">Vue web dashboard</text>
+<text x="1245" y="881" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Live camera + sensor readings</text>
+<text x="1245" y="907" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Threat alerts and clip playback</text>
+<text x="1245" y="933" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Officer review and response</text>
+<polyline points="1375,635 1375,805" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="1390" y="732" font-family="Arial, sans-serif" font-size="17" fill="#475569" font-weight="400">Live feed</text>
+<polyline points="1245,635 1245,710 985,710 985,805" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="1000" y="737" font-family="Arial, sans-serif" font-size="17" fill="#475569" font-weight="400">Saved clips</text>
+<polyline points="1135,875 1225,875" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="1525,285 1560,285 1560,875 1525,875" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="65" y="851" font-family="Arial, sans-serif" font-size="21" fill="#475569" font-weight="400">All dashboard data and clip access</text>
+<text x="65" y="886" font-family="Arial, sans-serif" font-size="21" fill="#475569" font-weight="400">use the application permission checks.</text>
+<text x="55" y="1023" font-family="Arial, sans-serif" font-size="18" fill="#475569" font-weight="400">Arrows show data flow; database reads and video playback are mediated by the Plant API.</text>
+<text x="55" y="1050" font-family="Arial, sans-serif" font-size="18" fill="#475569" font-weight="400">Scope: camera AI and sensor IoT. Hardware deployment and end-to-end operation are not verified by this diagram.</text>
+</svg>

@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "C:/Users/stan/OneDrive - Swinburne University Of Technology Sarawak Campus/Documents/GitHub/Smart-Ground-Truthing-and-Digital-Biodiversity-System-for-Plant-Species"
+		},
+		{
+			"name": "261116-110403-esp32dev",
+			"path": "C:/Users/stan/OneDrive - Swinburne University Of Technology Sarawak Campus/Documents/PlatformIO/Projects/261116-110403-esp32dev"
+		}
+	],
+	"settings": {
+		"python-envs.defaultEnvManager": "ms-python.python:system"
+	}
+}

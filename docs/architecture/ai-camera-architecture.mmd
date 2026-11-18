@@ -1,0 +1,21 @@
+flowchart TD
+  Camera["Camera / OpenCV video frames"] --> Human["YOLOv8n: human and animal detection"]
+  Camera --> Plants["YOLOv8s-World: plant detection"]
+  Camera --> Pose["YOLOv8n-pose: wrist keypoints"]
+  Region["Operator selects fixed plant region; maps database plant ID"] --> Contact
+  Pose --> Contact["Confident wrist inside / within 24 pixels for 2 seconds"]
+  Human --> View["Annotated frames"]
+  Plants --> View
+  Pose --> View
+  API["Plant API: authenticated movement lookup"] --> Fresh["Same plant; MPU6050 healthy; age at most 5 seconds"]
+  Contact --> Gate{"Contact AND fresh movement = 1; cooldown permits?"}
+  Fresh --> Gate
+  Gate -->|Yes| Alert["Possible-handling alert and sound"]
+  Alert --> Record["Record clip; stop 5 seconds after qualifying contact ends"]
+  Record --> Publisher["Clip publisher: H.264 and JSON retry outbox"]
+  Publisher --> Disk["Local MP4 files"]
+  Publisher -->|Camera credentials| Events["Plant API: persist event metadata in PostgreSQL"]
+  View --> Live["Local camera service :8001; in-memory events"]
+  Live -->|Camera proxy| Web["Officer dashboard"]
+  Events --> Web
+  Disk -->|Protected playback through Plant API| Web

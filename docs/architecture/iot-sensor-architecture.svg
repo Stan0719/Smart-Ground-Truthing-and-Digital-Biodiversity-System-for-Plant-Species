@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1260" viewBox="0 0 1600 1260">
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#64748b"/></marker></defs>
+<text x="55" y="76" font-family="Arial, sans-serif" font-size="36" fill="#0f172a" font-weight="700">IoT | ESP32 Sensor Architecture</text>
+<text x="55" y="115" font-family="Arial, sans-serif" font-size="20" fill="#475569" font-weight="400">Based on the current PlatformIO ESP32 firmware and the repository gateway / backend</text>
+<rect x="55" y="205" width="300" height="160" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="75" y="245" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">Environmental sensors</text>
+<text x="75" y="281" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">DHT11: temperature / humidity</text>
+<text x="75" y="307" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Soil probe: raw ADC</text>
+<text x="75" y="333" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Rain probe: raw ADC</text>
+<rect x="55" y="425" width="300" height="160" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="75" y="465" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">MPU6050</text>
+<text x="75" y="501" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Accelerometer + gyroscope</text>
+<text x="75" y="527" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">I2C: SDA21 / SCL22</text>
+<text x="75" y="553" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Movement + sensor health</text>
+<rect x="445" y="310" width="300" height="160" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="465" y="350" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">ESP32 · Arduino</text>
+<text x="465" y="386" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Sample and check sensors</text>
+<text x="465" y="412" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Detect movement locally</text>
+<text x="465" y="438" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Timestamp + format readings</text>
+<polyline points="355,285 400,285 400,355 445,355" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="355,505 400,505 400,425 445,425" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="835" y="205" width="300" height="160" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="855" y="245" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">USB path</text>
+<text x="855" y="281" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Serial at 115200 baud</text>
+<text x="855" y="307" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Python serial_bridge.py</text>
+<text x="855" y="333" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Parses sensor dashboard</text>
+<rect x="835" y="425" width="300" height="160" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="855" y="465" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">Wi-Fi path · optional</text>
+<text x="855" y="501" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">HTTPS POST /readings :8443</text>
+<text x="855" y="527" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">CA validation + ingress token</text>
+<text x="855" y="553" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Python wifi_receiver.py</text>
+<polyline points="745,355 790,355 790,285 835,285" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="745,425 790,425 790,505 835,505" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1225" y="310" width="300" height="160" rx="14" fill="white" stroke="#b45309" stroke-width="2"/>
+<text x="1245" y="350" font-family="Arial, sans-serif" font-size="23" fill="#b45309" font-weight="700">Durable host outbox</text>
+<text x="1245" y="386" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Private SQLite queue</text>
+<text x="1245" y="412" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Preserve capture timestamp</text>
+<text x="1245" y="438" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Retry pending uploads</text>
+<polyline points="1135,285 1180,285 1180,355 1225,355" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="1135,505 1180,505 1180,425 1225,425" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="445" y="740" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="465" y="780" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">AI camera consumer</text>
+<text x="465" y="816" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Polls movement through API</text>
+<text x="465" y="842" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Fresh / healthy MPU6050 data</text>
+<text x="465" y="868" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Same plant assignment required</text>
+<rect x="835" y="740" width="300" height="145" rx="14" fill="white" stroke="#2563eb" stroke-width="2"/>
+<text x="855" y="780" font-family="Arial, sans-serif" font-size="23" fill="#2563eb" font-weight="700">Node.js Plant API</text>
+<text x="855" y="816" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">POST /api/device/readings</text>
+<text x="855" y="842" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Authenticate registered device</text>
+<text x="855" y="868" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Store data + evaluate thresholds</text>
+<rect x="1225" y="740" width="300" height="145" rx="14" fill="white" stroke="#b45309" stroke-width="2"/>
+<text x="1245" y="780" font-family="Arial, sans-serif" font-size="23" fill="#b45309" font-weight="700">Supabase PostgreSQL</text>
+<text x="1245" y="816" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Readings and device mapping</text>
+<text x="1245" y="842" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Thresholds and alert history</text>
+<text x="1245" y="868" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Officer response records</text>
+<polyline points="1375,470 1375,655 985,655 985,740" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="1030" y="632" font-family="Arial, sans-serif" font-size="17" fill="#475569" font-weight="400">Authenticated upload</text>
+<polyline points="1135,812 1225,812" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="835,812 745,812" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="835" y="970" width="690" height="145" rx="14" fill="white" stroke="#334155" stroke-width="2"/>
+<text x="855" y="1010" font-family="Arial, sans-serif" font-size="23" fill="#334155" font-weight="700">Web IoT monitoring</text>
+<text x="855" y="1046" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Sensor trends + threat alerts</text>
+<text x="855" y="1072" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Admin: devices / thresholds</text>
+<text x="855" y="1098" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Officer: review / respond</text>
+<polyline points="985,885 985,970" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="55" y="710" font-family="Arial, sans-serif" font-size="20" fill="#0f766e" font-weight="700">FIRMWARE CONNECTIONS</text>
+<text x="55" y="755" font-family="Arial, sans-serif" font-size="20" fill="#334155" font-weight="400">DHT11 GPIO4 | Soil GPIO35</text>
+<text x="55" y="790" font-family="Arial, sans-serif" font-size="20" fill="#334155" font-weight="400">Rain GPIO34 | LED GPIO5</text>
+<text x="55" y="825" font-family="Arial, sans-serif" font-size="20" fill="#334155" font-weight="400">MPU6050 uses I2C</text>
+<text x="55" y="970" font-family="Arial, sans-serif" font-size="20" fill="#334155" font-weight="400">Local movement also drives the LED.</text>
+<text x="55" y="1005" font-family="Arial, sans-serif" font-size="20" fill="#334155" font-weight="400">Select USB or Wi-Fi as the upload path.</text>
+<text x="55" y="1183" font-family="Arial, sans-serif" font-size="18" fill="#475569" font-weight="400">Wi-Fi uploads require configuration; the ESP32 does not persist unsent packets while disconnected.</text>
+<text x="55" y="1210" font-family="Arial, sans-serif" font-size="18" fill="#475569" font-weight="400">Loopback API HTTP is supported locally; remote backend connections require HTTPS. Physical sensor calibration remains necessary.</text>
+</svg>

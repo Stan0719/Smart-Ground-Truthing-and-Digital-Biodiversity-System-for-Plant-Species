@@ -1,0 +1,16 @@
+flowchart LR
+  DHT["DHT11: GPIO4"] --> ESP["ESP32 / Arduino firmware"]
+  Soil["Soil raw ADC: GPIO35"] --> ESP
+  Rain["Rain raw ADC: GPIO34"] --> ESP
+  MPU["MPU6050: SDA21 / SCL22"] --> ESP
+  ESP --> LED["Local movement LED: GPIO5"]
+  ESP -->|USB 115200 baud| Serial["Python serial bridge"]
+  ESP -->|Optional Wi-Fi HTTPS| Receiver["Python receiver :8443 /readings; CA + ingress token"]
+  Serial --> Queue["Host SQLite outbox; original capture time; upload retries"]
+  Receiver --> Queue
+  Queue -->|Device-authenticated POST /api/device/readings| API["Node.js Plant API"]
+  API <--> DB[("Supabase PostgreSQL: readings, assignments, thresholds, alerts")]
+  API -->|Authenticated /api/device/movement| AI["AI camera: fresh same-plant MPU6050 state"]
+  API --> Web["Web IoT dashboard"]
+  Web --> Admin["Administrator: devices and thresholds"]
+  Web --> Officer["Conservation Officer: alert review and response"]

@@ -1,0 +1,24 @@
+flowchart LR
+  subgraph Field[Field hardware]
+    Sensors["DHT11 / soil / rain / MPU6050"] --> ESP["ESP32: sample sensors and detect movement"]
+    Camera["Camera video"]
+  end
+  subgraph Host[Local host computer]
+    USB["USB serial bridge"] --> Queue["SQLite outbox and retries"]
+    WiFi["Optional HTTPS receiver :8443"] --> Queue
+    Models["OpenCV + YOLOv8 + YOLO-World + YOLO pose"] --> Gate["2-second wrist proximity AND fresh same-plant MPU6050 movement"]
+    Models --> Live["Annotated live feed :8001"]
+    Gate --> Alert["Possible handling: sound and recording"]
+    Alert --> Publisher["Clip publisher and JSON retry outbox"]
+    Publisher --> Disk["Local H.264 MP4 storage"]
+  end
+  ESP -->|USB| USB
+  ESP -->|Wi-Fi HTTPS| WiFi
+  Camera --> Models
+  Queue -->|Authenticated upload| API["Node.js Plant API"]
+  API -->|Fresh movement state| Gate
+  Publisher -->|Camera-authenticated event metadata| API
+  API <--> DB[("Supabase PostgreSQL: readings, devices, alerts, event metadata")]
+  API -->|Protected data and clip playback| Web["Vue dashboard: officer review and response"]
+  Disk -->|Backend reads shared recording folder| API
+  Live -->|Camera proxy| Web

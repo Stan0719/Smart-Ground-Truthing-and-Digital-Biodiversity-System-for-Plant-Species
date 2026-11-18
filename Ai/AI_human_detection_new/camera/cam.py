@@ -34,7 +34,7 @@ WRIST_CONFIDENCE = 0.35
 PLANT_CONTACT_SECONDS = 2.0
 WRIST_REACH_PIXELS = 24
 RECORDING_SIZE = (640, 360)
-RECORDING_FPS = 60
+RECORDING_FPS = 30
 
 
 class EventVideoWriter:
@@ -287,7 +287,7 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
 
     recordings_dir = publisher.root if publisher is not None and publisher.configured else BASE_DIR / "recordings"
 
-    delay = 30
+    delay = 5
     paused = False
     last_contact_alert_time = float("-inf")
     last_contact_seen_time = 0
@@ -366,7 +366,7 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
                 results = model.track(
                     frame,
                     conf=0.5,
-                    imgsz=640,
+                    imgsz=416,
                     persist=True,
                     verbose=False,
                 )
@@ -378,7 +378,7 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
                 plant_count_frame = 0
                 plants = []
                 plant_results = plant_model.track(frame, conf=PLANT_CONFIDENCE,
-                                                  imgsz=640, persist=True, verbose=False)
+                                                  imgsz=416, persist=True, verbose=False)
                 if plant_results and plant_results[0].boxes is not None:
                     for box in plant_results[0].boxes:
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -389,7 +389,7 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
                         plant_id = int(box.id.item()) if box.id is not None else None
                         plants.append((plant_id, (x1, y1, x2, y2)))
 
-                pose_results = pose_model.predict(frame, conf=0.25, imgsz=640, verbose=False)
+                pose_results = pose_model.predict(frame, conf=0.25, imgsz=416, verbose=False)
                 wrists = draw_wrists(annotated_frame, pose_results[0]) if pose_results else []
                 wrist_count_frame = len(wrists)
 

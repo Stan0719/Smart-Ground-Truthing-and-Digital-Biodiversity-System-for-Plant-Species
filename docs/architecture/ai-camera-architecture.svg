@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1160" viewBox="0 0 1600 1160">
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#64748b"/></marker></defs>
+<text x="55" y="76" font-family="Arial, sans-serif" font-size="36" fill="#0f172a" font-weight="700">AI | Camera Monitoring Architecture</text>
+<text x="55" y="115" font-family="Arial, sans-serif" font-size="20" fill="#475569" font-weight="400">YOLO detection, wrist proximity and sensor-confirmed possible-handling alerts</text>
+<rect x="55" y="210" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="75" y="250" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Video source</text>
+<text x="75" y="286" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Connected camera</text>
+<text x="75" y="312" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">OpenCV frame capture</text>
+<text x="75" y="338" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Local Python camera process</text>
+<rect x="445" y="210" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="465" y="250" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">YOLO inference</text>
+<text x="465" y="286" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">YOLOv8n: humans / animals</text>
+<text x="465" y="312" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">YOLOv8s-World: plants</text>
+<text x="465" y="338" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">YOLOv8n-pose: wrists</text>
+<rect x="835" y="210" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="855" y="250" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Selected plant region</text>
+<text x="855" y="286" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Manual selection: P / drag</text>
+<text x="855" y="312" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Fixed monitored image region</text>
+<text x="855" y="338" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Linked database plant ID</text>
+<rect x="1225" y="210" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="1245" y="250" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Contact timer</text>
+<text x="1245" y="286" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Confident wrist near region</text>
+<text x="1245" y="312" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Inside / within 24 pixels</text>
+<text x="1245" y="338" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Sustained for 2 seconds</text>
+<polyline points="355,280 445,280" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="745,280 835,280" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="1135,280 1225,280" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="55" y="515" width="300" height="145" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="75" y="555" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">IoT movement source</text>
+<text x="75" y="591" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Plant API movement endpoint</text>
+<text x="75" y="617" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Authenticated Sensor device</text>
+<text x="75" y="643" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Same registered plant</text>
+<rect x="445" y="515" width="300" height="145" rx="14" fill="white" stroke="#0f766e" stroke-width="2"/>
+<text x="465" y="555" font-family="Arial, sans-serif" font-size="23" fill="#0f766e" font-weight="700">Freshness checks</text>
+<text x="465" y="591" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">MPU6050 health required</text>
+<text x="465" y="617" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Reading age at most 5 sec</text>
+<text x="465" y="643" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Stale / absent data cannot pass</text>
+<rect x="835" y="515" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="855" y="555" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Combined alert rule</text>
+<text x="855" y="591" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Timed wrist proximity</text>
+<text x="855" y="617" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">AND fresh movement = 1</text>
+<text x="855" y="643" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Apply existing alert cooldown</text>
+<rect x="1225" y="515" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="1245" y="555" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Possible handling</text>
+<text x="1245" y="591" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">On-screen alert + sound</text>
+<text x="1245" y="617" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Start / continue recording</text>
+<text x="1245" y="643" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">End 5 sec after contact ends</text>
+<polyline points="355,585 445,585" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="745,585 835,585" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="1135,585 1225,585" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="1375,355 1375,425 985,425 985,515" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="445" y="845" width="300" height="145" rx="14" fill="white" stroke="#6d28d9" stroke-width="2"/>
+<text x="465" y="885" font-family="Arial, sans-serif" font-size="23" fill="#6d28d9" font-weight="700">Live camera service</text>
+<text x="465" y="921" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Annotated frames + live events</text>
+<text x="465" y="947" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Local HTTP service :8001</text>
+<text x="465" y="973" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Events held in memory</text>
+<rect x="835" y="845" width="300" height="145" rx="14" fill="white" stroke="#b45309" stroke-width="2"/>
+<text x="855" y="885" font-family="Arial, sans-serif" font-size="23" fill="#b45309" font-weight="700">Clip publisher</text>
+<text x="855" y="921" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">H.264 MP4 + local JSON retry</text>
+<text x="855" y="947" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Camera key authenticates event</text>
+<text x="855" y="973" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Metadata sent to Plant API</text>
+<rect x="1225" y="845" width="300" height="145" rx="14" fill="white" stroke="#334155" stroke-width="2"/>
+<text x="1245" y="885" font-family="Arial, sans-serif" font-size="23" fill="#334155" font-weight="700">Officer dashboard</text>
+<text x="1245" y="921" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Live feed via camera proxy</text>
+<text x="1245" y="947" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Saved events via Plant API</text>
+<text x="1245" y="973" font-family="Arial, sans-serif" font-size="18" fill="#334155" font-weight="400">Protected video playback</text>
+<polyline points="1295,660 1295,750 985,750 985,845" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="595,355 595,425 395,425 395,780 595,780 595,845" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="745,917 790,917 790,1020 1375,1020 1375,990" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<polyline points="1135,917 1225,917" fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+<text x="55" y="1083" font-family="Arial, sans-serif" font-size="18" fill="#475569" font-weight="400">Camera models run on the host computer. Human presence alone does not trigger the combined handling alert.</text>
+<text x="55" y="1110" font-family="Arial, sans-serif" font-size="18" fill="#475569" font-weight="400">Possible handling is an estimate requiring officer review. Persisted events use PostgreSQL; completed videos remain local.</text>
+</svg>
