@@ -1,4 +1,27 @@
 {
+  "adminDeviceAssignment": {
+    "currentPlant": "当前关联植物",
+    "deviceType": "设备类型",
+    "Sensor": "传感器",
+    "Camera": "摄像头",
+    "Unknown": "未知",
+    "notLinked": "未关联",
+    "unavailable": "不可用",
+    "unassigned": "不关联植物",
+    "keepCurrent": "保留当前关联",
+    "currentOnly": "此处显示设备的当前关联。更改关联不会改写历史警报证据。",
+    "loading": "正在加载已批准的植物…",
+    "capped": "已达到目录加载上限。筛选仅涵盖已加载的记录。请输入准确的植物编号，查找此批次之外的已批准植物。",
+    "search": "筛选已加载植物或输入植物编号",
+    "searchHint": "已加载的名称、PL001 或 1",
+    "find": "查找植物编号",
+    "finding": "正在查找…",
+    "loadFailed": "无法加载已批准的植物。已保留您的选择。",
+    "findFailed": "请输入可用且已批准植物的有效编号。",
+    "retry": "重试",
+    "cameraRules": "摄像头接触检测使用独立的检测规则。",
+    "thresholdUnavailable": "此设备类型不支持传感器阈值设置。"
+  },
   "approvedChanges": {
     "allTypes": "所有类型",
     "searchPlaceholder": "提交编号、植物编号、名称、提交人、类型或区域",

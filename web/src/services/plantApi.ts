@@ -39,6 +39,8 @@ export interface Device {
   status: string
   last_seen: string | null
   thresholds: Record<string, number>
+  device_type?: string | null
+  plant_id?: string | number | null
 }
 export async function plantApi<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   if (!path.startsWith('/') || path.startsWith('//')) throw Error('Invalid API path.')

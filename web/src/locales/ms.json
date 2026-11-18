@@ -1,4 +1,27 @@
 {
+  "adminDeviceAssignment": {
+    "currentPlant": "Pokok Ditetapkan Semasa",
+    "deviceType": "Jenis Peranti",
+    "Sensor": "Sensor",
+    "Camera": "Kamera",
+    "Unknown": "Tidak diketahui",
+    "notLinked": "Tidak dipautkan",
+    "unavailable": "Tidak tersedia",
+    "unassigned": "Tiada penetapan",
+    "keepCurrent": "Kekalkan penetapan semasa",
+    "currentOnly": "Ini ialah penetapan peranti semasa. Perubahan tidak menulis semula bukti amaran terdahulu.",
+    "loading": "Memuatkan pokok yang diluluskan…",
+    "capped": "Had katalog telah dicapai. Pilihan yang ditapis hanya meliputi kelompok yang dimuatkan. Gunakan ID pokok tepat untuk mencari pokok diluluskan di luar kelompok ini.",
+    "search": "Tapis pokok dimuatkan atau masukkan ID pokok",
+    "searchHint": "Nama dalam kelompok, PL001 atau 1",
+    "find": "Cari ID Pokok",
+    "finding": "Mencari…",
+    "loadFailed": "Pokok diluluskan tidak dapat dimuatkan. Pilihan anda dikekalkan.",
+    "findFailed": "Masukkan ID pokok yang sah bagi pokok diluluskan yang tersedia.",
+    "retry": "Cuba semula",
+    "cameraRules": "Pengesanan sentuhan kamera menggunakan peraturan pengesanan berasingan.",
+    "thresholdUnavailable": "Ambang sensor tidak tersedia untuk jenis peranti ini."
+  },
   "approvedChanges": {
     "allTypes": "Semua Jenis",
     "searchPlaceholder": "ID penyerahan, ID tumbuhan, nama, pengirim, jenis atau zon",

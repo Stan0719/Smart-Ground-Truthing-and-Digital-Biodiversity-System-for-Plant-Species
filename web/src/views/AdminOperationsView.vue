@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import AdminPlantAssignment from '../components/AdminPlantAssignment.vue'
+import { KEEP_ASSIGNMENT, assignmentPayload, currentAssignment, deviceType, plantLabel } from '../services/deviceAssignment'
 import { useRoute, useRouter } from 'vue-router'
 import AdminPageShell from '../components/AdminPageShell.vue'
 import AdminTableIdentifier from '../components/AdminTableIdentifier.vue'
 import StaffDialog from '../components/StaffDialog.vue'
 import { api, logout, type AuthUser } from '../services/auth'
 import { plantApi, type Device } from '../services/plantApi'
+const { t } = useI18n()
+const da = (key: string) => t('adminDeviceAssignment.' + key)
+const assignmentLabel = (device: Device) => { const a = currentAssignment(device); return a.state === 'assigned' ? plantLabel(a.id) : da(a.state) }
 const route = useRoute(),
   router = useRouter(),
   section = computed(() => route.path.split('/').pop() || '')
@@ -64,7 +70,7 @@ const settings = ref({ session_hours: 8, login_limit: 30 }),
 const modal = ref<'register' | 'edit' | 'threshold' | 'settings' | null>(null),
   selected = ref<Device | null>(null),
   key = ref('')
-const form = ref({ name: '', status: 'Active', metric: 'temperature', threshold: '' })
+const form = ref({ name: '', status: 'Active', metric: 'temperature', threshold: '', plant: '' })
 const roles = ['Administrator', 'Conservation Officer', 'Botanist', 'Visitor', 'Guest']
 const metrics = ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall', 'sound']
 const date = (value: string | number | null | undefined) => {
@@ -158,11 +164,13 @@ async function load() {
   }
 }
 function open(kind: 'register' | 'edit' | 'threshold', device?: Device) {
+  if (kind === 'threshold' && (!device || deviceType(device) !== 'Sensor')) return
   selected.value = device || null
   form.value = {
     name: device?.name || '',
     status: device?.status || 'Active',
     metric: 'temperature',
+    plant: kind === 'edit' ? KEEP_ASSIGNMENT : '',
     threshold:
       device?.thresholds.temperature === undefined ? '' : String(device.thresholds.temperature),
   }
@@ -186,6 +194,7 @@ async function saveDevice() {
     if (modal.value === 'register') {
       const result = await plantApi<{ provisioningKey: string }>('/devices', 'POST', {
         name: form.value.name.trim(),
+        ...assignmentPayload(form.value.plant, false),
       })
       key.value = result.provisioningKey
       message.value = 'Sensor registered. Store its one-time device key privately.'
@@ -193,9 +202,11 @@ async function saveDevice() {
       await plantApi(`/devices/${selected.value.id}`, 'PATCH', {
         name: form.value.name.trim(),
         status: form.value.status,
+        ...assignmentPayload(form.value.plant, true),
       })
       message.value = 'Sensor updated.'
     } else if (modal.value === 'threshold' && selected.value) {
+      if (deviceType(selected.value) !== 'Sensor') throw Error(da('thresholdUnavailable'))
       const value = Number(form.value.threshold)
       if (!String(form.value.threshold).trim() || !Number.isFinite(value))
         throw Error('Enter a finite numeric threshold.')
@@ -335,7 +346,9 @@ watch(section, () => {
             <thead>
               <tr>
                 <th>Sensor</th>
+                <th>{{ da('deviceType') }}</th>
                 <th>Status</th>
+                <th>{{ da('currentPlant') }}</th>
                 <th>Last report</th>
                 <th>Thresholds</th>
                 <th v-if="section === 'sensors'">Actions</th>
@@ -346,13 +359,16 @@ watch(section, () => {
                 <td>
                   {{ d.name }}<small><AdminTableIdentifier :value="d.id" copy-label="Copy full Device ID" /></small>
                 </td>
+                <td>{{ da(deviceType(d)) }}</td>
                 <td>
                   <span class="badge" :class="{ neutral: d.status !== 'Active' }">{{
                     d.status
                   }}</span>
                 </td>
+                <td>{{ assignmentLabel(d) }}</td>
                 <td>{{ date(d.last_seen) }}</td>
-                <td>
+                <td v-if="deviceType(d) !== 'Sensor'">{{ da(deviceType(d) === 'Camera' ? 'cameraRules' : 'thresholdUnavailable') }}</td>
+                <td v-else>
                   {{
                     Object.keys(d.thresholds).length
                       ? measurement(d.thresholds)
@@ -362,12 +378,12 @@ watch(section, () => {
                 <td v-if="section === 'sensors'">
                   <div class="actions">
                     <button @click="open('edit', d)">Edit sensor</button
-                    ><button @click="open('threshold', d)">Configure threshold</button>
+                    ><button v-if="deviceType(d) === 'Sensor'" @click="open('threshold', d)">Configure threshold</button>
                   </div>
                 </td>
               </tr>
               <tr v-if="!filteredDevices.length">
-                <td :colspan="section === 'sensors' ? 5 : 4" class="empty">
+                <td :colspan="section === 'sensors' ? 7 : 6" class="empty">
                   {{
                     busy
                       ? 'Loading sensors…'
@@ -517,7 +533,9 @@ watch(section, () => {
                   <option>Active</option>
                   <option>Inactive</option>
                 </select></label
-              ></template
+              >
+              <AdminPlantAssignment v-if="modal === 'register' || modal === 'edit'" v-model="form.plant" :editing="modal === 'edit'" :device="selected" :disabled="operationBusy" />
+              </template
             ><template v-else
               ><p>{{ selected?.name }}</p>
               <label

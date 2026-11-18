@@ -1,4 +1,27 @@
 {
+  "adminDeviceAssignment": {
+    "currentPlant": "Current Assigned Plant",
+    "deviceType": "Device Type",
+    "Sensor": "Sensor",
+    "Camera": "Camera",
+    "Unknown": "Unknown",
+    "notLinked": "Not linked",
+    "unavailable": "Unavailable",
+    "unassigned": "Unassigned",
+    "keepCurrent": "Keep current assignment",
+    "currentOnly": "This is the current device assignment. Changing it does not rewrite historical alert evidence.",
+    "loading": "Loading Approved Plants…",
+    "capped": "The catalogue limit was reached. Filtered options cover only the loaded batch. Use an exact Plant ID to find an Approved Plant outside this batch.",
+    "search": "Filter loaded Plants or enter a Plant ID",
+    "searchHint": "Name in loaded batch, PL001 or 1",
+    "find": "Find Plant ID",
+    "finding": "Finding…",
+    "loadFailed": "Approved Plants could not be loaded. Your selection has been preserved.",
+    "findFailed": "Enter a valid Plant ID for an available Approved Plant.",
+    "retry": "Retry",
+    "cameraRules": "Camera contact detection uses separate detection rules.",
+    "thresholdUnavailable": "Sensor thresholds are unavailable for this device type."
+  },
   "approvedChanges": {
     "allTypes": "All Types",
     "searchPlaceholder": "Submission ID, Plant ID, name, submitter, type or zone",
