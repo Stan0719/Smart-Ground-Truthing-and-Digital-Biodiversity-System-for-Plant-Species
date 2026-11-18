@@ -74,6 +74,7 @@ function createPlantApp({
   mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountObservationReviewHistory(app, { pool, allow });
+  require("./iot-summary-report.cjs").mountIoTSummaryReport(app, { pool, allow });
   require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
   mountObservationEdits(app, { pool, allow });
   mountObservationWithdrawals(app, { pool, allow });

@@ -7,6 +7,8 @@ export interface ReportDocument {
   columns: string[]; rows: ExportCell[][]; displayRows: string[][]
   chart: { series: string; point: string; value: number | null; unit: string }[]
   context?: { label: string; value: ExportCell }[]
+  notes?: { label: string; value: string }[]
+  statisticsColumns?: 3 | 4
 }
 export const reportPalette: Record<string, [string, string]> = {
   totalObservations: ['#edf2ee', '#315b49'], 'Pending Review': ['#e8f0f5', '#315d78'], Approved: ['#e7f3e9', '#287347'],
@@ -90,7 +92,7 @@ export async function renderReportPdf(model: ReportDocument, chartImage: string 
   for (const item of model.context || []) textBlock(`${item.label}: ${item.value ?? '—'}`, 23)
   y += 22
   // Fixed print grid: independent of browser width, with indivisible card rows.
-  const columns = 3, gap = 18, cardWidth = (contentWidth - gap * (columns - 1)) / columns
+  const columns = model.statisticsColumns || 3, gap = 18, cardWidth = (contentWidth - gap * (columns - 1)) / columns
   for (let start = 0; start < model.statistics.length; start += columns) {
     const cards = model.statistics.slice(start, start + columns).map(stat => {
       context.font = '25px sans-serif'; const label = wrap(stat.label, cardWidth - 36)
@@ -146,6 +148,8 @@ export async function renderReportPdf(model: ReportDocument, chartImage: string 
       if (offset < lines) { page(); header() }
     }
   })
+  if (!current()) return false
+  for (const note of model.notes || []) { y += 18; textBlock(note.label, 28, true); textBlock(note.value, 22) }
   if (!current()) return false
   finishPage()
   return true
