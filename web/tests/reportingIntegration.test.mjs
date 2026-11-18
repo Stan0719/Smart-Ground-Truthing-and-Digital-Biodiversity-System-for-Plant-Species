@@ -409,13 +409,22 @@ test('applied period labels come from response metadata and zero-count periods r
 })
 
 
-test('chart stays capped at twelve matching species and form submit supports keyboard apply', async () => {
+test('chart supports default top twelve, hides zero counts, and form submit supports keyboard apply', async () => {
   const rows=Array.from({length:15},(_,i)=>({species_id:i+1,scientific_name:'Species '+String(i).padStart(2,'0'),common_name:'',approved_plants:i}))
   const h=harness(async()=>Response.json(reportFixture({rows})))
   try {
     await h.state.loadReport()
     assert.equal(h.state.chartRows.value.length,12)
     assert.equal(h.state.chartRows.value[0].approvedPlants,14)
+    assert.ok(h.state.chartRows.value.every(row => row.approvedPlants > 0))
+    h.state.chartLimit.value='5'
+    assert.equal(h.state.chartRows.value.length,5)
+    h.state.chartSort.value='low-high'
+    assert.equal(h.state.chartRows.value[0].approvedPlants,1)
+    h.state.chartLimit.value='all'
+    h.state.includeZeroCounts.value=true
+    assert.equal(h.state.chartRows.value.length,15)
+    assert.equal(h.state.chartRows.value[0].approvedPlants,0)
     h.state.search.value='Species 0'
     assert.equal(h.state.filteredRows.value.length,10);assert.equal(h.state.chartRows.value.length,10)
     assert.equal(h.state.totalApprovedPlants.value,45)
