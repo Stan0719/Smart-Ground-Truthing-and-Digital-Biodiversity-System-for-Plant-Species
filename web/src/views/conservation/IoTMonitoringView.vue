@@ -177,7 +177,7 @@ const gpsValue = (reading: ApiSensorReading | null) =>
     : '—'
 const motionValue = (reading: ApiSensorReading) => {
   if (reading.motion_detected === null) return '—'
-  return reading.motion_detected ? 'Detected' : 'No motion'
+  return `${reading.motion_detected ? 1 : 0} (${ct('Binary')})`
 }
 
 const viewDeviceAlerts = async (device: ApiSensorDevice) => {
@@ -258,7 +258,7 @@ const closeReadingHistory = () => {
   historyErrorMessage.value = ''
 }
 
-type NumericReadingField = 'temperature_c' | 'humidity' | 'soil_moisture' | 'rainfall_mm'
+type NumericReadingField = 'temperature_c' | 'humidity' | 'soil_moisture' | 'rainfall_mm' | 'sound_raw'
 const chartPointsFor = (field: NumericReadingField): SensorChartPoint[] =>
   historyReadings.value
     .filter((reading) => reading[field] !== null && Number.isFinite(Number(reading[field])))
@@ -269,6 +269,9 @@ const temperatureChartPoints = computed(() => chartPointsFor('temperature_c'))
 const humidityChartPoints = computed(() => chartPointsFor('humidity'))
 const soilMoistureChartPoints = computed(() => chartPointsFor('soil_moisture'))
 const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
+const soundChartPoints = computed(() => chartPointsFor('sound_raw'))
+const hasLatestSound = computed(() => latestReadings.value.some(item => item.reading.sound_raw != null))
+const hasHistorySound = computed(() => historyReadings.value.some(reading => reading.sound_raw != null))
 </script>
 
 <template>
@@ -396,7 +399,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       </div>
       <p v-if="!latestReadings.length" class="state-message">No sensor readings available.</p>
       <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="t('conservationPages.iot.recentReadings')" tabindex="0">
-        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
+        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col v-if="hasLatestSound" class="column-metric" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
           <thead>
             <tr>
               <th scope="col">Reading ID</th>
@@ -406,6 +409,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <th scope="col">Humidity</th>
               <th scope="col">Soil Moisture</th>
               <th scope="col">Rainfall</th>
+              <th v-if="hasLatestSound" scope="col">{{ ct('Sound') }}</th>
               <th scope="col">Motion</th>
               <th scope="col">GPS</th>
               <th scope="col">Recorded At</th>
@@ -421,8 +425,9 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <td>{{ plantDisplayId(item.reading) }}</td>
               <td>{{ valueOrDash(item.reading.temperature_c, ' °C') }}</td>
               <td>{{ valueOrDash(item.reading.humidity, '%') }}</td>
-              <td>{{ valueOrDash(item.reading.soil_moisture, '%') }}</td>
-              <td>{{ valueOrDash(item.reading.rainfall_mm, ' mm') }}</td>
+              <td>{{ valueOrDash(item.reading.soil_moisture, ' ' + ct('raw')) }}</td>
+              <td>{{ valueOrDash(item.reading.rainfall_mm, ' ' + ct('raw')) }}</td>
+              <td v-if="hasLatestSound">{{ valueOrDash(item.reading.sound_raw, ' ' + ct('raw')) }}</td>
               <td>
                 <span class="badge" :class="item.reading.motion_detected ? 'high' : 'approved'">{{
                   motionValue(item.reading)
@@ -548,20 +553,21 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         />
         <SensorHistoryChart
           title="Soil moisture over time"
-          unit="%"
+          :unit="ct('raw')"
           empty-message="No soil moisture history available."
           :points="soilMoistureChartPoints"
         />
         <SensorHistoryChart
           title="Rainfall over time"
-          unit="mm"
+          :unit="ct('raw')"
           type="bar"
           empty-message="No rainfall history available."
           :points="rainfallChartPoints"
         />
+        <SensorHistoryChart v-if="hasHistorySound" :title="ct('Sound over time')" :unit="ct('raw')" :empty-message="ct('No sound history available.')" :points="soundChartPoints" />
       </section>
       <div class="table-scroll officer-table-scroll history-table" role="region" :aria-label="`Reading History · ${historyDevice.device_name}`" tabindex="0">
-        <table class="officer-data-table iot-history-table"><colgroup><col class="column-id" /><col class="column-time" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-coordinates" /></colgroup>
+        <table class="officer-data-table iot-history-table"><colgroup><col class="column-id" /><col class="column-time" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col v-if="hasHistorySound" class="column-metric" /><col class="column-status" /><col class="column-coordinates" /></colgroup>
           <thead>
             <tr>
               <th scope="col">Reading ID</th>
@@ -571,6 +577,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <th scope="col">Humidity</th>
               <th scope="col">Soil Moisture</th>
               <th scope="col">Rainfall</th>
+              <th v-if="hasHistorySound" scope="col">{{ ct('Sound') }}</th>
               <th scope="col">Motion</th>
               <th scope="col">GPS</th>
             </tr>
@@ -584,8 +591,9 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <td>{{ plantDisplayId(reading) }}</td>
               <td>{{ valueOrDash(reading.temperature_c, ' °C') }}</td>
               <td>{{ valueOrDash(reading.humidity, '%') }}</td>
-              <td>{{ valueOrDash(reading.soil_moisture, '%') }}</td>
-              <td>{{ valueOrDash(reading.rainfall_mm, ' mm') }}</td>
+              <td>{{ valueOrDash(reading.soil_moisture, ' ' + ct('raw')) }}</td>
+              <td>{{ valueOrDash(reading.rainfall_mm, ' ' + ct('raw')) }}</td>
+              <td v-if="hasHistorySound">{{ valueOrDash(reading.sound_raw, ' ' + ct('raw')) }}</td>
               <td>{{ motionValue(reading) }}</td>
               <td>{{ gpsValue(reading) }}</td>
             </tr>
@@ -625,11 +633,11 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       </div>
       <div class="reading-measurement">
         <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19c5-5 13-5 18 0 M12 16V9 M12 10C6 11 5 5 5 5s7-1 7 5Z M12 9c0-5 7-5 7-5s0 6-7 5Z M6 22h.01 M12 21h.01 M18 22h.01" /></svg></span>Soil Moisture</dt>
-        <dd>{{ valueOrDash(selectedReading.soil_moisture, '%') }}</dd>
+        <dd>{{ valueOrDash(selectedReading.soil_moisture, ' ' + ct('raw')) }}</dd>
       </div>
       <div class="reading-measurement">
         <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15a4 4 0 0 1-1-7 6 6 0 0 1 11-3 5 5 0 1 1 3 10Z M7 18l-2 4 M13 18l-2 4 M19 18l-2 4" /></svg></span>Rainfall</dt>
-        <dd>{{ valueOrDash(selectedReading.rainfall_mm, ' mm') }}</dd>
+        <dd>{{ valueOrDash(selectedReading.rainfall_mm, ' ' + ct('raw')) }}</dd>
       </div>
       <div class="reading-measurement">
         <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 4.9a10 10 0 0 0 0 14.2 M19.1 4.9a10 10 0 0 1 0 14.2 M8 8a5.7 5.7 0 0 0 0 8 M16 8a5.7 5.7 0 0 1 0 8 M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z" /></svg></span>Motion</dt>
@@ -639,6 +647,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
         <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg></span>GPS</dt>
         <dd>{{ gpsValue(selectedReading) }}</dd>
       </div>
+      <div v-if="selectedReading.sound_raw != null" class="reading-measurement"><dt>{{ ct('Sound') }}</dt><dd>{{ valueOrDash(selectedReading.sound_raw, ' ' + ct('raw')) }}</dd></div>
       <div class="reading-measurement reading-recorded-at">
         <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4 M8 3v4 M3 11h18" /></svg></span>Recorded At</dt>
         <dd>{{ dt(selectedReading.recorded_at) }}</dd>

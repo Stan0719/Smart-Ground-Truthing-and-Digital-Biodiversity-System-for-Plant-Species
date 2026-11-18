@@ -78,7 +78,7 @@ test('reading View and Details share the reference layout, single ID, dynamic da
       assert.equal(title.filter(n => n.props?.class === 'reading-header-icon').length, 1)
       assert.deepEqual(body.filter(n => n.type === 'dt').map(nodeText), ['Temperature', 'Humidity', 'Soil Moisture', 'Rainfall', 'Motion', 'GPS', 'Recorded At'])
       assert.equal(body.filter(n => n.props?.class === 'reading-field-icon').length, 7)
-      assert.deepEqual(body.filter(n => n.type === 'dd').map(nodeText), ['22.1 \u00b0C', '64%', '4095%', '123 mm', 'No motion', '\u2014', '10 Nov 2026, 16:20'])
+      assert.deepEqual(body.filter(n => n.type === 'dd').map(nodeText), ['22.1 \u00b0C', '64%', '4095 raw', '123 raw', '0 (Binary)', '\u2014', '10 Nov 2026, 16:20'])
       const actions = body.filter(n => n.type === 'button')
       assert.deepEqual(actions.map(nodeText), ['View Alerts', 'View on Map'])
       assert.ok(actions.every(n => flat(n).some(child => child.type === 'svg')))
@@ -110,7 +110,7 @@ test('reading modal motion colors and missing-value behavior preserve the existi
   const h = harness()
   const nodeText = root => flat(root).filter(n => typeof n.children === 'string').map(n => n.children).join('').trim()
   try {
-    for (const [motion, label, badgeClass] of [[false, 'No motion', 'quiet'], [true, 'Detected', 'detected'], [null, '—', 'quiet']]) {
+    for (const [motion, label, badgeClass] of [[false, '0 (Binary)', 'quiet'], [true, '1 (Binary)', 'detected'], [null, '—', 'quiet']]) {
       h.state.selectedReading.value = { reading_id: 'legacy-reading', plant_id: null, temperature_c: null, humidity: null, soil_moisture: null, rainfall_mm: null, motion_detected: motion, gps_latitude: null, gps_longitude: null, recorded_at: 'invalid' }
       const modal = h.render().find(n => n.type?.name === 'AppModal.vue' && n.props?.title === 'Sensor Reading Details')
       const body = flat(modal), badge = body.find(n => n.props?.class?.includes('reading-motion'))
@@ -459,7 +459,7 @@ test('motion/device badge classes retain the original labels and fallback mappin
       assert.equal(badge.children, status)
       assert.ok(badge.props.class.includes(status.toLowerCase()))
     }
-    for (const [value, label, badgeClass] of [[0, 'No motion', 'approved'], [1, 'Detected', 'high'], [2, 'No motion', 'approved'], [null, '—', 'approved'], [undefined, '—', 'approved'], ['1', '—', 'approved']]) {
+    for (const [value, label, badgeClass] of [[0, '0 (Binary)', 'approved'], [1, '1 (Binary)', 'high'], [2, '\u2014', 'approved'], [null, '—', 'approved'], [undefined, '—', 'approved'], ['1', '—', 'approved']]) {
       h.state.readingDevices.value = [service.mapCanonicalDevice({ ...device(), latest_reading: reading('motion', { movement: value }) })]
       const table = h.render().find(n => n.type === 'table' && n.props?.class.includes('iot-reading-table'))
       const badge = flat(table).find(n => n.type === 'span' && n.props?.class.includes('badge'))
@@ -556,8 +556,8 @@ test('logout, pending session, account change and unmount abort/invalidate late 
   } finally { globalThis.fetch = original }
 })
 
-test('pre-task motion mapping, measurement presentation and inventory actions are restored', async () => {
-  for (const [value, expected] of [[0,false], [1,true], [2,false], [-1,false], [true,null], ['1',null], [null,null]]) {
+test('binary motion mapping and raw measurements preserve inventory actions', async () => {
+  for (const [value, expected] of [[0,false], [1,true], [2,null], [-1,null], [true,null], ['1',null], [null,null]]) {
     assert.equal(service.mapCanonicalDevice({ ...device(), latest_reading: reading('motion', { movement: value }) }).latest_reading.motion_detected, expected)
   }
   const original = globalThis.fetch
@@ -566,12 +566,12 @@ test('pre-task motion mapping, measurement presentation and inventory actions ar
   try {
     await h.state.loadDevices()
     const nodes = h.render()
-    assert.ok(nodes.some(n => n.children === '4095%'))
-    assert.ok(nodes.some(n => n.children === '123 mm'))
-    assert.ok(nodes.some(n => n.children === 'No motion'))
-    assert.ok(!nodes.some(n => n.children === '4095 raw' || n.children === '123 raw'))
+    assert.ok(nodes.some(n => n.children === '4095 raw'))
+    assert.ok(nodes.some(n => n.children === '123 raw'))
+    assert.ok(nodes.some(n => n.children === '0 (Binary)'))
+    assert.ok(!nodes.some(n => n.children === '4095%' || n.children === '123 mm'))
     assert.equal(h.state.motionValue({ motion_detected: null }), '—')
-    assert.equal(h.state.motionValue({ motion_detected: true }), 'Detected')
+    assert.equal(h.state.motionValue({ motion_detected: true }), '1 (Binary)')
     assert.equal(h.state.gpsValue(h.state.devices.value[0].latest_reading), '—')
     h.state.selectedDevice.value = h.state.devices.value[0]
     assert.ok(h.render().some(n => typeof n.children === 'string' && n.children.trim() === 'View Reading History'))
@@ -641,14 +641,14 @@ test('unauthorized sessions cannot refresh; session loss also invalidates an ini
   } finally { h.stop(); globalThis.fetch = original }
 })
 
-test('reading details and charts retain Malaysia dates and restore pre-task measurement units', async () => {
+test('reading details and charts retain Malaysia dates and use verified raw measurement units', async () => {
   const chart = readFileSync(new URL('../src/components/conservation/SensorHistoryChart.vue', import.meta.url), 'utf8')
   assert.match(chart, /const formatTimestamp = iotDate/)
-  assert.match(source, /title="Soil moisture over time"\s+unit="%"/)
-  assert.match(source, /title="Rainfall over time"\s+unit="mm"/)
+  assert.match(source, /title="Soil moisture over time"\s+:unit="ct\('raw'\)"/)
+  assert.match(source, /title="Rainfall over time"\s+:unit="ct\('raw'\)"/)
   assert.ok(!source.includes('raw ADC'))
-  assert.equal((source.match(/soil_moisture, '%'/g) || []).length, 3)
-  assert.equal((source.match(/rainfall_mm, ' mm'/g) || []).length, 3)
+  assert.equal((source.match(/soil_moisture, ' ' \+ ct\('raw'\)/g) || []).length, 3)
+  assert.equal((source.match(/rainfall_mm, ' ' \+ ct\('raw'\)/g) || []).length, 3)
   const original = globalThis.fetch
   globalThis.fetch = async () => Response.json({ devices: [device()] })
   const h = harness()
@@ -656,7 +656,7 @@ test('reading details and charts retain Malaysia dates and restore pre-task meas
     await h.state.loadDevices()
     h.state.selectedReading.value = h.state.latestReadings.value[0].reading
     assert.ok(h.render().some(n => n.type === 'dd' && n.children === '10 Nov 2026, 16:20'))
-    assert.ok(h.render().some(n => n.type === 'dd' && n.children === '4095%'))
+    assert.ok(h.render().some(n => n.type === 'dd' && n.children === '4095 raw'))
     assert.equal(h.state.dt(null), '—')
     assert.equal(h.state.cards.value.find(card => card[0] === 'onlineDevices')[1], '—')
     assert.equal(h.state.cards.value.find(card => card[0] === 'offlineDevices')[1], '—')

@@ -47,6 +47,20 @@ test('canonical device mapping preserves UUID, real name and zero JSON values', 
   assert.equal(result.latest_reading.recorded_at, '2026-11-03T04:05:06.000Z')
 })
 
+test('sound remains raw, zeros survive and invalid movement is unavailable', () => {
+  for (const [movement, expected] of [[0, false], [1, true], [2, null], [-1, null]]) {
+    const result = mapCanonicalDevice(device({ latest_reading: reading({ sound: 0, movement, soilMoisture: 2150, rainfall: 812 }) }))
+    assert.equal(result.latest_reading.sound_raw, 0)
+    assert.equal(result.latest_reading.motion_detected, expected)
+    assert.equal(result.latest_reading.soil_moisture, 2150)
+    assert.equal(result.latest_reading.rainfall_mm, 812)
+  }
+  assert.equal(mapCanonicalDevice(device()).latest_reading.sound_raw, null)
+  assert.match(page, /hasLatestSound/)
+  assert.match(page, /hasHistorySound/)
+  assert.match(page, /soundChartPoints/)
+})
+
 test('missing metrics remain unavailable and are not replaced with demo readings', () => {
   const result = mapCanonicalDevice(device({ latest_reading: reading({ sound: 42 }) }))
   assert.equal(result.latest_reading.temperature_c, null)

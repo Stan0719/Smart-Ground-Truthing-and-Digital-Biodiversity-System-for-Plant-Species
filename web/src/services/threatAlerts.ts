@@ -106,7 +106,7 @@ async function request(path: string, options: RequestInit = {}): Promise<unknown
   return result
 }
 
-export async function loadCanonicalAlerts(signal?: AbortSignal): Promise<CanonicalThreatAlert[]> {
+export async function loadCanonicalAlertQueue(signal?: AbortSignal) {
   const result = record(await request(CANONICAL_ALERTS_PATH, signal ? {
     signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
   } : {}))
@@ -118,7 +118,19 @@ export async function loadCanonicalAlerts(signal?: AbortSignal): Promise<Canonic
   const alerts = result.alerts.map((entry) => mapAlert(entry, responses as CanonicalAlertResponse[]))
   if (alerts.some((entry) => entry === null))
     throw new ThreatAlertApiError('The threat alert service returned invalid alert data.', 200, 'invalid')
-  return alerts as CanonicalThreatAlert[]
+  const unique = new Map<string, CanonicalThreatAlert>()
+  for (const alert of alerts as CanonicalThreatAlert[]) {
+    const prior = unique.get(alert.id)
+    if (prior && JSON.stringify(prior) !== JSON.stringify(alert))
+      throw new ThreatAlertApiError('The alert service returned conflicting identities.', 200, 'invalid')
+    unique.set(alert.id, alert)
+  }
+  return { alerts: [...unique.values()], alertsCapped: result.alerts.length >= CANONICAL_ALERT_CAP,
+    historyCapped: result.responses.length >= CANONICAL_ALERT_CAP }
+}
+
+export async function loadCanonicalAlerts(signal?: AbortSignal): Promise<CanonicalThreatAlert[]> {
+  return (await loadCanonicalAlertQueue(signal)).alerts
 }
 
 export const alertResponsePath = (id: string) =>

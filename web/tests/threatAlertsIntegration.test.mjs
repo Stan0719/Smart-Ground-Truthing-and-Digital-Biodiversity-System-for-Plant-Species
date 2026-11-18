@@ -9,6 +9,10 @@ import * as vue from 'vue'
 import { threatAlertBadgeStyle } from '../src/utils/workflowBadge.ts'
 import { monitoringDate, monitoringLabels } from '../src/utils/officerMonitoringDisplay.ts'
 import * as alertService from '../src/services/threatAlerts.ts'
+import * as evidenceService from '../src/services/alertEvidence.ts'
+import { sensorAlertFixture } from './fixtures/sensorAlertContext.mjs'
+import * as alertDisplay from '../src/utils/threatAlertDisplay.ts'
+import * as alertRefresh from '../src/services/threatAlertRefresh.ts'
 import * as previewModule from '../src/data/threatAlertPreview.ts'
 import {
   alertResponsePath,
@@ -104,9 +108,9 @@ test('malformed list, malformed save and network failures are rejected distinctl
 
 test('save flow refetches canonical state and source preserves note after failures', () => {
   assert.match(page, /await saveAlertResponse\(id, responseNote\.value, responseStatus\.value\)/)
-  assert.match(page, /const refreshed = await loadCanonicalAlerts\(\)/)
+  assert.match(page, /const result = await loadCanonicalAlertQueue\(\)/)
   assert.match(page, /responseNote\.value = ''/)
-  assert.match(page, /committed[\s\S]*saved, but refreshed alert data could not be loaded/)
+  assert.match(page, /committed[\s\S]*Response saved, but latest data could not be verified/)
 })
 
 test('legacy alert route is no longer authoritative and canonical deep links are supported', () => {
@@ -117,12 +121,13 @@ test('legacy alert route is no longer authoritative and canonical deep links are
 })
 
 test('one canonical table replaces all demonstration rendering and uses accessible details', () => {
-  assert.equal((page.match(/<table\b/g) || []).length, 1)
+  assert.equal((page.match(/class="officer-data-table threat-alert-table"/g) || []).length, 1)
+  assert.equal((page.match(/class="same-event-readings"/g) || []).length, 1)
   assert.equal((page.match(/<AppModal\b/g) || []).length, 1)
   assert.doesNotMatch(page, /prototypeCameraEvents|cameraMonitoringPrototype|selectedCameraEvent|CAM-EVT-|Suspicious Camera Events|Demonstration camera events/)
   assert.match(page, /v-if="selectedAlert"[\s\S]*?wide\s+accessible/)
   assert.match(page, /Alert ID, device, reading, type or status/)
-  assert.match(page, /v-model="severity" disabled/)
+  assert.match(page, /Severity is unavailable from the alert service/)
 })
 
 test('design structure and styling remain in place', () => {
@@ -130,7 +135,7 @@ test('design structure and styling remain in place', () => {
   assert.match(page, /class="control-bar"/)
   assert.match(page, /class="panel"/)
   assert.match(page, /class="table-scroll officer-table-scroll"/)
-  assert.match(page, /class="detail-list real-alert-details"/)
+  assert.match(page, /class="evidence-fields"/)
   assert.match(page, /<style scoped>/)
 })
 
@@ -157,7 +162,7 @@ test('Threat Alerts heading and scroll label use existing localization; updated 
   assert.deepEqual(compileTemplate({ source: descriptor.template.content, filename: 'ThreatAlertsView.vue', id: 'threat-summary', compilerOptions: { bindingMetadata: script.bindings } }).errors, [])
 })
 
-function pageHarness({ dev = false, hostname = 'localhost' } = {}) {
+function pageHarness({ dev = false, hostname = 'localhost', withEvidence = false } = {}) {
   const { descriptor } = parse(page)
   const script = compileScript(descriptor, { id: 'threat-badges' })
   const template = compileTemplate({ source: descriptor.template.content, filename: 'ThreatAlertsView.vue', id: 'threat-badges', compilerOptions: { bindingMetadata: script.bindings } })
@@ -165,15 +170,25 @@ function pageHarness({ dev = false, hostname = 'localhost' } = {}) {
   const scope = vue.effectScope(), exports = {}
   const route = vue.reactive({ query: {} })
   let session = { pending: false, user: { id: 'test-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false } }
-  const listeners = new Set(), cleanup = []
-  const context = { exports, Error, URL, window: { location: { hostname } }, __previewModule: previewModule, require(name) {
+  const listeners = new Set(), cleanup = [], mounted = [], events = new Map(), timers = new Map()
+  let timerSequence = 0
+  const browserEvents = { addEventListener: (key, fn) => events.set(key, fn), removeEventListener: key => events.delete(key) }
+  const browserWindow = { ...browserEvents, location: { hostname }, navigator: { onLine: true }, setTimeout: (fn, delay) => { timers.set(++timerSequence, { fn, delay }); return timerSequence }, clearTimeout: id => timers.delete(id) }
+  const browserDocument = { ...browserEvents, visibilityState: 'visible' }
+  const context = { exports, Error, URL, AbortController, window: browserWindow, document: browserDocument, __previewModule: previewModule, require(name) {
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
-    if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount(fn) { cleanup.push(fn) }, withDirectives: n => n, resolveComponent: name => ({ name }) }
+    if (name === 'vue') return { ...vue, onMounted(fn) { mounted.push(fn) }, onBeforeUnmount(fn) { cleanup.push(fn) }, withDirectives: n => n, resolveComponent: name => ({ name }) }
     if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
     if (name === 'vue-router') return { useRoute: () => route }
     if (name.endsWith('workflowBadge')) return { threatAlertBadgeStyle }
     if (name.endsWith('officerMonitoringDisplay')) return { monitoringDate, monitoringLabels }
+    if (name.endsWith('alertEvidence')) return withEvidence ? evidenceService : { ...evidenceService,
+      loadCurrentAssignments: async rows => ({ assignments: Object.fromEntries(rows.map(row => [row.id, evidenceService.unavailableAssignment(row.deviceId)])), partial: false }),
+      loadAlertContext: async row => ({ alert: { id: row.id, device_id: row.deviceId, reading_id: row.readingId, metric: row.metric, value: row.value }, current_assignment: evidenceService.unavailableAssignment(row.deviceId), historical_threshold: null,
+        reading: { state: 'missing', id: row.readingId, device_id: null, received_at: null, values: null } }) }
     if (name.endsWith('threatAlerts')) return alertService
+    if (name.endsWith('threatAlertDisplay')) return alertDisplay
+    if (name.endsWith('threatAlertRefresh')) return alertRefresh
     if (name.includes('useConservationText')) return { useConservationText: () => ({ ct: x => x, locale: vue.ref('en') }) }
     if (name.endsWith('.vue')) return { name: name.split('/').at(-1) }
     throw Error(name)
@@ -181,7 +196,7 @@ function pageHarness({ dev = false, hostname = 'localhost' } = {}) {
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
-  return { state, route, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), changeSession: next => { session = next; for (const fn of listeners) fn() }, stop: () => { cleanup.forEach(fn => fn()); scope.stop() } }
+  return { state, route, events, timers, browserDocument, mount: () => mounted.forEach(fn => fn()), render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), changeSession: next => { session = next; for (const fn of listeners) fn() }, stop: () => { cleanup.forEach(fn => fn()); scope.stop() } }
 }
 function nodes(root) {
   const result = []
@@ -196,6 +211,87 @@ function nodes(root) {
 }
 const canonicalRow = status => ({ id: 'canonical-real', deviceId: 'sensor-real', readingId: null, cameraId: null, metric: 'temperature', value: 31.5, status, detectedAt: alert().detected_at, createdAt: alert().created_at, videoPath: null, responses: [] })
 
+test('isolated Sensor fixture renders exact frame roles and verified current Plant without writes', async () => {
+  const h = pageHarness({ withEvidence: true }), original = globalThis.fetch
+  const fixture = sensorAlertFixture(), calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push(url); assert.notEqual(options?.method, 'POST')
+    if (url.includes('current-assignments')) return Response.json({ contract_version: 1, assignments: [{ alert_id: fixture.alert.id, ...fixture.assignment }] })
+    if (url.endsWith('/context')) return Response.json(fixture.context)
+    return Response.json({ alerts: [fixture.alert], responses: [] })
+  }
+  try {
+    await h.state.loadAlerts(); await new Promise(setImmediate)
+    h.state.openAlert(h.state.alerts.value[0]); await new Promise(setImmediate)
+    const tree = nodes(h.render())
+    assert.equal(h.state.eventReadings.value.length, 6)
+    assert.ok(tree.some(n => n.children === 'Trigger'))
+    assert.equal(tree.filter(n => n.children === 'Context').length, 5)
+    assert.ok(tree.some(n => n.props?.to === '/plant/32'))
+    const chips = tree.filter(n => n.props?.class === 'assigned-plant-chip')
+    assert.equal(chips.length, 2)
+    assert.ok(chips.every(n => n.props['aria-label'] === 'Current Assigned Plant: PL032' && n.props.to === '/plant/32'))
+    assert.equal(evidenceService.assignedPlantLabel(h.state.selectedAssignment.value), 'PL032')
+    assert.ok(tree.some(n => n.children === 'Threshold unavailable'))
+    assert.equal(h.state.selectedAlert.value.status, 'New')
+    assert.equal(h.state.selectedAlert.value.responses.length, 0)
+    assert.equal(calls.filter(url => url.endsWith('/context')).length, 1)
+  } finally { h.stop(); globalThis.fetch = original }
+})
+
+test('Plant chips have keyboard focus and neutral missing-assignment states without guessed links', () => {
+  const h = pageHarness()
+  try {
+    const row = canonicalRow('New'); h.state.alerts.value = [row]; h.state.isLoading.value = false
+    h.state.assignmentRows.value = { [row.id]: { state: 'not_linked', basis: 'current_device_assignment', device_id: row.deviceId, plant_id: null } }
+    assert.ok(nodes(h.render()).some(n => n.children === 'Not linked'))
+    assert.ok(!nodes(h.render()).some(n => n.props?.class === 'assigned-plant-chip'))
+    h.state.assignmentRows.value = {}
+    assert.ok(nodes(h.render()).some(n => n.children === 'Unavailable'))
+    assert.ok(!nodes(h.render()).some(n => n.props?.class === 'assigned-plant-chip'))
+    for (const selector of ['.assigned-plant-chip', '.assigned-plant-chip:hover', '.assigned-plant-chip:focus-visible']) assert.ok(page.includes(selector))
+    const rules = []; postcss.parse(parse(page).descriptor.styles[0].content).walkRules(rule => rules.push(rule))
+    assert.ok(rules.find(r => r.selector === '.assigned-plant-chip').nodes.some(n => n.prop === 'text-decoration' && n.value === 'none'))
+    assert.ok(rules.find(r => r.selector === '.assigned-plant-chip:focus-visible').nodes.some(n => n.prop === 'outline' && n.value.includes('3px')))
+    assert.match(page, /class="plant-chip-leaf"[^>]*aria-hidden="true"/)
+    assert.match(page, /class="plant-chip-arrow"[^>]*aria-hidden="true"/)
+  } finally { h.stop() }
+})
+
+test('missing Sensor context permits existing review, retries GET only, and Camera skips sensor lookup', async () => {
+  const h = pageHarness({ withEvidence: true }), original = globalThis.fetch, calls = []
+  globalThis.fetch = async (url, options) => { calls.push(url); assert.notEqual(options?.method, 'POST'); return Response.json({}, { status: 503 }) }
+  try {
+    h.state.isLoading.value = false; h.state.alerts.value = [canonicalRow('New')]
+    h.state.openAlert(h.state.alerts.value[0]); await new Promise(setImmediate)
+    assert.equal(h.state.evidenceError.value, true)
+    assert.equal(h.state.selectedAlert.value.status, 'New')
+    assert.equal(h.state.verificationRequired.value, false)
+    await h.state.loadEvidence(h.state.selectedAlert.value)
+    assert.equal(calls.length, 2)
+    h.state.alerts.value = [{ ...canonicalRow('New'), metric: 'possible_plant_contact', cameraId: 'camera' }]
+    h.state.openAlert(h.state.alerts.value[0])
+    await new Promise(setImmediate); assert.equal(calls.length, 2)
+    assert.ok(nodes(h.render()).some(n => n.children === 'No authorized recording is available for this alert.'))
+  } finally { h.stop(); globalThis.fetch = original }
+})
+
+for (const boundary of ['selection', 'logout', 'pending', 'unmount']) test(`late exact evidence is discarded after ${boundary}`, async () => {
+  const h = pageHarness({ withEvidence: true }), original = globalThis.fetch, fixture = sensorAlertFixture()
+  let release
+  globalThis.fetch = () => new Promise(resolve => { release = resolve })
+  try {
+    h.state.alerts.value = [{ ...canonicalRow('New'), id: fixture.alert.id, deviceId: fixture.alert.device_id, readingId: fixture.alert.reading_id, value: 38 }]
+    h.state.openAlert(h.state.alerts.value[0])
+    if (boundary === 'selection') h.state.closeAlert()
+    if (boundary === 'logout') h.changeSession({ pending: false, user: null })
+    if (boundary === 'pending') h.changeSession({ pending: true, user: { id: 'test-officer', role: 'Conservation Officer', status: 'Active' } })
+    if (boundary === 'unmount') h.stop()
+    release(Response.json(fixture.context)); await new Promise(setImmediate)
+    assert.equal(h.state.evidence.value, null)
+  } finally { if (boundary !== 'unmount') h.stop(); globalThis.fetch = original }
+})
+
 test('canonical table preserves status palettes, IDs and exact View selection', () => {
   const h = pageHarness()
   try {
@@ -207,12 +303,13 @@ test('canonical table preserves status palettes, IDs and exact View selection', 
       assert.equal(rendered.filter(n => n.type === 'table').length, 1)
       const badge = rendered.find(n => n.type === 'span' && n.props?.style)
       assert.deepEqual(badge.props.style, threatAlertBadgeStyle(status))
-      assert.equal(badge.children, status)
-      for (const value of [row.id, row.deviceId, row.readingId]) assert.ok(rendered.some(n => n.props?.value === value))
+      assert.equal(badge.children, alertDisplay.alertStatusLabel(status))
+      for (const value of [row.id, row.deviceId]) assert.ok(rendered.some(n => n.props?.value === value))
       rendered.find(n => n.type === 'button' && n.children === 'View').props.onClick()
       assert.equal(h.state.selectedAlert.value.id, row.id)
       const modal = nodes(h.render()).find(n => n.type?.name === 'AppModal.vue')
       assert.ok(modal); assert.equal(modal.props.accessible, '')
+      assert.ok(nodes(h.render()).some(n => n.props?.value === row.readingId))
     }
     assert.doesNotMatch(page, /confidence \*|formatConfidence|badge unavailable/)
   } finally { h.stop() }
@@ -229,7 +326,7 @@ test('canonical load, empty, loading, API error and retry stay inside the single
     globalThis.fetch = async () => Response.json({ error: 'Unavailable' }, { status: 503 })
     await h.state.loadAlerts()
     assert.ok(nodes(h.render()).some(n => n.props?.role === 'alert'))
-    const retry = nodes(h.render()).find(n => n.type === 'button' && n.children === 'Try again')
+    const retry = nodes(h.render()).find(n => n.type === 'button' && n.children === 'Retry')
     globalThis.fetch = async () => Response.json({ alerts: [alert()], responses: [response] })
     await retry.props.onClick()
     assert.equal(h.state.alerts.value[0].id, alert().id)
@@ -271,13 +368,13 @@ test('canonical response UI still allows direct New to Resolved and retains reso
     h.state.responseStatus.value = 'Resolved'
     await h.state.submitResponse()
     assert.equal(calls.length, 0)
-    assert.match(h.state.responseError.value, /note is required/)
+    assert.match(h.state.responseError.value, /Enter a response note/)
     h.state.responseNote.value = 'Investigated and resolved'
     await h.state.submitResponse()
     assert.deepEqual(JSON.parse(calls[0].options.body), { status: 'Resolved', note: 'Investigated and resolved' })
     assert.equal(calls[0].url, '/api/data/alerts/canonical-real/responses')
     assert.equal(h.state.selectedAlert.value.status, 'Resolved')
-    const button = nodes(h.render()).find(n => n.type === 'button' && typeof n.children === 'string' && n.children.trim() === 'Save Response')
+    const button = nodes(h.render()).find(n => n.type === 'button' && typeof n.children === 'string' && n.children.trim() === 'Resolve Alert')
     assert.equal(button.props.disabled, true)
   } finally { h.stop(); globalThis.fetch = original }
 })
@@ -316,7 +413,7 @@ test('reduced table width is page-scoped and backend response authorization stay
   const rules = []
   postcss.parse(descriptor.styles[0].content).walkRules(rule => rules.push(rule))
   const width = rules.find(rule => rule.selector === '.officer-layout.officer-layout .officer-table-scroll .threat-alert-table')
-  assert.ok(width.nodes.some(node => node.prop === 'min-width' && node.value === '68rem'))
+  assert.ok(width.nodes.some(node => node.prop === 'min-width' && node.value === '82rem'))
   const grants = readFileSync(new URL('../../shared/rbac.cjs', import.meta.url), 'utf8')
   const backend = readFileSync(new URL('../../plant-conservation-backend/iot.cjs', import.meta.url), 'utf8')
   assert.match(grants, /"responses.manage": \["Conservation Officer"\]/)
@@ -384,12 +481,12 @@ test('samples reuse one table, existing View modal, unavailable fields and real-
     assert.equal(rendered.filter(n => n.type === 'table').length, 1)
     assert.ok(rendered.some(n => typeof n.children === 'string' && n.children.includes('SAMPLE DATA')))
     const badges = rendered.filter(n => n.type === 'span' && n.props?.style)
-    assert.deepEqual(badges.map(n => n.props.style), ['New', 'Reviewing', 'Resolved'].map(threatAlertBadgeStyle))
+    assert.deepEqual(badges.map(n => n.props.style), ['Resolved', 'Reviewing', 'New'].map(threatAlertBadgeStyle))
     rendered.find(n => n.type === 'button' && n.children === 'View').props.onClick()
     rendered = nodes(h.render())
     assert.ok(rendered.some(n => n.type?.name === 'AppModal.vue' && n.props.accessible === ''))
     assert.ok(rendered.some(n => typeof n.children === 'string' && n.children.includes('SAMPLE PREVIEW')))
-    assert.equal(rendered.filter(n => n.children === 'Not available').length, 2)
+    assert.ok(rendered.some(n => n.children === 'Threshold unavailable'))
     assert.equal(h.state.selectedAlert.value.cameraId, null)
     h.state.search.value = 'movement'; assert.equal(h.state.filteredAlerts.value.length, 1)
     h.state.status.value = 'Resolved'; assert.equal(h.state.filteredAlerts.value.length, 0)
@@ -427,7 +524,7 @@ test('sample validation rejects blank, oversized, invalid and resolved responses
     globalThis.fetch = () => { throw Error('Unexpected transport') }
     const row = h.state.displayedAlerts.value[0]
     h.state.openAlert(row)
-    for (const [note, message] of [['   ', /required/], ['x'.repeat(4001), /4,000/]]) {
+    for (const [note, message] of [['   ', /Enter a response note/], ['x'.repeat(4001), /4,000/]]) {
       h.state.responseNote.value = note; await h.state.submitResponse()
       assert.match(h.state.responseError.value, message); assert.equal(row.responses.length, 0)
     }
@@ -437,7 +534,7 @@ test('sample validation rejects blank, oversized, invalid and resolved responses
     await h.state.submitResponse(); assert.equal(row.responses.length, 1)
     const resolved = h.state.displayedAlerts.value[2], previous = resolved.responses.length
     h.state.openAlert(resolved); h.state.responseNote.value = 'Again'
-    await h.state.submitResponse(); assert.match(h.state.responseError.value, /Resolved alerts/)
+    await h.state.submitResponse(); assert.equal(h.state.reviewBlocked.value, true)
     assert.equal(resolved.responses.length, previous)
     const button = nodes(h.render()).find(n => n.type === 'button' && n.children?.trim?.() === 'Save Response')
     assert.equal(button.props.disabled, true)
@@ -512,4 +609,160 @@ test('sample controller has no transport/storage and preview controls preserve s
   assert.match(page, /class="action-button" type="button" @click="exitPreview"/)
   assert.match(page, /preview-controls \{ display: flex; flex-wrap: wrap;/)
   assert.match(page, /sample-marker[^\n]*overflow-wrap: anywhere/)
+})
+
+
+test('unified source/status/date/search filters use actual metric provenance and retain real camera identities', () => {
+  const h = pageHarness()
+  try {
+    h.state.isLoading.value = false
+    h.state.alerts.value = [canonicalRow('New'), { ...canonicalRow('Reviewing'), id: 'camera-record', metric: 'possible_plant_contact', cameraId: 'camera-reference' }]
+    h.state.sourceFilter.value = 'Camera'
+    assert.deepEqual(Array.from(h.state.filteredAlerts.value, x => x.id), ['camera-record'])
+    h.state.search.value = 'Possible Plant Contact'; h.state.status.value = 'Reviewing'
+    assert.equal(h.state.filteredAlerts.value.length, 1)
+    h.state.sourceFilter.value = 'Sensor'; assert.equal(h.state.filteredAlerts.value.length, 0)
+    h.state.search.value = ''; h.state.status.value = ''; assert.equal(h.state.filteredAlerts.value.length, 1)
+    h.state.sourceFilter.value = ''; assert.equal(h.state.filteredAlerts.value.length, 2)
+    h.state.openAlert(h.state.alerts.value[1])
+    const tree = nodes(h.render())
+    assert.ok(tree.some(n => n.children === 'No authorized recording is available for this alert.'))
+    assert.ok(!tree.some(n => n.type === 'video' || n.type === 'iframe' || n.children === '92%'))
+    assert.ok(tree.some(n => n.children === 'Threshold unavailable'))
+  } finally { h.stop() }
+})
+
+for (const [initial, decision] of [['New','Reviewing'], ['New','Resolved'], ['Reviewing','Reviewing'], ['Reviewing','Resolved']]) {
+  test(`canonical ${initial} to ${decision} uses one POST, then authoritative GET and real response history`, async () => {
+    const h = pageHarness(), original = globalThis.fetch, calls = []
+    globalThis.fetch = async (url, options) => {
+      calls.push([url, options?.method || 'GET'])
+      return options?.method === 'POST' ? Response.json({ updated: true }) : Response.json({ alerts: [alert({ status: decision })], responses: [{ ...response, status: decision }] })
+    }
+    try {
+      h.state.alerts.value = [{ ...canonicalRow(initial), id: alert().id }]
+      h.state.openAlert(h.state.alerts.value[0]); assert.equal(calls.length, 0)
+      assert.equal(h.state.selectedAlert.value.status, initial)
+      h.state.responseStatus.value = decision; h.state.responseNote.value = 'Actual investigation note'
+      await h.state.submitResponse()
+      assert.deepEqual(calls.map(x => x[1]), ['POST','GET'])
+      assert.equal(h.state.selectedAlert.value.status, decision)
+      assert.equal(h.state.selectedAlert.value.responses[0].note, response.note)
+      assert.equal(h.state.verificationRequired.value, false)
+      if (decision === 'Resolved') { await h.state.submitResponse(); assert.equal(calls.length, 2) }
+    } finally { h.stop(); globalThis.fetch = original }
+  })
+}
+
+for (const boundary of ['logout','pending','account','selection','close','unmount']) {
+  test(`late successful save/readback cannot cross ${boundary} boundary`, async () => {
+    const h = pageHarness(), original = globalThis.fetch
+    let release, posts = 0
+    globalThis.fetch = async (_url, options) => options?.method === 'POST' ? (posts++, Response.json({ updated: true })) : new Promise(resolve => { release = resolve })
+    try {
+      const first = { ...canonicalRow('New'), id: alert().id }, other = { ...canonicalRow('New'), id: 'another-alert' }
+      h.state.alerts.value = [first, other]; h.state.openAlert(h.state.alerts.value[0]); h.state.responseNote.value = 'Private first draft'
+      const saving = h.state.submitResponse(); await new Promise(setImmediate)
+      if (boundary === 'logout') h.changeSession({ user: null, pending: false })
+      else if (boundary === 'pending') h.changeSession({ user: officerSession.user, pending: true })
+      else if (boundary === 'account') h.changeSession({ ...officerSession, user: { ...officerSession.user, id: 'other-officer' } })
+      else if (boundary === 'selection') { h.state.openAlert(h.state.alerts.value[1]); h.state.responseNote.value = 'Second draft' }
+      else if (boundary === 'close') h.state.closeAlert()
+      else h.stop()
+      release(Response.json({ alerts: [alert({ status: 'Resolved' })], responses: [response] })); await saving
+      assert.equal(posts, 1)
+      if (boundary === 'selection') { assert.equal(h.state.selectedAlert.value.id, other.id); assert.equal(h.state.responseNote.value, 'Second draft') }
+      else { assert.equal(h.state.selectedAlert.value, null); assert.equal(h.state.responseNote.value, '') }
+      if (['logout','pending','account','unmount'].includes(boundary)) assert.equal(h.state.alerts.value.length, 0)
+    } finally { h.stop(); globalThis.fetch = original }
+  })
+}
+
+test('saved-but-unverified and uncertain POST outcomes enforce GET-only recovery even after closing details', async () => {
+  for (const failPost of [false, true]) {
+    const h = pageHarness(), original = globalThis.fetch, calls = []
+    let allowRead = false
+    globalThis.fetch = async (url, options) => {
+      calls.push(options?.method || 'GET')
+      if (options?.method === 'POST') { if (failPost) throw Error('Uncertain network outcome'); return Response.json({ updated: true }) }
+      return allowRead ? Response.json({ alerts: [alert({ status: 'Reviewing' })], responses: [response] }) : Response.json({ error: 'Unavailable' }, { status: 503 })
+    }
+    try {
+      h.state.alerts.value = [{ ...canonicalRow('New'), id: alert().id }]; h.state.openAlert(h.state.alerts.value[0]); h.state.responseNote.value = 'Keep this draft'
+      await h.state.submitResponse()
+      assert.equal(h.state.selectedAlert.value.status, 'New'); assert.equal(h.state.verificationRequired.value, true)
+      await h.state.submitResponse(); assert.equal(calls.filter(x => x === 'POST').length, 1)
+      h.state.closeAlert(); h.state.openAlert(h.state.alerts.value[0]); assert.equal(h.state.verificationRequired.value, true)
+      h.state.responseNote.value = 'Retained review'; allowRead = true
+      await h.state.verifyResponse()
+      assert.equal(h.state.verificationRequired.value, false); assert.equal(h.state.inspectionRequired.value, true)
+      assert.equal(h.state.selectedAlert.value.status, 'Reviewing'); assert.equal(h.state.responseNote.value, 'Retained review')
+      await h.state.submitResponse(); assert.equal(calls.filter(x => x === 'POST').length, 1)
+      assert.ok(calls.includes('GET'))
+    } finally { h.stop(); globalThis.fetch = original }
+  }
+})
+
+test('409 recovery requires inspection and preserves notes; a failed reload stays blocked', async () => {
+  const original = globalThis.fetch, h = pageHarness(); let readsWork = true, posts = 0
+  globalThis.fetch = async (_url, options) => options?.method === 'POST' ? (posts++, Response.json({ error: 'Conflict' }, { status: 409 })) : readsWork ? Response.json({ alerts: [alert({ status: 'Reviewing' })], responses: [response] }) : Response.json({}, { status: 503 })
+  try {
+    h.state.alerts.value = [{ ...canonicalRow('New'), id: alert().id }]; h.state.openAlert(h.state.alerts.value[0]); h.state.responseNote.value = 'Inspect this change'
+    await h.state.submitResponse(); assert.equal(posts, 1); assert.equal(h.state.inspectionRequired.value, true); assert.equal(h.state.responseNote.value, 'Inspect this change')
+    await h.state.submitResponse(); assert.equal(posts, 1)
+    h.state.inspectionRequired.value = false; readsWork = false; await h.state.submitResponse()
+    assert.equal(posts, 2); assert.equal(h.state.verificationRequired.value, true)
+  } finally { h.stop(); globalThis.fetch = original }
+})
+
+test('background refresh discovers new alerts, preserves filters/modal/draft and discloses caps', async () => {
+  const original = globalThis.fetch, h = pageHarness(); let responses = []
+  globalThis.fetch = async () => Response.json({ alerts: Array.from({ length: 500 }, (_, i) => alert({ id: i === 0 ? alert().id : String(i) })), responses })
+  try {
+    h.state.alerts.value = [{ ...canonicalRow('New'), id: alert().id }]; h.state.openAlert(h.state.alerts.value[0]); h.state.responseNote.value = 'Unsubmitted note'
+    h.state.search.value = 'temperature'; h.state.sourceFilter.value = 'Sensor'; h.state.status.value = 'New'; h.state.date.value = '2026-11-03'
+    await h.state.loadAlerts(true)
+    assert.equal(h.state.alerts.value.length, 500); assert.equal(h.state.cards.value[0][1], 500)
+    assert.equal(h.state.responseNote.value, 'Unsubmitted note'); assert.equal(h.state.selectedAlert.value.id, alert().id)
+    assert.equal(h.state.search.value, 'temperature'); assert.equal(h.state.sourceFilter.value, 'Sensor'); assert.equal(h.state.status.value, 'New'); assert.equal(h.state.date.value, '2026-11-03')
+    assert.equal(h.state.queueMeta.value.alertsCapped, true)
+    assert.ok(nodes(h.render()).some(n => n.children === 'The service limit was reached. Alert totals or response history may be incomplete.'))
+    responses = Array.from({ length: 500 }, (_, i) => ({ ...response, id: String(i) }))
+    await h.state.loadAlerts(true); assert.equal(h.state.queueMeta.value.historyCapped, true)
+  } finally { h.stop(); globalThis.fetch = original }
+})
+
+test('sensor evidence never reconstructs thresholds or exceeds amounts and camera paths never become playable URLs', () => {
+  const h = pageHarness()
+  try {
+    h.state.alerts.value = [{ ...canonicalRow('New'), metric: 'soilMoisture', value: 2150 }]; h.state.openAlert(h.state.alerts.value[0])
+    let tree = nodes(h.render()); assert.ok(tree.some(n => n.children === 'Threshold unavailable')); assert.ok(tree.some(n => n.children === 'raw'))
+    h.state.alerts.value = [{ ...canonicalRow('New'), metric: 'possible_plant_contact', cameraId: 'camera', videoPath: 'https://untrusted.example/private?token=secret' }]; h.state.openAlert(h.state.alerts.value[0])
+    tree = nodes(h.render()); assert.ok(!tree.some(n => n.type === 'video' || n.props?.src || n.props?.href?.includes('untrusted')))
+    assert.ok(!JSON.stringify(tree).includes('token=secret'))
+    assert.ok(tree.some(n => n.children === 'No authorized recording is available for this alert.'))
+  } finally { h.stop() }
+})
+
+
+test('mounted page polling discovers alerts and updates summaries without losing filters or a draft, then stops on logout', async () => {
+  const h = pageHarness(), original = globalThis.fetch
+  let records = [alert()], calls = 0
+  globalThis.fetch = async () => { calls++; return Response.json({ alerts: records, responses: [] }) }
+  const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(setImmediate) }
+  try {
+    h.mount(); await settle(); assert.equal(h.state.alerts.value.length, 1)
+    h.state.openAlert(h.state.alerts.value[0]); h.state.responseNote.value = 'Inspection in progress'
+    h.state.sourceFilter.value = 'Sensor'; h.state.search.value = 'temperature'
+    records = [alert(), alert({ id: 'second-alert', status: 'Reviewing' })]
+    const [timerId, timer] = h.timers.entries().next().value
+    assert.equal(timer.delay, 30000); h.timers.delete(timerId); timer.fn(); await settle()
+    assert.equal(h.state.alerts.value.length, 2); assert.equal(h.state.cards.value[0][1], 2)
+    assert.equal(h.state.selectedAlert.value.id, alert().id); assert.equal(h.state.responseNote.value, 'Inspection in progress')
+    assert.equal(h.state.sourceFilter.value, 'Sensor'); assert.equal(h.state.search.value, 'temperature')
+    h.browserDocument.visibilityState = 'hidden'; h.events.get('visibilitychange')(); assert.equal(h.timers.size, 0)
+    const before = calls; h.events.get('focus')(); await settle(); assert.equal(calls, before)
+    h.browserDocument.visibilityState = 'visible'; h.events.get('visibilitychange')(); await settle(); assert.equal(calls, before + 1)
+    h.changeSession({ user: null, pending: false }); assert.equal(h.timers.size, 0); assert.equal(h.state.alerts.value.length, 0); assert.equal(h.state.responseNote.value, '')
+  } finally { h.stop(); globalThis.fetch = original }
 })
