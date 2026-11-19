@@ -37,6 +37,17 @@ test("complete persisted operational reports: statuses, boundaries, no double-co
   assert.deepEqual(iot.statistics.slice(-3).map(s=>s.value),[0,10,20]);
   assert.equal((await generate(pool,'iot',{...filters,device:'sensor',measurement:'soilMoisture'})).chart.unit,'raw');
   await assert.rejects(generate(pool,'iot',{...filters,device:'missing'}),error=>error.status===400);
+  await pool.query(`INSERT INTO iot_reading_aggregate(device_id,bucket_start,bucket_end,sample_count,metrics)
+    VALUES('sensor','2026-11-01T00:00:00Z','2026-11-01T00:10:00Z',2,
+      '{"temperature":{"sum":40,"count":2,"min":19,"max":21},"humidity":{"sum":130,"count":2,"min":60,"max":70},"movement":{"sum":1,"count":2,"min":0,"max":1}}')`);
+  const mixed = await generate(pool,'iot',{...filters,device:'sensor'});
+  assert.equal(mixed.rows.length,4);
+  assert.equal(mixed.statistics.find(s=>s.key==='totalReadings').value,5);
+  assert.equal(mixed.statistics.find(s=>s.key==='average').value,15);
+  assert.equal(mixed.statistics.find(s=>s.key==='minimum').value,0);
+  assert.equal(mixed.statistics.find(s=>s.key==='maximum').value,21);
+  assert.equal(mixed.statistics.find(s=>s.key==='latestReading').value,'2026-11-01T00:00:00.000Z');
+  assert.equal((await pool.query("SELECT COUNT(*)::integer AS count FROM sensor_reading WHERE device_id='sensor'")).rows[0].count,4);
   await pool.query(`INSERT INTO sensor_reading(id,device_id,"values",created_at) SELECT 'bulk-'||g,'sensor2',jsonb_build_object('humidity',g%100),'2026-11-01T00:00:00Z'::timestamptz FROM generate_series(1,605) AS g`);
   const uncapped = await generate(pool,'iot',{...filters,device:'sensor2',measurement:'humidity'});
   assert.equal(uncapped.rows.length,606); assert.equal(uncapped.statistics.find(stat=>stat.key==='totalReadings').value,606);

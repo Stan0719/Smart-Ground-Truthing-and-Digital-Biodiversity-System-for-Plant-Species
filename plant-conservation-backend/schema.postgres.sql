@@ -51,3 +51,24 @@ CREATE INDEX IF NOT EXISTS reading_device_time_idx ON sensor_reading(device_id,c
 CREATE INDEX IF NOT EXISTS location_plant_idx ON plant_location(plant_id,recorded_at DESC);
 CREATE INDEX IF NOT EXISTS observation_plant_idx ON plant_observation(plant_id,status,updated_at DESC);
 CREATE TABLE IF NOT EXISTS iot_ingestion_receipt(device_id TEXT NOT NULL REFERENCES iot_device(id),client_key TEXT NOT NULL,reading_id TEXT NOT NULL REFERENCES sensor_reading(id),PRIMARY KEY(device_id,client_key));
+CREATE TABLE IF NOT EXISTS iot_reading_checkpoint(
+    device_id TEXT PRIMARY KEY NOT NULL REFERENCES iot_device(id),
+    bucket_start TIMESTAMPTZ NOT NULL,
+    last_observed_at TIMESTAMPTZ NOT NULL,
+    sample_count INTEGER NOT NULL DEFAULT 0 CHECK(sample_count>=0),
+    metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    active_thresholds JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_payload_hash TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS iot_reading_aggregate(
+    device_id TEXT NOT NULL REFERENCES iot_device(id),
+    bucket_start TIMESTAMPTZ NOT NULL,
+    bucket_end TIMESTAMPTZ NOT NULL,
+    sample_count INTEGER NOT NULL CHECK(sample_count>0),
+    metrics JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(device_id,bucket_start),
+    CHECK(bucket_end>bucket_start)
+);
+CREATE INDEX IF NOT EXISTS iot_reading_aggregate_time_idx ON iot_reading_aggregate(bucket_start DESC,device_id);
