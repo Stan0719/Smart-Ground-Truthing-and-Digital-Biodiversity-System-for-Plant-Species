@@ -20,7 +20,7 @@ Stored Approved decisions remain Approved. Existing version-history consumers co
 
 ## Unified table
 
-The ten columns are Submission ID, Plant ID, Submission Type, Species, Submitted By, Location/Zone, Record Created, Status, Similarity and Actions. Type badges move into column three. Canonical IDs, full-ID copying, separate review routes, pagination and notification pinning remain intact. No Edit N label is inferred: the proposal-list contract does not expose a reliable edit sequence. Table fonts remain unchanged; horizontal scrolling accommodates the extra column.
+The nine columns are Submission ID, Plant ID, Submission Type, Species, Submitted By, Location/Zone, Record Created, Status and Actions. Type badges appear in column three. Canonical IDs, full-ID copying, separate review routes, pagination and notification pinning remain intact. No Edit N label is inferred: the proposal-list contract does not expose a reliable edit sequence. Table fonts remain unchanged; horizontal scrolling accommodates the columns.
 
 ## Verification limits
 

@@ -414,10 +414,20 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
                             obj_id = int(box.id.item())
 
                         if obj_id is not None:
-                            if label == "person":
-                                unique_person_ids.add(obj_id)
-                            elif label in animal_classes:
-                                unique_animal_ids.add(obj_id)
+                            tracked_ids = (
+                                unique_person_ids if label == "person"
+                                else unique_animal_ids
+                            )
+                            is_new_detection = obj_id not in tracked_ids
+                            tracked_ids.add(obj_id)
+
+                            if web_enabled and is_new_detection:
+                                camera_server.publish_event(
+                                    "human_detected" if label == "person" else "animal_detected",
+                                    f"{display_label} detected",
+                                    f"{display_label} detected in the camera view.",
+                                    confidence=float(box.conf.item()),
+                                )
 
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)

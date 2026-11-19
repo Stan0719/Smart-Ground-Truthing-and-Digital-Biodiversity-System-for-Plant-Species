@@ -2008,7 +2008,6 @@
       "imageAlt": "Submitted image {asset} for observation {id}",
       "imageUnavailable": "Image unavailable",
       "attachment": "Non-image attachment · preview unavailable",
-      "similarityUnavailable": "Similarity unavailable",
       "loadedHistory": "Recent Observations",
       "historyLimit": "Showing loaded observations only.",
       "saving": "Saving review and reloading submission…",

@@ -10,8 +10,6 @@ const visibleLimit = ref(100)
 
 import SubmissionChanges from '../../components/conservation/SubmissionChanges.vue'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
-import { similarityBadgeStyle } from '../../utils/similarityBadge'
-import { assetUrlFromId } from '../../services/assetImages'
 import { reviewDateTime, submitterIdentifierLabels } from '../../utils/officerMonitoringDisplay'
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
 import { useConservationText } from '../../composables/useConservationText'
@@ -23,7 +21,6 @@ import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import { ReviewApiError, createReviewRequest, performObservationReview, observationReviewSnapshot, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions as transitions, type ReviewDecision } from '../../services/observationReview'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
-import PlantSimilarityDrawer from '../../components/conservation/PlantSimilarityDrawer.vue'
 import PlantPhotoLightbox from '../../components/PlantPhotoLightbox.vue'
 import VisibilitySelector from '../../components/conservation/VisibilitySelector.vue'
 import { formatObservationId } from '../../utils/observationId'
@@ -38,7 +35,6 @@ import {
   type LinkedSpeciesRequest,
 } from '../../services/reviewSpeciesRequest'
 import type { ObservationStatus } from '../../data/conservation'
-import type { PlantSimilarityAnalysis } from '../../data/plantSimilarityPrototype'
 
 interface ReviewObservation {
   reviewSnapshot: ReturnType<typeof observationReviewSnapshot>
@@ -202,28 +198,6 @@ const reviewBusy = computed(() => isSaving.value || speciesSaving.value)
 const skippedRecords = ref(0)
 const reviewMessage = ref<{ variant: 'success' | 'error' | 'info'; message: string } | null>(null)
 const feedback = ref<{ id: number; variant: 'success' | 'error' | 'info'; message: string } | null>(null)
-const similarityAnalysis = ref<PlantSimilarityAnalysis | null>(null)
-const similarityTrigger = ref<HTMLElement | null>(null)
-const similarityResults = ref<Record<string, PlantSimilarityAnalysis>>({})
-const similarityErrors = ref<Record<string, string>>({})
-const similarityLoading = ref('')
-const similarityInfo = ref<HTMLElement | null>(null)
-const similarityInfoOpen = ref(false)
-function showSimilarityInfo(event: Event) {
-  const tooltip = similarityInfo.value
-  if (!tooltip) return
-  tooltip.showPopover()
-  const anchor = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  const box = tooltip.getBoundingClientRect()
-  tooltip.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8))}px`
-  tooltip.style.top = `${Math.max(8, Math.min(anchor.top - box.height - 8 >= 8 ? anchor.top - box.height - 8 : anchor.bottom + 8, window.innerHeight - box.height - 8))}px`
-}
-function hideSimilarityInfo(event?: Event) {
-  if (event?.type === 'mouseleave' && event.currentTarget === document.activeElement) return
-  similarityInfo.value?.hidePopover()
-}
-let similarityAbort: AbortController | null = null
-let similarityRequest = 0
 let feedbackId = 0
 let selectionRequest = 0
 let disposed = false
@@ -531,13 +505,6 @@ const unsubscribeReviewSession = subscribeSession((user, pending) => {
   const old = reviewSession.value.user?.id
   reviewSession.value = { user, pending }
   if (pending || !user || user.role !== 'Conservation Officer' || user.status !== 'Active' || user.mustChangePassword || old !== user.id) {
-    similarityRequest++
-    similarityAbort?.abort()
-    similarityLoading.value = ''
-    similarityResults.value = {}
-    similarityErrors.value = {}
-    similarityAnalysis.value = null
-    similarityTrigger.value = null
     clearCopyState()
     knownQrIdentities.value = new Set()
 
@@ -603,9 +570,6 @@ const speciesOptions = computed(() => {
 
 async function open(observation: ReviewObservation) {
   if (reviewBusy.value || !officerSessionReady.value) return
-  similarityRequest++
-  similarityAbort?.abort()
-  similarityLoading.value = ''
   const token = ++selectionRequest
   if (observation.origin !== 'subsequent_observation') queueOrigin.value = observation.origin
   selected.value = observation
@@ -647,9 +611,6 @@ async function retrySelection() {
 
 function closeReview() {
   if (reviewBusy.value) return
-  similarityRequest++
-  similarityAbort?.abort()
-  similarityLoading.value = ''
   clearPlantQr()
   selectionRequest++
   selectionLoading.value = false
@@ -661,97 +622,6 @@ function closeReview() {
   delete query.speciesRequest
   delete query.review
   void router.replace({ query })
-}
-
-const similarityFor = (observationId: string) => similarityResults.value[observationId]
-
-const formatSimilarity = (value: number) => `${Math.round(value * 100)}%`
-
-
-function openSimilarity(analysis: PlantSimilarityAnalysis, event: Event) {
-  similarityTrigger.value = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
-  similarityAnalysis.value = analysis
-}
-
-function parseSimilarity(value: unknown, observation: ReviewObservation): PlantSimilarityAnalysis {
-  const data = record(value)
-  if (!data || data.observationId !== observation.id || data.plantId !== observation.plantId ||
-      data.status !== 'available' || !Array.isArray(data.candidates) ||
-      data.candidates.length < 1 || data.candidates.length > 5)
-    throw new Error('The similarity service returned an invalid result.')
-  const candidates: PlantSimilarityAnalysis['candidates'] = []
-  const seen = new Set<string>()
-  for (const [index, value] of data.candidates.entries()) {
-    const candidate = record(value)
-    if (!candidate || typeof candidate.plantId !== 'string' || !/^PL[0-9]+$/.test(candidate.plantId) ||
-        candidate.plantId === observation.plantId || seen.has(candidate.plantId) ||
-        candidate.rank !== index + 1 || typeof candidate.similarity !== 'number' ||
-        !Number.isFinite(candidate.similarity) || Math.abs(candidate.similarity) > 1 ||
-        (candidate.distanceMeters !== undefined &&
-          (typeof candidate.distanceMeters !== 'number' || !Number.isFinite(candidate.distanceMeters) || candidate.distanceMeters < 0)))
-      throw new Error('The similarity service returned an invalid candidate.')
-    seen.add(candidate.plantId)
-    const rawObservationId = stringValue(candidate.observationId)
-    candidates.push({ rank: index + 1, plantId: candidate.plantId,
-      observationId: formatObservationId(rawObservationId) || rawObservationId || undefined,
-      rawObservationId: rawObservationId || undefined,
-      assetId: assetUrlFromId(candidate.assetId) ? candidate.assetId as string : undefined,
-      scientificName: stringValue(candidate.scientificName) || undefined,
-      commonName: stringValue(candidate.commonName) || undefined,
-      similarity: candidate.similarity,
-      distanceMeters: candidate.distanceMeters as number | undefined })
-  }
-  if (data.highestSimilarity !== candidates[0]?.similarity)
-    throw new Error('The similarity service returned inconsistent scores.')
-  return { observationId: observation.displayId, plantId: observation.plantId,
-    rawObservationId: observation.id,
-    sourceAssetId: assetUrlFromId(data.sourceAssetId) ? data.sourceAssetId as string : undefined,
-    status: 'available', highestSimilarity: data.highestSimilarity as number, candidates }
-}
-
-async function checkSimilarity(observation: ReviewObservation, event: Event) {
-  if (disposed || !officerSessionReady.value) return
-  const cached = similarityFor(observation.id)
-  if (cached) {
-    openSimilarity(cached, event)
-    return
-  }
-  const trigger = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
-  similarityAbort?.abort()
-  const controller = new AbortController()
-  similarityAbort = controller
-  const token = ++similarityRequest
-  similarityLoading.value = observation.id
-  delete similarityErrors.value[observation.id]
-  const timeout = window.setTimeout(() => controller.abort(), 180000)
-  try {
-    const response = await fetch(`/api/data/observations/${encodeURIComponent(observation.id)}/similarity`, {
-      credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-    })
-    const result: unknown = await response.json()
-    if (!response.ok) {
-      const error = record(result)
-      throw new Error(typeof error?.error === 'string' ? error.error : 'Unable to compare this observation.')
-    }
-    const analysis = parseSimilarity(result, observation)
-    if (disposed || token !== similarityRequest) return
-    similarityResults.value[observation.id] = analysis
-    similarityTrigger.value = trigger
-    similarityAnalysis.value = analysis
-  } catch (error) {
-    if (!disposed && token === similarityRequest)
-      similarityErrors.value[observation.id] = controller.signal.aborted
-        ? 'Comparison timed out. Check the BioCLIP terminal and retry.'
-        : error instanceof Error ? error.message : 'Unable to compare this observation.'
-  } finally {
-    window.clearTimeout(timeout)
-    if (token === similarityRequest) similarityLoading.value = ''
-  }
-}
-
-function closeSimilarity() {
-  similarityAnalysis.value = null
-  void nextTick(() => similarityTrigger.value?.focus())
 }
 
 const canDecide = (decision: ReviewDecision) =>
@@ -824,13 +694,6 @@ async function fetchObservation(id: string) {
   return observation
 }
 function updateObservation(observation: ReviewObservation) {
-  if (similarityLoading.value === observation.id) {
-    similarityRequest++
-    similarityAbort?.abort()
-    similarityLoading.value = ''
-  }
-  delete similarityResults.value[observation.id]
-  delete similarityErrors.value[observation.id]
   const previousRequest =
     selected.value?.id === observation.id ? selected.value.speciesRequest : null
   const lostDependency = previousRequest && !observation.speciesRequest
@@ -1175,7 +1038,6 @@ async function loadObservations(append = false) {
   if (append) { visibleLimit.value += 100; return }
   const token = ++listRequest
   const current = () => !disposed && token === listRequest
-  similarityRequest++; similarityAbort?.abort(); similarityLoading.value = ''; similarityResults.value = {}; similarityErrors.value = {}; similarityAnalysis.value = null; similarityTrigger.value = null
   observations.value = []; changeProposals.value = []; visibleLimit.value = 100
   skippedRecords.value = 0; nextCursor.value = null; hasMore.value = false
   isLoading.value = true; loadError.value = ''
@@ -1234,8 +1096,6 @@ onBeforeUnmount(() => {
   clearPlantQr()
   unsubscribeReviewSession()
   selectionRequest++
-  similarityRequest++
-  similarityAbort?.abort()
   listRequest++
 })
 </script>
@@ -1295,7 +1155,7 @@ onBeforeUnmount(() => {
     <p class="copy-feedback" :class="{ warning: copyFailed }" role="status" aria-live="polite" aria-atomic="true">{{ copyFeedback }}</p>
     <div class="table-scroll reviews-scroll" role="region" :aria-label="rt('queues.registrations')" tabindex="0">
       <table class="reviews-table">
-        <colgroup><col class="observation-column" /><col class="plant-column" /><col class="type-column" /><col class="species-column" /><col class="submitter-column" /><col class="zone-column" /><col class="created-column" /><col class="status-column" /><col class="similarity-column" /><col class="actions-column" /></colgroup>
+        <colgroup><col class="observation-column" /><col class="plant-column" /><col class="type-column" /><col class="species-column" /><col class="submitter-column" /><col class="zone-column" /><col class="created-column" /><col class="status-column" /><col class="actions-column" /></colgroup>
         <thead>
           <tr>
             <th scope="col">{{ t('approvedChanges.submissionId') }}</th>
@@ -1306,7 +1166,6 @@ onBeforeUnmount(() => {
             <th scope="col">{{ ct('Location Zone') }}</th>
             <th scope="col">{{ rt('recordCreated') }}</th>
             <th scope="col">{{ ct('Status') }}</th>
-            <th scope="col">{{ ct('Similarity') }}</th>
             <th scope="col">{{ ct('Actions') }}</th>
           </tr>
         </thead>
@@ -1330,21 +1189,6 @@ onBeforeUnmount(() => {
               <span v-if="observation.status === 'Pending Review' && (observation.submissionUpdate as { state?: string } | null)?.state === 'updated'" class="badge resubmission-tag">{{ t('submissionChanges.updated') }}</span>
               <span v-if="observation.status === 'Pending Review' && observation.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span>
             </td>
-            <td>
-              <button
-                class="similarity-badge-button"
-                :style="similarityBadgeStyle(similarityFor(observation.id)?.highestSimilarity)"
-                type="button"
-                :disabled="similarityLoading === observation.id || reviewBusy"
-                :aria-label="`Check BioCLIP similarity for ${observation.displayId}`"
-                @click="checkSimilarity(observation, $event)"
-              >
-                <strong>{{ similarityLoading === observation.id ? 'Checking...' :
-                  similarityFor(observation.id) ? formatSimilarity(similarityFor(observation.id)!.highestSimilarity) : 'Check similarity' }}</strong>
-                <span v-if="!similarityFor(observation.id)">BioCLIP 2</span>
-              </button>
-              <small v-if="similarityErrors[observation.id]" class="similarity-unavailable" role="alert">{{ similarityErrors[observation.id] }}</small>
-            </td>
             <td class="actions-cell"><div class="action-group">
               <button class="action-button" :disabled="reviewBusy" @click="open(observation)">
                 {{ ct('Review') }}
@@ -1360,12 +1204,11 @@ onBeforeUnmount(() => {
             <td>{{ changeZone(row.change) || rt('notRecorded') }}</td>
             <td>{{ formatDate(row.change.created_at) }}</td>
             <td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(row.change.status)" :class="row.change.status.toLowerCase().replaceAll(' ', '-')">{{ row.change.status === 'Cancelled' ? t('approvedChanges.cancelled') : ct(row.change.status) }}</span></span></td>
-            <td><span class="similarity-unavailable">{{ t('approvedChanges.notApplicable') }}</span></td>
             <td class="actions-cell"><div class="action-group"><button class="action-button" :disabled="reviewBusy || !officerSessionReady" :aria-label="t('approvedChanges.reviewProposal', { id: proposalLabel(row.change.id) })" @click="openChange(row.change)">{{ ct('Review') }}</button></div></td>
           </template>
           </tr>
           <tr v-if="isLoading || loadError || !reviewRows.length">
-            <td colspan="10">
+            <td colspan="9">
               {{
                 isLoading
                   ? 'Loading review submissions...'
@@ -1730,28 +1573,6 @@ onBeforeUnmount(() => {
         </div>
         <aside class="review-decision-panel" tabindex="0" aria-labelledby="review-decision-heading">
           <p id="review-decision-heading" class="section-kicker review-section-heading"><svg class="review-section-icon" data-section-icon="clipboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="5" y="4" width="14" height="18" rx="2" /><rect x="9" y="2" width="6" height="4" rx="1" /><path d="m9 14 2 2 4-4" /></svg><span>{{ ct('REVIEW DECISION') }}</span></p>
-          <section class="review-similarity-summary" aria-labelledby="review-similarity-heading">
-            <div>
-              <span>BioCLIP 2</span>
-              <h3 id="review-similarity-heading" class="similarity-heading-with-info">AI Plant Similarity<button type="button" class="similarity-info-button" aria-label="About AI Plant Similarity" aria-describedby="review-similarity-info" aria-controls="review-similarity-info" :aria-expanded="similarityInfoOpen" @mouseenter="showSimilarityInfo" @mouseleave="hideSimilarityInfo" @focus="showSimilarityInfo" @blur="hideSimilarityInfo" @click.stop.prevent="showSimilarityInfo" @keydown.esc.stop.prevent="hideSimilarityInfo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" /><path d="M12 11v6 M12 7h.01" /></svg></button></h3>
-              <div id="review-similarity-info" ref="similarityInfo" class="similarity-info-tooltip" popover="auto" role="tooltip" @toggle="similarityInfoOpen = ($event as ToggleEvent).newState === 'open'">Compare this submission with approved plant photos.</div>
-              <p v-if="similarityFor(selected.id)?.status === 'available'">
-                Highest visual similarity:
-                <strong>{{
-                  formatSimilarity(similarityFor(selected.id)!.highestSimilarity)
-                }}</strong>
-              </p>
-              <p v-if="similarityErrors[selected.id]" role="alert">{{ similarityErrors[selected.id] }}</p>
-            </div>
-            <button
-              class="secondary-button"
-              type="button"
-              :disabled="similarityLoading === selected.id || reviewBusy"
-              @click="checkSimilarity(selected, $event)"
-            >
-              {{ similarityLoading === selected.id ? 'Checking...' : similarityFor(selected.id) ? 'View matches' : 'Check similarity' }}
-            </button>
-          </section>
           <template v-if="selected.origin !== 'initial_registration'">
             <h3>{{ rt('loadedHistory') }}</h3>
             <p>{{ rt('historyLimit') }}</p>
@@ -1856,11 +1677,6 @@ onBeforeUnmount(() => {
     <p v-if="standaloneRequest && reviewMessage" :role="reviewMessage.variant === 'error' ? 'alert' : 'status'">{{ reviewMessage.message }}</p>
   </AppModal>
 
-  <PlantSimilarityDrawer
-    v-if="similarityAnalysis"
-    :analysis="similarityAnalysis"
-    @close="closeSimilarity"
-  />
 </template>
 
 <style scoped>
@@ -1884,13 +1700,6 @@ onBeforeUnmount(() => {
 .review-observation-evidence, .review-decision-panel { min-width: 0; }
 .review-decision-panel { align-self: start; overflow-wrap: anywhere; }
 .review-decision-panel:focus-visible { outline: 2px solid #33745d; outline-offset: 2px; }
-.review-decision-panel .review-similarity-summary { flex-wrap: wrap; }
-.similarity-heading-with-info { display: flex; align-items: center; gap: 4px; }
-.similarity-info-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--green, #33745d); cursor: pointer; }
-.similarity-info-button svg { display: block; width: 16px; height: 16px; }
-.similarity-info-button:focus-visible { outline: 2px solid var(--green, #33745d); outline-offset: 2px; }
-.similarity-info-tooltip { position: fixed; inset: auto; margin: 0; box-sizing: border-box; width: max-content; max-width: min(280px, calc(100vw - 16px)); padding: 9px 12px; border: 1px solid var(--line, #dfe7df); border-radius: 8px; background: var(--forest, #173f34); color: #fff; font: 400 12px/1.5 Poppins, sans-serif; box-shadow: 0 3px 12px rgb(23 63 52 / 15%); }
-.review-decision-panel .review-similarity-summary > div { min-width: 0; flex: 1 1 160px; }
 @media (min-width: 921px) {
   .review-decision-panel {
     position: sticky;
@@ -1941,7 +1750,6 @@ onBeforeUnmount(() => {
 .reviews-table .type-column { width: 11rem; }
 .reviews-table .species-column { width: 13rem; }
 .reviews-table .zone-column { width: 8rem; }
-.reviews-table .similarity-column { width: 8rem; }
 .reviews-table .status-column, .reviews-table .actions-column { width: 1%; }
 .reviews-table .created-column { width: 12rem; }
 .reviews-table th, .reviews-table td { padding: 12px 14px; text-align: left; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
@@ -2137,79 +1945,6 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
-.reviews-table .similarity-badge-button strong { font-size: 14px; }
-.reviews-table .similarity-badge-button span { font-size: 12px; }
-.similarity-badge-button {
-  min-width: 58px;
-  padding: 5px 8px;
-  display: inline-grid;
-  justify-items: center;
-  gap: 1px;
-  border: 1px solid #bcd7c8;
-  border-radius: 9px;
-  background: var(--similarity-background, #e8f3ec);
-  color: var(--similarity-text, #287a53);
-  cursor: pointer;
-}
-.similarity-badge-button strong {
-  color: inherit;
-  font-size: 10px;
-  line-height: 1.1;
-}
-.similarity-badge-button span {
-  font-size: 7px;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-.similarity-badge-button:hover {
-  border-color: #73a68e;
-  background: var(--similarity-background, #dceee3);
-}
-.similarity-badge-button:focus-visible {
-  outline: 3px solid rgba(65, 132, 104, 0.22);
-  outline-offset: 2px;
-}
-.similarity-unavailable {
-  color: #63776d;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.review-similarity-summary {
-  margin: 10px 0 20px;
-  padding: 14px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid #d6e5dc;
-  border-radius: 10px;
-  background: #f6faf7;
-}
-.review-similarity-summary span {
-  color: #698075;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.review-similarity-summary h3 {
-  margin: 4px 0;
-  color: #315749;
-  font-size: 12px;
-}
-.review-similarity-summary p {
-  margin: 0;
-  color: #71817a;
-  font-size: 9px;
-  line-height: 1.45;
-}
-.review-similarity-summary p strong {
-  color: #287a53;
-}
-.review-similarity-summary .secondary-button {
-  flex: 0 0 auto;
-}
 .review-subsection-heading {
   margin-top: 24px;
   margin-bottom: 12px;
@@ -2271,10 +2006,6 @@ button:disabled {
   margin-bottom: 14px;
 }
 @media (max-width: 620px) {
-  .review-similarity-summary {
-    align-items: flex-start;
-    flex-direction: column;
-  }
   .submission-image-grid {
     grid-template-columns: 1fr;
   }
