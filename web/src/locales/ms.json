@@ -2135,7 +2135,6 @@
       "imageAlt": "Imej {asset} yang dihantar untuk pemerhatian {id}",
       "imageUnavailable": "Imej tidak tersedia",
       "attachment": "Lampiran bukan imej · pratonton tidak tersedia",
-      "similarityUnavailable": "Persamaan tidak tersedia",
       "loadedHistory": "Pemerhatian Terkini",
       "historyLimit": "Hanya pemerhatian yang dimuatkan dipaparkan.",
       "saving": "Menyimpan semakan dan memuat semula penyerahan…",

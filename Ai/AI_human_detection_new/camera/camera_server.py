@@ -39,7 +39,7 @@ def publish_frame(frame):
     now = time.monotonic()
 
     # Limit JPEG encoding and streaming to approximately 8 FPS.
-    if now - _last_frame < 0.125:
+    if now - _last_frame < 0.0333:
         return
 
     ok, encoded = cv2.imencode(
@@ -56,7 +56,8 @@ def publish_frame(frame):
         _condition.notify_all()
 
 
-def publish_event(event_type, title, description, *, event_id=None, reading_id=None):
+def publish_event(event_type, title, description, *, event_id=None, reading_id=None,
+                  confidence=None):
     with _condition:
         event = {
             "eventId": event_id or uuid4().hex,
@@ -65,7 +66,7 @@ def publish_event(event_type, title, description, *, event_id=None, reading_id=N
             "eventType": event_type,
             "title": title,
             "description": description,
-            "confidence": None,
+            "confidence": confidence,
             "detectedAt": timestamp(),
             "status": "New",
         }
