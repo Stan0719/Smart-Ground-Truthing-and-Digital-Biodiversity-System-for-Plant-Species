@@ -110,15 +110,19 @@ class SerialBridgeTests(unittest.TestCase):
                  'Temperature : 26.3 C', 'BIODIVERSITY SENSOR MONITOR']
         self.assertEqual(list(frames(lines)), [{'temperature': 26.3}])
 
-    def test_capture_metadata_requires_explicit_mpu_health_and_resets_each_frame(self):
+    def test_capture_metadata_parses_both_sensor_health_statuses_and_resets_each_frame(self):
         from datetime import datetime
         lines = ['BIODIVERSITY SENSOR MONITOR', 'MPU6050 : Connected',
+                 'DHT11 Status : Operational',
                  'Movement Status : DETECTED', 'BIODIVERSITY SENSOR MONITOR',
                  'MPU6050 : Not detected', 'Movement Status : No movement',
+                 'DHT11 Status : ERROR - Reading is stale',
                  'BIODIVERSITY SENSOR MONITOR', 'Temperature : 26.3 C',
                  'BIODIVERSITY SENSOR MONITOR']
         actual = list(frames(lines, include_metadata=True))
         self.assertEqual([f['capture']['mpu_connected'] for f in actual], [True, False, None])
+        self.assertEqual([f['capture']['dht_status'] for f in actual],
+                         ['Operational', 'ERROR - Reading is stale', None])
         self.assertEqual([f['values'] for f in actual], [{'movement': 1}, {'movement': 0}, {'temperature': 26.3}])
         for frame in actual:
             self.assertIsNotNone(datetime.fromisoformat(frame['capture']['observed_at']).tzinfo)

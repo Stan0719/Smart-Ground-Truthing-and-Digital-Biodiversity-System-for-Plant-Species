@@ -10,6 +10,8 @@ export interface IoTReading {
   rainfall_mm: number | null
   // Legacy field names above do not imply calibration; soil/rain remain raw.
   motion_detected: boolean | null
+  dht_status: string | null
+  mpu_connected: boolean | null
   gps_latitude: number | null
   gps_longitude: number | null
   recorded_at: string
@@ -61,6 +63,7 @@ const mapReading = (value: unknown, plantId: unknown): IoTReading | null => {
   const recordedAt = requiredText(item?.created_at)
   if (!item || !values || !id || !recordedAt) return null
   const movement = metric(values, 'movement')
+  const capture = record(values._capture)
   return {
     reading_id: id,
     plant_id: optionalText(plantId),
@@ -69,6 +72,8 @@ const mapReading = (value: unknown, plantId: unknown): IoTReading | null => {
     soil_moisture: metric(values, 'soilMoisture'),
     rainfall_mm: metric(values, 'rainfall'),
     motion_detected: movement === 1 ? true : movement === 0 ? false : null,
+    dht_status: typeof capture?.dht_status === 'string' ? capture.dht_status : null,
+    mpu_connected: typeof capture?.mpu_connected === 'boolean' ? capture.mpu_connected : null,
     gps_latitude: null,
     gps_longitude: null,
     recorded_at: recordedAt,

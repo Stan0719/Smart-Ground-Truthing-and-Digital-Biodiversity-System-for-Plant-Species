@@ -47,6 +47,17 @@ test('canonical device mapping preserves UUID, real name and zero JSON values', 
   assert.equal(result.latest_reading.recorded_at, '2026-11-03T04:05:06.000Z')
 })
 
+test('sensor health metadata is mapped for the live monitoring display', () => {
+  const result = mapCanonicalDevice(device({ latest_reading: reading({
+    temperature: 24, humidity: 60, movement: 0,
+    _capture: { mpu_connected: true, dht_status: 'Operational' },
+  }) }))
+  assert.equal(result.latest_reading.dht_status, 'Operational')
+  assert.equal(result.latest_reading.mpu_connected, true)
+  assert.match(page, /DHT11 Health/)
+  assert.match(page, /MPU6050 Health/)
+})
+
 test('kit readings preserve raw values and invalid movement is unavailable without exposing sound', () => {
   for (const [movement, expected] of [[0, false], [1, true], [2, null], [-1, null]]) {
     const result = mapCanonicalDevice(device({ latest_reading: reading({ sound: 0, movement, soilMoisture: 2150, rainfall: 812 }) }))

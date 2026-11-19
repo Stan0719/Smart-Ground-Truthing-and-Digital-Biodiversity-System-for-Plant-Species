@@ -77,6 +77,7 @@ def frames(lines, *, include_metadata=False):
     dashboard = False
     section = None
     mpu_connected = None
+    dht_status = None
     observed_at = None
 
     def result():
@@ -85,6 +86,7 @@ def frames(lines, *, include_metadata=False):
         return {'values': values, 'capture': {
             'observed_at': observed_at or datetime.now(timezone.utc).isoformat(),
             'mpu_connected': mpu_connected,
+            'dht_status': dht_status,
         }}
 
     for line in lines:
@@ -93,21 +95,21 @@ def frames(lines, *, include_metadata=False):
             values = {}
             dashboard = False
             section = None
-            mpu_connected = observed_at = None
+            mpu_connected = dht_status = observed_at = None
         elif line == '====================================':
             if values:
                 yield result()
             values = {}
             dashboard = False
             section = None
-            mpu_connected = observed_at = None
+            mpu_connected = dht_status = observed_at = None
         elif line == 'BIODIVERSITY SENSOR MONITOR':
             if values:
                 yield result()
             values = {}
             dashboard = True
             section = None
-            mpu_connected = observed_at = None
+            mpu_connected = dht_status = observed_at = None
         elif dashboard and line.startswith('[') and line.endswith(']'):
             section = line[1:-1].strip()
         else:
@@ -142,6 +144,9 @@ def frames(lines, *, include_metadata=False):
             health = re.match(r'^(MPU6050|Status)\s*:\s*(Connected|Not detected|Disconnected)\s*$', line, re.IGNORECASE)
             if dashboard and health and (health[1].upper() == 'MPU6050' or section == 'MPU6050'):
                 mpu_connected = health[2].lower() == 'connected'
+            dht_health = re.match(r'^DHT11 Status\s*:\s*(.+?)\s*$', line, re.IGNORECASE)
+            if dashboard and dht_health:
+                dht_status = dht_health[1]
             movement = re.match(r'^Movement(?:\s+Status)?\s*:\s*(DETECTED|No movement)\s*$', line, re.IGNORECASE)
             if dashboard and movement:
                 values['movement'] = int(movement[1].lower() == 'detected')

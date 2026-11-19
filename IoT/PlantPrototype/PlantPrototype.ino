@@ -127,6 +127,8 @@ volatile bool wifiNtpSynced = false;
 unsigned long lastWifiAttempt = 0;
 const unsigned long WIFI_RETRY_INTERVAL = 10000;
 
+const char* getDHTHealthStatus(unsigned long now);
+
 struct WifiReadingSnapshot {
     int soilValue;
     int rainValue;
@@ -137,6 +139,7 @@ struct WifiReadingSnapshot {
     bool dhtHasReading;
     bool movementActive;
     bool mpuReady;
+    const char *dhtStatus;
     uint32_t movementEventSequence;
 };
 
@@ -168,8 +171,11 @@ int sendReadingsOverWifi(const WifiReadingSnapshot &reading) {
         separator = true;
     }
     if (separator) body += ",";
-    body += "\"movement\":" + String(reading.movementActive ? 1 : 0) +
-        "},\"capture\":{\"mpu_connected\":" + String(reading.mpuReady ? "true" : "false") + "}}";
+    body += "\"movement\":" + String(reading.movementActive ? 1 : 0) + "},\"capture\":{\"mpu_connected\":";
+    body += (reading.mpuReady ? "true" : "false");
+    body += ",\"dht_status\":\"";
+    body += (reading.dhtStatus ? reading.dhtStatus : "Waiting for valid reading");
+    body += "\"}}";
     int status = https.POST(body);
     https.end();
     return status;
@@ -201,6 +207,7 @@ void queueReadingsForWifi() {
         dhtHasReading,
         false,
         mpuReady,
+        getDHTHealthStatus(millis()),
         0
     };
     portENTER_CRITICAL(&wifiMovementEventMux);

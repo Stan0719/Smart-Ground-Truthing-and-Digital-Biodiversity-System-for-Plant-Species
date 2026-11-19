@@ -207,6 +207,17 @@ const motionValue = (reading: ApiSensorReading) => {
   if (reading.motion_detected === null) return '—'
   return ct(reading.motion_detected ? 'Detected' : 'No motion')
 }
+const dhtStatusValue = (reading: ApiSensorReading | null) =>
+  reading?.dht_status || 'Unavailable'
+const mpuStatusValue = (reading: ApiSensorReading | null) =>
+  reading?.mpu_connected === true ? 'Connected' : reading?.mpu_connected === false ? 'Not detected' : 'Unavailable'
+const sensorHealthClass = (status: string | boolean | null | undefined) => {
+  if (status === true || status === 'Connected' || status === 'Operational') return 'sensor-ok'
+  if (status === false || (typeof status === 'string' &&
+      (status.startsWith('ERROR') || status === 'Not detected' || status === 'Disconnected'))) return 'sensor-error'
+  if (typeof status === 'string' && status.startsWith('WARNING')) return 'sensor-warning'
+  return 'sensor-unknown'
+}
 
 const viewDeviceAlerts = async (device: ApiSensorDevice) => {
   if (!identity || disposed || selectedDevice.value?.sensor_id !== device.sensor_id ||
@@ -424,7 +435,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       </div>
       <p v-if="!latestReadings.length" class="state-message">No sensor readings available.</p>
       <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="t('conservationPages.iot.recentReadings')" tabindex="0">
-        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-metric" /><col class="column-status" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
+        <table class="officer-data-table iot-reading-table"><colgroup><col class="column-id" /><col class="column-identifier" /><col class="column-plant" /><col class="column-metric" /><col class="column-metric" /><col class="column-metric" /><col class="column-status" /><col class="column-metric" /><col class="column-status" /><col class="column-status" /><col class="column-status" /><col class="column-status" /><col class="column-coordinates" /><col class="column-time" /><col class="column-actions" /></colgroup>
           <thead>
             <tr>
               <th scope="col">Reading ID</th>
@@ -437,6 +448,8 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               <th scope="col">Rain Raw (ADC)</th>
               <th scope="col">Surface Condition</th>
               <th scope="col">Motion</th>
+              <th scope="col">DHT11 Health</th>
+              <th scope="col">MPU6050 Health</th>
               <th scope="col">GPS</th>
               <th scope="col">Recorded At</th>
               <th scope="col">Actions</th>
@@ -460,6 +473,8 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
                   motionValue(item.reading)
                 }}</span>
               </td>
+              <td><span class="badge sensor-health" :class="sensorHealthClass(item.reading.dht_status)">{{ dhtStatusValue(item.reading) }}</span></td>
+              <td><span class="badge sensor-health" :class="sensorHealthClass(item.reading.mpu_connected)">{{ mpuStatusValue(item.reading) }}</span></td>
               <td>{{ gpsValue(item.reading) }}</td>
               <td>{{ dt(item.reading.recorded_at) }}</td>
               <td>
@@ -520,6 +535,14 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               : 'No reading available'
           }}
         </dd>
+      </div>
+      <div class="reading-measurement">
+        <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18 M5 8h14 M7 8v8 M17 8v8 M9 16h6" /></svg></span>DHT11 Health</dt>
+        <dd><span class="badge sensor-health" :class="sensorHealthClass(selectedDevice.latest_reading?.dht_status)">{{ dhtStatusValue(selectedDevice.latest_reading) }}</span></dd>
+      </div>
+      <div class="reading-measurement">
+        <dt><span class="reading-field-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h4l2-7 4 14 2-7h4" /></svg></span>MPU6050 Health</dt>
+        <dd><span class="badge sensor-health" :class="sensorHealthClass(selectedDevice.latest_reading?.mpu_connected)">{{ mpuStatusValue(selectedDevice.latest_reading) }}</span></dd>
       </div>
     </dl>
     <div class="modal-actions reading-actions device-actions">
@@ -765,6 +788,26 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
 .iot-reading-table .badge.high {
   background: #FFEDD5;
   color: #9A3412;
+}
+.iot-reading-table .badge.sensor-ok,
+.reading-details-modal .badge.sensor-ok {
+  background: #DCFCE7;
+  color: #166534;
+}
+.iot-reading-table .badge.sensor-warning,
+.reading-details-modal .badge.sensor-warning {
+  background: #FEF3C7;
+  color: #92400E;
+}
+.iot-reading-table .badge.sensor-error,
+.reading-details-modal .badge.sensor-error {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+.iot-reading-table .badge.sensor-unknown,
+.reading-details-modal .badge.sensor-unknown {
+  background: #E5E7EB;
+  color: #374151;
 }
 .state-message {
   margin: 18px 0;

@@ -17,6 +17,13 @@ const metrics = [
   "rainfall",
   "sound",
 ];
+const dhtHealthStatuses = new Set([
+  "Operational",
+  "Waiting for valid reading",
+  "WARNING - No valid readings",
+  "ERROR - Reading is stale",
+  "WARNING - Repeated failures",
+]);
 function thresholds(value) {
   if (
     !value ||
@@ -86,11 +93,17 @@ function mountDeviceIngestion(app, { pool }) {
     if (b.capture !== undefined) {
       const c = b.capture;
       if (!c || typeof c !== "object" || Array.isArray(c) ||
-          Object.keys(c).some((key) => !["observed_at", "mpu_connected"].includes(key)) ||
+          Object.keys(c).some((key) => !["observed_at", "mpu_connected", "dht_status"].includes(key)) ||
           typeof c.observed_at !== "string" || !Number.isFinite(Date.parse(c.observed_at)) ||
-          ![true, false, null].includes(c.mpu_connected))
+          ![true, false, null].includes(c.mpu_connected) ||
+          (c.dht_status !== undefined && c.dht_status !== null &&
+            (typeof c.dht_status !== "string" || !dhtHealthStatuses.has(c.dht_status))))
         fail(400, "Invalid sensor capture metadata.");
-      capture = { observed_at: c.observed_at, mpu_connected: c.mpu_connected };
+      capture = {
+        observed_at: c.observed_at,
+        mpu_connected: c.mpu_connected,
+        ...(c.dht_status === undefined ? {} : { dht_status: c.dht_status }),
+      };
     }
     if (b.client_key !== undefined) text(b.client_key, 100);
     for (const [metric, value] of Object.entries(b.values)) {

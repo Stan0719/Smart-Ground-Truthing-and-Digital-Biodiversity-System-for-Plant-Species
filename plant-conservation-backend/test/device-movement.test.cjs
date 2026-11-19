@@ -41,6 +41,7 @@ test("camera gate reads only fresh, connected MPU state from its assigned sensor
   };
   const capture = (age = 0, connected = true) => ({
     observed_at: new Date(Date.now() - age).toISOString(), mpu_connected: connected,
+    dht_status: "Operational",
   });
 
   await t.test("missing/wrong keys, wrong plants and disabled sensors cannot open the gate", async () => {
@@ -54,6 +55,8 @@ test("camera gate reads only fresh, connected MPU state from its assigned sensor
   });
   await t.test("fresh movement and no-movement reach the camera as distinct states", async () => {
     await reading(1, capture());
+    const saved = (await pool.query('SELECT "values" FROM sensor_reading WHERE device_id=$1', ["test-sensor"])).rows[0].values;
+    assert.equal(saved._capture.dht_status, "Operational");
     let result = await get();
     assert.equal(result.status, 200);
     assert.equal(result.body.plantId, "1");
