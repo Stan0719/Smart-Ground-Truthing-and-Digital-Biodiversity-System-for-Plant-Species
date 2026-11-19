@@ -36,3 +36,4 @@ supabase/.temp/
 *.pth
 *.onnx
 Ai/**/camera/recordings/
+IoT/PlantPrototype/.private/outbox.sqlite
