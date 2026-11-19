@@ -50,10 +50,11 @@ test('Officer typography is imported only by its layout and every selector requi
   })
 })
 
-test('the navigation/router audit covers all nine Officer pages and their modal scope', () => {
+test('the navigation/router audit covers all nine Officer pages and the teleported drawer opts into only this scope', () => {
   const router = read('router/index.ts'), layout = read('layouts/ConservationOfficerLayout.vue')
   for (const name of ['dashboard', 'profile', 'species', 'observations', 'reviews', 'map', 'iot', 'alerts', 'reports']) assert.ok(router.includes(`name: 'conservation-${name}'`), name)
   for (const name of ['dashboard', 'species', 'observations', 'reviews', 'map', 'iot', 'alerts', 'reports']) assert.ok(layout.includes(`name: 'conservation-${name}'`))
+  assert.match(read('components/conservation/PlantSimilarityDrawer.vue'), /<Teleport to="body">\s*<div class="similarity-drawer-layer officer-type-layer">/)
   assert.match(read('components/conservation/AppModal.vue'), /class="modal-card"/)
   assert.doesNotMatch(read('components/conservation/AppModal.vue'), /<Teleport/)
 })

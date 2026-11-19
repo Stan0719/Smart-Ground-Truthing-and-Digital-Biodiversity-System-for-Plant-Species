@@ -91,7 +91,7 @@ test('shared controls retain compact horizontal actions and bounded table scroll
   assert.equal(values(scroll)['min-width'], '0')
   assert.equal(values(scroll)['max-width'], '100%')
   assert.ok(find('.sidebar', 'overflow-y', 'auto'))
-  for (const rule of rules) assert.match(rule.selector, /\.officer-layout|\.admin-shell|\.staff-dialog-mask/, rule.selector)
+  for (const rule of rules) assert.match(rule.selector, /\.officer-layout|\.admin-shell|\.staff-dialog-mask|\.similarity-drawer-layer/, rule.selector)
 })
 
 

@@ -1,5 +1,6 @@
 /* Officer-only typography. Repeated root classes let this shared scale outrank
    existing Vue-scoped page rules without !important or changes to other roles.
+   The explicit layer marker covers the Officer-only teleported similarity drawer.
    Route audit: overview, profile, species, observations, reviews, map, IoT/camera,
    alerts, reports; includes their details/history, forms, charts and photo dialog. */
 :is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) {
@@ -207,12 +208,12 @@
   gap: 7px;
 }
 
-:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.modal-card, .species-photo-manager) {
+:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.modal-card, .species-photo-manager, .similarity-drawer) {
   font-size: var(--officer-text);
   line-height: 1.5;
 }
 
-:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.modal-header h2, .photo-header h22) {
+:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.modal-header h2, .photo-header h2, .similarity-drawer-header h2) {
   font-size: var(--officer-modal);
   line-height: 1.3;
 }
@@ -232,7 +233,7 @@
   line-height: 1.55;
 }
 
-:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.panel-description, .dataset-note, .state-note, .detail-state, .dashboard-state, .overview-row, .coordinate-note, .persistence-note, .chart-note, .report-meta, .filter-error, .settings-card header p, .prototype-note, .success-message, .map-summary small, .history-item, .history-item span, .image-limitation p, .report-chart p, .chart-empty, .dashboard-map-empty, .media-placeholder, .submitted-image-preview, .image-placeholder, .recording-unavailable span, .evidence-unavailable span, .latest-detection > p:not(.camera-kicker), .section-guidance, .empty-gallery, .library-photo, .availability-note) {
+:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.panel-description, .dataset-note, .state-note, .detail-state, .dashboard-state, .overview-row, .coordinate-note, .persistence-note, .chart-note, .report-meta, .filter-error, .settings-card header p, .prototype-note, .success-message, .map-summary small, .history-item, .history-item span, .image-limitation p, .report-chart p, .chart-empty, .dashboard-map-empty, .media-placeholder, .submitted-image-preview, .image-placeholder, .recording-unavailable span, .evidence-unavailable span, .latest-detection > p:not(.camera-kicker), .review-similarity-summary p, .similarity-unavailable, .section-guidance, .empty-gallery, .library-photo, .availability-note) {
   font-size: var(--officer-support);
   line-height: 1.55;
 }
@@ -242,17 +243,17 @@
   line-height: 1.5;
 }
 
-:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.alert-preview small, .quick-grid small, .preview-overlay, .confidence-block small, .card-caption, .add-photos > span:last-child, .submitted-image-caption small, .candidate-identity span, .candidate-identity small, .highest-match span, .highest-match small, .candidate-score span, .candidate-heading > span, .location-comparison h3, .location-comparison-content > span) {
+:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.alert-preview small, .quick-grid small, .preview-overlay, .confidence-block small, .card-caption, .add-photos > span:last-child, .submitted-image-caption small, .review-similarity-summary span, .similarity-badge-button span, .candidate-identity span, .candidate-identity small, .highest-match span, .highest-match small, .candidate-score span, .candidate-heading > span, .location-comparison h3, .location-comparison-content > span) {
   font-size: var(--officer-small);
   line-height: 1.5;
 }
 
-:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.main-badge, .badge, .candidate-rank, .species-request-badge, .confidence-block strong) {
+:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.main-badge, .badge, .candidate-rank, .species-request-badge, .similarity-badge-button strong, .confidence-block strong) {
   font-size: var(--officer-small);
   line-height: 1.5;
 }
 
-:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.prototype-disclosure p, .source-summary p, .location-comparison p) {
+:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.prototype-disclosure p, .source-summary p, .similarity-drawer-header p, .location-comparison p, .similarity-footnote) {
   font-size: var(--officer-support);
   line-height: 1.55;
 }
@@ -292,7 +293,7 @@
   height: auto;
 }
 /* Darken only supporting labels; semantic card, status and preview colors stay intact. */
-:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.page-intro > div > p:not(.page-kicker), .profile-intro > p:last-child, .panel-description, .summary-card small, .quick-grid small, .alert-preview small, .settings-card header p, .settings-field > span small, .prototype-note, .map-summary small, .coordinate-note, .report-meta, .report-chart p, .chart-empty, .dashboard-map-empty, .history-item span, .notification-copy > span, .notification-copy time, .notification-empty, .notification-menu footer, .profile-copy small, .source-summary p, .location-comparison p, .candidate-identity span, .candidate-identity small) {
+:is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.page-intro > div > p:not(.page-kicker), .profile-intro > p:last-child, .panel-description, .summary-card small, .quick-grid small, .alert-preview small, .settings-card header p, .settings-field > span small, .prototype-note, .map-summary small, .coordinate-note, .report-meta, .report-chart p, .chart-empty, .dashboard-map-empty, .history-item span, .notification-copy > span, .notification-copy time, .notification-empty, .notification-menu footer, .profile-copy small, .source-summary p, .similarity-drawer-header p, .similarity-footnote, .location-comparison p, .candidate-identity span, .candidate-identity small) {
   color: var(--officer-muted);
 }
 :is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) :is(.field > span, .form-field > span, .form-field > label, .settings-field > span, dt) {

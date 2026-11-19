@@ -19,6 +19,7 @@ const { mountRecordChanges } = require("./record-changes.cjs");
 const { mountObservationEdits } = require("./observation-edits.cjs");
 const { mountObservationWithdrawals } = require("./observation-withdrawals.cjs");
 const { mountRecordVersionHistory } = require("./record-version-history.cjs");
+const { mountPlantSimilarity } = require("./plant-similarity.cjs");
 const { mountStaffNotifications } = require("./staff-notifications.cjs");
 const { createOfficerNotificationDelivery } = require("./officer-notification-delivery.cjs");
 const {
@@ -34,6 +35,7 @@ function createPlantApp({
   origins = configuredOrigins(),
   officerNotifications = null,
   qrPlantSchema = process.env.PLANT_QR_PLANT_SCHEMA || "plant_app",
+  similaritySearch,
   speciesPhotoWritesEnabled = false,
   recordingsRoot,
 }) {
@@ -85,6 +87,7 @@ function createPlantApp({
   mountPlantDetail(app, { pool, allow, auth });
   mountIoT(app, { pool, allow });
   mountCameraEvents(app, { pool, allow, recordingsRoot });
+  mountPlantSimilarity(app, { pool, allow, search: similaritySearch });
   app.get("/api/db-test", allow("system.read"), async (_req, res) => {
     await pool.query("SELECT 1");
     res.json({ connected: true, database: "postgresql" });

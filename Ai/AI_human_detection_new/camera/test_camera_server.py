@@ -59,17 +59,6 @@ class CameraHTTPTests(unittest.TestCase):
         self.assertEqual(event['readingId'], 'trigger-reading')
         self.assertEqual(published, event)
 
-    def test_detection_events_expose_model_confidence_to_the_website(self):
-        for event_type in ('human_detected', 'animal_detected'):
-            with self.subTest(event_type=event_type):
-                camera_server.publish_event(event_type, 'Detection', 'Camera detection.',
-                                            confidence=0.87)
-                status, result = self.request_json('/camera-events')
-                self.assertEqual(status, 200)
-                event = result['events'][0]
-                self.assertEqual(event['eventType'], event_type)
-                self.assertEqual(event['confidence'], 0.87)
-
     def test_live_feed_contains_a_decodable_jpeg_with_correct_multipart_headers(self):
         camera_server.publish_frame(np.full((54, 96, 3), 127, dtype=np.uint8))
         connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=3)

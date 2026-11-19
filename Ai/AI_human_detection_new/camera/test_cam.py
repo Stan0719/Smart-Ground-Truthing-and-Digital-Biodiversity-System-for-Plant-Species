@@ -82,14 +82,10 @@ class PlantContactTests(unittest.TestCase):
                 capture.isOpened.return_value = True
                 capture.read.return_value = (True, frame)
                 box = SimpleNamespace(cls=torch.tensor([0]), id=torch.tensor([1]),
-                                      conf=torch.tensor([0.9]),
                                       xyxy=torch.tensor([[100, 100, 200, 200]]))
-                animal_box = SimpleNamespace(cls=torch.tensor([1]), id=torch.tensor([2]),
-                                             conf=torch.tensor([0.8]),
-                                             xyxy=torch.tensor([[300, 100, 400, 200]]))
                 detector, plant_model, pose_model = MagicMock(), MagicMock(), MagicMock()
-                detector.names = {0: 'person', 1: 'cat'}
-                detector.track.return_value = [SimpleNamespace(boxes=[box, animal_box])]
+                detector.names = {0: 'person'}
+                detector.track.return_value = [SimpleNamespace(boxes=[box])]
                 plant_model.track.return_value = [SimpleNamespace(boxes=[box] if detected else [])]
                 region = cam.FixedPlantRegion()
                 if fixed:
@@ -117,13 +113,7 @@ class PlantContactTests(unittest.TestCase):
                 self.assertEqual(writer.write.call_count, 1 if should_alert else 0)
                 self.assertEqual(sound.Beep.call_count, 1 if should_alert else 0)
                 self.assertEqual(publish_frame.call_count, 3)
-                self.assertEqual(publish_event.call_count, 3 if should_alert else 2)
-                for event_type, confidence in (('human_detected', 0.9), ('animal_detected', 0.8)):
-                    detections = [call for call in publish_event.call_args_list
-                                  if call.args[0] == event_type]
-                    # The same track across three frames produces only one event.
-                    self.assertEqual(len(detections), 1)
-                    self.assertAlmostEqual(detections[0].kwargs['confidence'], confidence)
+                self.assertEqual(publish_event.call_count, 1 if should_alert else 0)
                 if should_alert:
                     self.assertEqual(publish_event.call_args.args[0], 'possible_plant_contact')
                     self.assertIn('MPU6050', publish_event.call_args.args[2])

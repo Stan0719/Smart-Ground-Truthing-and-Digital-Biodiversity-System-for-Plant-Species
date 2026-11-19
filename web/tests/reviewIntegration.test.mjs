@@ -1,4 +1,5 @@
 import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
+import { similarityBadgeStyle } from '../src/utils/similarityBadge.ts'
 import { assetUrlFromId } from '../src/services/assetImages.ts'
 import { reviewDateTime, submitterIdentifierLabels } from '../src/utils/officerMonitoringDisplay.ts'
 import assert from 'node:assert/strict'
@@ -116,6 +117,7 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
     },
     require(name) {
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
+    if (name.endsWith('similarityBadge')) return { similarityBadgeStyle }
     if (name.endsWith('assetImages')) return { assetUrlFromId }
     if (name.endsWith('officerMonitoringDisplay')) return { reviewDateTime, submitterIdentifierLabels }
       // DOM directives are not mounted by this VNode-only render harness.
@@ -173,7 +175,7 @@ function nodes(root) {
   return result
 }
 
-test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery', async () => {
+test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery and similarity isolation', async () => {
   const row = fixture()
   const h = harness(async (url) => fixtureResponse(url, [row, null, {}, fixture({ id: 1 })]),
   )
@@ -194,6 +196,8 @@ test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery', async
     assert.equal(observation.notes, row.content.notes)
     for (const key of ['latitude', 'longitude', 'gpsAccuracy']) assert.equal(observation[key], '0')
     assert.equal(observation.createdAt, row.created_at)
+    assert.equal(h.state.similarityFor(observation.displayId), undefined)
+    assert.equal(h.state.similarityFor(h.state.observations.value[1].id), undefined)
     await h.state.open(observation)
     await flush()
     assert.equal(h.route.query.review, firstId)
@@ -208,6 +212,203 @@ test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery', async
   } finally {
     h.stop()
   }
+})
+
+test('similarity loads real UUID results through the plant proxy, preserves missing distance and clears on refresh', async () => {
+  const h = harness(async (url, options) => {
+    if (url.endsWith('/similarity')) {
+      assert.equal(url, `/api/data/observations/${firstId}/similarity`)
+      assert.equal(options.credentials, 'same-origin')
+      return Response.json({ observationId: firstId, plantId: 'PL001', status: 'available',
+        highestSimilarity: 0.92, candidates: [
+          { rank: 1, plantId: 'PL008', observationId: secondId, similarity: 0.92, distanceMeters: 0 },
+          { rank: 2, plantId: 'PL009', observationId: '2', similarity: 0.8 },
+        ] })
+    }
+    return Response.json({ observations: [fixture()] })
+  })
+  try {
+    await h.state.loadObservations()
+    const observation = h.state.observations.value[0]
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    const analysis = h.state.similarityFor(firstId)
+    assert.equal(analysis.candidates[0].plantId, 'PL008')
+    assert.equal(analysis.candidates[0].observationId, secondId)
+    assert.equal(analysis.candidates[0].distanceMeters, 0)
+    assert.equal(analysis.candidates[1].distanceMeters, undefined)
+    assert.equal(analysis.candidates[1].observationId, 'OBS002')
+    assert.equal(h.state.similarityAnalysis.value, analysis)
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.equal(h.calls.filter((call) => call.url.endsWith('/similarity')).length, 1)
+    await h.state.loadObservations()
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
+  } finally { h.stop() }
+})
+
+test('similarity table colors use raw score boundaries without changing display, requests or result navigation', async () => {
+  let score = 0
+  const h = harness(async url => url.endsWith('/similarity')
+    ? Response.json({ observationId: firstId, plantId: 'PL001', status: 'available', highestSimilarity: score,
+      candidates: [{ rank: 1, plantId: 'PL008', similarity: score }] })
+    : Response.json({ observations: [fixture()] }))
+  const button = () => nodes(h.render()).find(node => node.props?.class === 'similarity-badge-button')
+  try {
+    await h.state.loadObservations()
+    assert.equal(button().props.style, undefined)
+    assert.equal(nodes(button()).find(node => node.type === 'strong').children, 'Check similarity')
+    assert.equal(nodes(button()).find(node => node.type === 'span').children, 'BioCLIP 2')
+    const row = h.state.observations.value[0]
+    assert.ok(nodes(h.render()).some(node => node.type === 'td' && node.children === '1 Oct 2026, 18:00'))
+    for (const [value, background, text] of [
+      ...[0, 0.55, 0.69, 0.699].map(value => [value, '#DCFCE7', '#166534']),
+      ...[0.70, 0.78, 0.89, 0.899].map(value => [value, '#FEF9C3', '#854D0E']),
+      ...[0.90, 0.92, 1].map(value => [value, '#FEE2E2', '#B91C1C']),
+    ]) {
+      score = value
+      delete h.state.similarityResults.value[firstId]
+      await button().props.onClick({ currentTarget: null })
+      const calls = h.calls.length
+      const result = button()
+      assert.deepEqual({ ...result.props.style }, { '--similarity-background': background, '--similarity-text': text })
+      assert.equal(nodes(result).find(node => node.type === 'strong').children, `${Math.round(value * 100)}%`)
+      assert.equal(nodes(result).some(node => node.type === 'span' && node.children === 'BioCLIP 2'), false)
+      assert.equal(result.props.disabled, false)
+      h.state.closeSimilarity()
+      await result.props.onClick({ currentTarget: null })
+      assert.equal(h.state.similarityAnalysis.value, h.state.similarityFor(row.id))
+      assert.ok(nodes(h.render()).some(node => node.type?.name?.endsWith('PlantSimilarityDrawer.vue')))
+      h.render(); h.render()
+      assert.equal(h.calls.length, calls)
+    }
+    for (const value of [undefined, null, NaN, Infinity, -Infinity, 1.01, -1.01, '0.92', {}]) assert.equal(h.state.similarityBadgeStyle(value), undefined)
+    assert.deepEqual({ ...h.state.similarityBadgeStyle(-0.2) }, { '--similarity-background': '#DCFCE7', '--similarity-text': '#166534' })
+    assert.match(descriptor.styles[0].content, /background: var\(--similarity-background, #e8f3ec\)/)
+    assert.match(descriptor.styles[0].content, /\.similarity-badge-button:hover\s*\{\s*border-color: #73a68e;\s*background: var\(--similarity-background, #dceee3\)/)
+  } finally { h.stop() }
+})
+
+test('comparison photo IDs are optional, safely retained and never replaced by gallery photos; raw numeric IDs remain copyable', async () => {
+  const h = harness(() => Response.json({ observations: [fixture()] }))
+  try {
+    const observation = h.state.mapObservation(fixture({ id: '15' }))
+    const base = { observationId: '15', plantId: 'PL001', status: 'available', highestSimilarity: .8,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: '8', similarity: .8 }] }
+    for (const value of [undefined, null, '', '../private', 'https://example.invalid/photo', {}, 1]) {
+      const result = h.state.parseSimilarity({ ...base, sourceAssetId: value, candidates: [{ ...base.candidates[0], assetId: value }] }, observation)
+      assert.equal(result.sourceAssetId, undefined)
+      assert.equal(result.candidates[0].assetId, undefined)
+      assert.equal(result.rawObservationId, '15')
+      assert.equal(result.candidates[0].rawObservationId, '8')
+      assert.equal(result.observationId, 'OBS015')
+    }
+    const result = h.state.parseSimilarity({ ...base, sourceAssetId: 'source-selected', candidates: [{ ...base.candidates[0], assetId: 'reference-selected' }] }, observation)
+    assert.equal(result.sourceAssetId, 'source-selected')
+    assert.equal(result.candidates[0].assetId, 'reference-selected')
+    assert.equal(h.calls.length, 0)
+    let focused = 0
+    h.state.similarityAnalysis.value = result
+    h.state.similarityTrigger.value = { focus() { focused++ } }
+    h.state.closeSimilarity(); await flush()
+    assert.equal(h.state.similarityAnalysis.value, null)
+    assert.equal(focused, 1)
+  } finally { h.stop() }
+})
+
+test('similarity session changes clear cached evidence and invalidate pending responses', async () => {
+  for (const action of ['logout', 'account', 'pending']) {
+    const rows = [fixture(), fixture({ id: secondId, plant_id: 2 })]
+    const analysis = (id) => ({ observationId: id, plantId: id === firstId ? 'PL001' : 'PL002',
+      status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: '8', similarity: 0.9 }] })
+    let release
+    const h = harness(async url => {
+      if (url === `/api/data/observations/${firstId}/similarity`) return Response.json(analysis(firstId))
+      if (url === `/api/data/observations/${secondId}/similarity`)
+        return new Promise(resolve => { release = () => resolve(Response.json(analysis(secondId))) })
+      return fixtureResponse(url, rows)
+    })
+    try {
+      await h.state.loadObservations()
+      const [first, second] = h.state.observations.value
+      await h.state.checkSimilarity(first, { currentTarget: null })
+      assert.ok(h.state.similarityFor(firstId))
+      const pending = h.state.checkSimilarity(second, { currentTarget: null })
+      await flush()
+      if (action === 'account') h.emitSession({ id: 'another-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false })
+      else h.emitSession(null, action === 'pending')
+      // Let a late server response finish even if the HTTP mock ignores abort.
+      release()
+      await pending
+      assert.equal(h.calls.find(call => call.url.endsWith(`${secondId}/similarity`)).options.signal.aborted, true)
+      assert.equal(h.state.similarityFor(firstId), undefined)
+      assert.equal(h.state.similarityFor(secondId), undefined)
+      assert.equal(h.state.similarityAnalysis.value, null)
+      assert.equal(h.state.similarityLoading.value, '')
+      if (action !== 'account') {
+        const before = h.calls.length
+        await h.state.checkSimilarity(first, { currentTarget: null })
+        assert.equal(h.calls.length, before)
+      }
+    } finally { h.stop() }
+  }
+})
+
+test('loading another queue page preserves BioCLIP results while a full refresh clears them', async () => {
+  const rows = [fixture(), fixture({ id: secondId, plant_id: 2 })]
+  const h = harness(async url => url.endsWith('/similarity')
+    ? Response.json({ observationId: firstId, plantId: 'PL001', status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: '8', similarity: 0.9 }] })
+    : fixtureResponse(url, rows), {}, 'en', undefined, async url => {
+      const more = new URL(url, 'https://fixture.invalid').searchParams.has('cursor')
+      return Response.json({ observations: [rows[more ? 1 : 0]],
+        page: { has_more: !more, next_cursor: more ? null : 'next-page' } })
+    })
+  try {
+    await h.state.loadObservations()
+    await h.state.checkSimilarity(h.state.observations.value[0], { currentTarget: null })
+    const cached = h.state.similarityFor(firstId)
+    await h.state.loadObservations(true)
+    assert.equal(h.state.observations.value.length, 2)
+    assert.equal(h.state.similarityFor(firstId), cached)
+    await h.state.loadObservations()
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
+  } finally { h.stop() }
+})
+
+test('similarity failures and mismatched observations never display demo results; stale requests are ignored', async () => {
+  let mode = 'offline', release
+  const h = harness(async (url) => {
+    if (!url.endsWith('/similarity')) return Response.json({ observations: [fixture()] })
+    if (mode === 'offline') return Response.json({ error: 'BioCLIP unavailable' }, { status: 503 })
+    if (mode === 'invalid') return Response.json({ observationId: secondId })
+    return new Promise((resolve) => { release = () => resolve(Response.json({
+      observationId: firstId, plantId: 'PL001', status: 'available', highestSimilarity: 0.9,
+      candidates: [{ rank: 1, plantId: 'PL008', observationId: secondId, similarity: 0.9 }],
+    })) })
+  })
+  try {
+    await h.state.loadObservations()
+    const observation = h.state.observations.value[0]
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.match(h.state.similarityErrors.value[firstId], /BioCLIP unavailable/)
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    mode = 'invalid'
+    await h.state.checkSimilarity(observation, { currentTarget: null })
+    assert.match(h.state.similarityErrors.value[firstId], /invalid result/)
+    assert.equal(h.state.similarityAnalysis.value, null)
+    mode = 'delayed'
+    const pending = h.state.checkSimilarity(observation, { currentTarget: null })
+    await flush()
+    assert.equal(h.state.similarityLoading.value, firstId)
+    await h.state.loadObservations()
+    release()
+    await pending
+    assert.equal(h.state.similarityFor(firstId), undefined)
+    assert.equal(h.state.similarityAnalysis.value, null)
+    assert.equal(h.state.similarityLoading.value, '')
+  } finally { h.stop() }
 })
 
 test('UUID deep links outside list cap and reactive query changes load detail; stale responses are ignored', async () => {
@@ -1488,13 +1689,13 @@ test('legacy deep links select the explicit fallback; all queue labels render in
 const reviewTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'reviews-table')
 const reviewCopyButtons = h => nodes(reviewTable(h)).filter(node => node.type === 'button' && node.props?.class === 'identifier-copy')
 
-test('review queue retains the requested nine headers, compact observation/subject labels and raw review identifiers', async () => {
+test('review queue retains the requested ten headers, compact observation/subject labels and raw review identifiers', async () => {
   const row = fixture({ owner_subject: 'staff:2ace382f-1111-4111-8111-111111111111' })
   const h = harness(url => fixtureResponse(url, [row]))
   try {
     await h.state.loadObservations()
     const headers = nodes(reviewTable(h)).filter(node => node.type === 'th')
-    assert.deepEqual(headers.map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Actions'])
+    assert.deepEqual(headers.map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
     assert.ok(headers.every(node => node.props.scope === 'col'))
     assert.equal(h.state.observationLabel(row.id), 'OBS-AA3BD8BE')
     assert.equal(h.state.submitterLabel(row.owner_subject), 'Staff \u00b7 2ACE382F')
@@ -1835,7 +2036,7 @@ test('review typography uses a readable hierarchy without squeezing identifiers,
     ['.review-summary-title p', 14], ['.review-summary-card strong', 30],
     ['.reviews-filters > .field > span', 12], ['.reviews-table th', 12], ['.reviews-table td', 14],
     ['.reviews-table .badge', 12], ['.reviews-table .action-group > .action-button', 13],
-    ['.reviews-table .species-request-badge', 12],
+    ['.reviews-table .species-request-badge', 12], ['.similarity-unavailable', 12],
   ]) {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const rule = new RegExp(`^(?:\\.submission-review-badge, )?${escaped}\\s*\\{([^}]+)\\}`, 'm').exec(css)?.[1]
@@ -1873,6 +2074,39 @@ test('missing review comment gets a decorative Lucide circle-alert without chang
     assert.ok(!nodes(reviewModal(h)).some(n => String(n.props?.class).includes('lucide-circle-alert')))
     assert.match(descriptor.styles[0].content, /\.review-comment-validation \{ display: flex; align-items: flex-start; gap: 8px/)
     assert.match(descriptor.styles[0].content, /\.review-comment-alert-icon \{[^}]*flex: 0 0 18px/)
+  } finally { h.stop() }
+})
+
+test('similarity explanation is a top-layer help tooltip with hover, focus and tap access, without changing comparison', async () => {
+  const row = fixture(), document = { activeElement: null }
+  const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { document })
+  try {
+    await h.state.open(h.state.mapObservation(row)); await flush()
+    const all = nodes(reviewModal(h)), help = all.find(n => n.props?.class === 'similarity-info-button')
+    const tooltip = all.find(n => n.props?.id === 'review-similarity-info')
+    const description = 'Compare this submission with approved plant photos.'
+    assert.equal(tooltip.children, description)
+    assert.equal(tooltip.props.popover, 'auto')
+    assert.equal(tooltip.props.role, 'tooltip')
+    assert.ok(!all.some(n => n.type === 'p' && n.children === description))
+    assert.equal(help.props['aria-describedby'], tooltip.props.id)
+    assert.equal(help.props.type, 'button')
+    let shows = 0, hides = 0
+    const popup = { style: {}, showPopover() { shows++ }, hidePopover() { hides++ }, getBoundingClientRect: () => ({ width: 280, height: 54 }) }
+    h.state.similarityInfo.value = popup
+    const target = { getBoundingClientRect: () => ({ left: 950, top: 10, bottom: 38 }) }
+    for (const handler of ['onMouseenter', 'onFocus', 'onClick']) help.props[handler]({ currentTarget: target, stopPropagation() {}, preventDefault() {} })
+    assert.equal(shows, 3)
+    assert.equal(popup.style.left, '736px')
+    assert.equal(popup.style.top, '46px')
+    document.activeElement = target
+    help.props.onMouseleave({ type: 'mouseleave', currentTarget: target })
+    assert.equal(hides, 0)
+    help.props.onBlur({ type: 'blur', currentTarget: target })
+    assert.equal(hides, 1)
+    assert.ok(all.some(n => n.type === 'button' && n.children === 'Check similarity'))
+    assert.equal(h.calls.filter(call => call.url.endsWith('/similarity')).length, 0)
+    assert.match(descriptor.styles[0].content, /\.similarity-info-tooltip \{ position: fixed; inset: auto/)
   } finally { h.stop() }
 })
 
@@ -1925,7 +2159,7 @@ test('submission status badges reuse table styles independently for every workfl
   } finally { h.stop() }
 })
 
-test('whole decision panel keeps comment and feedback together for registration and subsequent layouts', async () => {
+test('whole decision panel keeps similarity, comment and feedback together for registration and subsequent layouts', async () => {
   for (const origin of ['initial_registration', 'subsequent_observation']) {
     const row = fixture({ origin_type: origin })
     const h = harness(url => fixtureResponse(url, [row]))
@@ -1938,6 +2172,7 @@ test('whole decision panel keeps comment and feedback together for registration 
       assert.ok(panel)
       assert.equal(panel.props.tabindex, '0')
       assert.equal(panel.props['aria-labelledby'], 'review-decision-heading')
+      assert.ok(nodes(panel).some(node => node.props?.class === 'review-similarity-summary'))
       assert.ok(nodes(panel).some(node => node.props?.id === 'review-decision-heading'))
       assert.ok(nodes(panel).some(node => node.children === 'Existing validation feedback'))
       const textarea = nodes(panel).filter(node => node.type === 'textarea')
@@ -1959,6 +2194,7 @@ test('decision panel sticks only on desktop within the existing modal scroller a
   assert.match(css, /\.review-observation-columns\s*\{ align-items: start/)
   assert.match(css, /@media \(min-width: 921px\)\s*\{\s*\.review-decision-panel\s*\{[^}]*position: sticky;[^}]*top: 16px;[^}]*max-height: calc\(100dvh - 104px\);[^}]*overflow: auto;[^}]*scrollbar-gutter: stable/s)
   assert.match(css, /\.review-decision-panel:focus-visible/)
+  assert.match(css, /\.review-decision-panel \.review-similarity-summary\s*\{ flex-wrap: wrap/)
   const shared = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
   assert.match(shared, /\.officer-layout \.modal-card\s*\{[^}]*max-height: calc\(100vh - 40px\);[^}]*overflow: auto/)
   assert.match(shared, /@media \(max-width: 920px\)[\s\S]*\.two-column\s*\{\s*grid-template-columns: 1fr/)
@@ -1990,6 +2226,7 @@ test('major review section headings use eight themed outline icons without decor
       for (const label of nodes(section).filter(node => node.type === 'dt')) assert.equal(nodes(label).filter(node => node.type === 'svg').length, 0)
       const panel = all.find(node => node.props?.class === 'review-decision-panel')
       assert.ok(nodes(panel).some(node => node.props?.id === 'review-decision-heading'))
+      assert.ok(nodes(panel).some(node => node.props?.class === 'review-similarity-summary'))
       assert.equal(nodes(panel).filter(node => node.type === 'textarea').length, 1)
     } finally { h.stop() }
   }
@@ -2145,17 +2382,17 @@ test('redundant decision heading is absent while localized accessible group, com
   } finally { h.stop() }
 })
 
-test('Review Submissions retains exactly nine aligned columns while full observation copying stays authoritative', async () => {
+test('Review Submissions retains exactly ten aligned columns while full observation copying stays authoritative', async () => {
   const row = fixture({ plant_id: 18 }), copied = []
   const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
   try {
     await h.state.loadObservations()
     const table = reviewTable(h)
-    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['observation-column', 'plant-column', 'type-column', 'species-column', 'submitter-column', 'zone-column', 'created-column', 'status-column', 'actions-column'])
-    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Actions'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['observation-column', 'plant-column', 'type-column', 'species-column', 'submitter-column', 'zone-column', 'created-column', 'status-column', 'similarity-column', 'actions-column'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', 'Similarity', 'Actions'])
     const renderedRow = nodes(table).find(node => node.type === 'tr' && node.key === 'observation:' + row.id)
     const cells = nodes(renderedRow).filter(node => node.type === 'td')
-    assert.equal(cells.length, 9)
+    assert.equal(cells.length, 10)
     assert.equal(cells[1].props.class, 'plant-id-cell')
     assert.equal(cells[1].children, 'PL018')
     assert.equal(cells[0].props.class, 'identity-cell')
@@ -2514,6 +2751,7 @@ test('one original table integrates registration, linked species, plant edits an
       assert.equal(rows.find(r=>r.kind==='approved_plant_change').change.id,plant.id)
       assert.equal(h.state.counts.value.find(([title])=>title==='Pending Review')[1],3)
       const editRows=nodes(table).filter(n=>n.type==='tr'&&String(n.key).startsWith('change:'))
+      assert.ok(editRows.every(row=>!nodes(row).some(n=>n.props?.class==='similarity-badge-button')))
       assert.ok(editRows.every(row=>nodes(row).some(n=>n.type==='button'&&n.props?.class==='action-button')))
       await nodes(editRows[0]).find(n=>n.type==='button'&&n.props?.class==='action-button').props.onClick()
       assert.equal(h.route.query.change,editRows[0].key.slice(7));assert.equal(h.state.selected.value,null)
