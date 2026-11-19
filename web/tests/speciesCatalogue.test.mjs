@@ -14,7 +14,7 @@ const template = compileTemplate({ source: descriptor.template.content, filename
 const js = value => ts.transpileModule(value, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const fixture = (slug, family, name = slug) => ({ slug, family, name, scientificName: `Scientific ${slug}`, genus: 'Genus', description: 'Forest', category: 'Uncategorized', images: [] })
 function harness() {
-  const scope = vue.effectScope(), exports = {}, loaded = [], route = vue.reactive({ query: {} })
+  const scope = vue.effectScope(), exports = {}, loaded = vue.reactive([]), route = vue.reactive({ query: {} })
   const loggedIn = vue.ref(false), role = vue.ref(null)
   const context = { exports, require(name) {
     if (name.endsWith('/conservationBadge')) return { conservationBadgeStyle }
@@ -24,7 +24,8 @@ function harness() {
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x, te: () => false }) }
     if (name.includes('usePrototypeSession')) return { usePrototypeSession: () => ({ isLoggedIn: loggedIn, userRole: role }) }
     if (name.endsWith('/plants')) return { plants: loaded }
-    if (name.endsWith('/knowledge')) return { refreshKnowledge: async () => {}, knowledgeError: vue.ref('') }
+    if (name.includes('useCatalogueRefresh')) return { useCatalogueRefresh: load => ({ refresh: () => load(() => true), reset: () => load(() => true) }) }
+    if (name.endsWith('/knowledge')) return { refreshKnowledge: async () => {}, knowledgeError: vue.ref(''), catalogueLimited: vue.ref(false) }
     throw Error(name)
   } }
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
@@ -141,4 +142,18 @@ test('card actions use equal flexible columns, bottom alignment and contained wr
   assert.match(css, /\.card-actions\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*margin-top: auto/)
   assert.match(css, /\.card-action-link\s*\{[^}]*box-sizing: border-box;[^}]*width: 100%;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;[^}]*min-width: 0;[^}]*min-height: 44px/)
   assert.doesNotMatch(css, /\.plant-description/)
+})
+
+test('Explore Species keeps its grid mounted beside a recoverable refresh error', async () => {
+  const h = harness()
+  try {
+    h.loaded.push(fixture('a', 'Family A'))
+    await h.state.loadSpecies(); await vue.nextTick()
+    h.state.activeFamily.value = 'family a'
+    h.state.loadError.value = 'Temporary fixture failure'
+    const tree = flat(h.render())
+    assert.ok(tree.some(node => node.props?.class === 'plant-grid'))
+    assert.ok(tree.some(node => node.props?.role === 'alert'))
+    assert.equal(h.state.activeFamily.value, 'family a')
+  } finally { h.stop() }
 })

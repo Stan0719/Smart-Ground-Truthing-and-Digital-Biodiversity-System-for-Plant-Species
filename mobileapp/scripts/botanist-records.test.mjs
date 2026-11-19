@@ -1,3 +1,4 @@
+import * as submissionSearch from '../utils/submissionSearch.js';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,6 +13,7 @@ function moduleFrom(file, deps) {
   new Function("require", "module", "exports", code)((name) => {
     if (name === "../components/BackButton") return { default: (props) => React.createElement("TouchableOpacity", props, props.label || props.accessibilityLabel), __esModule: true };
     if (name === "../components/BotanicalSkeleton") return { CardListSkeleton: "CardListSkeleton", DetailSkeletonContent: "DetailSkeletonContent", __esModule: true };
+    if (name === "../utils/submissionSearch") return { ...moduleFrom("utils/submissionSearch.js", {}), __esModule: true };
     assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" };
   }, module, module.exports);
   return module.exports;
@@ -90,6 +92,7 @@ test("Original Plant withdrawal eligibility and history filter use the live owne
 
 function submissionsUtils(translate = (key) => key) {
   return moduleFrom("screens/BotanistDashboard.js", {
+    "../utils/submissionSearch": submissionSearch,
     react: React,
     "../components/LanguageSelector": { default: "LanguageSelector" },
     "../components/fieldFormStyles": { fieldFormStyles: { submitButton: {}, submitButtonText: {} } },
@@ -470,6 +473,7 @@ test("My Submissions renders the resolved label while keeping the Original revie
   const native = { StyleSheet: { create: (value) => value }, useWindowDimensions: () => ({ width: 390 }), Alert: { alert() {} } };
   for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "FlatList", "ScrollView", "Image", "ActivityIndicator", "RefreshControl"]) native[name] = name;
   const screen = moduleFrom("screens/BotanistDashboard.js", {
+    "../utils/submissionSearch": submissionSearch,
     react: { ...React, useCallback: (callback) => callback, useEffect() {}, useRef: (initial) => ({ current: initial }),
       useState: (initial) => { const i = stateIndex++; return [slots[i] ?? initial, () => {}]; } },
     "react-native": native, "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
@@ -1131,7 +1135,7 @@ test("actual plant detail loads the existing owned ID from API and displays its 
     "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
     "../utils/botanistRecords": { canWithdrawOriginalPlant: fixture().canWithdrawOriginalPlant, fetchBotanistPlant: async (...args) => { requested = args; if (plantLoadFails) throw Error("plant detail network failure"); return record; }, fetchBotanistRecordChangeStatus: async () => {
       if (availabilityError) throw Error("offline");
-      return { available: true, pending: pendingChange, latest: pendingChange };
+      return { available: true, pending: ["Pending Review", "Correction Required"].includes(pendingChange?.status) ? pendingChange : null, latest: pendingChange };
     } },
     "../utils/plantApi": { getPlantRegisteredByDisplayName: (plant, user, fallback) => plant.registeredBy === `staff:${user?.id}` ? user?.name || fallback : fallback, plantApi: async (path) => { if (path.endsWith("/withdrawal")) return { eligible: originalEditable, editable: originalEditable, observation_id: "observation-8" }; if (path.endsWith("/withdraw")) { withdrawalCalls++; return { withdrawn: true }; } historyCalls++; return path.startsWith("/record-versions?") ? { history_available: true, versions: [{ id: "v2", version_number: 2, status: "Pending Review", created_at: "2026-11-04T00:00:00Z", edited_by: "staff:owner", previous_snapshot: { scientific_name: "Old name" }, snapshot: { scientific_name: "New name" } }], prior_changes: [] } : { version: {} }; } },
     "@expo/vector-icons/Ionicons": { default: "Ionicons" },
@@ -1197,7 +1201,18 @@ test("actual plant detail loads the existing owned ID from API and displays its 
   assert.equal(unavailableAction.props.disabled, true);
   assert.equal(unavailableAction.props.labelKey, "recordEdits.editUnavailable");
   assert.ok(text(pendingTree).includes("An edit is already awaiting review."));
+  assert.ok(find((node) => node?.type === "View" && text(node).includes("Please wait") && node.props?.style?.backgroundColor === "#FFF7E8", pendingTree));
   pendingCleanup();
+  for (const [status, expectedColor] of [["Approved", "#E8F3ED"], ["Correction Required", "#FFF7E8"], ["Rejected", "#FEF2F1"]]) {
+    pendingChange = { id: `change-${status}`, status, review_comment: `Officer note for ${status}` };
+    render(); const feedbackCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+    const feedbackTree = render();
+    const feedbackPanel = find((node) => node?.type === "View" && text(node).includes(`Officer note for ${status}`) &&
+      (Array.isArray(node.props?.style) ? node.props.style : [node.props?.style]).some((style) => style?.backgroundColor === expectedColor), feedbackTree);
+    assert.ok(feedbackPanel, `${status} feedback has its own status color`);
+    assert.ok(text(feedbackPanel).includes("Officer feedback"));
+    feedbackCleanup();
+  }
   pendingChange = null; availabilityError = true;
   render(); const failedCheckCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
   const failedCheckTree = render();
@@ -1384,6 +1399,13 @@ test("Correction Requests include creator-owned observations on another plant an
   assert.equal(tasks.find((task) => task.id === "proposal-1").plantId, "1");
   assert.equal(tasks.find((task) => task.proposalId === "plant-change").feedback, "Plant feedback");
   assert.equal(tasks.find((task) => task.proposalId === "species-change").requestId, "21");
+  const matches = submissionsUtils().correctionTaskMatchesCategory;
+  assert.equal(tasks.filter((task) => matches(task, "all")).length, 6);
+  assert.deepEqual(new Set(tasks.filter((task) => matches(task, "plants")).map((task) => task.kind)), new Set(["plant", "plantEdit"]));
+  assert.deepEqual(new Set(tasks.filter((task) => matches(task, "species")).map((task) => task.kind)), new Set(["species", "speciesEdit"]));
+  assert.deepEqual(new Set(tasks.filter((task) => matches(task, "observations")).map((task) => task.kind)), new Set(["observation", "observationEdit"]));
+  assert.equal(matches(tasks.find((task) => task.id === "12"), "plants"), true, "initial registration correction remains a Plant correction");
+  assert.equal(matches(tasks.find((task) => task.id === "12"), "observations"), false);
 });
 
 for (const language of ["en", "ms", "zh"]) {
@@ -1400,6 +1422,7 @@ for (const language of ["en", "ms", "zh"]) {
     const native = { StyleSheet: { create: (v) => v }, Alert: { alert: (...args) => alerts.push(args) }, useWindowDimensions: () => ({ width: viewportWidth, height: 844 }) };
     for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "FlatList", "ScrollView", "Image", "ActivityIndicator", "RefreshControl"]) native[name] = name;
     const screen = moduleFrom("screens/BotanistDashboard.js", {
+    "../utils/submissionSearch": submissionSearch,
       react: { ...React, useCallback: (callback) => callback, useEffect: () => {}, useRef: (initial) => ({ current: initial }), useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = initial; return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }]; } }, "react-native": native,
       "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
       "@react-navigation/native": { useFocusEffect: () => {} },
@@ -1482,9 +1505,16 @@ for (const language of ["en", "ms", "zh"]) {
     assert.equal(correctionCard?.props.style.backgroundColor, "#FFFFFF");
     assert.ok(correctionCard?.props.style.borderWidth, "correction card keeps the shared white-card border");
     assert.ok(!text(tree).includes("common.goBack"), "Correction Requests has no redundant in-page back control");
-    assert.equal(find((node) => node?.props?.testID === "correction-filter-all", tree), undefined, "Correction Requests has no All filter");
+    assert.ok(find((node) => node?.props?.testID === "correction-filter-all", tree), "Correction Requests defaults to All");
     assert.equal(find((node) => node?.props?.testID === "correction-filter-correctionRequired", tree), undefined, "Correction Requests has no Correction Required filter");
     assert.ok(text(tree).includes(t("botanistDashboard.matchingCorrectionRequests", { count: 1 })), "the count reflects the matching correction requests");
+    find((node) => node?.props?.testID === "correction-filter-species", tree).props.onPress();
+    index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
+    assert.ok(text(tree).includes(t("botanistDashboard.matchingCorrectionRequests", { count: 0 })));
+    assert.ok(text(tree).includes(t("botanistDashboard.noMatchingCorrectionRequests")));
+    find((node) => node?.props?.testID === "correction-filter-observations", tree).props.onPress();
+    index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
+    assert.ok(find((node) => node?.props?.testID === "correction-task-observation:observation-8", tree));
     const correctionSearch = find((node) => node?.type === "TextInput", tree);
     correctionSearch.props.onChangeText("does not match");
     index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
@@ -1492,6 +1522,7 @@ for (const language of ["en", "ms", "zh"]) {
     assert.ok(text(tree).includes(t("botanistDashboard.noMatchingCorrectionRequests")), "search still filters correction requests");
     correctionSearch.props.onChangeText("");
     index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
+    assert.equal(find((node) => node?.props?.testID === "correction-filter-observations", tree).props.accessibilityState.selected, true, "clearing search retains the category");
     assert.ok(text(tree).includes("Please add leaf details."));
     const edit = find((node) => node?.type === "TouchableOpacity" && text(node).includes(t("fieldCollection.correctObservation")), tree); assert.ok(edit); await edit.props.onPress(); assert.equal(navigations.at(-1)[0], "FieldCollectionEdit");
     projected.plants[0].status = "Pending Review";
@@ -1581,6 +1612,14 @@ test("read-only request detail renders actual fields, review metadata and authen
   const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
   function find(predicate, node = tree) { if (predicate(node)) return node; for (const child of children(node)) { const result = find(predicate, child); if (result) return result; } }
   for (const value of ["Different species name", "Common species name", "Actual genus", "Actual family", "Endangered", "Actual description", "Actual habitat", "Pending Review", "Actual reviewer comment"]) assert.ok(text(tree).includes(value), value);
+  assert.ok(text(tree).includes("submissions.speciesRecord"));
+  assert.ok(text(tree).includes("submissions.speciesInformationSubtitle"));
+  assert.ok(text(tree).includes("submissions.speciesPhotoSubtitle"));
+  assert.ok(!text(tree).includes("recordEdits.versionHistory"), "Edit History belongs to the expanded submission card");
+  const summary = find((node) => node?.props?.testID === "species-request-record-meta", tree);
+  assert.ok(text(summary).includes("submissions.requestId") && text(summary).includes("Pending Review"));
+  assert.ok(find((node) => node?.type === "Text" && node.props?.children === 1, summary));
+  assert.equal(find((node) => node?.type === "Image", tree).props.source.headers.Authorization, "Bearer fixture");
   assert.deepEqual(requested, ["owner", "1"]); assert.ok(!text(tree).includes("Delete"));
   const withdrawButton = find((node) => node?.props?.testID === "withdraw-original-species", tree);
   assert.ok(withdrawButton, "eligible owner sees Withdraw Submission");
@@ -1606,6 +1645,8 @@ test("read-only request detail renders actual fields, review metadata and authen
   record.request_status = "Approved";
   render(); const approvedCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
   const approvedTree = render();
+  assert.ok(find((node) => node?.type === "View" && text(node).includes("Actual reviewer comment") &&
+    (Array.isArray(node.props?.style) ? node.props.style : [node.props?.style]).some((style) => style?.backgroundColor === "#E8F3ED"), approvedTree));
   assert.equal(find((node) => node?.type === "EditAction" && node.props.testID === "edit-own-species", approvedTree).props.disabled, false);
   assert.equal(find((node) => node?.props?.testID === "withdraw-original-species", approvedTree), undefined,
     "approved Species cannot be withdrawn");
@@ -1616,6 +1657,15 @@ test("read-only request detail renders actual fields, review metadata and authen
   assert.equal(find((node) => node?.type === "EditAction" && node.props.testID === "edit-own-species", pendingTree).props.disabled, true);
   assert.ok(text(pendingTree).includes("recordEdits.pendingEditExplanation"));
   pendingCleanup();
+  for (const [status, color] of [["Correction Required", "#FFF7E8"], ["Rejected", "#FEF2F1"]]) {
+    record.request_status = status;
+    pendingChange = null;
+    render(); const statusCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+    const statusTree = render();
+    assert.ok(find((node) => node?.type === "View" && text(node).includes("Actual reviewer comment") &&
+      (Array.isArray(node.props?.style) ? node.props.style : [node.props?.style]).some((style) => style?.backgroundColor === color), statusTree));
+    statusCleanup();
+  }
 });
 
 test("historical species request versions use the existing read-only request detail layout without fetching current data", async () => {

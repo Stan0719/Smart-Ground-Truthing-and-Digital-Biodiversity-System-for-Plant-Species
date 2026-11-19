@@ -99,3 +99,18 @@ test("new report HTTP routes enforce existing Officer-only authorization before 
   }
   assert.equal(calls,0);
 });
+
+test('threat report adds canonical identity and stored values in one read without changing legacy rows or period filters', async t => {
+  const pool = await createPlantDatabase(); t.after(() => pool.end());
+  await pool.query("INSERT INTO iot_device(id,name,device_type,key_hash) VALUES('sensor-authentic','Fixture sensor','Sensor','synthetic-key'),('camera-authentic','Fixture camera','Camera','synthetic-key')");
+  const fixtures = [['temperature',-5],['humidity',0],['soilMoisture',0],['movement',1],['rainfall',0],['sound',321.75],['possible_plant_contact',1],['legacy_code',2]];
+  for (const [i,[metric,value]] of fixtures.entries()) await pool.query("INSERT INTO threat_alert_history(id,device_id,camera_id,metric,value,status,created_at) VALUES($1,'sensor-authentic',$2,$3,$4,$5,'2026-11-04T04:00:00Z')",['canonical-'+i,metric==='possible_plant_contact'?'camera-authentic':null,metric,value,i%2?'Resolved':'New']);
+  await pool.query("INSERT INTO threat_alert_history(id,device_id,metric,value,created_at) VALUES('nonfinite','sensor-authentic','temperature','Infinity'::float8,'2026-11-04T04:00:00Z')");
+  const queries=[]; const report=await generate({query:async(sql,args)=>{queries.push({sql,args});return pool.query(sql,args)}},'threats',{period:'custom',start:'2026-11-04',end:'2026-11-04'});
+  assert.equal(queries.length,1);assert.ok(queries[0].sql.includes('a.value'));assert.ok(!queries[0].sql.includes('sensor_reading'));assert.deepEqual(queries[0].args,['2026-11-03T16:00:00.000Z','2026-11-04T16:00:00.000Z']);
+  assert.equal(report.threatDetailsVersion,1);assert.equal(report.alertDetails.length,9);assert.equal(report.rows.length,9);assert.equal(report.statistics[0].value,9);
+  const byId=new Map(report.alertDetails.map(row=>[row.id,row]));
+  assert.equal(byId.get('canonical-0').triggerValue,-5);assert.equal(byId.get('canonical-1').triggerValue,0);assert.equal(byId.get('canonical-6').cameraId,'camera-authentic');assert.equal(byId.get('canonical-0').deviceId,'sensor-authentic');assert.equal(byId.get('nonfinite').triggerValue,null);
+  for(const [index,detail]of report.alertDetails.entries()){assert.equal(detail.metric,report.rows[index][0]);assert.equal(detail.status,report.rows[index][2]);assert.equal(detail.createdAt,report.rows[index][5]);assert.equal(report.rows[index].length,6);assert.ok(!('threshold'in detail));assert.ok(!('exceeded'in detail))}
+  assert.deepEqual((await generate(pool,'threats',{period:'custom',start:'2027-01-01',end:'2027-01-01'})).alertDetails,[]);
+})

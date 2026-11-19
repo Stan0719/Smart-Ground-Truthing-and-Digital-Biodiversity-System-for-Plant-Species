@@ -6,6 +6,8 @@ import { createLocalization, createDisplayTranslator, createFieldValueTranslator
 import { A4_PRINT_OPTIONS, buildQRPrintHtml } from "../utils/qrPrint.js";
 import { validateSpeciesRequest, validatePlantDetails, validatePlantGps } from "../utils/addPlantValidation.js";
 import { normalizeSpeciesName } from "../utils/speciesNameNormalization.js";
+import { submissionGroupMatchesSearch } from "../utils/submissionSearch.js";
+import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation.js";
 
 const require = createRequire(import.meta.url);
 const parser = require("@babel/parser");
@@ -187,10 +189,10 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
     "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" }, "../utils/faceSession": { faceSession: {} },
     "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails, validatePlantGps },
     "../utils/speciesNameNormalization": { normalizeSpeciesName },
-    "../utils/submissionSearch": { submissionGroupMatchesSearch: () => true },
     "../components/SpeciesDictionary": { default: "SpeciesDictionary" },
+    "../utils/submissionSearch": { submissionGroupMatchesSearch },
+    "../utils/gpsLocation": { validGpsPoint, readGpsLocation },
     "../components/GpsLocationPicker": { default: "GpsLocationPicker" },
-    "../utils/gpsLocation": { validGpsPoint: () => false, readGpsLocation: async () => null },
     "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }), refresh: async () => { network.push(["inventory-refresh"]); return true; }, addGenerated: () => 1, retire: (id) => network.push(["inventory-retire", id]) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
     "../utils/qrPrint": { A4_PRINT_OPTIONS, buildQRPrintHtml }, "../data/mockData": { botanistPlantRecords: [] },
     "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ items: notificationItems, loading: false, loaded: true, error: "", unreadCount: notificationItems.filter((item) => !item.read).length, refresh: async () => {} }) },

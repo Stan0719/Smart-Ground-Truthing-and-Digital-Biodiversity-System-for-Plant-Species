@@ -35,6 +35,7 @@ export interface SubmittedGpsEvidence {
 }
 
 export interface PlantContract {
+  scientificName?: string
   id: string
   displayId: string
   speciesId: string
@@ -141,6 +142,7 @@ export const mapPlantContract = (value: unknown): PlantContract | null => {
   return {
     id,
     displayId: formatPlantId(id) || id,
+    scientificName: text(item.scientific_name),
     speciesId,
     status: text(item.rbac_status),
     registeredSubject: text(item.registered_subject),

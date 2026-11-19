@@ -209,14 +209,14 @@ test('network failures are distinguished by the real report API helper', async (
   } finally { globalThis.fetch = originalFetch }
 })
 
-test('category selector exposes all four implemented reports with explicit filter actions', async () => {
+test('category selector exposes four reports with only the Environmental IoT option and explicit filter actions', async () => {
   const h = harness(async () => Response.json(reportFixture()))
   try {
     await h.state.loadReport()
     const tree = nodes(h.render())
     const category = tree.find(n => n.type === 'select' && n.props.id === 'report-category')
     assert.ok(category)
-    assert.deepEqual(nodes(category).filter(n => n.type === 'option').map(n => n.props.value), ['species-approved', 'observations', 'threats', 'iot'])
+    assert.deepEqual(nodes(category).filter(n => n.type === 'option').map(n => n.props.value), ['species-approved', 'observations', 'threats', 'iot-summary'])
     assert.ok(!tree.some(n => n.props?.type === 'radio'))
     assert.ok(tree.some(n => n.type === 'label' && n.props.for === 'report-category'))
     assert.ok(tree.some(n => n.type === 'button' && n.props.type === 'submit' && n.children === 'Apply'))
@@ -235,15 +235,21 @@ test('new categories use their own report component and shared applied dates; re
   const h = harness(async () => Response.json(reportFixture()))
   try {
     await h.state.loadReport()
-    for (const category of ['observations','threats','iot']) {
+    for (const category of ['observations','threats','iot-summary']) {
       h.state.reportType.value = category; await vue.nextTick()
-      const child = nodes(h.render()).find(node => node.props?.category === category)
+      const child = nodes(h.render()).find(node => category === 'iot-summary' ? node.type?.name?.includes('IoTEnvironmentalReport') : category === 'threats' ? node.type?.name?.includes('ThreatIncidentReport') : node.props?.category === category)
       assert.ok(child)
       assert.ok(!nodes(h.render()).some(node => node.props?.class === 'report-preview'))
       h.state.pendingPeriod.value = 'custom'; h.state.pendingStart.value = '2026-11-01'; h.state.pendingEnd.value = '2026-11-05'
       await h.state.applyFilters()
       assert.equal(h.state.operationalFilters.value.period, 'custom')
       assert.equal(h.state.operationalFilters.value.start, '2026-11-01')
+      const appliedChild = nodes(h.render()).find(node => category === 'threats' && node.type?.name?.includes('ThreatIncidentReport'))
+      if (category === 'threats') {
+        assert.equal(appliedChild.props.filters.start, '2026-11-01')
+        assert.equal(appliedChild.props.filters.end, '2026-11-05')
+        assert.ok(!nodes(h.render()).some(node => node.props?.category === 'threats'))
+      }
     }
     const before = h.calls.length
     await h.state.resetFilters(); await new Promise(resolve => setImmediate(resolve))
@@ -306,7 +312,7 @@ test('period inputs stay pending; apply, refresh and reset use the right snapsho
     h.state.pendingPeriod.value = 'custom'
     h.state.pendingStart.value = '2026-11-01'; h.state.pendingEnd.value = '2026-11-03'
     assert.equal(h.calls.length, 1)
-    assert.match(h.state.appliedScope.value, /All time/)
+    assert.match(h.state.appliedPeriodLabel.value, /All time/)
     await h.state.applyFilters()
     assert.equal(h.calls.at(-1).url, '/api/data/reports?period=custom&start=2026-11-01&end=2026-11-03')
     h.state.pendingPeriod.value = 'last-month'
@@ -398,10 +404,10 @@ test('applied period labels come from response metadata and zero-count periods r
   try {
     h.state.pendingPeriod.value='custom';h.state.pendingStart.value='2026-11-01';h.state.pendingEnd.value='2026-11-03'
     await h.state.applyFilters()
-    assert.match(h.state.appliedScope.value,/2026-11-01 to 2026-11-03/)
+    assert.deepEqual([h.state.report.value.scope.startDate,h.state.report.value.scope.endDate],['2026-11-01','2026-11-03'])
     assert.equal(h.state.totalSpecies.value,1);assert.equal(h.state.totalApprovedPlants.value,0)
     assert.ok(nodes(h.render()).some(n=>n.children===messages.conservationPages.reports.noPlantsInPeriod))
-    h.state.pendingStart.value='2026-11-02';assert.match(h.state.appliedScope.value,/2026-11-01/)
+    h.state.pendingStart.value='2026-11-02';assert.equal(h.state.report.value.scope.startDate,'2026-11-01')
     fail=true;await h.state.loadReport();assert.equal(h.state.report.value,null)
     assert.match(h.state.loadError.value,/Reporting unavailable/)
     h.state.exportCsv();await h.state.exportPdf();assert.equal(h.pdfs.length,0)
@@ -409,13 +415,22 @@ test('applied period labels come from response metadata and zero-count periods r
 })
 
 
-test('chart stays capped at twelve matching species and form submit supports keyboard apply', async () => {
+test('chart supports default top twelve, hides zero counts, and form submit supports keyboard apply', async () => {
   const rows=Array.from({length:15},(_,i)=>({species_id:i+1,scientific_name:'Species '+String(i).padStart(2,'0'),common_name:'',approved_plants:i}))
   const h=harness(async()=>Response.json(reportFixture({rows})))
   try {
     await h.state.loadReport()
     assert.equal(h.state.chartRows.value.length,12)
     assert.equal(h.state.chartRows.value[0].approvedPlants,14)
+    assert.ok(h.state.chartRows.value.every(row => row.approvedPlants > 0))
+    h.state.chartLimit.value='5'
+    assert.equal(h.state.chartRows.value.length,5)
+    h.state.chartSort.value='low-high'
+    assert.equal(h.state.chartRows.value[0].approvedPlants,1)
+    h.state.chartLimit.value='all'
+    h.state.includeZeroCounts.value=true
+    assert.equal(h.state.chartRows.value.length,15)
+    assert.equal(h.state.chartRows.value[0].approvedPlants,0)
     h.state.search.value='Species 0'
     assert.equal(h.state.filteredRows.value.length,10);assert.equal(h.state.chartRows.value.length,10)
     assert.equal(h.state.totalApprovedPlants.value,45)
@@ -447,7 +462,7 @@ test('page shows one localized applied-period label without technical labels; ex
     const tree=nodes(h.render())
     assert.ok(tree.some(n=>n.props?.class==='applied-scope' && n.children===h.state.appliedPeriodLabel.value))
     assert.ok(!tree.some(n=>n.props?.class==='section-kicker'))
-    assert.match(h.state.appliedScope.value,/Asia\/Kuala_Lumpur/)
+    assert.equal(h.state.report.value.scope.timezone,'Asia/Kuala_Lumpur')
     for(const language of ['en','ms','zh-CN']) {
       const translations=JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`,import.meta.url),'utf8')).conservationPages.reports
       assert.ok(translations.appliedPeriod.includes('{period}'))

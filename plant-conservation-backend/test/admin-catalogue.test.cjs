@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const { createPlantDatabase } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
+const { seedRegistrationReceipt } = require("./registration-provenance-fixture.cjs");
 const { permitted, grants, visibilityFor } = require("../../shared/rbac.cjs");
 
 test("Administrator catalogue reads match Officer records/projections and retain independent write gates", async (t) => {
@@ -110,6 +111,7 @@ test("Administrator catalogue reads match Officer records/projections and retain
       ["species-photo-" + id, id, Buffer.from("isolated photo")],
     );
   }
+  for (const id of [1,2,3,4,5]) await seedRegistrationReceipt(pool, "observation-" + id);
   await pool.query(`INSERT INTO plant_record(plant_id,species_id,registered_subject,rbac_status,qr_token) VALUES(6,3,'staff:bot','Pending Review','pending');
     INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES('pending',6,'staff:bot','Pending Review','{}','pending');
     INSERT INTO plant_asset(id,plant_id,owner_subject,client_key,observation_id,content_type,content) VALUES('pending-photo',6,'staff:bot','pending-photo','pending','image/jpeg','private');`);

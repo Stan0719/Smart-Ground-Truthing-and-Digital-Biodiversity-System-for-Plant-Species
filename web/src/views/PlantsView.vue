@@ -6,7 +6,9 @@ import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 import { plants as prototypePlants, type Plant } from '../data/plants'
-import {refreshKnowledge,knowledgeError} from '../services/knowledge'
+import type { AuthUser } from '../services/auth'
+import { useCatalogueRefresh } from '../composables/useCatalogueRefresh'
+import {refreshKnowledge,knowledgeError,catalogueLimited} from '../services/knowledge'
 
 const species = ref<Plant[]>([])
 const isLoading = ref(true)
@@ -30,7 +32,7 @@ const sortOption = ref<'default' | 'name-asc' | 'name-desc' | 'scientific-asc'>(
 const sortMenuOpen = ref(false)
 const sortMenu = ref<HTMLElement | null>(null)
 const route = useRoute()
-const { t, te } = useI18n()
+const { t } = useI18n()
 // Keep the translated title intact, including Chinese word order.
 const heroTitleParts = computed(() => t('species.heroTitle').split(/(Niah|尼亚)/u))
 const { isLoggedIn, userRole } = usePrototypeSession()
@@ -46,46 +48,34 @@ const clearFilters = () => {
   activeFamily.value = ''
 }
 
-interface ApiSpecies {
-  species_id: string | number
-  scientific_name: string
-  common_name: string
-  genus_name?: string
-  family_name?: string
-  conservation_status?: string
-  description?: string
-}
-
-interface SpeciesResponse {
-  species: ApiSpecies[]
-}
-
-const loadSpecies = async () => {
-  isLoading.value = true
+const fetchSpecies = async (current: () => boolean, user: AuthUser | null) => {
+  isLoading.value = species.value.length === 0
   loadError.value = ''
-
   try {
-    await refreshKnowledge()
-    if(knowledgeError.value)throw Error(knowledgeError.value)
-    species.value=[...prototypePlants]
-
+    await refreshKnowledge(user)
+    if (!current()) return
+    if (knowledgeError.value) throw Error(knowledgeError.value)
+    // App-level and page-level refreshes share this authorized reactive catalogue.
+    // Keep the live collection so a newer refresh cannot leave a copied empty list.
+    species.value = prototypePlants
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
-  } finally {
-    isLoading.value = false
-  }
+    if (current()) { loadError.value = error instanceof Error ? error.message : t('catalogueDisplay.loadFailed') }
+  } finally { if (current()) isLoading.value = false }
 }
+const catalogue = useCatalogueRefresh(fetchSpecies,
+  () => { species.value = []; isLoading.value = false },
+  () => { loadError.value = t('catalogueDisplay.loadFailed') })
+const loadSpecies = () => catalogue.refresh()
 
 const canViewConservationStatus = computed(
   () =>
     isLoggedIn.value && (userRole.value === 'botanist' || userRole.value === 'conservation-officer' || userRole.value === 'admin'),
 )
 
-const translatedOr = (key: string, fallback: string) => (te(key) ? t(key) : fallback)
-const displayName = (item: Plant) => translatedOr(`plantNames.${item.slug}`, item.name)
+const displayName = (item: Plant) => item.name
 const displayScientificName = (item: Plant) =>
-  translatedOr(`scientificNames.${item.slug}`, item.scientificName)
-const displayFamily = (item: Plant) => translatedOr(`familyNames.${item.slug}`, item.family || '')
+  item.scientificName
+const displayFamily = (item: Plant) => item.family || ''
 
 const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
   if (
@@ -100,7 +90,6 @@ const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
 onMounted(() => {
   document.addEventListener('click', closeSortMenu)
   document.addEventListener('keydown', closeSortMenu)
-  void loadSpecies()
 })
 
 onBeforeUnmount(() => {
@@ -172,9 +161,10 @@ const filteredSpecies = computed(() => {
             <p class="section-label">{{ t('species.libraryEyebrow') }}</p>
             <h2 id="plant-library-title">{{ t('species.libraryTitle') }}</h2>
           </div>
-          <p>{{ t('species.found', { count: filteredSpecies.length }) }}</p>
+          <p v-if="!isLoading && !loadError">{{ t('species.found', { count: filteredSpecies.length }) }}</p>
         </div>
 
+        <p v-if="catalogueLimited" class="catalogue-notice" role="status">{{ t('catalogueDisplay.speciesLimited') }}</p>
         <div class="filter-bar">
           <div class="filter-controls">
             <label class="search-box">
@@ -271,7 +261,7 @@ const filteredSpecies = computed(() => {
           <button type="button" @click="loadSpecies">Try again</button>
         </p>
 
-        <div v-else-if="filteredSpecies.length" class="plant-grid">
+        <div v-if="!isLoading && filteredSpecies.length" class="plant-grid">
           <article v-for="item in filteredSpecies" :key="item.slug" class="plant-card">
             <div class="plant-image-wrapper">
               <img
@@ -330,7 +320,7 @@ const filteredSpecies = computed(() => {
           </article>
         </div>
 
-        <div v-else class="empty-state">
+        <div v-else-if="!isLoading && !loadError" class="empty-state">
           <span aria-hidden="true">ðŸŒ¿</span>
           <h3>{{ t('species.notFound') }}</h3>
           <p>{{ t('species.noMatch') }}</p>

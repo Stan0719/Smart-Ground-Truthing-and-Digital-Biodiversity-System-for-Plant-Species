@@ -7,10 +7,10 @@ import NavigationBar from '../components/NavigationBar.vue'
 import PlantPhotoGallery from '../components/PlantPhotoGallery.vue'
 import { createPlantGallery, groupGallery } from '../services/plantGallery'
 import PlantObservationHistory from '../components/PlantObservationHistory.vue'
+import PlantRegistrationRecord from '../components/PlantRegistrationRecord.vue'
 import { createPlantHistory } from '../services/plantHistory'
 import { readPlantDetail, canReadPlantDetail, type PlantDetail } from '../services/plantDetail'
 import { formatPlantId } from '../utils/plantId'
-import { formatPlantDateTime } from '../utils/plantDateTime'
 import { conservationBadgeStyle } from '../utils/conservationBadge'
 import { useConservationText } from '../composables/useConservationText'
 import { rawPlantIdFromRoute } from '../services/plantIntegration'
@@ -30,7 +30,6 @@ const backTarget = computed(() => {
     (canReadStaff.value && staffSources.includes(String(resolved.name))) ? resolved.fullPath : '/species'
 })
 const { ct } = useConservationText()
-const dateTime = (value: unknown) => formatPlantDateTime(value, ct('Unavailable'))
 const { t } = useI18n()
 const plant = ref<PlantDetail | null>(null)
 const isLoading = ref(true)
@@ -61,12 +60,21 @@ function loadHistory(append = false) {
   if (!plant.value || !canReadStaff.value || sessionSnapshot().pending) return
   void history.load(plant.value.information.plant_id, append)
 }
+function retryHistory() {
+  if (!plant.value || !canReadStaff.value || sessionSnapshot().pending) return
+  void history.retry(plant.value.information.plant_id)
+}
 function clearRecord() {
   gallery.reset(); publicGallery.reset(); history.reset()
   loadRequest++
   plant.value = null
 }
 const unsubscribe = subscribeSession((verifiedUser, pending) => {
+  if (pending && sessionSnapshot().unavailable && verifiedUser && identity(user.value) === identity(verifiedUser) && canReadPlantDetail(verifiedUser)) {
+    sessionRequest++; loadRequest++; refreshWork = null; history.pause()
+    refreshError.value = ct('Verify your session to view this plant.')
+    return
+  }
   if (pending) {
     sessionRequest++; refreshWork = null; clearRecord(); user.value = null
     return
@@ -125,11 +133,7 @@ onBeforeUnmount(() => {
 })
 
 const display = (value: string | null | undefined) => value || ct('Unavailable')
-const location = computed(() => plant.value?.staff?.approved_location || null)
-const latestObservation = computed(() => plant.value?.staff?.latest_observation || null)
-const latestApprovedObservation = computed(() => plant.value?.staff?.latest_approved_observation || null)
 const habitat = computed(() => canReadStaff.value ? plant.value?.staff?.habitat : isGuest.value ? plant.value?.information.habitat : null)
-const accuracy = (value: number | null | undefined) => value == null ? ct('Unavailable') : `${value} m`
 const badgeKey = (value: string | null | undefined) => (value || '').toLowerCase().replace(/[^a-z]/g, '')
 
 async function loadPlant(background = false) {
@@ -149,8 +153,15 @@ async function loadPlant(background = false) {
   try {
     const detail = await readPlantDetail(rawId, canReadPlantDetail(user.value))
     if (disposed || requestId !== loadRequest) return
+    const historyScopeChanged = plant.value?.staff?.status !== detail.staff?.status || Boolean(plant.value?.staff) !== Boolean(detail.staff)
+    if (background && historyScopeChanged) history.reset()
     if (JSON.stringify(plant.value) !== JSON.stringify(detail)) plant.value = detail
     if (background) {
+      if (canReadStaff.value) {
+        if (historyScopeChanged) await history.load(rawId)
+        else await history.refresh(rawId)
+      }
+      if (disposed || requestId !== loadRequest) return
       if (canReadStaff.value || isGuest.value) await visibleGallery.value.refresh(rawId, canReadStaff.value)
       if (disposed || requestId !== loadRequest) return
       if (visibleGallery.value.state.denied) {
@@ -228,55 +239,10 @@ watch(() => route.params.plantId, () => { sessionRequest++; refreshWork = null; 
       </div>
     </section>
     <section v-if="canReadStaff && plant.staff" class="content-section"><div class="container">
-      <aside class="staff-panel">
-        <h2>{{ ct('Plant record') }}</h2>
-        <dl class="registration-grid">
-          <div><dt>{{ ct('Registered at') }}</dt><dd>{{ dateTime(plant.staff.registered_at) }}</dd></div>
-        </dl>
-        <section class="approved-location"><h3><svg class="taxonomy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg><span>{{ ct('Approved Plant Location') }}</span></h3><dl v-if="location" class="location-grid">
-          <div><dt>{{ ct('Latitude') }}</dt><dd>{{ location.latitude ?? ct('Unavailable') }}</dd></div>
-          <div><dt>{{ ct('Longitude') }}</dt><dd>{{ location.longitude ?? ct('Unavailable') }}</dd></div>
-          <div><dt>{{ ct('GPS Accuracy') }}</dt><dd>{{ accuracy(location.accuracy_m) }}</dd></div>
-          <div><dt>{{ ct('Altitude') }}</dt><dd>{{ location.altitude_m == null ? ct('Unavailable') : `${location.altitude_m} m` }}</dd></div>
-          <div><dt>{{ ct('Zone') }}</dt><dd>{{ display(location.zone) }}</dd></div>
-        </dl><p v-else class="availability-note">{{ ct('No approved plant location is available.') }}</p></section>
-      </aside>
-    </div></section>
-    <section v-if="canReadStaff && plant.staff" class="latest-section"><div class="container">
-      <article class="observation-summary-panel">
-        <h2>{{ ct('Latest approved observation') }}</h2>
-        <template v-if="latestApprovedObservation">
-          <p class="observation-date-line">{{ dateTime(latestApprovedObservation.created_at) }}</p>
-          <dl class="observation-summary">
-            <div><dt>{{ ct('Height') }}</dt><dd>{{ latestApprovedObservation.content.heightCm == null ? ct('Unavailable') : `${latestApprovedObservation.content.heightCm} cm` }}</dd></div>
-            <div><dt>{{ ct('Health status') }}</dt><dd>{{ display(latestApprovedObservation.content.healthStatus) }}</dd></div>
-            <div><dt>{{ ct('Life stage') }}</dt><dd>{{ display(latestApprovedObservation.content.lifeStage) }}</dd></div>
-            <div class="wide"><dt>{{ ct('Morphology') }}</dt><dd>{{ display(latestApprovedObservation.content.morphology) }}</dd></div>
-            <div class="wide"><dt>{{ ct('Notes') }}</dt><dd>{{ display(latestApprovedObservation.content.notes) }}</dd></div>
-          </dl>
-          <dl v-if="Object.keys(latestApprovedObservation.content.taxonomy).length" class="taxonomy-list">
-            <div v-for="(value, key) in latestApprovedObservation.content.taxonomy" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
-          </dl>
-        </template>
-        <p v-else class="availability-note">{{ ct('The plant has no latest approved observation content.') }}</p>
-        <section class="submitted-gps"><h3>{{ ct('Submitted GPS Evidence') }}</h3>
-          <p>{{ ct('From the latest linked observation. Submitted evidence is separate from the approved plant location.') }}</p>
-          <template v-if="latestObservation">
-            <p class="observation-date-line">{{ ct(latestObservation.status) }} · {{ dateTime(latestObservation.created_at) }}</p>
-            <dl class="observation-summary gps-summary">
-              <div><dt>{{ ct('Latitude') }}</dt><dd>{{ latestObservation.content.latitude ?? ct('Unavailable') }}</dd></div>
-              <div><dt>{{ ct('Longitude') }}</dt><dd>{{ latestObservation.content.longitude ?? ct('Unavailable') }}</dd></div>
-              <div><dt>{{ ct('GPS Accuracy') }}</dt><dd>{{ accuracy(latestObservation.content.accuracy_m) }}</dd></div>
-              <div><dt>{{ ct('Altitude') }}</dt><dd>{{ latestObservation.content.altitude_m == null ? ct('Unavailable') : `${latestObservation.content.altitude_m} m` }}</dd></div>
-              <div><dt>{{ ct('Zone') }}</dt><dd>{{ display(latestObservation.content.zone) }}</dd></div>
-            </dl>
-          </template>
-          <p v-else class="availability-note">{{ ct('No linked observation GPS evidence is available.') }}</p>
-        </section>
-      </article>
+      <PlantRegistrationRecord :authorized="canReadStaff" :staff="plant.staff" :plant-id="plant.information.plant_id" :observations="history.state.observations" :complete="history.state.complete" :loading="history.state.loading" :error="history.state.error" :has-more="history.state.hasMore" :verified-complete="history.state.verifiedComplete" />
     </div></section>
     <section v-if="canReadStaff" class="history-section"><div class="container">
-      <PlantObservationHistory :key="history.state.epoch" :observations="history.state.observations" :loading="history.state.loading" :error="history.state.error" :complete="history.state.complete" :has-more="history.state.hasMore" @retry="loadHistory()" @more="loadHistory(true)" />
+      <PlantObservationHistory :key="history.state.epoch" :observations="history.state.observations" :loading="history.state.loading" :error="history.state.error" :complete="history.state.complete" :has-more="history.state.hasMore" :refreshing="history.state.refreshing" :retained="history.state.hasSnapshot" @retry="retryHistory()" @more="loadHistory(true)" />
     </div></section>
   </main>
 </template>

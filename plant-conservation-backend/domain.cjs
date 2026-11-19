@@ -1,5 +1,5 @@
-﻿"use strict";
-const { observationHistory, captureApprovedReview } = require("./historical-reviews.cjs");
+"use strict";
+const { observationHistory, captureApprovedReview, submittedHistoryForReview } = require("./historical-reviews.cjs");
 const { resolvePlantRegistrations, registrationLocation } = require("./plant-registration.cjs");
 const { finalRejection } = require("./final-rejection.cjs");
 const { withSubmissionUpdates } = require("./submission-updates.cjs");
@@ -289,6 +289,29 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
   qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
   const qrPlantRecord = qrPlantRecordRelation(qrPlantSchema);
   const qrPlantAssociation = "qr.plant_id=p.plant_id AND qr.qr_code=p.qr_token";
+  const withQrGeneratorNames = async (rows) => {
+    const names = new Map();
+    for (const row of rows) {
+      const owner = row.generator_subject;
+      if (!owner?.startsWith("staff:") || !auth.db?.prepare) {
+        row.generated_by_name = null;
+        delete row.generator_subject;
+        continue;
+      }
+      if (!names.has(owner)) {
+        let name = null;
+        try {
+          const account = await auth.db.prepare("SELECT id,name,role FROM users WHERE id=?").get(owner.slice(6));
+          if (account?.role === "Botanist" && typeof account.name === "string" && account.name.trim())
+            name = account.name.trim();
+        } catch { /* Missing account directory leaves the creator unavailable. */ }
+        names.set(owner, name);
+      }
+      row.generated_by_name = names.get(owner);
+      delete row.generator_subject;
+    }
+    return rows;
+  };
   app.get('/api/admin/overview', allow('devices.manage'), async (req, res) => {
     if (req.user?.role !== 'Administrator') fail(403, 'Administrator access required.');
     const result = await pool.query(`SELECT
@@ -298,21 +321,28 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
   });
 
   app.get("/api/qr-codes", allow("plants.create"), async (_req, res) => {
+    const requestedQrId = _req.query?.qr_id == null ? null : id(String(_req.query.qr_id));
     const qrCodes = (
       await pool.query(
-        `SELECT q.qr_id,q.plant_id,q.qr_code,q.status,
+        `SELECT q.qr_id,q.plant_id,q.qr_code,q.status,creator.generator_subject,
           CASE WHEN COALESCE(v.visibility,'protected') = ANY($1::text[]) THEN p.scientific_name END AS plant_name,
           q.generated_at,q.assigned_at,q.activated_at,q.retired_at
           FROM plant_app.qr_code q LEFT JOIN ${qrPlantRecord} p ON p.plant_id=q.plant_id
           LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
-          WHERE q.status='retired' OR q.qr_id IN (
+          LEFT JOIN (
+            SELECT generated.generated_id,CASE WHEN count(*)=1 THEN min(a.actor_subject) END AS generator_subject
+            FROM business_audit a CROSS JOIN LATERAL unnest(string_to_array(a.target,',')) AS generated(generated_id)
+            WHERE a.action='qr_codes_generated'
+            GROUP BY generated.generated_id
+          ) creator ON q.status='generated' AND q.plant_id IS NULL AND creator.generated_id=q.qr_id::text
+          WHERE q.qr_id=$2 OR q.status='retired' OR q.qr_id IN (
              SELECT qr_id FROM plant_app.qr_code ORDER BY qr_id DESC LIMIT 500
           )
           ORDER BY q.qr_id DESC`,
-        [visibilityFor(_req.user)],
+        [visibilityFor(_req.user), requestedQrId],
       )
     ).rows;
-    res.json({ qr_codes: qrCodes });
+    res.json({ qr_codes: await withQrGeneratorNames(qrCodes) });
   });
   app.delete("/api/qr-codes/:id", allow("plants.create"), async (req, res) => {
     const qrId = id(String(req.params.id));
@@ -355,7 +385,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       await audit(c, req.user, "qr_codes_generated", created.map((row) => row.qr_id).join(","));
       return created;
     });
-    res.status(201).json({ qr_codes: qrCodes });
+    res.status(201).json({ qr_codes: await withQrGeneratorNames(qrCodes.map((row) => ({ ...row, generator_subject: subject(req.user) }))) });
   });
   mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, fail, text, id, assertNewSpecies, speciesRow, officerNotifications });
   app.get("/api/species", allow("plants.catalogue.read"), async (req, res) => {
@@ -919,7 +949,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       ...(legacyObservationEdit && typeof row.metadata?.comment === "string" ? { comment: row.metadata.comment } : {}),
       ...(row.metadata?.count != null ? { count: Number(row.metadata.count) } : {}),
       ...(typeof row.metadata?.draftKey === "string" ? { draftKey: row.metadata.draftKey } : {}),
-      ...(row.type === "record_change_correction" && row.metadata?.entityType === "record_change" &&
+      ...(["record_change_correction", "record_change_approved", "record_change_rejected"].includes(row.type) && row.metadata?.entityType === "record_change" &&
         ["plant", "species"].includes(row.metadata?.recordKind) && typeof row.metadata?.changeId === "string" && typeof row.metadata?.targetId === "string"
         ? { entityType: "record_change", changeId: row.metadata.changeId, recordKind: row.metadata.recordKind,
           targetId: row.metadata.targetId, ...(Number.isInteger(row.metadata.revision) ? { revision: row.metadata.revision } : {}) } : {}),
@@ -1344,13 +1374,15 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
               ],
             );
         }
-        let reviewedVersionId = null;
-        if ((await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available) {
-          const reviewedVersion = await c.query(`UPDATE record_version_history SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
-            WHERE id=(SELECT id FROM record_version_history WHERE plant_id=$4 AND status='Pending Review'
-              AND snapshot->>'observation_id'=$5 ORDER BY version_number DESC LIMIT 1) RETURNING id`,
-            [req.body.decision, subject(req.user), req.body.comment || "Verified.", row.plant_id, row.id]);
-          reviewedVersionId = reviewedVersion.rows[0]?.id ?? null;
+        const reviewedVersionId = await submittedHistoryForReview(c, {
+          kind: "plant", targetId: row.plant_id, submissionId: row.id, status: row.status,
+        });
+        if (reviewedVersionId) {
+          const transitioned = await c.query(`UPDATE record_version_history
+            SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
+            WHERE id=$4 AND status=$5`,
+          [req.body.decision, subject(req.user), req.body.comment || "Verified.", reviewedVersionId, row.status]);
+          if (transitioned.rowCount !== 1) fail(409, "The submitted history version changed before review.");
         }
         if (req.body.decision === "Approved") await captureApprovedReview(c, {
           kind: "plant", submissionId: row.id, reviewId: review.id, reviewer: subject(req.user), versionId: reviewedVersionId,
@@ -1372,7 +1404,8 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     ).rows[0];
     if (!row) fail(404, "QR code not found.");
     if (row.plant_id == null || row.status === "generated" || row.status === "retired")
-      return res.json({ assigned: false });
+      return res.json({ assigned: false, status: row.status,
+        ...(row.status === "generated" && row.plant_id == null && req.user?.role === "Botanist" ? { qr_id: row.qr_id } : {}) });
     if (row.status !== "active") fail(404, "Plant information is not available.");
     if (row.rbac_status !== "Approved") fail(404, "Plant information is not available.");
     const species = await speciesRow(pool, row.species_id, req.user);

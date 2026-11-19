@@ -91,9 +91,9 @@ async function fixture(language = "en", initial = {}, api) {
   const app = createLocalization({ resources: { en: { translation: en }, ms: { translation: ms }, zh: { translation: zh } }, storage: { getItem: async () => null, setItem: async () => {} } });
   await app.changeLanguage(language);
   const display = createDisplayTranslator(app.i18n, en), t = (key, values) => app.i18n.t(key, values);
-  const state = { speciesCatalog: [species], loadingSpeciesCatalog: false, recoveryResolved: true, ...initial }, refs = [], alerts = [], network = [], speciesReads = [], effects = [], navigationCalls = [], savedDrafts = [];
+  const state = { speciesCatalog: [species], loadingSpeciesCatalog: false, recoveryResolved: true, ...initial }, refs = [], alerts = [], network = [], qrChecks = [], speciesReads = [], effects = [], navigationCalls = [], savedDrafts = [];
   let stateIndex, refIndex, tree, focusEffect;
-  const hooks = { ...React, useId: () => "workflow-form", useEffect: () => {}, useCallback: (fn) => fn, useState: (value) => {
+  const hooks = { ...React, useId: () => "workflow-form", useCallback: (fn) => fn, useState: (value) => {
     const [key, setterName] = stateNames[stateIndex++];
     if (!(key in state)) state[key] = typeof value === "function" ? value() : value;
     const setter = (next) => { state[key] = typeof next === "function" ? next(state[key]) : next; };
@@ -114,10 +114,15 @@ async function fixture(language = "en", initial = {}, api) {
         if (sample instanceof Error) throw sample; return { coords: sample }; } }, "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => ({ status: "granted" }), launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: proposal.photoUri }] }) },
     "expo-file-system/legacy": { EncodingType: { Base64: "base64" }, readAsStringAsync: async () => "cGhvdG8=" },
     "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" }, "../components/QRRefreshButton": { default: "QRRefreshButton" }, "../components/RefreshButton": { default: "RefreshButton" }, "../components/GpsLocationPicker": { default: "GpsLocationPicker" }, "../utils/gpsLocation": { validGpsPoint, readGpsLocation },
+    "../components/SpeciesDictionary": { default: "SpeciesDictionary" },
     "../components/fieldFormStyles": { fieldFormStyles: native.StyleSheet.create({ ...Object.fromEntries(["container", "scrollView", "scrollContent", "card", "sectionTitle", "label", "input", "textArea", "locationButton", "locationButtonText", "photoButtonRow", "photoButton", "photoButtonText", "submitButton", "submitButtonText"].map((key) => [key, {}])), qrRefreshButton: { minHeight: 48 }, qrRefreshText: {} }) },
     "../utils/plantApi": { fetchSpeciesCatalog: async (options) => { speciesReads.push(options); return initial.catalogSpecies || [species]; },
       fetchSpeciesDetail: async () => initial.speciesDetail || species, plantApi: async (...args) => {
-      network.push(args); if (api) return api(...args);
+      if (String(args[0]).startsWith("/qr-codes?qr_id=")) { qrChecks.push(args); return { qr_codes: state.selectedQRCode ? [{
+        ...state.selectedQRCode, status: "generated", plant_id: null,
+      }] : [] }; }
+      network.push(args);
+      if (api) return api(...args);
       if (String(args[0]).startsWith("/species-requests?scope=mine-active")) return { species_requests: initial.speciesRequests || [] };
       if (args[0] === "/species-requests") return { species_request: { request_id: 12, request_status: "Pending Review" } };
       if (args[0] === "/plant-submissions") return { plant_id: 42, id: "observation-42", qr_token: "unchanged-qr-token" };
@@ -137,8 +142,8 @@ async function fixture(language = "en", initial = {}, api) {
     const node = find((n) => n?.type === "TextInput" && n.props.onChangeText?.name === setter); assert.ok(node, setter); node.props.onChangeText(value); render();
   }
   const byLabel = (key) => find((n) => n?.props?.accessibilityLabel === t(key) || (n?.type === "RefreshButton" && n.props.label === t(key)));
-  render(); return { state, alerts, network, speciesReads, navigationCalls, savedDrafts, render, find, text: () => text(tree), textOf: text, t, press, fill, byLabel,
-    startDuplicateCheck() { const check = effects[0]; assert.equal(typeof check, "function"); return check(); },
+  render(); return { state, alerts, network, qrChecks, speciesReads, navigationCalls, savedDrafts, render, find, text: () => text(tree), textOf: text, t, press, fill, byLabel,
+    startDuplicateCheck() { const check = effects.find((effect) => effect.toString().includes("normalizeSpeciesName")); assert.equal(typeof check, "function"); return check(); },
     async checkDuplicate() { this.startDuplicateCheck(); await new Promise((resolve) => setTimeout(resolve, 525)); render(); },
     async focus() { focusEffect(); await new Promise((resolve) => setImmediate(resolve)); render(); } };
 }
@@ -182,7 +187,7 @@ test("plant mapping preserves the entered plant name and never substitutes the s
   assert.equal(records[1].scientificName, "");
 });
 
-const plantValues = { selectedQRCode: { qr_id: 17 }, guidedPhotos: { wholePlant: "whole.jpg", leafCloseUp: "leaf.jpg", stemBark: "stem.jpg", flowerFruit: null } };
+const plantValues = { selectedQRCode: { qr_id: 17, qr_code: "test-qr-17" }, guidedPhotos: { wholePlant: "whole.jpg", leafCloseUp: "leaf.jpg", stemBark: "stem.jpg", flowerFruit: null } };
 function fillPlant(app) {
   for (const [setter, value] of [["setPlantScientificName", "Manual plant name"], ["setHeight", "80"], ["setGrowthStage", "Juvenile"], ["setMorphology", "Plant morphology"], ["setLatitude", "4.5"], ["setLongitude", "113.7"]]) app.fill(setter, value);
 }
@@ -483,6 +488,8 @@ for (const language of ["en", "ms"]) {
     assert.equal(app.alerts.at(-1)[1], app.t("addPlantWorkflow.plantScientificNameRequired"));
     assert.equal(app.network.length, 0);
     fillPlant(app); await app.press("addPlantWorkflow.addPlantRecord");
+    assert.equal(app.qrChecks.length, 1);
+    assert.equal(app.qrChecks[0][0], "/qr-codes?qr_id=17");
     assert.equal(app.network.length, 1);
     const [path, { body }] = app.network[0];
     assert.equal(path, "/plant-submissions"); assert.equal(body.species_id, 7); assert.equal(body.new_species, undefined);

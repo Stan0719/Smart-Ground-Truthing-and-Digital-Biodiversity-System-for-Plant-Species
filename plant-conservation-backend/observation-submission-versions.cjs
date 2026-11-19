@@ -123,8 +123,10 @@ async function insertVersion(c, { observationId, ownerSubject, submissionType,
         !(await c.query("SELECT $1::jsonb=$2::jsonb AS matches",
           [JSON.stringify(request.proposed_content), JSON.stringify(content)])).rows[0].matches)
       throw error("Edit snapshot must match the exact active request revision.");
-    const retained = Array.isArray(request.retained_photo_ids) ? request.retained_photo_ids : [];
-    const additions = Array.isArray(request.added_photos) ? request.added_photos : [];
+    if (!Array.isArray(request.retained_photo_ids) || !Array.isArray(request.added_photos))
+      throw error("Observation edit photo evidence is invalid. Contact support for an evidence-preserving assessment.");
+    const retained = request.retained_photo_ids;
+    const additions = request.added_photos;
     const staged = additions.length ? (await c.query(`SELECT id FROM plant_asset
       WHERE observation_id=$1 AND plant_id=$2 AND owner_subject=$3
         AND client_key LIKE $4 ORDER BY client_key`,

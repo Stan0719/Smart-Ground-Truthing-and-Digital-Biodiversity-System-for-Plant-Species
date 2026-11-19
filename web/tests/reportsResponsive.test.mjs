@@ -71,7 +71,8 @@ test('both chart canvases stay inside their parent with content-width mobile hei
     const container = values(find(filename, selector))
     assert.equal(container['min-width'], '0'); assert.equal(container.width, '100%'); assert.equal(container['max-width'], '100%')
     assert.equal(values(find(filename, selector + ' canvas'))['max-width'], '100%')
-    assert.ok(rules.some(rule => rule.parent.name === 'container' && rule.parent.params === '(max-width: 520px)' && values(rule).height === '260px'))
+    if (filename === 'OperationalReportChart.vue') assert.ok(rules.some(rule => rule.parent.name === 'container' && rule.parent.params === '(max-width: 520px)' && values(rule).height === '260px'))
+    else assert.match(source, /labels\.length \* 38/)
     assert.match(source, /responsive: true/); assert.match(source, /maintainAspectRatio: false/); assert.match(source, /role="img"/)
   }
   assert.match(files['OperationalReportChart.vue'].source, /reportSeries\(c.labels, series.values\)/)

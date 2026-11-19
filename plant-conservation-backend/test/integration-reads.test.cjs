@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { once } = require("node:events");
 const { createPlantDatabase } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
+const { seedRegistrationReceipt } = require("./registration-provenance-fixture.cjs");
 
 test("detail visibility, observation ownership, latest readings and bounded device history", async (t) => {
   const pool = await createPlantDatabase();
@@ -71,6 +72,8 @@ test("detail visibility, observation ownership, latest readings and bounded devi
            ('plant-photo-pdf',1,'3','staff:bot','pdf-photo',TRUE,'application/pdf',$1)`,
     [imageBytes],
   );
+  for (const id of ['3','5','6']) await seedRegistrationReceipt(pool, id);
+  await pool.query("UPDATE plant_asset SET approved=TRUE WHERE id='approved-plant-photo'");
   const device = "11111111-1111-4111-8111-111111111111";
   const empty = "22222222-2222-4222-8222-222222222222";
   const missing = "33333333-3333-4333-8333-333333333333";
@@ -123,7 +126,7 @@ test("detail visibility, observation ownership, latest readings and bounded devi
   assert.deepEqual(adminPlant.data, officerPlant.data);
   assert.equal(botanistPlant.data.plant.latitude, 11);
   assert.equal(botanistPlant.data.plant.longitude, 22);
-  assert.equal(botanistPlant.data.plant.accuracy_m, 8);
+  assert.equal(botanistPlant.data.plant.accuracy_m, 3, 'registration content takes precedence over unrelated location rows');
   assert.equal(botanistPlant.data.plant.altitude_m, 28.5);
   assert.equal(botanistPlant.data.plant.zone, "Zone A");
   assert.equal(botanistPlant.data.plant.plant_image_asset_id, "approved-plant-photo");
@@ -151,7 +154,7 @@ test("detail visibility, observation ownership, latest readings and bounded devi
     assert.equal(visitorPlant.data.plant[field], undefined);
   assert.equal(officerPlant.data.plant.latitude, 11);
   assert.equal(officerPlant.data.plant.longitude, 22);
-  assert.equal(officerPlant.data.plant.accuracy_m, 8);
+  assert.equal(officerPlant.data.plant.accuracy_m, 3);
   assert.equal(officerPlant.data.plant.latest_approved.latitude, 11);
   assert.equal(officerPlant.data.plant.latest_approved.longitude, 22);
   const noApprovedGps = await call("/plants/4", "officer");

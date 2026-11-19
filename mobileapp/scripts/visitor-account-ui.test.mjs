@@ -51,3 +51,37 @@ test("Visitor Account uses a centered layout, profile-contained logout, and comp
     assert.ok(catalogue.account.logOut);
   }
 });
+
+test("Login Visitor account popup keeps its open/close controls and localized benefits", () => {
+  const login = read("../screens/Login.js");
+  assert.match(login, /onPress=\{\(\) => setShowAccountBenefits\(true\)\}/);
+  assert.match(login, /onRequestClose=\{\(\) => setShowAccountBenefits\(false\)\}/);
+  assert.match(login, /accessibilityLabel=\{t\("login\.close"\)\} onPress=\{\(\) => setShowAccountBenefits\(false\)\}/);
+  assert.match(login, /style=\{styles\.accountBenefitsLink\}>\{t\("login\.whyRegisterOrLogIn"\)\}/);
+  assert.match(login, /style=\{styles\.modalTitle\}>\{t\("login\.exploreAsGuest"\)\}/);
+  assert.equal((login.match(/onPress=\{\(\) => setShowAccountBenefits\(true\)\}/g) || []).length, 2);
+  assert.match(login, /onPress=\{handleGuest\}/);
+  const handler = login.slice(login.indexOf("  function handleGuest()"), login.indexOf("  if (pendingPasswordSession)"));
+  assert.match(handler, /setShowAccountBenefits\(false\)/);
+  assert.match(handler, /navigation\.replace\("MainTabs"\)/);
+  assert.doesNotMatch(handler, /setShowAccountBenefits\(true\)/);
+  assert.match(login, /t\("login\.loginOrRegister"\)/);
+  assert.match(login, /t\("login\.visitorBenefitsHeading"\)/);
+  assert.match(login, /t\("login\.visitorCompactBenefit"\)/);
+  assert.doesNotMatch(login, /\["heart-outline", "visitorSaveBenefit"\]/);
+  for (const language of ["en", "ms", "zh"]) {
+    const strings = JSON.parse(read(`../translations/${language}.json`)).login;
+    for (const key of ["exploreAsGuest", "guestExploreDescription", "visitorBenefitsHeading", "visitorCompactBenefit", "loginOrRegister"]) assert.ok(strings[key]);
+  }
+  assert.match(login, /ScrollView style=\{styles\.benefitsScrollView\}/);
+  const expected = {
+    en: ["Why Create a Visitor Account?", "Without a Visitor Account", "With a Visitor Account", "Browse plants, explore species, and scan QR codes as a Guest.", "Browse plants, explore species, and scan QR codes.", "Save your favourite plants and species for easy access later.", "View your QR scan history to revisit previously scanned plants.", "Plant and Observation submissions are available only to authorized Botanists."],
+    ms: ["Mengapa Perlu Mendaftar Akaun Pelawat?", "Tanpa Akaun Pelawat", "Dengan Akaun Pelawat", "Layari tumbuhan, terokai spesies dan imbas kod QR sebagai tetamu.", "Layari tumbuhan, terokai spesies dan imbas kod QR.", "Simpan tumbuhan dan spesies kegemaran anda untuk diakses dengan mudah kemudian.", "Lihat sejarah imbasan kod QR anda untuk melawat semula tumbuhan yang pernah diimbas.", "Penghantaran rekod tumbuhan dan pemerhatian hanya tersedia kepada Ahli Botani yang diberi kebenaran."],
+    zh: ["为什么要注册访客账户？", "没有访客账户", "拥有访客账户", "以访客身份浏览植物、探索物种并扫描二维码。", "浏览植物、探索物种并扫描二维码。", "收藏喜爱的植物和物种，方便日后查看。", "查看二维码扫描历史，重新浏览之前扫描过的植物。", "只有获得授权的植物学家才能提交植物和观察记录。"],
+  };
+  for (const [language, values] of Object.entries(expected)) {
+    const strings = JSON.parse(read(`../translations/${language}.json`)).login;
+    assert.deepEqual([strings.whyRegisterOrLogIn, strings.withoutAccount, strings.withAccount, strings.guestCapabilities,
+      strings.visitorBenefitBrowse, strings.visitorBenefitFavourites, strings.visitorBenefitScanHistory, strings.botanistRestriction], values);
+  }
+});

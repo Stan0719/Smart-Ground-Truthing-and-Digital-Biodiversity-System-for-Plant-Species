@@ -131,3 +131,38 @@ test('a transition started by a session listener retains its own generation', as
   assert.equal(auth.sessionSnapshot().pending, false)
   assert.equal(auth.sessionSnapshot().user, null)
 })
+
+
+for (const failure of [403, 429, 500, 502, 503, 504, 'network', 'invalid-json', 'invalid-user']) {
+  test(`temporary verification ${failure} retains verified identity, blocks API work and recovers`, async () => {
+    let mode = 'success', calls = 0
+    const auth = harness(async () => {
+      calls++
+      if (mode === 'network') throw Error('offline')
+      if (mode === 'invalid-json') return new Response('invalid')
+      if (mode === 'invalid-user') return Response.json({ user: { id: user.id } })
+      return mode === 'success' ? Response.json({ user }) : Response.json({ error: 'fixture' }, { status: mode })
+    })
+    assert.equal((await auth.verifySession()).status, 'authenticated')
+    mode = failure
+    const result = await auth.verifySession()
+    assert.equal(result.status, 'unavailable'); assert.equal(auth.sessionVerificationCurrent(result), true)
+    assert.equal(auth.sessionSnapshot().user.id, user.id)
+    assert.equal(auth.sessionSnapshot().pending, true); assert.equal(auth.sessionSnapshot().unavailable, true)
+    const before = calls
+    await assert.rejects(auth.api('/admin/users', 'POST', {}), /temporarily unavailable/)
+    assert.equal(calls, before)
+    mode = 'success'
+    assert.equal((await auth.verifySession()).status, 'authenticated')
+    assert.equal(auth.sessionSnapshot().pending, false); assert.equal(auth.sessionSnapshot().unavailable, false)
+  })
+}
+
+test('unknown identity is never invented during unavailable verification; explicit 401 clears a known identity', async () => {
+  let mode = 503
+  const auth = harness(async () => mode === 200 ? Response.json({user}) : Response.json({error:'fixture'},{status:mode}))
+  assert.equal((await auth.verifySession()).status,'unavailable');assert.equal(auth.sessionSnapshot().user,null)
+  mode=200;await auth.verifySession();mode=401
+  assert.equal((await auth.verifySession()).status,'unauthenticated')
+  assert.equal(auth.sessionSnapshot().user,null);assert.equal(auth.sessionSnapshot().pending,false)
+})

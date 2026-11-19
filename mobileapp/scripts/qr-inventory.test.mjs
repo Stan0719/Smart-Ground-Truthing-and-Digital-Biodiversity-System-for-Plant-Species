@@ -13,6 +13,14 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 
+test("QR inventory retains the verified generator display name with an honest missing-name fallback", () => {
+  const records = normalizeQRCodes(payload(row(32, { generated_by_name: "A long Botanist name" }), row(31)));
+  assert.equal(records[0].generatedByName, "A long Botanist name");
+  assert.equal(records[1].generatedByName, "");
+  assert.equal(records[0].status, "generated");
+  assert.equal(records[0].plantId, null);
+});
+
 test("initial load distinguishes loading, valid empty inventory and failure", async () => {
   let fail = true;
   const changes = [];

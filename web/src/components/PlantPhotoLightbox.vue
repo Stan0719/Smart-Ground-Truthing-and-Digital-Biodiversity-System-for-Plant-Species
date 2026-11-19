@@ -83,7 +83,7 @@ defineExpose({ open, close, reconcile })
 
 <style scoped>
 .photo-lightbox { position: fixed; inset: 0; margin: 0; padding: 0; border: 0; border-radius: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; box-sizing: border-box; background: transparent; box-shadow: none; overflow: hidden; }
-.photo-lightbox::backdrop { background: rgb(8 24 17 / 85%); }
+.photo-lightbox::backdrop { background: rgb(0 0 0 / 85%); }
 .zoom-content { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .zoom-photo-frame { position: relative; flex: 0 0 auto; width: fit-content; line-height: 0; }
 .zoom-content img { display: block; max-width: calc(100vw - 128px); max-height: calc(100dvh - 128px); width: auto; height: auto; object-fit: contain; border-radius: 10px; }

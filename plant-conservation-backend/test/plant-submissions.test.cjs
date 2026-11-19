@@ -42,7 +42,7 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(before.status, 200);
     assert.equal(before.data.qr_codes.length, 4);
     assert.ok(before.data.qr_codes.every((code) => code.plant_id == null));
-    assert.deepEqual((await call("/qr/qr-1", "guest")).data, { assigned: false });
+    assert.deepEqual((await call("/qr/qr-1", "guest")).data, { assigned: false, status: "generated" });
     const r = await call("/plant-submissions", "bot", "POST", { ...plant, species_id: 1 });
     assert.equal(r.status, 201, JSON.stringify(r.data)); assert.equal(await count("species"), 1); assert.equal(await count("plant_record"), 1);
     assert.equal(r.data.qr_token, "qr-1"); assert.equal(r.data.species_request_id, null);

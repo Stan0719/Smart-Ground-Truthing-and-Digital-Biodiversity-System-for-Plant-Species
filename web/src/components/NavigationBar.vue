@@ -5,7 +5,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LoginModal from './LoginModal.vue'
 import LanguageSwitcher from './LanguageSwitcher.vue'
-import { currentUser, logout as serverLogout } from '../services/auth'
+import { verifySession, logout as serverLogout } from '../services/auth'
+
+import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,12 +16,7 @@ const navSearch = ref('')
 
 type UserRole = 'admin' | 'conservation-officer' | null
 
-const isLoggedIn = ref(false)
-
-// Display state; the backend enforces account status and permissions.
-const userRole = ref<UserRole>(null)
-
-const username = ref('')
+const { isLoggedIn, userRole, username, sessionPending, canUseProtectedSession } = usePrototypeSession()
 
 const navItems = computed(() => {
   const items = [
@@ -33,14 +30,14 @@ const navItems = computed(() => {
     },
   ]
 
-  if (isLoggedIn.value && userRole.value === 'admin') {
+  if (canUseProtectedSession.value && userRole.value === 'admin') {
     items.push({
       label: t('nav.admin'),
       to: '/admin',
     })
   }
 
-  if (isLoggedIn.value && userRole.value === 'conservation-officer') {
+  if (canUseProtectedSession.value && userRole.value === 'conservation-officer') {
     items.push({
       label: t('nav.officer'),
       to: '/conservation-dashboard',
@@ -116,12 +113,7 @@ const handleResize = () => {
 }
 
 onMounted(async () => {
-  const user = await currentUser()
-  if (user && !user.mustChangePassword && user.role !== 'Botanist') {
-    isLoggedIn.value = true
-    userRole.value = user.role === 'Administrator' ? 'admin' : 'conservation-officer'
-    username.value = user.name
-  }
+  void verifySession()
   updateNavThumb()
 
   window.addEventListener('resize', handleResize)
@@ -131,7 +123,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
 })
 
-watch([() => route.path, isLoggedIn, userRole], () => {
+watch([() => route.path, isLoggedIn, userRole, canUseProtectedSession], () => {
   updateNavThumb()
 })
 
@@ -183,9 +175,6 @@ const handleLogin = (user: {
   email?: string
   mustChangePassword?: boolean
 }) => {
-  username.value = user.username
-  userRole.value = user.role
-  isLoggedIn.value = true
   loginModalOpen.value = false
   router.push(
     user.role === 'admin' ? { name: 'admin-dashboard' } : { name: 'conservation-dashboard' },
@@ -208,12 +197,6 @@ const closeLogoutModal = () => {
 
 const logout = async () => {
   await serverLogout()
-
-  isLoggedIn.value = false
-
-  userRole.value = null
-
-  username.value = ''
 
   logoutModalOpen.value = false
 }
@@ -285,7 +268,7 @@ const logout = async () => {
         <!-- Logged Out -->
 
         <button
-          v-if="!isLoggedIn"
+          v-if="!isLoggedIn && !sessionPending"
           class="login-button"
           type="button"
           :aria-label="t('nav.login')"
@@ -310,7 +293,7 @@ const logout = async () => {
 
         <!-- Logged In -->
 
-        <button v-else class="logout-button" type="button" @click="openLogoutModal">
+        <button v-else-if="isLoggedIn" class="logout-button" type="button" @click="openLogoutModal">
           <span>
             {{ username }}
           </span>
@@ -453,7 +436,7 @@ const logout = async () => {
         <!-- Mobile Authentication: reuses the shared login/logout state. -->
 
         <button
-          v-if="!isLoggedIn"
+          v-if="!isLoggedIn && !sessionPending"
           class="mobile-login-button"
           type="button"
           @click="openLoginModal"
@@ -471,7 +454,7 @@ const logout = async () => {
 
           {{ t('nav.login') }}
         </button>
-        <div v-else class="mobile-authenticated">
+        <div v-else-if="isLoggedIn" class="mobile-authenticated">
           <div class="mobile-user">
             <svg
               class="login-icon"

@@ -1,4 +1,150 @@
 {
+  "threatReport": {
+    "helpLabel": "Tentang laporan ini",
+    "help": "Kiraan menunjukkan amaran tersimpan yang dicipta dalam tempoh dipilih. Status ialah status semasa, dan penapis digunakan pada seluruh laporan.",
+    "alertId": "ID Amaran",
+    "triggerReading": "Bacaan Pencetus",
+    "triggerUnit": "Unit Bacaan",
+    "deviceCamera": "Peranti / Kamera",
+    "deviceId": "ID Peranti",
+    "cameraId": "ID Kamera",
+    "notApplicable": "Tidak berkenaan",
+    "unavailableValue": "Tidak tersedia",
+    "raw": "mentah",
+    "binary": "binari 0/1",
+    "triggerLimit": "Bacaan pencetus ialah ukuran yang disimpan bersama amaran, bukan ambang sejarah. Ambang ketika pengesanan dan jumlah lebihan tidak tersedia. Suhu menggunakan °C, kelembapan %, pergerakan binari 0/1; kelembapan tanah, hujan dan bunyi menggunakan unit mentah.",
+    "projectionMissing": "Versi backend ini tidak membekalkan ID amaran kanonik, rujukan peranti dan bacaan pencetus. Kemas kini backend laporan untuk mengaktifkan medan ini.",
+    "title": "Laporan Ancaman / Insiden",
+    "total": "Jumlah Amaran",
+    "sensorCount": "Amaran Sensor",
+    "cameraCount": "Amaran Kamera",
+    "openCount": "Amaran Belum Selesai",
+    "resolvedCount": "Amaran Selesai",
+    "source": "Sumber Amaran",
+    "status": "Status Semakan",
+    "allSources": "Semua Sumber",
+    "allStatuses": "Semua Status",
+    "Sensor": "Sensor",
+    "Camera": "Kamera",
+    "Unknown": "Tidak Diketahui",
+    "New": "Baharu",
+    "Reviewing": "Dalam Semakan",
+    "Resolved": "Selesai",
+    "clear": "Kosongkan penapis laporan",
+    "refresh": "Segarkan laporan",
+    "retry": "Cuba lagi",
+    "loading": "Memuatkan laporan ancaman…",
+    "unavailable": "Laporan ancaman tidak dapat disahkan. Sila cuba lagi.",
+    "allTime": "Sepanjang masa",
+    "timezone": "Waktu Malaysia (UTC+08:00)",
+    "generated": "Laporan dijana",
+    "unknownNote": "Kod amaran yang tidak dikenali termasuk dalam Jumlah Amaran.",
+    "trend": "Trend Amaran Mengikut Masa",
+    "creationPeriod": "Tarikh / tempoh penciptaan",
+    "creationBasis": "Masa amaran dicipta",
+    "count": "Amaran",
+    "day": "Harian",
+    "week": "Mingguan",
+    "month": "Bulanan",
+    "chartAlternative": "Kiraan dan tarikh amaran yang tepat tersedia dalam jadual laporan dan CSV.",
+    "type": "Jenis Amaran / Metrik Pencetus",
+    "currentPlant": "Pokok (pautan peranti semasa)",
+    "currentSpecies": "Spesies (pautan peranti semasa)",
+    "createdAt": "Dicipta Pada",
+    "table": "Rekod amaran kanonik ditapis",
+    "empty": "Tiada amaran sepadan dengan tempoh dan penapis laporan.",
+    "interpretation": "Tafsiran laporan",
+    "limitations": "Kiraan ialah rekod amaran kanonik tersimpan, bukan insiden disahkan atau bacaan sensor unik. Status semakan ialah status semasa laporan dijana. Pengelasan Sensor/Kamera menggunakan kod amaran yang dikenali; kod lain kekal Tidak Diketahui. Pautan Pokok dan Spesies ialah penetapan peranti semasa, bukan kaitan yang disahkan ketika pengesanan. Tahap keterukan, ambang sejarah, identiti Pokok ketika pengesanan dan rakaman kamera dibenarkan tidak disahkan oleh laporan ini.",
+    "scaleLimit": "API semasa mengembalikan semua amaran dalam tempoh dipilih. Laporan Sepanjang masa yang besar mungkin perlahan; pilih tempoh lebih singkat jika perlu. Bar sifar bermaksud tiada rekod amaran sepadan, bukan ketersediaan sensor yang disahkan.",
+    "pdf": "Eksport PDF",
+    "csv": "Eksport CSV",
+    "downloaded": "Laporan dimuat turun.",
+    "exportFailed": "Laporan tidak dapat dieksport. Sila cuba lagi.",
+    "Temperature Threshold": "Ambang Suhu",
+    "Humidity Threshold": "Ambang Kelembapan",
+    "Soil Moisture Threshold": "Ambang Kelembapan Tanah",
+    "Movement Threshold": "Ambang Pergerakan",
+    "Rainfall Threshold": "Ambang Hujan",
+    "Sound Threshold": "Ambang Bunyi",
+    "Possible Plant Contact": "Kemungkinan Sentuhan Pokok",
+    "Human Detected": "Manusia Dikesan",
+    "Animal Detected": "Haiwan Dikesan",
+    "Suspicious Movement": "Pergerakan Mencurigakan"
+  },
+  "adminDeviceAssignment": {
+    "assignedPlantOptional": "Pokok Ditetapkan (pilihan)",
+    "searchPlants": "Cari ID atau nama pokok",
+    "noMatches": "Tiada pokok diluluskan yang sepadan dalam hasil dimuatkan.",
+
+    "currentPlant": "Pokok Ditetapkan Semasa",
+    "deviceType": "Jenis Peranti",
+    "Sensor": "Sensor",
+    "Camera": "Kamera",
+    "Unknown": "Tidak diketahui",
+    "notLinked": "Tidak dipautkan",
+    "unavailable": "Tidak tersedia",
+    "unassigned": "Tiada penetapan",
+    "keepCurrent": "Kekalkan penetapan semasa",
+    "currentOnly": "Ini ialah penetapan peranti semasa. Perubahan tidak menulis semula bukti amaran terdahulu.",
+    "loading": "Memuatkan pokok yang diluluskan…",
+    "capped": "Had katalog telah dicapai. Pilihan yang ditapis hanya meliputi kelompok yang dimuatkan. Gunakan ID pokok tepat untuk mencari pokok diluluskan di luar kelompok ini.",
+    "search": "Tapis pokok dimuatkan atau masukkan ID pokok",
+    "searchHint": "Nama dalam kelompok, PL001 atau 1",
+    "find": "Cari ID Pokok",
+    "finding": "Mencari…",
+    "loadFailed": "Pokok diluluskan tidak dapat dimuatkan. Pilihan anda dikekalkan.",
+    "findFailed": "Masukkan ID pokok yang sah bagi pokok diluluskan yang tersedia.",
+    "retry": "Cuba semula",
+    "cameraRules": "Pengesanan sentuhan kamera menggunakan peraturan pengesanan berasingan.",
+    "thresholdUnavailable": "Ambang sensor tidak tersedia untuk jenis peranti ini."
+  },
+  "catalogueDisplay": {
+    "approvedRegistration": "Pendaftaran diluluskan",
+    "speciesLimited": "Katalog mungkin tidak lengkap kerana had API telah dicapai (200 spesies atau 500 tumbuhan). Kiraan, carian dan penapis hanya meliputi rekod yang dimuatkan.",
+    "plantsLimited": "Hasil mungkin tidak lengkap kerana had API telah dicapai. Kiraan, carian dan penapis hanya meliputi rekod yang dimuatkan.",
+    "loadFailed": "Katalog tidak dapat disahkan. Sila cuba lagi."
+  },
+  "plantRecord": {
+    "refreshing": "Sedang menyegarkan sejarah pemerhatian\u2026",
+    "refreshFailed": "Sejarah tidak dapat disegarkan. Bukti yang dimuatkan sebelum ini masih dipaparkan dan belum disahkan semula. Sila cuba lagi.",
+    "title": "Rekod Tumbuhan",
+    "registration": "Pendaftaran",
+    "location": "Lokasi Pendaftaran",
+    "initial": "Pemerhatian Awal",
+    "approved": "Diluluskan",
+    "submitted": "Dihantar",
+    "unavailable": "Bukti pendaftaran yang disahkan tidak tersedia. Tiada pemerhatian lapangan kemudian digunakan sebagai ganti.",
+    "approvedNotice": "Maklumat pendaftaran semasa yang diluluskan.",
+    "pendingNotice": "Pendaftaran tumbuhan sedang menunggu kelulusan. Lokasi dan maklumat Pemerhatian awal di bawah dihantar oleh Ahli Botani dan belum disahkan oleh Pegawai Pemuliharaan.",
+    "correctionNotice": "Pembetulan telah diminta. Bukti di bawah ialah maklumat yang dihantar, bukan maklumat pendaftaran yang diluluskan.",
+    "rejectedNotice": "Pendaftaran ini ditolak. Bukti yang dihantar dikekalkan untuk rujukan.",
+    "withdrawnNotice": "Pendaftaran ini ditarik balik. Bukti yang dihantar dikekalkan untuk rujukan.",
+    "flaggedNotice": "Pendaftaran ini ditandai untuk tindakan susulan. Bukti yang dipaparkan belum disahkan sebagai pendaftaran diluluskan.",
+    "submittedNotice": "Bukti pendaftaran yang dihantar belum disahkan sebagai diluluskan.",
+    "locationUnavailable": "Lokasi pendaftaran tidak tersedia dalam bukti yang dibenarkan dan disahkan.",
+    "observationUnavailable": "Maklumat pendaftaran awal tidak tersedia dalam bukti yang disahkan. Muatkan halaman sejarah yang tinggal untuk menyemak bukti pendaftaran.",
+    "historyEmpty": "Belum ada pemerhatian susulan.",
+    "historyEmptyExplanation": "Pemerhatian lapangan baharu akan dipaparkan apabila tersedia dan dibenarkan untuk dilihat.",
+    "historyMore": "Belum ada pemerhatian susulan dimuatkan. Halaman sejarah lain masih tersedia.",
+    "unclassified": "Rekod Sejarah / Tidak Dikelaskan",
+    "unclassifiedExplanation": "Asal rekod ini belum disahkan dan dipaparkan berasingan daripada lawatan lapangan susulan.",
+    "historyScope": "Pemerhatian lapangan susulan yang tersedia dan bukti semakannya."
+  },
+  "finalOfficerWorkflow": {
+    "loadedQueue": "Kiraan dan halaman meliputi penyerahan layak yang dimuatkan. Keputusan Spesies mungkin tidak lengkap.",
+  "all": "Semua Penyerahan",
+  "original": "Pemerhatian Susulan",
+  "edit": "Permohonan Suntingan Pemerhatian Susulan",
+  "legacy": "Lihat bukti pendaftaran legasi / tidak dikelaskan",
+  "speciesCapped": "Permohonan Spesies mencapai had respons 500 rekod. Keputusan mungkin tidak lengkap.",
+  "speciesUnavailable": "Permohonan Spesies tidak dapat dimuatkan. Penyerahan lain masih tersedia.",
+  "loading": "Memuatkan...",
+  "retry": "Cuba lagi"
+},
+  "sessionVerification": {
+    "unavailable": "Pengesahan sesi tidak tersedia buat sementara waktu. Kerja anda dikekalkan. Sila cuba lagi.",
+    "retry": "Cuba Lagi"
+  },
   "approvedChanges": {
     "allTypes": "Semua Jenis",
     "searchPlaceholder": "ID penyerahan, ID tumbuhan, nama, pengirim, jenis atau zon",
@@ -10,23 +156,29 @@
     "historicalPhotosUnavailable": "Foto sejarah tidak tersedia.",
     "historicalSpeciesUnavailable": "Nilai medan sejarah tidak tersedia untuk permohonan spesies ini.",
     "reviewedBy": "Disemak Oleh",
+    "reviewedByColumn": "DISEMAK OLEH",
     "submissionId": "ID Penyerahan",
     "summary": "Ringkasan perubahan",
-  "targetType": "Jenis sasaran",
-  "changedFields": "Medan berubah",
-  "noChanges": "Tiada perubahan medan boleh sunting dikesan.",
-  "fieldComparison": "Perbandingan medan",
-  "changed": "Berubah",
-  "technicalDetails": "Butiran teknikal",
-  "masked": "Nilai operasi disembunyikan",
-  "photographs": "Foto",
-  "photoUnit": "foto",
-  "retainedPhotoCount": "foto dikekalkan",
-  "removedPhotoCount": "foto diminta dibuang",
-  "reviewDecision": "Keputusan semakan",
-  "emptyValue": "Rentetan kosong",
-  "nullValue": "Tiada nilai (null)",
-    "statuses": {"Pending Review": "Menunggu Semakan", "Approved": "Diluluskan", "Rejected": "Ditolak", "Cancelled": "Dibatalkan"},
+    "targetType": "Jenis sasaran",
+    "changedFields": "Medan berubah",
+    "noChanges": "Tiada perubahan medan boleh sunting dikesan.",
+    "fieldComparison": "Perbandingan medan",
+    "changed": "Berubah",
+    "technicalDetails": "Butiran teknikal",
+    "masked": "Nilai operasi disembunyikan",
+    "photographs": "Foto",
+    "photoUnit": "foto",
+    "retainedPhotoCount": "foto dikekalkan",
+    "removedPhotoCount": "foto diminta dibuang",
+    "reviewDecision": "Keputusan semakan",
+    "emptyValue": "Rentetan kosong",
+    "nullValue": "Tiada nilai (null)",
+    "statuses": {
+      "Pending Review": "Menunggu Semakan",
+      "Approved": "Diluluskan",
+      "Rejected": "Ditolak",
+      "Cancelled": "Dibatalkan"
+    },
     "plantEdit": "Suntingan Tumbuhan",
     "speciesEdit": "Suntingan Spesies",
     "speciesId": "ID Spesies",
@@ -36,7 +188,7 @@
     "copyProposal": "Salin ID cadangan",
     "copiedProposal": "ID cadangan disalin.",
     "reviewProposal": "Semak cadangan {id}",
-    "queueScope": "Baris ini merangkumi pendaftaran dan suntingan rekod diluluskan yang berasingan. Kiraan meliputi keseluruhan baris sebelum penapis jadual. Pembetulan Diperlukan dan Ditandai hanya terpakai kepada pendaftaran.",
+    "queueScope": "Baris ini merangkumi pendaftaran, Permohonan Spesies dan suntingan rekod diluluskan. Kiraan meliputi penyerahan layak yang dimuatkan sebelum penapis jadual.",
     "unifiedQueue": "Pendaftaran dan suntingan rekod diluluskan",
     "notificationSelection": "Memaparkan cadangan yang dipilih melalui pemberitahuan walaupun disembunyikan oleh penapis.",
     "proposal": "Cadangan",
@@ -87,7 +239,8 @@
       "genus_name": "Genus",
       "conservation_status": "Status pemuliharaan",
       "qr_id": "ID QR"
-    }
+    },
+    "previousReview": "Semakan Pegawai terdahulu (sebelum pembatalan)"
   },
   "submissionChanges": {
     "upToDate": "Penyerahan adalah terkini. Komen semakan anda dikekalkan.",
@@ -119,6 +272,9 @@
     }
   },
   "observationModal": {
+    "upToDate": "Pemerhatian adalah terkini. Komen semakan anda dikekalkan.",
+    "currentRecordNotice": "Butiran dan foto ini menunjukkan rekod pemerhatian semasa. Sejarah semakan menyenaraikan keputusan dan komen terdahulu, bukan petikan nilai medan atau foto terdahulu.",
+    "historyReadOnly": "Sejarah Pemerhatian menyenaraikan rekod berasingan untuk tumbuhan ini, bukan petikan sejarah pemerhatian yang dipilih. Paparan sejarah ini adalah baca sahaja.",
     "title": "Pemerhatian Tumbuhan",
     "details": "Butiran Pemerhatian",
     "plantSpecies": "Maklumat Tumbuhan & Spesies",
@@ -215,21 +371,33 @@
       "description": "Terokai tumbuhan, biodiversiti dan warisan semula jadi di salah sebuah taman negara paling menakjubkan di Sarawak.",
       "cta": "Terokai Tumbuhan"
     },
-    "about": { "eyebrow": "Tentang Niah", "title": "Taman Negara Niah" },
+    "about": {
+      "eyebrow": "Tentang Niah",
+      "title": "Taman Negara Niah"
+    },
     "explore": {
       "eyebrow": "Terokai Niah",
       "title": "Landskap yang Menakjubkan",
       "why": "Mengapa Niah?"
     },
-    "experience": { "eyebrow": "Alami Niah", "title": "Saksikan Perjalanan Ini Menjadi Nyata" },
-    "journey": { "eyebrow": "Perjalanan Anda", "title": "Pengembaraan Bermula Sebelum Gua" },
+    "experience": {
+      "eyebrow": "Alami Niah",
+      "title": "Saksikan Perjalanan Ini Menjadi Nyata"
+    },
+    "journey": {
+      "eyebrow": "Perjalanan Anda",
+      "title": "Pengembaraan Bermula Sebelum Gua"
+    },
     "flora": {
       "eyebrow": "Terokai Flora",
       "title": "Temui Flora Niah",
       "subtitle": "Kenali tumbuhan luar biasa yang membentuk hutan hujan Taman Negara Niah.",
       "more": "Terokai Lebih Banyak Spesies Tumbuhan"
     },
-    "prepare": { "eyebrow": "Sebelum Meneroka", "title": "Bersedia untuk Pengembaraan" }
+    "prepare": {
+      "eyebrow": "Sebelum Meneroka",
+      "title": "Bersedia untuk Pengembaraan"
+    }
   },
   "species": {
     "heroTitle": "Tumbuhan Niah",
@@ -266,7 +434,6 @@
       "photoCounter": "Foto {current} daripada {total}",
       "viewPhoto": "Lihat foto spesies {number}",
       "selectedPhoto": "Foto dipilih",
-
       "profileEyebrow": "Profil spesies",
       "enlargeImage": "Besarkan potret spesies",
       "imageUnavailable": "Imej spesies tidak tersedia",
@@ -282,7 +449,6 @@
       "loadingRecords": "Memuatkan tumbuhan yang didokumentasikan…",
       "loadedRecords": "Tiada rekod tumbuhan ditemui dalam hasil yang dimuatkan. | 1 rekod tumbuhan ditemui dalam hasil yang dimuatkan. | {count} rekod tumbuhan ditemui dalam hasil yang dimuatkan.",
       "noLoadedRecords": "Tiada rekod tumbuhan yang didokumentasikan dalam hasil yang dimuatkan.",
-
       "aboutEyebrow": "Tentang Spesies Ini",
       "about": "Tentang {name}",
       "referenceEyebrow": "Taksonomi & Fakta Ringkas",
@@ -479,7 +645,11 @@
         "Rizom bawah tanah yang beraroma",
         "Pertumbuhan berumpun padat"
       ],
-      "gallery": ["Kepala bunga", "Perincian bunga", "Struktur daun dan batang"]
+      "gallery": [
+        "Kepala bunga",
+        "Perincian bunga",
+        "Struktur daun dan batang"
+      ]
     },
     "tree-fern": {
       "overview": "Paku pakis pokok memberikan suasana purba kepada hutan hujan. Tidak seperti pokok berbunga, ia membiak melalui spora dan membentuk mahkota pelepah halus di bahagian atas batang yang tegak.",
@@ -519,7 +689,11 @@
         "Daun lebar dan berkilat",
         "Haruman bunga yang manis"
       ],
-      "gallery": ["Perincian bunga", "Bunga dan daun", "Tumbuhan berbunga matang"]
+      "gallery": [
+        "Perincian bunga",
+        "Bunga dan daun",
+        "Tumbuhan berbunga matang"
+      ]
     },
     "rattan-palm": {
       "overview": "Rotan ialah palma memanjat yang menggunakan struktur bercangkuk untuk menarik dirinya ke atas melalui tumbuhan di sekelilingnya. Batangnya yang panjang dan fleksibel boleh menjalar jauh di bawah kanopi.",
@@ -559,7 +733,11 @@
         "Kelompok bunga berwarna pucat",
         "Buah berisi seperti beri"
       ],
-      "gallery": ["Kelompok bunga", "Buah dan dedaun matang", "Kanopi matang yang berbunga"]
+      "gallery": [
+        "Kelompok bunga",
+        "Buah dan dedaun matang",
+        "Kanopi matang yang berbunga"
+      ]
     }
   },
   "speciesLabels": {
@@ -995,7 +1173,9 @@
     }
   },
   "adminModules": {
-    "common": { "needsAttention": "Memerlukan perhatian" },
+    "common": {
+      "needsAttention": "Memerlukan perhatian"
+    },
     "iot": {
       "eyebrow": "Pemantauan Langsung",
       "intro": "Pantau bacaan persekitaran langsung dan sambungan sensor di seluruh Niah.",
@@ -1204,7 +1384,11 @@
       "Botanist": "Ahli Botani",
       "Visitor": "Pelawat"
     },
-    "statuses": { "active": "Aktif", "inactive": "Tidak Aktif", "suspended": "Digantung" }
+    "statuses": {
+      "active": "Aktif",
+      "inactive": "Tidak Aktif",
+      "suspended": "Digantung"
+    }
   },
   "conservationText": {
     "available": "Tersedia",
@@ -1250,6 +1434,7 @@
     "sound": "Bunyi",
     "soundovertime": "Bunyi mengikut masa",
     "nosoundhistoryavailable": "Tiada sejarah bunyi tersedia.",
+
     "close": "Tutup",
     "alertiddevicereadingtypeorstatus": "ID amaran, peranti, bacaan, jenis atau status",
     "readingreference": "Rujukan Bacaan",
@@ -1260,6 +1445,7 @@
     "tryagain": "Cuba lagi",
     "retry": "Cuba semula",
     "saving": "Sedang menyimpan...",
+
     "inspectavailableevidenceandrecordyourinvestigationresponse": "Periksa bukti yang tersedia dan rekodkan respons siasatan anda.",
     "refreshing": "Sedang menyegarkan...",
     "refreshalerts": "Segarkan amaran",
@@ -1277,6 +1463,7 @@
     "threatalert": "Amaran Ancaman",
     "alertinformation": "Maklumat Amaran",
     "plantlocation": "Tumbuhan & Lokasi",
+    "noverifiedplantorlocationassociationwasprovidedforthisalert": "Tiada hubungan tumbuhan atau lokasi yang disahkan diberikan untuk amaran ini.",
     "detectiontimeistherecordedalerttimeandmayrepresentingestionnotsensorcapture": "Masa pengesanan ialah masa amaran direkodkan dan mungkin masa penerimaan, bukan tangkapan sensor.",
     "sensorevidence": "Bukti Sensor",
     "sensorreading": "Bacaan sensor",
@@ -1335,6 +1522,7 @@
     "responsesavedbutlatestdatacouldnotbeverifiedretryreloadbeforerespondingagain": "Respons disimpan, tetapi data terkini tidak dapat disahkan. Cuba muat semula sebelum memberikan respons lagi.",
     "thesaveoutcomeisuncertainretryreloadbeforerespondingagainyournoteispreserved": "Hasil simpanan tidak pasti. Cuba muat semula sebelum memberikan respons lagi; nota anda dikekalkan.",
 
+    "plantscientificname": "Nama saintifik tumbuhan",
     "back": "Kembali",
     "speciesrepresentativeimage": "Imej perwakilan spesies",
     "maintenance": "Penyelenggaraan",
@@ -1563,7 +1751,10 @@
     "dipterocarpaceae": "Dipterocarpaceae",
     "notassessed": "Belum Dinilai",
     "plantinformation": "Maklumat Tumbuhan",
-    "verifyyoursessiontoviewthisplant": "Sesi anda tidak dapat disahkan. Sila cuba lagi."
+    "verifyyoursessiontoviewthisplant": "Sesi anda tidak dapat disahkan. Sila cuba lagi.",
+    "withdrawn": "Ditarik Balik",
+    "cancelled": "Dibatalkan",
+    "superseded": "Digantikan"
   },
   "conservationPages": {
     "observations": {
@@ -1684,7 +1875,10 @@
         "habitat": "Habitat",
         "pitcher": "Kantung periuk kera",
         "bark": "Kulit kayu",
-        "fruit": "Buah"
+        "fruit": "Buah",
+        "withdrawn": "Ditarik Balik",
+        "cancelled": "Dibatalkan",
+        "superseded": "Digantikan"
       },
       "records": {
         "OBS001": {
@@ -1737,7 +1931,9 @@
         }
       }
     },
-    "common": { "allZones": "Semua zon" },
+    "common": {
+      "allZones": "Semua zon"
+    },
     "species": {
       "knowledgeBase": "Pangkalan Pengetahuan",
       "title": "Spesies Tumbuhan",
@@ -1904,6 +2100,91 @@
       }
     },
     "reports": {
+      "iotSummary": {
+        "title": "Laporan Pemantauan Alam Sekitar IoT",
+        "subtitle": "Data sensor alam sekitar daripada peranti IoT lapangan",
+        "device": "Peranti",
+        "metric": "Ukuran Sensor",
+        "validReadings": "Bacaan Sah",
+        "average": "Purata",
+        "minimum": "Minimum",
+        "maximum": "Maksimum",
+        "trend": "Trend",
+        "bucket": "Tempoh Tarikh / Masa",
+        "reportGenerated": "Laporan dijana",
+        "summarized_hour_one": "Bacaan diringkaskan mengikut jam",
+        "summarized_hour_many": "Bacaan diringkaskan setiap {count} jam",
+        "summarized_day_one": "Bacaan diringkaskan mengikut hari",
+        "summarized_day_many": "Bacaan diringkaskan setiap {count} hari",
+        "summarized_week_one": "Bacaan diringkaskan mengikut minggu",
+        "summarized_week_many": "Bacaan diringkaskan setiap {count} minggu",
+        "validMeasurements": "Ukuran Sah",
+        "missingMeasurements": "Ukuran Tidak Tersedia",
+        "tableTitle": "Ukuran sensor teragregat",
+        "qualityTitle": "Ringkasan Kualiti Data",
+        "technicalDetails": "Butiran Teknikal",
+        "validBadge": "{count} bacaan sah",
+        "missingBadge": "{count} nilai tidak tersedia",
+        "descriptionAllValid": "Semua bacaan diterima mengandungi nilai sah bagi {measurement}.",
+        "descriptionPartial": "Sebahagian bacaan diterima mempunyai nilai {measurement} yang hilang atau tidak sah; nilai selebihnya sah.",
+        "descriptionNoneValid": "Tiada bacaan diterima mengandungi nilai sah bagi {measurement}.",
+        "timestampLabel": "Cap masa",
+        "missingLabel": "Nilai tidak tersedia",
+        "availabilityLabel": "Ketersediaan",
+        "qualityAllValid": "Kesemua {received} bacaan yang diterima mengandungi nilai sah bagi {measurement}. Tiada nilai ukuran yang hilang dalam rekod diterima.",
+        "qualitySomeMissing": "Daripada {received} bacaan diterima, {valid} mengandungi nilai sah bagi {measurement} dan {missing} mempunyai nilai ukuran yang hilang atau tidak sah.",
+        "qualityNoneValid": "Tiada daripada {received} bacaan diterima mengandungi nilai sah bagi {measurement}. Kesemua {missing} nilai ukuran hilang atau tidak sah.",
+        "qualityNoRecords": "Tiada bacaan diterima bagi tempoh pelaporan yang dipilih.",
+        "qualitySpan": "Rekod diterima meliputi {start} hingga {end}.",
+        "qualityEssential": "Nilai hilang hanya merujuk kepada rekod yang diterima. Ketersediaan sensor belum disahkan.",
+        "receivedRows": "Baris bacaan diterima",
+        "absent": "Tiada atau null",
+        "invalid": "Nilai tidak sah",
+        "observedSpan": "Tempoh bacaan diperhatikan",
+        "aggregation": "Selang pengagregatan",
+        "timestampBasis": "Asas cap masa",
+        "receiptTime": "Masa penerimaan pangkalan data (waktu Malaysia)",
+        "hour": "Setiap jam",
+        "day": "Harian",
+        "week": "Mingguan",
+        "noDevice": "Tiada peranti yang dibenarkan tersedia.",
+        "noReadings": "Tiada bacaan direkodkan dalam tempoh ini.",
+        "noValid": "Baris diterima tidak mengandungi nilai sah untuk ukuran ini.",
+        "csvEndExclusive": "akhir tidak termasuk",
+        "downloadCsv": "Muat Turun CSV",
+        "csvDescription": "Baldi agregat sahaja, termasuk ukuran yang tiada; bacaan mentah individu tidak dieksport.",
+        "chartDescription": "Purata dan maksimum mengikut julat masa; nilai tidak tersedia ditunjukkan sebagai jurang.",
+        "categorySpacing": "Setiap titik mewakili satu tempoh pelaporan. Lihat jadual untuk tarikh yang tepat.",
+        "chartKeyboard": "Gunakan anak panah Kiri dan Kanan untuk menyemak julat, atau Home dan End untuk julat pertama dan terakhir.",
+        "movementNote": "Purata pergerakan ialah perkadaran sampel sah yang mengesan pergerakan, bukan tempoh pergerakan.",
+        "movementDetected": "Pergerakan Dikesan",
+        "otherPeriods": "Tempoh lain",
+        "movementPeriodNote": "Setiap bar mewakili satu tempoh pelaporan. Lihat jadual untuk tarikh yang tepat.",
+        "latestPeriod": "Tempoh terkini",
+        "latestValidPeriod": "Tempoh terkini dengan bacaan sah",
+        "highestDetectionCount": "Kiraan pengesanan tertinggi",
+        "detectionRate": "Kadar Pengesanan",
+        "movementTrend": "Trend Pengesanan Pergerakan",
+        "movementDetectedReadings": "Bacaan yang mengesan pergerakan",
+        "movementCaveat": "Pergerakan dikesan merujuk kepada bacaan sensor bernilai 1, bukan kejadian pergerakan yang berasingan.",
+        "detectionRateNote": "Kadar pengesanan ialah peratusan sampel diterima yang sah yang mengesan pergerakan, bukan masa operasi atau tempoh pergerakan.",
+        "unknownLimitation": "Batasan sumber data tambahan terpakai.",
+        "errors": {
+          "unavailable": "Perkhidmatan ringkasan IoT tidak tersedia. Cuba lagi.",
+          "unauthorized": "Anda tidak dibenarkan melihat laporan ini.",
+          "limit": "Laporan melebihi had yang disokong. Pilih tempoh lebih pendek.",
+          "invalidRequest": "Permintaan laporan tidak sah. Semak penapis.",
+          "invalidResponse": "Perkhidmatan mengembalikan respons ringkasan tidak sah."
+        },
+        "limitations": {
+          "receipt_time_not_capture_time": "Tarikh menggunakan masa penerimaan pangkalan data, bukan masa tangkapan sensor.",
+          "missing_counts_apply_to_received_rows": "Kiraan tidak tersedia merujuk kepada ukuran dalam baris diterima; bukan paket yang tidak pernah tiba.",
+          "expected_sampling_schedule_unavailable": "Tiada jadual pensampelan jangkaan yang disahkan.",
+          "availability_not_calculated": "Masa operasi dan ketersediaan sensor tidak dikira.",
+          "sample_weighted_average": "Purata diberatkan mengikut sampel diterima yang sah, bukan masa berlalu.",
+          "uncalibrated_raw_units": "Bacaan mentah bukan peratusan, kedalaman hujan atau desibel yang ditentukur."
+        }
+      },
       "operational": {
         "malaysiaTime": "Waktu Malaysia (MYT)",
         "observationScopeShort": "Dicipta dalam tempoh · Status semasa · Tidak termasuk draf",
@@ -1986,7 +2267,21 @@
       "totalApprovedPlants": "Tumbuhan diluluskan (spesies sepadan)",
       "matchingRows": "Spesies sepadan",
       "chartTitle": "Tumbuhan Diluluskan mengikut Spesies",
-      "chartLimit": "Carta menunjukkan {count} spesies teratas mengikut bilangan tumbuhan diluluskan; jadual mengandungi semua baris sepadan.",
+      "chartLimit": "Carta menunjukkan {count} spesies berdasarkan tetapan carta; jadual mengekalkan semua baris sepadan.",
+      "chartControls": "Kawalan carta",
+      "chartSort": "Susunan carta",
+      "chartSortHigh": "Tertinggi ke terendah",
+      "chartSortLow": "Terendah ke tertinggi",
+      "chartSortAlphabetical": "Mengikut abjad",
+      "chartTop": "Spesies dipaparkan",
+      "chartTop5": "5 teratas",
+      "chartTop10": "10 teratas",
+      "chartTop12": "12 teratas",
+      "chartAll": "Semua spesies",
+      "chartIncludeZero": "Sertakan spesies dengan kiraan sifar",
+      "chartSelected": "Spesies dipilih",
+      "chartNoRows": "Tiada spesies sepadan dengan tetapan carta. Sertakan kiraan sifar atau ubah carian.",
+      "chartClearSelection": "Kosongkan pilihan carta",
       "scientificName": "Nama Saintifik",
       "commonName": "Nama Biasa",
       "approvedPlants": "Tumbuhan Diluluskan",
@@ -2019,10 +2314,18 @@
       "appliedPeriod": "Tempoh laporan: {period}"
     },
     "reviews": {
+      "queueRefresh": {"loading": "Memuatkan penyerahan untuk semakan…", "refreshing": "Mengemas kini penyerahan… Baris gilir terakhir yang disahkan dipaparkan.", "unverified": "Baris gilir semakan lengkap tidak dapat disahkan. Rekod terdahulu mungkin lapuk. Muat semula sebelum menyemak."},
+      "copiedToast": "Disalin",
       "queues": {
         "registrations": "Pendaftaran Tumbuhan Baharu",
         "registrationEyebrow": "Aliran Kerja Pengesahan",
-        "registrationIntro": "Semak dan luluskan atau tolak pendaftaran tumbuhan baharu serta permohonan spesies berkaitan.",
+        "registrationIntro": "Semak dan urus pendaftaran tumbuhan serta permohonan spesies.",
+        "aboutQueue": "Tentang senarai semakan ini",
+        "includedHeading": "Apakah yang disertakan?",
+        "includedText": "Pendaftaran tumbuhan baharu, permohonan spesies dan suntingan rekod tumbuhan yang diluluskan.",
+        "countsHeading": "Bagaimanakah kiraan dibuat?",
+        "countsText": "Kiraan berdasarkan penyerahan yang dimuatkan sebelum penapis digunakan. Sesetengah permohonan spesies mungkin tidak dipaparkan dalam hasil.",
+        "queueHelp": "Senarai ini merangkumi pendaftaran tumbuhan, permohonan spesies dan permohonan suntingan rekod diluluskan. Kiraan dan penomboran halaman berdasarkan penyerahan layak yang dimuatkan sebelum penapis jadual, bukan semestinya semua rekod pangkalan data. Hasil spesies mungkin tidak lengkap.",
         "submissionView": "Paparan Penyerahan",
         "allSubmissions": "Semua Penyerahan",
         "unverifiedOriginSubmissions": "Penyerahan dengan Asal Belum Disahkan",
@@ -2065,7 +2368,12 @@
       "officerReview": "Semakan Pegawai",
       "reviewComment": "Ulasan semakan (wajib untuk penolakan, pembetulan atau penandaan)",
       "reviewUnavailable": "Semakan tidak tersedia. Semak butiran terkini dan permohonan spesies yang dipautkan.",
-      "decisions": {"approved":"Luluskan","rejected":"Tolak","correction":"Minta Pembetulan","flagged":"Tandakan"},
+      "decisions": {
+        "approved": "Luluskan",
+        "rejected": "Tolak",
+        "correction": "Minta Pembetulan",
+        "flagged": "Tandakan"
+      },
       "speciesRequest": {
         "updated": "Dikemas kini",
         "submissionChanged": "Penyerahan telah berubah",
@@ -2098,7 +2406,8 @@
           "unavailable": "Permohonan spesies tidak tersedia",
           "error": "Permohonan spesies tidak dapat disahkan",
           "unknown": "Status permohonan spesies tidak tersedia",
-          "saving": "Menyimpan keputusan spesies…"
+          "saving": "Menyimpan keputusan spesies…",
+          "withdrawn": "Ditarik Balik"
         },
         "notices": {
           "approvedReadOnly": "Kaitan spesies yang diluluskan telah disahkan. Penyerahan yang diluluskan ini adalah baca sahaja.",
@@ -2111,7 +2420,8 @@
           "unavailable": "Penyerahan ini merujuk permohonan spesies, tetapi butirannya tidak tersedia. Kontrak pelayan untuk permohonan berkaitan diperlukan; semakan tumbuhan kekal dikunci.",
           "error": "Permohonan berkaitan tidak dapat dimuatkan atau identitinya tidak sepadan. Butiran pemerhatian kekal tersedia; semakan tumbuhan kekal dikunci.",
           "unknown": "Status permohonan spesies tiada atau tidak disokong. Semakan tumbuhan dikunci sehingga penyelesaian dapat disahkan.",
-          "saving": "Menyimpan keputusan spesies dan mengesahkan penyerahan. Semakan tumbuhan kekal dikunci."
+          "saving": "Menyimpan keputusan spesies dan mengesahkan penyerahan. Semakan tumbuhan kekal dikunci.",
+          "withdrawn": "Permohonan ini telah ditarik balik. Butiran dan bukti tersedia adalah baca sahaja."
         },
         "commentHelp": "Ulasan diperlukan untuk penolakan atau pembetulan. Maksimum 4,000 aksara.",
         "commentRequired": "Masukkan ulasan semakan spesies untuk penolakan atau pembetulan.",
@@ -2154,6 +2464,8 @@
         "reloaded": "Penyerahan terkini telah dimuat semula. Komen anda dikekalkan; semak keadaan semasa sebelum menghantar keputusan.",
         "conflict": "Penyerahan berubah semasa anda menyemaknya. Versi terkini telah dimuat semula. Komen anda dikekalkan; semak keadaan terkini sebelum mencuba lagi.",
         "conflictReloadFailed": "Penyerahan berubah tetapi versi terkini tidak dapat dimuatkan. Muat semula sebelum mencuba lagi. Komen anda dikekalkan.",
+        "conflictRefreshed": "Penyerahan terkini kini dipaparkan. Semak status semasa sebelum meneruskan.",
+        "reviewedElsewhere": "Penyerahan ini telah disemak oleh Pegawai lain. Status terkini kini dipaparkan.",
         "savedReloadFailed": "Semakan disimpan tetapi penyerahan terkini tidak dapat dimuatkan. Muat semula sebelum tindakan selanjutnya."
       }
     },
@@ -2254,5 +2566,180 @@
     "locationValue": "Niah, Bahagian Miri, Sarawak",
     "travelTime": "Kira-kira 1.5 jam",
     "systemName": "Sistem Pendigitalan Biodiversiti dan Pengesahan Lapangan Pintar"
+  },
+  "observationEdits": {
+    "savedUnverified": "Keputusan anda mungkin telah disimpan, tetapi keadaan cadangan terkini tidak dapat disahkan. Maklumat yang dipaparkan mungkin sudah lapuk. Cuba muat semula sebelum meneruskan.",
+    "retryReload": "Cuba Muat Semula",
+    "reloaded": "Keadaan cadangan terkini telah disahkan. Semak status dan semakan semasa di bawah.",
+    "queueLimit": "Baris gilir Permintaan Suntingan Pemerhatian telah mencapai had keselamatan 500 baris. Kelengkapannya tidak dapat disahkan, maka cadangan ini tidak dipaparkan. Kategori penghantaran lain masih tersedia.",
+    "title": "Permintaan Suntingan Pemerhatian",
+    "proposal": "ID Cadangan",
+    "observation": "ID Pemerhatian",
+    "revision": "Semakan cadangan",
+    "status": "Status",
+    "submittedBy": "Dihantar Oleh",
+    "reviewedBy": "Disemak Oleh",
+    "submittedAt": "Masa dihantar",
+    "currentApproved": "Pemerhatian Diluluskan Semasa",
+    "comparison": "Perbandingan medan",
+    "field": "Medan",
+    "baseline": "Asas diluluskan semasa penghantaran",
+    "proposed": "Nilai dicadangkan",
+    "baselinePhotos": "Foto asas diluluskan",
+    "proposedPhotos": "Foto dicadangkan",
+    "history": "Peristiwa semakan tersedia",
+    "unavailable": "Tidak tersedia",
+    "reload": "Muat Semula Cadangan Terkini",
+    "inspect": "Saya telah memeriksa cadangan yang dimuat semula.",
+    "comment": "Ulasan semakan",
+    "readOnly": "Cadangan ini untuk bacaan sahaja.",
+    "conflict": "Cadangan berubah atau telah disemak. Periksa data terkini sebelum membuat keputusan lagi.",
+    "failed": "Cadangan tidak dapat disahkan. Muat semula sebelum meneruskan.",
+    "saved": "Keputusan disimpan.",
+    "commentRequired": "Masukkan ulasan semakan (sehingga 4000 aksara).",
+    "limitations": "Sejarah lama mungkin tidak mengandungi petikan pembetulan terdahulu. Pengekalan foto tidak dikuatkuasakan oleh pangkalan data.",
+    "reasonUnavailable": "API ini tidak memberikan sebab Botanis yang berasingan. Nota yang dihantar dipaparkan di bawah.",
+    "fields": {
+      "heightCm": "Ketinggian (cm)",
+      "lifeStage": "Peringkat pertumbuhan",
+      "healthStatus": "Kesihatan",
+      "morphology": "Morfologi",
+      "notes": "Nota",
+      "zone": "Zon",
+      "latitude": "Latitud",
+      "longitude": "Longitud",
+      "accuracy_m": "Ketepatan (m)"
+    },
+    "decisions": {
+      "Approved": "Luluskan",
+      "Rejected": "Tolak",
+      "Correction Required": "Pembetulan Diperlukan"
+    },
+    "events": {
+      "submitted": "Dihantar",
+      "approved": "Diluluskan",
+      "rejected": "Ditolak",
+      "correction_required": "Pembetulan Diperlukan",
+      "resubmitted": "Dihantar Semula",
+      "cancelled": "Dibatalkan"
+    },
+    "statuses": {
+      "Pending Review": "Menunggu Semakan",
+      "Approved": "Diluluskan",
+      "Rejected": "Ditolak",
+      "Correction Required": "Pembetulan Diperlukan",
+      "Cancelled": "Dibatalkan",
+      "Withdrawn": "Ditarik Balik",
+      "Superseded": "Digantikan"
+    },
+    "cancelledReadOnly": "Cadangan ini telah dibatalkan. Ia tidak boleh disemak; pemerhatian Diluluskan kekal tidak berubah."
+  },
+  "observationVersions": {
+    "registrationTitle": "Sejarah Penyerahan Pendaftaran",
+    "snapshotVersion": "Petikan Pendaftaran — Versi {number}",
+    "plantSpecies": "Maklumat Tumbuhan dan Spesies Tersimpan",
+    "submittedFields": "Pemerhatian Asal yang Dihantar",
+    "historyHelp": "Memaparkan petikan tersimpan bagi pendaftaran awal tumbuhan. Sejarah lama atau foto mungkin tidak lengkap.",
+    "savedSnapshots": "Petikan pendaftaran tersimpan",
+    "currentlyViewing": "Sedang dipaparkan",
+    "approvedSource": "Penyerahan diluluskan dipaparkan di atas",
+    "viewSubmission": "Lihat Penyerahan",
+    "registrationIntro": "Syot kilat sejarah pendaftaran awal pokok.",
+    "historicalVersion": "Versi Sejarah",
+    "versionHeading": "Versi",
+    "version": "Versi {number}",
+    "snapshot": "Syot Kilat Pendaftaran",
+    "snapshotStatus": "Status syot kilat",
+    "action": "Tindakan",
+    "viewDetails": "Lihat Butiran",
+    "statusMeaning": "Status merujuk kepada syot kilat tersimpan. Nombor versi ialah nombor sejarah pokok dan mungkin tidak berurutan; bukan nombor semakan penyerahan.",
+    "technical": "Butiran teknikal",
+    "created": "Syot kilat dicipta",
+    "reviewed": "Semakan direkodkan",
+    "comment": "Ulasan semakan",
+    "reviewerIdentifier": "Pengecam penyemak",
+    "retry": "Cuba semula sejarah",
+    "fields": {"heightCm": "Ketinggian (cm)", "lifeStage": "Peringkat pertumbuhan", "healthStatus": "Status kesihatan", "morphology": "Morfologi", "notes": "Nota", "zone": "Zon lokasi", "latitude": "Latitud", "longitude": "Longitud", "accuracy_m": "Ketepatan GPS (m)", "altitudeM": "Altitud (m)"},
+    "title": "Sejarah penyerahan Pemerhatian",
+    "limited": "Hanya petikan pendaftaran awal yang tersedia. Senarai ini mungkin tidak lengkap; penyimpanan foto tidak dijamin.",
+    "loading": "Memuatkan sejarah",
+    "unavailable": "Sejarah versi penyerahan tidak tersedia untuk Pemerhatian ini.",
+    "identity": "ID versi tersimpan / ordinal",
+    "status": "Status",
+    "details": "Lihat butiran sejarah",
+    "readOnly": "Petikan sejarah — baca sahaja. Tindakan semakan dinyahdayakan.",
+    "canonical": "ID Pemerhatian semasa",
+    "contentUnavailable": "Kandungan sejarah tidak tersedia",
+    "photoUnavailable": "Foto asal tidak tersedia",
+    "photo": "Foto asal yang tersedia",
+    "back": "Kembali ke Pemerhatian semasa",
+    "statuses": {
+      "Pending Review": "Menunggu Semakan",
+      "Approved": "Diluluskan",
+      "Rejected": "Ditolak",
+      "Correction Required": "Pembetulan Diperlukan",
+      "Cancelled": "Dibatalkan",
+      "Withdrawn": "Ditarik Balik",
+      "Superseded": "Digantikan",
+      "Flagged": "Ditandai"
+    }
+  },
+  "observationOriginFilter": {
+    "label": "Jenis Pemerhatian",
+    "all": "Semua Pemerhatian",
+    "initial": "Pemerhatian Pendaftaran Awal",
+    "subsequent": "Pemerhatian Lapangan Susulan",
+    "legacy": "Pemerhatian Legasi / Tidak Dikelaskan"
+  },
+  "observationTable": {
+    "type": "Jenis Pemerhatian",
+    "initial": "Pendaftaran Awal",
+    "subsequent": "Lapangan Susulan",
+    "legacy": "Legasi / Tidak Dikelaskan"
+  },
+  "dashboardObservationEdits": {
+    "title": "Permintaan Suntingan Pemerhatian",
+    "scope": "Cadangan berasingan untuk Pemerhatian Diluluskan. Kiraan Pemerhatian asal kekal berasingan. Memaparkan sehingga empat permintaan yang layak.",
+    "pending": "Permintaan suntingan menunggu semakan",
+    "refresh": "Muat semula permintaan",
+    "session": "Sahkan sesi anda untuk melihat permintaan suntingan.",
+    "loading": "Memuatkan permintaan suntingan…",
+    "limit": "Permintaan suntingan mencapai had keselamatan 500 baris. Kiraan lengkap tidak tersedia.",
+    "unavailable": "Permintaan suntingan Pemerhatian tidak tersedia. Bahagian Papan Pemuka lain masih tersedia.",
+    "empty": "Tiada permintaan suntingan Pemerhatian yang layak dalam senarai dimuatkan.",
+    "request": "ID Permintaan Suntingan",
+    "observation": "ID Pemerhatian",
+    "plant": "ID Tumbuhan",
+    "submitter": "Dihantar Oleh",
+    "status": "Status",
+    "submitted": "Dihantar",
+    "action": "Tindakan",
+    "review": "Semak permintaan",
+    "viewAll": "Lihat semua permohonan suntingan"
+  },
+  "observationEditNotices": {
+    "submitted": "Permintaan Suntingan Pemerhatian Baharu",
+    "resubmitted": "Permintaan Suntingan Pemerhatian Dihantar Semula"
+  },
+  "observationEditQueue": {
+    "empty": "Tiada Permohonan Suntingan Pemerhatian sepadan dengan status ini.",
+    "scope": "Cadangan suntingan bagi Pemerhatian Diluluskan. Bilangan cadangan dan penapis status berasingan daripada Pemerhatian asal.",
+    "limit": "Permohonan suntingan mencapai had keselamatan 500 baris. Senarai lengkap permohonan tidak tersedia.",
+    "unavailable": "Permohonan suntingan Pemerhatian tidak tersedia. Pemerhatian asal masih tersedia."
+  },
+  "unifiedObservations": {
+    "historicalExplanation": "Asal rekod lama ini tidak dapat dikenal pasti dengan pasti. Buka bukti dan butiran yang tersedia secara berasingan.",
+    "historicalTitle": "Rekod Sejarah / Tidak Dikelaskan",
+    "submissionType": "Jenis Penyerahan",
+    "submissionId": "ID Penyerahan",
+    "original": "Pemerhatian Asal",
+    "originalCounts": "Bilangan Pemerhatian Asal",
+    "filterScope": "Carian dan penapis digunakan pada penyerahan yang dimuatkan. Rekod lain mungkin tersedia.",
+    "retry": "Cuba semula permohonan suntingan",
+    "httpError": "Permohonan suntingan Pemerhatian tidak dapat dimuatkan (HTTP {status}). Pemerhatian asal masih tersedia.",
+    "empty": "Tiada penyerahan dimuatkan sepadan dengan penapis ini.",
+    "partial": "Permohonan suntingan tidak tersedia; hanya Pemerhatian asal yang dimuatkan boleh dipaparkan.",
+    "capabilityError": "Permohonan suntingan Pemerhatian tidak tersedia atau tidak serasi dengan backend ini. Pemerhatian asal masih tersedia.",
+    "invalidEvidence": "Sesetengah Permohonan Suntingan Pemerhatian tidak dapat dipaparkan kerana bukti foto tidak dapat disahkan. Semakan tidak tersedia untuk permohonan tersebut. Tiada rekod diubah. Hubungi sokongan atau cuba muat semula."
   }
 }

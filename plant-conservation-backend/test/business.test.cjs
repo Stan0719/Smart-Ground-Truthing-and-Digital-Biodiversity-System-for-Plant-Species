@@ -144,6 +144,9 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
     (await call("/species?scope=scientific", "officer")).data.species.length,
     3,
   );
+  const registrationPhoto = { content_type: 'image/png', base64: (await sharp({
+    create: { width: 2, height: 2, channels: 3, background: '#00ff00' },
+  }).png().toBuffer()).toString('base64') };
   const content = {
       heightCm: 12,
       healthStatus: "Healthy",
@@ -153,6 +156,8 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
       longitude: 2,
     },
     body = {
+      scientific_name: 'Business registration',
+      photos: [registrationPhoto, registrationPhoto, registrationPhoto],
       species_id: 1,
       qr_id: inventory.qr_id,
       latitude: 1,
@@ -160,11 +165,11 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
       content,
       client_key: "field-one",
     };
-  const created = await call("/plants", "bot", "POST", body);
+  const created = await call("/plant-submissions", "bot", "POST", body);
   assert.equal(created.status, 201, JSON.stringify(created.data));
   const plantId = created.data.plant_id;
   assert.equal(
-    (await call("/plants", "bot", "POST", body)).data.plant_id,
+    (await call("/plant-submissions", "bot", "POST", body)).data.plant_id,
     plantId,
   );
   assert.equal(
@@ -182,14 +187,17 @@ test("PostgreSQL: visibility, ownership, review, media and simulated IoT", async
   })
     .png()
     .toBuffer();
-  const asset = await call("/assets", "bot", "POST", {
+  const lockedUpload = await call("/assets", "bot", "POST", {
     plant_id: plantId,
     observation_id: created.data.id,
     base64: png.toString("base64"),
     content_type: "image/png",
     client_key: "photo-one",
   });
-  assert.equal(asset.status, 201, JSON.stringify(asset.data));
+  assert.equal(lockedUpload.status, 409, 'submitted atomic registration photos cannot be changed through the draft upload route');
+  const submittedPhotos = (await call(`/observations/${created.data.id}`, 'bot')).data.observation.assets;
+  assert.equal(submittedPhotos.length, 3);
+  const asset = { data: { id: submittedPhotos[0].id } };
   assert.equal((await call("/assets/" + asset.data.id)).status, 404);
   assert.equal(
     (await call(`/observations/${created.data.id}/submit`, "bot", "POST", {}))

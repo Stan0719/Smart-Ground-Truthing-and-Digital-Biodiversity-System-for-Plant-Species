@@ -62,12 +62,13 @@ const inbox = createOfficerInbox({ transport: (...args) => fetch(...args), navig
 } })
 const notificationState = inbox.state
 const nt = (key: string) => t('dashboardNotifications.officerLive.' + key)
-const noticeTitle = (notice: OfficerNotice) => notice.event_type === 'record_change_submitted' ? (notice.change_target_type === 'plant' ? 'Approved Plant Change Submitted' : notice.change_target_type === 'species' ? 'Approved Species Change Submitted' : 'Approved-record Change Submitted') : nt(notice.event_type === 'species_request_submitted' ? 'speciesTitle' : notice.event_type === 'observation_resubmitted' ? 'correctionTitle' : notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
+const noticeTitle = (notice: OfficerNotice) => notice.event_type === 'observation_edit_submitted' ? t('observationEditNotices.submitted') : notice.event_type === 'observation_edit_resubmitted' ? t('observationEditNotices.resubmitted') : notice.event_type === 'record_change_submitted' ? (notice.change_target_type === 'plant' ? 'Approved Plant Change Submitted' : notice.change_target_type === 'species' ? 'Approved Species Change Submitted' : 'Approved-record Change Submitted') : nt(notice.event_type === 'species_request_submitted' ? 'speciesTitle' : notice.event_type === 'observation_resubmitted' ? 'correctionTitle' : notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
 // Labels are display-only. Navigation and acknowledgement retain the raw resource.
 const observationLabels = computed(() => monitoringLabels(notificationState.items
   .filter(item => item.resource.kind === 'observation').map(item => item.resource.id)))
 const noticeReference = (notice: OfficerNotice) => {
   const id = notice.resource.id
+  if (notice.resource.kind === 'observation_edit') return 'CHANGE-' + id.slice(0, 8).toUpperCase()
   if (notice.resource.kind === 'record_change') return 'CHANGE-' + id.slice(0, 8).toUpperCase()
   if (notice.resource.kind === 'species_request') return formatSpeciesRequestId(id)
   const numeric = formatObservationId(id)

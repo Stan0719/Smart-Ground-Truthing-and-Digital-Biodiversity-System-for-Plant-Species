@@ -23,6 +23,7 @@ function loginFixture({cameraEnabled=false,register=false,pending=null,previousE
  for(const name of ['SafeAreaView','KeyboardAvoidingView','ScrollView','Text','View','TextInput','TouchableOpacity','Switch','Modal'])native[name]=name;
  function MandatoryScreen(){}
  const deps={'../translations/i18n':translationFixture,'../components/LanguageSelector':{default:'LanguageSelector'},'../components/authNavigationStyles':{authNavigationStyles},react:hooks,'react-native':native,'expo-router':{router:{push:path=>navigation.push(path)}},'@expo/vector-icons':{Ionicons:'Icon'},'expo-local-authentication':{},'expo-secure-store':{},'expo-constants':{},'../utils/faceCaptureFlow':{FACE_CAPTURE_VERSION,createFaceCameraController:options=>createFaceCameraController({...options,onChange:request=>{options.onChange(request);if(request)cameras.push(request);}})},'../utils/completeFaceLogin':{},'../utils/faceSession':{faceSession:{establish:async result=>{assert.notEqual(result.user.mustChangePassword,true,'Pending session entered normal features');return result.user;}}},'../utils/faceApi':{faceApi:async(...args)=>{requests.push(args);return api(...args)},validateFaceSession:value=>value,faceDiagnostic:()=>{},faceReference:()=> '123456abcdef'},'../components/FaceCameraModal':{default:'FaceCamera',faceCameraConfigured:()=>cameraEnabled},'./MandatoryPasswordChange':{default:MandatoryScreen},'../utils/firstLoginPassword':{changeFirstLoginPassword}};
+ deps['../components/PasswordVisibilityButton']={default:'PasswordVisibilityButton'};
  const compiled=ts.transpileModule(readFileSync(new URL('../screens/Login.js',import.meta.url),'utf8'),{fileName:'Login.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
  deps['expo-constants']={default:{expoConfig:{hostUri:'192.0.2.1:8082'}}};
@@ -41,6 +42,7 @@ function registerFixture(){
  const native={StyleSheet:{create:styles=>styles},Platform:{OS:'android'},Animated:{Value:class{interpolate(){return 0}},View:'AnimatedView',Text:'AnimatedText'}};
  for(const name of ['KeyboardAvoidingView','ScrollView','Text','View','TextInput','TouchableOpacity'])native[name]=name;
  const deps={'../translations/i18n':translationFixture,'../components/authNavigationStyles':{authNavigationStyles},react:hooks,'react-native':native,'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},'@expo/vector-icons':{Ionicons:'Icon'},'../utils/faceApi':{faceApi:async(...args)=>{requests.push(args);return {};}}};
+ deps['../components/PasswordVisibilityButton']={default:'PasswordVisibilityButton'};
  const compiled=ts.transpileModule(readFileSync(new URL('../screens/VisitorRegister.js',import.meta.url),'utf8'),{fileName:'VisitorRegister.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
  new Function('require','module','exports',compiled)(name=>{assert.ok(name in deps,`Unexpected dependency ${name}`);return {...deps[name],__esModule:name!=='react'}},module,module.exports);
@@ -94,7 +96,7 @@ test('Login keeps advanced settings and account help in compact dialogs',async()
  assert.ok(find(collapsed.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Log In with Face ID'));
  assert.equal(find(collapsed.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Set Up Face ID'),undefined);
  assert.equal(find(collapsed.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Remove Face ID'),undefined);
- assert.equal(find(collapsed.tree,node=>node.type==='Text'&&text(node)==='Without an account'),undefined);
+ assert.equal(find(collapsed.tree,node=>node.type==='Text'&&text(node)===english.login.exploreAsGuest),undefined);
  assert.equal(text(collapsed.tree).includes("Explore Niah's biodiversity as a visitor"),false);
  assert.equal(text(collapsed.tree).includes('Face flow:'),false);
  assert.ok(text(collapsed.tree).includes('Log in to your account'));
@@ -122,7 +124,7 @@ test('Login keeps advanced settings and account help in compact dialogs',async()
  assert.equal(find(collapsed.tree,node=>node.type==='KeyboardAvoidingView').props.behavior,'height');
  assert.equal(find(collapsed.tree,node=>node.type==='KeyboardAvoidingView').props.style.overflow,undefined);
  settingsButton.props.onPress();
- find(collapsed.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Why Create an Account?').props.onPress();
+ find(collapsed.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Why Create a Visitor Account?').props.onPress();
  assert.ok(collapsed.assignments.some(([key,value])=>key===10&&value===true));
  assert.ok(collapsed.assignments.some(([key,value])=>key===11&&value===true));
  const expanded=loginFixture({cameraEnabled:true,expandedFace:true,expandedBenefits:true});
@@ -131,10 +133,10 @@ test('Login keeps advanced settings and account help in compact dialogs',async()
  assert.equal(find(expanded.tree,node=>node.type==='View'&&node.props?.style?.maxWidth===430).props.style.width,'100%');
  assert.ok(find(expanded.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Set Up Face ID'));
  assert.equal(find(expanded.tree,node=>node.props?.accessibilityLabel==='Previous account email'),undefined);
- assert.ok(find(expanded.tree,node=>node.type==='Text'&&text(node)==='Without an account'));
- assert.ok(find(expanded.tree,node=>node.type==='Text'&&text(node)==='With an account'));
+ assert.ok(find(expanded.tree,node=>node.type==='Text'&&text(node)===english.login.exploreAsGuest));
+ assert.ok(find(expanded.tree,node=>node.type==='Text'&&text(node)===english.login.visitorBenefitsHeading));
  assert.match(text(expanded.tree),/scan QR codes/);
- assert.match(text(expanded.tree),/authorized Botanists/);
+ assert.ok(text(expanded.tree).includes(english.login.visitorCompactBenefit));
  settingsModal.props.onRequestClose();
  assert.ok(expanded.assignments.some(([key,value])=>key===10&&value===false));
  find(expanded.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Link Existing Face ID').props.onPress();
@@ -415,7 +417,7 @@ test('mandatory change UI contains only secure replacement fields and sign-out c
  const native={Alert:{alert:(...args)=>alerts.push(args)},StyleSheet:{create:styles=>styles},Platform:{OS:'android'}};
  for(const name of ['KeyboardAvoidingView','SafeAreaView','ScrollView','Text','TextInput','TouchableOpacity','View'])native[name]=name;
  const compiled=ts.transpileModule(readFileSync(new URL('../screens/MandatoryPasswordChange.js',import.meta.url),'utf8'),{fileName:'Mandatory.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
- const module={exports:{}};new Function('require','module','exports',compiled)(name=>name==='../translations/i18n'?translationFixture:name==='react'?hooks:native,module,module.exports);
+ const module={exports:{}};new Function('require','module','exports',compiled)(name=>name==='../translations/i18n'?translationFixture:name==='react'?hooks:name==='../components/PasswordVisibilityButton'?{default:'PasswordVisibilityButton'}:native,module,module.exports);
  let submitted,signOuts=0;
  const tree=module.exports.default({onSubmit:async(...args)=>{submitted=args},onCancel:async()=>{signOuts++}});
  const card=find(tree,node=>node.type==='View'&&node.props.style?.maxWidth===390);

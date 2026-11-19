@@ -443,7 +443,10 @@ td em {
   color: #287a53;
 }
 .badge.pending-review,
-.badge.pending,
+.badge.pending {
+  background: #FEF9C3;
+  color: #854D0E;
+}
 .badge.reviewing,
 .badge.medium,
 .badge.vulnerable,

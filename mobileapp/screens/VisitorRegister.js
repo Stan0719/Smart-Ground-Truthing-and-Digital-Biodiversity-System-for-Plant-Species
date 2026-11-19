@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { faceApi } from "../utils/faceApi";
 import { authNavigationStyles } from "../components/authNavigationStyles";
+import PasswordVisibilityButton from "../components/PasswordVisibilityButton";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -33,6 +34,7 @@ function FloatingInput({
 }) {
   useAppTranslation();
   const [isFocused, setIsFocused] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const animation = useRef(new Animated.Value(value.length > 0 ? 1 : 0)).current;
   const isFloating = isFocused || value.length > 0;
 
@@ -51,12 +53,12 @@ function FloatingInput({
         pointerEvents="none"
       />
       <TextInput
-        style={[styles.input, isFocused && styles.inputFocused]}
+        style={[styles.input, isFocused && styles.inputFocused, secureTextEntry && { paddingRight: 50 }]}
         value={value}
         onChangeText={onChangeText}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        secureTextEntry={secureTextEntry}
+        secureTextEntry={secureTextEntry && !passwordVisible}
         keyboardType={keyboardType}
         autoCapitalize={autoCapitalize}
         autoCorrect={false}
@@ -65,6 +67,7 @@ function FloatingInput({
         onSubmitEditing={onSubmitEditing}
         accessibilityLabel={label}
       />
+      {secureTextEntry && <View style={{ position: "absolute", right: 4, top: 5 }}><PasswordVisibilityButton visible={passwordVisible} onPress={() => setPasswordVisible((current) => !current)} /></View>}
       <Animated.Text
         pointerEvents="none"
         style={[

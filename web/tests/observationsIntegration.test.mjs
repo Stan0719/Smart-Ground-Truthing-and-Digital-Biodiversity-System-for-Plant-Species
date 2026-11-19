@@ -1,3 +1,5 @@
+import { mapObservationEdit } from '../src/services/observationEdits.ts'
+import { useOfficerCopyConfirmation } from '../src/composables/useOfficerCopyConfirmation.ts'
 import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -59,6 +61,11 @@ const fixture = (overrides = {}) => ({
   ],
   ...overrides,
 })
+function assertReadOnlyObservationSources(h) {
+  assert.ok(h.calls.every(call => (call.url.startsWith('/api/observations') || call.url.startsWith('/api/conservation/submitter-names?')) &&
+    (!call.options.method || call.options.method === 'GET') && call.options.credentials === 'same-origin'),
+    'identity display reads only the authorized Observation and name-directory contracts')
+}
 const flush = async () => {
   for (let i = 0; i < 4; i++) {
     await vue.nextTick()
@@ -69,21 +76,23 @@ const officer = { id: 'officer', role: 'Conservation Officer', status: 'Active',
 const summaryStates = ['Pending Review','Correction Required','Flagged','Rejected','Approved']
 const summaryCards = h => nodes(h.render()).filter(node => node.type === 'article' && String(node.props?.class).includes('observation-summary-card'))
 
-test('five informational status cards count each loaded observation once in the selected origin scope, including normalized statuses',async()=>{
+test('five informational status cards count each loaded observation once in the subsequent queue, including normalized statuses',async()=>{
   const rows=['subsequent_observation','initial_registration','unknown'].flatMap(origin=>summaryStates.map((status,index)=>fixture({id:origin+'-'+index,origin_type:origin,status:status.toUpperCase().replaceAll(' ','_')})))
   rows.push(fixture({id:'draft',status:'Draft'}));rows.push(rows[0])
   const h=harness(async()=>Response.json({observations:rows}));try{
+    h.state.queueOrigin.value = 'subsequent_observation' // Only verified subsequent records belong to this page.
+
     await h.state.loadObservations()
     assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.status),summaryStates)
     assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[1,1,1,1,1])
-    h.state.queueOrigin.value='all';assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[3,3,3,3,3])
+    h.state.queueOrigin.value='all';assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[1,1,1,1,1])
     h.state.queueOrigin.value='unknown';assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[1,1,1,1,1])
     h.state.queueOrigin.value='subsequent_observation';h.state.search.value='no matches';h.state.species.value='missing';h.state.owner.value='missing';h.state.date.value='2026-01-01'
     assert.equal(h.state.filtered.value.length,0);assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[1,1,1,1,1])
     const cards=summaryCards(h);assert.equal(cards.length,5);assert.ok(cards.every(card=>nodes(card).filter(node=>node.type==='svg').length===1))
     assert.ok(cards.every(card=>!card.props.onClick&&!nodes(card).some(node=>node.type==='button'||node.type==='a')))
     const tree=nodes(h.render());assert.ok(tree.findIndex(node=>node.props?.class==='observation-summary')<tree.findIndex(node=>node.props?.class==='control-bar'))
-    assert.equal(h.calls.length,1,'cards never issue a count request or change filters')
+    assert.equal(h.calls.filter(call=>call.url.startsWith('/api/observations')).length,1,'cards never issue a count request or change filters')
   }finally{h.stop()}
 })
 
@@ -158,6 +167,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
     AbortSignal,
     AbortController,
     console,
+    window: { setTimeout, clearTimeout, ...options.window },
     navigator: { clipboard: options.clipboard },
     fetch: async (url, options) => {
       calls.push({ url, options })
@@ -171,6 +181,8 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
       return fetchHandler(url, options)
     },
     require(name) {
+    if (name.endsWith('.css')) return {}
+    if (name.includes('useOfficerCopyConfirmation')) return { useOfficerCopyConfirmation }
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
       if (name === 'vue') return {
@@ -249,7 +261,7 @@ test('list keeps raw IDs, sorts valid timestamps and opens local review without 
     const links = nodes(h.render()).filter((node) => node.props?.to?.name === 'conservation-reviews')
     const reviewButtons = nodes(h.render()).filter(node => node.type === 'button' && node.props?.class === 'action-button' && node.children === 'Review')
     assert.ok(reviewButtons.length > 0)
-    assert.equal(links.length, 0)
+    assert.equal(links.length, 1); assert.equal(links[0].props.to.query.legacy, '1')
     await reviewButtons[0].props.onClick()
     assert.equal(h.state.reviewMode.value, true)
     assert.equal(h.state.selected.value.id, uuid)
@@ -299,7 +311,7 @@ test('API failures and malformed contracts stay distinct from a successful empty
   try {
     await empty.state.loadObservations()
     assert.equal(empty.state.loadError.value, '')
-    assert.ok(nodes(empty.render()).some((node) => node.children === 'No field observations in the loaded results.'))
+    assert.ok(nodes(empty.render()).some((node) => node.children === messages.unifiedObservations.empty))
   } finally { empty.stop() }
 })
 
@@ -540,27 +552,17 @@ test('approved species linkage enables review, but a disappearing dependency rem
   } finally { h.stop() }
 })
 
-test('field queue, all-origin history and legacy browsing retain their distinct review owners', async () => {
-  const field = fixture(), initial = fixture({ id: '21', origin_type: 'initial_registration' }), legacy = fixture({ id: '22', origin_type: 'unknown' })
-  const rows = [field, initial, legacy]
-  const h = harness(async url => Response.json({ observation: rows.find(row => row.id === url.split('/').pop()) }), officer, false, async url => {
-    const query = new URL(url, 'https://fixture.invalid').searchParams
-    return Response.json({ observations: rows.filter(row => !query.get('origin_type') || row.origin_type === query.get('origin_type')), page: { has_more: false, next_cursor: null } })
-  })
+test('the subsequent queue excludes registration and legacy rows while retaining explicit compatibility access', async () => {
+  const field=fixture(), initial=fixture({id:'21',origin_type:'initial_registration'}), legacy=fixture({id:'22',origin_type:'unknown'})
+  const h=harness(async()=>Response.json({observation:field}),officer,false,async()=>Response.json({observations:[field,initial,legacy],page:{has_more:false,next_cursor:null}}))
   try {
-    await h.state.loadObservations(); assert.equal(h.state.filtered.value.length, 1)
+    await h.state.loadObservations()
+    assert.deepEqual(Array.from(h.state.filtered.value,row=>row.id),[field.id])
     assert.ok(h.calls[0].url.includes('origin_type=subsequent_observation'))
-    await h.state.open(h.state.filtered.value[0], true); assert.equal(h.state.reviewAllowed.value, true)
-    h.state.closeModal(); h.state.queueOrigin.value = 'all'; await h.state.loadObservations()
-    assert.equal(h.state.filtered.value.length, 3)
-    await h.state.open(h.state.mapObservation(initial), true)
-    assert.equal(h.state.reviewAllowed.value, false)
-    assert.ok(modalReview(h)); h.state.closeModal()
-    h.state.queueOrigin.value = 'unknown'; await h.state.loadObservations()
-    assert.equal(h.state.filtered.value[0].origin, 'unknown')
-    assert.ok(nodes(h.render()).some(n => typeof n.children === 'string' && n.children === 'Origin not verified'))
-    await h.state.open(h.state.filtered.value[0]); assert.ok(modalReview(h))
-  } finally { h.stop() }
+    await h.state.open(h.state.filtered.value[0],true); assert.equal(h.state.reviewAllowed.value,true)
+    assert.ok(nodes(h.render()).some(n=>n.props?.to?.name==='conservation-reviews'&&n.props.to.query.legacy==='1'))
+    assert.ok(!h.calls.some(call=>call.options.method==='POST'))
+  } finally {h.stop()}
 })
 
 test('pagination reaches older field records, survives a failed next page and rejects stale selection loads', async () => {
@@ -588,6 +590,8 @@ test('bounded scanning advances through empty/nonmatching pages and stops on rea
     queueResponse([fixture(), fixture({ id: 'rejected', status: 'Rejected' })], 'c')]
   const h = harness(async () => Response.json({}), officer, false, async () => pages.shift())
   try {
+    h.state.queueOrigin.value = 'subsequent_observation' // Only verified subsequent records belong to this page.
+
     h.state.search.value = 'PL007'; h.state.species.value = '3'; h.state.owner.value = 'staff:real-botanist-subject'; h.state.date.value = h.state.dateKey(fixture().created_at)
     await h.state.loadObservations()
     assert.equal(queueCalls(h).length, 3)
@@ -686,7 +690,7 @@ test('automatic scanning stays sequential, preserves the server status filter an
 })
 
 test('queue/status changes abort an automatic scan immediately and late pages cannot replace the new queue', async () => {
-  for (const change of ['origin', 'status']) {
+  for (const change of ['status']) {
     let release, oldSignal
     const h = harness(async () => Response.json({}), officer, false, async (url, options) => {
       const query = new URL(url, 'https://fixture.invalid').searchParams
@@ -790,24 +794,16 @@ test('primary field action respects status, self-review, session, revision and s
   }
 })
 
-test('initial and legacy rows preserve read-only details, review routing and supporting actions', async () => {
-  for (const origin of ['initial_registration', 'unknown']) {
-    const row = fixture({ origin_type: origin })
-    const h = harness(async () => Response.json({ observation: row }))
+test('initial and legacy records cannot acquire normal Observation actions', async () => {
+  for(const origin of ['initial_registration','unknown']) {
+    const h=harness(async()=>Response.json({observation:fixture({origin_type:origin})}))
     try {
-      h.state.queueOrigin.value = 'all'; h.state.isLoading.value = false
-      h.state.observations.value = [h.state.mapObservation(row)]
-      const actions = nodes(nodes(h.render()).find(n => n.props?.class === 'action-group'))
-      const view = actions.find(n => n.type === 'button' && n.children === 'View Details')
-      assert.ok(view); assert.ok(!actions.some(n => n.type === 'button' && n.children === 'Review'))
-      assert.ok(actions.some(n => n.props?.to?.name === 'conservation-reviews' && n.props.to.query.review === uuid))
-      assert.ok(actions.some(n => n.props?.to === '/plant/' + h.state.observations.value[0].plantRouteId))
-      assert.ok(actions.some(n => n.children === 'History'))
-      assert.ok(actions.some(n => n.props?.to?.name === 'conservation-map'))
-      await view.props.onClick(); await flush()
-      assert.equal(h.state.selected.value.origin, origin); assert.equal(h.state.reviewMode.value, false)
-      assert.ok(!nodes(h.render()).some(n => n.props?.class === 'officer-review'))
-    } finally { h.stop() }
+      h.state.isLoading.value=false; h.state.observations.value=[h.state.mapObservation(fixture({origin_type:origin}))]
+      assert.equal(h.state.filtered.value.length,0)
+      assert.ok(!nodes(h.render()).some(n=>n.props?.class==='action-group'))
+      assert.ok(nodes(h.render()).some(n=>n.props?.to?.name==='conservation-reviews'&&n.props.to.query.legacy==='1'))
+      assert.ok(!h.calls.some(call=>call.options.method==='POST'))
+    } finally {h.stop()}
   }
 })
 
@@ -849,11 +845,12 @@ test('observation aliases extend loaded collisions, handle legacy IDs and remain
     const caseVariant = ids[0].toUpperCase()
     const caseLabels = h.state.compactIdentifierTokens([ids[0], caseVariant])
     assert.notEqual(caseLabels.get(ids[0]), caseLabels.get(caseVariant))
-    assert.equal(h.calls.length, 1)
+    assert.equal(h.calls.filter(call=>call.url.startsWith('/api/observations')).length, 1)
+  assertReadOnlyObservationSources(h)
   } finally { h.stop() }
 })
 
-test('single UUID display is compact and submitter labels use only existing subjects, never unauthorized names/lookups', async () => {
+test('single UUID display ignores uncontracted names and uses only the authorized directory lookup', async () => {
   const owner = 'staff:2ace382f-1010-4010-8010-101010101010'
   const rows = [fixture({ owner_subject: owner, owner_name: 'Uncontracted account name' })]
   const h = harness(identityHandler(rows))
@@ -867,9 +864,11 @@ test('single UUID display is compact and submitter labels use only existing subj
     assert.ok(tree.some(node => node.type === 'strong' && node.children === 'OBS-5D8A3647' && node.props.title === uuid))
     assert.ok(tree.some(node => node.type === 'option' && node.props?.value === owner && node.children === 'Staff \u00b7 2ACE382F'))
     assert.ok(!tree.some(node => node.children === 'Uncontracted account name'))
-    assert.ok(h.calls.every(call => call.url.startsWith('/api/observations')))
-    assert.equal(h.calls.length, 1)
+    assert.ok(h.calls.every(call => call.url.startsWith('/api/observations') || call.url.startsWith('/api/conservation/submitter-names?')))
+    const namesRequest=h.calls.find(call=>call.url.startsWith('/api/conservation/submitter-names?'));assert.ok(namesRequest);assert.equal(new URL(namesRequest.url,'https://fixture.invalid').searchParams.get('ids'),owner.slice(6));assert.equal(namesRequest.options.credentials,'same-origin')
+    assert.equal(h.calls.filter(call=>call.url.startsWith('/api/observations')).length, 1)
     h.state.owner.value = owner; assert.equal(h.state.filtered.value.length, 1)
+  assertReadOnlyObservationSources(h)
   } finally { h.stop() }
 })
 
@@ -878,20 +877,21 @@ test('copy buttons write the exact full UUID and subject and give accessible suc
   const h = harness(identityHandler([fixture({ owner_subject: owner })]), officer, false, null, 'en', { clipboard: { writeText: async value => { writes.push(value) } } })
   try {
     await h.state.loadObservations()
+    const requestsBeforeCopy = h.calls.length
     const buttons = copyButtons(h)
     assert.equal(buttons.length, 2)
     assert.match(buttons[0].props['aria-label'], /Copy full observation ID for OBS-5D8A3647/)
     assert.equal(buttons[0].props.type, 'button')
     await buttons[0].props.onClick()
     assert.deepEqual(writes, [uuid])
-    assert.match(h.state.copyFeedback.value, /Full observation ID copied/)
+    assert.equal(h.state.copyFeedback.value, ''); assert.ok(h.state.controlToastKey.value)
     await copyButtons(h)[1].props.onClick()
     assert.deepEqual(writes, [uuid, owner])
-    assert.match(h.state.copyFeedback.value, /Full submitter identifier copied/)
+    assert.equal(h.state.copyFeedback.value, ''); assert.ok(h.state.controlToastKey.value)
     const feedback = nodes(h.render()).find(node => String(node.props?.class).includes('copy-feedback'))
     assert.equal(feedback.props.role, 'status'); assert.equal(feedback.props['aria-live'], 'polite')
     assert.equal(feedback.props['aria-atomic'], 'true')
-    assert.equal(h.calls.length, 1)
+    assert.equal(h.calls.length, requestsBeforeCopy)
     assert.ok(h.calls.every(call => !call.options.method || call.options.method === 'GET'))
   } finally { h.stop() }
 })
@@ -1008,7 +1008,8 @@ test('submitter collisions extend their aliases, distinguish subject namespaces 
       assert.equal(h.state.filtered.value[0].ownerSubject, subject)
     }
     assert.deepEqual(Array.from(h.state.ownerOptions.value), subjects)
-    assert.equal(h.calls.length, 1)
+    assert.equal(h.calls.filter(call=>call.url.startsWith('/api/observations')).length, 1)
+  assertReadOnlyObservationSources(h)
   } finally { h.stop() }
 })
 
@@ -1025,47 +1026,49 @@ test('only an exact current-Officer subject match can use the authenticated sess
     assert.deepEqual(Array.from(h.state.filtered.value, item => item.id), [uuid])
     assert.equal(h.state.observations.value[0].ownerSubject, 'staff:officer')
     assert.equal(h.state.canReviewField(h.state.observations.value[0]), false, 'self-review still uses the full subject')
-    assert.equal(h.calls.length, 1)
+    assert.equal(h.calls.filter(call=>call.url.startsWith('/api/observations')).length, 1)
     h.changeSession(account, true)
     assert.notEqual(h.state.submitterLabel('staff:officer'), 'Aina Actual', 'unverified sessions do not resolve names')
+  assertReadOnlyObservationSources(h)
   } finally { h.stop() }
 })
 
 const mainObservationTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'observations-table')
 const observationCells = row => nodes(row).filter(node => node.type === 'td')
 
-test('main table has seven matching columns with one Status, full action access and no duplicate Review State', async () => {
+test('main table has eight matching columns with one Status, full action access and no duplicate Review State', async () => {
   const longName = 'Long species name '.repeat(35) + 'UnbrokenName'.repeat(40)
   const rows = ['Draft', 'Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged'].map((status, index) => fixture({ id: String(index + 1), status, scientific_name: longName }))
   const h = harness(identityHandler(rows))
   try {
     await h.state.loadObservations()
     const table = mainObservationTable(h), headers = nodes(table).filter(node => node.type === 'th')
-    assert.deepEqual(headers.map(node => node.children), ['Observation ID', 'Plant ID', 'Species', 'Submitted By', 'Status', 'Created', 'Actions'])
+    assert.deepEqual(headers.map(node => node.children), ['Submission ID', 'Submission Type', 'Plant ID', 'Species', 'Submitted By', 'Status', 'Created', 'Actions'])
     assert.equal(headers.filter(node => node.children === 'Status').length, 1)
     assert.ok(!headers.some(node => node.children === 'Review State'))
     assert.ok(headers.every(node => node.props.scope === 'col'))
-    assert.equal(nodes(table).filter(node => node.type === 'col').length, 7)
+    assert.equal(nodes(table).filter(node => node.type === 'col').length, 8)
     const dataRows = nodes(table).filter(node => node.type === 'tr' && observationCells(node).length)
     assert.equal(dataRows.length, rows.length)
     dataRows.forEach((row, index) => {
       const cells = observationCells(row), item = h.state.observations.value[index]
       assert.equal(cells.length, headers.length)
       assert.ok(nodes(cells[0]).some(node => node.children === h.state.observationLabel(item.id)))
-      assert.equal(cells[1].children, item.plantDisplayId)
-      assert.ok(nodes(cells[2]).some(node => node.children === longName))
-      assert.ok(nodes(cells[3]).some(node => node.children === h.state.submitterLabel(item.ownerSubject)))
-      assert.ok(nodes(cells[4]).some(node => String(node.props?.class).includes('badge') && node.children === h.state.label(item.status)))
-      assert.equal(cells[5].children, h.state.formatDate(item.createdAt))
-      const actions = nodes(cells[6])
+      assert.equal(cells[2].children, item.plantDisplayId)
+      assert.ok(nodes(cells[3]).some(node => node.children === longName))
+      assert.ok(nodes(cells[4]).some(node => node.children === h.state.submitterLabel(item.ownerSubject)))
+      assert.ok(nodes(cells[5]).some(node => String(node.props?.class).split(/\s+/).includes('badge') && node.children === h.state.label(item.status)))
+      assert.equal(cells[6].children, h.state.formatDate(item.createdAt))
+      const actions = nodes(cells[7])
       assert.ok(actions.some(node => node.type === 'button' && ['Review', 'View Details'].includes(node.children)))
       assert.ok(actions.some(node => node.props?.to === '/plant/PL007'))
       assert.ok(actions.some(node => node.type === 'button' && node.children === 'History'))
       assert.ok(actions.some(node => node.props?.to?.name === 'conservation-map' && node.props.to.query.plant === '7'))
       assert.equal(nodes(cells[0]).filter(node => node.props?.class === 'identifier-copy').length, 1)
-      assert.equal(nodes(cells[3]).filter(node => node.props?.class === 'identifier-copy').length, 1)
+      assert.equal(nodes(cells[4]).filter(node => node.props?.class === 'identifier-copy').length, 1)
     })
-    assert.equal(h.calls.length, 1)
+    assert.equal(h.calls.filter(call=>call.url.startsWith('/api/observations')).length, 1)
+  assertReadOnlyObservationSources(h)
   } finally { h.stop() }
 })
 
@@ -1109,7 +1112,7 @@ test('Observation modal opts into accessibility and its own two-column theme wit
     assert.ok(modal)
     assert.equal(modal.props.accessible, '')
     assert.equal(modal.props.title, 'Plant Observation')
-    assert.equal(h.state.modalDate('2026-11-07T06:20:00Z'), '7 Nov 2026, 14:20')
+    assert.equal(h.state.modalDate('2026-11-07T06:20:00Z'), '7 November 2026, 14:20')
     assert.equal(h.state.modalDate('bad'), '\u2014')
     assert.ok(nodes(modal).some(node => node.props?.class === 'observation-information-column'))
     assert.ok(nodes(modal).some(node => String(node.props?.class).includes('observation-review-column')))
@@ -1126,25 +1129,25 @@ test('Observation modal opts into accessibility and its own two-column theme wit
   } finally { h.stop() }
 })
 
-test('loading, unavailable and empty main-table states span the seven retained columns', async () => {
+test('loading, unavailable and empty main-table states span the eight retained columns', async () => {
   for (const fail of [false, true]) {
     const h = harness(async () => fail ? Response.json({ error: 'Unavailable' }, { status: 503 }) : Response.json({ observations: [] }))
     try {
       const loading = nodes(mainObservationTable(h)).filter(node => node.type === 'td')
-      assert.equal(loading.length, 1); assert.equal(loading[0].props.colspan, '7')
+      assert.equal(loading.length, 1); assert.equal(loading[0].props.colspan, '8')
       await h.state.loadObservations()
       const cells = nodes(mainObservationTable(h)).filter(node => node.type === 'td')
-      assert.equal(cells.length, 1); assert.equal(cells[0].props.colspan, '7')
+      assert.equal(cells.length, 1); assert.equal(cells[0].props.colspan, '8')
     } finally { h.stop() }
   }
 })
 
 test('table layout reserves intrinsic status/action widths, consistent padding and internal horizontal scrolling', async () => {
   const css = descriptor.styles[0].content
-  assert.match(css, /\.observations-table\s*\{[^}]*width: 100%; min-width: 80rem; table-layout: auto; white-space: normal/)
+  assert.match(css, /\.observations-table\s*\{[^}]*width: 100%; min-width: 92rem; table-layout: auto; white-space: normal/)
   assert.match(css, /\.observations-table th, \.observations-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)
-  assert.match(css, /\.observations-table \.status-column, \.observations-table \.actions-column\s*\{ width: 1%/)
-  assert.match(css, /\.observations-table \.species-column\s*\{ width: 20%/)
+  assert.match(css, /\.observations-table \.status-column\s*\{ width: 10rem/)
+  assert.match(css, /\.observations-table \.species-column\s*\{ width: 15rem/)
   assert.match(css, /\.observations-table \.plant-column\s*\{ width: 6rem/)
   assert.match(css, /\.identifier-line\s*\{[^}]*display: inline-flex;[^}]*justify-content: flex-start;[^}]*gap: 7px/)
   assert.doesNotMatch(/\.identifier-line\s*\{([^}]+)\}/.exec(css)[1], /width: 180px/)
@@ -1175,7 +1178,7 @@ test('main observation header is continuous forest green and row content is vert
   assert.match(css, /\.observations-table thead th:first-child\s*\{ border-top-left-radius: 10px/)
   assert.match(css, /\.observations-table thead th:last-child\s*\{ border-top-right-radius: 10px/)
   assert.match(css, /\.observations-table th, \.observations-table td\s*\{[^}]*vertical-align: middle/)
-  const identifiers = /\.identifier-line\s*\{([^}]+)\}/.exec(css)[1]
+  const identifiers = /(?:^|\n)\.identifier-line\s*\{([^}]+)\}/.exec(css)[1]
   assert.match(identifiers, /align-items: center/)
   assert.match(identifiers, /vertical-align: middle/)
   assert.match(css, /\.observations-table \.badge\s*\{[^}]*align-items: center;[^}]*vertical-align: middle/)
@@ -1203,13 +1206,13 @@ test('status badges and action rows retain intrinsic single-line widths without 
 
 test('pending and completed observations keep every action and full localized status label in the single-row group', async () => {
   for (const language of ['en', 'ms', 'zh-CN']) for (const status of ['Pending Review', 'Approved', 'Rejected', 'Correction Required']) {
-    for (const origin of ['subsequent_observation', 'initial_registration']) {
+    for (const origin of ['subsequent_observation']) {
       const row = fixture({ status, origin_type: origin })
       const h = harness(identityHandler([row]), officer, false, null, language)
       try {
         await h.state.loadObservations(); h.state.queueOrigin.value = 'all'
         const table = mainObservationTable(h)
-        const badge = nodes(table).find(node => node.type === 'span' && String(node.props?.class).includes('badge'))
+        const badge = nodes(table).find(node => node.type === 'span' && String(node.props?.class).split(/\s+/).includes('badge'))
         assert.equal(badge.children, h.state.label(status))
         const cell = nodes(table).find(node => node.props?.class === 'actions-cell')
         const group = nodes(cell).find(node => node.props?.class === 'action-group')
@@ -1218,14 +1221,15 @@ test('pending and completed observations keep every action and full localized st
         assert.ok(actions.every(node => nodes(node).some(child => typeof child.children === 'string' && child.children.trim())))
         assert.ok(actions.some(node => node.props?.to === '/plant/PL007'))
         assert.ok(actions.some(node => node.props?.to?.name === 'conservation-map'))
-        assert.equal(nodes(table).filter(node => node.type === 'th').length, 7)
+        assert.equal(nodes(table).filter(node => node.type === 'th').length, 8)
         const scroll = nodes(h.render()).find(node => String(node.props?.class).includes('observations-scroll'))
         assert.equal(scroll.props.tabindex, '0')
         assert.equal(nodes(scroll).filter(node => String(node.props?.class).includes('table-scroll')).length, 1, 'only one table scroll container')
         assert.equal(copyButtons(h).length, 2)
-        assert.equal(h.calls.length, 1)
+        assert.equal(h.calls.filter(call=>call.url.startsWith('/api/observations')).length, 1)
         assert.ok(h.calls.every(call => !call.options.method || call.options.method === 'GET'))
-      } finally { h.stop() }
+      assertReadOnlyObservationSources(h)
+  } finally { h.stop() }
     }
   }
 })
@@ -1285,4 +1289,278 @@ test('Resubmitted is informational, localized and strictly limited to verified P
    assert.match(styles,/background: #FFF1DB; color: #926119/)
   }finally{h.stop()}
  }
+})
+
+
+test('all Observation copy icons use control-specific checkmarks and the same anchored two-second toast',async()=>{
+ let now=0,id=0;const timers=new Map(),copied=[]
+ const window={setTimeout(fn,ms){const key=++id;timers.set(key,{fn,due:now+ms});return key},clearTimeout(key){timers.delete(key)}}
+ const owner='staff:shared-owner',other='6d8a3647-e3c3-43fa-b355-aabdddf05f72'
+ const h=harness(identityHandler([fixture({owner_subject:owner}),fixture({id:other,owner_subject:owner})]),officer,false,null,'en',{window,clipboard:{writeText:async value=>copied.push(value)}})
+ const checks=()=>nodes(h.render()).filter(n=>n.type==='span'&&n.props?.class==='officer-copy-anchor').filter(n=>nodes(n).some(c=>c.type==='button'&&nodes(c).some(svg=>svg.type==='path'&&svg.props?.d==='m5 12 4 4 10-10')))
+ const toasts=()=>nodes(h.render()).filter(n=>n.props?.class==='officer-copy-toast')
+ try{
+  await h.state.loadObservations();const buttons=copyButtons(h)
+  await buttons[1].props.onClick();assert.deepEqual(copied,[owner]);assert.equal(checks().length,1);assert.equal(toasts().length,1)
+  assert.equal(h.state.copyFeedback.value,'')
+  await buttons[3].props.onClick();assert.deepEqual(copied,[owner,owner]);assert.equal(checks().length,2);assert.equal(toasts().length,1)
+  const old=[...timers.values()][0].fn
+  now=1500;await buttons[1].props.onClick();old();assert.equal(checks().length,2)
+  now=2000;for(const [key,t] of timers)if(t.due<=now){timers.delete(key);t.fn()}
+  assert.equal(checks().length,1);assert.equal(toasts().length,1)
+  now=3500;for(const [key,t] of timers)if(t.due<=now){timers.delete(key);t.fn()}
+  assert.equal(checks().length,0);assert.equal(toasts().length,0)
+ }finally{h.stop()}
+ assert.equal(timers.size,0)
+})
+
+
+test('temporary authentication verification preserves field-review drafts and blocks decisions until recovery',async()=>{
+ const h=harness(async url=>Response.json(url.startsWith('/api/observations?')?{observations:[fixture()],page:{has_more:false,next_cursor:null}}:url==='/api/observations'?{observations:[fixture()]}:{observation:fixture()}))
+ try{
+  await h.state.loadObservations()
+  await h.state.open(h.state.observations.value[0],true)
+  h.state.reviewComment.value='Keep field review draft'
+  const officer=h.state.session.value.user
+  h.changeSession(officer,true)
+  assert.equal(h.state.selected.value.id,uuid)
+  assert.equal(h.state.reviewComment.value,'Keep field review draft')
+  assert.equal(h.state.authorizedOfficer.value,false)
+  await h.state.decide('Approved')
+  assert.equal(h.calls.filter(call=>call.options?.method==='POST').length,0)
+  h.changeSession(officer,false)
+  assert.equal(h.state.reviewComment.value,'Keep field review draft')
+  assert.equal(h.state.authorizedOfficer.value,true)
+  h.changeSession(null,false);assert.equal(h.state.selected.value,null)
+ }finally{h.stop()}
+})
+
+const observationText = h => nodes(h.render()).map(n => typeof n.children === 'string' ? n.children : '').join(' ')
+
+test('unchanged observation reload preserves drafts and acknowledgement with info styling in every locale', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    let row = fixture({ revision: 1 })
+    const h = harness(url => Response.json(url === '/api/observations' ? { observations: [row] } : { observation: row }), officer, false, null, language)
+    try {
+      await h.state.open(h.state.mapObservation(row), true)
+      h.state.reviewComment.value = 'Unsent Officer comment'
+      row = { ...row, updated_at: '2026-11-03T18:00:00+08:00', assets: [...row.assets].reverse(), content: Object.fromEntries(Object.entries(row.content).reverse()) }
+      await h.state.reloadReview()
+      assert.equal(h.state.reviewComment.value, 'Unsent Officer comment')
+      assert.equal(h.state.reviewAcknowledged.value, true)
+      assert.equal(h.state.reviewAllowed.value, true)
+      assert.equal(h.state.reviewNeedsReload.value, false)
+      assert.equal(h.state.reviewFeedbackVariant.value, 'info')
+      const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
+      assert.equal(h.state.reviewFeedback.value, labels.observationModal.upToDate)
+      const info = nodes(h.render()).find(n => n.type === 'p' && String(n.props?.class).includes('observation-review-feedback'))
+      assert.equal(info.props.role, 'status'); assert.ok(info.props.class.includes('info')); assert.ok(!info.props.class.includes('error'))
+      assert.ok(!nodes(h.render()).some(n => n.props?.class === 'review-feedback error'))
+      assert.ok(nodes(h.render()).some(n => n.props?.['initial-submission'] === true))
+      assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
+    } finally { h.stop() }
+  }
+})
+
+for (const [name, patch] of [
+  ['revision', { revision: 5 }], ['content', { content: { ...fixture().content, heightCm: 77 } }],
+  ['photos', { assets: [{ id: 'different-image', content_type: 'image/jpeg' }] }],
+  ['approval', { status: 'Approved', revision: 5 }], ['rejection', { status: 'Rejected', revision: 5 }],
+  ['origin', { origin_type: 'initial_registration' }],
+]) test(`changed observation ${name} requires reinspection without resubmitting a decision`, async () => {
+  const { h, set } = reviewHarness()
+  try {
+    await h.state.open(h.state.mapObservation(fixture()), true); h.state.reviewComment.value = 'Preserve draft'
+    set(fixture(patch)); await h.state.reloadReview()
+    assert.equal(h.state.reviewAcknowledged.value, false)
+    assert.equal(h.state.reviewAllowed.value, false)
+    assert.equal(h.state.reviewComment.value, 'Preserve draft')
+    assert.equal(h.state.reviewFeedbackVariant.value, 'error')
+    h.state.reviewAcknowledged.value = true
+    assert.equal(h.state.reviewAllowed.value, !['approval', 'rejection', 'origin'].includes(name))
+    assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
+  } finally { h.stop() }
+})
+
+for (const invalid of [null, undefined, '4', 0, 1.5, 'http-error']) test(`failed or malformed observation reload ${String(invalid)} blocks review until a successful read`, async () => {
+  let row = fixture(), fail = false
+  const h = harness(url => fail && invalid === 'http-error'
+    ? Response.json({ error: 'Latest read failed' }, { status: 503 })
+    : Response.json(url === '/api/observations' ? { observations: [row] } : { observation: row }))
+  try {
+    await h.state.open(h.state.mapObservation(row), true); h.state.reviewComment.value = 'Preserve failed-read draft'
+    fail = true; if (invalid !== 'http-error') row = fixture({ revision: invalid })
+    await h.state.reloadReview()
+    assert.equal(h.state.reviewNeedsReload.value, true); assert.equal(h.state.reviewAllowed.value, false)
+    assert.equal(h.state.reviewFeedbackVariant.value, 'error')
+    assert.equal(h.state.reviewComment.value, 'Preserve failed-read draft')
+    assert.ok(observationText(h).includes(messages.submissionChanges.reloadRequired))
+    assert.ok(!observationText(h).includes(messages.submissionChanges.conflict))
+    await h.state.decide('Rejected'); assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
+    fail = false; row = fixture(); await h.state.reloadReview()
+    assert.equal(h.state.reviewNeedsReload.value, false); assert.equal(h.state.reviewAllowed.value, true)
+    assert.equal(h.state.reviewFeedbackVariant.value, 'info')
+  } finally { h.stop() }
+})
+
+test('an unchanged reload cannot clear inspection required by an actual HTTP 409', async () => {
+  const { h } = reviewHarness(fixture(), () => Response.json({ error: 'Stale review' }, { status: 409 }))
+  try {
+    await h.state.open(h.state.mapObservation(fixture()), true); h.state.reviewComment.value = 'Keep conflict draft'
+    await h.state.decide('Rejected'); assert.equal(h.state.reviewAcknowledged.value, false)
+    await h.state.reloadReview()
+    assert.equal(h.state.reviewAcknowledged.value, false); assert.equal(h.state.reviewAllowed.value, false)
+    assert.equal(h.state.reviewComment.value, 'Keep conflict draft'); assert.equal(h.state.reviewFeedbackVariant.value, 'error')
+    assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 1)
+    h.state.reviewAcknowledged.value = true; assert.equal(h.state.reviewAllowed.value, true)
+  } finally { h.stop() }
+})
+
+test('validation after an unchanged info reload still uses real error feedback', async () => {
+  const { h } = reviewHarness()
+  try {
+    await h.state.open(h.state.mapObservation(fixture()), true); await h.state.reloadReview()
+    assert.equal(h.state.reviewFeedbackVariant.value, 'info')
+    h.state.reviewComment.value = ''; await h.state.decide('Correction Required')
+    assert.equal(h.state.reviewFeedbackVariant.value, 'error'); assert.equal(h.state.reviewCommentError.value, true)
+    assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
+  } finally { h.stop() }
+})
+
+
+
+test('Observation provenance identifies current content and the separate history view stays read-only in every locale',async()=>{
+  for(const language of ['en','ms','zh-CN']){
+    const row=fixture({status:'Approved',historical_review:{state:'available',fields:{content:{heightCm:999}}}})
+    const h=harness(async()=>Response.json({observation:row}),officer,false,null,language)
+    try{
+      await h.state.open(h.state.mapObservation(row))
+      const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'))
+      const notices=nodes(h.render()).filter(n=>n.props?.class==='observation-data-provenance')
+      assert.ok(notices.some(n=>n.children===labels.observationModal.currentRecordNotice))
+      assert.notEqual(h.state.selected.value.height,'999')
+      h.state.openHistory(h.state.selected.value);await flush()
+      assert.equal(h.state.reviewAllowed.value,false)
+      assert.ok(nodes(h.render()).some(n=>n.props?.class==='observation-data-provenance'&&n.children===labels.observationModal.historyReadOnly))
+      await h.state.decide('Approved');assert.equal(h.calls.filter(c=>c.options?.method==='POST').length,0)
+    }finally{h.stop()}
+  }
+})
+
+test('Superseded and terminal Observation records cannot initiate review decisions',async()=>{
+  for(const status of ['Superseded','Withdrawn','Rejected','Approved','Correction Required']){
+    const row=fixture({status}),h=harness(async()=>Response.json({observation:row}))
+    try{
+      await h.state.open(h.state.mapObservation(row),true)
+      assert.equal(h.state.reviewAllowed.value,false)
+      await h.state.decide('Approved')
+      assert.equal(h.calls.filter(c=>c.options?.method==='POST').length,0)
+    }finally{h.stop()}
+  }
+})
+
+
+test('one Submission Type filter has exactly the three subsequent-workflow choices in every locale',async()=>{
+ for(const language of ['en','ms','zh-CN']){
+  const h=harness(identityHandler([]),officer,false,null,language)
+  try {await h.state.loadObservations();const dictionary=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'));const tree=nodes(h.render());
+   assert.equal(h.state.queueOrigin.value,'subsequent_observation');assert.ok(!tree.some(n=>n.props?.class==='field observation-type-field'));
+   const select=tree.find(n=>n.type==='select'&&nodes(n).some(o=>o.type==='option'&&o.props?.value==='original'));
+   assert.deepEqual(nodes(select).filter(n=>n.type==='option').map(n=>n.children),[dictionary.finalOfficerWorkflow.all,dictionary.finalOfficerWorkflow.original,dictionary.finalOfficerWorkflow.edit]);
+   assert.equal(nodes(mainObservationTable(h)).filter(n=>n.type==='th').length,8);
+  }finally{h.stop()}
+ }
+})
+
+test('registration and unclassified originals never enter the normal queue, even if an API returns mixed origins',async()=>{
+ const rows=['initial_registration','subsequent_observation','unknown'].map((origin_type,i)=>fixture({id:'origin-'+i,origin_type}));const h=harness(identityHandler(rows));
+ try{await h.state.loadObservations();assert.deepEqual(Array.from(h.state.filtered.value,r=>r.id),['origin-1']);assert.equal(h.state.summaryCounts.value.find(c=>c.status==='Pending Review').count,1);
+  assert.ok(nodes(h.render()).some(n=>n.type==='RouterLink'&&n.props?.to?.query?.legacy==='1'));
+ }finally{h.stop()}
+})
+
+test('Created uses real Malaysia date and time, including next-day rollover, and headers cannot wrap into characters',()=>{
+ const h=harness(identityHandler([]));try{assert.equal(h.state.formatDate('2026-11-03T20:30:00Z'),'4 November 2026, 04:30');assert.equal(h.state.formatDate('invalid'),'\u2014');}finally{h.stop()}
+ const css=descriptor.styles.map(s=>s.content).join('\n');assert.match(css,/th:nth-child\(6\).*th:nth-child\(8\)[^{]*\{[^}]*white-space: nowrap; overflow-wrap: normal/);assert.ok(!css.includes('status-column, .observations-table .actions-column { width: 1%'));
+})
+
+async function unifiedProposal(status='Pending Review',origin='subsequent_observation') {
+ const baseline=fixture({status:'Approved',origin_type:origin,created_at:'2026-10-01T00:00:00Z'})
+ return mapObservationEdit({id:uuid,observation_id:uuid,owner_subject:baseline.owner_subject,status,revision:7,base_revision:3,created_at:'2026-11-17T00:00:00Z',base_snapshot:{content:baseline.content},proposed_content:{...baseline.content,notes:'Proposal draft'},retained_photo_ids:[],added_photo_count:0},async()=>({observation:baseline}))
+}
+test('unified Observation table renders both distinct submission identities and accurate original counts',async()=>{
+ const canonical=[fixture({status:'Approved'}),fixture({id:'pending-original'})],h=harness(identityHandler(canonical))
+ try{await h.state.loadObservations();const edit=await unifiedProposal();h.state.receiveProposalState({rows:[edit],names:{'real-botanist-subject':'Botanist Aina'},loading:false,error:''});await flush()
+ assert.equal(h.state.displayedRows.value.length,3);assert.equal(new Set(h.state.displayedRows.value.map(row=>row.key)).size,3)
+ assert.ok(h.state.displayedRows.value.some(row=>row.key==='observation:'+uuid));assert.ok(h.state.displayedRows.value.some(row=>row.key==='observation-edit:'+uuid))
+ assert.equal(h.state.observations.value.length,2);assert.equal(h.state.summaryCounts.value.find(card=>card.status==='Pending Review').count,1)
+ const table=mainObservationTable(h),headers=nodes(table).filter(n=>n.type==='th');assert.equal(headers.length,8);assert.equal(headers[1].children,'Submission Type');assert.equal(headers[3].children,'Species')
+ const rows=nodes(table).filter(n=>n.type==='tr'&&observationCells(n).length===8);assert.equal(rows.length,3)
+ assert.ok(nodes(table).some(n=>n.children===messages.finalOfficerWorkflow.edit));assert.ok(nodes(table).some(n=>n.children===messages.finalOfficerWorkflow.original))
+ assert.equal(h.state.proposalItems.value[0].proposal.revision,7);assert.equal(h.state.proposalItems.value[0].baseline.status,'Approved')
+ assert.ok(!nodes(h.render()).some(n=>n.type==='section'&&n.props?.class==='panel observation-edit-queue'))
+ }finally{h.stop()}
+})
+test('unified filters use proposal status, owner and date with genuine baseline origin and Species',async()=>{
+ const h=harness(identityHandler([fixture()]));try{await h.state.loadObservations();h.state.receiveProposalState({rows:[await unifiedProposal('Pending Review','subsequent_observation')],names:{'real-botanist-subject':'Botanist Aina'},loading:false,error:''})
+ h.state.submissionType.value='edit';assert.equal(h.state.displayedRows.value.length,1)
+ h.state.status.value='Approved';assert.equal(h.state.displayedRows.value.length,0)
+ h.state.status.value='Pending Review';assert.equal(h.state.displayedRows.value.length,1)
+ h.state.queueOrigin.value='all';h.state.search.value='Botanist Aina';assert.equal(h.state.displayedRows.value.length,1)
+ h.state.search.value='CHANGE-'+uuid;assert.equal(h.state.displayedRows.value.length,1)
+ h.state.species.value=h.state.proposalItems.value[0].baseline.speciesId;h.state.owner.value='staff:real-botanist-subject';h.state.date.value='2026-11-17';assert.equal(h.state.displayedRows.value.length,1)
+ h.state.date.value='2026-10-01';assert.equal(h.state.displayedRows.value.length,0)
+ h.state.date.value='';h.state.search.value='';h.state.submissionType.value='original';assert.equal(h.state.displayedRows.value.length,1)
+ assert.ok(h.state.speciesOptions.value.some(item=>item.id===h.state.proposalItems.value[0].baseline.speciesId))
+ }finally{h.stop()}
+})
+test('unified proposal actions preserve exact identity and terminal grey/read-only presentation',async()=>{
+ for(const status of ['Pending Review','Cancelled','Withdrawn','Superseded']){
+ const h=harness(identityHandler([]));try{await h.state.loadObservations();const edit=await unifiedProposal(status),opened=[];h.state.proposalQueue.value={view:row=>opened.push(row)}
+ h.state.receiveProposalState({rows:[edit],names:{},loading:false,error:''});await flush()
+ const row=nodes(mainObservationTable(h)).find(n=>n.type==='tr'&&observationCells(n).length===8),cells=observationCells(row),button=nodes(cells[7]).find(n=>n.type==='button')
+ assert.equal(h.state.proposalReviewable(edit),status==='Pending Review');assert.equal(button.children,status==='Pending Review'?messages.dashboardObservationEdits.review:messages.common.viewDetails)
+ if(status!=='Pending Review')assert.ok(row.props.class.includes(status==='Superseded'?'superseded':'terminal-read-only'))
+ button.props.onClick();assert.equal(opened[0].id,uuid);assert.equal(opened[0].revision,7);assert.equal(h.state.selected.value,null);assert.equal(h.calls.filter(c=>c.options?.method==='POST').length,0)
+ }finally{h.stop()}
+ }
+})
+test('unified source warning is compact; retry touches only edit requests and filters never hide deep-link handling',async()=>{
+ const h=harness(identityHandler([fixture()]));try{await h.state.loadObservations();let retries=0;h.state.proposalQueue.value={load:()=>retries++}
+ h.state.receiveProposalState({rows:[],names:{},loading:false,error:'HTTP 503 unavailable'});h.state.submissionType.value='original';h.state.status.value='Rejected';await flush()
+ const warning=nodes(h.render()).find(n=>n.props?.class==='proposal-warning');assert.ok(warning);assert.equal(warning.props.role,'alert')
+ const before=h.calls.length;nodes(warning).find(n=>n.type==='button').props.onClick();assert.equal(retries,1);assert.equal(h.calls.length,before)
+ assert.equal(h.state.observations.value.length,1)
+ const controller=nodes(h.render()).find(n=>n.type?.name?.endsWith('ObservationEditQueue.vue'));assert.ok(controller,'controller and deep-link dialog stay mounted regardless of filters')
+ }finally{h.stop()}
+})
+test('Cancelled proposal filter never sends an unsupported canonical status to the backend',async()=>{
+ const h=harness(identityHandler([fixture()]));try{h.state.status.value='Cancelled';await h.state.loadObservations();assert.ok(!h.calls.some(c=>c.url?.includes('status=Cancelled')));assert.equal(h.state.filtered.value.length,0)}finally{h.stop()}
+})
+
+
+test('initial and unknown edit proposals stay out of normal rows without becoming canonical observations',async()=>{
+ const h=harness(identityHandler([fixture()]));try{await h.state.loadObservations();h.state.receiveProposalState({rows:[await unifiedProposal('Pending Review','initial_registration'),await unifiedProposal('Pending Review','unknown')],names:{},loading:false,error:''});assert.equal(h.state.proposalItems.value.length,0);assert.equal(h.state.displayedRows.value.length,1);assert.equal(h.state.observations.value.length,1)}finally{h.stop()}
+})
+
+test('Observation submission types use full localized labels and distinct high-contrast fixed badge colors',async()=>{
+ for(const language of ['en','ms','zh-CN']){
+  const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'))
+  const h=harness(identityHandler([fixture()]),officer,false,null,language)
+  try{await h.state.loadObservations();h.state.receiveProposalState({rows:[await unifiedProposal()],names:{},loading:false,error:''});const table=mainObservationTable(h)
+   for(const [kind,label] of [['original',labels.finalOfficerWorkflow.original],['edit',labels.finalOfficerWorkflow.edit]]){const badges=nodes(table).filter(n=>n.props?.class==='submission-type-badge submission-type-'+kind);assert.equal(badges.length,1);assert.equal(badges[0].children,label)}
+   const statusBadges=nodes(table).filter(n=>n.type==='span'&&String(n.props?.class).split(/\s+/).includes('badge'));assert.equal(statusBadges.length,2);assert.ok(statusBadges.every(n=>JSON.stringify(n.props.style)===JSON.stringify(workflowBadgeStyle('Pending Review'))))
+  }finally{h.stop()}
+ }
+ const css=descriptor.styles.map(s=>s.content).join('\n');const pairs=[['original','#e0f2fe','#075985'],['edit','#f3e8ff','#6b21a8']]
+ const luminance=hex=>{const rgb=hex.slice(1).match(/../g).map(x=>parseInt(x,16)/255).map(x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4);return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2]}
+ for(const[kind,bg,fg]of pairs){assert.ok(css.includes('.submission-type-'+kind+' { background-color: '+bg+'; color: '+fg+'; }'));assert.ok((luminance(bg)+.05)/(luminance(fg)+.05)>=4.5)}
+ assert.match(css,/submission-type-badge[^}]*overflow-wrap: normal/)
+})
+test('historical access is collapsed, explained and retains the exact authorized legacy destination in every locale',()=>{
+ for(const language of ['en','ms','zh-CN']){const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'));const h=harness(identityHandler([]),officer,false,null,language)
+ try{const details=nodes(h.render()).find(n=>n.type==='details'&&n.props?.class==='historical-access');assert.ok(details);assert.ok(!details.props.open);assert.ok(nodes(details).some(n=>n.type==='summary'&&n.children===labels.unifiedObservations.historicalTitle));assert.ok(nodes(details).some(n=>n.type==='p'&&n.children===labels.unifiedObservations.historicalExplanation));assert.ok(nodes(details).some(n=>n.props?.to?.name==='conservation-reviews'&&n.props.to.query.legacy==='1'));assert.ok(labels.unifiedObservations.filterScope.length<130);assert.doesNotMatch(labels.unifiedObservations.filterScope,/Origin and Species|Observation baseline/)}finally{h.stop()}}
+})
+test('unverified photo evidence warning remains visible with no invented proposals and a source-only retry',async()=>{
+ const h=harness(identityHandler([fixture()]));try{await h.state.loadObservations();let retries=0;h.state.proposalQueue.value={load:()=>{retries++}};h.state.receiveProposalState({rows:[],names:{},loading:false,error:messages.unifiedObservations.invalidEvidence});const warning=nodes(h.render()).find(n=>n.props?.class==='proposal-warning');assert.equal(warning.props.role,'alert');assert.ok(nodes(warning).some(n=>typeof n.children==='string'&&n.children.includes(messages.unifiedObservations.invalidEvidence)));assert.equal(h.state.displayedRows.value.length,1);assert.equal(h.state.displayedRows.value[0].kind,'original');const calls=h.calls.length;nodes(warning).find(n=>n.type==='button').props.onClick();assert.equal(retries,1);assert.equal(h.calls.length,calls);assert.ok(h.calls.every(c=>!c.options.method||c.options.method==='GET'))}finally{h.stop()}
 })

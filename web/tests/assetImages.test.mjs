@@ -78,6 +78,7 @@ test('knowledge refresh retains plant thumbnails and separates preview fallback 
     if (name.endsWith('/plantCardMapping')) return cardMapping
     if (name.endsWith('/plants')) return { plants }
     if (name.endsWith('/plantRecords')) return { plantRecords: records }
+    if (name.endsWith('/auth')) return { sessionSnapshot: () => ({ user: null, pending: false }), subscribeSession: () => () => {} }
     if (name.includes('usePrototypeSession')) return { refreshSession: async () => null }
     if (name.endsWith('/plantApi')) return { plantApi: async path => {
       calls.push(path)
@@ -86,7 +87,7 @@ test('knowledge refresh retains plant thumbnails and separates preview fallback 
         { species_id: '2', scientific_name: 'Fixture two', image_asset_id: 'fallback' },
       ] }
       if (path === '/plants?scope=public-web') return { plants: [
-        { plant_id: '1', species_id: '1', plant_image_asset_id: 'plant-photo', rbac_status: 'Approved', observed_at: '2026-11-05T03:00:00Z', zone: 'Approved zone', latest_approved: { heightCm: 42, lifeStage: 'Mature' } },
+        { plant_id: '1', species_id: '1', plant_image_asset_id: 'plant-photo', rbac_status: 'Approved', observed_at: '2026-11-05T03:00:00Z', zone: 'Approved zone', current_registration: { state: 'available', observation_id: 'initial', content: { heightCm: 42, lifeStage: 'Mature' } }, latest_approved: { heightCm: 99, lifeStage: 'Mature' } },
         { plant_id: '2', species_id: '2', rbac_status: 'Pending Review', latitude: null, longitude: null, registered_at: '2026-11-05' },
       ] }
       return { assets: path.endsWith('=1') ? [] : [{ id: 'official', content_type: 'image/jpeg' }] }
@@ -200,12 +201,12 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
   const { descriptor } = parse(load('../src/views/SpeciesPlantsView.vue'))
   const script = compileScript(descriptor, { id: 'species-thumbnails' })
   const exports = {}, scope = vue.effectScope(), calls = []
-  const context = { exports, console, fetch: async url => {
+  const context = { exports, console, AbortSignal, fetch: async url => {
     calls.push(url)
     return Response.json(url === '/api/species' ? { species: [
       { species_id: '1', scientific_name: 'Fixture', common_name: 'Fixture', image_url: '/api/assets/preview' },
     ] } : { plants: [
-      { plant_id: '1', species_id: '1', rbac_status: 'Approved', plant_image_asset_id: 'plant-photo', observed_at: '2026-11-05T03:00:00Z', zone: 'Approved zone', latest_approved: { heightCm: 42, lifeStage: 'Mature' } },
+      { plant_id: '1', species_id: '1', rbac_status: 'Approved', plant_image_asset_id: 'plant-photo', observed_at: '2026-11-05T03:00:00Z', zone: 'Approved zone', current_registration: { state: 'available', observation_id: 'initial', content: { heightCm: 42, lifeStage: 'Mature' } }, latest_approved: { heightCm: 99, lifeStage: 'Mature' } },
       { plant_id: '2', species_id: '1', rbac_status: 'Pending Review', registered_at: '2026-11-05', latitude: null, latest_submission: { heightCm: 99, lifeStage: 'Young', zone: 'Pending zone' } },
     ] })
   }, require(name) {
@@ -217,23 +218,25 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
     if (name.endsWith('/plantCardMapping')) return cardMapping
     if (name.endsWith('/plants')) return { plants: [] }
     if (name.endsWith('/plantId')) return { formatPlantId: id => `PL${String(id).padStart(3, '0')}` }
-    if (name.includes('usePrototypeSession')) return { usePrototypeSession: () => ({ isLoggedIn: vue.ref(Boolean(role)), userRole: vue.ref(role) }) }
+    if (name.includes('useCatalogueRefresh')) return { useCatalogueRefresh: load => ({ refresh: () => load(() => true, role ? { id: 'fixture-user', role: role === 'admin' ? 'Administrator' : 'Conservation Officer', status: 'Active', mustChangePassword: false } : null), reset: () => load(() => true, null) }) }
+    if (name.includes('usePrototypeSession')) return { refreshSession: async () => role ? { id: 'fixture-user', role: role === 'admin' ? 'Administrator' : 'Conservation Officer', status: 'Active', mustChangePassword: false } : null, usePrototypeSession: () => ({ isLoggedIn: vue.ref(Boolean(role)), userRole: vue.ref(role) }) }
     if (name.endsWith('.vue')) return {}
     throw Error(name)
   } }
   try {
     vm.runInNewContext(js(script.content), context)
     const state = scope.run(() => exports.default.setup({}, { expose() {} }))
+    await state.loadPlants()
     for (let i = 0; i < 8; i++) { await vue.nextTick(); await new Promise(setImmediate) }
     assert.equal(state.loadError.value, '')
     assert.equal(state.selectedSpecies.value.image, '/api/data/assets/preview')
-    assert.equal(state.selectedSpecies.value.images, undefined)
+    assert.equal(state.selectedSpecies.value.images.length, 0)
     assert.equal(state.speciesPlants.value[0].images[0].path, '/api/data/assets/plant-photo')
     assert.equal(state.speciesPlants.value[1].images.length, 0)
     assert.equal(state.speciesPlants.value[0].latestApproved.heightCm, 42)
     assert.equal(state.speciesPlants.value[0].latestApproved.lifeStage, 'Mature')
     assert.equal(state.speciesPlants.value[0].location.zone, 'Approved zone')
-    assert.equal(state.speciesPlants.value[0].latestApproved.date, '2026-11-05T03:00:00Z')
+    assert.equal(state.speciesPlants.value[0].latestApproved.date, '')
     assert.equal(state.speciesPlants.value[1].reviewStatus, 'Pending Review')
     assert.equal(state.speciesPlants.value[1].latestApproved.date, '')
     assert.ok(Number.isNaN(state.speciesPlants.value[1].latestApproved.heightCm))
@@ -257,17 +260,19 @@ test('catalogue portrait URL, ID and safe gallery fallback have explicit priorit
 
 test('Administrator shared knowledge loader requests scientific catalogue and maps protected names, status and authorized photos', async () => {
   const plants = vue.reactive([]), records = vue.reactive([]), calls = [], exports = {}
+  const administrator = { id: 'fixture-admin', role: 'Administrator', status: 'Active', mustChangePassword: false }
   vm.runInNewContext(js(load('../src/services/knowledge.ts')), { exports, require(name) {
     if (name === 'vue') return vue
     if (name.endsWith('/assetImages')) return images
     if (name.endsWith('/plantCardMapping')) return cardMapping
     if (name.endsWith('/plants')) return { plants }
     if (name.endsWith('/plantRecords')) return { plantRecords: records }
-    if (name.includes('usePrototypeSession')) return { refreshSession: async () => ({ role: 'Administrator', mustChangePassword: false }) }
+    if (name.endsWith('/auth')) return { sessionSnapshot: () => ({ user: administrator, pending: false }), subscribeSession: () => () => {} }
+    if (name.includes('usePrototypeSession')) return { refreshSession: async () => administrator }
     if (name.endsWith('/plantApi')) return { plantApi: async path => {
       calls.push(path)
       if (path.startsWith('/species?')) return { species: [{ species_id: '3', scientific_name: 'Protected name', common_name: 'Common', habitat: 'Rainforest', conservation_status: 'Vulnerable', sensitivity: 'protected' }] }
-      if (path === '/plants') return { plants: [{ plant_id: '8', species_id: '3', rbac_status: 'Approved', plant_image_asset_id: 'plant-photo', zone: 'Approved zone', latest_approved: { heightCm: 42, lifeStage: 'Mature' } }] }
+      if (path === '/plants') return { plants: [{ plant_id: '8', species_id: '3', rbac_status: 'Approved', plant_image_asset_id: 'plant-photo', zone: 'Approved zone', current_registration: { state: 'available', observation_id: 'initial', content: { heightCm: 42, lifeStage: 'Mature' } }, latest_approved: { heightCm: 99, lifeStage: 'Mature' } }] }
       return { assets: [{ id: 'species-photo', content_type: 'image/jpeg' }] }
     } }
     throw Error(name)

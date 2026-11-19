@@ -1,7 +1,12 @@
 import { reportRequestUrl, type ReportFilters, type ReportScope } from './reporting'
 export type OperationalCategory = 'observations' | 'threats' | 'iot'
 export type Cell = string | number | null
+export interface ThreatReportDetail {
+  id: string; deviceId: string; cameraId: string | null; metric: string; triggerValue: unknown; status: string; createdAt: string
+}
 export interface OperationalReport {
+  threatDetailsVersion?: 1
+  alertDetails?: ThreatReportDetail[]
   category: OperationalCategory
   generatedAt: string
   scope: ReportScope

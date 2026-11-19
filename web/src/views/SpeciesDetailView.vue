@@ -25,6 +25,7 @@ const failedImages = ref<string[]>([])
 const isLoading = ref(true)
 const loadError = ref('')
 const plantsError = ref('')
+const plantsLimited = ref(false)
 const plantsLoading = ref(false)
 const imagesError = ref('')
 const user = ref<AuthUser | null>(null)
@@ -113,7 +114,7 @@ function clearPage() {
   generation++
   closeZoom()
   selectedImage.value = ''; selectedSpecies.value = null; linkedPlants.value = []; images.value = []; failedImages.value = []
-  loadError.value = ''; plantsError.value = ''; imagesError.value = ''; plantsLoading.value = false
+  plantsLimited.value = false; loadError.value = ''; plantsError.value = ''; imagesError.value = ''; plantsLoading.value = false
 }
 async function loadSpecies(background = false) {
   if (!background) clearPage()
@@ -157,6 +158,7 @@ async function loadSpecies(background = false) {
           const result = await requestPlantApi(user.value ? '/api/data/plants' : '/api/data/plants?scope=public-web')
           if (!current()) return
           if (!Array.isArray(result.plants)) throw Error()
+          plantsLimited.value = result.plants.length >= 500
           const nextPlants = result.plants.flatMap(value => {
             const row = object(value)
             if (!row || String(row.species_id) !== id || (row.rbac_status !== undefined && row.rbac_status !== 'Approved')) return []
@@ -199,8 +201,9 @@ async function loadSpecies(background = false) {
       if (JSON.stringify(images.value) !== JSON.stringify(nextImages)) images.value = nextImages
       const remainingFailures = failedImages.value.filter(path => allowed.includes(path))
       if (JSON.stringify(failedImages.value) !== JSON.stringify(remainingFailures)) failedImages.value = remainingFailures
-      if (JSON.stringify(selectedSpecies.value) !== JSON.stringify(nextProfile)) selectedSpecies.value = nextProfile
-    } else if (!background) selectedSpecies.value = nextProfile
+    }
+    // A secondary gallery outage must not prevent approved taxonomy/name refresh.
+    if (JSON.stringify(selectedSpecies.value) !== JSON.stringify(nextProfile)) selectedSpecies.value = nextProfile
   } catch (error) {
     if (current()) {
       if (background && !denied(error)) refreshError.value = error instanceof Error ? error.message : t('species.detail.loadFailed')
@@ -340,6 +343,7 @@ onBeforeUnmount(() => {
           <p>{{ t('species.detail.linkedDescription') }}</p>
           <p v-if="!plantsError && !plantsLoading && previewPlants.length < linkedPlants.length">{{ t('species.detail.previewRecords', { count: previewPlants.length, loaded: linkedPlants.length }) }}</p>
         </div>
+        <p v-if="plantsLimited" role="status">{{ t('catalogueDisplay.plantsLimited') }}</p>
         <p v-if="plantsLoading" role="status">{{ t('species.detail.loadingRecords') }}</p>
         <p v-else-if="plantsError" role="alert">{{ plantsError }}</p>
         <div v-else-if="linkedPlants.length" class="individual-plant-grid"><PlantRecordCard v-for="plant in previewPlants" :key="plant.plantId" :plant="plant" compact /></div>
@@ -812,7 +816,7 @@ onBeforeUnmount(() => {
   .profile-taxonomy > div, .profile-habitat { padding: 14px 16px; }
 }
 .portrait-dialog { position: fixed; inset: 0; margin: 0; padding: 0; border: 0; border-radius: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; box-sizing: border-box; background: transparent; box-shadow: none; overflow: hidden; }
-.portrait-dialog::backdrop { background: rgb(8 24 17 / 85%); }
+.portrait-dialog::backdrop { background: rgb(0 0 0 / 85%); }
 .zoom-content { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .zoom-photo-frame { position: relative; flex: 0 0 auto; width: fit-content; line-height: 0; }
 /* Natural image dimensions determine the frame. Reserve space for controls on every side. */

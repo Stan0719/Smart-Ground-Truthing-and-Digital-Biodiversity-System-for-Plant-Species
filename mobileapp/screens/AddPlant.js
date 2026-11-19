@@ -86,10 +86,12 @@ export default function AddPlantScreen(props) {
 
 function AddPlantSession({ route, navigation }) {
   useAppTranslation();
+  const qrEntry = route.params?.entrySource === "qr-scan" && route.params?.scannedQrId &&
+    route.params?.scannedQrToken && !route.params?.formDraftKey;
   const [session, setSession] = useState({ revision: 0, fresh: false });
   const freshOnFocus = useRef(false);
   const startFresh = useCallback(() => {
-    navigation.setParams({ formDraftKey: undefined });
+    navigation.setParams({ formDraftKey: undefined, entrySource: undefined, scannedQrId: undefined, scannedQrToken: undefined });
     setSession((current) => ({ revision: current.revision + 1, fresh: true }));
   }, [navigation]);
   useFocusEffect(useCallback(() => {
@@ -98,8 +100,8 @@ function AddPlantSession({ route, navigation }) {
       startFresh();
     }
   }, [startFresh]));
-  return <AddPlantForm key={`${session.revision}:${route.params?.formDraftKey || "new"}`} route={route} navigation={navigation}
-    skipRecovery={session.fresh} onStartNew={startFresh} onSubmitted={() => { freshOnFocus.current = true; }} />;
+  return <AddPlantForm key={`${session.revision}:${route.params?.formDraftKey || "new"}:${qrEntry ? route.params.scannedQrToken : ""}`} route={route} navigation={navigation}
+    skipRecovery={session.fresh || Boolean(qrEntry)} onStartNew={startFresh} onSubmitted={() => { freshOnFocus.current = true; }} />;
 }
 
 export function AddPlantForm({
@@ -131,6 +133,7 @@ export function AddPlantForm({
   const [loadingQRCodes, setLoadingQRCodes] = useState(true);
   const [qrLoadError, setQrLoadError] = useState("");
   const qrLoadPromiseRef = useRef(null);
+  const scannedQrHandledRef = useRef(null);
   const [generatingQR, setGeneratingQR] = useState(false);
   const generatingQRRef = useRef(false);
   const [qrGenerationMessage, setQrGenerationMessage] = useState("");
@@ -250,6 +253,25 @@ export function AddPlantForm({
     void loadSpeciesCatalog();
     void loadAvailableQRCodes();
   }, [loadSpeciesCatalog, loadAvailableQRCodes]));
+
+  useEffect(() => {
+    const scannedId = route.params?.scannedQrId;
+    if (!scannedId || !recoveryResolved || route.params?.formDraftKey || scannedQrHandledRef.current === scannedId) return;
+    let active = true;
+    scannedQrHandledRef.current = scannedId;
+    setSelectedQRCode(null);
+    plantApi(`/qr-codes?qr_id=${encodeURIComponent(String(scannedId))}`, { expectedAccountId: accountId }).then((response) => {
+      if (!active) return;
+      const match = response?.qr_codes?.find((code) => String(code.qr_id) === String(scannedId) &&
+        code.qr_code === route.params?.scannedQrToken && code.status === "generated" && code.plant_id == null);
+      if (match) setSelectedQRCode(match);
+      else {
+        setSelectedQRCode(null);
+        Alert.alert(t("addPlant.selectAQrCode"), t("addPlant.scannedQrUnavailable"));
+      }
+    }).catch(() => { if (active) Alert.alert(t("addPlant.selectAQrCode"), t("addPlant.scannedQrUnavailable")); });
+    return () => { active = false; };
+  }, [route.params?.scannedQrId, route.params?.scannedQrToken, route.params?.formDraftKey, recoveryResolved, accountId]);
 
   const filteredSpecies = speciesCatalog
     .filter((species) => {
@@ -847,6 +869,11 @@ function handleRemoveSpeciesPhoto(index) {
     submissionBusyRef.current = true;
     setSubmitting(true);
     try {
+      const currentInventory = await plantApi(`/qr-codes?qr_id=${encodeURIComponent(String(selectedQRCode.qr_id))}`, { expectedAccountId: accountId });
+      const availableQr = currentInventory?.qr_codes?.some((code) =>
+        String(code.qr_id) === String(selectedQRCode.qr_id) &&
+        code.qr_code === selectedQRCode.qr_code && code.status === "generated" && code.plant_id == null);
+      if (!availableQr) throw Error(t("addPlant.scannedQrUnavailable"));
       const latitudeValue = Number(latitude);
       const longitudeValue = Number(longitude);
       const accuracyValue = gpsAccuracy.trim() ? Number(gpsAccuracy) : undefined;

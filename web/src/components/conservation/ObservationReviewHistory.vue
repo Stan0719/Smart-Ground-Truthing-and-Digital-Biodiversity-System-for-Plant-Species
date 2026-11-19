@@ -89,7 +89,7 @@ async function requestHistory(append: boolean) {
           <span class="badge" :style="workflowBadgeStyle(review.decision)">{{ decisionLabel(review.decision) }}</span>
           <time :datetime="review.created_at || undefined">{{ formatReviewTimestamp(review.created_at, locale) }}</time>
         </div>
-        <div class="history-reviewer"><slot v-if="review.reviewer_subject?.trim()" name="reviewer" :subject="review.reviewer_subject.trim()">{{ review.reviewer_subject.trim() }}</slot><template v-else>{{ ht('reviewerUnavailable') }}</template></div>
+        <div class="history-reviewer"><slot v-if="review.reviewer_subject?.trim()" name="reviewer" :review="review" :subject="review.reviewer_subject.trim()">{{ review.reviewer_subject.trim() }}</slot><template v-else>{{ ht('reviewerUnavailable') }}</template></div>
         <p v-if="review.review_origin === 'species_dependency'" class="history-comment"><strong>{{ t('submissionChanges.automaticRejection') }}</strong> ? {{ review.species_request_id }}</p>
         <p class="history-comment">{{ review.comment }}</p>
       </li>

@@ -4,6 +4,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import OperationalReport from '../../components/conservation/OperationalReport.vue'
+import IoTEnvironmentalReport from '../../components/conservation/IoTEnvironmentalReport.vue'
+import ThreatIncidentReport from '../../components/conservation/ThreatIncidentReport.vue'
 import type { OperationalCategory } from '../../services/operationalReporting'
 import { reportCsv, reportFilename, renderReportPdf, type ReportDocument } from '../../utils/reportExport'
 import ReportChart from '../../components/conservation/ReportChart.vue'
@@ -41,6 +43,10 @@ const isLoading = ref(true)
 const loadError = ref('')
 const search = ref('')
 const sort = ref<ReportSort>('scientific-asc')
+const chartSort = ref<'high-low' | 'low-high' | 'alphabetical'>('high-low')
+const chartLimit = ref<'5' | '10' | '12' | 'all'>('12')
+const includeZeroCounts = ref(false)
+const selectedChartIndex = ref<number | null>(null)
 const toast = ref<{ tone: 'success' | 'error'; message: string } | null>(null)
 const reportChart = ref<{ toDataUrl: () => string | null; toPrintDataUrl: () => Promise<string | null> } | null>(null)
 const exporting = ref(false)
@@ -50,15 +56,33 @@ const filteredRows = computed(() =>
 const totalSpecies = computed(() => report.value?.rows.length || 0)
 const totalApprovedPlants = computed(() =>
   filteredRows.value.reduce((sum, row) => sum + row.approvedPlants, 0))
-const chartRows = computed(() =>
-  [...filteredRows.value]
-    .sort((a, b) => b.approvedPlants - a.approvedPlants || a.scientificName.localeCompare(b.scientificName))
-    .slice(0, 12))
+const chartRows = computed(() => {
+  const rows = filteredRows.value.filter(row => includeZeroCounts.value || row.approvedPlants > 0)
+  rows.sort((a, b) => {
+    if (chartSort.value === 'alphabetical') return a.scientificName.localeCompare(b.scientificName)
+    const countOrder = a.approvedPlants - b.approvedPlants
+    return (chartSort.value === 'high-low' ? -countOrder : countOrder) || a.scientificName.localeCompare(b.scientificName)
+  })
+  return chartLimit.value === 'all' ? rows : rows.slice(0, Number(chartLimit.value))
+})
+watch([search, chartSort, chartLimit, includeZeroCounts], () => { selectedChartIndex.value = null })
+const selectedChartRow = computed(() => selectedChartIndex.value == null ? null : chartRows.value[selectedChartIndex.value] || null)
+async function selectTableSpecies(row: ApprovedPlantReport['rows'][number]) {
+  if (!includeZeroCounts.value && row.approvedPlants === 0) includeZeroCounts.value = true
+  if (chartLimit.value !== 'all') chartLimit.value = 'all'
+  await nextTick()
+  const index = chartRows.value.findIndex(item => item === row)
+  if (index >= 0) selectedChartIndex.value = selectedChartIndex.value === index ? null : index
+}
 const chartSpec = computed(() => ({
   title: rt('chartTitle'),
-  labels: chartRows.value.map((row) => row.commonName || row.scientificName),
+  labels: chartRows.value.map((row) => row.scientificName),
+  scientificNames: chartRows.value.map((row) => row.scientificName),
+  commonNames: chartRows.value.map((row) => row.commonName || rt('unavailable')),
+  axisTitle: rt('approvedPlants'),
+  approvedLabel: rt('approvedPlants'),
   values: chartRows.value.map((row) => row.approvedPlants),
-  colors: chartRows.value.map((_, index) => index % 2 ? '#65a556' : '#32745b'),
+  colors: chartRows.value.map(() => '#477d62'),
 }))
 const appliedScope = computed(() => {
   const scope = report.value?.scope
@@ -161,7 +185,6 @@ function exportCsv() {
   try {
     const model = exportDocument()
     downloadBlob(new Blob([reportCsv(model)], { type: 'text/csv;charset=utf-8' }), reportFilename(model, 'csv'))
-    toast.value = { tone: 'success', message: rt('csvDownloaded') }
   } catch { toast.value = { tone: 'error', message: rt('errors.export') } }
 }
 async function exportPdf() {
@@ -178,7 +201,6 @@ async function exportPdf() {
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm' })
     if (await renderReportPdf(model, chartImage || null, pdf, current) && current()) {
       pdf.save(reportFilename(model, 'pdf'))
-      toast.value = { tone: 'success', message: rt('pdfDownloaded') }
     }
   } catch { if (current()) toast.value = { tone: 'error', message: rt('errors.export') } }
   finally { exporting.value = false }
@@ -192,7 +214,7 @@ onMounted(() => loadReport())
   <section class="panel reports-panel">
     <form class="control-bar report-filters" :class="{ 'custom-period': pendingPeriod === 'custom' }" aria-labelledby="report-filters-title" @submit.prevent="applyFilters">
       <h3 id="report-filters-title" class="filter-heading">{{ rt('filters') }}</h3>
-      <label class="field category-field" for="report-category"><span>{{ rt('reportCategory') }}</span><select v-officer-dropdown id="report-category" v-model="reportType"><option value="species-approved">{{ rt('speciesApprovedSummary') }}</option><option value="observations">{{ rt('observationSummary') }}</option><option value="threats">{{ rt('threatIncidentReport') }}</option><option value="iot">{{ rt('iotMonitoringReport') }}</option></select></label>
+      <label class="field category-field" for="report-category"><span>{{ rt('reportCategory') }}</span><select v-officer-dropdown id="report-category" v-model="reportType"><option value="species-approved">{{ rt('speciesApprovedSummary') }}</option><option value="observations">{{ rt('observationSummary') }}</option><option value="threats">{{ rt('threatIncidentReport') }}</option><option value="iot-summary">{{ rt('iotSummary.title') }}</option></select></label>
       <label class="field" for="report-period"><span>{{ rt('reportingPeriod') }}</span><select v-officer-dropdown id="report-period" v-model="pendingPeriod"><option value="all-time">{{ rt('periodAllTime') }}</option><option value="this-month">{{ rt('periodThisMonth') }}</option><option value="last-month">{{ rt('periodLastMonth') }}</option><option value="custom">{{ rt('periodCustom') }}</option></select></label>
       <template v-if="pendingPeriod === 'custom'">
         <label class="field" for="report-start"><span>{{ rt('startDate') }}</span><input id="report-start" v-model="pendingStart" type="date" required :aria-invalid="Boolean(filterError)" aria-describedby="report-filter-error" /></label>
@@ -202,7 +224,9 @@ onMounted(() => loadReport())
       <p v-if="filterError" id="report-filter-error" class="filter-error" role="alert">{{ filterError }}</p>
     </form>
 
-    <OperationalReport v-if="reportType !== 'species-approved'" :key="reportType" :category="reportType as OperationalCategory" :filters="operationalFilters" @busy="operationalBusy = $event" />
+    <IoTEnvironmentalReport v-if="reportType === 'iot-summary'" :filters="operationalFilters" @busy="operationalBusy = $event" />
+    <ThreatIncidentReport v-else-if="reportType === 'threats'" :filters="operationalFilters" @busy="operationalBusy = $event" />
+    <OperationalReport v-else-if="reportType !== 'species-approved'" :key="reportType" :category="reportType as OperationalCategory" :filters="operationalFilters" @busy="operationalBusy = $event" />
     <template v-else>
     <div class="control-bar report-controls">
       <label class="field search-field"><span>{{ rt('search') }}</span><input v-model="search" :placeholder="rt('searchPlaceholder')" :disabled="!report" /></label>
@@ -213,13 +237,21 @@ onMounted(() => loadReport())
     <div v-if="isLoading" class="report-state" role="status" aria-live="polite">{{ rt('loading') }}</div>
     <div v-else-if="loadError" class="report-state error" role="alert"><strong>{{ rt('loadFailed') }}</strong><span>{{ loadError }}</span><button class="primary-button" type="button" @click="loadReport(retryFilters)">{{ rt('retry') }}</button></div>
     <article v-else-if="report" class="report-preview">
-      <header class="report-title"><h2>{{ rt('speciesApprovedSummary') }}</h2><p class="applied-scope">{{ appliedPeriodLabel }}</p><p>{{ rt('generatedAt') }}: <strong>{{ generatedAt }}</strong></p></header>
+      <header class="report-title"><h2>{{ rt('speciesApprovedSummary') }}</h2><p class="applied-scope" :aria-description="appliedScope">{{ appliedPeriodLabel }}</p><p>{{ rt('generatedAt') }}: <strong>{{ generatedAt }}</strong></p></header>
       <div class="metric-grid"><div class="metric"><span>{{ rt('totalSpecies') }}</span><strong>{{ totalSpecies }}</strong></div><div class="metric"><span>{{ rt('totalApprovedPlants') }}</span><strong>{{ totalApprovedPlants }}</strong></div><div class="metric"><span>{{ rt('matchingRows') }}</span><strong>{{ filteredRows.length }}</strong></div></div>
       <p v-if="filteredRows.length && totalApprovedPlants === 0" class="chart-note" role="status">{{ rt('noPlantsInPeriod') }}</p>
-      <ReportChart v-if="filteredRows.length" ref="reportChart" :title="chartSpec.title" :labels="chartSpec.labels" :values="chartSpec.values" :colors="chartSpec.colors" />
-      <p v-if="filteredRows.length > chartRows.length" class="chart-note">{{ rt('chartLimit', { count: chartRows.length }) }}</p>
+      <div v-if="filteredRows.length" class="chart-tools" :aria-label="rt('chartControls')">
+        <label class="field chart-select"><span>{{ rt('chartSort') }}</span><select v-officer-dropdown v-model="chartSort"><option value="high-low">{{ rt('chartSortHigh') }}</option><option value="low-high">{{ rt('chartSortLow') }}</option><option value="alphabetical">{{ rt('chartSortAlphabetical') }}</option></select></label>
+        <label class="field chart-select"><span>{{ rt('chartTop') }}</span><select v-officer-dropdown v-model="chartLimit"><option value="5">{{ rt('chartTop5') }}</option><option value="10">{{ rt('chartTop10') }}</option><option value="12">{{ rt('chartTop12') }}</option><option value="all">{{ rt('chartAll') }}</option></select></label>
+        <label class="chart-toggle"><input v-model="includeZeroCounts" type="checkbox" /> {{ rt('chartIncludeZero') }}</label>
+        <button v-if="selectedChartIndex !== null" class="chart-clear" type="button" @click="selectedChartIndex = null">{{ rt('chartClearSelection') }}</button>
+      </div>
+      <div v-if="selectedChartRow" class="chart-selection" role="status" aria-live="polite"><strong>{{ rt('chartSelected') }}</strong><span><em>{{ selectedChartRow.scientificName }}</em> · {{ selectedChartRow.commonName || rt('unavailable') }} · {{ rt('approvedPlants') }}: {{ selectedChartRow.approvedPlants }}</span></div>
+      <ReportChart v-if="chartRows.length" ref="reportChart" :title="chartSpec.title" :labels="chartSpec.labels" :scientific-names="chartSpec.scientificNames" :common-names="chartSpec.commonNames" :axis-title="chartSpec.axisTitle" :approved-label="chartSpec.approvedLabel" :values="chartSpec.values" :colors="chartSpec.colors" :selected-index="selectedChartIndex" @select="selectedChartIndex = selectedChartIndex === $event ? null : $event" />
+      <p v-else-if="filteredRows.length" class="chart-note" role="status">{{ rt('chartNoRows') }}</p>
+      <p v-if="chartRows.length < filteredRows.filter(row => includeZeroCounts || row.approvedPlants > 0).length" class="chart-note">{{ rt('chartLimit', { count: chartRows.length }) }}</p>
       <div class="table-scroll officer-table-scroll" role="region" :aria-label="rt('speciesApprovedSummary')" tabindex="0">
-        <table class="officer-data-table report-summary-table"><colgroup><col class="column-report-scientific" /><col class="column-report-common" /><col class="column-report-count" /></colgroup><thead><tr><th scope="col">{{ rt('scientificName') }}</th><th scope="col">{{ rt('commonName') }}</th><th scope="col">{{ rt('approvedPlants') }}</th></tr></thead><tbody><tr v-for="row in filteredRows" :key="row.speciesId || row.scientificName"><td><em>{{ row.scientificName }}</em></td><td>{{ row.commonName || rt('unavailable') }}</td><td>{{ row.approvedPlants }}</td></tr><tr v-if="!filteredRows.length"><td colspan="3" class="empty-row">{{ report.rows.length ? rt('noMatches') : rt('empty') }}</td></tr></tbody></table></div>
+        <table class="officer-data-table report-summary-table"><colgroup><col class="column-report-scientific" /><col class="column-report-common" /><col class="column-report-count" /></colgroup><thead><tr><th scope="col">{{ rt('scientificName') }}</th><th scope="col">{{ rt('commonName') }}</th><th scope="col">{{ rt('approvedPlants') }}</th></tr></thead><tbody><tr v-for="row in filteredRows" :key="row.speciesId || row.scientificName" :class="{ 'chart-row-selected': selectedChartRow === row }" tabindex="0" :aria-selected="selectedChartRow === row" @click="selectTableSpecies(row)" @keydown.enter.prevent="selectTableSpecies(row)"><td><em>{{ row.scientificName }}</em></td><td>{{ row.commonName || rt('unavailable') }}</td><td>{{ row.approvedPlants }}</td></tr><tr v-if="!filteredRows.length"><td colspan="3" class="empty-row">{{ report.rows.length ? rt('noMatches') : rt('empty') }}</td></tr></tbody></table></div>
       <div class="modal-actions report-actions"><button type="button" class="secondary-button" :disabled="isLoading || exporting || !filteredRows.length" @click="exportPdf">{{ rt('exportPdf') }}</button><button type="button" class="secondary-button" :disabled="isLoading || exporting || !filteredRows.length" @click="exportCsv">{{ rt('exportCsv') }}</button></div>
       <p class="persistence-note">{{ rt('downloadOnly') }}</p>
     </article>
@@ -261,6 +293,17 @@ onMounted(() => loadReport())
 .filter-actions { display: flex; align-items: center; align-self: flex-end; flex-wrap: wrap; gap: 8px; }
 .filter-error { flex-basis: 100%; margin: 0; color: #9b3d35; font-size: 12px; }
 .persistence-note, .chart-note { color: #63776d; font-size: 11px; }
+.chart-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 4px 0 -14px; color: #526b5f; font-size: 12px; }
+.chart-tools .chart-select { min-width: 150px; margin: 0; }
+.chart-tools .chart-select select { min-height: 36px; }
+.chart-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.chart-toggle input { accent-color: #32745b; }
+.chart-clear { border: 0; padding: 4px 0; background: transparent; color: #32745b; text-decoration: underline; cursor: pointer; font: inherit; }
+.chart-selection { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 12px 0 -8px; padding: 10px 12px; border-left: 3px solid #477d62; background: #f3f7f3; color: #315749; font-size: 12px; }
+.report-summary-table tbody tr { cursor: pointer; transition: background-color 120ms ease; }
+.report-summary-table tbody tr:hover { background: #f3f7f3; }
+.report-summary-table tbody tr.chart-row-selected { background: #e6f0e8; box-shadow: inset 3px 0 #477d62; }
+.report-summary-table tbody tr:focus-visible { outline: 2px solid #477d62; outline-offset: -2px; }
 .applied-scope { line-height: 1.6; }
 .report-controls { margin: 0; }
 .report-state { padding: 45px 20px; text-align: center; color: #64776e; }

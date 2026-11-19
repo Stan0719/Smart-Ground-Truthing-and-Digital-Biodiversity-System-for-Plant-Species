@@ -10,7 +10,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { changeApi, changeRequest, compareChange, type RecordChange } from '../../services/recordChanges'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
 const route = useRoute(), router = useRouter()
-const emit = defineEmits<{ updated: [] }>()
+const emit = defineEmits<{ updated: [change: RecordChange]; reviewing: [] }>()
 const { t, te } = useI18n({ useScope: 'global' })
 const label = (key: string) => t('approvedChanges.' + key)
 const statusLabel = (status: string) => te('approvedChanges.statuses.' + status) ? label('statuses.' + status) : status
@@ -21,6 +21,8 @@ const selected = ref<RecordChange | null>(null)
 const loading = ref(false), busy = ref(false), error = ref(''), conflict = ref(false), comment = ref('')
 const photos = ref<string[]>([]), originalPhotos = ref<string[]>([])
 let detailGeneration = 0
+const recoveredMessage = ref('')
+const recoveredInfo = ref(false)
 const allComparisons = computed(() => selected.value ? compareChange(selected.value) : [])
 const technicalKeys = new Set(['qr_id','qr_token','qr_code','species_id','change_id','created_at','updated_at','registered_at'])
 const comparisons = computed(() => allComparisons.value.filter(row => !technicalKeys.has(row.key)))
@@ -38,19 +40,24 @@ function enlarge(items: string[], index: number, event: Event, title: string) {
 }
 function photoFailed(url: string) { failedPhotos.value = new Set([...failedPhotos.value,url]) }
 const eligible = computed(() => selected.value?.status === 'Pending Review' && !conflict.value && !busy.value && !loading.value &&
-  officerReady.value && selected.value.owner_subject !== `staff:${session.value.user?.id}`)
+  Number.isSafeInteger(selected.value.revision) && selected.value.revision > 0 && officerReady.value && selected.value.owner_subject !== `staff:${session.value.user?.id}`)
 const display = (value: unknown) => value === undefined ? label('unavailable') : value === null ? label('nullValue') : value === '' ? label('emptyValue') : typeof value === 'object' ? JSON.stringify(value) : String(value)
 const date = (value: string | null) => value ? reviewDateTime(value) : label('unavailable')
 async function open(id: string, preserveComment = false) {
   if (!officerReady.value) return
+  const inspect = preserveComment && conflict.value
   const generation = ++detailGeneration
+  const actor = session.value.user?.id, routeId = route.query.change
+  const current = () => generation === detailGeneration && officerReady.value && session.value.user?.id === actor && route.query.change === routeId
+  recoveredMessage.value = ''; recoveredInfo.value = false
   conflict.value = true; busy.value = true; error.value = ''; photos.value = []; originalPhotos.value = []; failedPhotos.value = new Set(); preview.value?.close()
   if (!preserveComment) { comment.value = ''; selected.value = null }
   try {
     const data = await changeRequest('/' + encodeURIComponent(id))
-    if (generation !== detailGeneration) return
+    if (!current()) return
     if (!data.change || data.change.id !== id) throw Error('Invalid proposal response.')
     selected.value = data.change
+    emit('updated', data.change)
     photos.value = Array.from({ length: Math.min(8,Math.max(0,Number(data.change.proposal_photo_count) || 0)) }, (_,i) => `${changeApi}/${encodeURIComponent(id)}/photos/${i}`)
     const base = data.change.base_snapshot
     if (data.change.plant_id) originalPhotos.value = (Array.isArray(base.photo_ids) ? base.photo_ids : []).map((asset: string) => '/api/data/assets/' + encodeURIComponent(asset))
@@ -64,11 +71,17 @@ async function open(id: string, preserveComment = false) {
         if (generation === detailGeneration && previous?.has_species_photo) originalPhotos.value = ['/api/data/record-versions/' + encodeURIComponent(previous.id) + '/photo']
       }
     }
-    if (generation !== detailGeneration) return
-    conflict.value = false
+    if (!current()) return
+    conflict.value = inspect && selected.value?.status === 'Pending Review'
+    if (inspect) {
+      const row = selected.value!
+      const confirmed = ['Approved','Rejected'].includes(row.status) && Boolean(row.reviewed_at && Number.isFinite(Date.parse(row.reviewed_at)) && row.reviewed_by?.startsWith('staff:') && row.reviewed_by.length > 6 && row.reviewed_by !== `staff:${actor}`)
+      recoveredInfo.value = row.status !== 'Pending Review'
+      recoveredMessage.value = confirmed ? t('conservationPages.reviews.feedback.reviewedElsewhere') : recoveredInfo.value ? t('conservationPages.reviews.feedback.conflictRefreshed') : label('conflict')
+    }
 
-  } catch (failure) { if (generation === detailGeneration) error.value = (failure as { status?: number }).status === 409 ? label('conflict') : label('requestFailed') }
-  finally { if (generation === detailGeneration) busy.value = false }
+  } catch (failure) { if (current()) error.value = (failure as { status?: number }).status === 409 ? label('conflict') : label('requestFailed') }
+  finally { if (current()) busy.value = false }
 }
 function close() {
   if (busy.value) return
@@ -82,21 +95,30 @@ async function decide(decision: 'Approved' | 'Rejected') {
   const generation = detailGeneration
   try {
     const id = selected.value.id
-    await changeRequest('/' + encodeURIComponent(id) + '/review', { decision, comment: comment.value.trim() })
+    emit('reviewing')
+    await changeRequest('/' + encodeURIComponent(id) + '/review', { decision, comment: comment.value.trim(), revision: selected.value.revision })
     if (generation !== detailGeneration) return
-    await open(id,true); emit('updated')
+    await open(id,true)
   } catch (failure) {
     if (generation !== detailGeneration) return
     error.value = (failure as { status?: number }).status === 409 ? label('conflict') : label('requestFailed')
-    if ((failure as { status?: number }).status === 409) conflict.value = true
+    conflict.value = true
+    if ((failure as { status?: number }).status === 409) await open(selected.value!.id, true)
   } finally { if (generation === detailGeneration) busy.value = false }
 }
 watch(() => route.query.change, id => {
   if (typeof id === 'string') void open(id)
-  else { detailGeneration++; selected.value = null; comment.value = ''; error.value = ''; busy.value = false; photos.value = []; originalPhotos.value = [] }
+  else { recoveredMessage.value = ''; detailGeneration++; selected.value = null; comment.value = ''; error.value = ''; busy.value = false; photos.value = []; originalPhotos.value = [] }
 }, { immediate: true })
 const unsubscribe = subscribeSession((user,pending) => {
-  detailGeneration++; selected.value = null; comment.value = ''; photos.value = []; originalPhotos.value = []
+  if (!pending && session.value.pending && user && user.id === session.value.user?.id && user.role === 'Conservation Officer' && user.status === 'Active' && !user.mustChangePassword) {
+    session.value = { user, pending }; return
+  }
+  if (pending && user && user.id === session.value.user?.id) {
+    detailGeneration++; conflict.value = conflict.value || busy.value; busy.value = false
+    session.value = { user, pending }; return
+  }
+  recoveredMessage.value = ''; detailGeneration++; selected.value = null; comment.value = ''; photos.value = []; originalPhotos.value = []
   loading.value = false; busy.value = false; session.value = { user,pending }
   if (officerReady.value) { if (typeof route.query.change === 'string') void open(route.query.change) }
   else error.value = label('sessionRequired')
@@ -123,6 +145,7 @@ onBeforeUnmount(() => { unsubscribe(); detailGeneration++; preview.value?.close(
       <div><span class="summary-label">{{ label('changedFields') }}: {{ changedFields.length }}</span><span v-if="!changedFields.length">{{ label('noChanges') }}</span><span v-for="field in changedFields" :key="field.key" class="changed-field">{{ fieldLabel(field.key) }}</span></div>
     </section>
     <p v-if="error" class="review-alert" role="alert">{{ error }}</p>
+    <p v-if="recoveredMessage" :class="recoveredInfo ? 'read-only-message' : 'review-alert'" :role="recoveredInfo ? 'status' : 'alert'">{{ recoveredMessage }}</p>
     <div v-if="conflict" class="review-alert" role="alert"><strong>{{ label('conflict') }}</strong><button class="action-button" :disabled="busy" @click="open(selected.id,true)">{{ label('reload') }}</button></div>
     <section class="comparison-section"><h3>{{ label('fieldComparison') }}</h3>
       <table class="comparison-table"><caption class="sr-only">{{ label('comparison') }}</caption><colgroup><col class="field-column" /><col /><col /></colgroup><thead><tr><th scope="col">{{ label('field') }}</th><th scope="col">{{ label('baseline') }}</th><th scope="col">{{ label('proposedValue') }}</th></tr></thead><tbody><tr v-for="field in comparisons" :key="field.key" :class="{ changed: field.changed }"><th scope="row">{{ fieldLabel(field.key) }}<span v-if="field.changed" class="changed-badge">{{ label('changed') }}</span></th><td>{{ display(field.before) }}</td><td :class="{ 'proposed-changed': field.changed }">{{ display(field.after) }}</td></tr></tbody></table>
@@ -132,7 +155,8 @@ onBeforeUnmount(() => { unsubscribe(); detailGeneration++; preview.value?.close(
       <section class="photo-panel"><header><h4>{{ label('baselinePhotos') }}</h4><span v-if="originalPhotos.length" class="photo-count">{{ originalPhotos.length }} {{ label('photoUnit') }}</span></header><p v-if="!originalPhotos.length" class="photo-empty">{{ label('photosUnavailable') }}</p><div class="photo-grid"><template v-for="(src,index) in originalPhotos" :key="src"><button v-if="!failedPhotos.has(src)" type="button" class="photo-thumbnail" :aria-label="label('baselinePhotos') + ' ' + (index + 1)" @click="enlarge(originalPhotos,index,$event,label('baselinePhotos'))"><img :src="src" :alt="label('baselinePhotos') + ' ' + (index + 1)" @error="photoFailed(src)" /></button><span v-else role="status">{{ label('photosUnavailable') }}</span></template></div></section>
       <section class="photo-panel"><header><h4>{{ label('proposedPhotos') }}</h4><span class="photo-count">{{ photos.length }} {{ label('photoUnit') }}</span></header><div v-if="!photos.length" class="photo-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m4 17 5-5 4 4 3-3 5 5"/></svg><p>{{ label('retainedPhotos') }}</p></div><div class="photo-grid"><template v-for="(src,index) in photos" :key="src"><button v-if="!failedPhotos.has(src)" type="button" class="photo-thumbnail" :aria-label="label('proposedPhotos') + ' ' + (index + 1)" @click="enlarge(photos,index,$event,label('proposedPhotos'))"><img :src="src" :alt="label('proposedPhotos') + ' ' + (index + 1)" @error="photoFailed(src)" /></button><span v-else role="status">{{ label('photosUnavailable') }}</span></template></div><p v-if="selected.plant_id" class="retention-summary"><span>{{ retainedIds.length }} {{ label('retainedPhotoCount') }}</span><span v-if="removedCount" class="removed-count">{{ removedCount }} {{ label('removedPhotoCount') }}</span></p></section>
     </div></section>
-    <section v-if="selected.reviewed_at" class="recorded-decision"><h3>{{ label('decision') }}</h3><p>{{ statusLabel(selected.status) }} | <MonitoringIdentifier :value="selected.reviewed_by" :labels="identifiers" /> | {{ date(selected.reviewed_at) }}</p><p>{{ selected.review_comment }}</p></section>
+    <section v-if="selected.reviewed_at" class="recorded-decision"><h3>{{ label(selected.status === 'Cancelled' ? 'previousReview' : 'decision') }}</h3><p><template v-if="selected.status !== 'Cancelled'">{{ statusLabel(selected.status) }} | </template><MonitoringIdentifier :value="selected.reviewed_by" :labels="identifiers" /> | {{ date(selected.reviewed_at) }}</p><p>{{ selected.review_comment }}</p></section>
+    <label v-if="conflict && !busy && !error && recoveredMessage && selected.status === 'Pending Review'"><input type="checkbox" :checked="false" @change="conflict = !($event.target as HTMLInputElement).checked" /> {{ t('conservationPages.reviews.speciesRequest.inspectLatest') }}</label>
     <section v-if="selected.status === 'Pending Review'" class="review-decision"><h3>{{ label('reviewDecision') }}</h3><label for="proposal-review-comment">{{ label('comment') }}</label><textarea id="proposal-review-comment" v-model="comment" maxlength="4000" rows="4" :placeholder="label('commentPlaceholder')" :aria-invalid="Boolean(error)" /><p class="character-count">{{ comment.length }} / 4,000</p><div class="review-actions"><button class="reject-change" :disabled="!eligible" @click="decide('Rejected')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 8 8 8m0-8-8 8"/></svg>{{ label('reject') }}</button><button class="approve-change" :disabled="!eligible" @click="decide('Approved')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg>{{ label('approve') }}</button></div></section>
     <p v-else class="read-only-message">{{ label('readOnly') }}</p>
     <PlantPhotoLightbox ref="preview" root-scroll-lock />

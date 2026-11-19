@@ -1,7 +1,7 @@
 "use strict";
 const { createHash, randomUUID } = require("node:crypto");
 const sharp = require("sharp");
-const { speciesHistory, captureApprovedReview } = require("./historical-reviews.cjs");
+const { speciesHistory, captureApprovedReview, submittedHistoryForReview } = require("./historical-reviews.cjs");
 const {proposedPhoto}=require("./species-photo-library.cjs");
 const {approveRequestPhoto,setPointer}=require("./species-photo-provenance.cjs");
 const { permitted } = require("../shared/rbac.cjs");
@@ -333,12 +333,9 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       if (!Number.isSafeInteger(b.expected_review_cycle) || b.expected_review_cycle < 1 || b.expected_review_cycle !== row.review_cycle)
         return { cycle_conflict: true };
       if (row.request_status !== "Pending Review") fail(409, "Species request has already been reviewed.");
-      let latestVersion = null;
-      const hasHistory = (await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available;
-      if (hasHistory) latestVersion = (await c.query(`SELECT id,status FROM record_version_history
-        WHERE request_id=$1 ORDER BY version_number DESC LIMIT 1 FOR UPDATE`, [requestKey])).rows[0] || null;
-      if (latestVersion && latestVersion.status !== "Pending Review")
-        fail(409, "Species request is no longer the latest pending version.");
+      const reviewedVersionId = await submittedHistoryForReview(c, {
+        kind: "species", targetId: row.request_id, submissionId: row.request_id, status: row.request_status,
+      });
       if (b.decision === "Approved" && fields.some(key => typeof row[key] !== "string" || !row[key].trim()))
         fail(409, "Species request is incomplete.");
       const decisionId = randomUUID();
@@ -378,12 +375,12 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       }
       const reviewed = (await c.query(`UPDATE species_request_submission SET request_status=$1,review_comment=$2,reviewed_by=$3,reviewed_at=CURRENT_TIMESTAMP,approved_species_id=$4,review_decision_id=$6 WHERE request_id=$5 RETURNING ${columns}`,
         [b.decision, comment, subject(req.user), speciesId, row.request_id, decisionId])).rows[0];
-      let reviewedVersionId = null;
-      if ((await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available) {
-        const reviewedVersion = await c.query(`UPDATE record_version_history SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
-          WHERE id=(SELECT id FROM record_version_history WHERE request_id=$4 AND status='Pending Review' ORDER BY version_number DESC LIMIT 1) RETURNING id`,
-          [b.decision, subject(req.user), comment, row.request_id]);
-        reviewedVersionId = reviewedVersion.rows[0]?.id ?? null;
+      if (reviewedVersionId) {
+        const transitioned = await c.query(`UPDATE record_version_history
+          SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
+          WHERE id=$4 AND status=$5`,
+        [b.decision, subject(req.user), comment, reviewedVersionId, row.request_status]);
+        if (transitioned.rowCount !== 1) fail(409, "The submitted history version changed before review.");
       }
       if (b.decision === "Approved") await captureApprovedReview(c, {
         kind: "species", submissionId: row.request_id, reviewId: decisionId, reviewer: subject(req.user), versionId: reviewedVersionId,

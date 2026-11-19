@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
+import DashboardObservationEdits from '../../components/conservation/DashboardObservationEdits.vue'
 import { monitoringLabels, monitoringDate } from '../../utils/officerMonitoringDisplay'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import BiodiversityMapPreview from '../../components/conservation/BiodiversityMapPreview.vue'
@@ -200,7 +201,6 @@ const requiresReview = (observation: ApiObservation) => {
   const status = effectiveObservationStatus(observation).toLowerCase().replace(/[_-]+/g, ' ')
   return ['pending', 'pending review', 'correction required', 'flagged'].includes(status)
 }
-const pending = computed(() => observations.value.filter(requiresReview).slice(0, 4))
 // Reuse the server's provenance classification; never infer origin from plant/status.
 // Conflicting duplicate identities cannot safely belong to either preview.
 const previewReviewEligible = (row: ApiObservation) => {
@@ -234,16 +234,6 @@ const classifiedPending = computed(() => {
 const pendingRegistrations = computed(() => classifiedPending.value.filter(row => observationOrigin(row.origin_type) === 'initial_registration').slice(0, 4))
 const pendingFieldObservations = computed(() => classifiedPending.value.filter(row => observationOrigin(row.origin_type) === 'subsequent_observation').slice(0, 4))
 
-const timestamp = (value?: string | null) => {
-  const parsed = value ? Date.parse(value) : NaN
-  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
-}
-// Most recently registered among the loaded records; missing dates sort last.
-const recentPlants = computed(() =>
-  [...plants.value]
-    .sort((a, b) => timestamp(b.registered_at) - timestamp(a.registered_at))
-    .slice(0, 4),
-)
 const speciesById = computed(
   () => new Map(species.value.map((item) => [String(item.species_id), item])),
 )
@@ -451,6 +441,8 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
       </div>
     </section>
 
+  <DashboardObservationEdits />
+
   <div class="two-column overview-medium">
     <section class="panel pending-observations-panel">
       <header class="panel-header">
@@ -655,7 +647,7 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
 .overview-date { width: 12rem; }
 .overview-status, .overview-actions { width: 1%; }
 .dashboard-overview .overview-table-scroll :is(.badge, .action-button) { white-space: nowrap; }
-.dashboard-overview :is(.pending-review-table, .field-observations-table) .badge.pending-review, .dashboard-overview :is(.pending-review-table, .field-observations-table) .badge.pending { background: #e8eff2; color: #53727c; }
+.dashboard-overview :is(.pending-review-table, .field-observations-table) .badge.pending-review, .dashboard-overview :is(.pending-review-table, .field-observations-table) .badge.pending { background: #FEF9C3; color: #854D0E; }
 .dashboard-overview :is(.pending-review-table, .field-observations-table) .badge.flagged { background: #f0eaf8; color: #69459a; }
 .dashboard-overview .quick-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .dashboard-overview .quick-grid button { min-width: 0; padding: 12px; align-items: center; }

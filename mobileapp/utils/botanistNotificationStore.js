@@ -26,6 +26,8 @@ export const notificationPresentation = {
   species_request_approved: { title: "Species Request Approved", icon: "checkmark-circle-outline" },
   species_request_rejected: { title: "Species Request Rejected", icon: "close-circle-outline" },
   species_correction_requested: { title: "Species Correction Requested", icon: "create-outline" },
+  record_change_approved: { title: "Edit Approved", icon: "checkmark-circle-outline" },
+  record_change_rejected: { title: "Edit Rejected", icon: "close-circle-outline" },
   record_change_correction: { title: "Edit Correction Required", icon: "create-outline" },
   observation_edit_submitted: { title: "Observation Edit Submitted", icon: "create-outline" },
   observation_edit_correction: { title: "Observation Edit Correction Requested", icon: "create-outline" },

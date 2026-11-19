@@ -46,6 +46,17 @@ test("status filters use the existing QR inventory values, and Add Plant still o
   assert.match(addPlant, /qr_id: selectedQRCode\.qr_id/);
 });
 
+test("Unused cards show a wrapping generator line without changing QR controls", () => {
+  assert.match(page, /\{unused && <Text style=\{styles\.qrGenerator\}>/);
+  assert.match(page, /qr\.generatedByName \|\| t\("plantQRCode\.generatorUnavailable"\)/);
+  assert.match(page, /qrGenerator: \{ marginTop: 2, color: "#6B7C73", fontSize: 11, lineHeight: 16 \}/);
+  for (const language of ["en", "ms", "zh"]) {
+    const strings = JSON.parse(read(`../translations/${language}.json`));
+    assert.ok(strings.plantQRCode.generatedBy.includes("{{name}}"));
+    assert.ok(strings.plantQRCode.generatorUnavailable);
+  }
+});
+
 test("QR inventory has only Unused and Assigned tabs and one expandable card at a time", () => {
   assert.match(page, /key: "unused"/);
   assert.match(page, /key: "assigned"/);

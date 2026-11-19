@@ -1,7 +1,8 @@
 import { formatPlantId } from '../utils/plantId.ts'
 export interface RecordChange {
+  observation_edit?: { observation_id: string; base_revision: number; retained_photo_ids: string[]; current: Record<string, unknown> }
   id: string; plant_id: number | null; species_id: number | null; owner_subject: string
-  status: 'Pending Review' | 'Approved' | 'Rejected' | 'Cancelled'; created_at: string
+  status: 'Pending Review' | 'Correction Required' | 'Approved' | 'Rejected' | 'Cancelled'; revision: number; created_at: string
   base_snapshot: Record<string, unknown>; proposed_snapshot: Record<string, unknown>
   proposal_photo_count: number; review_comment: string | null; reviewed_by: string | null; reviewed_at: string | null
 }
@@ -75,18 +76,18 @@ export function submissionSearchMatches(query: string, numericIds: unknown[], id
   return identifiers.some(value => normalize(value).includes(needle) || (compact && normalize(value).replaceAll('-', '').includes(compact))) || text.some(value => normalize(value).includes(needle))
 }
 export function changeMatches(change: RecordChange, filter: { search: string; status: string; species: string; date: string }, dateKey: (value: string) => string, display: { identifiers?: unknown[]; text?: unknown[] } = {}) {
-  const matchesSearch = submissionSearchMatches(filter.search, [change.plant_id, change.id],
-    [change.id, `CHANGE-${change.id}`, change.plant_id ? formatPlantId(change.plant_id) : '', change.owner_subject, ...(display.identifiers || [])],
+  const matchesSearch = submissionSearchMatches(filter.search, [change.plant_id, change.id, change.observation_edit?.observation_id],
+    [change.id, `CHANGE-${change.id}`, change.observation_edit?.observation_id, change.observation_edit ? `OBS-${change.observation_edit.observation_id}` : '', change.plant_id ? formatPlantId(change.plant_id) : '', change.owner_subject, ...(display.identifiers || [])],
     [change.base_snapshot.scientific_name, change.proposed_snapshot.scientific_name, change.base_snapshot.species_scientific_name, change.proposed_snapshot.species_scientific_name, change.status, change.plant_id ? 'Plant Edit' : 'Species Edit', changeZone(change), ...(display.text || [])])
   return matchesSearch && (!filter.status || change.status === filter.status) &&
     (!filter.species || changeSpeciesId(change) === filter.species) && (!filter.date || dateKey(change.created_at) === filter.date)
 }
 export type UnifiedReviewRow<T> = { kind: 'initial_registration' | 'linked_species_request' | 'legacy_observation'; key: string; observation: T; createdAt: string } |
-  { kind: 'approved_plant_change' | 'approved_species_change'; key: string; change: RecordChange; createdAt: string }
+  { kind: 'approved_plant_change' | 'approved_species_change' | 'observation_edit'; key: string; change: RecordChange; createdAt: string }
 export function unifiedReviewRows<T extends { id: string; createdAt: string; speciesRequest: unknown; origin?: string }>(observations: T[], changes: RecordChange[]): UnifiedReviewRow<T>[] {
   const rows: UnifiedReviewRow<T>[] = [
     ...observations.map(observation => ({ kind: observation.origin === 'unknown' ? 'legacy_observation' as const : observation.speciesRequest ? 'linked_species_request' as const : 'initial_registration' as const, key: 'observation:' + observation.id, observation, createdAt: observation.createdAt })),
-    ...changes.map(change => ({ kind: change.plant_id ? 'approved_plant_change' as const : 'approved_species_change' as const, key: 'change:' + change.id, change, createdAt: change.created_at })),
+    ...changes.map(change => ({ kind: change.observation_edit ? 'observation_edit' as const : change.plant_id ? 'approved_plant_change' as const : 'approved_species_change' as const, key: (change.observation_edit ? 'observation-edit:' : 'change:') + change.id, change, createdAt: change.created_at })),
   ]
   return [...new Map(rows.map(row => [row.key,row])).values()].sort((a,b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0) || a.key.localeCompare(b.key))
 }

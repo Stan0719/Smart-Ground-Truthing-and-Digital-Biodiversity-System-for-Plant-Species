@@ -17,6 +17,7 @@ import {
 import { faceApi } from "../../utils/faceApi";
 import BackButton from "../../components/BackButton";
 import { authNavigationStyles } from "../../components/authNavigationStyles";
+import PasswordVisibilityButton from "../../components/PasswordVisibilityButton";
 
 export default function ForgotPassword() {
   useAppTranslation();
@@ -25,6 +26,8 @@ export default function ForgotPassword() {
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmVisible, setConfirmVisible] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -150,7 +153,7 @@ export default function ForgotPassword() {
                           accessibilityLabel={t("mandatoryPasswordChange.newPassword")}
                           placeholder={t("mandatoryPasswordChange.newPassword")}
                           placeholderTextColor="#9BBDB4"
-                          secureTextEntry
+                          secureTextEntry={!passwordVisible}
                           value={password}
                           onChangeText={setPassword}
                           autoComplete="new-password"
@@ -158,6 +161,7 @@ export default function ForgotPassword() {
                           maxLength={128}
                           editable={!busy}
                         />
+                        <PasswordVisibilityButton visible={passwordVisible} onPress={() => setPasswordVisible((current) => !current)} disabled={busy} />
                       </View>
                       <Text style={styles.passwordHint}>{t("firstLoginPassword.useMatchingPasswordsWith15To128Characters")}</Text>
                       <Text style={styles.fieldLabel}>{t("forgot-password.confirmPassword")}</Text>
@@ -168,13 +172,14 @@ export default function ForgotPassword() {
                           accessibilityLabel={t("mandatoryPasswordChange.confirmNewPassword")}
                           placeholder={t("forgot-password.confirmPassword")}
                           placeholderTextColor="#89988D"
-                          secureTextEntry
+                          secureTextEntry={!confirmVisible}
                           value={confirm}
                           onChangeText={setConfirm}
                           autoComplete="new-password"
                           textContentType="newPassword"
                           editable={!busy}
                         />
+                        <PasswordVisibilityButton visible={confirmVisible} onPress={() => setConfirmVisible((current) => !current)} disabled={busy} />
                       </View>
                     </>
                   )}

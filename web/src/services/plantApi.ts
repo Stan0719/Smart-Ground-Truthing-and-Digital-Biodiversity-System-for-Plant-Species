@@ -39,6 +39,8 @@ export interface Device {
   status: string
   last_seen: string | null
   thresholds: Record<string, number>
+  device_type?: string | null
+  plant_id?: string | number | null
 }
 export async function plantApi<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   if (!path.startsWith('/') || path.startsWith('//')) throw Error('Invalid API path.')
@@ -54,8 +56,10 @@ export async function plantApi<T>(path: string, method = 'GET', body?: unknown):
   } catch {
     throw new Error('Unable to reach the plant data service. Please try again later.')
   }
-  return readApiResponse<T>(
-    response,
-    'The plant data service is unavailable. Please try again later.',
-  )
+  try {
+    return await readApiResponse<T>(response, 'The plant data service is unavailable. Please try again later.')
+  } catch (error) {
+    if (!response.ok && error instanceof Error) Object.assign(error, { status: response.status })
+    throw error
+  }
 }

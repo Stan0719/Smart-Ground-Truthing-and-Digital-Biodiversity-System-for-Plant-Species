@@ -295,6 +295,12 @@ function getPhotoUri(photo) {
 }
 
 
+export function reviewFeedbackTone(status) {
+  if (status === "Approved") return "approved";
+  if (status === "Rejected") return "rejected";
+  return "pending";
+}
+
 // =====================================================
 // MAIN SCREEN
 // =====================================================
@@ -338,6 +344,10 @@ function findPlant() {
 
 
   const [plant, setPlant] = useState(null);
+  const feedbackPanelStyle = (status) => reviewFeedbackTone(status) === "approved" ? styles.approvedFeedbackPanel
+    : reviewFeedbackTone(status) === "rejected" ? styles.rejectedFeedbackPanel : null;
+  const feedbackTextStyle = (status) => reviewFeedbackTone(status) === "approved" ? styles.approvedFeedbackText
+    : reviewFeedbackTone(status) === "rejected" ? styles.rejectedFeedbackText : null;
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -895,24 +905,24 @@ const rawPhotos = Array.isArray(plant.photos)
         </View>}
         {plant.isHistoricalVersion && plant.historicalSnapshotUnavailable && <Text style={styles.mutedText}>{t("recordEdits.originalSnapshotUnavailable")}</Text>}
         {plant.isHistoricalVersion && !!route.params?.historicalReviewComment &&
-          <View style={[styles.changeNotice, plant.status === "Rejected" && styles.rejectedFeedbackPanel]}>
-            <Text style={[styles.changeNoticeText, plant.status === "Rejected" && styles.rejectedFeedbackText]}>{t("notificationObservation.officerFeedback")}</Text>
-            <Text style={[styles.changeNoticeText, plant.status === "Rejected" && styles.rejectedFeedbackText]}>{route.params.historicalReviewComment}</Text></View>}
+          <View style={[styles.changeNotice, feedbackPanelStyle(plant.status)]}>
+            <Text style={[styles.changeNoticeText, styles.feedbackHeading, feedbackTextStyle(plant.status)]}>{t("notificationObservation.officerFeedback")}</Text>
+            <Text style={[styles.changeNoticeText, feedbackTextStyle(plant.status)]}>{route.params.historicalReviewComment}</Text></View>}
         {!plant.isHistoricalVersion && ["Rejected", "Correction Required"].includes(plant.status) &&
           plant.initialObservation?.status === plant.status && !!plant.initialObservation.review_comment &&
-          <View style={[styles.changeNotice, plant.status === "Rejected" && styles.rejectedFeedbackPanel]} testID={plant.status === "Rejected" ? "plant-rejected-feedback" : undefined}>
-            <Text style={[styles.changeNoticeText, plant.status === "Rejected" && styles.rejectedFeedbackHeading]}>{t("notificationObservation.officerFeedback")}</Text>
-            <Text style={[styles.changeNoticeText, plant.status === "Rejected" && styles.rejectedFeedbackText]}>{plant.initialObservation.review_comment}</Text></View>}
+          <View style={[styles.changeNotice, feedbackPanelStyle(plant.initialObservation.status)]} testID={plant.status === "Rejected" ? "plant-rejected-feedback" : undefined}>
+            <Text style={[styles.changeNoticeText, styles.feedbackHeading, feedbackTextStyle(plant.initialObservation.status)]}>{t("notificationObservation.officerFeedback")}</Text>
+            <Text style={[styles.changeNoticeText, feedbackTextStyle(plant.initialObservation.status)]}>{plant.initialObservation.review_comment}</Text></View>}
         {!plant.isHistoricalVersion && plant.status === "Approved" && editAvailability === "pending" && <View style={styles.editAvailabilityNote}>
           <Text style={styles.pendingEditLabel}>{t("recordEdits.pendingEdit")}</Text>
           <Text style={styles.changeNoticeText}>{t("recordEdits.pendingEditExplanation")}</Text>
-          {!!changeInfo?.review_comment && <Text style={styles.changeNoticeText}>{changeInfo.review_comment}</Text>}
+          {!!changeInfo?.review_comment && <><Text style={[styles.changeNoticeText, styles.feedbackHeading]}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.changeNoticeText}>{changeInfo.review_comment}</Text></>}
         </View>}
         {!plant.isHistoricalVersion && plant.status === "Approved" && editAvailability === "checking" && <Text style={styles.changeNoticeText}>{t("recordEdits.checkingEditAvailability")}</Text>}
         {!plant.isHistoricalVersion && plant.status === "Approved" && editAvailability === "unavailable" && <Text style={styles.changeError}>{t("recordEdits.editAvailabilityUnavailable")}</Text>}
-        {!plant.isHistoricalVersion && changeInfo && !(plant.status === "Approved" && editAvailability === "pending") && <View style={styles.changeNotice}><Text style={styles.changeNoticeText}>
+        {!plant.isHistoricalVersion && changeInfo && !(plant.status === "Approved" && editAvailability === "pending") && <View style={[styles.changeNotice, feedbackPanelStyle(changeInfo.status)]}><Text style={[styles.changeNoticeText, feedbackTextStyle(changeInfo.status)]}>
           {changeInfo.status === "Pending Review" ? t("recordEdits.changesPending") : changeInfo.status === "Rejected" ? t("recordEdits.changesRejected") : changeInfo.status === "Cancelled" ? t("recordEdits.cancelledStatus") : changeInfo.status === "Correction Required" ? translateLabel(changeInfo.status) : t("recordEdits.changesApproved")}
-        </Text>{!!changeInfo.review_comment && <Text style={styles.changeNoticeText}>{changeInfo.review_comment}</Text>}</View>}
+        </Text>{!!changeInfo.review_comment && <><Text style={[styles.changeNoticeText, styles.feedbackHeading, feedbackTextStyle(changeInfo.status)]}>{t("notificationObservation.officerFeedback")}</Text><Text style={[styles.changeNoticeText, feedbackTextStyle(changeInfo.status)]}>{changeInfo.review_comment}</Text></>}</View>}
         {!!cancelEditError && <Text style={styles.changeError} accessibilityRole="alert">{cancelEditError}</Text>}
         {!!withdrawError && <Text style={styles.changeError} accessibilityRole="alert">{withdrawError}</Text>}
         {!plant.isHistoricalVersion && !!changeError && plant.status !== "Approved" && <Text style={styles.changeError}>{translateUIMessage(changeError)}</Text>}
@@ -1175,6 +1185,9 @@ const styles = StyleSheet.create({
   editHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   headingActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   changeNotice: { padding: 12, borderRadius: 12, backgroundColor: "#FFF1D6", marginBottom: 12, gap: 4 },
+  approvedFeedbackPanel: { backgroundColor: "#E8F3ED", borderWidth: 1, borderColor: "#C9DEC9" },
+  approvedFeedbackText: { color: "#2F6B4F" },
+  feedbackHeading: { fontWeight: "800" },
   rejectedBanner: { flexDirection: "row", alignItems: "center", gap: 10, padding: 13, borderRadius: 12, backgroundColor: "#FDECEC", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318", marginBottom: 12 },
   rejectedBannerText: { flex: 1, flexShrink: 1, color: "#8F1D16", fontSize: 15, fontWeight: "800", lineHeight: 21 },
   rejectedFeedbackPanel: { backgroundColor: "#FEF2F1", borderWidth: 1, borderColor: "#E8B4B0", borderLeftWidth: 4, borderLeftColor: "#B42318" },

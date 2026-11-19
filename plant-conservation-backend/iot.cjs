@@ -53,6 +53,17 @@ function positiveBigint(value) {
     return false;
   }
 }
+async function assignmentPlant(c, value) {
+  if (value === null) return null;
+  const id = typeof value === "number" ? value :
+    typeof value === "string" && /^[1-9][0-9]{0,9}$/.test(value) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(id) || id < 1 || id > 2147483647)
+    fail(400, "A valid Plant ID or null is required.");
+  const plant = (await c.query("SELECT plant_id,rbac_status FROM plant_record WHERE plant_id=$1 FOR SHARE", [id])).rows[0];
+  if (!plant || plant.rbac_status !== "Approved")
+    fail(400, "Select an existing Approved Plant.");
+  return id;
+}
 function mountDeviceIngestion(app, { pool }) {
   const runtime = runtimeFor(pool);
   // A sensor key can read only its own movement, bound to its assigned plant.
@@ -410,12 +421,13 @@ function mountIoT(app, { pool, allow }) {
     }
 
     await transaction(pool, async (c) => {
+      const plantId = Object.hasOwn(req.body, "plant_id") ? await assignmentPlant(c, req.body.plant_id) : null;
       await c.query(
         "INSERT INTO iot_device(id,name,plant_id,key_hash,device_type) VALUES($1,$2,$3,$4,$5)",
         [
           deviceId,
           req.body.name,
-          req.body.plant_id || null,
+          plantId,
           hash(key),
           deviceType,
         ],
@@ -435,9 +447,12 @@ function mountIoT(app, { pool, allow }) {
     if (!["Active", "Inactive"].includes(req.body.status))
       fail(400, "Invalid device status.");
     await transaction(pool, async (c) => {
+      const current = (await c.query("SELECT plant_id FROM iot_device WHERE id=$1 FOR UPDATE", [req.params.id])).rows[0];
+      if (!current) fail(404, "Device not found.");
+      const plantId = Object.hasOwn(req.body, "plant_id") ? await assignmentPlant(c, req.body.plant_id) : current.plant_id;
       const result = await c.query(
-        "UPDATE iot_device SET name=$1,status=$2 WHERE id=$3 RETURNING id",
-        [req.body.name, req.body.status, req.params.id],
+        "UPDATE iot_device SET name=$1,status=$2,plant_id=$3 WHERE id=$4 RETURNING id",
+        [req.body.name, req.body.status, plantId, req.params.id],
       );
       if (!result.rows.length) fail(404, "Device not found.");
       await audit(c, req.user, "device_updated", req.params.id);

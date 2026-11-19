@@ -21,11 +21,11 @@ const text = node => node.children.map(child => child.type === 2 ? child.content
 const expected = {
   IoTMonitoringView: [
     ['iot-device-table', ['Sensor ID', 'Device Name', 'Device Type', 'Serial Number', 'Related Plant', 'Location Description', 'Status', 'Installed At', 'Latest Reading', 'Actions']],
-    ['iot-reading-table', ['Reading ID', 'Sensor ID', 'Plant ID', 'Temperature', 'Humidity', 'Soil Raw (ADC)', 'Soil Condition', 'Rain Raw (ADC)', 'Surface Condition', 'Motion', 'GPS', 'Recorded At', 'Actions']],
+    ['iot-reading-table', ['Reading ID', 'Sensor ID', 'Plant ID', 'Temperature', 'Humidity', 'Soil Raw (ADC)', 'Soil Condition', 'Rain Raw (ADC)', 'Surface Condition', 'Motion', 'DHT11 Health', 'MPU6050 Health', 'GPS', 'Recorded At', 'Actions']],
     ['iot-history-table', ['Reading ID', 'Recorded Time', 'Related Plant', 'Temperature', 'Humidity', 'Soil Raw (ADC)', 'Soil Condition', 'Rain Raw (ADC)', 'Surface Condition', 'Motion', 'GPS']],
   ],
   ThreatAlertsView: [
-    ['threat-alert-table', ['Alert ID', 'Alert Type', 'Reading Reference', 'Device', 'Status', 'Detected At', 'Actions']],
+    ['threat-alert-table', ['Alert ID', 'Alert Source', 'Current Assigned Plant', 'Alert Type', 'Device / Camera', 'Status', 'Detected At', 'Actions']],
   ],
   ReportsView: [['report-summary-table', ['scientificName', 'commonName', 'approvedPlants']]],
 }
@@ -33,7 +33,12 @@ const expected = {
 for (const [page, definitions] of Object.entries(expected)) test(`${page}: every existing table opts in with unchanged headers/order and matching columns/body cells`, () => {
   const { descriptor } = parse(read(`views/conservation/${page}.vue`))
   const ast = baseParse(descriptor.template.content)
-  const tables = elements(ast, 'table')
+  const tables = elements(ast, 'table').filter(table => attr(table, 'class')?.split(' ').includes('officer-data-table'))
+  if (page === 'ThreatAlertsView') {
+    const evidence = elements(ast, 'table').find(table => attr(table, 'class') === 'same-event-readings')
+    assert.ok(evidence, 'same-event evidence remains a separate table')
+    assert.deepEqual(elements(evidence, 'th').filter(node => attr(node, 'scope') === 'col').map(node => text(node).replace(/^ct\('([^']+)'\)$/, '$1')), ['Sensor', 'Reading', 'Evidence Role'])
+  }
   assert.equal(tables.length, definitions.length)
   assert.ok(descriptor.styles.some(style => style.src === '../../styles/officer-data-tables.css'))
   for (const [index, [variant, headers]] of definitions.entries()) {
@@ -98,7 +103,8 @@ test('header styling is isolated from cards/charts/other roles and leaves status
   }
   const alerts = read('views/conservation/ThreatAlertsView.vue')
   assert.doesNotMatch(alerts, /class="badge unavailable"/)
-  assert.match(alerts, /:class="alert.status\?\.toLowerCase\(\)"/)
+  assert.match(alerts, /:class="alert.status.toLowerCase\(\)"/)
+  assert.match(alerts, /:style="threatAlertBadgeStyle\(alert.status\)"/)
   assert.match(alerts, /@click="openAlert\(alert\)"/)
   const iot = read('views/conservation/IoTMonitoringView.vue')
   assert.match(iot, /motion_detected \? 'high' : 'approved'/)
