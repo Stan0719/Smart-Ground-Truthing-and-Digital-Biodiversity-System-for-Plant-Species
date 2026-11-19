@@ -269,3 +269,19 @@ test("failed persistent read updates leave the notification unread", async () =>
   assert.equal((await store.load("alice")).items[0].read, false);
   assert.equal(first.items[0].read, false);
 });
+
+test("Plant and Species edit approval/rejection notifications retain their navigation references", async () => {
+  for (const recordKind of ["plant", "species"]) for (const status of ["approved", "rejected"]) {
+    const f = fixture();
+    f.dependencies.fetchNotifications = async () => ({ notifications: [{ id: `${recordKind}-${status}`, type: `record_change_${status}`,
+      entityType: "record_change", changeId: "edit-17", recordKind, targetId: "17", revision: 1,
+      createdAt: "2026-11-02T03:00:00.000Z", read: false, comment: "Officer decision" }] });
+    const [item] = (await createBotanistNotificationStore(f.dependencies).load("alice")).items;
+    assert.equal(item.type, `record_change_${status}`);
+    assert.equal(item.changeId, "edit-17"); assert.equal(item.recordKind, recordKind); assert.equal(item.read, false);
+    for (const language of ["en", "ms", "zh"]) {
+      const strings = JSON.parse(readFileSync(new URL(`../translations/${language}.json`, import.meta.url), "utf8"));
+      assert.ok(strings.notifications[`${recordKind}Edit${status === "approved" ? "Approved" : "Rejected"}`]);
+    }
+  }
+});

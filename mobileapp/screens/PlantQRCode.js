@@ -322,6 +322,7 @@ export default function PlantQRCodeScreen({ route }) {
                       <View style={styles.qrInfo}>
                         <Text style={styles.qrId} numberOfLines={1} selectable>{qr.label}</Text>
                         <Text style={styles.qrSubtitle} numberOfLines={2}>{subtitle}</Text>
+                        {unused && <Text style={styles.qrGenerator}>{t("plantQRCode.generatedBy", { name: qr.generatedByName || t("plantQRCode.generatorUnavailable") })}</Text>}
                       </View>
                       <View style={[styles.statusBadge, unused ? styles.unusedBadge : styles.assignedBadge]}>
                         <Text style={styles.statusText}>{statusLabel}</Text>
@@ -431,6 +432,7 @@ const styles = StyleSheet.create({
   qrInfo: { flex: 1, minWidth: 0 },
   qrId: { color: "#234A3C", fontSize: 14, lineHeight: 19, fontWeight: "700" },
   qrSubtitle: { marginTop: 3, color: "#6B7C73", fontSize: 11, lineHeight: 16 },
+  qrGenerator: { marginTop: 2, color: "#6B7C73", fontSize: 11, lineHeight: 16 },
   statusBadge: { maxWidth: "34%", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 9 },
   unusedBadge: { backgroundColor: "#FFF3D6" },
   assignedBadge: { backgroundColor: "#DEF2E5" },

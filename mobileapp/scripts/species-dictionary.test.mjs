@@ -78,7 +78,7 @@ test("Add Plant exposes the modal dictionary by the plant name field; Add Specie
   assert.doesNotMatch(addSpecies, /reviewPresentation=/);
   assert.match(component, /<Modal[\s\S]*onRequestClose=\{cancelReview\}/);
   assert.match(component, /<ScrollView[\s\S]*dialogContent/);
-  assert.match(component, /speciesDictionary\.applyListedFields/);
+  assert.match(component, /speciesDictionary\.apply/);
   assert.match(component, /speciesDictionary\.replaceExisting/);
   assert.match(component, /item\.commonName/);
   assert.match(component, /item\.scientificName/);
@@ -86,9 +86,23 @@ test("Add Plant exposes the modal dictionary by the plant name field; Add Specie
 });
 
 test("dictionary and review translations exist for English, Malay and Simplified Chinese", () => {
-  const keys = ["title", "helper", "placeholder", "search", "loading", "empty", "error", "rateLimited", "family", "rank", "description", "source", "use", "attribution", "reviewTitle", "reviewMessage", "fillEmpty", "applyListedFields", "replaceExisting", "noFieldsTitle", "noFields"];
+  const keys = ["title", "helper", "placeholder", "search", "loading", "empty", "error", "rateLimited", "family", "rank", "description", "source", "use", "attribution", "reviewTitle", "reviewMessage", "fillEmpty", "apply", "applyListedFields", "replaceExisting", "noFieldsTitle", "noFields"];
   for (const language of ["en", "ms", "zh"]) {
     const translations = JSON.parse(readFileSync(new URL(`translations/${language}.json`, root), "utf8"));
     for (const key of keys) assert.equal(typeof translations.speciesDictionary[key], "string", `${language}.speciesDictionary.${key}`);
   }
+});
+
+test("Add Plant dictionary bounds nested results and presents a botanical review dialog", () => {
+  const component = readFileSync(new URL("components/SpeciesDictionary.js", root), "utf8");
+  assert.match(component, /card: \{ backgroundColor: "#F0F7EF"/);
+  assert.match(component, /searchRow: \{[^\n]*backgroundColor: "#FFFFFF"/);
+  assert.match(component, /result: \{ backgroundColor: "#FFFFFF"/);
+  assert.match(component, /<ScrollView ref=\{resultsScroll\} nestedScrollEnabled/);
+  assert.match(component, /maxHeight: Math\.min\(height \* 0\.45, 370\)/);
+  assert.match(component, /resultsScroll\.current\?\.scrollTo\(\{ y: 0, animated: false \}\)/);
+  assert.match(component, /onRequestClose=\{cancelReview\}/);
+  assert.match(component, /<Pressable[^\n]*onPress=\{cancelReview\}/);
+  assert.match(component, /onPress=\{confirmReview\}/);
+  assert.match(component, /row\.key === "plantScientificName" && dialogStyles\.primaryRow/);
 });

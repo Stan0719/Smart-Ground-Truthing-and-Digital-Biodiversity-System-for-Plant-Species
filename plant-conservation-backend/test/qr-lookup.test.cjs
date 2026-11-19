@@ -74,8 +74,9 @@ test("QR lookup resolves only approved, visible plant assignments", async (t) =>
     );
   });
   await t.test("unused and retired QR codes are never resolved as plants", async () => {
-    assert.deepEqual(await call("botanist", "payload-unused"), { status: 200, data: { assigned: false } });
-    assert.deepEqual(await call("botanist", "payload-retired"), { status: 200, data: { assigned: false } });
+    assert.deepEqual(await call("botanist", "payload-unused"), { status: 200, data: { assigned: false, status: "generated", qr_id: 11 } });
+    assert.deepEqual(await call("botanist", "payload-retired"), { status: 200, data: { assigned: false, status: "retired" } });
+    assert.deepEqual(await call("visitor", "payload-unused"), { status: 200, data: { assigned: false, status: "generated" } });
   });
   await t.test("an approved plant with a non-active inventory code is not resolvable", async () => {
     await pool.query("UPDATE plant_app.qr_code SET status='assigned' WHERE qr_code='payload-approved'");

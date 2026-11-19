@@ -7,7 +7,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
+  Modal,
 } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
 
 import {
   CameraView,
@@ -26,8 +28,10 @@ export default function ScanScreen({ navigation, user }) {
     useCameraPermissions();
 
   const [cameraKey, setCameraKey] = useState(0);
+  const [prompt, setPrompt] = useState(null);
   const scanInProgress = useRef(false);
   useEffect(() => navigation.addListener("focus", () => { scanInProgress.current = false; }), [navigation]);
+  const dismissPrompt = () => { setPrompt(null); setCameraKey((current) => current + 1); scanInProgress.current = false; };
 
 
   // ==========================================
@@ -92,26 +96,25 @@ export default function ScanScreen({ navigation, user }) {
     if (scanInProgress.current) return;
     scanInProgress.current = true;
     let navigated = false;
+    let prompted = false;
     try {
       const token = parsePlantQrPayload(data);
 
-      let result;
+      const result = await fetchPlantByQRCode(token);
       let historyError = null;
-      if (user?.role?.toLowerCase() === "visitor") {
+      if (result?.assigned && user?.role?.toLowerCase() === "visitor") {
         try {
-          result = await recordVisitorScan(user.id, token);
+          await recordVisitorScan(user.id, token);
         } catch (error) {
           historyError = error;
-          // Preserve QR navigation if history storage is temporarily unavailable.
-          // This fallback never writes a scan event.
-          result = await fetchPlantByQRCode(token);
         }
-      } else {
-        result = await fetchPlantByQRCode(token);
       }
       if (result?.assigned === false) {
-        Alert.alert(t("scan.plantQrUnavailable"), t("scan.qrCodeNotAssigned"));
-        setCameraKey((current) => current + 1);
+        const botanist = user?.role?.toLowerCase() === "botanist";
+        setPrompt({ kind: result.status === "retired" ? "retired" : result.status === "generated" ? "unassigned" : "unavailable",
+          qrId: botanist && result.status === "generated" && /^[1-9]\d*$/.test(String(result.qr_id)) ? String(result.qr_id) : null,
+          token: botanist && result.status === "generated" ? token : null });
+        prompted = true;
         return;
       }
       const plantId = result?.plant?.plant_id;
@@ -130,7 +133,7 @@ export default function ScanScreen({ navigation, user }) {
       );
       setCameraKey((current) => current + 1);
     } finally {
-      if (!navigated) scanInProgress.current = false;
+      if (!navigated && !prompted) scanInProgress.current = false;
     }
   }
 
@@ -200,6 +203,25 @@ export default function ScanScreen({ navigation, user }) {
 
       <Text style={styles.instruction}>{t("scan.positionTheQrCodeInsideTheBox")}</Text>
 
+      <Modal visible={Boolean(prompt)} transparent animationType="fade" onRequestClose={dismissPrompt}>
+        <View style={styles.promptBackdrop}><View style={styles.promptCard}>
+          <Ionicons name="qr-code-outline" size={28} color="#2F6B4F" />
+          <Text style={styles.promptTitle}>{t(prompt?.kind === "unassigned" ? "scan.noPlantRecordFound" : "scan.plantQrUnavailable")}</Text>
+          <Text style={styles.promptMessage}>{t(prompt?.kind === "retired" ? "scan.qrRetired" : prompt?.kind === "unassigned" && prompt.qrId ? "scan.botanistUnassigned" : prompt?.kind === "unassigned" ? "scan.visitorUnassigned" : "scan.plantQrUnavailable")}</Text>
+          <View style={styles.promptActions}>
+            {prompt?.qrId && <TouchableOpacity style={styles.promptSecondary} onPress={dismissPrompt} accessibilityRole="button"><Text style={styles.promptSecondaryText}>{t("common.cancel")}</Text></TouchableOpacity>}
+            <TouchableOpacity style={styles.promptPrimary} accessibilityRole="button" onPress={() => {
+              const selected = prompt;
+              setPrompt(null);
+              if (selected?.qrId && user?.role?.toLowerCase() === "botanist") navigation.navigate("AddPlant", {
+                botanist: user, formDraftKey: undefined, entrySource: "qr-scan", scannedQrId: selected.qrId, scannedQrToken: selected.token,
+              });
+              else dismissPrompt();
+            }}><Text style={styles.promptPrimaryText}>{t(prompt?.qrId ? "scan.addNewPlant" : "common.ok")}</Text></TouchableOpacity>
+          </View>
+        </View></View>
+      </Modal>
+
     </View>
   );
 }
@@ -210,6 +232,15 @@ export default function ScanScreen({ navigation, user }) {
 // ==================================================
 
 const styles = StyleSheet.create({
+  promptBackdrop: { flex: 1, justifyContent: "center", padding: 20, backgroundColor: "rgba(8,29,24,0.65)" },
+  promptCard: { width: "100%", maxWidth: 420, alignSelf: "center", padding: 20, gap: 12, borderRadius: 20, backgroundColor: "#F7FBF4" },
+  promptTitle: { color: "#234B3A", fontSize: 20, fontWeight: "700" },
+  promptMessage: { color: "#52665A", fontSize: 15, lineHeight: 22 },
+  promptActions: { flexDirection: "row", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" },
+  promptPrimary: { minHeight: 44, paddingHorizontal: 16, justifyContent: "center", borderRadius: 12, backgroundColor: "#2F6B4F" },
+  promptPrimaryText: { color: "#FFFFFF", fontWeight: "700" },
+  promptSecondary: { minHeight: 44, paddingHorizontal: 16, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: "#C9DEC9" },
+  promptSecondaryText: { color: "#2F6B4F", fontWeight: "700" },
 
   container: {
     flex: 1,

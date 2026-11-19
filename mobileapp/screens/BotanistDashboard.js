@@ -42,6 +42,14 @@ export function correctionTasks(plants, observations, requests, botanistId, edit
   return [...observationTasks, ...speciesTasks, ...editTasks, ...recordChangeTasks].sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
 }
 
+export function correctionTaskMatchesCategory(task, category) {
+  if (category === "all") return true;
+  if (category === "plants") return ["plant", "plantEdit"].includes(task.kind);
+  if (category === "species") return ["species", "speciesEdit"].includes(task.kind);
+  if (category === "observations") return ["observation", "observationEdit"].includes(task.kind);
+  return false;
+}
+
 function statusBadge(status, correctionResolved = false) {
   const kind = submissionStatus(status);
   const superseded = status === "Superseded";
@@ -700,7 +708,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><FlatList
     data={searchedData} keyExtractor={(item) => item.key} renderItem={record} refreshing={loading} onRefresh={() => { void refresh(); }}
     contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent, !searchedData.length && styles.emptyList]}
-    ListHeaderComponent={<View style={styles.pageHeaderContent}><View style={styles.pageHeading}><Text style={styles.pageTitle}>{t("submissions.title")}</Text></View>
+    ListHeaderComponent={<View style={[styles.pageHeaderContent, styles.submissionsHeaderContent]}>
       <View style={styles.tabs} accessibilityRole="tablist">{["plants", "requests"].map((value) => <TouchableOpacity key={value} testID={"submissions-tab-" + value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => { activeTabRef.current = value; expandMatchesRef.current = null; setTab(value); setFilter("all"); }} style={[styles.tab, tab === value && styles.activeTab]}><Ionicons name={value === "plants" ? "leaf-outline" : "flask-outline"} size={17} color={tab === value ? "#FFFFFF" : "#2F6B4F"} /><Text style={[styles.tabLabel, tab === value && styles.activeTabLabel]}>{t(value === "plants" ? "botanistDashboard.myPlantRecords" : "botanistRecords.speciesRequests")}</Text><Text style={[styles.tabCount, tab === value && styles.activeTabLabel]}>{loaded ? (value === "plants" ? plantCount : requestCount) : "—"}</Text></TouchableOpacity>)}</View>
       <View testID="submissions-search" style={styles.searchContainer}>
         <Ionicons name="search-outline" size={20} color="#668271" />
@@ -728,9 +736,10 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
   const { plants, observations, requests, edits, recordChanges, loading, loaded, error, refresh } = useBotanistRecords(botanist?.id);
   const corrections = correctionTasks(plants, observations, requests, botanist?.id, edits, recordChanges);
   const [correctionQuery, setCorrectionQuery] = useState("");
+  const [correctionCategory, setCorrectionCategory] = useState("all");
   const visibleCorrections = corrections.filter((task) => {
     const label = `${task.id} ${task.plantId || ""} ${task.name} ${task.feedback}`.toLocaleLowerCase();
-    return !correctionQuery.trim() || label.includes(correctionQuery.trim().toLocaleLowerCase());
+    return correctionTaskMatchesCategory(task, correctionCategory) && (!correctionQuery.trim() || label.includes(correctionQuery.trim().toLocaleLowerCase()));
   });
   const openCorrection = async (task) => {
     if (task.kind === "plantEdit" || task.kind === "speciesEdit") {
@@ -772,10 +781,15 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
     </View>;
   };
   return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><ScrollView contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent]} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void refresh(); }} tintColor="#2F6B4F" />}>
-    <View style={styles.pageHeaderContent}><View style={styles.pageHeading}><Text style={styles.pageTitle}>{t("botanistDashboard.correctionRequests")}</Text></View>
+    <View style={[styles.pageHeaderContent, styles.correctionHeaderContent]}>
       <TextInput style={styles.correctionSearch} value={correctionQuery} onChangeText={setCorrectionQuery}
         placeholder={t("botanistDashboard.searchCorrectionRequests")} placeholderTextColor="#7B8A80"
         accessibilityLabel={t("botanistDashboard.searchCorrectionRequests")} returnKeyType="search" />
+      <View style={styles.correctionFilters} accessibilityRole="tablist">{["all", "plants", "species", "observations"].map((category) =>
+        <TouchableOpacity key={category} testID={`correction-filter-${category}`} accessibilityRole="tab" accessibilityState={{ selected: correctionCategory === category }}
+          onPress={() => setCorrectionCategory(category)} style={[styles.correctionFilterChip, correctionCategory === category && styles.selectedFilter]}>
+          <Text style={[styles.filterLabel, correctionCategory === category && styles.selectedFilterLabel]}>{t(`botanistDrafts.filter.${category === "plants" ? "plant-records" : category === "species" ? "species-requests" : category}`)}</Text>
+        </TouchableOpacity>)}</View>
       {loaded && !error && <Text style={styles.correctionResultCount}>{t("botanistDashboard.matchingCorrectionRequests", { count: visibleCorrections.length })}</Text>}
       {!!error && <View style={styles.correctionErrorBox}><Text style={styles.correctionErrorText} accessibilityRole="alert">{error.split("\n").map(translateUIMessage).join("\n")}</Text><TouchableOpacity style={styles.correctionRetryButton} onPress={() => { void refresh(); }}><Text style={styles.correctionRetryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>}
       {!loaded && loading ? <View style={styles.correctionMessage}><ActivityIndicator color="#2F6B4F" /><Text style={styles.correctionEmptyText}>{t("botanistDashboard.loadingCorrectionRequests")}</Text></View> : error && !loaded ? null : !visibleCorrections.length ? <View style={styles.correctionMessage}><Text style={styles.correctionEmptyText}>{corrections.length ? t("botanistDashboard.noMatchingCorrectionRequests") : t("botanistDashboard.noCorrectionRequests")}</Text></View> : visibleCorrections.map(renderCorrection)}
@@ -828,6 +842,8 @@ const styles = StyleSheet.create({
   addGlyph: { position: "absolute", right: 1, bottom: 3, backgroundColor: "#C8E0CC", borderRadius: 9 },
   correctionCardBadge: { position: "absolute", top: 10, right: 10, minWidth: 22, height: 22, paddingHorizontal: 5, borderRadius: 11, backgroundColor: "#B84F43", alignItems: "center", justifyContent: "center", zIndex: 2 },
   pageHeaderContent: { width: "100%", maxWidth: 952, alignSelf: "center", paddingTop: 8 },
+  correctionHeaderContent: { paddingTop: 18 },
+  submissionsHeaderContent: { paddingTop: 18 },
   pageHeading: { marginBottom: 18 },
   pageTitle: { color: "#2F6B4F", fontSize: 24, fontWeight: "800" },
   dashboardCardTitle: { marginTop: 11, paddingRight: 18, color: "#2F6B4F", fontSize: 14, fontWeight: "750", lineHeight: 19, flexShrink: 1 },
@@ -857,6 +873,8 @@ const styles = StyleSheet.create({
   correctionRetryButton: { minHeight: 44, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 4 },
   correctionRetryText: { color: "#2F6B4F", fontSize: 13, fontWeight: "700" },
   correctionSearch: { minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: "#DCEBDD", paddingHorizontal: 13, backgroundColor: "#FFFFFF", color: "#2F6B4F", fontSize: 14, marginBottom: 11 },
+  correctionFilters: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 11 },
+  correctionFilterChip: { minHeight: 44, justifyContent: "center", borderRadius: 22, paddingHorizontal: 13, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCE8D6" },
   correctionResultCount: { color: "#64766B", fontSize: 12, marginTop: -7, marginBottom: 10 },
   submissionsSection: { marginBottom: 10 },
   tabs: { flexDirection: "row", backgroundColor: "#DCEBDD", borderRadius: 14, padding: 4, gap: 4, marginBottom: 12 },

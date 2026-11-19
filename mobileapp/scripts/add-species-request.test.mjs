@@ -28,6 +28,7 @@ function fixture({ fail = false } = {}) {
     "@expo/vector-icons": { Ionicons: "Ionicons" },
     "../translations/i18n": { useAppTranslation() {}, t: (key) => key, translateLabel: (value) => value, translateUIMessage: (value) => value },
     "../utils/addPlantValidation": { validateSpeciesRequest },
+    "../components/SpeciesDictionary": { default: "SpeciesDictionary" },
     "../utils/botanistFormDrafts": { findBotanistFormDraft: async () => null, getBotanistFormDraft: async () => null,
       saveBotanistFormDraft: async (_accountId, draft) => ({ ...draft, saved_at: "saved" }), deleteBotanistFormDraft: async () => true },
     "../utils/botanistDraftAutosave": { useBotanistDraftAutosave: () => ({ stop: async () => {}, flush: async () => {} }) },

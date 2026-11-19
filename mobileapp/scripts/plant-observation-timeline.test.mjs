@@ -60,7 +60,7 @@ test("timeline card retains expand/collapse and opens its exact approved Observa
 });
 
 test("timeline Rejected badge is red while Pending and Approved retain their colors", () => {
-  for (const [status, background] of [["Rejected", "#FCE2E2"], ["Pending Review", "#F4E7D2"], ["Approved", "#D8EBD9"]]) {
+  for (const [status, background] of [["Rejected", "#FDE7E7"], ["Pending Review", "#FFF0D8"], ["Approved", "#D8EBD9"]]) {
     const card = renderTimelineCard({ observationId: status, plantId: "24", status, date: "2026-11-12T00:00:00Z" });
     const tree = card.render();
     const badge = find(tree, (node) => node?.props?.style?.some?.((style) => style?.backgroundColor === background));

@@ -17,7 +17,9 @@ const speciesNotificationTitles = {
   species_correction_requested: "notifications.speciesCorrectionRequested",
   record_change_correction: "notifications.recordChangeCorrection",
 };
-const notificationTitle = (item) => speciesNotificationTitles[item.type]
+const notificationTitle = (item) => ["record_change_approved", "record_change_rejected"].includes(item.type)
+  ? t(`notifications.${item.recordKind === "plant" ? "plantEdit" : "speciesEdit"}${item.type === "record_change_approved" ? "Approved" : "Rejected"}`)
+  : speciesNotificationTitles[item.type]
   ? t(speciesNotificationTitles[item.type]) : item.entityType === "observation_edit"
     ? t(`observationEdits.notifications.${item.type}`) : translateLabel(notificationPresentation[item.type].title);
 
@@ -144,7 +146,8 @@ export default function BotanistNotifications({ navigation, user }) {
       </View> : null}
       renderItem={({ item }) => {
         const presentation = notificationPresentation[item.type];
-        const destructive = ["observation_rejected", "species_request_rejected", "observation_edit_rejected", "observation_edit_cancelled", "sync_failed"].includes(item.type);
+        const warning = item.type === "record_change_correction";
+        const destructive = ["observation_rejected", "species_request_rejected", "observation_edit_rejected", "observation_edit_cancelled", "sync_failed", "record_change_rejected"].includes(item.type);
         return <TouchableOpacity
           style={[styles.card, !item.read && styles.unreadCard, busy === item.id && styles.disabled]}
           onPress={() => openNotification(item)}
@@ -153,8 +156,8 @@ export default function BotanistNotifications({ navigation, user }) {
           accessibilityRole="button"
           accessibilityLabel={t("botanistNotifications.label", { value0: translateLabel(item.read ? "Read" : "Unread"), title: notificationTitle(item), value2: localizedNotificationMessage(item) })}
         >
-          <View style={[styles.icon, destructive && styles.destructiveIcon]}>
-            {busy === item.id ? <ActivityIndicator color="#35786F" /> : <Ionicons name={presentation.icon} size={22} color={destructive ? "#A34740" : "#35786F"} />}
+          <View style={[styles.icon, destructive && styles.destructiveIcon, warning && styles.warningIcon]}>
+            {busy === item.id ? <ActivityIndicator color="#35786F" /> : <Ionicons name={presentation.icon} size={22} color={destructive ? "#A34740" : warning ? "#8A611C" : "#35786F"} />}
           </View>
           <View style={styles.details}>
             <View style={styles.titleRow}>
@@ -182,6 +185,7 @@ const styles = StyleSheet.create({
   card: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E2EDE0", borderRadius: 16, padding: 14, marginBottom: 12 },
   unreadCard: { backgroundColor: "#EEF7EF", borderColor: "#BAD9CB" },
   icon: { width: 42, height: 42, borderRadius: 13, backgroundColor: "#E1F0E6", alignItems: "center", justifyContent: "center" },
+  warningIcon: { backgroundColor: "#FFF0D8" },
   destructiveIcon: { backgroundColor: "#FCEAE6" },
   details: { flex: 1, minWidth: 0 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },

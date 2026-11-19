@@ -5,7 +5,6 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 const require=createRequire(import.meta.url),ts=require('typescript'),React=require('react');
 function load(file,deps){const source=readFileSync(new URL('../'+file,import.meta.url),'utf8');const code=ts.transpileModule(source,{fileName:file+'.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;const module={exports:{}};new Function('require','module','exports',code)((name)=>{if(name==='../components/BackButton')return{default:(props)=>React.createElement('TouchableOpacity',props,props.label||props.accessibilityLabel),__esModule:true};assert.ok(name in deps,name);return {...deps[name],__esModule:name!=='react'}},module,module.exports);return module.exports;}
-const tick=()=>new Promise(r=>setImmediate(r));
 function fixture(api){let slots=[],index=0,focus,active,removed=0;const hooks={useState(initial){const i=index++;if(!(i in slots))slots[i]=initial;return[slots[i],value=>slots[i]=value]},useMemo(fn,deps){const i=index++;if(!slots[i]||deps.some((v,j)=>v!==slots[i].deps[j]))slots[i]={deps,value:fn()};return slots[i].value}};hooks.useCallback=(fn,deps)=>hooks.useMemo(()=>fn,deps);const module=load('utils/useSpeciesCatalog.js',{react:hooks,'@react-navigation/native':{useFocusEffect:fn=>focus=fn},'react-native':{AppState:{addEventListener:(_,fn)=>{active=fn;return{remove(){removed++}}}}},'./plantApi':api});return {render(account='owner',options={}){index=0;return module.useSpeciesCatalog(account,options)},focus:()=>focus(),active:()=>active('active'),removed:()=>removed};}
 
 test('catalogue refreshes on focus, foreground and pull; counts include approved plants only',async()=>{let reads=0;const f=fixture({fetchSpeciesCatalog:async options=>{assert.equal(options.accountId,'owner');reads++;return [{id:'6'}]},fetchPlantRecords:async()=>[{speciesId:'6',currentStatus:'Approved'},{speciesId:'6',currentStatus:'Pending Review'}]});f.render();const cleanup=f.focus();await f.render().refresh();assert.equal(reads,1);assert.equal(f.render().counts['6'],1);f.active();await f.render().refresh();assert.equal(reads,2);cleanup();assert.equal(f.removed(),1);const again=f.focus();await f.render().refresh();assert.equal(reads,3);again();});
@@ -52,8 +51,10 @@ test('species-specific Plants reloads are scoped to the selected route and API f
   assert.match(list,/filterUniqueSpeciesPlantRecords\(records, matchedId, currentSlug\)/);
   assert.match(list,/filterPlantRecordsForRole\(recordsForSpecies, role, accountId, \{ publicOnly \}\)/);
   assert.match(list,/!loading && !refreshing && !errorMessage && <Text style=\{styles\.count\}>/);
-  assert.match(list,/listViewState === "error" \? <View style=\{styles\.loadError\}/);
-  assert.match(list,/listViewState === "loading" \? <View style=\{styles\.loadingState\}/);
+  assert.match(list,/ListEmptyComponent=\{listViewState === "loading"[\s\S]*?listViewState === "error" \? \(/);
+  assert.match(list,/<View style=\{styles\.loadError\} testID="plant-list-error">/);
+  assert.match(list,/ListEmptyComponent=\{listViewState === "loading" \? \(/);
+  assert.match(list,/<View style=\{styles\.loadingState\} testID="plant-list-loading">/);
   assert.match(list,/t\("common\.retry"\)/);
   assert.match(species,/useSpeciesCatalog\(user\?\.id, \{ publicOnly: isPublicViewer, includeOwnedRequests: isBotanist \}\)/);
   assert.match(list,/const publicOnly = !user \|\| isVisitor/);
@@ -73,7 +74,7 @@ test('a slower request for the previous species cannot replace the selected spec
     useMemo(fn){return fn()},useCallback:fn=>fn,
   };
   const native={StyleSheet:{create:styles=>styles},Dimensions:{get:()=>({width:390})}};
-  for(const name of ['View','Text','TextInput','TouchableOpacity','ScrollView','Image','RefreshControl'])native[name]=name;
+  for(const name of ['View','Text','TextInput','TouchableOpacity','ScrollView','FlatList','Image','RefreshControl'])native[name]=name;
   const screen=load('screens/Plant.js',{
     react:{...React,...hooks},'react-native':native,
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},
@@ -110,19 +111,21 @@ test('a slower request for the previous species cannot replace the selected spec
   render('6','species-6');
   assert.equal(screenTree.type,'SafeAreaView');
   assert.deepEqual(screenTree.props.edges,['top','left','right']);
-  const [header,scroll]=React.Children.toArray(screenTree.props.children);
+  const [header]=React.Children.toArray(screenTree.props.children);
   assert.equal(header.type,'View');
   assert.equal(screenTree.props.style.backgroundColor,header.props.style.backgroundColor,'safe area behind the status bar matches the light-green fixed header');
   assert.equal(screenTree.props.style.backgroundColor,'#E7F2E2');
-  assert.equal(header.props.style.paddingTop,8,'safe area replaces the fixed 50-point top gap');
-  assert.equal(scroll.type,'ScrollView');
-  assert.equal(scroll.props.style.backgroundColor,'#F7FBF4','scrolling content retains its existing background');
+  assert.equal(header.props.style.paddingTop,4,'safe area keeps the compact fixed header below the status bar');
   const nodes=node=>node&&typeof node==='object'?[node,...React.Children.toArray(node.props?.children).flatMap(nodes)]:[];
-  const headerNodes=nodes(header),scrollNodes=nodes(scroll);
+  const scroll=nodes(screenTree).find(node=>node.type==='FlatList');
+  assert.ok(scroll,'Plant records use the independently scrolling FlatList');
+  assert.equal(scroll.props.style.backgroundColor,'#F7FBF4','scrolling content retains its existing background');
+  const headerNodes=nodes(header),fixedNodes=nodes(screenTree),scrollNodes=nodes(scroll);
   assert.equal(headerNodes.filter(node=>node.type==='RefreshButton').length,1);
   assert.equal(scrollNodes.some(node=>node.type==='RefreshButton'),false);
   assert.equal(headerNodes.some(node=>node.type==='TextInput'),false);
-  assert.equal(scrollNodes.filter(node=>node.type==='TextInput').length,1,'search remains in scrolling content');
+  assert.equal(fixedNodes.filter(node=>node.type==='TextInput').length,1,'search remains fixed above the Plant list');
+  assert.equal(scrollNodes.some(node=>node.type==='TextInput'),false);
   assert.ok(headerNodes.some(node=>node.props?.children==='plant.allVisiblePlants'));
   const refresh=headerNodes.find(node=>node.type==='RefreshButton');
   assert.equal(refresh.props.testID,'plant-list-refresh');

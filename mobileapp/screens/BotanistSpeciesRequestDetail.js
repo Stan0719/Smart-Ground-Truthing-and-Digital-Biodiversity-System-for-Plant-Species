@@ -131,20 +131,11 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
     {!!changeError && current.request?.request_status !== "Approved" && <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorText}>{translateUIMessage(changeError)}</Text></View>}
     {current.loading && !request && <DetailSkeletonContent label={t("submissions.loadingRequestDetails")} sections={2} />}
     {request && <>
-      {!historicalDetail && <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate("RecordVersionHistory", { kind: "species", targetId: request.request_id, botanist: route.params?.botanist })}>
-        <Text style={styles.value}>{t("recordEdits.versionHistory")} ›</Text></TouchableOpacity>
-      }
-      {!historicalDetail && changeInfo && !(request.request_status === "Approved" && editAvailability === "pending") && <View style={styles.error}><Text style={styles.value}>
+      {!historicalDetail && changeInfo && !(request.request_status === "Approved" && editAvailability === "pending") && <View style={[styles.feedbackNotice, changeInfo.status === "Approved" ? styles.approvedFeedback : changeInfo.status === "Rejected" ? styles.rejectedFeedback : styles.pendingFeedback]}><Text style={styles.value}>
         {changeInfo.status === "Pending Review" ? t("recordEdits.changesPending") : changeInfo.status === "Rejected" ? t("recordEdits.changesRejected") : changeInfo.status === "Cancelled" ? t("recordEdits.cancelledStatus") : changeInfo.status === "Correction Required" ? translateLabel(changeInfo.status) : t("recordEdits.changesApproved")}
-      </Text>{!!changeInfo.review_comment && <Text style={styles.value}>{changeInfo.review_comment}</Text>}</View>}
+      </Text>{!!changeInfo.review_comment && <><Text style={styles.feedbackLabel}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.value}>{changeInfo.review_comment}</Text></>}</View>}
       {!!cancelEditError && <Text accessibilityRole="alert" style={styles.errorText}>{cancelEditError}</Text>}
-      <View style={styles.hero}>
-        {request.photo && <Image source={request.photo} style={styles.photo} resizeMode="cover" accessibilityLabel={t("submissions.photo")} />}
-        {historicalDetail && !request.photo && <Text style={styles.missingPhoto}>{t("recordEdits.noPhotos")}</Text>}
-        <View style={styles.heroText}>
-          <Text style={styles.reference}>{t("submissions.requestId")} {request.request_id}</Text>
-          {request.request_status === "Rejected" && <Text accessibilityRole="alert" style={styles.value}>{t("recordEdits.finalRejected")}</Text>}
-          <View style={styles.titleRow} testID="species-detail-heading"><Text style={styles.title}>{request.scientific_name || t("recordEdits.historicalFieldUnavailable")}</Text>
+      <View style={styles.titleRow} testID="species-detail-heading"><Text style={styles.title}>{t("submissions.speciesRecord")}</Text>
             {(canEditSpecies || canWithdraw || canCancelSelectedEdit) && <View style={styles.headingActions}>
             {canEditSpecies &&
               <EditAction testID="edit-own-species" disabled={request.request_status === "Approved" && editAvailability !== "clear"}
@@ -176,19 +167,24 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
               {cancellingEdit ? <ActivityIndicator size="small" color="#B42318" /> : <Ionicons name="trash-outline" size={21} color="#B42318" />}
             </TouchableOpacity>}
             </View>}
+      </View>
+      <Text style={styles.subtitle}>{t("submissions.speciesRecordSubtitle")}</Text>
+      <View style={styles.recordMeta} testID="species-request-record-meta">
+        <View style={styles.recordMetaSummary}><View style={styles.recordMetaText}>
+          <Text style={styles.reference}>{t("submissions.requestId")}</Text><Text style={styles.recordIdValue}>{request.request_id}</Text>
+        </View><View style={styles.recordMetaStatus}>
+          <View style={[styles.badge, submissionStatus(request.request_status) === "approved" ? styles.approved : submissionStatus(request.request_status) === "rejected" ? styles.rejected : ["withdrawn", "cancelled", "superseded"].includes(submissionStatus(request.request_status)) ? styles.neutral : styles.pending]}>
+            <Text style={[styles.badgeText, submissionStatus(request.request_status) === "rejected" && styles.rejectedBadgeText]}>{request.request_status ? translateLabel(request.request_status) : t("recordEdits.historicalFieldUnavailable")}</Text>
           </View>
-          {!!request.common_name && <Text style={styles.common}>{request.common_name}</Text>}
           {historicalDetail && <View style={styles.versionMetaRow}>
             <Text style={styles.versionPill}>{request.historicalVersionLabel}</Text>
             {request.historicalCurrent && <Text style={styles.currentVersionPill}>{t("recordEdits.currentVersionLabel")}</Text>}
             {request.historicalSuperseded && <Text style={styles.supersededVersionPill}>{t("recordEdits.supersededLabel")}</Text>}
           </View>}
-          <View style={[styles.badge, submissionStatus(request.request_status) === "approved" ? styles.approved : ["rejected", "withdrawn", "superseded"].includes(submissionStatus(request.request_status)) ? styles.rejected : styles.pending]}>
-            <Text style={styles.badgeText}>{request.request_status ? translateLabel(request.request_status) : t("recordEdits.historicalFieldUnavailable")}</Text>
-          </View>
-          {!!withdrawError && <Text accessibilityRole="alert" style={styles.withdrawError}>{withdrawError}</Text>}
-        </View>
+        </View></View>
       </View>
+      {request.request_status === "Rejected" && <Text accessibilityRole="alert" style={styles.withdrawError}>{t("recordEdits.finalRejected")}</Text>}
+      {!!withdrawError && <Text accessibilityRole="alert" style={styles.withdrawError}>{withdrawError}</Text>}
       {!historicalDetail && request.request_status === "Approved" && editAvailability === "pending" && <View style={styles.editAvailabilityNote}>
         <Text style={styles.pendingEditLabel}>{t("recordEdits.pendingEdit")}</Text>
         <Text style={styles.value}>{t("recordEdits.pendingEditExplanation")}</Text>
@@ -197,16 +193,21 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
       {!historicalDetail && request.request_status === "Approved" && editAvailability === "checking" && <Text style={styles.value}>{t("recordEdits.checkingEditAvailability")}</Text>}
       {!historicalDetail && request.request_status === "Approved" && editAvailability === "unavailable" && <Text style={styles.errorText}>{t("recordEdits.editAvailabilityUnavailable")}</Text>}
       {historicalDetail && request.historicalSnapshotUnavailable && <View style={styles.error}><Text style={styles.value}>{t("recordEdits.originalSnapshotUnavailable")}</Text></View>}
-      <View style={styles.section}><Text style={styles.heading}>{t("submissions.speciesInformation")}</Text>
+      {!!request.review_comment && <View style={[styles.feedbackNotice, request.request_status === "Approved" ? styles.approvedFeedback : request.request_status === "Rejected" ? styles.rejectedFeedback : styles.pendingFeedback]}><Text style={styles.feedbackLabel}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.value}>{request.review_comment}</Text></View>}
+      <View style={styles.section}><View style={styles.sectionHeader}><View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>01</Text></View><View style={styles.sectionHeading}><Text style={styles.heading}>{t("submissions.speciesInformation")}</Text><Text style={styles.sectionSubtitle}>{t("submissions.speciesInformationSubtitle")}</Text></View></View>
         {field("speciesScientificName", request.scientific_name)}{field("commonName", request.common_name)}
         {field("genus", request.genus_name)}{field("family", request.family_name)}
         {field("conservation", translateLabel(request.conservation_status))}
         {field("description", request.description)}{field("habitat", request.habitat)}
+        {request.cultural_significance && <View style={styles.field}><Text style={styles.label}>{t("speciesDetail.traditionalAndCulturalImportance")}</Text><Text style={styles.value}>{request.cultural_significance}</Text></View>}
       </View>
-      <View style={styles.section}><Text style={styles.heading}>{t("submissions.reviewInformation")}</Text>
+      <View style={styles.section}><View style={styles.sectionHeader}><View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>02</Text></View><View style={styles.sectionHeading}><Text style={styles.heading}>{t("submissions.speciesPhoto")}</Text><Text style={styles.sectionSubtitle}>{t("submissions.speciesPhotoSubtitle")}</Text></View></View>
+        {request.photo ? <Image source={request.photo} style={styles.photo} resizeMode="contain" accessibilityLabel={t("submissions.photo")} />
+          : <Text style={styles.missingPhoto}>{t("recordEdits.noPhotos")}</Text>}
+      </View>
+      <View style={styles.section}><View style={styles.sectionHeader}><View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>03</Text></View><View style={styles.sectionHeading}><Text style={styles.heading}>{t("submissions.reviewInformation")}</Text></View></View>
         {field("requestId", String(request.request_id))}{field("submitted", date(request.submitted_at))}
         {field("status", translateLabel(request.request_status))}{field("reviewed", date(request.reviewed_at))}
-        {field("reviewComments", request.review_comment)}
       </View>
     </>}
   </ScrollView>;
@@ -214,19 +215,23 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#F7FBF4" },
-  content: { padding: 20, gap: 18, width: "100%", maxWidth: 820, alignSelf: "center", paddingBottom: 45 },
-  hero: { backgroundColor: "#FFFFFF", borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: "#E2EDE0" },
-  photo: { width: "100%", height: 240 }, heroText: { padding: 20, gap: 8 },
+  content: { padding: 16, gap: 14, width: "100%", maxWidth: 820, alignSelf: "center", paddingBottom: 45 },
+  photo: { width: "100%", height: 240, borderRadius: 12, backgroundColor: "#F7FBF4" },
   reference: { color: "#468585", fontSize: 12, fontWeight: "700" },
-  title: { fontSize: 25, fontWeight: "700", fontStyle: "italic", color: "#234B3A", flexShrink: 1 },
-  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  recordIdValue: { marginTop: 4, color: "#234B3A", fontSize: 14, fontWeight: "700" },
+  title: { fontSize: 25, fontWeight: "700", color: "#234B3A", flexShrink: 1 },
+  subtitle: { color: "#718078", fontSize: 14, lineHeight: 20 },
+  titleRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 },
   headingActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  common: { color: "#718078", fontSize: 16 },
+  recordMeta: { padding: 14, borderRadius: 14, backgroundColor: "#E8F2E4" },
+  recordMetaSummary: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  recordMetaText: { flex: 1, minWidth: 0 },
+  recordMetaStatus: { maxWidth: "58%", alignItems: "flex-end", gap: 6 },
   editAvailabilityNote: { backgroundColor: "#FFF7E8", borderWidth: 1, borderColor: "#EAD9B5", borderRadius: 12, padding: 12, gap: 5 },
   pendingEditLabel: { color: "#77501D", fontSize: 12, fontWeight: "700" },
-  badge: { alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10, marginTop: 4 },
-  pending: { backgroundColor: "#FFF1D6" }, approved: { backgroundColor: "#E1F4E3" }, rejected: { backgroundColor: "#FCE2E2" },
-  badgeText: { color: "#234B3A", fontWeight: "700", fontSize: 12 },
+  badge: { maxWidth: "100%", paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9 },
+  pending: { backgroundColor: "#F4E7D2" }, approved: { backgroundColor: "#D8EBD9" }, rejected: { backgroundColor: "#B42318" }, neutral: { backgroundColor: "#F4E9E6" },
+  badgeText: { color: "#234B3A", fontWeight: "700", fontSize: 11, textAlign: "center", flexShrink: 1 }, rejectedBadgeText: { color: "#FFFFFF" },
   withdrawButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4" },
   withdrawDisabled: { opacity: 0.65 },
   withdrawError: { color: "#A34436", fontSize: 13, lineHeight: 20 },
@@ -234,10 +239,20 @@ const styles = StyleSheet.create({
   versionPill: { overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, color: "#234B3A", backgroundColor: "#E8F2E4", fontSize: 11, fontWeight: "700" },
   currentVersionPill: { overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, color: "#FFFFFF", backgroundColor: "#468585", fontSize: 11, fontWeight: "700" },
   supersededVersionPill: { overflow: "hidden", paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, color: "#56625A", backgroundColor: "#E7EBE6", fontSize: 11, fontWeight: "700" },
-  missingPhoto: { padding: 16, color: "#718078", fontSize: 13 },
-  section: { backgroundColor: "#FFFFFF", borderRadius: 18, padding: 20, borderWidth: 1, borderColor: "#E2EDE0", gap: 15 },
-  heading: { color: "#234B3A", fontSize: 17, fontWeight: "700", marginBottom: 3 },
-  field: { gap: 5 }, label: { color: "#718078", fontSize: 12, fontWeight: "600" },
+  missingPhoto: { color: "#718078", fontSize: 13 },
+  section: { backgroundColor: "#FFFFFF", borderRadius: 16, padding: 16, borderWidth: 1, borderColor: "#E2EDE0" },
+  sectionHeader: { flexDirection: "row", alignItems: "center", marginBottom: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: "#EAF0E6" },
+  sectionNumber: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "#E8F2E4" },
+  sectionNumberText: { color: "#468585", fontSize: 13, fontWeight: "700" },
+  sectionHeading: { flex: 1, minWidth: 0, marginLeft: 12 },
+  sectionSubtitle: { marginTop: 4, color: "#718078", fontSize: 11, lineHeight: 16 },
+  heading: { color: "#234B3A", fontSize: 17, fontWeight: "700" },
+  field: { marginBottom: 16, gap: 5 }, label: { color: "#718078", fontSize: 12, fontWeight: "600" },
+  feedbackNotice: { borderRadius: 12, padding: 12, gap: 4, borderWidth: 1 },
+  feedbackLabel: { color: "#234B3A", fontSize: 13, fontWeight: "700" },
+  approvedFeedback: { backgroundColor: "#E8F3ED", borderColor: "#C9DEC9" },
+  pendingFeedback: { backgroundColor: "#FFF7E8", borderColor: "#EAD9B5" },
+  rejectedFeedback: { backgroundColor: "#FEF2F1", borderColor: "#E8B4B0" },
   value: { color: "#234B3A", fontSize: 15, lineHeight: 23 },
   error: { backgroundColor: "#FFF2EB", borderRadius: 12, padding: 15, gap: 12 }, errorText: { color: "#A34436", lineHeight: 21 },
   retry: { alignSelf: "flex-start", padding: 12, backgroundColor: "#468585", borderRadius: 10 }, retryText: { color: "#FFFFFF", fontWeight: "700" },

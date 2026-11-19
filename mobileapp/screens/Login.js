@@ -32,6 +32,7 @@ import MandatoryPasswordChangeScreen from "./MandatoryPasswordChange";
 import { changeFirstLoginPassword } from "../utils/firstLoginPassword";
 import FaceCameraModal, { faceCameraConfigured } from "../components/FaceCameraModal";
 import { authNavigationStyles } from "../components/authNavigationStyles";
+import PasswordVisibilityButton from "../components/PasswordVisibilityButton";
 
 
 const BIOMETRIC_KEY = "niah.biometric.credentials";
@@ -58,6 +59,7 @@ function FloatingInput({
 }) {
   useAppTranslation();
   const [isFocused, setIsFocused] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   const animation = useRef(
     new Animated.Value(value.length > 0 ? 1 : 0)
@@ -115,13 +117,14 @@ function FloatingInput({
         style={[
           styles.input,
           isFocused && styles.inputFocused,
+          secureTextEntry && { paddingRight: 50 },
         ]}
         value={value}
         onChangeText={onChangeText}
         onFocus={() => { setIsFocused(true); onFocus?.(); }}
         editable={editable}
         onBlur={() => setIsFocused(false)}
-        secureTextEntry={secureTextEntry}
+        secureTextEntry={secureTextEntry && !passwordVisible}
         keyboardType={keyboardType}
         autoCapitalize="none"
         autoCorrect={false}
@@ -130,6 +133,7 @@ function FloatingInput({
         onSubmitEditing={onSubmitEditing}
         accessibilityLabel={label}
       />
+      {secureTextEntry && <View style={{ position: "absolute", right: 4, top: 5 }}><PasswordVisibilityButton visible={passwordVisible} onPress={() => setPasswordVisible((current) => !current)} disabled={!editable} /></View>}
 
       <Animated.Text
         pointerEvents="none"
@@ -513,6 +517,7 @@ export default function LoginScreen({
 
 
   function handleGuest() {
+    setShowAccountBenefits(false);
     setEmail("");
     setPassword("");
     setLoginError("");
@@ -615,20 +620,26 @@ export default function LoginScreen({
       </Modal>}
 
       {showAccountBenefits && <Modal visible transparent animationType="fade" onRequestClose={() => setShowAccountBenefits(false)}>
-        <SafeAreaView style={styles.modalBackdrop}>
+        <SafeAreaView style={[styles.modalBackdrop, styles.benefitsBackdrop]}>
+          <ScrollView style={styles.benefitsScrollView} contentContainerStyle={styles.benefitsScrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.benefitsCard}>
             <View style={styles.modalHeader}>
-              <Text accessibilityRole="header" style={styles.modalTitle}>{t("login.whyRegisterOrLogIn")}</Text>
+              <Text accessibilityRole="header" style={styles.modalTitle}>{t("login.exploreAsGuest")}</Text>
               <TouchableOpacity style={styles.modalClose} accessibilityRole="button" accessibilityLabel={t("login.close")} onPress={() => setShowAccountBenefits(false)}>
                 <Ionicons name="close" size={24} color="#DEF9C4" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.accountBenefitsLabel}>{t("login.withoutAccount")}</Text>
-            <Text style={styles.biometricHelp}>{t("login.guestCapabilities")}</Text>
-            <Text style={styles.accountBenefitsLabel}>{t("login.withAccount")}</Text>
-            <Text style={styles.biometricHelp}>{t("login.accountCapabilities")}</Text>
-            <Text style={styles.biometricHelp}>{t("login.botanistRestriction")}</Text>
+            <Text style={styles.biometricHelp}>{t("login.guestExploreDescription")}</Text>
+            <Text accessibilityRole="header" style={styles.accountBenefitsLabel}>{t("login.visitorBenefitsHeading")}</Text>
+            <Text style={styles.biometricHelp}>{t("login.visitorCompactBenefit")}</Text>
+            <TouchableOpacity style={[styles.guestButton, styles.benefitsButton]} accessibilityRole="button" onPress={() => setShowAccountBenefits(false)}>
+              <Text style={[styles.guestButtonText, styles.benefitsButtonText]}>{t("login.loginOrRegister")}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.guestButton, styles.benefitsButton]} accessibilityRole="button" onPress={handleGuest}>
+              <Text style={[styles.guestButtonText, styles.benefitsButtonText]}>{t("login.continueAsGuest")}</Text>
+            </TouchableOpacity>
           </View>
+          </ScrollView>
         </SafeAreaView>
       </Modal>}
 
@@ -839,7 +850,7 @@ export default function LoginScreen({
               {/* Guest */}
               <TouchableOpacity
                 style={styles.guestButton}
-                onPress={handleGuest}
+                onPress={() => setShowAccountBenefits(true)}
                 activeOpacity={0.75}
                 accessibilityRole="button"
               >
@@ -877,12 +888,21 @@ const styles = StyleSheet.create({
   accountBenefitsToggle: { minHeight: 48, flexDirection: "row", alignSelf: "center", alignItems: "center", gap: 6, paddingHorizontal: 8 },
   accountBenefitsLink: { color: "#DEF9C4", fontSize: 16, fontWeight: "700", textDecorationLine: "underline" },
   accountBenefitsLabel: { color: "#DEF9C4", fontSize: 16, fontWeight: "700" },
+  benefitRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  benefitBullet: { color: "#DEF9C4", fontSize: 16, lineHeight: 22 },
+  benefitText: { flex: 1 },
+  benefitsNote: { opacity: 0.85, fontSize: 13, lineHeight: 19, marginTop: 4 },
+  benefitsScrollView: { maxHeight: "100%" },
+  benefitsBackdrop: { paddingHorizontal: 0 },
+  benefitsButton: { height: "auto", minHeight: 52, paddingHorizontal: 10, paddingVertical: 12 },
+  benefitsButtonText: { textAlign: "center", flexShrink: 1 },
+  benefitsScrollContent: { flexGrow: 1, justifyContent: "center", paddingVertical: 20 },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(8, 29, 24, 0.78)", justifyContent: "center", paddingHorizontal: 20 },
   modalKeyboard: { flex: 1, justifyContent: "center" },
   modalScroll: { flexGrow: 1, justifyContent: "center", alignItems: "center", paddingVertical: 24 },
   modalCard: { width: "100%", maxWidth: 430, alignSelf: "center", gap: 12, padding: 20,
     backgroundColor: "#2B5651", borderRadius: 20, borderWidth: 1, borderColor: "rgba(222, 249, 196, 0.25)" },
-  benefitsCard: { width: "100%", maxWidth: 430, alignSelf: "center", gap: 10, padding: 20,
+  benefitsCard: { width: "70%", maxWidth: 360, alignSelf: "center", gap: 14, paddingHorizontal: 16, paddingVertical: 24,
     backgroundColor: "#2B5651", borderRadius: 20, borderWidth: 1, borderColor: "rgba(222, 249, 196, 0.25)" },
   modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   modalTitle: { flex: 1, color: "#FFF6DC", fontSize: 22, fontWeight: "700" },

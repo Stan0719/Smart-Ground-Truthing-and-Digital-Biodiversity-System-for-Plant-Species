@@ -122,7 +122,6 @@ export default function BotanistMyDrafts({ route, navigation }) {
     <ScrollView contentContainerStyle={[styles.content, tablet && styles.tabletContent]}
       refreshControl={<RefreshControl refreshing={state.loading} onRefresh={() => { void load(); }} tintColor="#2F6B4F" />}>
       <View style={styles.header}>
-        <Text style={styles.title}>{t("botanistDrafts.title")}</Text>
         <Text style={styles.subtitle}>{t("botanistDrafts.subtitle")}</Text>
       </View>
       <TextInput style={styles.search} value={query} onChangeText={setQuery} placeholder={t("botanistDrafts.searchPlaceholder")}
@@ -165,8 +164,8 @@ export default function BotanistMyDrafts({ route, navigation }) {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#FAFBF7" }, content: { width: "100%", maxWidth: 900, alignSelf: "center", padding: 16, paddingBottom: 32, gap: 12 },
-  tabletContent: { padding: 24 }, header: { marginBottom: 4 },
-  title: { color: "#2F6B4F", fontSize: 25, fontWeight: "800" }, subtitle: { color: "#64766B", fontSize: 14, lineHeight: 20, marginTop: 4 },
+  tabletContent: { paddingHorizontal: 24, paddingTop: 18 }, header: { marginBottom: 4 },
+  subtitle: { color: "#64766B", fontSize: 14, lineHeight: 20 },
   search: { minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: "#DCEBDD", paddingHorizontal: 13, backgroundColor: "#FFFFFF", color: "#2F6B4F", fontSize: 14 },
   filters: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 2 }, filterChip: { minHeight: 38, justifyContent: "center", borderRadius: 20, borderWidth: 1, borderColor: "#DCEBDD", backgroundColor: "#FFFFFF", paddingHorizontal: 12 },
   filterChipSelected: { backgroundColor: "#D6E9D9", borderColor: "#2F6B4F" }, filterLabel: { color: "#64766B", fontSize: 12 }, filterLabelSelected: { color: "#2F6B4F", fontWeight: "700" },

@@ -914,13 +914,14 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
         [req.body.decision, comment, subject(req.user), change.id, ...(revisionMatch ? [change.revision] : [])]);
         if (!updatedVersion.rowCount) fail(409, "The exact pending version is unavailable. Reload before reviewing.");
       }
-      if (req.body.decision === "Correction Required") {
+      {
+        const notificationType = { Approved: "record_change_approved", Rejected: "record_change_rejected", "Correction Required": "record_change_correction" }[req.body.decision];
         const recordKind = change.plant_id ? "plant" : "species";
         const targetId = change.plant_id ?? change.base_snapshot?.request_id ?? change.species_id;
         const metadata = { entityType: "record_change", changeId: change.id, recordKind, targetId: String(targetId), revision: change.revision };
         await c.query(`INSERT INTO botanist_notification(id,recipient_subject,type,source_key,plant_id,metadata)
-          VALUES($1,$2,'record_change_correction',$3,$4,$5::jsonb) ON CONFLICT(recipient_subject,source_key) DO NOTHING`,
-        [randomUUID(), change.owner_subject, `record-change-correction:${change.id}:${change.revision}`, change.plant_id, metadata]);
+          VALUES($1,$2,$6,$3,$4,$5::jsonb) ON CONFLICT(recipient_subject,source_key) DO NOTHING`,
+        [randomUUID(), change.owner_subject, `record-change-${notificationType === 'record_change_correction' ? 'correction' : req.body.decision.toLowerCase()}:${change.id}:${change.revision}`, change.plant_id, metadata, notificationType]);
       }
       await audit(c, req.user, `record_change_${req.body.decision.toLowerCase()}`, change.id);
       return { id: change.id, status: req.body.decision };

@@ -7,6 +7,17 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 const React = require("react");
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+const compile = (path) => ts.transpileModule(read(path), { fileName: path, compilerOptions: {
+  module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
+} }).outputText;
+const recordsModule = { exports: {} };
+new Function("require", "module", "exports", compile("../utils/botanistRecords.js"))(
+  () => ({}), recordsModule, recordsModule.exports,
+);
+const orderingModule = { exports: {} };
+new Function("require", "module", "exports", compile("../utils/speciesPlantOrdering.js"))(
+  () => ({ submissionStatus: recordsModule.exports.submissionStatus }), orderingModule, orderingModule.exports,
+);
 
 function makeScreen({ language = "en", species = null, fetchSpeciesDetail = async () => null, user = null,
   records = [], imageSource = () => null } = {}) {
@@ -30,8 +41,9 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
       return refs[index];
     },
     useCallback: (callback) => callback,
+    useMemo: (compute) => compute(),
   };
-  const native = { StyleSheet: { create: (styles) => styles } };
+  const native = { StyleSheet: { create: (styles) => styles }, useWindowDimensions: () => ({ height: 900, width: 390 }) };
   for (const type of ["View", "Text", "ScrollView", "TouchableOpacity", "Image", "RefreshControl"]) native[type] = type;
   const source = read("../screens/SpeciesDetail.js");
   const compiled = ts.transpileModule(source, {
@@ -48,6 +60,7 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
     "../data/speciesImages": { getSpeciesImageSource: imageSource },
     "../components/BackButton": { default: "TouchableOpacity" },
     "../utils/plantApi": { fetchPlantRecords: async () => records, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords: (items) => items, isPlantVisibleInRoleCatalog: () => true, isOwnedRejectedPlant: () => false },
+    "../utils/speciesPlantOrdering": orderingModule.exports,
     "../components/PlantCard": { default: "PlantCard" },
     "../components/RefreshButton": { default: "RefreshButton" },
     "../components/FavouriteHeart": { default: "FavouriteHeart" },

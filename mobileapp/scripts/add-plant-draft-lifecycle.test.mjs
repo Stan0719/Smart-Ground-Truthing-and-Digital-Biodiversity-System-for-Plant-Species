@@ -26,7 +26,7 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 const species = { id: "7", name: "Species Seven", scientificName: "Species scientific" };
 
 function environment() {
-  let rendering, nextId = 0, failSubmit = false, saveGate = null, activeAccount = "owner";
+  let rendering, nextId = 0, failSubmit = false, saveGate = null, activeAccount = "owner", qrAvailable = true;
   const rows = new Map(), files = new Set(), alerts = [], calls = [], mounts = [];
   const hooks = { ...React,
     useId() { const h = rendering, index = h.cursor++; return (h.cells[index] ||= { value: `form-${h.id}` }).value; },
@@ -74,18 +74,19 @@ function environment() {
     "expo-location": {}, "expo-image-picker": {}, "expo-file-system/legacy": fs,
     "react-native-qrcode-svg": { default: "QRCode" }, "@expo/vector-icons/Ionicons": { default: "Icon" },
     "../components/RefreshButton": { default: "RefreshButton" }, "../components/GpsLocationPicker": { default: "GpsLocationPicker" }, "../utils/gpsLocation": { validGpsPoint, readGpsLocation }, "../components/fieldFormStyles": { fieldFormStyles: {} },
+    "../components/SpeciesDictionary": { default: "SpeciesDictionary" },
     "../utils/addPlantValidation": { validateSpeciesRequest, validatePlantDetails, validatePlantGps },
     "../utils/speciesNameNormalization": { normalizeSpeciesName },
     "../utils/botanistFormDrafts": draftApi, "../utils/botanistDraftAutosave": autosave,
     "../utils/plantApi": { fetchSpeciesCatalog: async () => [species], fetchSpeciesDetail: async () => species, plantApi: async (path, options) => {
       if (path === "/plant-submissions") { calls.push(options.body); if (failSubmit) throw Error("submission failed"); return { plant_id: 42, qr_token: "qr-42" }; }
-      return { qr_codes: [{ qr_id: 17, status: "generated", plant_id: null }] };
+      return { qr_codes: qrAvailable ? [{ qr_id: 17, qr_code: "unused-17", status: "generated", plant_id: null }] : [] };
     } },
   });
   const nodes = (node) => node && typeof node === "object" ? [node, ...React.Children.toArray(node.props?.children).flatMap(nodes)] : [];
-  function mount({ accountId = activeAccount, formDraftKey, skipRecovery = false, component = screen.AddPlantForm, props = {} } = {}) {
+  function mount({ accountId = activeAccount, formDraftKey, routeParams = {}, skipRecovery = false, component = screen.AddPlantForm, props = {} } = {}) {
     const h = { id: ++nextId, cells: [], setters: {}, fields: {}, dirty: true, effects: [], focusListeners: new Set(), component, fresh: false, submitted: false, listeners: new Map() };
-    const route = { key: `route-${h.id}`, params: { botanist: { id: accountId }, formDraftKey } };
+    const route = { key: `route-${h.id}`, params: { botanist: { id: accountId }, formDraftKey, ...routeParams } };
     const navigation = { setParams: (params) => { Object.assign(route.params, params); h.dirty = true; }, navigate: (...args) => calls.push(args), goBack() {}, addListener: (event, listener) => { h.listeners.set(event, listener); return () => h.listeners.delete(event); } };
     h.props = { route, navigation, skipRecovery, onStartNew: () => { h.fresh = true; }, onSubmitted: () => { h.submitted = true; }, ...props };
     h.render = () => { rendering = h; h.cursor = 0; h.fieldCursor = 0; h.dirty = false; h.effects = []; h.tree = component(h.props); rendering = null; const effects = h.effects; effects.filter((effect) => effect.layout).forEach((effect) => effect.run()); effects.filter((effect) => !effect.layout).forEach((effect) => effect.run()); return h.tree; };
@@ -102,12 +103,12 @@ function environment() {
     choice: (name) => { const prompt = alerts.findLast((alert) => alert[0] === "botanistDrafts.recoveryTitle"); assert.ok(prompt, "recovery prompt exists"); return prompt[2].find((button) => button.text === `botanistDrafts.${name}`).onPress(); },
     prompts: () => alerts.filter((alert) => alert[0] === "botanistDrafts.recoveryTitle").length,
     seed: (key, form = { plantScientificName: "Saved plant" }, photos = []) => draftApi.saveBotanistFormDraft(activeAccount, { client_key: key, form_type: "add-plant", submission_client_key: `submit-${key}`, form, photos }),
-    failSubmit(value) { failSubmit = value; }, setAccount(value) { activeAccount = value; }, delaySaves(promise) { saveGate = promise; },
+    failSubmit(value) { failSubmit = value; }, setAccount(value) { activeAccount = value; }, setQrAvailable(value) { qrAvailable = value; }, delaySaves(promise) { saveGate = promise; },
     async close() { for (const h of mounts) await h.unmount(); },
   };
 }
 function completeForm(h) {
-  for (const [key, value] of Object.entries({ selectedSpecies: species, plantScientificName: "Submitted plant", height: "80", growthStage: "Mature", morphology: "Leaves", latitude: "4.5", longitude: "113.7", selectedQRCode: { qr_id: 17 }, guidedPhotos: { wholePlant: "whole.jpg", leafCloseUp: "leaf.jpg", stemBark: "stem.jpg", flowerFruit: null } })) h.set(key, value);
+  for (const [key, value] of Object.entries({ selectedSpecies: species, plantScientificName: "Submitted plant", height: "80", growthStage: "Mature", morphology: "Leaves", latitude: "4.5", longitude: "113.7", selectedQRCode: { qr_id: 17, qr_code: "unused-17" }, guidedPhotos: { wholePlant: "whole.jpg", leafCloseUp: "leaf.jpg", stemBark: "stem.jpg", flowerFruit: null } })) h.set(key, value);
 }
 
 test("no draft or empty/default-only draft opens without recovery and does not autosave", async () => {
@@ -118,6 +119,61 @@ test("no draft or empty/default-only draft opens without recovery and does not a
     await h.unmount();
     await e.seed("empty", { plantScientificName: "   ", healthStatus: "Healthy", speciesConservationStatus: "Not Assessed", showSpeciesForm: true });
     const next = e.mount(); await next.settle(); assert.equal(e.prompts(), 0);
+  } finally { await e.close(); }
+});
+
+test("QR entry opens a fresh isolated form with the validated code and leaves existing drafts resumable", async () => {
+  const e = environment();
+  try {
+    await e.seed("existing", { plantScientificName: "Existing draft" });
+    const original = structuredClone(e.rows.get("owner").find((row) => row.client_key === "existing"));
+    const qrParams = { entrySource: "qr-scan", scannedQrId: "17", scannedQrToken: "unused-17" };
+    const outer = e.mount({ component: e.screen.default, routeParams: qrParams });
+    const session = e.mount({ component: outer.tree.type, props: outer.tree.props });
+    assert.equal(session.tree.props.skipRecovery, true);
+    const form = e.mount({ component: session.tree.type, props: session.tree.props });
+    await form.settle();
+    assert.equal(e.prompts(), 0);
+    assert.equal(form.value("selectedQRCode").qr_code, "unused-17");
+    assert.equal(form.value("plantScientificName"), "");
+    assert.deepEqual(e.rows.get("owner").find((row) => row.client_key === "existing"), original);
+    const firstKey = session.tree.key;
+    session.props.route.params.scannedQrId = "18";
+    session.props.route.params.scannedQrToken = "unused-18";
+    session.render();
+    assert.notEqual(session.tree.key, firstKey, "another scan gets a fresh form instance");
+    session.props.route.params.scannedQrId = "17";
+    session.props.route.params.scannedQrToken = "unused-17";
+    session.render();
+    form.set("plantScientificName", "Scanned plant"); await form.blur(); await form.unmount();
+    const saved = e.rows.get("owner").find((row) => row.form?.plantScientificName === "Scanned plant");
+    assert.ok(saved);
+    assert.notEqual(saved.client_key, "existing");
+    assert.deepEqual(e.rows.get("owner").find((row) => row.client_key === "existing"), original);
+    const resumed = e.mount({ formDraftKey: saved.client_key }); await resumed.settle();
+    assert.equal(resumed.value("plantScientificName"), "Scanned plant");
+    session.props.route.params = { botanist: { id: "owner" } };
+    session.render();
+    assert.equal(session.tree.props.skipRecovery, false, "normal entry can offer draft recovery again");
+    const normal = e.mount(); await normal.settle();
+    assert.equal(e.prompts(), 1, "normal Add Plant entry retains recovery");
+  } finally { await e.close(); }
+});
+
+test("QR entry rejects a code that became unavailable without opening draft recovery", async () => {
+  const e = environment();
+  try {
+    e.setQrAvailable(false);
+    const form = e.mount({ skipRecovery: true, routeParams: {
+      entrySource: "qr-scan", scannedQrId: "17", scannedQrToken: "unused-17",
+    } });
+    await form.settle();
+    assert.equal(form.value("selectedQRCode"), null);
+    assert.equal(e.prompts(), 0);
+    assert.ok(e.alerts.some((alert) => alert[1] === "addPlant.scannedQrUnavailable"));
+    e.setQrAvailable(true);
+    form.set("selectedQRCode", { qr_id: 17, qr_code: "unused-17" });
+    assert.equal(form.value("selectedQRCode").qr_id, 17, "manual QR selection remains available");
   } finally { await e.close(); }
 });
 

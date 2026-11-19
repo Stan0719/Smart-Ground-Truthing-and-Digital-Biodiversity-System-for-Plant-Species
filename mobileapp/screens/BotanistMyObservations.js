@@ -144,7 +144,6 @@ export default function BotanistMyObservations({ navigation, user }) {
     renderItem={renderItem}
     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void load(true); }} tintColor="#2F6B4F" colors={["#2F6B4F"]} />}
     ListHeaderComponent={<View style={styles.pageHeaderContent}>
-      <View style={styles.pageHeading}><Text style={styles.pageTitle}>{t("myObservations.title")}</Text></View>
       <View testID="observations-search" style={styles.searchContainer}>
         <Ionicons name="search-outline" size={20} color="#668271" />
         <TextInput value={searchQuery} onChangeText={(value) => {
@@ -185,9 +184,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 14, paddingBottom: 28, width: "100%", alignSelf: "center" },
   tabletContent: { maxWidth: 1000, paddingHorizontal: 24 },
   emptyContent: { flexGrow: 1 },
-  pageHeaderContent: { width: "100%", maxWidth: 952, alignSelf: "center", paddingTop: 8 },
-  pageHeading: { marginBottom: 18 },
-  pageTitle: { color: "#2F6B4F", fontSize: 24, fontWeight: "800" },
+  pageHeaderContent: { width: "100%", maxWidth: 952, alignSelf: "center", paddingTop: 18 },
   filters: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 14 },
   searchContainer: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 13,
     marginBottom: 12, borderRadius: 14, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCEBDD" },
