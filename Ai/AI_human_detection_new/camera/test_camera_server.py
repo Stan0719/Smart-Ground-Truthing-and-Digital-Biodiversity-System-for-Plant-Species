@@ -59,6 +59,19 @@ class CameraHTTPTests(unittest.TestCase):
         self.assertEqual(event['readingId'], 'trigger-reading')
         self.assertEqual(published, event)
 
+    def test_detection_confidence_and_contact_evidence_reach_http_clients(self):
+        camera_server.publish_event('human_detected', 'Human', 'Detected.', confidence=0.91,
+                                    confidence_kind='object_detection')
+        event = self.request_json('/camera-events')[1]['events'][0]
+        self.assertEqual(event['confidence'], 0.91)
+        camera_server.publish_event('possible_plant_contact', 'Contact', 'Review.', confidence=0.87,
+                                    confidence_kind='wrist_keypoint', contact_duration_seconds=2.1,
+                                    contact_threshold_seconds=2)
+        event = self.request_json('/camera-events')[1]['events'][0]
+        self.assertEqual(event['confidenceKind'], 'wrist_keypoint')
+        self.assertEqual(event['contactDurationSeconds'], 2.1)
+        self.assertEqual(event['contactThresholdSeconds'], 2)
+
     def test_live_feed_contains_a_decodable_jpeg_with_correct_multipart_headers(self):
         camera_server.publish_frame(np.full((54, 96, 3), 127, dtype=np.uint8))
         connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=3)

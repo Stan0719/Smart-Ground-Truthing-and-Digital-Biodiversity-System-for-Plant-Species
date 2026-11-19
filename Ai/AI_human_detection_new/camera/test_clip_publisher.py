@@ -56,6 +56,16 @@ class ClipPublisherTests(unittest.TestCase):
         self.assertIn(b'Video: h264', result.stderr)
         self.assertFalse((self.root / (self.event['eventId'] + '.encoding.mp4')).exists())
 
+    def test_contact_evidence_survives_metadata_and_post(self):
+        evidence = dict(confidence=0.9, confidenceKind='wrist_keypoint',
+                        contactDurationSeconds=2.1, contactThresholdSeconds=2)
+        self.publisher.begin(self.event | evidence)
+        with patch.object(self.publisher, '_post') as post:
+            self.publisher.process_once()
+        for key, value in evidence.items():
+            self.assertEqual(self.metadata()[key], value)
+            self.assertEqual(post.call_args.args[0][key], value)
+
     def test_network_failure_retries_same_event_after_restart_and_keeps_files(self):
         self.publisher.begin(self.event)
         raw = self.raw_clip()

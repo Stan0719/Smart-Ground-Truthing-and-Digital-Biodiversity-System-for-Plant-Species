@@ -30,7 +30,14 @@ export async function loadCameraEvents(signal?: AbortSignal): Promise<{ events: 
     if (!isRecord(value) || typeof value.eventId !== 'string' || !/^[a-f0-9]{32}$/.test(value.eventId) ||
         typeof value.cameraId !== 'string' || !value.cameraId || typeof value.plantId !== 'string' || !/^[1-9][0-9]*$/.test(value.plantId) ||
         value.eventType !== 'possible_plant_contact' || typeof value.title !== 'string' || typeof value.description !== 'string' ||
-        value.confidence !== null || !instant(value.detectedAt) || !instant(value.recordingStartedAt) ||
+        (value.confidence !== null && (typeof value.confidence !== 'number' || !Number.isFinite(value.confidence) ||
+          value.confidence < 0 || value.confidence > 1 || value.confidenceKind !== 'wrist_keypoint')) ||
+        (value.confidenceKind !== undefined && value.confidenceKind !== 'wrist_keypoint') ||
+        (value.contactDurationSeconds !== undefined && (typeof value.contactDurationSeconds !== 'number' ||
+          !Number.isFinite(value.contactDurationSeconds) || value.contactDurationSeconds < 0 || value.contactDurationSeconds > 86400)) ||
+        (value.contactThresholdSeconds !== undefined && (typeof value.contactThresholdSeconds !== 'number' ||
+          !Number.isFinite(value.contactThresholdSeconds) || value.contactThresholdSeconds <= 0 || value.contactThresholdSeconds > 86400)) ||
+        !instant(value.detectedAt) || !instant(value.recordingStartedAt) ||
         typeof value.recordingStatus !== 'string' || !states.includes(value.recordingStatus) ||
         !['New', 'Reviewing', 'Resolved'].includes(String(value.status)) ||
         (value.recordingEndedAt !== undefined && !instant(value.recordingEndedAt)) ||

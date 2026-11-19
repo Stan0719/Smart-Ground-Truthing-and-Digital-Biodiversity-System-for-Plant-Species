@@ -8,6 +8,20 @@ const states = ["recording", "processing", "failed", "ready"];
 const defaultRecordings = resolve(__dirname, "../Ai/AI_human_detection_new/camera/recordings");
 const cameraMetric = "possible_plant_contact";
 
+function detectionEvidence(item) {
+  const finite = (value, minimum, maximum) => typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
+  if ((item.contactDurationSeconds != null && !finite(item.contactDurationSeconds, 0, 86400)) ||
+      (item.contactThresholdSeconds != null && (!finite(item.contactThresholdSeconds, 0, 86400) || item.contactThresholdSeconds === 0)) ||
+      (item.confidence != null && (!finite(item.confidence, 0, 1) || item.confidenceKind !== "wrist_keypoint")) ||
+      (item.confidenceKind != null && item.confidenceKind !== "wrist_keypoint")) return null;
+  return {
+    confidence: item.confidence ?? null,
+    confidenceKind: item.confidence != null ? "wrist_keypoint" : undefined,
+    contactDurationSeconds: item.contactDurationSeconds ?? undefined,
+    contactThresholdSeconds: item.contactThresholdSeconds ?? undefined,
+  };
+}
+
 // Additional display metadata stays beside the clip, never in new database columns.
 async function clipMetadata(root, row) {
   try {
@@ -41,8 +55,9 @@ async function clipFile(root, id) {
 
 function payload(body) {
   if (!body || typeof body !== "object" || Array.isArray(body) ||
-      Object.keys(body).some(key => !["eventId", "plantId", "readingId", "eventType", "title", "description", "detectedAt", "recordingStartedAt", "recordingEndedAt", "recordingStatus"].includes(key)))
+      Object.keys(body).some(key => !["eventId", "plantId", "readingId", "eventType", "title", "description", "detectedAt", "recordingStartedAt", "recordingEndedAt", "recordingStatus", "confidence", "confidenceKind", "contactDurationSeconds", "contactThresholdSeconds"].includes(key)))
     fail(400, "Invalid camera event.");
+  if (!detectionEvidence(body)) fail(400, "Invalid camera detection evidence.");
   if (typeof body.eventId !== "string" || !eventId.test(body.eventId) || typeof body.plantId !== "string" || !/^[1-9][0-9]{0,18}$/.test(body.plantId) ||
       BigInt(body.plantId) > 9223372036854775807n || body.eventType !== cameraMetric || !states.includes(body.recordingStatus) ||
       (body.readingId != null && (typeof body.readingId !== "string" || !body.readingId.trim() || body.readingId.length > 100)))
@@ -105,7 +120,8 @@ function mountCameraEvents(app, { pool, allow, recordingsRoot = process.env.CAME
       return {
         eventId: row.id, cameraId: row.camera_id, plantId: metadata?.plantId ?? String(row.plant_id), eventType: cameraMetric,
         title: "Camera contact + MPU6050 movement",
-        description: "Camera contact with sensor movement detected. Please review.", confidence: null,
+        description: "Camera contact with sensor movement detected. Please review.",
+        ...(detectionEvidence(metadata ?? {}) ?? { confidence: null }),
         detectedAt: row.detected_at, recordingStartedAt: row.detected_at,
         recordingEndedAt: metadata?.recordingEndedAt ?? undefined,
         durationSeconds: metadata?.recordingEndedAt

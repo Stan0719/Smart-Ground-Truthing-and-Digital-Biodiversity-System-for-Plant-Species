@@ -79,6 +79,8 @@ class ClipPublisher:
             'cameraId': self.camera_id, 'recordingStartedAt': event['detectedAt'],
             'recordingEndedAt': None, 'recordingStatus': 'recording',
             'readingId': event.get('readingId'),
+            **{key: event[key] for key in ('confidence', 'confidenceKind',
+                'contactDurationSeconds', 'contactThresholdSeconds') if key in event},
         })
 
     def finish(self, event_id):

@@ -145,7 +145,7 @@ def draw_button(frame, text, top_left, size, color):
     put_text(frame, text, (x + 14, y + 31), 0.55, (255, 255, 255), 1)
 
 
-def draw_wrists(frame, pose_result):
+def draw_wrists(frame, pose_result, scores=None):
     wrists = []
     if pose_result.keypoints is None:
         return wrists
@@ -157,9 +157,11 @@ def draw_wrists(frame, pose_result):
             if confidence < WRIST_CONFIDENCE or (x == 0 and y == 0):
                 continue
             wrists.append((x, y))
+            if scores is not None:
+                scores[(x, y)] = confidence
             color = (0, 220, 255)
             cv2.circle(frame, (int(x), int(y)), 7, color, -1)
-            put_text(frame, f"{side} wrist", (int(x) + 10, max(20, int(y) - 10)),
+            put_text(frame, f"{side} wrist {confidence:.0%}", (int(x) + 10, max(20, int(y) - 10)),
                      0.45, color, 1)
     return wrists
 
@@ -383,14 +385,15 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
                     for box in plant_results[0].boxes:
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (100, 220, 200), 2)
-                        put_text(annotated_frame, "Plant", (x1, max(20, y1 - 10)),
+                        put_text(annotated_frame, f"Plant {float(box.conf.item()):.0%}", (x1, max(20, y1 - 10)),
                                  0.55, (100, 220, 200), 1)
                         plant_count_frame += 1
                         plant_id = int(box.id.item()) if box.id is not None else None
                         plants.append((plant_id, (x1, y1, x2, y2)))
 
                 pose_results = pose_model.predict(frame, conf=0.25, imgsz=416, verbose=False)
-                wrists = draw_wrists(annotated_frame, pose_results[0]) if pose_results else []
+                wrist_scores = {}
+                wrists = draw_wrists(annotated_frame, pose_results[0], wrist_scores) if pose_results else []
                 wrist_count_frame = len(wrists)
 
                 if results and results[0].boxes is not None:
@@ -414,10 +417,17 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
                             obj_id = int(box.id.item())
 
                         if obj_id is not None:
-                            if label == "person":
-                                unique_person_ids.add(obj_id)
-                            elif label in animal_classes:
-                                unique_animal_ids.add(obj_id)
+                            tracked_ids = unique_person_ids if label == "person" else unique_animal_ids
+                            is_new_detection = obj_id not in tracked_ids
+                            tracked_ids.add(obj_id)
+                            if web_enabled and is_new_detection:
+                                camera_server.publish_event(
+                                    "human_detected" if label == "person" else "animal_detected",
+                                    f"{display_label} detected",
+                                    f"{display_label} detected in the camera view.",
+                                    confidence=float(box.conf.item()),
+                                    confidence_kind="object_detection",
+                                )
 
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
                         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
@@ -425,6 +435,7 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
                         text = display_label
                         if obj_id is not None:
                             text = f"{display_label} ID:{obj_id}"
+                        text += f" {float(box.conf.item()):.0%}"
 
                         put_text(
                             annotated_frame,
@@ -481,13 +492,24 @@ def _run_camera(web_enabled=False, sensor=None, publisher=None):
                             recording_event_id if publisher is not None and publisher.configured else None,
                         )
                         if video_writer is not None and web_enabled:
+                            # Use only wrist scores inside a region that actually triggered.
+                            contact_confidence = max((score
+                                for plant_id, (x1, y1, x2, y2) in monitored_plants
+                                if plant_id in handling_ids
+                                for (x, y), score in wrist_scores.items()
+                                if max(x1 - x, 0, x - x2) ** 2 + max(y1 - y, 0, y - y2) ** 2
+                                <= WRIST_REACH_PIXELS ** 2), default=None)
                             event = camera_server.publish_event(
                                 "possible_plant_contact",
                                 "Camera contact + MPU6050 movement",
                                 f"Wrist proximity for at least {PLANT_CONTACT_SECONDS:g} seconds "
                                 "with fresh MPU6050 movement from this plant's sensor. Please review.",
                                 event_id=recording_event_id,
-                            reading_id=sensor_state.get('readingId'),
+                                reading_id=sensor_state.get('readingId'),
+                                confidence=contact_confidence,
+                                confidence_kind="wrist_keypoint" if contact_confidence is not None else None,
+                                contact_duration_seconds=max(contact_elapsed[key] for key in handling_ids),
+                                contact_threshold_seconds=PLANT_CONTACT_SECONDS,
                             )
                             if publisher is not None and publisher.configured:
                                 try:

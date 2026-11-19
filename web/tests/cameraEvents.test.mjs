@@ -36,7 +36,7 @@ test('camera list distinguishes access failures and malformed metadata from an e
       globalThis.fetch = async () => Response.json({}, { status })
       await assert.rejects(loadCameraEvents(), /sign in|permission|unavailable/)
     }
-    for (const bad of [{ eventId: '../secret' }, { plantId: null }, { confidence: 0.9 }, { recordingStatus: 'unknown' }, { durationSeconds: -1 }, { recordingEndedAt: 'bad' }, { detectedAt: 'bad' }]) {
+    for (const bad of [{ eventId: '../secret' }, { plantId: null }, { confidence: 0.9 }, { confidence: 1.1, confidenceKind: 'wrist_keypoint' }, { contactDurationSeconds: -1 }, { contactThresholdSeconds: 0 }, { recordingStatus: 'unknown' }, { durationSeconds: -1 }, { recordingEndedAt: 'bad' }, { detectedAt: 'bad' }]) {
       globalThis.fetch = async () => Response.json({ events: [{ ...event(), ...bad }], hasMore: false })
       await assert.rejects(loadCameraEvents(), /invalid|incomplete/)
     }
@@ -44,5 +44,15 @@ test('camera list distinguishes access failures and malformed metadata from an e
     await assert.rejects(loadCameraEvents(), /invalid/)
     globalThis.fetch = async () => { throw Error('offline') }
     await assert.rejects(loadCameraEvents(), /Unable to reach/)
+  } finally { globalThis.fetch = original }
+})
+
+test('camera contact evidence retains measured values and explicitly typed confidence', async () => {
+  const original = globalThis.fetch
+  try {
+    const evidence = { confidence: 0.91, confidenceKind: 'wrist_keypoint', contactDurationSeconds: 2.1, contactThresholdSeconds: 2 }
+    globalThis.fetch = async () => Response.json({ events: [{ ...event(), ...evidence }], hasMore: false })
+    const actual = (await loadCameraEvents()).events[0]
+    for (const [key, value] of Object.entries(evidence)) assert.equal(actual[key], value)
   } finally { globalThis.fetch = original }
 })

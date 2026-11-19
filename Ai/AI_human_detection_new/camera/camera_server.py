@@ -56,7 +56,9 @@ def publish_frame(frame):
         _condition.notify_all()
 
 
-def publish_event(event_type, title, description, *, event_id=None, reading_id=None):
+def publish_event(event_type, title, description, *, event_id=None, reading_id=None,
+                  confidence=None, confidence_kind=None, contact_duration_seconds=None,
+                  contact_threshold_seconds=None):
     with _condition:
         event = {
             "eventId": event_id or uuid4().hex,
@@ -65,12 +67,17 @@ def publish_event(event_type, title, description, *, event_id=None, reading_id=N
             "eventType": event_type,
             "title": title,
             "description": description,
-            "confidence": None,
+            "confidence": confidence,
             "detectedAt": timestamp(),
             "status": "New",
         }
         if reading_id is not None:
             event["readingId"] = reading_id
+        for key, value in (("confidenceKind", confidence_kind),
+                           ("contactDurationSeconds", contact_duration_seconds),
+                           ("contactThresholdSeconds", contact_threshold_seconds)):
+            if value is not None:
+                event[key] = value
         _events.appendleft(event)
         return dict(event)
 

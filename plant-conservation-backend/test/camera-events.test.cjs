@@ -38,7 +38,8 @@ test("camera clips reuse existing alert columns, enforce device/session boundari
   const base = `http://127.0.0.1:${server.address().port}/api`;
   const event = { eventId: id, plantId: "42", eventType: "possible_plant_contact", title: "Possible contact",
     description: "Contact plus fresh MPU movement", detectedAt: "2026-11-13T01:00:00Z",
-    recordingStartedAt: "2026-11-13T01:00:00Z", recordingEndedAt: null, recordingStatus: "recording", readingId: "trigger-reading" };
+    recordingStartedAt: "2026-11-13T01:00:00Z", recordingEndedAt: null, recordingStatus: "recording", readingId: "trigger-reading",
+    confidence: 0.91, confidenceKind: "wrist_keypoint", contactDurationSeconds: 2.1, contactThresholdSeconds: 2 };
   const send = (body = event, device = "camera", secret = key) => fetch(base + "/device/camera-events", {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: "Device " + secret, "X-Camera-ID": device },
     body: JSON.stringify(body),
@@ -50,6 +51,9 @@ test("camera clips reuse existing alert columns, enforce device/session boundari
   assert.equal((await send({ ...event, plantId: "43" })).status, 403);
   assert.equal((await send({ ...event, clip_filename: "../secret.mp4" })).status, 400);
   assert.equal((await send({ ...event, recordingStartedAt: "bad" })).status, 400);
+  for (const bad of [{ confidence: 1.5 }, { confidenceKind: "threat_probability" },
+    { contactDurationSeconds: -1 }, { contactThresholdSeconds: 0 }])
+    assert.equal((await send({ ...event, ...bad })).status, 400);
   // Simulate the same local metadata written by the camera, not additional DB columns.
   const sidecar = data => writeFile(join(root, id + ".json"), JSON.stringify({ ...data, cameraId: "camera" }));
   await sidecar(event);
@@ -88,6 +92,10 @@ test("camera clips reuse existing alert columns, enforce device/session boundari
   assert.equal(list.events[0].recordingStatus, "ready");
   assert.equal(list.events[0].videoUrl, `/api/data/camera-events/${id}/video`);
   assert.equal(list.events[0].durationSeconds, 12);
+  assert.equal(list.events[0].confidence, 0.91);
+  assert.equal(list.events[0].confidenceKind, "wrist_keypoint");
+  assert.equal(list.events[0].contactDurationSeconds, 2.1);
+  assert.equal(list.events[0].contactThresholdSeconds, 2);
   assert.equal(list.events[0].plantId, "42");
   assert.equal(list.events[0].status, "Reviewing");
   assert.equal((await pool.query("SELECT video_path FROM threat_alert_history WHERE id=$1", [id])).rows[0].video_path, id + ".mp4");

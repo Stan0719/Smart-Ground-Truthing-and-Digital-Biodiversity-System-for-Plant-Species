@@ -9,6 +9,9 @@ export interface CameraEvent {
   title: string
   description: string
   confidence: number | null
+  confidenceKind?: 'object_detection' | 'wrist_keypoint'
+  contactDurationSeconds?: number
+  contactThresholdSeconds?: number
   detectedAt: string
   recordingStartedAt?: string
   recordingEndedAt?: string

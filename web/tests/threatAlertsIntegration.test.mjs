@@ -279,6 +279,26 @@ test('camera recording states refresh without losing investigation notes or inve
   } finally { h.stop(); globalThis.fetch = original }
 })
 
+test('camera evidence shows trigger measurements, preserves zero confidence, and keeps legacy evidence unavailable', async () => {
+  const h = pageHarness({ withCamera: true }), original = globalThis.fetch
+  let evidence = { confidence: 0.91, confidenceKind: 'wrist_keypoint', contactDurationSeconds: 2.1, contactThresholdSeconds: 2 }
+  globalThis.fetch = async () => Response.json({ events: [savedCameraEvent(evidence)], hasMore: false })
+  try {
+    h.state.alerts.value = [cameraRow()]
+    h.state.openAlert(h.state.alerts.value[0]); await new Promise(setImmediate)
+    let tree = nodes(h.render())
+    for (const value of ['91%', '2.1 s', '2.0 s']) assert.ok(tree.some(n => n.children === value), value)
+    evidence = { ...evidence, confidence: 0 }
+    await h.state.loadCameraEvidence(h.state.selectedAlert.value)
+    assert.ok(nodes(h.render()).some(n => n.children === '0%'))
+    evidence = {}
+    await h.state.loadCameraEvidence(h.state.selectedAlert.value)
+    tree = nodes(h.render())
+    assert.ok(tree.some(n => n.children === 'Threshold unavailable'))
+    assert.ok(!tree.some(n => n.children === '91%'))
+  } finally { h.stop(); globalThis.fetch = original }
+})
+
 test('camera evidence requires the exact event, camera and detection time and discloses the bounded lookup', async () => {
   const h = pageHarness({ withCamera: true }), original = globalThis.fetch
   try {
@@ -430,7 +450,7 @@ test('canonical table preserves status palettes, IDs and exact View selection', 
       assert.ok(modal); assert.equal(modal.props.accessible, '')
       assert.ok(nodes(h.render()).some(n => n.props?.value === row.readingId))
     }
-    assert.doesNotMatch(page, /confidence \*|formatConfidence|badge unavailable/)
+    assert.doesNotMatch(page, /selectedAlert\.value \*|badge unavailable/)
   } finally { h.stop() }
 })
 

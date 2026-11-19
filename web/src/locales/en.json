@@ -1165,6 +1165,7 @@
     "contactduration": "Contact duration",
     "configuredcontactthreshold": "Configured contact threshold",
     "detectionconfidence": "Detection confidence",
+    "confidencedescribeswristdetectionnottheprobabilityofathreatcontactdurationismeasuredatthealerttrigger": "Confidence describes wrist detection, not the probability of a threat. Contact duration is measured at the alert trigger.",
     "detaileddetectionevidencewasnotsuppliedacontactalertdoesnotestablishpoaching": "Detailed detection evidence was not supplied. A contact alert does not establish poaching.",
     "alertevidence": "Alert Evidence",
     "sourcespecificevidenceisunavailable": "Source-specific evidence is unavailable.",

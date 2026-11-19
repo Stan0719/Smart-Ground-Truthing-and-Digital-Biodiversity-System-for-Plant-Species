@@ -269,6 +269,7 @@ onBeforeUnmount(() => {
           <div>
             <strong>Detection confidence</strong>
             <small>Based on {{ cameraEvents.length }} events from this server session.</small>
+            <small>Model detection scores, not threat probabilities. Contact events use wrist detection confidence.</small>
           </div>
           <div class="confidence-chart">
             <canvas

@@ -1291,6 +1291,7 @@
     "contactduration": "Tempoh sentuhan",
     "configuredcontactthreshold": "Ambang sentuhan yang ditetapkan",
     "detectionconfidence": "Keyakinan pengesanan",
+    "confidencedescribeswristdetectionnottheprobabilityofathreatcontactdurationismeasuredatthealerttrigger": "Keyakinan menerangkan pengesanan pergelangan tangan, bukan kebarangkalian ancaman. Tempoh sentuhan diukur ketika amaran dicetuskan.",
     "detaileddetectionevidencewasnotsuppliedacontactalertdoesnotestablishpoaching": "Bukti pengesanan terperinci tidak diberikan. Amaran sentuhan tidak membuktikan pemburuan haram.",
     "alertevidence": "Bukti Amaran",
     "sourcespecificevidenceisunavailable": "Bukti khusus sumber tidak tersedia.",

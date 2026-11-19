@@ -82,10 +82,14 @@ class PlantContactTests(unittest.TestCase):
                 capture.isOpened.return_value = True
                 capture.read.return_value = (True, frame)
                 box = SimpleNamespace(cls=torch.tensor([0]), id=torch.tensor([1]),
+                                      conf=torch.tensor([0.9]),
                                       xyxy=torch.tensor([[100, 100, 200, 200]]))
+                animal_box = SimpleNamespace(cls=torch.tensor([1]), id=torch.tensor([2]),
+                                             conf=torch.tensor([0.8]),
+                                             xyxy=torch.tensor([[300, 100, 400, 200]]))
                 detector, plant_model, pose_model = MagicMock(), MagicMock(), MagicMock()
-                detector.names = {0: 'person'}
-                detector.track.return_value = [SimpleNamespace(boxes=[box])]
+                detector.names = {0: 'person', 1: 'cat'}
+                detector.track.return_value = [SimpleNamespace(boxes=[box, animal_box])]
                 plant_model.track.return_value = [SimpleNamespace(boxes=[box] if detected else [])]
                 region = cam.FixedPlantRegion()
                 if fixed:
@@ -113,10 +117,20 @@ class PlantContactTests(unittest.TestCase):
                 self.assertEqual(writer.write.call_count, 1 if should_alert else 0)
                 self.assertEqual(sound.Beep.call_count, 1 if should_alert else 0)
                 self.assertEqual(publish_frame.call_count, 3)
-                self.assertEqual(publish_event.call_count, 1 if should_alert else 0)
+                self.assertEqual(publish_event.call_count, 3 if should_alert else 2)
+                for event_type, confidence in (('human_detected', 0.9), ('animal_detected', 0.8)):
+                    calls = [call for call in publish_event.call_args_list if call.args[0] == event_type]
+                    self.assertEqual(len(calls), 1)  # One event per track, not per frame.
+                    self.assertAlmostEqual(calls[0].kwargs['confidence'], confidence)
+                self.assertTrue(any('Human ID:1 90%' in call.args[1] for call in text.call_args_list))
+                self.assertTrue(any('Animal ID:2 80%' in call.args[1] for call in text.call_args_list))
                 if should_alert:
                     self.assertEqual(publish_event.call_args.args[0], 'possible_plant_contact')
                     self.assertIn('MPU6050', publish_event.call_args.args[2])
+                    self.assertEqual(publish_event.call_args.kwargs['contact_threshold_seconds'], 2)
+                    self.assertEqual(publish_event.call_args.kwargs['contact_duration_seconds'], 2)
+                    self.assertAlmostEqual(publish_event.call_args.kwargs['confidence'], 0.9)
+                    self.assertEqual(publish_event.call_args.kwargs['confidence_kind'], 'wrist_keypoint')
                 handling_labels = [call.args[1] for call in text.call_args_list
                                    if call.args[1].startswith('POSSIBLE HANDLING:')]
                 self.assertEqual(bool(handling_labels), should_alert)
