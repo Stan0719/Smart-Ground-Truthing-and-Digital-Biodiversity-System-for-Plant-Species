@@ -50,8 +50,6 @@ test("camera clips reuse existing alert columns, enforce device/session boundari
   assert.equal((await send({ ...event, plantId: "43" })).status, 403);
   assert.equal((await send({ ...event, clip_filename: "../secret.mp4" })).status, 400);
   assert.equal((await send({ ...event, recordingStartedAt: "bad" })).status, 400);
-  assert.equal((await send({ ...event, readingId: "missing-reading" })).status, 403);
-  assert.equal((await send({ ...event, readingId: "other-reading" })).status, 403);
   // Simulate the same local metadata written by the camera, not additional DB columns.
   const sidecar = data => writeFile(join(root, id + ".json"), JSON.stringify({ ...data, cameraId: "camera" }));
   await sidecar(event);
@@ -59,7 +57,7 @@ test("camera clips reuse existing alert columns, enforce device/session boundari
   assert.equal((await send()).status, 201);
   assert.equal((await pool.query("SELECT COUNT(*) AS count FROM threat_alert_history WHERE camera_id IS NOT NULL")).rows[0].count, 1);
   const stored = (await pool.query("SELECT * FROM threat_alert_history WHERE id=$1", [id])).rows[0];
-  assert.equal(stored.device_id, "sensor"); assert.equal(stored.reading_id, "trigger-reading");
+  assert.equal(stored.device_id, "camera"); assert.equal(stored.reading_id, null);
   assert.equal(stored.camera_id, "camera"); assert.equal(stored.video_path, null);
   assert.equal(stored.metric, "possible_plant_contact"); assert.equal(stored.value, 1);
   assert.equal((await send({ ...event, plantId: "43", readingId: null }, "other", otherKey)).status, 409);
@@ -112,7 +110,7 @@ test("camera clips reuse existing alert columns, enforce device/session boundari
   const head = await get(path, undefined, {}, "HEAD");
   assert.equal(head.status, 200); assert.equal(head.headers.get("content-length"), String(video.length));
   assert.equal((await get("/camera-events/not-a-valid-id/video")).status, 400);
-  assert.equal((await get(`/camera-events/${"d".repeat(32)}/video`)).status, 404);
+  assert.equal((await get(`/camera-events/${"9".repeat(32)}/video`)).status, 404);
   // The existing video_path is sufficient even if optional local display metadata is gone.
   await unlink(join(root, id + ".json"));
   const withoutMetadata = (await (await get()).json()).events[0];
@@ -122,7 +120,7 @@ test("camera clips reuse existing alert columns, enforce device/session boundari
   await pool.query("UPDATE threat_alert_history SET video_path=$2 WHERE id=$1", [id, id + ".mp4"]);
   await unlink(join(root, id + ".mp4"));
   assert.equal((await get(path)).status, 404);
-  const unlinkedId = "e".repeat(32);
+  const unlinkedId = "f".repeat(32);
   assert.equal((await send({ ...event, eventId: unlinkedId, readingId: null })).status, 201);
   const unlinked = (await pool.query("SELECT device_id,reading_id FROM threat_alert_history WHERE id=$1", [unlinkedId])).rows[0];
   assert.equal(unlinked.device_id, "camera"); assert.equal(unlinked.reading_id, null);

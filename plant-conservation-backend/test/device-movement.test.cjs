@@ -25,12 +25,7 @@ test("camera gate reads only fresh, connected MPU state from its assigned sensor
     const response = await fetch(base + suffix, { headers: auth });
     return { status: response.status, body: await response.json() };
   };
-  const reading = async (movement, capture, clientKey = randomUUID(), clear = true) => {
-    if (clear) {
-      await pool.query("DELETE FROM iot_ingestion_receipt");
-      await pool.query("DELETE FROM sensor_reading");
-    }
-    await pool.query("UPDATE iot_device SET last_seen=NULL");
+  const reading = async (movement, capture, clientKey = randomUUID()) => {
     const response = await fetch(base + "/api/device/readings", {
       method: "POST", headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({ device_id: "test-sensor", values: { movement },
@@ -55,8 +50,7 @@ test("camera gate reads only fresh, connected MPU state from its assigned sensor
   });
   await t.test("fresh movement and no-movement reach the camera as distinct states", async () => {
     await reading(1, capture());
-    const saved = (await pool.query('SELECT "values" FROM sensor_reading WHERE device_id=$1', ["test-sensor"])).rows[0].values;
-    assert.equal(saved._capture.dht_status, "Operational");
+    assert.equal((await pool.query("SELECT COUNT(*)::integer AS count FROM sensor_reading WHERE device_id=$1", ["test-sensor"])).rows[0].count, 0);
     let result = await get();
     assert.equal(result.status, 200);
     assert.equal(result.body.plantId, "1");
@@ -73,20 +67,19 @@ test("camera gate reads only fresh, connected MPU state from its assigned sensor
     await reading(1, undefined);
     assert.equal((await get()).body.status, "unavailable");
   });
-  await t.test("old queued movement does not become live after upload or retry", async () => {
-    const id = await reading(1, capture(30000));
-    assert.equal((await get()).body.status, "stale");
-    await reading(1, capture(), id, false);
-    const result = (await get()).body;
-    assert.equal(result.status, "stale");
-    assert.equal(result.movement, null);
-    assert.equal((await pool.query("SELECT COUNT(*)::integer AS count FROM sensor_reading")).rows[0].count, 1);
-  });
-  await t.test("stale database receipts and future-dated samples cannot open the gate", async () => {
+  await t.test("late queued movement cannot replace a newer live sample", async () => {
     await reading(1, capture());
-    await pool.query("UPDATE sensor_reading SET created_at=CURRENT_TIMESTAMP-INTERVAL '30 seconds'");
-    assert.equal((await get()).body.status, "stale");
+    assert.equal((await get()).body.status, "moving");
+    await reading(0, capture(30000));
+    const result = (await get()).body;
+    assert.equal(result.status, "moving");
+    assert.equal(result.movement, 1);
+    assert.equal((await pool.query("SELECT COUNT(*)::integer AS count FROM sensor_reading")).rows[0].count, 0);
+  });
+  await t.test("future-dated and older samples cannot open the gate", async () => {
     await reading(1, capture(-30000));
+    assert.equal((await get()).body.status, "stale");
+    await reading(0, capture(30000));
     assert.equal((await get()).body.status, "stale");
   });
 });

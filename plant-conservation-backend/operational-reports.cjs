@@ -47,21 +47,60 @@ async function generateOperationalReport(pool, category, query) {
       statistics: [{ key: "totalIncidents", value: source.length }, { key: "unresolved", value: source.filter(row => row.status !== "Resolved").length }, { key: "Resolved", value: source.filter(row => row.status === "Resolved").length }],
       chart: { kind: "horizontal", labels: distribution.map(row => row[0]), unit: "count", series: [{ key: "totalIncidents", values: distribution.map(row => row[1]) }] } };
   }
-  // A single selected device and measurement; every persisted reading is retained,
-  // including null values for missing/invalid measurements. Never turn absence into 0.
-  const devices = (await pool.query(`SELECT DISTINCT d.id,d.name FROM iot_device d JOIN sensor_reading r ON r.device_id=d.id WHERE ($1::timestamptz IS NULL OR r.created_at >= $1::timestamptz) AND ($2::timestamptz IS NULL OR r.created_at < $2::timestamptz) ORDER BY d.name,d.id`, args)).rows;
+  // Keep all old raw rows and add one point for each completed aggregate window.
+  const devices = (await pool.query(`SELECT DISTINCT d.id,d.name FROM iot_device d
+    WHERE EXISTS (SELECT 1 FROM sensor_reading r WHERE r.device_id=d.id
+      AND ($1::timestamptz IS NULL OR r.created_at >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR r.created_at < $2::timestamptz))
+    OR EXISTS (SELECT 1 FROM iot_reading_aggregate a WHERE a.device_id=d.id
+      AND ($1::timestamptz IS NULL OR a.bucket_start >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR a.bucket_start < $2::timestamptz))
+    ORDER BY d.name,d.id`, args)).rows;
   if (device && !devices.some(item => item.id === device)) throw Object.assign(Error("Device has no readings in this reporting period."), { status: 400 });
   const selectedDevice = device || devices[0]?.id || null;
-  const source = selectedDevice == null ? [] : (await pool.query(`SELECT r.created_at,r."values" -> $4::text AS value,d.name,d.id FROM sensor_reading r JOIN iot_device d ON d.id=r.device_id
-    WHERE ($1::timestamptz IS NULL OR r.created_at >= $1::timestamptz) AND ($2::timestamptz IS NULL OR r.created_at < $2::timestamptz) AND r.device_id=$3 ORDER BY r.created_at,r.id`, [...args, selectedDevice, measurement])).rows;
+  const raw = selectedDevice == null ? [] : (await pool.query(`SELECT r.created_at AS recorded_at,r.created_at AS order_at,
+    r."values" -> $4::text AS value,d.name,d.id,1::bigint AS sample_count,NULL::jsonb AS metric_stats,
+    NULL::timestamptz AS bucket_end,'raw'::text AS point_type
+    FROM sensor_reading r JOIN iot_device d ON d.id=r.device_id
+    WHERE ($1::timestamptz IS NULL OR r.created_at >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR r.created_at < $2::timestamptz) AND r.device_id=$3
+    ORDER BY r.created_at,r.id`, [...args, selectedDevice, measurement])).rows;
+  const summaries = selectedDevice == null ? [] : (await pool.query(`SELECT a.bucket_start AS recorded_at,a.bucket_start AS order_at,
+    a.bucket_end,a.sample_count,a.metrics -> $4::text AS metric_stats,d.name,d.id,NULL::jsonb AS value,
+    'aggregate'::text AS point_type
+    FROM iot_reading_aggregate a JOIN iot_device d ON d.id=a.device_id
+    WHERE ($1::timestamptz IS NULL OR a.bucket_start >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR a.bucket_start < $2::timestamptz) AND a.device_id=$3
+    ORDER BY a.bucket_start,a.bucket_end`, [...args, selectedDevice, measurement])).rows;
+  const source = [
+    ...raw,
+    ...summaries.map(row => {
+      const stats = row.metric_stats;
+      const valid = stats && Number(stats.count) > 0 && Number.isFinite(Number(stats.sum));
+      return { ...row, value: valid ? Number(stats.sum) / Number(stats.count) : null };
+    }),
+  ].sort((a, b) => new Date(a.order_at) - new Date(b.order_at) || a.point_type.localeCompare(b.point_type));
   const values = source.map(row => typeof row.value === "number" && Number.isFinite(row.value) ? row.value : null);
-  const numeric = values.filter(value => value !== null);
-  const extrema = numeric.reduce((state, value, index) => ({ min: Math.min(state.min, value), max: Math.max(state.max, value), mean: state.mean * (index / (index + 1)) + value / (index + 1) }), { min: Infinity, max: -Infinity, mean: 0 });
+  let numericCount = 0, sum = 0, minimum = Infinity, maximum = -Infinity, totalReadings = 0;
+  for (const row of raw) {
+    totalReadings += 1;
+    if (typeof row.value !== "number" || !Number.isFinite(row.value)) continue;
+    numericCount += 1; sum += row.value; minimum = Math.min(minimum, row.value); maximum = Math.max(maximum, row.value);
+  }
+  for (const row of summaries) {
+    totalReadings += Number(row.sample_count) || 0;
+    const stats = row.metric_stats;
+    if (!stats || Number(stats.count) <= 0 || !Number.isFinite(Number(stats.sum))) continue;
+    numericCount += Number(stats.count); sum += Number(stats.sum);
+    minimum = Math.min(minimum, Number(stats.min)); maximum = Math.max(maximum, Number(stats.max));
+  }
+  const latest = source.reduce((value, row) =>
+    !value || new Date(row.recorded_at) > new Date(value) ? row.recorded_at : value, null);
   const unit = measurements[measurement];
   return { ...base, basis: "iotScope", devices, device: selectedDevice, measurement, measurements: Object.keys(measurements),
-    columns: ["recordedAt", "device", "measurement", "value", "unit"], rows: source.map((row, index) => [instant(row.created_at), row.name, measurement, values[index], unit]),
-    statistics: [{ key: "devicesWithReadings", value: devices.length }, { key: "totalReadings", value: source.length }, { key: "latestReading", value: instant(source.at(-1)?.created_at) }, { key: "minimum", value: numeric.length ? extrema.min : null }, { key: "average", value: numeric.length ? extrema.mean : null }, { key: "maximum", value: numeric.length ? extrema.max : null }],
-    chart: { kind: "line", labels: source.map(row => instant(row.created_at)), unit, series: [{ key: measurement, values }] } };
+    columns: ["recordedAt", "device", "measurement", "value", "unit"], rows: source.map((row, index) => [instant(row.recorded_at), row.name, measurement, values[index], unit]),
+    statistics: [{ key: "devicesWithReadings", value: devices.length }, { key: "totalReadings", value: totalReadings }, { key: "latestReading", value: instant(latest) }, { key: "minimum", value: numericCount ? minimum : null }, { key: "average", value: numericCount ? sum / numericCount : null }, { key: "maximum", value: numericCount ? maximum : null }],
+    chart: { kind: "line", labels: source.map(row => instant(row.recorded_at)), unit, series: [{ key: measurement, values }] } };
 }
 function mountOperationalReports(app, { pool, allow }) {
   app.get("/api/reports/:category", allow("reports.read"), async (req, res) => {

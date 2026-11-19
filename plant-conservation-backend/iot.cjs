@@ -9,14 +9,20 @@ const {
   hash,
 } = require("./domain.cjs");
 const { projectGps } = require("../shared/rbac.cjs");
-const metrics = [
-  "temperature",
-  "humidity",
-  "soilMoisture",
-  "movement",
-  "rainfall",
-  "sound",
-];
+const {
+  CHECKPOINT_INTERVAL_MS,
+  addReading,
+  bucketStart,
+  cloneAccumulator,
+  metrics,
+  newAccumulator,
+  normalizedValues,
+  payloadHash,
+  restoreAccumulator,
+  runtimeFor,
+  summarize,
+  withDeviceLock,
+} = require("./iot-reading-cache.cjs");
 const dhtHealthStatuses = new Set([
   "Operational",
   "Waiting for valid reading",
@@ -48,6 +54,7 @@ function positiveBigint(value) {
   }
 }
 function mountDeviceIngestion(app, { pool }) {
+  const runtime = runtimeFor(pool);
   // A sensor key can read only its own movement, bound to its assigned plant.
   // This route is mounted before browser-session authentication, like ingestion.
   app.get("/api/device/movement", async (req, res) => {
@@ -62,10 +69,7 @@ function mountDeviceIngestion(app, { pool }) {
     if (!device || device.status !== "Active") fail(401, "Device authentication failed.");
     if (device.device_type !== "Sensor" || String(device.plant_id) !== req.query.plant_id)
       fail(403, "The active sensor must be assigned to this plant.");
-    const reading = (await pool.query(
-      'SELECT id,"values",created_at FROM sensor_reading WHERE device_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',
-      [device.id],
-    )).rows[0];
+    const reading = runtime.latest.get(device.id);
     const capture = reading?.values?._capture;
     const movement = reading?.values?.movement;
     const observed = typeof capture?.observed_at === "string" ? Date.parse(capture.observed_at) : NaN;
@@ -79,7 +83,7 @@ function mountDeviceIngestion(app, { pool }) {
     res.json({ deviceId: device.id, plantId: String(device.plant_id), status,
       movement: ["moving", "stationary"].includes(status) ? movement : null,
       observedAt: Number.isFinite(observed) ? capture.observed_at : null,
-      readingId: reading?.id ?? null, maxAgeSeconds: 5 });
+      readingId: null, maxAgeSeconds: 5 });
   });
 
   app.post("/api/device/readings", async (req, res) => {
@@ -106,6 +110,7 @@ function mountDeviceIngestion(app, { pool }) {
       };
     }
     if (b.client_key !== undefined) text(b.client_key, 100);
+    const targetDeviceId = text(b.device_id, 100);
     for (const [metric, value] of Object.entries(b.values)) {
       if (metric === "humidity" && (value < 0 || value > 100))
         fail(400, "Humidity must be a percentage from 0 to 100.");
@@ -118,71 +123,137 @@ function mountDeviceIngestion(app, { pool }) {
     }
     if (!Object.keys(b.values).length)
       fail(400, "At least one reading is required.");
-    await transaction(pool, async (c) => {
-      const device = (
-        await c.query(
+    const acceptedValues = normalizedValues(b.values, capture);
+    const acceptedHash = payloadHash(acceptedValues);
+    const outcome = await withDeviceLock(runtime, targetDeviceId, async () => {
+      const observedAt = capture ? Date.parse(capture.observed_at) : Date.now();
+      const result = await transaction(pool, async c => {
+        const device = (await c.query(
           "SELECT * FROM iot_device WHERE id=$1 AND key_hash=$2 AND status='Active' FOR UPDATE",
-          [b.device_id, hash(match[1])],
-        )
-      ).rows[0];
+          [targetDeviceId, hash(match[1])],
+        )).rows[0];
+        if (!device) fail(401, "Device authentication failed.");
+        if (device.device_type !== "Sensor") fail(403, "Camera devices cannot submit sensor readings.");
 
-      if (!device) fail(401, "Device authentication failed.");
-
-      if (device.device_type !== "Sensor") {
-        fail(403, "Camera devices cannot submit sensor readings.");
-      }
-      
-      if (b.client_key) {
-        const previous = (
-          await c.query(
+        // Retain idempotency for receipts created before the aggregate cutover.
+        if (b.client_key) {
+          const previous = (await c.query(
             'SELECT r."values" FROM iot_ingestion_receipt i JOIN sensor_reading r ON r.id=i.reading_id WHERE i.device_id=$1 AND i.client_key=$2',
             [device.id, b.client_key],
-          )
-        ).rows[0];
-        if (previous) {
-          if (
-            metrics.some(
-              (metric) => previous.values[metric] !== b.values[metric],
-            )
-          )
-            fail(409, "Reading key already belongs to a different payload.");
-          return;
+          )).rows[0];
+          if (previous) {
+            if (metrics.some(metric => previous.values[metric] !== b.values[metric]))
+              fail(409, "Reading key already belongs to a different payload.");
+            return { duplicate: true, accumulator: runtime.accumulators.get(device.id) || null };
+          }
         }
-      }
-      if (
-        device.last_seen &&
-        Date.now() - new Date(device.last_seen).getTime() < 1000
-      )
-        fail(429, "Device rate limit exceeded.");
-      const reading = randomUUID();
-      await c.query(
-        'INSERT INTO sensor_reading(id,device_id,"values") VALUES($1,$2,$3)',
-        [reading, device.id, capture ? { ...b.values, _capture: capture } : b.values],
-      );
-      if (b.client_key)
-        await c.query(
-          "INSERT INTO iot_ingestion_receipt(device_id,client_key,reading_id) VALUES($1,$2,$3)",
-          [device.id, b.client_key, reading],
+
+        let accumulator = runtime.accumulators.get(device.id) || null;
+        if (!accumulator) {
+          const checkpoint = (await c.query(
+            "SELECT bucket_start,last_observed_at,sample_count,metrics,active_thresholds,last_payload_hash,updated_at FROM iot_reading_checkpoint WHERE device_id=$1 FOR UPDATE",
+            [device.id],
+          )).rows[0];
+          accumulator = restoreAccumulator(checkpoint);
+          if (!accumulator) {
+            // Cut over without re-aggregating the device's latest legacy row.
+            const legacy = (await c.query(
+              'SELECT "values",created_at FROM sensor_reading WHERE device_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',
+              [device.id],
+            )).rows[0];
+            if (legacy) {
+              const capturedAt = legacy.values?._capture?.observed_at;
+              const legacyObservedAt = typeof capturedAt === "string" && Number.isFinite(Date.parse(capturedAt))
+                ? Date.parse(capturedAt) : new Date(legacy.created_at).getTime();
+              accumulator = newAccumulator(legacyObservedAt);
+              accumulator.lastObservedAt = legacyObservedAt;
+              accumulator.lastPayloadHash = payloadHash(legacy.values);
+            }
+          }
+        }
+        if (accumulator && observedAt < accumulator.lastObservedAt)
+          return { duplicate: true, accumulator };
+        if (accumulator && observedAt === accumulator.lastObservedAt) {
+          if (accumulator.lastPayloadHash && acceptedHash !== accumulator.lastPayloadHash)
+            fail(409, "Reading timestamp already belongs to a different payload.");
+          return { duplicate: true, accumulator };
+        }
+
+        const hadAccumulator = Boolean(accumulator);
+        let candidate = accumulator ? cloneAccumulator(accumulator) : newAccumulator(observedAt);
+        const incomingBucket = bucketStart(observedAt);
+        let crossedWindow = false;
+        let completed = null;
+        if (incomingBucket > candidate.bucketStart) {
+          if (candidate.sampleCount > 0) completed = summarize(candidate);
+          candidate = newAccumulator(observedAt, candidate.activeThresholds);
+          crossedWindow = true;
+        }
+        addReading(candidate, b.values);
+        candidate.lastObservedAt = observedAt;
+        candidate.lastPayloadHash = acceptedHash;
+
+        let thresholdStateChanged = false;
+        for (const metric of metrics) {
+          const threshold = device.thresholds[metric];
+          const wasActive = candidate.activeThresholds[metric] === true;
+          if (threshold === undefined) {
+            if (wasActive) {
+              candidate.activeThresholds[metric] = false;
+              thresholdStateChanged = true;
+            }
+            continue;
+          }
+          const value = b.values[metric];
+          if (value === undefined) continue;
+          const isActive = value > threshold;
+          if (isActive !== wasActive) {
+            candidate.activeThresholds[metric] = isActive;
+            thresholdStateChanged = true;
+            if (isActive) await c.query(
+              "INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value) VALUES($1,$2,NULL,$3,$4)",
+              [randomUUID(), device.id, metric, value],
+            );
+          }
+        }
+
+        if (completed) await c.query(
+          "INSERT INTO iot_reading_aggregate(device_id,bucket_start,bucket_end,sample_count,metrics) " +
+          "VALUES($1,$2,$3,$4,$5) ON CONFLICT(device_id,bucket_start) DO UPDATE SET " +
+          "bucket_end=EXCLUDED.bucket_end,sample_count=EXCLUDED.sample_count,metrics=EXCLUDED.metrics",
+          [device.id, completed.bucketStart, completed.bucketEnd, completed.sampleCount, completed.metrics],
         );
-      await c.query(
-        "UPDATE iot_device SET last_seen=CURRENT_TIMESTAMP WHERE id=$1",
-        [device.id],
-      );
-      for (const metric of metrics)
-        if (
-          b.values[metric] !== undefined &&
-          device.thresholds[metric] !== undefined &&
-          b.values[metric] > device.thresholds[metric]
-        )
+
+        const now = Date.now();
+        const shouldCheckpoint = !hadAccumulator || !candidate.persistedAt ||
+          now - candidate.persistedAt >= CHECKPOINT_INTERVAL_MS || crossedWindow || thresholdStateChanged;
+        if (shouldCheckpoint) {
           await c.query(
-            "INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value) VALUES($1,$2,$3,$4,$5)",
-            [randomUUID(), device.id, reading, metric, b.values[metric]],
+            "INSERT INTO iot_reading_checkpoint(device_id,bucket_start,last_observed_at,sample_count,metrics,active_thresholds,last_payload_hash,updated_at) " +
+            "VALUES($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP) ON CONFLICT(device_id) DO UPDATE SET " +
+            "bucket_start=EXCLUDED.bucket_start,last_observed_at=EXCLUDED.last_observed_at," +
+            "sample_count=EXCLUDED.sample_count,metrics=EXCLUDED.metrics," +
+            "active_thresholds=EXCLUDED.active_thresholds,last_payload_hash=EXCLUDED.last_payload_hash,updated_at=CURRENT_TIMESTAMP",
+            [device.id, new Date(candidate.bucketStart).toISOString(), new Date(candidate.lastObservedAt).toISOString(),
+              candidate.sampleCount, candidate.metrics, candidate.activeThresholds, candidate.lastPayloadHash],
           );
+          candidate.persistedAt = now;
+          await c.query("UPDATE iot_device SET last_seen=CURRENT_TIMESTAMP WHERE id=$1", [device.id]);
+        }
+        return { duplicate: false, accumulator: candidate };
+      });
+      if (result.accumulator) runtime.accumulators.set(targetDeviceId, result.accumulator);
+      if (!result.duplicate) runtime.latest.set(targetDeviceId, {
+        id: randomUUID(), device_id: targetDeviceId,
+        values: acceptedValues, created_at: new Date().toISOString(),
+      });
+      return result;
     });
-    res.status(201).json({ recorded: true });
+    res.status(201).json({ recorded: !outcome.duplicate, live: true });
   });
 }
 function mountIoT(app, { pool, allow }) {
+  const runtime = runtimeFor(pool);
   require("./iot-alert-context.cjs").mountAlertContext(app, { pool, allow });
   app.get("/api/iot/devices", allow("devices.read"), async (req, res) => {
     const rows = (
@@ -269,15 +340,19 @@ function mountIoT(app, { pool, allow }) {
       alerts: rows,
     });
   });
-  app.get("/api/devices", allow("devices.read"), async (req, res) =>
-    res.json({
-      devices: (
-        await pool.query(
-          `SELECT d.id,d.name,d.device_type,d.plant_id,d.status,d.thresholds,d.last_seen,CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object('id',r.id,'device_id',r.device_id,'values',r."values",'created_at',r.created_at)END AS latest_reading FROM iot_device d LEFT JOIN LATERAL (SELECT id,device_id,"values",created_at FROM sensor_reading WHERE device_id=d.id ORDER BY created_at DESC,id DESC LIMIT 1) r ON true ORDER BY d.name,d.id`,
-        )
-      ).rows,
-    }),
-  );
+  app.get("/api/devices", allow("devices.read"), async (_req, res) => {
+    const devices = (await pool.query(
+      "SELECT d.id,d.name,d.device_type,d.plant_id,d.status,d.thresholds,d.last_seen," +
+      "CASE WHEN r.id IS NULL THEN NULL ELSE jsonb_build_object('id',r.id,'device_id',r.device_id,'values',r.\"values\",'created_at',r.created_at) END AS latest_reading " +
+      "FROM iot_device d LEFT JOIN LATERAL (SELECT id,device_id,\"values\",created_at FROM sensor_reading " +
+      "WHERE device_id=d.id ORDER BY created_at DESC,id DESC LIMIT 1) r ON true ORDER BY d.name,d.id",
+    )).rows;
+    for (const device of devices) {
+      const live = runtime.latest.get(device.id);
+      if (live) device.latest_reading = live;
+    }
+    res.json({ devices });
+  });
   app.get(
     "/api/devices/:id/readings",
     allow("readings.read"),
@@ -306,6 +381,8 @@ function mountIoT(app, { pool, allow }) {
         ])
       ).rows[0];
       if (!device) fail(404, "Device not found.");
+      const isLiveLatestRequest = page === 1 && limit === 1;
+      const live = isLiveLatestRequest ? runtime.latest.get(req.params.id) : null;
       const rows = (
         await pool.query(
           'SELECT id,device_id,"values",created_at FROM sensor_reading WHERE device_id=$1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3',
@@ -313,10 +390,10 @@ function mountIoT(app, { pool, allow }) {
         )
       ).rows;
       res.json({
-        readings: rows.slice(0, limit),
+        readings: isLiveLatestRequest ? (live ? [live] : []) : rows.slice(0, limit),
         page,
         limit,
-        hasMore: rows.length > limit,
+        hasMore: isLiveLatestRequest ? rows.length > 0 : rows.length > limit,
       });
     },
   );
@@ -383,15 +460,18 @@ function mountIoT(app, { pool, allow }) {
       res.json({ updated: true });
     },
   );
-  app.get("/api/readings", allow("readings.read"), async (req, res) =>
+  app.get("/api/readings", allow("readings.read"), async (_req, res) => {
+    const persisted = (await pool.query(
+      "SELECT * FROM sensor_reading ORDER BY created_at DESC LIMIT 500",
+    )).rows;
+    const rows = new Map(persisted.map(row => [row.id, row]));
+    for (const live of runtime.latest.values()) rows.set(live.id, live);
     res.json({
-      readings: (
-        await pool.query(
-          "SELECT * FROM sensor_reading ORDER BY created_at DESC LIMIT 500",
-        )
-      ).rows,
-    }),
-  );
+      readings: [...rows.values()]
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at) || String(b.id).localeCompare(String(a.id)))
+        .slice(0, 500),
+    });
+  });
   app.get("/api/alerts", allow("alerts.read"), async (req, res) =>
     res.json({
       alerts: (

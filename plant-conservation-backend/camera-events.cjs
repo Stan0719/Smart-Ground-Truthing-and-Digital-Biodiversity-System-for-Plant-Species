@@ -74,26 +74,20 @@ function mountCameraIngestion(app, { pool, recordingsRoot = process.env.CAMERA_R
       if (!device || device.status !== "Active") fail(401, "Camera authentication failed.");
       if (device.device_type !== "Camera" || String(device.plant_id) !== body.plantId)
         fail(403, "The active camera must be assigned to this plant.");
-      let sourceDevice = device.id;
-      if (body.readingId != null) {
-        const reading = (await client.query(`SELECT r.device_id FROM sensor_reading r JOIN iot_device d ON d.id=r.device_id
-          WHERE r.id=$1 AND d.plant_id=$2 AND d.device_type='Sensor'`, [body.readingId, body.plantId])).rows[0];
-        if (!reading) fail(403, "The triggering reading must belong to this plant's sensor.");
-        sourceDevice = reading.device_id;
-      }
       const previous = (await client.query("SELECT * FROM threat_alert_history WHERE id=$1 FOR UPDATE", [body.eventId])).rows[0];
-      if (previous && (previous.camera_id !== device.id || previous.device_id !== sourceDevice ||
-          previous.reading_id !== (body.readingId ?? null) ||
+      if (previous && (previous.camera_id !== device.id ||
           new Date(previous.detected_at).toISOString() !== body.detectedAt || previous.metric !== cameraMetric || previous.value !== 1 ||
           (previous.video_path != null && previous.video_path !== body.eventId + ".mp4")))
         fail(409, "Event identifier already belongs to another event.");
       if (body.recordingStatus === "ready") await clipFile(recordingsRoot, body.eventId);
       // value=1 means the contact-plus-movement rule was satisfied; it is not a confidence score.
       // Preserve officer review status, response history, and an already linked clip on retries.
+      // New camera events are linked to the camera and clip only; do not persist
+      // a sensor-reading snapshot or a link to an individual live sample.
       await client.query(`INSERT INTO threat_alert_history(id,device_id,reading_id,camera_id,metric,value,detected_at,video_path)
-        VALUES($1,$2,$3,$4,$5,1,$6,$7)
+        VALUES($1,$2,NULL,$3,$4,1,$5,$6)
         ON CONFLICT(id) DO UPDATE SET video_path=COALESCE(threat_alert_history.video_path,EXCLUDED.video_path)`,
-      [body.eventId, sourceDevice, body.readingId ?? null, device.id, cameraMetric, body.detectedAt,
+      [body.eventId, device.id, device.id, cameraMetric, body.detectedAt,
         body.recordingStatus === "ready" ? body.eventId + ".mp4" : null]);
     });
     res.status(201).json({ recorded: true });
