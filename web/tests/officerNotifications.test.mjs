@@ -41,7 +41,7 @@ test('real inbox handles loading, sixth-and-later records, continuation, count a
 })
 test('errors are not empty success; append retry preserves records and expired cursor recovers', async () => {
   let status = 200
-  const h = setup(async url => status !== 200 ? Response.json({}, { status }) : page([notice()], true, 'next'))
+  const h = setup(async _url => status !== 200 ? Response.json({}, { status }) : page([notice()], true, 'next'))
   await h.client.load(); status = 503; await h.client.load(true)
   assert.equal(h.client.state.items.length, 1); assert.equal(h.client.state.unread, 1); assert.equal(h.client.state.error, 'loadFailed')
   status = 400; await h.client.load(true); assert.equal(h.client.state.cursor, null)
@@ -413,4 +413,51 @@ test('mounted Officer header updates badge and open/closed dropdown automaticall
     assert.equal(h.calls.length,3,'one refresh per interval, independent of dropdown visibility')
   } finally {h.stop()}
   assert.equal(timers.size,0);assert.equal(listeners.size,0)
+})
+
+
+const editNotice = (revision=1,type='observation_edit_submitted') => notice(91,{event_type:type,resource:{kind:'observation_edit',id:'12345678-1234-4234-8234-123456789abc',revision}})
+test('Observation edit notices validate exact identity/revision and open authoritative proposal detail only',async()=>{
+ for(const type of ['observation_edit_submitted','observation_edit_resubmitted']){
+  const n=editNotice(2,type)
+  const h=setup(async(url)=>{if(url.includes('/observations/obs-target'))return Response.json({observation:{id:'obs-target',owner_subject:'staff:bot',origin_type:'subsequent_observation'}});if(url.includes('/observation-edits/'))return Response.json({edit:{id:n.resource.id,revision:3,status:'Pending Review',observation_id:'obs-target',owner_subject:'staff:bot'}});if(url.endsWith('/read'))return Response.json({notification:{id:n.id,read_at:'2026-11-18T00:00:00Z'}});if(url.includes('unread-count'))return Response.json({unread_count:0});return page([n])})
+  await h.client.load();assert.equal(h.client.state.items[0].resource.revision,2)
+  assert.equal(await h.client.open(h.client.state.items[0]),true);assert.deepEqual(h.destinations[0],{name:'conservation-observations',query:{observationEdit:n.resource.id}})
+  assert.ok(h.calls.some(c=>c.url==='/api/data/observation-edits/'+n.resource.id&&c.options.method==='GET'));assert.ok(!h.calls.some(c=>c.url.endsWith('/review')));assert.ok(h.client.state.items[0].read_at);h.client.dispose()
+ }
+})
+test('Observation edit notices reject malformed identities, missing revisions and future revision claims',async()=>{
+ for(const resource of [{kind:'observation_edit',id:'wrong',revision:1},{kind:'record_change',id:editNotice().resource.id,revision:1},{kind:'observation_edit',id:editNotice().resource.id},{kind:'observation_edit',id:editNotice().resource.id,revision:0}]){
+  const h=setup(async()=>page([notice(91,{event_type:'observation_edit_submitted',resource})]));await h.client.load();assert.equal(h.client.state.items.length,0);assert.equal(h.client.state.error,'loadFailed');h.client.dispose()
+ }
+ const h=setup(async()=>Response.json({edit:{id:editNotice().resource.id,revision:1,status:'Pending Review'}}));assert.equal(await h.client.open(editNotice(2)),false);assert.equal(h.destinations.length,0);assert.ok(!h.calls.some(c=>c.options.method==='POST'));h.client.dispose()
+})
+test('completed Observation edit notices stay navigable without restoring decisions; unavailable detail never acknowledges',async()=>{
+ for(const status of ['Approved','Rejected','Cancelled','Correction Required']){
+  const n=editNotice(),h=setup(async(url)=>url.includes('/observations/obs-target')?Response.json({observation:{id:'obs-target',owner_subject:'staff:bot',origin_type:'subsequent_observation'}}):url.includes('/observation-edits/')?Response.json({edit:{id:n.resource.id,revision:1,status,observation_id:'obs-target',owner_subject:'staff:bot'}}):url.includes('unread-count')?Response.json({unread_count:0}):Response.json({notification:{id:n.id,read_at:'2026-11-18T00:00:00Z'}}))
+  assert.equal(await h.client.open(n),true);assert.equal(h.destinations[0].query.observationEdit,n.resource.id);assert.ok(h.calls.every(c=>c.options.method==='GET'||c.url.endsWith('/read')));h.client.dispose()
+ }
+ const h=setup(async()=>Response.json({},{status:404}));assert.equal(await h.client.open(editNotice()),false);assert.equal(h.client.state.error,'openFailed');assert.equal(h.destinations.length,0);h.client.dispose()
+})
+test('late Observation edit detail after account change cannot navigate or acknowledge',async()=>{
+ let release;const h=setup(()=>new Promise(resolve=>release=resolve));const pending=h.client.open(editNotice());h.client.setSession({...officer,id:'another'},false);release(Response.json({edit:{id:editNotice().resource.id,revision:1,status:'Pending Review'}}));assert.equal(await pending,false);assert.equal(h.destinations.length,0);assert.ok(!h.calls.some(c=>c.options.method==='POST'));h.client.dispose()
+})
+test('Observation edit bell titles are localized in EN, Malay and Chinese',()=>{
+ for(const language of ['en','ms','zh-CN']){const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8')).observationEditNotices;assert.deepEqual(Object.keys(labels).sort(),['resubmitted','submitted']);assert.ok(labels.submitted);assert.ok(labels.resubmitted);assert.notEqual(labels.submitted,labels.resubmitted)}
+ const source=readFileSync(new URL('../src/components/ConservationTopbarActions.vue',import.meta.url),'utf8');assert.match(source,/observationEditNotices.submitted/);assert.match(source,/observationEditNotices.resubmitted/)
+})
+
+
+test('Withdrawn Species notification navigates to authoritative read-only details',async()=>{
+ const item=notice(1,{event_type:'species_request_submitted',resource:{kind:'species_request',id:'73'}})
+ const h=setup(async(url,options)=>options.method==='POST'?Response.json({notification:{id:item.id,read_at:'2026-11-02T00:00:00Z'}}):url.startsWith('/api/species-requests/')?Response.json({species_request:{request_id:73,request_status:'Withdrawn'}}):page([item]))
+ try{await h.client.load();assert.equal(await h.client.open(h.client.state.items[0]),true);assert.equal(h.destinations[0].query.speciesRequest,'73');assert.ok(h.calls.filter(c=>c.options.method==='POST').every(c=>!c.url.endsWith('/review')))}finally{h.client.dispose()}
+})
+
+
+test('initial and unclassified Observation edit notices preserve authorized compatibility details',async()=>{
+ for(const origin of ['initial_registration','unknown']){
+  const n=editNotice(),h=setup(async url=>url.includes('/observation-edits/')?Response.json({edit:{id:n.resource.id,revision:1,status:'Pending Review',observation_id:'obs-target',owner_subject:'staff:bot'}}):url.includes('/observations/obs-target')?Response.json({observation:{id:'obs-target',owner_subject:'staff:bot',origin_type:origin}}):url.includes('unread-count')?Response.json({unread_count:0}):Response.json({notification:{id:n.id,read_at:'2026-11-18T00:00:00Z'}}));
+  assert.equal(await h.client.open(n),true);assert.equal(h.destinations[0].name,'conservation-reviews');assert.equal(h.destinations[0].query.observationEdit,n.resource.id);assert.ok(!h.calls.some(c=>c.url.endsWith('/review')));h.client.dispose()
+ }
 })

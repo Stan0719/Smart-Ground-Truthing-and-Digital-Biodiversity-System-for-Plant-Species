@@ -2,15 +2,16 @@
 const test = require("node:test"), assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs"), { join } = require("node:path"), { once } = require("node:events");
 const sharp = require("sharp");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installRecordChangeNotifications } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 
 test("Registration projections stay independent of subsequent Observations", async t => {
   // In-memory PGlite only; never opens an application database connection.
   const pool = await createPlantDatabase();
   t.after(() => pool.end());
-  for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql", "016-species-request-content-revision.sql", "017-species-review-cycle.sql"])
+  for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql", "016-species-request-content-revision.sql", "017-species-review-cycle.sql", "022-cancel-edit-requests.sql"])
     await pool.query(readFileSync(join(__dirname, "../migrations", name), "utf8"));
+  await installRecordChangeNotifications(pool);
   await pool.query(`CREATE TABLE plant_app.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     plant_id integer UNIQUE,qr_code text UNIQUE,status text,assigned_at timestamptz,activated_at timestamptz,retired_at timestamptz)`);
   await pool.query(`INSERT INTO species(scientific_name,common_name,rbac_data) VALUES
@@ -132,6 +133,24 @@ test("Registration projections stay independent of subsequent Observations", asy
       assert.equal(r.status,404);
     }
   });
+  const originalCapture = (await pool.query("SELECT id,status,snapshot FROM record_version_history WHERE snapshot->'review_provenance'->>'submission_id'=$1", [f.id])).rows[0];
+  const originalHistorical = assertOk(await call('/observations/'+f.id,'GET',undefined,'officer')).observation.historical_review;
+  assert.equal(originalHistorical.state,'available');
+  assert.equal(originalHistorical.fields.content.heightCm,20);
+  async function checkOriginalHistory() {
+    const capture = (await pool.query('SELECT status,snapshot FROM record_version_history WHERE id=$1',[originalCapture.id])).rows[0];
+    assert.equal(capture.status,'Superseded'); assert.deepEqual(capture.snapshot,originalCapture.snapshot);
+    const history=assertOk(await call('/observations/'+f.id,'GET',undefined,'officer')).observation.historical_review;
+    assert.equal(originalHistorical.approval_capture.status,'Approved');
+    assert.deepEqual(history.approval_capture,{id:originalCapture.id,status:'Superseded',
+      source_submitted_history_id:originalCapture.snapshot.review_provenance.source_submitted_history_id});
+    assert.equal(typeof history.approval_capture.source_submitted_history_id,'string');
+    assert.deepEqual({...history,approval_capture:originalHistorical.approval_capture},originalHistorical);
+    for(const asset of history.assets){
+      const response=await fetch(`http://127.0.0.1:${server.address().port}/api/assets/${asset.id}`,{headers:{Authorization:`Bearer ${tokens.officer}`}});
+      assert.equal(response.status,200);assert.ok((await response.arrayBuffer()).byteLength);
+    }
+  }
   await t.test('genuine approved Plant edit C uses A as base and preserves subsequent Observation B', async () => {
     const change = assertOk(await call('/record-changes','POST', {kind:'plant',target_id:f.plant_id,
       client_key:'genuine-edit',proposed:{species_id:1,scientific_name:'Edited registration',
@@ -154,6 +173,47 @@ test("Registration projections stay independent of subsequent Observations", asy
     assert.equal(row.latest_verified_observation.content.heightCm,10);
     assert.equal(row.latest_verified_observation.photo_ids.length,0);
     assert.equal((await call(`/record-changes/${change.id}/review`,'POST',{decision:'Approved',comment:'Replay'},'officer')).status,409);
+    await checkOriginalHistory();
+  });
+  await t.test('successive approved edits and replacement photos preserve the original approval evidence',async()=>{
+    for(const height of [50,55]){
+      const edit=assertOk(await call('/record-changes','POST',{kind:'plant',target_id:f.plant_id,client_key:'successive-'+height,
+        proposed:{species_id:1,scientific_name:'Edited registration',content:{...content,heightCm:height,latitude:5,longitude:114},photo_ids:[],photos:[photo,photo,photo]}})).change;
+      assertOk(await call(`/record-changes/${edit.id}/review`,'POST',{decision:'Approved',comment:'Replacement approved'},'officer'));
+      await checkOriginalHistory();
+      const current=await resolvePlantRegistration(pool,f.plant_id);
+      assert.equal(current.content.heightCm,height);assert.equal(current.photo_ids.length,3);
+      assert.ok(current.photo_ids.every(id=>!original.photo_ids.includes(id)));
+      const detail=assertOk(await call(`/plants/${f.plant_id}/detail`,'GET',undefined,'officer'));
+      assert.equal(detail.staff.current_registration.content.heightCm,height);
+    }
+    const removed=(await pool.query('SELECT observation_id,approved FROM plant_asset WHERE id=ANY($1::text[])',[original.photo_ids])).rows;
+    assert.equal(removed.length,3);assert.ok(removed.every(row=>row.observation_id===null&&!row.approved));
+    assert.equal(assertOk(await call('/observations/'+f.id,'GET',undefined,'other')).observation.historical_review,undefined);
+    assert.equal((await call('/observations/'+f.id,'GET',undefined,null)).status,401);
+  });
+  await t.test('rejected and cancelled Plant edits do not change original or current approved registration',async()=>{
+    for(const outcome of ['Rejected','Cancelled']){
+      const before=await resolvePlantRegistration(pool,f.plant_id);
+      const edit=assertOk(await call('/record-changes','POST',{kind:'plant',target_id:f.plant_id,client_key:'terminal-'+outcome,
+        proposed:{species_id:1,scientific_name:'Not applied',content:{...content,heightCm:99}}})).change;
+      if(outcome==='Rejected')assertOk(await call(`/record-changes/${edit.id}/review`,'POST',{decision:'Rejected',comment:'Not approved'},'officer'));
+      else assertOk(await call(`/record-changes/${edit.id}/cancel`,'POST',{}));
+      assert.deepEqual(await resolvePlantRegistration(pool,f.plant_id),before);await checkOriginalHistory();
+    }
+  });
+  await t.test('correction before initial approval captures the final corrected registration without replacing older submitted history',async()=>{
+    const fresh=await create();
+    assertOk(await call('/observations/'+fresh.id+'/review','POST',{decision:'Correction Required',comment:'Correct height',revision:1},'officer'));
+    assertOk(await call('/my-plants/'+fresh.plant_id,'PATCH',{expected_revision:2,species_id:1,scientific_name:'Corrected individual',content:{...content,heightCm:30}}));
+    await approve(fresh.id,3);
+    const result=assertOk(await call('/observations/'+fresh.id,'GET',undefined,'officer')).observation;
+    assert.equal(result.historical_review.fields.content.heightCm,30);
+    const versions=(await pool.query("SELECT status,snapshot FROM record_version_history WHERE plant_id=$1 ORDER BY version_number",[fresh.plant_id])).rows;
+    assert.equal(versions[0].status,'Superseded');assert.equal(versions[0].snapshot.content.heightCm,20);
+    assert.equal(versions.at(-1).snapshot.content.heightCm,30);
+    assert.equal(versions.at(-1).snapshot.review_provenance.submission_id,fresh.id);
+    assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM record_change_submission WHERE plant_id=$1',[fresh.plant_id])).rows[0].n,0);
   });
   await t.test('ambiguous legacy data stays in lists but cannot become a registration or edit base', async () => {
     const legacy = (await pool.query("INSERT INTO plant_record(species_id,registered_subject,qr_token,rbac_status) VALUES(1,'staff:bot','legacy','Approved') RETURNING plant_id")).rows[0];

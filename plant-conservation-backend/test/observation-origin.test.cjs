@@ -59,6 +59,7 @@ test("Phase 2: authoritative observation origin across creation, history and rev
     const d = await detail(f);
     assert.equal(d.status, 200, JSON.stringify(d.data));
     const list = await call('/observations', 'GET', undefined, 'officer');
+    assert.equal(list.status, 200, JSON.stringify(list.data));
     const row = list.data.observations.find(row => row.id === f.id);
     assert.equal(row.origin_type, d.data.observation.origin_type);
     return d.data.observation.origin_type;
@@ -96,7 +97,7 @@ test("Phase 2: authoritative observation origin across creation, history and rev
   await t.test('historical receipt recovers only exact initial identity, independent of status and later observations', async () => {
     const f = await create(), before = await receipt(f);
     await pool.query("UPDATE plant_observation SET origin_type='unknown' WHERE id=$1", [f.id]);
-    for (const status of ['Pending Review', 'Approved', 'Rejected', 'Flagged']) {
+    for (const status of ['Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged']) {
       await pool.query('UPDATE plant_observation SET status=$1 WHERE id=$2', [status, f.id]);
       assert.equal(await origin(f), 'initial_registration');
     }
@@ -184,6 +185,45 @@ test("Phase 2: authoritative observation origin across creation, history and rev
       assert.equal((await pool.query('SELECT status FROM plant_app.qr_code WHERE qr_id=$1', [qr.qr_id])).rows[0].status, 'generated');
     } finally { await pool.query('DROP TRIGGER fail_origin_asset ON plant_asset; DROP FUNCTION fail_origin_asset()'); }
   });
+  await t.test('withdrawn atomic receipts retain exact origin, filtered visibility and immutable evidence without review eligibility', async () => {
+    for (const name of ['021-observation-edit-requests.sql', '022-cancel-edit-requests.sql', '025-original-plant-withdrawal.sql'])
+      await pool.query(readFileSync(join(__dirname, '../migrations', name), 'utf8'));
+    for (const proposal of [false, true]) {
+      const f = await create(proposal), before = await receipt(f);
+      const beforeDetail = (await detail(f)).data.observation;
+      const versions = async () => call(`/record-versions?kind=plant&id=${f.plant_id}`, 'GET', undefined, 'officer');
+      const priorHistory = await versions();
+      assert.equal(priorHistory.status, 200, JSON.stringify(priorHistory.data));
+      assert.equal((await call(`/plant-submissions/${f.plant_id}/withdraw`, 'POST', {})).status, 200);
+      const after = await receipt(f);
+      assert.deepEqual(after.result, { ...before.result, status: 'Withdrawn' });
+      assert.equal(after.payload_hash, before.payload_hash);
+      assert.equal(await origin(f), 'initial_registration');
+      const filtered = await call('/observations?origin_type=initial_registration&status=Withdrawn', 'GET', undefined, 'officer');
+      assert.equal(filtered.status, 200);
+      assert.ok(filtered.data.observations.some(row => row.id === f.id && row.status === 'Withdrawn'));
+      const withdrawn = (await detail(f)).data.observation;
+      assert.deepEqual(withdrawn.content, beforeDetail.content);
+      assert.deepEqual(withdrawn.assets, beforeDetail.assets);
+      const history = await versions();
+      assert.equal(history.status, 200);
+      assert.ok(history.data.versions.length > 0);
+      assert.deepEqual(history.data.versions.map(row => row.snapshot), priorHistory.data.versions.map(row => row.snapshot));
+      for (const decision of ['Approved', 'Rejected', 'Correction Required', 'Flagged']) {
+        assert.equal((await call(`/observations/${f.id}/review`, 'POST', { decision, comment: 'Stale decision', revision: 2 }, 'officer')).status, 409);
+      }
+      assert.equal((await stored(f)).status, 'Withdrawn');
+      if (proposal) assert.equal((await pool.query('SELECT request_status FROM species_request_submission WHERE request_id=$1', [f.species_request_id])).rows[0].request_status, 'Pending Review');
+      // A Withdrawn label never substitutes for the original identity evidence.
+      for (const patch of [{ id: 'missing' }, { plant_id: 999999 }, { species_id: 999999 }, { species_request_id: 999999 }]) {
+        await pool.query('UPDATE plant_submission_receipt SET result=$1 WHERE client_key=$2', [{ ...after.result, ...patch }, f.body.client_key]);
+        assert.equal(await origin(f), 'unknown');
+      }
+      await pool.query('UPDATE plant_submission_receipt SET result=$1 WHERE client_key=$2', [after.result, f.body.client_key]);
+      await pool.query("UPDATE plant_submission_receipt SET owner_subject='staff:other' WHERE client_key=$1", [f.body.client_key]);
+      assert.equal(await origin(f), 'unknown');
+    }
+  });
   await t.test('old schema stays operational; additive migration is repeatable, defaults unknown and constrains new values', async () => {
     const known = await create();
     const before = await receipt(known);
@@ -191,6 +231,10 @@ test("Phase 2: authoritative observation origin across creation, history and rev
     await pool.query('ALTER TABLE plant_observation DROP COLUMN origin_type');
     assert.equal(await origin(known), 'initial_registration');
     assert.equal((await review(known)).status, 200);
+    const oldDetail = await detail(known);
+    assert.equal(oldDetail.status, 200, JSON.stringify(oldDetail.data));
+    assert.equal(oldDetail.data.observation.historical_review.approval_capture.source_submitted_history_id, null,
+      'an absent origin column must not fabricate a verified approval-to-submission identity');
     const historical = await call(`/plants/${known.plant_id}/observations`, 'POST', { content, client_key: 'old-schema-visit' });
     assert.equal(historical.status, 201);
     assert.equal(await origin(historical.data), 'unknown');

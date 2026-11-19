@@ -1,0 +1,5 @@
+.officer-copy-anchor { position: relative; display: inline-flex; flex: none; }
+.officer-copy-toast { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 200; pointer-events: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 8px; background: #DCF3E4; color: #245A46; box-shadow: 0 4px 14px #173f3426; font-size: 14px; font-weight: 500; line-height: 1.4; }
+.officer-copy-toast svg { display: block; width: 16px; height: 16px; flex: none; }
+.officer-copy-live { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* No animation or transition, including for reduced-motion users. */

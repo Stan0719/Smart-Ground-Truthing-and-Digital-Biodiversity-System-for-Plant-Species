@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { once } = require("node:events");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installRecordChangeNotifications } = require("./postgres-fixture.cjs");
 const { createReadySpeciesPhotoDatabase } = require("./species-photo-bigint-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 const { readGallery, saveGallery } = require("../species-gallery.cjs");
@@ -405,6 +405,7 @@ test("species gallery foundation: migration, service, public readers and evidenc
 
 test("HTTP review paths preserve Officer images, request-photo history and retry safety", async (t) => {
   const pool = await createReadySpeciesPhotoDatabase();
+  await installRecordChangeNotifications(pool);
   await pool.query(readFileSync(join(__dirname, "../migrations/016-species-request-content-revision.sql"), "utf8"));
   await pool.query(readFileSync(join(__dirname, "../migrations/017-species-review-cycle.sql"), "utf8"));
   t.after(() => pool.end());

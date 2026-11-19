@@ -9,6 +9,8 @@ import type { PlantRecord } from '../data/plantRecords'
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 import { formatPlantId } from '../utils/plantId'
 import { plantThumbnailImages, webAssetUrl } from '../services/assetImages'
+import { useCatalogueRefresh } from '../composables/useCatalogueRefresh'
+import type { AuthUser } from '../services/auth'
 import { mapPlantCardMetadata } from '../services/plantCardMapping'
 
 type SortOption = 'default' | 'id-asc' | 'verified-newest' | 'verified-oldest'
@@ -31,6 +33,7 @@ const selectedSpecies = ref<Plant | null>(null)
 const speciesPlants = ref<Array<PlantRecord & { genus?: string; detailLinkEnabled?: boolean }>>([])
 const isLoading = ref(true)
 const loadError = ref('')
+const catalogueLimited = ref(false)
 
 interface ApiSpecies {
   image_url?: string
@@ -41,6 +44,7 @@ interface ApiSpecies {
   family_name?: string
   conservation_status?: string
   description?: string
+  habitat?: string
 }
 
 interface ApiPlant {
@@ -81,22 +85,22 @@ const generatedSlug = (item: ApiSpecies) => {
 }
 
 let loadRequest = 0
-const loadPlants = async () => {
+const fetchPlants = async (current: () => boolean, user: AuthUser | null) => {
   const attempt = ++loadRequest
-  isLoading.value = true
+  isLoading.value = selectedSpecies.value === null
   loadError.value = ''
-  selectedSpecies.value = null
-  speciesPlants.value = []
 
   try {
+    if (!current()) return
     const slug = String(route.params.slug || '')
     const prototypeForSlug = prototypeSpecies.find((item) => item.slug === slug)
-    const speciesResponse = await fetch('/api/species')
+    const speciesResponse = await fetch('/api/species', { signal: AbortSignal.timeout(15000) })
 
-    if (!speciesResponse.ok) throw new Error('Unable to load plant records.')
+    if (!speciesResponse.ok) throw Object.assign(new Error('Unable to load plant records.'), { status: speciesResponse.status })
 
     const speciesResult: SpeciesResponse = await speciesResponse.json()
-    if (attempt !== loadRequest) return
+    if (attempt !== loadRequest || !current()) return
+    if (!Array.isArray(speciesResult.species) || speciesResult.species.some(item => !item || item.species_id == null || typeof item.scientific_name !== 'string')) throw Error('Invalid species response.')
     const apiSpecies = prototypeForSlug
       ? speciesResult.species.find(
           (item) =>
@@ -104,15 +108,10 @@ const loadPlants = async () => {
         )
       : speciesResult.species.find((item) => String(item.species_id)===slug||generatedSlug(item) === slug)
 
-    if (!apiSpecies) return
+    if (!apiSpecies) { selectedSpecies.value = null; speciesPlants.value = []; catalogueLimited.value = speciesResult.species.length >= 200; return }
 
-    const prototype = prototypeSpecies.find(
-      (item) => item.scientificName.toLowerCase() === apiSpecies.scientific_name.toLowerCase(),
-    )
-
-    selectedSpecies.value = {
-      ...(prototype || {}),
-      image: prototype?.image || webAssetUrl(apiSpecies.image_url) || undefined,
+    const nextSpecies: Plant = {
+      image: webAssetUrl(apiSpecies.image_url) || undefined,
       speciesId: String(apiSpecies.species_id),
       slug,
       name: apiSpecies.common_name || apiSpecies.scientific_name,
@@ -121,21 +120,23 @@ const loadPlants = async () => {
       family: apiSpecies.family_name || '',
       conservationStatus: apiSpecies.conservation_status || '',
       description: apiSpecies.description || 'No description available yet.',
-      category: prototype?.category || ('' as Plant['category']),
-      overview: prototype?.overview || '',
-      habitat: prototype?.habitat || '',
-      characteristics: prototype?.characteristics || [],
-      significance: prototype?.significance || '',
+      category: 'Uncategorized',
+      images: [],
+      overview: apiSpecies.description || '',
+      habitat: apiSpecies.habitat || '',
+      characteristics: [],
+      significance: '',
     }
 
-    const plantsResponse = await fetch(isLoggedIn.value ? '/api/plants' : '/api/plants?scope=public-web')
-    if (!plantsResponse.ok) throw new Error('Unable to load plant records.')
+    const plantsResponse = await fetch(user ? '/api/plants' : '/api/plants?scope=public-web', { signal: AbortSignal.timeout(15000) })
+    if (!plantsResponse.ok) throw Object.assign(new Error('Unable to load plant records.'), { status: plantsResponse.status })
 
     const plantsResult: PlantsResponse = await plantsResponse.json()
-    if (attempt !== loadRequest) return
+    if (attempt !== loadRequest || !current()) return
+    if (!Array.isArray(plantsResult.plants) || plantsResult.plants.some(item => !item || item.plant_id == null || item.species_id == null)) throw Error('Invalid plant response.')
     const speciesId = String(apiSpecies.species_id)
 
-    speciesPlants.value = plantsResult.plants
+    const nextPlants = plantsResult.plants
       .filter((item) => String(item.species_id) === speciesId)
       .map((item) => ({ item, plantId: formatPlantId(item.plant_id) }))
       .filter((entry): entry is { item: ApiPlant; plantId: string } => entry.plantId !== null)
@@ -143,9 +144,9 @@ const loadPlants = async () => {
         plantId,
         speciesSlug: slug,
         speciesId: String(item.species_id),
-        speciesName: item.scientific_name || apiSpecies.scientific_name,
-        commonName: item.common_name || apiSpecies.common_name || apiSpecies.scientific_name,
-        genus: item.genus_name || apiSpecies.genus_name || '',
+        speciesName: apiSpecies.scientific_name,
+        commonName: apiSpecies.common_name || apiSpecies.scientific_name,
+        genus: apiSpecies.genus_name || '',
         ...mapPlantCardMetadata(item),
         qr: { code: '', status: '' },
         registeredBy: item.registered_subject || '',
@@ -154,14 +155,25 @@ const loadPlants = async () => {
         observations: [],
         detailLinkEnabled: true,
       }))
+    if (attempt !== loadRequest || !current()) return
+    selectedSpecies.value = nextSpecies
+    speciesPlants.value = nextPlants
+    catalogueLimited.value = speciesResult.species.length >= 200 || plantsResult.plants.length >= 500
   } catch (error) {
-    if (attempt === loadRequest) loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
+    if (attempt === loadRequest && current()) {
+      if ([401, 403, 404].includes((error as { status?: number }).status || 0)) { selectedSpecies.value = null; speciesPlants.value = []; catalogueLimited.value = false }
+      loadError.value = error instanceof Error ? error.message : 'An unexpected error occurred.'
+    }
   } finally {
-    if (attempt === loadRequest) isLoading.value = false
+    if (attempt === loadRequest && current()) isLoading.value = false
   }
 }
 
-watch(() => [route.params.slug, isLoggedIn.value, userRole.value], loadPlants, { immediate: true, flush: 'sync' })
+const catalogue = useCatalogueRefresh(fetchPlants,
+  () => { loadRequest++; selectedSpecies.value = null; speciesPlants.value = []; catalogueLimited.value = false; isLoading.value = false },
+  () => { loadError.value = t('catalogueDisplay.loadFailed') })
+const loadPlants = () => catalogue.refresh()
+watch(() => route.params.slug, () => { void catalogue.reset() }, { flush: 'sync' })
 
 const primaryImage = computed(
   () =>
@@ -263,28 +275,9 @@ const optionLabel = (option: string) => {
   return te(key) ? t(key) : option
 }
 
-const translatedOr = (key: string, fallback: string) => (te(key) ? t(key) : fallback)
-const displayName = computed(() =>
-  selectedSpecies.value
-    ? translatedOr(`plantNames.${selectedSpecies.value.slug}`, selectedSpecies.value.name)
-    : '',
-)
-const displayScientificName = computed(() =>
-  selectedSpecies.value
-    ? translatedOr(
-        `scientificNames.${selectedSpecies.value.slug}`,
-        selectedSpecies.value.scientificName,
-      )
-    : '',
-)
-const displayDescription = computed(() =>
-  selectedSpecies.value
-    ? translatedOr(
-        `plantDescriptions.${selectedSpecies.value.slug}`,
-        selectedSpecies.value.description,
-      )
-    : '',
-)
+const displayName = computed(() => selectedSpecies.value?.name || '')
+const displayScientificName = computed(() => selectedSpecies.value?.scientificName || '')
+const displayDescription = computed(() => selectedSpecies.value?.description || '')
 
 watch(
   canViewStaffPlantData,
@@ -317,7 +310,7 @@ watch(
             <h1>{{ displayName }}</h1>
             <p class="scientific-name">{{ displayScientificName }}</p>
             <p>{{ displayDescription }}</p>
-            <strong>{{
+            <strong v-if="!loadError">{{
               t('species.records.count', { count: speciesPlants.length }, speciesPlants.length)
             }}</strong>
           </div>
@@ -327,12 +320,14 @@ watch(
 
     <section class="records-section" aria-labelledby="plant-records-title">
       <div class="page-container">
+        <p v-if="catalogueLimited" role="status">{{ t('catalogueDisplay.plantsLimited') }}</p>
+        <p v-if="loadError" role="alert">{{ t('catalogueDisplay.loadFailed') }} <button type="button" @click="loadPlants">{{ t('sessionVerification.retry') }}</button></p>
         <div class="section-heading">
           <div>
             <p class="section-label">{{ t('species.records.section') }}</p>
             <h2 id="plant-records-title">{{ t('species.records.section') }}</h2>
           </div>
-          <p>
+          <p v-if="!loadError">
             {{
               t('species.records.found', { count: filteredPlants.length }, filteredPlants.length)
             }}
@@ -436,7 +431,7 @@ watch(
           <PlantRecordCard v-for="plant in filteredPlants" :key="plant.plantId" :plant="plant" />
         </div>
 
-        <div v-else class="empty-state">
+        <div v-else-if="!loadError" class="empty-state">
           <span aria-hidden="true">🌿</span>
           <h3>
             {{ speciesPlants.length ? t('species.records.noMatch') : t('species.records.none') }}
@@ -455,8 +450,10 @@ watch(
 
   <main v-else class="not-found">
     <span aria-hidden="true">🌿</span>
-    <h1>{{ t('species.notFound') }}</h1>
-    <p>{{ loadError || t('species.notFoundDescription') }}</p>
+    <h1>{{ catalogueLimited ? t('catalogueDisplay.loadFailed') : t('species.notFound') }}</h1>
+    <p v-if="catalogueLimited" role="status">{{ t('catalogueDisplay.plantsLimited') }}</p>
+    <p :role="loadError ? 'alert' : undefined">{{ loadError || t('species.notFoundDescription') }}</p>
+    <button v-if="loadError" type="button" @click="loadPlants">{{ t('sessionVerification.retry') }}</button>
     <RouterLink to="/species">{{ t('common.returnToSpecies') }}</RouterLink>
   </main>
 </template>

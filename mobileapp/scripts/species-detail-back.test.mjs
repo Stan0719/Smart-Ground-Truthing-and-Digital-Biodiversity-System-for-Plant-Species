@@ -60,12 +60,12 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
     "../data/speciesImages": { getSpeciesImageSource: imageSource },
     "../components/BackButton": { default: "TouchableOpacity" },
     "../utils/plantApi": { fetchPlantRecords: async () => records, fetchSpeciesDetail, filterUniqueSpeciesPlantRecords: (items) => items, isPlantVisibleInRoleCatalog: () => true, isOwnedRejectedPlant: () => false },
-    "../utils/speciesPlantOrdering": orderingModule.exports,
     "../components/PlantCard": { default: "PlantCard" },
     "../components/RefreshButton": { default: "RefreshButton" },
     "../components/FavouriteHeart": { default: "FavouriteHeart" },
     "../hooks/useVisitorFavourites": { default: () => ({ isFavourite: () => false, isPending: () => false, loading: false, refreshing: false, mutationError: "", refresh: async (...args) => { favouriteCalls.push(["refresh", ...args]); }, toggle: async (...args) => { favouriteCalls.push(["toggle", ...args]); } }) },
     "../components/BotanicalSkeleton": { DetailSkeletonContent: "DetailSkeletonContent" },
+    "../utils/speciesPlantOrdering": orderingModule.exports,
   };
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled)((name) => {

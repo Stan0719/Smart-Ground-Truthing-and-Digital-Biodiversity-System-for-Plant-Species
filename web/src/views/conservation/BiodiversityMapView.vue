@@ -17,7 +17,7 @@ import {
   type SpeciesContract,
 } from '../../services/plantIntegration'
 
-const { ct, dt, locale } = useConservationText()
+const { ct, locale } = useConservationText()
 const route = useRoute()
 const router = useRouter()
 const search = ref('')
@@ -45,9 +45,11 @@ const formatRegisteredAt = (value: string | null | undefined) => {
   if (!value) return ct('Unavailable')
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return ct('Unavailable')
-  return new Intl.DateTimeFormat(locale.value === 'ms' ? 'ms-MY' : locale.value, {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(parsed)
+  const parts = new Intl.DateTimeFormat(locale.value === 'ms' ? 'ms-MY' : locale.value, {
+    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kuching',
+  }).formatToParts(parsed)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value || ''
+  return `${part('day')} ${part('month')} ${part('year')}, ${part('hour')}:${part('minute')}`
 }
 const speciesName = (plant: EnrichedPlant) =>
   plant.species?.scientificName || plant.species?.commonName || ct('Unavailable')
@@ -123,7 +125,7 @@ async function loadPlants() {
 
 const markerIcon = () => L.divIcon({
   className: 'plant-marker-host',
-  html: '<span class="plant-marker-pin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20v-5m0 0c-4.8 0-7-2.7-7-6.7 3.8-.5 6.4.9 7 4.1.6-3.2 3.2-4.6 7-4.1 0 4-2.2 6.7-7 6.7Z"/></svg></span>',
+  html: '<span class="plant-marker-pin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17,8C8,10,5.9,16.17,3.82,21.34L5.71,22l1-2.3A4.49,4.49,0,0,0,8,20C19,20,22,3,22,3,21,5,14,5.25,9,6.25S2,11.5,2,13.5a6.22,6.22,0,0,0,1.75,3.75C7,8,17,8,17,8Z"/></svg></span>',
   iconSize: [38, 46], iconAnchor: [19, 44], popupAnchor: [0, -42],
 })
 const appendText = <Tag extends keyof HTMLElementTagNameMap>(
@@ -148,10 +150,11 @@ const popupContent = (plant: EnrichedPlant) => {
     appendText(row, 'dd', value)
     details.appendChild(row)
   }
+  addDetail(ct('Plant scientific name'), display(plant.scientificName))
   addDetail(ct('Species ID'), plant.speciesId)
   addDetail(ct('Plant status'), display(plant.status))
-  addDetail(ct('Registered at'), plant.registeredAt ? dt(plant.registeredAt) : ct('Unavailable'))
-  addDetail(ct('Latest approved observation'), plant.observedAt ? dt(plant.observedAt) : ct('Unavailable'))
+  addDetail(ct('Registered at'), formatRegisteredAt(plant.registeredAt))
+  addDetail(ct('Latest approved observation'), formatRegisteredAt(plant.observedAt))
   addDetail(ct('GPS Accuracy'), accuracy(plant))
   root.appendChild(details)
   const actions = document.createElement('div')
@@ -180,8 +183,10 @@ const selectPlant = (plant: EnrichedPlant, center = true) => {
 }
 const fitVisiblePlants = () => {
   if (!map || !mappedPlants.value.length) return
+  map.closePopup()
+  map.invalidateSize({ pan: false })
   map.fitBounds(L.latLngBounds(mappedPlants.value.map((plant) => [plant.latitude!, plant.longitude!])), {
-    padding: [48, 48], maxZoom: 17,
+    padding: [64, 64], maxZoom: 17, animate: false,
   })
 }
 const renderMarkers = () => {
@@ -221,7 +226,7 @@ const scheduleMapRefresh = (applyRoute = false) => {
 onMounted(async () => {
   await nextTick()
   if (!mapElement.value || map) return
-  map = L.map(mapElement.value, { zoomControl: true, minZoom: 3 })
+  map = L.map(mapElement.value, { zoomControl: true, minZoom: 1, zoomSnap: 0.25 })
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxZoom: 20, maxNativeZoom: 19,
     attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
@@ -289,10 +294,10 @@ onBeforeUnmount(() => {
       <div v-else-if="!mappedPlants.length" class="map-empty" role="status">{{ ct('No plants with valid coordinates match the selected filters.') }}</div>
     </div>
     <p v-if="speciesError" class="coordinate-note error-state">{{ ct('Species metadata is unavailable:') }} {{ speciesError }}</p>
-    <p v-if="unmappedPlantCount" class="coordinate-note">{{ ct('{count} filtered records are not shown because coordinates are unavailable.', { count: unmappedPlantCount }) }}</p>
+    <p v-if="unmappedPlantCount" class="coordinate-note coordinate-info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" /><path d="M12 10v7M12 7h.01" /></svg><span>{{ ct('{count} filtered records are not shown because coordinates are unavailable.', { count: unmappedPlantCount }) }}</span></p>
     <p v-if="skippedPlants" class="coordinate-note">{{ ct('{count} malformed plant records were skipped.', { count: skippedPlants }) }}</p>
     <p v-if="deepLinkMissing" class="coordinate-note">{{ ct('The requested plant is not present in the loaded list of up to 500 records.') }}</p>
-    <div v-if="selected" class="selected-card"><div class="panel-header"><div><h3>{{ selected.displayId }} · {{ speciesName(selected) }}</h3><span class="panel-description">{{ display(selected.species?.commonName) }} · {{ ct('Species ID') }} {{ selected.speciesId }}</span></div><div class="selection-actions"><RouterLink class="secondary-button" :to="`/plant/${encodeURIComponent(selected.id)}`">{{ ct('View Plant Details') }}</RouterLink><button class="secondary-button" type="button" @click="history = true">{{ ct('History availability') }}</button></div></div><dl class="detail-list"><div><dt>{{ ct('Coordinates') }}</dt><dd>{{ selected.latitude }}, {{ selected.longitude }}</dd></div><div><dt>{{ ct('Plant status') }}</dt><dd>{{ display(selected.status) }}</dd></div><div><dt>{{ ct('GPS Accuracy') }}</dt><dd>{{ accuracy(selected) }}</dd></div><div><dt>{{ ct('Latest approved observation') }}</dt><dd>{{ selected.observedAt ? dt(selected.observedAt) : ct('Unavailable') }}</dd></div></dl></div>
+    <div v-if="selected" class="selected-card"><div class="panel-header"><div><h3>{{ selected.displayId }} · {{ speciesName(selected) }}</h3><span class="panel-description">{{ display(selected.species?.commonName) }} · {{ ct('Species ID') }} {{ selected.speciesId }}</span></div><div class="selection-actions"><RouterLink class="secondary-button" :to="`/plant/${encodeURIComponent(selected.id)}`">{{ ct('View Plant Details') }}</RouterLink><button class="secondary-button" type="button" @click="history = true">{{ ct('History availability') }}</button></div></div><dl class="detail-list"><div><dt>{{ ct('Plant scientific name') }}</dt><dd>{{ display(selected.scientificName) }}</dd></div><div><dt>{{ ct('Coordinates') }}</dt><dd>{{ selected.latitude }}, {{ selected.longitude }}</dd></div><div><dt>{{ ct('Plant status') }}</dt><dd>{{ display(selected.status) }}</dd></div><div><dt>{{ ct('GPS Accuracy') }}</dt><dd>{{ accuracy(selected) }}</dd></div><div><dt>{{ ct('Latest approved observation') }}</dt><dd>{{ formatRegisteredAt(selected.observedAt) }}</dd></div></dl></div>
   </section>
 
   <section class="panel mapped-records-panel">
@@ -350,7 +355,7 @@ onBeforeUnmount(() => {
 .officer-layout .mapped-records-scroll .mapped-records-table td { font-size: var(--officer-text, .875rem); line-height: 1.5; }
 .officer-layout .mapped-records-scroll .mapped-records-table td.species-name-cell { white-space: normal; overflow-wrap: normal; word-break: normal; }
 .officer-layout .mapped-records-scroll .mapped-records-table .status-cell, .officer-layout .mapped-records-scroll .mapped-records-table .actions-cell { white-space: nowrap; }
-.officer-layout .mapped-records-scroll .mapped-records-table .badge.pending-review { background: #e8eff2; color: #53727c; }
+.officer-layout .mapped-records-scroll .mapped-records-table .badge.pending-review { background: #FEF9C3; color: #854D0E; }
 .officer-layout .mapped-records-scroll .mapped-records-table .badge.flagged { background: #f0eaf8; color: #69459a; }
 .officer-layout .mapped-records-scroll .mapped-records-table .action-group { display: flex; flex-wrap: nowrap; align-items: center; gap: 7px; width: max-content; min-width: max-content; }
 .map-empty { position: absolute; top: 50%; left: 50%; z-index: 500; width: min(390px, calc(100% - 32px)); padding: 16px; border-radius: 10px; background: rgba(255,255,255,.96); color: #60746b; text-align: center; transform: translate(-50%,-50%); }
@@ -358,16 +363,26 @@ onBeforeUnmount(() => {
 .coordinate-note { margin: 0; padding: 9px 18px; border-top: 1px solid #e3e9e3; background: #f8faf8; color: #77877f; font-size: 10px; }
 .error-state { color: #963d36; }
 .selected-card { padding: 20px 23px 23px; border-top: 1px solid #e3e9e3; }
+.selected-card { background: #245443; color: #fff; }
+.officer-layout.officer-layout.officer-layout .map-card .selected-card :is(h3, .panel-description, dt, dd) { color: #fff; }
+.selected-card .detail-list > div { border-color: rgba(255,255,255,.22); }
+.selected-card dt { font-weight: 700; }
+.selected-card .secondary-button { background: transparent; color: #fff; border-color: rgba(255,255,255,.65); }
+.selected-card .secondary-button:hover { background: rgba(255,255,255,.12); }
+.coordinate-info { display: flex; align-items: center; gap: 7px; color: #245443; background: #edf5ef; font-weight: 600; }
+.officer-layout.officer-layout.officer-layout .map-card .coordinate-info { color: #245443; }
+.coordinate-info svg { width: 14px; height: 14px; flex: 0 0 14px; }
 .selection-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .selection-actions a, a.action-button { text-decoration: none; }
 :deep(.plant-marker-host) { background: transparent; border: 0; }
 :deep(.plant-marker-pin) { width: 36px; height: 36px; display: grid; place-items: center; border: 3px solid #fff; border-radius: 50% 50% 50% 7px; background: #65a556; color: #fff; box-shadow: 0 3px 9px rgba(16,57,33,.42); transform: rotate(-45deg); }
-:deep(.plant-marker-pin svg) { width: 22px; height: 22px; fill: currentColor; transform: rotate(45deg); }
+:deep(.plant-marker-pin svg) { width: 22px; height: 22px; fill: #FFFFFF; stroke: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(45deg); }
 :deep(.plant-marker-host:hover .plant-marker-pin), :deep(.plant-marker-host.is-selected .plant-marker-pin) { background: #246c45; transform: rotate(-45deg) scale(1.14); }
 :deep(.plant-popup-card) { display: grid; color: #425e54; }
 :deep(.plant-popup-card strong), :deep(.plant-popup-card em), :deep(.plant-popup-card span) { display: block; margin-bottom: 5px; }
 :deep(.plant-popup-card dl) { margin: 8px 0; }
-:deep(.plant-popup-card dl div) { display: flex; justify-content: space-between; gap: 15px; }
+:deep(.plant-popup-card dl div) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 12px; margin-bottom: 6px; }
+:deep(.plant-popup-card dt) { font-weight: 700; }
 :deep(.plant-popup-card dd) { margin: 0; text-align: right; }
 :deep(.plant-popup-actions) { display: flex; gap: 7px; margin-top: 8px; }
 :deep(.plant-popup-actions a), :deep(.plant-popup-actions button) { padding: 7px 9px; border: 0; border-radius: 7px; background: #315f4e; color: white; font: inherit; text-decoration: none; cursor: pointer; }

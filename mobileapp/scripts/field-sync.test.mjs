@@ -320,3 +320,32 @@ test('rejected targets retain local drafts and stop before edits, uploads or sub
   assert.equal(f.removed.length,0);assert.equal(f.calls.some(call=>call.path==='/assets'||call.path.endsWith('/submit')||call.options?.method==='PATCH'),false);
  }
 });
+
+
+test('queued new Observation edits recheck authoritative origin, retain prohibited drafts and preserve legacy correction', async () => {
+  for (const origin of ['initial_registration', 'unknown', undefined, 'subsequent_observation']) {
+    for (const correction of [false, true]) {
+      const calls = [], removed = [];
+      const draft = validDraft({ method: 'OBSERVATION_EDIT', observation_id: 'approved-observation',
+        path: correction ? '/observation-edits/existing-request' : '/observation-edits',
+        body: { ...validDraft().body, observation_id: 'approved-observation', ...(correction ? { revision: 2 } : {}) } });
+      const sync = new Function('readDrafts','removeDraft','plantApi','faceSession','botanistNotifications', source + '\nreturn syncDrafts;')(
+        async()=>[draft], async()=>{removed.push(true)}, async(path,options)=>{
+          calls.push({path,options});
+          if(path==='/observations/approved-observation') return {observation:{id:'approved-observation',plant_id:7,owner_subject:'staff:owner',status:'Approved',origin_type:origin}};
+          if(path==='/observation-edits/existing-request' && !options?.method) return {edit:{owner_subject:'staff:owner',status:'Correction Required',revision:2}};
+          return {edit:{id:'existing-request',status:'Pending Review'}};
+        }, {restore:async()=>({id:'owner',role:'botanist'})}, {recordSync:async()=>{}});
+      if(correction || origin==='subsequent_observation') {
+        assert.equal(await sync('owner'),1);
+        const post=calls.find(c=>c.options?.method);
+        assert.equal(post.options.method,correction?'PATCH':'POST');
+        if(correction) assert.equal(post.options.body.revision,2);
+      } else {
+        await assert.rejects(sync('owner'),/Only verified subsequent/);
+        assert.equal(calls.some(c=>c.options?.method),false);
+        assert.equal(removed.length,0);
+      }
+    }
+  }
+})

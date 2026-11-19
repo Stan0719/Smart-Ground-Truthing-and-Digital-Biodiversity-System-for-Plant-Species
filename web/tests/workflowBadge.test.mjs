@@ -66,3 +66,21 @@ test('workflow badges bind the shared style while retaining their visible labels
     assert.ok(source.replace(/\s+/g, ' ').includes(value + ')'), file)
   }
 })
+
+
+test('Officer Pending Review CSS badges and both review summary cards match the shared yellow palette', () => {
+  const read = file => readFileSync(new URL('../src/' + file, import.meta.url), 'utf8')
+  const shared = read('styles/conservation.css')
+  assert.match(shared, /\.badge\.pending-review,\s*\.badge\.pending\s*\{\s*background: #FEF9C3;\s*color: #854D0E;/)
+  for (const [file, prefix, selector] of [
+    ['views/conservation/ObservationsView.vue', 'observation', '.observation-summary-card[data-status="Pending Review"]'],
+    ['views/conservation/ReviewSubmissionsView.vue', 'review', '.review-summary-pending-review'],
+  ]) {
+    const source = read(file)
+    const start = source.indexOf(selector + ' {')
+    assert.ok(start >= 0, file)
+    const rule = source.slice(start, source.indexOf('}', start))
+    assert.ok(rule.includes(`--${prefix}-summary-background: #FEF9C3`))
+    assert.ok(rule.includes(`--${prefix}-summary-ink: #854D0E`))
+  }
+})

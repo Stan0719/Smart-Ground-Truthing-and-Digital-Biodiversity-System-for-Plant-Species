@@ -51,10 +51,8 @@ test('species-specific Plants reloads are scoped to the selected route and API f
   assert.match(list,/filterUniqueSpeciesPlantRecords\(records, matchedId, currentSlug\)/);
   assert.match(list,/filterPlantRecordsForRole\(recordsForSpecies, role, accountId, \{ publicOnly \}\)/);
   assert.match(list,/!loading && !refreshing && !errorMessage && <Text style=\{styles\.count\}>/);
-  assert.match(list,/ListEmptyComponent=\{listViewState === "loading"[\s\S]*?listViewState === "error" \? \(/);
-  assert.match(list,/<View style=\{styles\.loadError\} testID="plant-list-error">/);
-  assert.match(list,/ListEmptyComponent=\{listViewState === "loading" \? \(/);
-  assert.match(list,/<View style=\{styles\.loadingState\} testID="plant-list-loading">/);
+  assert.match(list,/listViewState === "error" \? \(\s*<View style=\{styles\.loadError\} testID="plant-list-error"/);
+  assert.match(list,/ListEmptyComponent=\{listViewState === "loading" \? \(\s*<View style=\{styles\.loadingState\} testID="plant-list-loading"/);
   assert.match(list,/t\("common\.retry"\)/);
   assert.match(species,/useSpeciesCatalog\(user\?\.id, \{ publicOnly: isPublicViewer, includeOwnedRequests: isBotanist \}\)/);
   assert.match(list,/const publicOnly = !user \|\| isVisitor/);
@@ -74,7 +72,7 @@ test('a slower request for the previous species cannot replace the selected spec
     useMemo(fn){return fn()},useCallback:fn=>fn,
   };
   const native={StyleSheet:{create:styles=>styles},Dimensions:{get:()=>({width:390})}};
-  for(const name of ['View','Text','TextInput','TouchableOpacity','ScrollView','FlatList','Image','RefreshControl'])native[name]=name;
+  for(const name of ['View','Text','TextInput','TouchableOpacity','ScrollView','FlatList','ActivityIndicator','Image','RefreshControl'])native[name]=name;
   const screen=load('screens/Plant.js',{
     react:{...React,...hooks},'react-native':native,
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},
@@ -112,20 +110,24 @@ test('a slower request for the previous species cannot replace the selected spec
   assert.equal(screenTree.type,'SafeAreaView');
   assert.deepEqual(screenTree.props.edges,['top','left','right']);
   const [header]=React.Children.toArray(screenTree.props.children);
+  const scroll=React.Children.toArray(screenTree.props.children).find(node=>node.type==='FlatList');
   assert.equal(header.type,'View');
   assert.equal(screenTree.props.style.backgroundColor,header.props.style.backgroundColor,'safe area behind the status bar matches the light-green fixed header');
   assert.equal(screenTree.props.style.backgroundColor,'#E7F2E2');
-  assert.equal(header.props.style.paddingTop,4,'safe area keeps the compact fixed header below the status bar');
-  const nodes=node=>node&&typeof node==='object'?[node,...React.Children.toArray(node.props?.children).flatMap(nodes)]:[];
-  const scroll=nodes(screenTree).find(node=>node.type==='FlatList');
-  assert.ok(scroll,'Plant records use the independently scrolling FlatList');
+  assert.equal(header.props.style.paddingTop,4,'safe area replaces the fixed 50-point top gap');
+  assert.equal(scroll.type,'FlatList');
+  assert.deepEqual(scroll.props.data.map(plant=>plant.plantId),['8']);
+  assert.equal(scroll.props.testID,'plant-record-list');
   assert.equal(scroll.props.style.backgroundColor,'#F7FBF4','scrolling content retains its existing background');
-  const headerNodes=nodes(header),fixedNodes=nodes(screenTree),scrollNodes=nodes(scroll);
+  const nodes=node=>node&&typeof node==='object'?[node,...React.Children.toArray(node.props?.children).flatMap(nodes)]:[];
+  const headerNodes=nodes(header),scrollNodes=nodes(scroll);
+  const controls=React.Children.toArray(screenTree.props.children)[1];
   assert.equal(headerNodes.filter(node=>node.type==='RefreshButton').length,1);
   assert.equal(scrollNodes.some(node=>node.type==='RefreshButton'),false);
   assert.equal(headerNodes.some(node=>node.type==='TextInput'),false);
-  assert.equal(fixedNodes.filter(node=>node.type==='TextInput').length,1,'search remains fixed above the Plant list');
-  assert.equal(scrollNodes.some(node=>node.type==='TextInput'),false);
+  assert.equal(nodes(controls).filter(node=>node.type==='TextInput').length,1,'search lives in its dedicated controls area');
+  assert.equal(scrollNodes.filter(node=>node.type==='TextInput').length,0,'virtualized rows do not duplicate search controls');
+  assert.equal(typeof nodes(controls).find(node=>node.type==='TextInput').props.onChangeText,'function');
   assert.ok(headerNodes.some(node=>node.props?.children==='plant.allVisiblePlants'));
   const refresh=headerNodes.find(node=>node.type==='RefreshButton');
   assert.equal(refresh.props.testID,'plant-list-refresh');

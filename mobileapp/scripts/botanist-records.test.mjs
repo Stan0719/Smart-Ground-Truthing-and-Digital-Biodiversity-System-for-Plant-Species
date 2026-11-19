@@ -1,3 +1,4 @@
+import * as submissionSearch from '../utils/submissionSearch.js';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -91,6 +92,7 @@ test("Original Plant withdrawal eligibility and history filter use the live owne
 
 function submissionsUtils(translate = (key) => key) {
   return moduleFrom("screens/BotanistDashboard.js", {
+    "../utils/submissionSearch": submissionSearch,
     react: React,
     "../components/LanguageSelector": { default: "LanguageSelector" },
     "../components/fieldFormStyles": { fieldFormStyles: { submitButton: {}, submitButtonText: {} } },
@@ -471,6 +473,7 @@ test("My Submissions renders the resolved label while keeping the Original revie
   const native = { StyleSheet: { create: (value) => value }, useWindowDimensions: () => ({ width: 390 }), Alert: { alert() {} } };
   for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "FlatList", "ScrollView", "Image", "ActivityIndicator", "RefreshControl"]) native[name] = name;
   const screen = moduleFrom("screens/BotanistDashboard.js", {
+    "../utils/submissionSearch": submissionSearch,
     react: { ...React, useCallback: (callback) => callback, useEffect() {}, useRef: (initial) => ({ current: initial }),
       useState: (initial) => { const i = stateIndex++; return [slots[i] ?? initial, () => {}]; } },
     "react-native": native, "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
@@ -1419,6 +1422,7 @@ for (const language of ["en", "ms", "zh"]) {
     const native = { StyleSheet: { create: (v) => v }, Alert: { alert: (...args) => alerts.push(args) }, useWindowDimensions: () => ({ width: viewportWidth, height: 844 }) };
     for (const name of ["View", "Text", "TextInput", "TouchableOpacity", "FlatList", "ScrollView", "Image", "ActivityIndicator", "RefreshControl"]) native[name] = name;
     const screen = moduleFrom("screens/BotanistDashboard.js", {
+    "../utils/submissionSearch": submissionSearch,
       react: { ...React, useCallback: (callback) => callback, useEffect: () => {}, useRef: (initial) => ({ current: initial }), useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = initial; return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }]; } }, "react-native": native,
       "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
       "@react-navigation/native": { useFocusEffect: () => {} },

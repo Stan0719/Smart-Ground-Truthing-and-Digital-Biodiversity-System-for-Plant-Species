@@ -48,8 +48,7 @@ const optionLabel = (value: string) => {
 }
 
 const translatedGenus = computed(() => {
-  const key = `speciesContent.${props.plant.speciesSlug}.genus`
-  return te(key) ? t(key) : props.plant.genus || selectedSpecies.value?.genus || '—'
+  return props.plant.genus || selectedSpecies.value?.genus || '—'
 })
 
 const formatDate = (value: string) => {
@@ -69,14 +68,8 @@ const displayHeight = computed(() =>
     ? `${props.plant.latestApproved.heightCm} cm`
     : '—',
 )
-const displayName = computed(() => {
-  const key = `plantNames.${props.plant.speciesSlug}`
-  return te(key) ? t(key) : props.plant.commonName
-})
-const displayScientificName = computed(() => {
-  const key = `scientificNames.${props.plant.speciesSlug}`
-  return te(key) ? t(key) : props.plant.speciesName
-})
+const displayName = computed(() => props.plant.commonName)
+const displayScientificName = computed(() => props.plant.speciesName)
 const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
 </script>
 
@@ -99,6 +92,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
       </div>
       <p class="record-common-name">{{ displayName }}</p>
       <p class="record-species">{{ displayScientificName }}</p>
+      <p v-if="!isGuest && plant.measurementSource === 'registration'" class="record-source">{{ t('catalogueDisplay.approvedRegistration') }}</p>
       <dl v-if="canViewStaffPlantData">
         <div>
           <dt>{{ t('common.location') }}</dt>
@@ -112,7 +106,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
           <dt>{{ t('common.lifeStage') }}</dt>
           <dd>{{ optionLabel(plant.latestApproved.lifeStage) }}</dd>
         </div>
-        <div>
+        <div v-if="plant.latestApproved.date">
           <dt>{{ compact ? t('common.verified') : t('common.lastVerified') }}</dt>
           <dd>{{ formatDate(plant.latestApproved.date) }}</dd>
         </div>
@@ -130,7 +124,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
           <dt>{{ t('speciesLabels.genus') }}</dt>
           <dd>{{ translatedGenus }}</dd>
         </div>
-        <div>
+        <div v-if="plant.latestApproved.date">
           <dt>{{ compact ? t('common.verified') : t('common.lastVerified') }}</dt>
           <dd>{{ formatDate(plant.latestApproved.date) }}</dd>
         </div>
@@ -204,6 +198,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
   color: #234a3c;
   font-size: 24px;
 }
+.record-source { margin: 0 0 12px; color: #405f56; font-size: 12px; font-weight: 600; }
 .record-common-name {
   margin: 5px 0 2px;
   color: #315447;

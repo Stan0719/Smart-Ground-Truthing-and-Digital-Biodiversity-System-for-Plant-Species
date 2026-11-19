@@ -16,6 +16,7 @@ function component(name, props = {}) {
   const script=compileScript(descriptor,{id:name}),template=compileTemplate({source:descriptor.template.content,filename:name+'.vue',id:name,compilerOptions:{bindingMetadata:script.bindings}})
   const scope=vue.effectScope(),exports={},events=[],document={body:{style:{overflow:'auto'}},documentElement:{style:{overflow:'auto'},scrollTop:0},activeElement:null},cleanup=[]
   const context={exports,document,require(name) {
+    if (name==='vue-i18n') { const labels=JSON.parse(readFileSync(new URL('../src/locales/en.json',import.meta.url),'utf8')); return {useI18n:()=>({t:key=>key.split('.').reduce((v,k)=>v?.[k],labels)||key})} }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
     if(name==='vue')return {...vue,onBeforeUnmount:fn=>cleanup.push(fn)}
     if(name.endsWith('useConservationText'))return {useConservationText:()=>({ct:x=>x,dt:x=>x})}
@@ -57,12 +58,12 @@ const observation=(id,origin)=>({id,plant_id:'1',origin,date:'2026-11-03T05:31:3
 test('expandable history hides verified registration rows and retains subsequent/unknown details and photos', async () => {
   const h=component('PlantObservationHistory',{observations:[observation('initial','initial_registration'),observation('field','subsequent_observation'),observation('legacy','unknown')],loading:false,error:'',complete:false,hasMore:true})
   try {
-    const tree=h.render();assert.equal(tree.filter(n=>n.type==='details').length,2)
+    const tree=h.render();assert.equal(tree.filter(n=>n.type==='details'&&n.props?.class==='observation-row').length,2)
     assert.deepEqual(tree.filter(n=>n.type==='img').map(n=>n.props.src),['/photo-field','/photo-legacy'])
     assert.ok(!tree.some(n=>n.children==='Registration photos appear in the gallery above.'))
     assert.ok(tree.some(n=>n.children==='More history pages are available. This is not the complete history.'))
     assert.ok(tree.some(n=>n.children==='Origin not verified'))
-    assert.match(text(tree.find(n=>n.props?.class==='history-heading')), /2 observations loaded/)
+    assert.match(text(tree.find(n=>n.props?.class==='history-heading')), /1 observations loaded/)
     const opened=[];h.state.lightbox.value={open:(...args)=>opened.push(args)}
     tree.find(n=>n.type==='button'&&n.props?.['aria-label']?.startsWith('Enlarge observation photo')).props.onClick({currentTarget:{}})
     assert.equal(opened[0][0].length,1);assert.equal(opened[0][0][0].id,'photo-field')
@@ -81,16 +82,16 @@ test('excluded registration-only pages keep continuation and visible counts unti
   try {
     assert.equal(h.render().filter(n=>n.type==='details').length,0)
     assert.ok(!h.render().some(n=>n.props?.class==='empty-history'))
-    assert.ok(h.render().some(n=>n.children==='No subsequent or unclassified observations are loaded yet. More pages remain.'))
+    assert.ok(h.render().some(n=>n.children==='No subsequent observations are loaded yet. More history pages are available.'))
     h.render().find(n=>n.type==='button'&&n.children==='Load more observations').props.onClick();assert.deepEqual(h.events,['more'])
     await history.load('1',true)
     h.props.observations=history.state.observations;h.props.complete=history.state.complete;h.props.hasMore=history.state.hasMore;await vue.nextTick()
     assert.ok(calls[1].includes('cursor=next'));assert.equal(history.state.observations.length,3,'presentation never removes the stored registration from the controller')
-    assert.equal(h.render().filter(n=>n.type==='details').length,2)
-    assert.match(text(h.render().find(n=>n.props?.class==='history-heading')), /2 observations$/)
+    assert.equal(h.render().filter(n=>n.type==='details'&&n.props?.class==='observation-row').length,2)
+    assert.match(text(h.render().find(n=>n.props?.class==='history-heading')), /1 observations$/)
     assert.ok(!h.render().some(n=>n.type==='button'&&n.children==='Load more observations'))
     h.props.observations=[observation('initial','initial_registration')];await vue.nextTick()
-    assert.ok(h.render().some(n=>n.props?.class==='empty-history'&&n.children==='No subsequent or unclassified observations are available for this plant.'))
+    assert.ok(h.render().some(n=>n.props?.class==='empty-history'&&text(n).includes('No subsequent observations yet.')))
     assert.ok(!text(h.render().find(n=>n.props?.class==='history-heading')).includes('1 observations'))
   } finally {h.stop();history.reset()}
 })
@@ -101,7 +102,7 @@ test('history dates, review dates and enlargement captions share Malaysia format
   try {
     const tree=h.render()
     assert.ok(tree.some(n=>n.children==='Nov 3, 2026, 13:31'));assert.ok(tree.some(n=>n.type==='strong'&&n.children==='Rejected · Nov 5, 2026, 00:12'))
-    assert.ok(text(tree.find(n=>n.type==='summary')).includes('Real Botanist'))
+    assert.ok(text(nodes(tree.find(n=>n.type==='details'&&n.props?.class==='observation-row')).find(n=>n.type==='summary')).includes('Real Botanist'))
     const opened=[];h.state.lightbox.value={open:(...args)=>opened.push(args)}
     tree.find(n=>n.type==='button'&&n.props?.['aria-label']?.startsWith('Enlarge observation photo')).props.onClick({currentTarget:{}})
     assert.equal(opened[0][2],'Observation · Nov 3, 2026, 13:31')

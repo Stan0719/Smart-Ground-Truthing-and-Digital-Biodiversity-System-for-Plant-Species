@@ -13,6 +13,7 @@ const { assertQrAssignmentAllowed, normalizeQrPlantSchema } = require("./qr-plan
 
 const { requireReviewCycle } = require("./species-review-cycle.cjs");
 const { finalRejection } = require("./final-rejection.cjs");
+const { requireRecordChangeNotifications } = require("./record-change-notifications.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const initialObservationWorkflow = "initial_registration_observation_edit";
 const observationPhotoId = (value) => typeof value === "string" && /^[A-Za-z0-9:_-]{1,100}$/.test(value);
@@ -854,8 +855,8 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
       await requireVersionHistory(c);
       if (req.body.decision === "Correction Required") {
         if (!comment) fail(400, "Correction feedback is required.");
-        if (!(await recordChangeCorrectionNotificationsAvailable(c))) fail(503, "Plant and Species edit correction notifications require migration 023.");
       }
+      await requireRecordChangeNotifications(c);
       if (req.body.decision === "Approved") {
         if (change.plant_id) {
           const plant = (await c.query("SELECT * FROM plant_record WHERE plant_id=$1 FOR UPDATE", [change.plant_id])).rows[0];
@@ -919,7 +920,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
         const recordKind = change.plant_id ? "plant" : "species";
         const targetId = change.plant_id ?? change.base_snapshot?.request_id ?? change.species_id;
         const metadata = { entityType: "record_change", changeId: change.id, recordKind, targetId: String(targetId), revision: change.revision };
-        await c.query(`INSERT INTO botanist_notification(id,recipient_subject,type,source_key,plant_id,metadata)
+        await c.query(`INSERT INTO plant_app.botanist_notification(id,recipient_subject,type,source_key,plant_id,metadata)
           VALUES($1,$2,$6,$3,$4,$5::jsonb) ON CONFLICT(recipient_subject,source_key) DO NOTHING`,
         [randomUUID(), change.owner_subject, `record-change-${notificationType === 'record_change_correction' ? 'correction' : req.body.decision.toLowerCase()}:${change.id}:${change.revision}`, change.plant_id, metadata, notificationType]);
       }

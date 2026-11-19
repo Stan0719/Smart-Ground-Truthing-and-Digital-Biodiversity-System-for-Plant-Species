@@ -76,7 +76,7 @@ function createPlantApp({
   mountObservationReviewHistory(app, { pool, allow });
   require("./iot-summary-report.cjs").mountIoTSummaryReport(app, { pool, allow });
   require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
-  mountObservationEdits(app, { pool, allow });
+  mountObservationEdits(app, { pool, allow, officerNotifications });
   mountObservationWithdrawals(app, { pool, allow });
   mountRecordVersionHistory(app, { pool, allow });
   mountUploads(app, { pool, allow, speciesPhotoWritesEnabled });
@@ -100,6 +100,8 @@ function createPlantApp({
   );
   app.use((_req, res) => res.status(404).json({ error: "Not found." }));
   app.use((error, _req, res, _next) => {
+    if (error.code === "RECORD_CHANGE_NOTIFICATION_SCHEMA_REQUIRED")
+      return res.status(503).json({ code: error.code, error: error.message });
     if (["42P01", "42703"].includes(error.code))
       return res.status(503).json({ error: "Plant database setup is incomplete. Apply the supplied Add Plant migrations and restart the plant API." });
     const status =

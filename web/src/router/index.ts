@@ -10,7 +10,7 @@ import ReviewSubmissionsView from '../views/conservation/ReviewSubmissionsView.v
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
 import AdminModuleView from '../views/AdminModuleView.vue'
 import AdminOperationsView from '../views/AdminOperationsView.vue'
-import { currentUser, logout } from '../services/auth'
+import { verifySession, sessionVerificationCurrent, sessionSnapshot, logout } from '../services/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -203,7 +203,9 @@ const router = createRouter({
   ],
 })
 
+let guardSequence = 0
 router.beforeEach(async (to) => {
+  const token = ++guardSequence
   if (
     !to.path.startsWith('/admin') &&
     !to.path.startsWith('/conservation') &&
@@ -211,12 +213,18 @@ router.beforeEach(async (to) => {
     to.name !== 'change-password'
   )
     return
-  const user = await currentUser()
-  if (!user) return { name: 'home' }
+  const result = await verifySession()
+  if (token !== guardSequence || !sessionVerificationCurrent(result)) return false
+  if (result.status === 'unavailable' || result.status === 'superseded') return false
+  if (result.status === 'unauthenticated') return { name: 'home' }
+  if (result.status !== 'authenticated') return false
+  const user = result.user
   if (!['Administrator', 'Conservation Officer'].includes(user.role)) {
     await logout()
+    if (token !== guardSequence || sessionSnapshot().pending || sessionSnapshot().user) return false
     return { name: 'home' }
   }
+  if (user.status !== 'Active') return { name: 'home' }
   if (user.mustChangePassword && to.name !== 'change-password') return { name: 'change-password' }
   if (to.path.startsWith('/admin') && user.role !== 'Administrator') return { name: 'home' }
   if (to.path.startsWith('/conservation') && user.role !== 'Conservation Officer')

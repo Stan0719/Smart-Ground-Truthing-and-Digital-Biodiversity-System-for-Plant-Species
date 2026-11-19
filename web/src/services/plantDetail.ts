@@ -32,13 +32,13 @@ export async function readPlantDetail(id: string, staff: boolean, request = requ
   if (result.staff !== null) {
     if (!result.staff || typeof result.staff !== 'object' || Array.isArray(result.staff)) throw Error('The plant service returned an invalid response.')
     const data = result.staff as Record<string, unknown>
-    if (!['Approved', 'Pending Review', 'Rejected'].includes(String(data.status)) || typeof data.registered_at !== 'string' || !Number.isFinite(Date.parse(data.registered_at)) ||
+    if (typeof data.status !== 'string' || !['Approved', 'Pending Review', 'Rejected', 'Flagged', 'Correction Required', 'Withdrawn'].includes(data.status) || typeof data.registered_at !== 'string' || !Number.isFinite(Date.parse(data.registered_at)) ||
       ['conservation_status', 'habitat'].some(key => data[key] !== null && typeof data[key] !== 'string')) throw Error('The plant service returned an invalid response.')
     const validObservation = (value: unknown): value is DetailObservation => {
       if (value === null) return true
       if (!value || typeof value !== 'object' || Array.isArray(value)) return false
       const observation = value as Record<string, unknown>, content = observation.content
-      if (!['Approved', 'Pending Review', 'Rejected', 'Flagged', 'Correction Required', 'Draft'].includes(String(observation.status)) ||
+      if (typeof observation.status !== 'string' || !['Approved', 'Pending Review', 'Rejected', 'Flagged', 'Correction Required', 'Draft', 'Withdrawn'].includes(observation.status) ||
         typeof observation.created_at !== 'string' || !Number.isFinite(Date.parse(observation.created_at)) || !content || typeof content !== 'object' || Array.isArray(content)) return false
       const fields = content as Record<string, unknown>
       if (['heightCm', 'latitude', 'longitude', 'accuracy_m', 'altitude_m'].some(key => fields[key] !== null &&

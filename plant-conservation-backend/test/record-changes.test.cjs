@@ -5,7 +5,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { once } = require("node:events");
 const sharp = require("sharp");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installRecordChangeNotifications } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 
 test("owned pending edits and reviewed approved proposals preserve record IDs and approval boundary", async (t) => {
@@ -21,6 +21,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
   // This isolated test schema is disposable. No production migration is run.
   await pool.query(migration("008-record-change-submissions.sql"));
   await pool.query(migration("009-record-version-history.sql"));
+  await installRecordChangeNotifications(pool);
   const photo = await sharp({ create: { width: 4, height: 4, channels: 3, background: "green" } }).jpeg().toBuffer();
   const species = (await pool.query("INSERT INTO species(scientific_name,common_name,description,rbac_data) VALUES('Species A','Common A','Original description',$1) RETURNING species_id",
     [{ habitat: "Forest", culturalSignificance: "Existing cultural knowledge", retainedMetadata: { source: "fixture" }, approvalStatus: "Approved", submittedBy: "staff:bot" }])).rows[0].species_id;
@@ -270,10 +271,26 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal((await call("/observations/pending-observation/review", "officer", "POST",
       { decision: "Approved", comment: "GPS checked", revision: 3 })).status, 200);
     const after = await call(`/record-versions?kind=plant&id=${pendingPlant}`);
-    assert.equal(after.data.versions[0].status, "Approved");
-    assert.equal(after.data.versions[0].review_comment, "GPS checked");
-    assert.equal(after.data.versions[1].status, "Superseded");
-    assert.equal(after.data.versions[2].snapshot.qr_token, "qr-edit-pending");
+    const submitted = before.data.versions[0];
+    const source = after.data.versions.find(v => v.id === submitted.id);
+    const capture = after.data.versions.find(v => v.snapshot.review_provenance?.source_submitted_history_id === submitted.id);
+    assert.equal(source.status, "Approved");
+    assert.equal(source.review_comment, "GPS checked");
+    assert.deepEqual(source.snapshot, submitted.snapshot, "submitted evidence stays immutable");
+    assert.ok(capture, "approval appends its own provenance-linked capture");
+    assert.equal(capture.status, "Approved");
+    assert.equal(capture.snapshot.review_provenance.evidence_type, "approval_capture");
+    assert.equal(capture.snapshot.observation_id, "pending-observation");
+    const reviewEvidence = (await pool.query("SELECT observation_id,reviewer_subject,decision FROM observation_review WHERE id=$1", [capture.snapshot.review_provenance.review_id])).rows[0];
+    assert.deepEqual(reviewEvidence, { observation_id: "pending-observation", reviewer_subject: "staff:officer", decision: "Approved" });
+    assert.equal(capture.reviewed_by, reviewEvidence.reviewer_subject);
+    assert.ok(capture.version_number > submitted.version_number);
+    assert.equal(after.data.versions.length, before.data.versions.length + 1);
+    for (const earlier of before.data.versions.slice(1)) {
+      const retained = after.data.versions.find(v => v.id === earlier.id);
+      assert.equal(retained.status, earlier.status);
+      assert.deepEqual(retained.snapshot, earlier.snapshot);
+    }
   });
   await t.test("a later protected classification blocks botanist edits without changing visibility", async () => {
     await pool.query("UPDATE rbac_species_visibility SET visibility='protected' WHERE species_id=$1", [species]);

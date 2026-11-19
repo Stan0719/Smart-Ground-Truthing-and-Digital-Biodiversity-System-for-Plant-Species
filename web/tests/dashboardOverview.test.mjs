@@ -61,13 +61,13 @@ test('Overview keeps all six loaded count sources, removes per-card explanations
   assert.deepEqual(template.errors,[])
   const h=harness();try{
     await h.load();assert.deepEqual(Array.from(h.state.summaries.value,card=>card[1]),[6,5,5,2,1,8])
-    assert.equal(h.state.pending.value.length,4);assert.equal(h.state.recentPlants.value.length,4)
+    assert.equal(h.state.observations.value.filter(h.state.requiresReview).slice(0,4).length,4);assert.equal(h.state.plants.value.length,5)
     const tree=nodes(h.render()),cards=tree.filter(node=>node.type==='article'&&node.props?.class==='summary-card')
     assert.equal(cards.length,6);assert.ok(cards.every(card=>!nodes(card).some(node=>node.type==='small')))
     assert.ok(cards.some(card=>text(card).includes('Observations')));assert.ok(!text(h.render()).includes('Loaded Observations'))
     assert.equal(tree.filter(node=>node.props?.class==='summary-scope').length,0)
     assert.equal(text(h.render()).split('Counts reflect loaded records.').length-1,1);assert.ok(!text(h.render()).includes('Approved plants with valid coordinates'))
-    assert.deepEqual(h.calls.map(call=>call.url).sort(),['/api/iot/alerts','/api/observations','/api/plants','/api/species?scope=scientific'].sort())
+    assert.deepEqual(h.calls.filter(call=>!call.url.startsWith('/api/conservation/submitter-names?')).map(call=>call.url).sort(),['/api/iot/alerts','/api/observations','/api/plants','/api/species?scope=scientific'].sort())
     assert.ok(h.calls.every(call=>!call.options.method||call.options.method==='GET'))
   }finally{h.stop()}
 })
@@ -97,7 +97,7 @@ test('submitter and registered-by display uses only this authorized session name
     h.session({id:owner,name:'Do not expose',role:'Botanist',status:'Active',mustChangePassword:false})
     assert.ok(!h.state.subjectLabels.value.get(raw).includes('Do not expose'))
     h.session(null);assert.match(h.state.subjectLabels.value.get(raw),/^Staff /)
-    assert.equal(h.calls.length,4,'no staff directory/account lookup added')
+    assert.equal(h.calls.filter(call=>call.url.startsWith('/api/conservation/submitter-names?')).length,1,'only the bounded authorized name projection is used');assert.equal(h.calls.length,5)
   }finally{h.stop()}
 })
 
@@ -155,7 +155,7 @@ test('Overview opts into established table styling with middle alignment, status
   const shared=read('styles/officer-data-tables.css');assert.match(shared,/background: #245443/);assert.match(shared,/vertical-align: middle/);assert.match(shared,/color: #fff/)
   assert.equal((source.match(/<th scope="col">/g)||[]).length,11)
   const scrolling=rules.find(rule=>rule.selector.endsWith('.overview-table-scroll'));assert.equal(declarations(scrolling)['overflow-x'],'auto');assert.equal(declarations(scrolling)['min-width'],'0')
-  assert.ok(rules.some(rule=>rule.selector.includes('.field-observations-table) .badge.pending-review')&&declarations(rule).background==='#e8eff2'))
+  assert.ok(rules.some(rule=>rule.selector.includes('.field-observations-table) .badge.pending-review')&&declarations(rule).background==='#FEF9C3'))
   assert.ok(rules.some(rule=>rule.selector.includes('.field-observations-table) .badge.flagged')&&declarations(rule).background==='#f0eaf8'))
   assert.ok(!rules.some(rule=>rule.selector.includes('.recent-records-table .badge')),'plant status palette remains inherited')
   for(const width of [1250,1000,650,400])assert.ok(rules.some(rule=>rule.parent.name==='container'&&rule.parent.params===`(max-width: ${width}px)`))
@@ -194,7 +194,7 @@ test('full-width registrations precede paired field observations/status while ma
     assert.deepEqual(nodes(table).filter(node=>node.type==='col').slice(0,2).map(node=>node.props.class),['overview-plant','overview-species'])
     const row=nodes(table).find(node=>node.type==='tr'&&node.key===seed().observations[2].id)
     assert.equal(nodes(row).filter(node=>node.type==='td')[0].children,'PL018')
-    assert.equal(h.state.pending.value.length,4);assert.ok(h.state.pending.value.some(item=>item.status==='Flagged'));assert.ok(h.state.pending.value.some(item=>item.status==='Correction Required'))
+    assert.equal(h.state.observations.value.filter(h.state.requiresReview).slice(0,4).length,4);assert.ok(h.state.observations.value.filter(h.state.requiresReview).slice(0,4).some(item=>item.status==='Flagged'));assert.ok(h.state.observations.value.filter(h.state.requiresReview).slice(0,4).some(item=>item.status==='Correction Required'))
   }finally{h.stop()}
 })
 
@@ -313,6 +313,6 @@ test('every eligible row action preserves its full authoritative ID and the scop
   assert.equal(tree.filter(n=>n.props?.class==='statistics-scope').length,1)
   const cards=tree.filter(n=>n.type==='article'&&n.props?.class==='summary-card');assert.equal(cards.length,6)
   assert.ok(cards.every(card=>!text(card).includes('loaded records')&&!nodes(card).some(n=>n.type==='small')))
-  assert.equal(h.calls.length,4)
+  assert.equal(h.calls.length,5)
  }finally{h.stop()}
 })

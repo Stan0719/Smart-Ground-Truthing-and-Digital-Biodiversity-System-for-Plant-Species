@@ -6,10 +6,10 @@ export function observationDetailContent(row, selectedSnapshot, selectedVersion,
     ? selectedEdit?.proposed_content || selectedSnapshot?.content : row?.content) || {};
 }
 
-export function canStartObservationEdit(row, editHistory, activeEdit, historicalSelection, accountId, versioningActive = false) {
-  const verifiedOrigin = ["initial_registration", "subsequent_observation"].includes(row?.origin_type);
+export function canStartObservationEdit(row, editHistory, activeEdit, historicalSelection, accountId) {
+  const verifiedOrigin = row?.origin_type === "subsequent_observation";
   return !historicalSelection && row?.owner_subject === `staff:${accountId}` && row.status === "Approved" &&
-    !!editHistory && !activeEdit && (!versioningActive || verifiedOrigin);
+    !!editHistory && !activeEdit && verifiedOrigin;
 }
 
 export function canWithdrawOriginalObservation(row, activeEdit, historicalSelection, accountId) {

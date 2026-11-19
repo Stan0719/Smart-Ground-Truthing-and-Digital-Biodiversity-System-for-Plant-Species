@@ -7,7 +7,6 @@ const { audit, subject, fail, text, fieldContent, speciesRow } = require("./doma
 const versions = require("./observation-submission-versions.cjs");
 const { classifyObservations } = require("./observation-origin.cjs");
 const {
-  submitInitialObservationEdit,
   resubmitInitialObservationEdit,
   cancelInitialObservationEdit,
   reviewInitialObservationEdit,
@@ -17,9 +16,16 @@ const {
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const validId = (value) => typeof value === "string" && /^[a-f0-9-]{8,80}$/i.test(value);
 const initialObservationWorkflow = "initial_registration_observation_edit";
+const evidenceInvalid = () => fail(409, "Observation edit photo evidence is invalid. Contact support for an evidence-preserving assessment.");
+const validPhotoIds = value => Array.isArray(value) && value.every(id => typeof id === "string" && id.length > 0);
+function assertPhotoEvidence(row) {
+  if (!validPhotoIds(row.retained_photo_ids) || !Array.isArray(row.added_photos) ||
+      (row.base_snapshot?.photo_ids !== undefined && !validPhotoIds(row.base_snapshot.photo_ids))) evidenceInvalid();
+}
 const exposed = (row) => {
+  assertPhotoEvidence(row);
   const { added_photos, ...safe } = row;
-  return { ...safe, added_photo_count: Array.isArray(added_photos) ? added_photos.length : 0 };
+  return { ...safe, added_photo_count: added_photos.length };
 };
 async function available(c) {
   return Boolean((await c.query("SELECT to_regclass(current_schema() || '.observation_edit_request') IS NOT NULL AS available")).rows[0]?.available);
@@ -293,7 +299,7 @@ async function selectedPhotos(c, observationId, selected, additions) {
     fail(409, "Observation photos changed. Reload before editing.");
   return { current, retained };
 }
-function mountObservationEdits(app, { pool, allow }) {
+function mountObservationEdits(app, { pool, allow, officerNotifications = null }) {
   const read = (req, res, next) => allow(permitted(req.user, "observations.review") ? "observations.review" : "observations.create")(req, res, next);
   app.get("/api/observation-edits/capabilities", read, async (_req, res) => res.json({
     available: await available(pool), versioning_available: await versioningAvailable(pool),
@@ -302,41 +308,24 @@ function mountObservationEdits(app, { pool, allow }) {
     const { observation_id: observationId, client_key: clientKey, ...input } = req.body || {};
     if (!validId(observationId) || typeof clientKey !== "string" || !clientKey.trim() || clientKey.length > 100) fail(400, "Invalid observation edit reference.");
     const proposed = await proposal(input);
-    if (await versioningAvailable(pool)) {
-      const owned = (await pool.query("SELECT * FROM plant_observation WHERE id=$1 AND owner_subject=$2",
-        [observationId, subject(req.user)])).rows[0];
-      if (owned?.status === "Approved") {
-        const origin = (await classifyObservations(pool, [owned]))[0]?.origin_type;
-        if (origin === "unknown") fail(409, "Observation origin cannot be verified. This record cannot be edited safely.");
-        if (origin === "initial_registration") {
-          if ((await pool.query(`SELECT id FROM observation_edit_request WHERE observation_id=$1
-            AND status IN ('Pending Review','Correction Required') LIMIT 1`, [observationId])).rows.length)
-            fail(409, "An older observation edit is still awaiting review.");
-          const created = await submitInitialObservationEdit(pool, { user: req.user,
-            plantId: owned.plant_id, observationId, clientKey, content: proposed.content,
-            photo_ids: proposed.photoIds, photos: input.photos });
-          const row = (await pool.query("SELECT * FROM record_change_submission WHERE id=$1", [created.id])).rows[0];
-          return res.status(201).json({ edit: await initialChangeEdit(pool, row) });
-        }
-      }
-    }
     const payloadHash = hash({ observationId, proposed });
     const result = await versions.withVersionTransaction(pool, async (c) => {
       await requireAvailable(c);
       const observation = await ownedObservation(c, observationId, req.user, true);
       if (observation.status !== "Approved") fail(409, "Only an Approved observation can be edited.");
-      const versioning = await versioningAvailable(c);
-      const origin = (await classifyObservations(c, [observation]))[0]?.origin_type;
-      if (versioning && !["subsequent_observation", "initial_registration"].includes(origin))
-        fail(409, "Observation origin cannot be verified. This record cannot be edited safely.");
-      if (versioning && origin === "initial_registration")
-        fail(409, "Initial-registration Observations are managed through their Plant submission workflow.");
-      const versioned = versioning && origin === "subsequent_observation";
       const prior = (await c.query("SELECT * FROM observation_edit_request WHERE owner_subject=$1 AND client_key=$2", [subject(req.user), clientKey])).rows[0];
       if (prior) {
         if (prior.payload_hash !== payloadHash || prior.observation_id !== observationId) fail(409, "This edit key belongs to another proposal.");
         return exposed(prior);
       }
+      // Creation policy only: preserve verified retries and all existing proposal operations.
+      const origin = (await classifyObservations(c, [observation]))[0]?.origin_type;
+      if (origin === "initial_registration")
+        fail(409, "To change registration information, use Edit Plant.");
+      if (origin !== "subsequent_observation")
+        fail(409, "Observation origin cannot be verified. Independent edits require a subsequent field Observation.");
+      const versioning = await versioningAvailable(c);
+      const versioned = versioning && origin === "subsequent_observation";
       if ((await c.query("SELECT id FROM observation_edit_request WHERE observation_id=$1 AND status IN ('Pending Review','Correction Required')", [observationId])).rows.length)
         fail(409, "An observation edit is already awaiting review.");
       const photos = await selectedPhotos(c, observationId, proposed.photoIds, proposed.photos);
@@ -346,17 +335,19 @@ function mountObservationEdits(app, { pool, allow }) {
       const row = (await c.query(`INSERT INTO observation_edit_request
         (id,observation_id,owner_subject,version_number,base_revision,base_fingerprint,base_snapshot,proposed_content,retained_photo_ids,added_photos,client_key,payload_hash)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [id, observationId, subject(req.user), number, observation.revision, hash(base), base, proposed.content, photos.retained,
-        proposed.photos, clientKey, payloadHash])).rows[0];
+      [id, observationId, subject(req.user), number, observation.revision, hash(base), base, proposed.content, JSON.stringify(photos.retained),
+        JSON.stringify(proposed.photos), clientKey, payloadHash])).rows[0];
       if (versioned) {
         const approved = await ensureApprovedBaseline(c, observation, row, photos.current, req.user);
         await insertEditSnapshot(c, observation, row, photos.retained, proposed.photos, approved.id, req.user);
       }
       await c.query(`INSERT INTO observation_version_history(id,observation_id,version_number,owner_subject,content,photo_ids)
         VALUES($1,$2,0,$3,$4,$5) ON CONFLICT(observation_id,version_number) DO NOTHING`,
-      [randomUUID(), observationId, subject(req.user), observation.content, photos.current]);
+      [randomUUID(), observationId, subject(req.user), observation.content, JSON.stringify(photos.current)]);
+      const notificationEventId = randomUUID();
       await c.query("INSERT INTO observation_edit_event(id,request_id,observation_id,actor_subject,event_type) VALUES($1,$2,$3,$4,'submitted')",
-        [randomUUID(), id, observationId, subject(req.user)]);
+        [notificationEventId, id, observationId, subject(req.user)]);
+      if (officerNotifications) await officerNotifications.enqueueObservationEdit(c, id, notificationEventId);
       await audit(c, req.user, "observation_edit_submitted", id);
       return exposed(row);
     });
@@ -419,6 +410,7 @@ function mountObservationEdits(app, { pool, allow }) {
         to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.US') AS exact_created_at
         FROM observation_edit_event WHERE observation_id=$1 ORDER BY created_at,id`, [observation.id]),
     ]);
+    if (legacyVersions.rows.some(row => !validPhotoIds(row.photo_ids))) evidenceInvalid();
     let versions = legacyVersions.rows, edits = legacyEdits.rows.map(exposed), events = legacyEvents.rows;
     if (legacyEdits.rows.length && (await pool.query("SELECT to_regclass(current_schema() || '.botanist_notification') IS NOT NULL AS available")).rows[0]?.available) {
       const requestIds = legacyEdits.rows.map(row => row.id);
@@ -601,6 +593,7 @@ function mountObservationEdits(app, { pool, allow }) {
       await requireAvailable(c);
       const { observation, request: row } = await lockEditTargets(c, req.params.id, subject(req.user));
       if (row.status !== "Correction Required" || row.revision !== revision) fail(409, "Reload the correction request before resubmitting.");
+      assertPhotoEvidence(row);
       if (observation.status !== "Approved" || observation.revision !== row.base_revision) fail(409, "Approved observation changed. Start a fresh edit.");
       const versioning = await versioningAvailable(c);
       if (versioning) {
@@ -615,10 +608,12 @@ function mountObservationEdits(app, { pool, allow }) {
           const updated = (await c.query(`UPDATE observation_edit_request SET proposed_content=$1,added_photos=$2,
             revision=$3,status='Pending Review',review_comment=NULL,reviewed_by=NULL,reviewed_at=NULL,
             updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND revision=$5 AND status='Correction Required' RETURNING *`,
-          [proposed.content, added, nextRevision, row.id, row.revision])).rows[0];
+          [proposed.content, JSON.stringify(added), nextRevision, row.id, row.revision])).rows[0];
           if (!updated) fail(409, "Reload the correction request before resubmitting.");
+          const notificationEventId = randomUUID();
           await c.query("INSERT INTO observation_edit_event(id,request_id,observation_id,actor_subject,event_type) VALUES($1,$2,$3,$4,'resubmitted')",
-            [randomUUID(), row.id, row.observation_id, subject(req.user)]);
+            [notificationEventId, row.id, row.observation_id, subject(req.user)]);
+          if (officerNotifications) await officerNotifications.enqueueObservationEdit(c, row.id, notificationEventId);
           await audit(c, req.user, "observation_edit_resubmitted", row.id);
           return exposed(updated);
         }
@@ -643,14 +638,16 @@ function mountObservationEdits(app, { pool, allow }) {
         input.photo_ids === undefined ? row.retained_photo_ids : proposed.photoIds, additions);
       const updated = (await c.query(`UPDATE observation_edit_request SET proposed_content=$1,retained_photo_ids=$2,added_photos=$3,
         revision=revision+1,status='Pending Review',review_comment=NULL,reviewed_by=NULL,reviewed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$4 RETURNING *`,
-      [proposed.content, selected.retained, additions, row.id])).rows[0];
+      [proposed.content, JSON.stringify(selected.retained), JSON.stringify(additions), row.id])).rows[0];
       if (versioning) {
         await versions.transitionVersion(c, { observationId: observation.id, versionId: sourceVersion.id,
           status: "Superseded", actorSubject: subject(req.user) });
         await insertEditSnapshot(c, observation, updated, selected.retained, additions, sourceVersion.id, req.user, correctionEvent.id);
       }
+      const notificationEventId = randomUUID();
       await c.query("INSERT INTO observation_edit_event(id,request_id,observation_id,actor_subject,event_type) VALUES($1,$2,$3,$4,'resubmitted')",
-        [randomUUID(), row.id, row.observation_id, subject(req.user)]);
+        [notificationEventId, row.id, row.observation_id, subject(req.user)]);
+      if (officerNotifications) await officerNotifications.enqueueObservationEdit(c, row.id, notificationEventId);
       await audit(c, req.user, "observation_edit_resubmitted", row.id);
       return exposed(updated);
     });
@@ -697,10 +694,9 @@ function mountObservationEdits(app, { pool, allow }) {
   app.post("/api/observation-edits/:id/review", allow("observations.review"), async (req, res) => {
     if (!req.body || !["Approved", "Rejected", "Correction Required"].includes(req.body.decision) ||
       Object.keys(req.body).some((key) => !["decision", "comment", "revision"].includes(key)) ||
-      (req.body.revision !== undefined && (!Number.isInteger(req.body.revision) || req.body.revision < 1)))
+      (!Number.isSafeInteger(req.body.revision) || req.body.revision < 1))
       fail(400, "Invalid review decision.");
     const versioning = await versioningAvailable(pool);
-    if (versioning && req.body.revision === undefined) fail(400, "Review revision is required.");
     const comment = text(req.body.comment);
     if (versioning) {
       const parent = await initialParentChange(pool, req.params.id, req.user);
@@ -724,8 +720,9 @@ function mountObservationEdits(app, { pool, allow }) {
         fail(409, "Approved observation changed since this proposal.");
       const versioned = await versioningAvailable(c);
       const legacyInitial = versioned ? await verifiedLegacyInitialRequest(c, edit, { observation }) : null;
-      if (req.body.revision !== undefined && edit.revision !== req.body.revision)
+      if (edit.revision !== req.body.revision)
         fail(409, "This edit revision is out of date. Reload before reviewing.");
+      assertPhotoEvidence(edit);
       if (legacyInitial) {
         if (req.body.decision !== "Approved" && !comment)
           fail(400, "Officer feedback is required for this decision.");
@@ -771,7 +768,7 @@ function mountObservationEdits(app, { pool, allow }) {
           const nextVersion = Number((await c.query("SELECT COALESCE(MAX(version_number),0)+1 AS next FROM observation_version_history WHERE observation_id=$1", [observation.id])).rows[0].next);
           await c.query(`INSERT INTO observation_version_history(id,observation_id,version_number,owner_subject,content,photo_ids,edit_request_id)
             VALUES($1,$2,$3,$4,$5,$6,$7)`,
-          [randomUUID(), observation.id, nextVersion, edit.owner_subject, edit.proposed_content, [...retained, ...addedIds], edit.id]);
+          [randomUUID(), observation.id, nextVersion, edit.owner_subject, edit.proposed_content, JSON.stringify([...retained, ...addedIds]), edit.id]);
         }
         const updated = (await c.query(`UPDATE observation_edit_request SET status=$1,review_comment=$2,reviewed_by=$3,
           reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND status='Pending Review' AND revision=$5 RETURNING *`,
@@ -840,7 +837,7 @@ function mountObservationEdits(app, { pool, allow }) {
           const nextVersion = Number((await c.query("SELECT COALESCE(MAX(version_number),0)+1 AS next FROM observation_version_history WHERE observation_id=$1", [observation.id])).rows[0].next);
           await c.query(`INSERT INTO observation_version_history(id,observation_id,version_number,owner_subject,content,photo_ids,edit_request_id)
             VALUES($1,$2,$3,$4,$5,$6,$7)`,
-          [randomUUID(), observation.id, nextVersion, edit.owner_subject, edit.proposed_content, [...edit.retained_photo_ids, ...addedIds], edit.id]);
+          [randomUUID(), observation.id, nextVersion, edit.owner_subject, edit.proposed_content, JSON.stringify([...edit.retained_photo_ids, ...addedIds]), edit.id]);
         }
       }
       const updated = (await c.query(`UPDATE observation_edit_request SET status=$1,review_comment=$2,reviewed_by=$3,

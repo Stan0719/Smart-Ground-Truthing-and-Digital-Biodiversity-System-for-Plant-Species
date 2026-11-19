@@ -26,7 +26,7 @@ function nodes(value) { const out = []; function walk(n) { if (Array.isArray(n))
 function text(value) { return typeof value === 'string' ? value : Array.isArray(value) ? value.map(text).join('') : value && typeof value === 'object' ? text(value.children) : '' }
 function harness(initial = null, handler = null, photoHandler = null, historyHandler = null, previous = '/species') {
   const scope = vue.effectScope(), route = vue.reactive({ params: { plantId: '1' } }), listeners = new Set(), calls = [], photoCalls = [], historyCalls = []
-  let verified = initial, pending = false
+  let verified = initial, pending = false, unavailable = false
   let verificationFailure = 0
   const mounted = [], events = {}, timers = []
   const exports = {}, context = { exports, console, window: { addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, document: { visibilityState: 'visible', addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, setInterval: (fn, delay) => { timers.push({ fn, delay }); return 1 }, clearInterval() {}, require(name) {
@@ -35,7 +35,7 @@ function harness(initial = null, handler = null, photoHandler = null, historyHan
     if (name === 'vue-router') return { useRoute: () => route, useRouter: () => ({ options: { history: { state: { back: previous } } }, resolve(path) { return { name: path.startsWith('/conservation/') ? 'conservation-map' : path === '/species' ? 'species' : undefined, fullPath: path } } }) }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key === 'speciesLabels.habitat' ? 'Natural habitat' : key }) }
     if (name.endsWith('useConservationText')) return { useConservationText: () => ({ ct: x => String(x), dt: x => x }) }
-    if (name.endsWith('/auth')) return { currentUser: async () => verified, api: async () => { if (verificationFailure) throw Object.assign(Error('Session check failed'), { status: verificationFailure }); if (!verified) throw Object.assign(Error('Guest'), { status: 401 }); return { user: verified } }, sessionSnapshot: () => ({ user: verified, pending }), subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
+    if (name.endsWith('/auth')) return { currentUser: async () => verified, api: async () => { if (verificationFailure) throw Object.assign(Error('Session check failed'), { status: verificationFailure }); if (!verified) throw Object.assign(Error('Guest'), { status: 401 }); return { user: verified } }, sessionSnapshot: () => ({ user: verified, pending, unavailable }), subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
     if (name.endsWith('plantIntegration')) return integration
     if (name.endsWith('plantId')) return { formatPlantId }
     if (name.endsWith('plantDateTime')) return { formatPlantDateTime }
@@ -49,7 +49,7 @@ function harness(initial = null, handler = null, photoHandler = null, historyHan
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
-  return { state, calls, photoCalls, historyCalls, route, events, timers, failVerification: status => { verificationFailure = status }, mount: () => mounted.forEach(fn => fn()), change(user, checking = false) { verified = user; pending = checking; for (const fn of listeners) fn(user, checking) }, render: () => nodes(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})), stop() { state.clearRecord(); scope.stop() } }
+  return { state, calls, photoCalls, historyCalls, route, events, timers, failVerification: status => { verificationFailure = status }, mount: () => mounted.forEach(fn => fn()), change(user, checking = false, outage = false) { verified = user; pending = checking; unavailable = outage; for (const fn of listeners) fn(user, checking) }, render: () => nodes(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})), stop() { state.clearRecord(); scope.stop() } }
 }
 test('Guest adds only public photos to the existing upper layout; authenticated Visitor/Botanist behavior stays unchanged', async () => {
   for (const user of [null, { ...officer, role: 'Visitor' }, { ...officer, role: 'Botanist' }]) {
@@ -106,27 +106,19 @@ test('Officer/Admin information follows Species identity, taxonomy, habitat and 
       assert.ok(informationCard.some(n => n.props?.class === 'conservation-status' && n.props['data-status'] === 'vulnerable'))
       assert.ok(informationCard.some(n => n.children === 'Staff habitat'))
       assert.ok(informationCard.findIndex(n => n.props?.class === 'profile-habitat') < informationCard.findIndex(n => n.props?.class === 'profile-description'))
-      assert.deepEqual(recordCard.filter(n => n.type === 'dt').map(text), ['Registered at','Latitude','Longitude','GPS Accuracy','Altitude','Zone'])
-      for (const value of ['Common', 'Individual name', 'PL001', 'Staff habitat', 'Vulnerable', 'Approved']) assert.ok(!recordCard.some(n => n.children === value))
-      assert.equal(tree.filter(n => n.props?.class === 'staff-panel').length, 1)
-      assert.ok(tree.findIndex(n => n.props?.class === 'staff-panel') < tree.findIndex(n => n.type?.name?.includes('PlantObservationHistory')))
+      const record = tree.find(n => n.type?.name?.includes('PlantRegistrationRecord'))
+      assert.ok(record)
+      assert.equal(record.props.authorized,true)
+      assert.equal(record.props.staff,h.state.plant.value.staff)
+      assert.equal(record.props['plant-id'],'1')
+      assert.equal(recordCard.filter(n => n.type === 'dt').length,0, 'lower fields render within the isolated registration component')
+      assert.ok(tree.findIndex(n => n === record) < tree.findIndex(n => n.type?.name?.includes('PlantObservationHistory')))
     } finally { h.stop() }
   }
 })
 
-test('Officer/Admin see latest approved observation details and separate latest submitted GPS evidence', async () => {
-  const h = harness(officer)
-  try {
-    await flush(); const tree = h.render()
-    const details = nodes(tree.find(n => n.props?.class === 'observation-summary-panel'))
-    assert.ok(details.some(n => n.children === 'Latest approved observation'))
-    assert.ok(details.some(n => n.children === 'Latest notes'))
-    assert.ok(details.some(n => n.children === 'Submitted GPS Evidence'))
-    assert.ok(text(details).includes('Pending Review'))
-    assert.ok(details.some(n => n.children === 'Submitted zone'))
-    assert.ok(details.some(n => n.children === 'Broad'))
-    assert.ok(tree.some(n => n.type?.name?.includes('PlantObservationHistory')))
-  } finally { h.stop() }
+test('Officer/Admin delegate only lower registration and history evidence without separate latest/submitted panels',async()=>{
+ const h=harness(officer);try{await flush();const tree=h.render(),record=tree.find(n=>n.type?.name?.includes('PlantRegistrationRecord'));assert.ok(record);assert.equal(record.props.staff,h.state.plant.value.staff);assert.equal(record.props.observations,h.state.history.state.observations);assert.equal(record.props.complete,h.state.history.state.complete);assert.ok(tree.some(n=>n.type?.name?.includes('PlantObservationHistory')));assert.ok(!tree.some(n=>n.props?.class==='observation-summary-panel'||n.props?.class==='submitted-gps'));assert.ok(!text(tree).includes('Latest approved observation'))}finally{h.stop()}
 })
 
 test('missing values remain honest; optional habitat/badges and unavailable official location never invent data', async () => {
@@ -135,32 +127,22 @@ test('missing values remain honest; optional habitat/badges and unavailable offi
     await flush(); const tree = h.render()
     assert.equal(tree.find(n => n.type === 'h1').children, 'Unavailable')
     assert.ok(!tree.some(n => n.props?.class === 'conservation-status' || n.props?.class === 'profile-habitat' || n.props?.class === 'profile-divider'))
-    assert.ok(tree.some(n => n.children === 'No approved plant location is available.'))
+    assert.equal(tree.find(n => n.type?.name?.includes('PlantRegistrationRecord')).props.staff.approved_location,null)
     assert.ok(!tree.some(n => n.props?.class === 'location-grid'))
     assert.ok(nodes(tree.find(n => n.props?.class === 'profile-description')).some(n => n.children === 'Unavailable'))
   } finally { h.stop() }
   const zero = harness(officer, async () => ({ information, staff: { ...staff, approved_location: { latitude: 0, longitude: 0, accuracy_m: 0, altitude_m: 0, zone: null } } }))
   try {
-    await flush(); const record = nodes(zero.render().find(n => n.props?.class === 'staff-panel'))
-    assert.equal(record.filter(n => n.type === 'dd' && n.children === '0 m').length, 2)
-    assert.ok(!record.some(n => n.children === 'No approved plant location is available.'))
+    await flush(); const record = zero.render().find(n => n.type?.name?.includes('PlantRegistrationRecord'))
+    assert.equal(record.props.staff.approved_location.latitude,0)
+    assert.equal(record.props.staff.approved_location.accuracy_m,0)
+    assert.equal(record.props.staff.approved_location.altitude_m,0)
   } finally { zero.stop() }
 })
 
-test('registration timestamp uses Malaysia time and the approved location heading reuses the map pin with taxonomy styling', async () => {
-  const h = harness(officer, async () => ({ information, staff: { ...staff, registered_at: '2026-11-03T05:31:37.284Z' } }))
-  try {
-    await flush(); const tree = h.render()
-    assert.ok(tree.some(n => n.children === 'Nov 3, 2026, 13:31'))
-    assert.ok(!tree.some(n => n.children === '2026-11-03T05:31:37.284Z'))
-    const heading = nodes(tree.find(n => n.props?.class === 'approved-location')).find(n => n.type === 'h3')
-    const icon = nodes(heading).find(n => n.type === 'svg')
-    assert.equal(icon.props.class, 'taxonomy-icon'); assert.equal(icon.props['aria-hidden'], 'true'); assert.equal(icon.props.focusable, 'false')
-    assert.ok(nodes(icon).some(n => n.type === 'circle' && n.props.cy === '10'))
-    const map = readFileSync(new URL('../src/views/conservation/BiodiversityMapView.vue', import.meta.url), 'utf8')
-    assert.ok(map.includes(nodes(icon).find(n => n.type === 'path').props.d))
-    assert.match(descriptor.styles[0].content, /\.approved-location h3 \{ display: flex; align-items: center; gap: 8px/)
-  } finally { h.stop() }
+test('registration component receives the genuine timestamp without altering upper taxonomy markup',async()=>{
+ const stamp='2026-11-03T05:31:37.284Z',h=harness(officer,async()=>({information,staff:{...staff,registered_at:stamp}}))
+ try{await flush();const tree=h.render(),record=tree.find(n=>n.type?.name?.includes('PlantRegistrationRecord'));assert.equal(record.props.staff.registered_at,stamp);assert.ok(nodes(tree.find(n=>n.props?.class==='record-panel')).some(n=>n.props?.class==='taxonomy-icon'))}finally{h.stop()}
 })
 
 test('Plant Detail keeps separate conservation/workflow palettes and hides both from visitors', async () => {
@@ -201,7 +183,7 @@ test('Officer and authorized Admin get registration gallery and real history wit
       assert.equal(h.historyCalls.length, 1); assert.match(h.historyCalls[0], /plants\/1\/detail\/history/)
       const tree = h.render(); assert.ok(tree.some(n => n.type?.name?.includes('PlantPhotoGallery') && n.props['registration-only'] === ''))
       assert.ok(tree.some(n => n.type?.name?.includes('PlantObservationHistory')))
-      assert.ok(tree.some(n => n.children === 'Approved Plant Location'))
+      assert.ok(tree.some(n => n.type?.name?.includes('PlantRegistrationRecord') && n.props.authorized))
       assert.ok(!tree.some(n => n.type === 'img'))
     } finally { h.stop() }
   }
@@ -337,4 +319,62 @@ test('Guest habitat uses the existing Officer field between taxonomy and descrip
       await h.state.verifySession(); assert.equal(h.state.habitat.value, value)
     } finally { h.stop() }
   }
+})
+
+
+test('strict detail parsing accepts real correction/terminal states but rejects proposal/version states', async () => {
+  for (const status of ['Approved', 'Pending Review', 'Correction Required', 'Rejected', 'Flagged', 'Withdrawn']) {
+    const result = await detailService.readPlantDetail('1', true, async () => ({ information,
+      staff: { ...staff, status, latest_observation: { ...detailObservation, status: 'Withdrawn' } } }))
+    assert.equal(result.staff.status, status)
+  }
+  for (const status of ['Cancelled', 'Superseded', 'Unknown', 'Draft', ['Approved'], null, {}]) {
+    await assert.rejects(detailService.readPlantDetail('1', true, async () => ({ information, staff: { ...staff, status } })), /invalid response/)
+  }
+  await assert.rejects(detailService.readPlantDetail('1', false, async () => ({ information, staff })), /invalid response/)
+})
+
+test('Officer background detail reload refreshes history while Guests never request private history', async () => {
+  for (const user of [officer, null]) {
+    const h = harness(user)
+    try {
+      await flush()
+      const previous = h.historyCalls.length
+      await h.state.verifySession(); await flush()
+      assert.equal(h.historyCalls.length, user ? previous + 1 : 0)
+    } finally { h.stop() }
+  }
+})
+
+test('Plant Detail Retry retains verified history and pending registration during delayed refresh and outages', async () => {
+  let next = () => Response.json({ plant_id:'1',observations:[{id:'initial',plant_id:'1',origin:'initial_registration',date:'2026-11-13T10:38:00Z',status:'Pending Review',recorded_by:'Botanist',content:detailObservation.content,assets:[],review:null}],page:{limit:20,has_more:false,next_cursor:null} })
+  const pendingStaff = { ...staff, status:'Pending Review',current_registration:{state:'unavailable'} }
+  const h = harness(officer, async () => ({ information, staff:pendingStaff }), null, () => next())
+  try {
+    await flush();h.mount();const rows=h.state.history.state.observations,epoch=h.state.history.state.epoch
+    let resolve;next=()=>new Promise(yes=>{resolve=yes})
+    h.events.focus();h.events.visibilitychange();await flush()
+    assert.equal(h.state.history.state.observations,rows);assert.equal(h.state.history.state.verifiedComplete,true);assert.equal(h.state.isLoading.value,false)
+    resolve(new Response('{}',{status:503}));await flush()
+    h.state.retryHistory();await flush()
+    assert.equal(h.state.history.state.observations,rows);assert.equal(h.state.history.state.epoch,epoch)
+    resolve(new Response('{}',{status:503}));await flush()
+    h.change(officer,true,true)
+    assert.ok(h.state.plant.value);assert.equal(h.state.history.state.observations,rows)
+    const calls=h.historyCalls.length;h.state.retryHistory();assert.equal(h.historyCalls.length,calls)
+    h.change(null,true);assert.equal(h.state.plant.value,null);assert.equal(h.state.history.state.observations.length,0)
+  }finally{h.stop()}
+})
+test('Plant status change invalidates old history before the replacement request completes', async () => {
+  let status='Pending Review',hold=false,resolve
+  const h=harness(officer,async()=>({information,staff:{...staff,status}}),null,async()=>{
+    if(hold)await new Promise(yes=>{resolve=yes})
+    return Response.json({plant_id:'1',observations:[],page:{limit:20,has_more:false,next_cursor:null}})
+  })
+  try{
+    await flush();assert.equal(h.state.history.state.verifiedComplete,true)
+    status='Rejected';hold=true;const work=h.state.verifySession();await flush()
+    assert.equal(h.state.plant.value.staff.status,'Rejected');assert.equal(h.state.history.state.verifiedComplete,false)
+    resolve();await work
+  }finally{h.stop()}
 })

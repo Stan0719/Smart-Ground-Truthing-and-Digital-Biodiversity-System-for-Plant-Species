@@ -554,7 +554,7 @@ test('lightbox removes its panel, shrink-wraps the photograph and anchors contro
   assert.match(dialog, /background: transparent/)
   assert.match(dialog, /padding: 0/); assert.match(dialog, /border: 0/)
   assert.match(dialog, /box-shadow: none/); assert.match(dialog, /overflow: hidden/)
-  assert.match(css, /\.portrait-dialog::backdrop\s*\{[^}]*background: rgb\(8 24 17 \/ 85%\)/)
+  assert.match(css, /\.portrait-dialog::backdrop\s*\{[^}]*background: rgb\(0 0 0 \/ 85%\)/)
   const content = /\.zoom-content\s*\{([^}]+)\}/.exec(css)[1]
   assert.match(content, /align-items: center; justify-content: center/)
   assert.doesNotMatch(content, /background:|padding:/)
@@ -786,5 +786,38 @@ test('Administrator Species Detail uses Officer scientific fields, gallery URLs 
     assert.ok(tree.some(n => n.props?.to === '/species/201/plants'))
     assert.ok(!tree.some(n => n.props?.to?.startsWith('/conservation/')))
     await h.state.verifySession(); assert.equal(h.state.primaryImage.value, '/api/data/assets/portrait')
+  } finally { h.stop() }
+})
+
+
+test('approved Species names and linked card metadata refresh even when the secondary gallery is unavailable', async () => {
+  let canonical = { ...species }, galleryFailure = false
+  const h = harness({ initial: officer, handler: async path => {
+    if (path.includes('/species/')) return { species: canonical }
+    if (path.includes('/plants')) return { plants: [{ plant_id: 8, species_id: 201, scientific_name: 'Individual name', rbac_status: 'Approved' }] }
+    if (galleryFailure) throw Object.assign(Error('Gallery temporarily unavailable'), { status: 503 })
+    return { assets: [] }
+  } })
+  try {
+    await flush()
+    canonical = { ...canonical, proposed_snapshot: { scientific_name: 'Unapproved name' } }
+    await h.state.verifySession()
+    assert.equal(h.state.selectedSpecies.value.scientificName, species.scientific_name)
+    canonical = { ...canonical, scientific_name: 'Approved new name', description: 'Approved description' }
+    galleryFailure = true
+    await h.state.verifySession(); await flush()
+    assert.equal(h.state.selectedSpecies.value.scientificName, 'Approved new name')
+    assert.equal(h.state.linkedPlants.value[0].speciesName, 'Approved new name')
+    assert.ok(h.state.imagesError.value)
+  } finally { h.stop() }
+})
+
+test('Species Detail discloses capped linked Plant counts instead of claiming an exhaustive catalogue', async () => {
+  const h = harness({ initial: officer, handler: async path => path.includes('/species/') ? { species } : path.includes('/plants') ? {
+    plants: Array.from({ length: 500 }, (_, i) => ({ plant_id: i + 1, species_id: 201, rbac_status: 'Approved' })) } : { assets: [] } })
+  try {
+    await flush()
+    assert.equal(h.state.plantsLimited.value, true)
+    assert.ok(h.render().some(node => node.props?.role === 'status' && node.children === h.t('catalogueDisplay.plantsLimited')))
   } finally { h.stop() }
 })

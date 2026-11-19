@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { workflowBadgeStyle } from '../utils/workflowBadge'
 import { computed, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { formatPlantDateTime } from '../utils/plantDateTime'
 import { useConservationText } from '../composables/useConservationText'
 import type { HistoryObservation } from '../services/plantHistory'
 import PlantPhotoLightbox from './PlantPhotoLightbox.vue'
-const props = defineProps<{ observations: HistoryObservation[]; loading: boolean; error: string; complete: boolean; hasMore: boolean }>()
+const props = defineProps<{ observations: HistoryObservation[]; loading: boolean; error: string; complete: boolean; hasMore: boolean; refreshing?: boolean; retained?: boolean }>()
 defineEmits<{ retry: []; more: [] }>()
 const { ct } = useConservationText()
+const { t } = useI18n()
 const dateTime = (value: unknown) => formatPlantDateTime(value, ct('Unavailable'))
 // origin is the backend's verified effective origin. Unknown is never guessed.
 // Filter presentation only; pagination still follows every server continuation.
-const visibleObservations = computed(() => props.observations.filter(observation => observation.origin !== 'initial_registration'))
+const visibleObservations = computed(() => props.observations.filter(observation => observation.origin === 'subsequent_observation'))
+const unclassified = computed(() => props.observations.filter(observation => observation.origin === 'unknown'))
+const historyGroups = computed(() => [{ key: 'subsequent', rows: visibleObservations.value }, { key: 'unknown', rows: unclassified.value }].filter(group => group.rows.length))
 const lightbox = ref<InstanceType<typeof PlantPhotoLightbox> | null>(null), failed = reactive(new Set<string>())
 const display = (value: string | number | null) => value === null || value === '' ? ct('Unavailable') : value
 function enlarge(observation: HistoryObservation, index: number, event: MouseEvent) {
@@ -22,11 +26,16 @@ function enlarge(observation: HistoryObservation, index: number, event: MouseEve
 <template>
   <section class="observation-history" :aria-busy="loading" aria-labelledby="plant-history-title">
     <header class="history-heading"><div><p class="eyebrow">{{ ct('FIELD RECORD') }}</p><h2 id="plant-history-title">{{ ct('Observation History') }}</h2></div><p v-if="visibleObservations.length" role="status">{{ visibleObservations.length }} {{ ct(complete && !hasMore ? 'observations' : 'observations loaded') }}</p></header>
-    <p v-if="loading" role="status">{{ ct('Loading observation history…') }}</p>
-    <div v-if="error" class="history-error" role="alert"><p>{{ ct(error) }}</p><button type="button" :disabled="loading" @click="$emit('retry')">{{ ct('Retry') }}</button></div>
-    <p v-if="!loading && complete && !hasMore && !visibleObservations.length && !error" class="empty-history">{{ ct('No subsequent or unclassified observations are available for this plant.') }}</p>
-    <p v-if="!loading && hasMore && !visibleObservations.length && !error" role="status">{{ ct('No subsequent or unclassified observations are loaded yet. More pages remain.') }}</p>
-    <details v-for="observation in visibleObservations" :key="observation.id" class="observation-row">
+    <p class="history-scope">{{ t('plantRecord.historyScope') }}</p>
+    <p v-if="refreshing" class="history-refresh-note" role="status">{{ t('plantRecord.refreshing') }}</p>
+    <p v-else-if="loading" role="status">{{ ct('Loading observation history…') }}</p>
+    <div v-if="error" :class="retained ? 'history-refresh-note' : 'history-error'" :role="retained ? 'status' : 'alert'"><p>{{ retained ? t('plantRecord.refreshFailed') : ct(error) }}</p><button type="button" :disabled="loading" @click="$emit('retry')">{{ ct('Retry') }}</button></div>
+    <p v-if="!loading && complete && !hasMore && !visibleObservations.length && !error" class="empty-history"><strong>{{ t('plantRecord.historyEmpty') }}</strong><span>{{ t('plantRecord.historyEmptyExplanation') }}</span></p>
+    <p v-if="!loading && hasMore && !visibleObservations.length && !error" role="status">{{ t('plantRecord.historyMore') }}</p>
+    <component :is="group.key === 'unknown' ? 'details' : 'div'" v-for="group in historyGroups" :key="group.key" :class="{ 'unclassified-history': group.key === 'unknown' }">
+      <summary v-if="group.key === 'unknown' && group.rows.length">{{ t('plantRecord.unclassified') }}</summary>
+      <p v-if="group.key === 'unknown' && group.rows.length">{{ t('plantRecord.unclassifiedExplanation') }}</p>
+    <details v-for="observation in group.rows" :key="observation.id" class="observation-row">
       <summary>
         <span class="observation-date"><strong>{{ dateTime(observation.date) }}</strong><small>{{ ct(observation.origin === 'subsequent_observation' ? 'Subsequent observation' : 'Origin not verified') }}</small></span>
         <span class="recorded-by"><small>{{ ct('Recorded by') }}</small>{{ display(observation.recorded_by) }}</span>
@@ -60,6 +69,7 @@ function enlarge(observation: HistoryObservation, index: number, event: MouseEve
         <p v-else class="registration-note">{{ ct('No photos are available for this observation.') }}</p>
       </div>
     </details>
+    </component>
     <footer v-if="hasMore"><p>{{ ct('More history pages are available. This is not the complete history.') }}</p><button type="button" :disabled="loading" @click="$emit('more')">{{ ct('Load more observations') }}</button></footer>
     <PlantPhotoLightbox ref="lightbox" />
   </section>
@@ -83,6 +93,7 @@ summary small { color: #66796b; font-size: 11px; font-weight: 400; }
 details[open] .expand-mark { transform: rotate(45deg); }
 .observation-details { padding: 0 0 24px; animation: reveal 120ms ease-out; }
 .observation-facts { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin: 0; }
+.observation-facts > div { padding: 12px 14px; background: #f5f6f2; border-radius: 9px; }
 .observation-facts dt { color: #66796b; font-size: 11px; }
 .observation-facts dd { margin: 6px 0 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wide { grid-column: 1 / -1; }
@@ -97,9 +108,18 @@ h3 { margin: 0; font-size: 14px; }
 .history-thumbnails small { position: absolute; right: 4px; bottom: 4px; padding: 2px 5px; background: #173f34d9; color: #fff; border-radius: 3px; }
 footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid #dfe6dd; padding-top: 16px; }
 footer button, .history-error button { min-height: 44px; padding: 9px 14px; border: 1px solid #a8bfae; border-radius: 8px; background: #f4f7f1; color: #315447; font: inherit; font-size: 12px; cursor: pointer; }
+.history-refresh-note { margin: 8px 0; color: #66796b; font-size: 12px; line-height: 1.6; }
+.history-refresh-note p { margin: 0 0 6px; }
+.history-refresh-note button { padding: 4px 9px; border: 1px solid #a8bfae; border-radius: 6px; background: #f4f7f1; color: #315447; font: inherit; cursor: pointer; }
 .history-error { color: #8d3d35; }
 @keyframes reveal { from { opacity: .6; } to { opacity: 1; } }
 @media (max-width: 760px) { summary { grid-template-columns: 1fr auto 20px; gap: 12px; } .recorded-by { grid-column: 1; grid-row: 2; } .photo-count { grid-column: 2; grid-row: 2; font-size: 12px; } .expand-mark { grid-column: 3; grid-row: 1 / 3; } }
 @media (max-width: 480px) { .observation-history { padding: 20px 16px; } .history-heading, footer { align-items: flex-start; flex-direction: column; gap: 8px; } .observation-facts { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (prefers-reduced-motion: reduce) { .observation-details { animation: none; } .expand-mark { transition: none; } }
+.empty-history { display: grid; gap: 7px; padding: 26px 18px; border-radius: 10px; background: #f6f7f2; color: #52685c; font-size: 13px; line-height: 1.6; text-align: center; }
+.empty-history strong { color: #315447; font-weight: 600; }
+.empty-history span { font-size: 12px; }
+.unclassified-history { margin-top: 18px; color: #52685c; }
+.unclassified-history > summary { display: block; padding: 10px 0; font-size: 12px; }
+.unclassified-history > p { font-size: 12px; line-height: 1.6; }
 </style>

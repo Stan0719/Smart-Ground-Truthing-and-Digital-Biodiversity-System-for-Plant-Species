@@ -14,7 +14,7 @@ const template = compileTemplate({ source: descriptor.template.content, filename
 assert.deepEqual(template.errors, [])
 const transpile = code => ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const plants = [
-  { plant_id: 18, species_id: 4, rbac_status: 'Pending Review', registered_at: '2026-11-05T03:44:00Z', latitude: 0, longitude: 0, accuracy_m: 0 },
+  { plant_id: 18, scientific_name: 'Plant-specific name', observed_at: '2026-11-03T09:58:16.113Z', species_id: 4, rbac_status: 'Pending Review', registered_at: '2026-11-05T03:44:00Z', latitude: 0, longitude: 0, accuracy_m: 0 },
   { plant_id: 19, species_id: 5, rbac_status: 'Flagged', registered_at: null, latitude: null, longitude: null },
   { plant_id: 20, species_id: 4, rbac_status: 'Approved', registered_at: '2026-11-04T03:44:00Z', latitude: 1, longitude: 2 },
 ]
@@ -41,13 +41,13 @@ function harness(language = 'en', options = {}) {
     const text = dictionary.conservationText[key] ?? dictionary.conservationPages.observations.values[key] ?? dictionary.dashboardValues[key] ?? value
     return Object.entries(params).reduce((s, [key, value]) => s.replaceAll(`{${key}}`, String(value)), text)
   }
-  const calls = [], fits = [], centers = [], destinations = [], mounted = [], cleanup = []
+  const calls = [], fits = [], centers = [], destinations = [], mounted = [], cleanup = [], mapOptions = [], mapOperations = []
   const scope = vue.effectScope()
-  const element = () => ({ className: '', textContent: '', appendChild() {}, addEventListener() {}, scrollIntoView() {}, classList: { toggle() {} } })
-  const map = { fitBounds: (...args) => fits.push(args), setView: (...args) => centers.push(args), whenReady: fn => fn(), invalidateSize() {}, off() {}, remove() {} }
+  const element = () => ({ children: [], className: '', textContent: '', appendChild(child) { this.children.push(child) }, addEventListener() {}, scrollIntoView() {}, classList: { toggle() {} } })
+  const map = { closePopup() { mapOperations.push('closePopup') }, fitBounds: (...args) => { mapOperations.push('fitBounds'); fits.push(args) }, setView: (...args) => centers.push(args), whenReady: fn => fn(), invalidateSize() { mapOperations.push('invalidateSize') }, off() {}, remove() {} }
   const group = { addTo() { return this }, clearLayers() {} }
   const marker = () => ({ bindPopup() { return this }, on() { return this }, addTo() { return this }, openPopup() {}, getElement: element })
-  const leaflet = { map: () => map, tileLayer: () => ({ addTo() {} }), layerGroup: () => group, marker, divIcon: value => value, latLngBounds: value => value }
+  const leaflet = { map: (_element, options) => { mapOptions.push(options); return map }, tileLayer: () => ({ addTo() {} }), layerGroup: () => group, marker, divIcon: value => value, latLngBounds: value => value }
   const route = vue.reactive({ query: {} }), exports = {}
   const context = {
     exports, console, Error, document: { createElement: element },
@@ -72,7 +72,7 @@ function harness(language = 'en', options = {}) {
   vm.runInNewContext(`(function () { ${transpile(script.content)} })()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
   vm.runInNewContext(`(function () { ${transpile(template.code)} })()`, context)
-  return { state, calls, fits, centers, destinations, ct, locale,
+  return { state, calls, fits, centers, destinations, ct, locale, mapOptions, mapOperations,
     start: async () => { state.mapElement.value = element(); await mounted[0](); await flush() },
     render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}),
     stop: () => { cleanup.forEach(fn => fn()); scope.stop() },
@@ -104,13 +104,16 @@ test('fit-bounds icon button keeps the real handler and fits only valid filtered
   try {
     await h.start()
     assert.equal(h.fits.length, 1)
+    assert.equal(h.mapOptions[0].minZoom, 1)
+    assert.equal(h.mapOptions[0].zoomSnap, 0.25)
     const button = nodes(h.render()).find(node => node.props?.class === 'fit-map-button')
     assert.ok(nodes(button).some(node => node.type === 'svg' && node.props['aria-hidden'] === 'true'))
     assert.ok(nodes(button).some(node => node.type === 'span' && node.children === h.ct('Fit visible plants')))
     assert.equal(button.props.onClick, h.state.fitVisiblePlants)
     h.state.statusFilter.value = 'Pending Review'; await flush()
     button.props.onClick()
-    assert.equal(JSON.stringify(h.fits.at(-1)), JSON.stringify([[[0, 0]], { padding: [48, 48], maxZoom: 17 }]))
+    assert.deepEqual(h.mapOperations.slice(-3), ['closePopup', 'invalidateSize', 'fitBounds'])
+    assert.equal(JSON.stringify(h.fits.at(-1)), JSON.stringify([[[0, 0]], { padding: [64, 64], maxZoom: 17, animate: false }]))
     assert.deepEqual(h.calls, ['/api/plants', '/api/species?scope=scientific'])
   } finally { h.stop() }
 })
@@ -145,7 +148,11 @@ test('date formatting follows the Officer locale and handles unavailable/invalid
     const h = harness(language)
     try {
       const raw = plants[0].registered_at
-      assert.equal(h.state.formatRegisteredAt(raw), new Intl.DateTimeFormat(language === 'ms' ? 'ms-MY' : language, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(raw)))
+      const parts = new Intl.DateTimeFormat(language === 'ms' ? 'ms-MY' : language, { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kuching' }).formatToParts(new Date(raw))
+      const part = type => parts.find(item => item.type === type).value
+      assert.equal(h.state.formatRegisteredAt(raw), `${part('day')} ${part('month')} ${part('year')}, ${part('hour')}:${part('minute')}`)
+      assert.match(h.state.formatRegisteredAt(raw), /11:44$/)
+      assert.match(h.state.formatRegisteredAt('2026-11-03T20:30:00Z'), /^4 .*2026, 04:30$/)
       for (const value of [null, '', 'not-a-date']) assert.equal(h.state.formatRegisteredAt(value), h.ct('Unavailable'))
       assert.equal(plants[0].registered_at, raw)
     } finally { h.stop() }
@@ -193,10 +200,34 @@ test('map cards/table preserve their palette and layout independently of shared 
   const review = read('views/conservation/ReviewSubmissionsView.vue')
   // Map retains its existing palette; Review Submissions intentionally uses the
   // shared workflow mapping, whose colors and fallbacks have dedicated tests.
-  assert.match(css, /\.badge\.pending-review\s*\{\s*background: #e8eff2; color: #53727c;\s*\}/)
+  assert.match(css, /\.badge\.pending-review\s*\{\s*background: #FEF9C3; color: #854D0E;\s*\}/)
   assert.match(css, /\.badge\.flagged\s*\{\s*background: #f0eaf8; color: #69459a;\s*\}/)
   assert.match(review, /import\s*\{\s*workflowBadgeStyle\s*\}\s*from ['"]\.\.\/\.\.\/utils\/workflowBadge['"]/)
   assert.ok(review.includes(':style="workflowBadgeStyle(observation.status)"'))
   assert.match(css, /\.fit-map-button:focus-visible/)
   assert.equal(compileStyle({ source: css, id: 'data-v-map-ui', scoped: true }).errors.length, 0)
+})
+
+
+test('popup and selected panel show the Plant name and consistent Malaysia timestamps without raw ISO values', async () => {
+  const h = harness()
+  try {
+    await h.state.loadPlants(); await flush()
+    const plant = h.state.plants.value[0]
+    assert.equal(plant.scientificName, 'Plant-specific name')
+    const popup = h.state.popupContent(plant)
+    const text = node => [node.textContent, ...(node.children || []).map(text)].join(' ')
+    const content = text(popup)
+    assert.ok(content.includes('Plant-specific name'))
+    assert.ok(content.includes('Shorea actualis'))
+    assert.ok(content.includes('3 November 2026, 17:58'))
+    assert.ok(content.includes('5 November 2026, 11:44'))
+    assert.ok(!content.includes('T09:58'))
+    h.state.selected.value = plant
+    const selected = nodes(h.render()).find(node => node.props?.class === 'selected-card')
+    assert.ok(nodes(selected).some(node => node.type === 'dd' && node.children === 'Plant-specific name'))
+    assert.ok(nodes(selected).some(node => node.type === 'dd' && node.children === '3 November 2026, 17:58'))
+    const note = nodes(h.render()).find(node => node.props?.class === 'coordinate-note coordinate-info')
+    assert.ok(nodes(note).some(node => node.type === 'svg' && node.props['aria-hidden'] === 'true'))
+  } finally { h.stop() }
 })

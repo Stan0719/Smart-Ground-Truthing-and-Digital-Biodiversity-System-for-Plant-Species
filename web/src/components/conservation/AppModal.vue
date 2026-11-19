@@ -2,7 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
 const { t } = useI18n()
-const props = defineProps<{ title: string; subtitle?: string; wide?: boolean; accessible?: boolean }>()
+const props = defineProps<{ title: string; subtitle?: string; wide?: boolean; accessible?: boolean; suspended?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const backdrop = ref<HTMLElement | null>(null)
 const card = ref<HTMLElement | null>(null)
@@ -42,13 +42,13 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <div ref="backdrop" class="modal-backdrop" @click.self="$emit('close')" @keydown="keyboard">
+  <div v-show="!suspended" ref="backdrop" class="modal-backdrop" :inert="suspended || undefined" :aria-hidden="suspended ? 'true' : undefined" @click.self="$emit('close')" @keydown="keyboard">
     <section
       class="modal-card"
       ref="card"
       :class="{ wide }"
       role="dialog"
-      aria-modal="true"
+      :aria-modal="suspended ? undefined : 'true'"
       :aria-label="title"
     >
       <header class="modal-header">

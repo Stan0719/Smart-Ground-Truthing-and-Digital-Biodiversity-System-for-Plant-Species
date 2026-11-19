@@ -10,6 +10,7 @@ import { monitoringLabels } from '../src/utils/officerMonitoringDisplay.ts'
 import { formatObservationId } from '../src/utils/observationId.ts'
 import { formatSpeciesRequestId } from '../src/utils/speciesRequestId.ts'
 import { createOfficerInbox } from '../src/services/officerNotifications.ts'
+import { createOfficerNotificationRefresh } from '../src/services/officerNotificationRefresh.ts'
 
 const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'utf8')
 const sheet = postcss.parse(read('styles/officer-header.css'))
@@ -64,6 +65,7 @@ function harness(component, language = 'en', width = 1440) {
       if (name.endsWith('observationId')) return { formatObservationId }
       if (name.endsWith('speciesRequestId')) return { formatSpeciesRequestId }
       if (name.endsWith('officerNotifications')) return { createOfficerInbox }
+      if (name.endsWith('officerNotificationRefresh')) return { createOfficerNotificationRefresh }
       if (name.endsWith('conservationProfile')) return { conservationProfile: profile }
       if (name.endsWith('useAuthenticatedPageTranslation')) return { useAuthenticatedPageTranslation() {} }
       if (name.endsWith('.vue')) return { name: name.split('/').at(-1).replace('.vue', '') }

@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import OperationalReport from '../../components/conservation/OperationalReport.vue'
 import IoTEnvironmentalReport from '../../components/conservation/IoTEnvironmentalReport.vue'
+import ThreatIncidentReport from '../../components/conservation/ThreatIncidentReport.vue'
 import type { OperationalCategory } from '../../services/operationalReporting'
 import { reportCsv, reportFilename, renderReportPdf, type ReportDocument } from '../../utils/reportExport'
 import ReportChart from '../../components/conservation/ReportChart.vue'
@@ -213,7 +214,7 @@ onMounted(() => loadReport())
   <section class="panel reports-panel">
     <form class="control-bar report-filters" :class="{ 'custom-period': pendingPeriod === 'custom' }" aria-labelledby="report-filters-title" @submit.prevent="applyFilters">
       <h3 id="report-filters-title" class="filter-heading">{{ rt('filters') }}</h3>
-      <label class="field category-field" for="report-category"><span>{{ rt('reportCategory') }}</span><select v-officer-dropdown id="report-category" v-model="reportType"><option value="species-approved">{{ rt('speciesApprovedSummary') }}</option><option value="observations">{{ rt('observationSummary') }}</option><option value="threats">{{ rt('threatIncidentReport') }}</option><option value="iot">{{ rt('iotMonitoringReport') }}</option><option value="iot-summary">{{ rt('iotSummary.title') }}</option></select></label>
+      <label class="field category-field" for="report-category"><span>{{ rt('reportCategory') }}</span><select v-officer-dropdown id="report-category" v-model="reportType"><option value="species-approved">{{ rt('speciesApprovedSummary') }}</option><option value="observations">{{ rt('observationSummary') }}</option><option value="threats">{{ rt('threatIncidentReport') }}</option><option value="iot-summary">{{ rt('iotSummary.title') }}</option></select></label>
       <label class="field" for="report-period"><span>{{ rt('reportingPeriod') }}</span><select v-officer-dropdown id="report-period" v-model="pendingPeriod"><option value="all-time">{{ rt('periodAllTime') }}</option><option value="this-month">{{ rt('periodThisMonth') }}</option><option value="last-month">{{ rt('periodLastMonth') }}</option><option value="custom">{{ rt('periodCustom') }}</option></select></label>
       <template v-if="pendingPeriod === 'custom'">
         <label class="field" for="report-start"><span>{{ rt('startDate') }}</span><input id="report-start" v-model="pendingStart" type="date" required :aria-invalid="Boolean(filterError)" aria-describedby="report-filter-error" /></label>
@@ -224,6 +225,7 @@ onMounted(() => loadReport())
     </form>
 
     <IoTEnvironmentalReport v-if="reportType === 'iot-summary'" :filters="operationalFilters" @busy="operationalBusy = $event" />
+    <ThreatIncidentReport v-else-if="reportType === 'threats'" :filters="operationalFilters" @busy="operationalBusy = $event" />
     <OperationalReport v-else-if="reportType !== 'species-approved'" :key="reportType" :category="reportType as OperationalCategory" :filters="operationalFilters" @busy="operationalBusy = $event" />
     <template v-else>
     <div class="control-bar report-controls">
@@ -239,8 +241,8 @@ onMounted(() => loadReport())
       <div class="metric-grid"><div class="metric"><span>{{ rt('totalSpecies') }}</span><strong>{{ totalSpecies }}</strong></div><div class="metric"><span>{{ rt('totalApprovedPlants') }}</span><strong>{{ totalApprovedPlants }}</strong></div><div class="metric"><span>{{ rt('matchingRows') }}</span><strong>{{ filteredRows.length }}</strong></div></div>
       <p v-if="filteredRows.length && totalApprovedPlants === 0" class="chart-note" role="status">{{ rt('noPlantsInPeriod') }}</p>
       <div v-if="filteredRows.length" class="chart-tools" :aria-label="rt('chartControls')">
-        <label class="field chart-select"><span>{{ rt('chartSort') }}</span><select v-model="chartSort"><option value="high-low">{{ rt('chartSortHigh') }}</option><option value="low-high">{{ rt('chartSortLow') }}</option><option value="alphabetical">{{ rt('chartSortAlphabetical') }}</option></select></label>
-        <label class="field chart-select"><span>{{ rt('chartTop') }}</span><select v-model="chartLimit"><option value="5">{{ rt('chartTop5') }}</option><option value="10">{{ rt('chartTop10') }}</option><option value="12">{{ rt('chartTop12') }}</option><option value="all">{{ rt('chartAll') }}</option></select></label>
+        <label class="field chart-select"><span>{{ rt('chartSort') }}</span><select v-officer-dropdown v-model="chartSort"><option value="high-low">{{ rt('chartSortHigh') }}</option><option value="low-high">{{ rt('chartSortLow') }}</option><option value="alphabetical">{{ rt('chartSortAlphabetical') }}</option></select></label>
+        <label class="field chart-select"><span>{{ rt('chartTop') }}</span><select v-officer-dropdown v-model="chartLimit"><option value="5">{{ rt('chartTop5') }}</option><option value="10">{{ rt('chartTop10') }}</option><option value="12">{{ rt('chartTop12') }}</option><option value="all">{{ rt('chartAll') }}</option></select></label>
         <label class="chart-toggle"><input v-model="includeZeroCounts" type="checkbox" /> {{ rt('chartIncludeZero') }}</label>
         <button v-if="selectedChartIndex !== null" class="chart-clear" type="button" @click="selectedChartIndex = null">{{ rt('chartClearSelection') }}</button>
       </div>

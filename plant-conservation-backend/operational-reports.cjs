@@ -35,14 +35,17 @@ async function generateOperationalReport(pool, category, query) {
       chart: { kind: "stacked", labels: periods, unit: "count", series: statuses.map((key, index) => ({ key, values: rows.map(row => row[index + 2]) })) } };
   }
   if (category === "threats") {
-    // Only established device -> plant -> species links; no identity/evidence/GPS.
-    const { rows: source } = await pool.query(`SELECT a.metric,a.status,a.created_at,p.plant_id::text,s.scientific_name
+    // Additive canonical alert evidence; associations remain current device links. No thresholds/GPS.
+    const { rows: source } = await pool.query(`SELECT a.id,a.device_id,a.camera_id,a.value,a.metric,a.status,a.created_at,p.plant_id::text,s.scientific_name
       FROM threat_alert_history a LEFT JOIN iot_device d ON d.id=a.device_id LEFT JOIN plant_record p ON p.plant_id=d.plant_id LEFT JOIN species s ON s.species_id=p.species_id
       WHERE ($1::timestamptz IS NULL OR a.created_at >= $1::timestamptz) AND ($2::timestamptz IS NULL OR a.created_at < $2::timestamptz) ORDER BY a.created_at,a.id`, args);
     const counts = new Map();
     for (const row of source) counts.set(row.metric, (counts.get(row.metric) || 0) + 1);
     const distribution = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    return { ...base, basis: "threatScope", columns: ["category", "severity", "status", "devicePlant", "species", "createdAt"],
+    return { ...base, basis: "threatScope", threatDetailsVersion: 1,
+      alertDetails: source.map(row => ({ id: row.id, deviceId: row.device_id, cameraId: row.camera_id,
+        metric: row.metric, triggerValue: typeof row.value === "number" && Number.isFinite(row.value) ? row.value : null,
+        status: row.status, createdAt: instant(row.created_at) })), columns: ["category", "severity", "status", "devicePlant", "species", "createdAt"],
       rows: source.map(row => [row.metric, null, row.status, row.plant_id == null ? null : `PL${row.plant_id.padStart(3, "0")}`, row.scientific_name, instant(row.created_at)]),
       statistics: [{ key: "totalIncidents", value: source.length }, { key: "unresolved", value: source.filter(row => row.status !== "Resolved").length }, { key: "Resolved", value: source.filter(row => row.status === "Resolved").length }],
       chart: { kind: "horizontal", labels: distribution.map(row => row[0]), unit: "count", series: [{ key: "totalIncidents", values: distribution.map(row => row[1]) }] } };

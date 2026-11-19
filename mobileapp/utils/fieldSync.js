@@ -226,6 +226,8 @@ export function syncDrafts(accountId, { onSubmitted } = {}) {
           if (currentObservation.observation?.owner_subject !== `staff:${accountId}` || currentObservation.observation?.status !== "Approved")
             throw Error("The approved observation is unavailable for this edit. The draft remains saved.");
           const correction = draft.path !== "/observation-edits";
+          if (!correction && currentObservation.observation.origin_type !== "subsequent_observation")
+            throw Error("Only verified subsequent Observations can be edited independently. Use Edit Plant for registration information. The draft remains saved.");
           if (correction) {
             const currentRequest = await plantApi(draft.path, { expectedAccountId: accountId });
             if (currentRequest.edit?.owner_subject !== `staff:${accountId}` || currentRequest.edit?.status !== "Correction Required")

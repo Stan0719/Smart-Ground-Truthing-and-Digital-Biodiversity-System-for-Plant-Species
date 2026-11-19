@@ -19,7 +19,11 @@ test('Administrator alert route is removed while Sensor Management and Officer a
         createWebHistory: () => ({}),
         createRouter(value) { options = value; return { beforeEach(value) { guard = value } } },
       }
-      if (name.endsWith('/auth')) return { currentUser: async () => ({ role: 'Administrator', mustChangePassword: false }), logout: async () => {} }
+      if (name.endsWith('/auth')) return {
+        verifySession: async () => ({ status: 'authenticated', user: { role: 'Administrator', status: 'Active', mustChangePassword: false } }),
+        sessionVerificationCurrent: () => true,
+        logout: async () => {},
+      }
       return { __esModule: true, default: name.endsWith('AdminOperationsView.vue') ? operations : {} }
     },
   })

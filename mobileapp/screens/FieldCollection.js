@@ -320,6 +320,8 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       if (!observation?.id || observation.owner_subject !== `staff:${user?.id}` || observation.status !== "Approved")
         throw Error(t("observationEdits.ownedApprovedRequired"));
       const request = editRequest || route.params?.draft?.edit_request;
+      if (!request?.id && observation.origin_type !== "subsequent_observation")
+        throw Error(t("observationEdits.ownedApprovedRequired"));
       return { client_key: draftKey.current, method: "OBSERVATION_EDIT",
         path: request?.id ? `/observation-edits/${request.id}` : "/observation-edits",
         observation_id: String(observation.id), edit_request: request,
@@ -409,7 +411,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           plantApi(`/observations/${encodeURIComponent(observationId)}/edit-history`, { expectedAccountId: user.id }),
         ]);
         const currentObservation = current?.observation;
-        if (!Array.isArray(history?.edits) || currentObservation?.owner_subject !== `staff:${user.id}` || currentObservation.status !== "Approved" ||
+        if (!Array.isArray(history?.edits) || currentObservation?.owner_subject !== `staff:${user.id}` || currentObservation.status !== "Approved" || currentObservation.origin_type !== "subsequent_observation" ||
           (history?.edits || []).some((request) => ["Pending Review", "Correction Required"].includes(request.status)))
           throw Error(t("observationEdits.ownedApprovedRequired"));
       }

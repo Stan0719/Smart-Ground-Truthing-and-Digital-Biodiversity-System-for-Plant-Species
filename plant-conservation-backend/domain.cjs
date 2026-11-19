@@ -1,5 +1,5 @@
-﻿"use strict";
-const { observationHistory, captureApprovedReview } = require("./historical-reviews.cjs");
+"use strict";
+const { observationHistory, captureApprovedReview, submittedHistoryForReview } = require("./historical-reviews.cjs");
 const { resolvePlantRegistrations, registrationLocation } = require("./plant-registration.cjs");
 const { finalRejection } = require("./final-rejection.cjs");
 const { withSubmissionUpdates } = require("./submission-updates.cjs");
@@ -1374,13 +1374,15 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
               ],
             );
         }
-        let reviewedVersionId = null;
-        if ((await c.query("SELECT to_regclass(current_schema() || '.record_version_history') IS NOT NULL AS available")).rows[0].available) {
-          const reviewedVersion = await c.query(`UPDATE record_version_history SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
-            WHERE id=(SELECT id FROM record_version_history WHERE plant_id=$4 AND status='Pending Review'
-              AND snapshot->>'observation_id'=$5 ORDER BY version_number DESC LIMIT 1) RETURNING id`,
-            [req.body.decision, subject(req.user), req.body.comment || "Verified.", row.plant_id, row.id]);
-          reviewedVersionId = reviewedVersion.rows[0]?.id ?? null;
+        const reviewedVersionId = await submittedHistoryForReview(c, {
+          kind: "plant", targetId: row.plant_id, submissionId: row.id, status: row.status,
+        });
+        if (reviewedVersionId) {
+          const transitioned = await c.query(`UPDATE record_version_history
+            SET status=$1,reviewed_by=$2,reviewed_at=CURRENT_TIMESTAMP,review_comment=$3
+            WHERE id=$4 AND status=$5`,
+          [req.body.decision, subject(req.user), req.body.comment || "Verified.", reviewedVersionId, row.status]);
+          if (transitioned.rowCount !== 1) fail(409, "The submitted history version changed before review.");
         }
         if (req.body.decision === "Approved") await captureApprovedReview(c, {
           kind: "plant", submissionId: row.id, reviewId: review.id, reviewer: subject(req.user), versionId: reviewedVersionId,

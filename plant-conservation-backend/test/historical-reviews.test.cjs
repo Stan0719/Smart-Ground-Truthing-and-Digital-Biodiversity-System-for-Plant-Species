@@ -6,9 +6,10 @@ const { join } = require("node:path");
 const { once } = require("node:events");
 const sharp = require("sharp");
 const { createHash } = require("node:crypto");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installRecordChangeNotifications } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 const { observationHistory, speciesHistory } = require("../historical-reviews.cjs");
+const { seedRegistrationReceipt } = require("./registration-provenance-fixture.cjs");
 
 test("historical reviews select event-linked submitted versions without changing live approvals", async t => {
   const pool = await createPlantDatabase(); t.after(() => pool.end());
@@ -16,6 +17,7 @@ test("historical reviews select event-linked submitted versions without changing
   await pool.query(readFileSync(join(__dirname,"../schema.postgres.sql"),"utf8"));
   for (const name of ["004-species-requests.sql","006-atomic-plant-submissions.sql","008-record-change-submissions.sql","009-record-version-history.sql","016-species-request-content-revision.sql","017-species-review-cycle.sql"])
     await pool.query(readFileSync(join(__dirname,"../migrations/"+name),"utf8"));
+  await installRecordChangeNotifications(pool);
   const photo = await sharp({create:{width:4,height:4,channels:3,background:"green"}}).jpeg().toBuffer();
   await pool.query(`INSERT INTO species(scientific_name,rbac_data) VALUES('Catalogue original','{"approvalStatus":"Approved"}');
     INSERT INTO rbac_species_visibility VALUES(1,'public');
@@ -33,6 +35,7 @@ test("historical reviews select event-linked submitted versions without changing
     const response=await fetch(`http://127.0.0.1:${server.address().port}/api`+path,{method,headers:{Authorization:`Bearer ${tokens[role]}`,"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});
     const data=await response.json();assert.ok(response.status<300,JSON.stringify(data));return data;
   };
+  await seedRegistrationReceipt(pool, '24');
   const original = {species_id:1,scientific_name:"Original plant",content:{heightCm:12,healthStatus:"Healthy",lifeStage:"Mature",morphology:"Original",notes:"Original notes",zone:"Original zone",latitude:0,longitude:0}};
   // The existing pending-edit path captures the submitted version; the actual
   // approval endpoint links that version to its review event in one transaction.

@@ -15,9 +15,11 @@ function validReceipt(receipt, plant, observations, species, requests) {
   const result = receipt.result;
   // The existing receipt has no version column. Accept its unversioned atomic
   // response shape only; hashes are immutable replay evidence, not recomputed here.
+  // Withdrawal updates this receipt status in place without changing its origin.
+  // This is provenance validation, not permission to review the Observation.
   if (!object(result) || Object.hasOwn(result, "version") ||
       typeof result.id !== "string" || !positiveId(result.plant_id) || !positiveId(result.species_id) ||
-      result.status !== "Pending Review" || typeof result.qr_token !== "string" || !result.qr_token.trim() ||
+      !["Pending Review", "Withdrawn"].includes(result.status) || typeof result.qr_token !== "string" || !result.qr_token.trim() ||
       !/^[a-f0-9]{64}$/.test(receipt.payload_hash) || !Object.hasOwn(result, "species_request_id") ||
       (result.species_request_id !== null && !positiveId(result.species_request_id))) return false;
   const initial = observations.get(result.id);

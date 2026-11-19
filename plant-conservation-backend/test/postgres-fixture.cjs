@@ -13,4 +13,10 @@ async function createPlantDatabase() {
   );
   return pool;
 }
-module.exports = { createPlantDatabase };
+// Explicit opt-in: old/missing-schema fixtures must remain available for negatives.
+async function installRecordChangeNotifications(pool) {
+  if (!(await pool.query("SELECT to_regclass('plant_app.botanist_notification') IS NOT NULL AS ready")).rows[0].ready)
+    await pool.query(readFileSync(join(__dirname, "../migrations/011-botanist-notification-history.sql"), "utf8"));
+  await pool.query(readFileSync(join(__dirname, "../migrations/030-record-change-review-notifications.sql"), "utf8"));
+}
+module.exports = { createPlantDatabase, installRecordChangeNotifications };

@@ -6,7 +6,7 @@ export const speciesRequestCanDecide = (request: LinkedSpeciesRequest | null) =>
   Boolean(request?.id && request.state === 'pending')
 
 export type SpeciesRequestState =
-  'pending' | 'approved' | 'rejected' | 'correction' | 'unavailable' | 'error' | 'unknown'
+  'pending' | 'approved' | 'rejected' | 'correction' | 'withdrawn' | 'unavailable' | 'error' | 'unknown'
 export interface LinkedSpeciesRequest {
   reviewedBy?: string
   reviewedAt?: string
@@ -74,6 +74,7 @@ export function mapLinkedSpeciesRequest(
     approved: 'approved',
     rejected: 'rejected',
     'correction required': 'correction',
+    withdrawn: 'withdrawn',
   }
   const invalid =
     (!referenceId && !embeddedId) ||

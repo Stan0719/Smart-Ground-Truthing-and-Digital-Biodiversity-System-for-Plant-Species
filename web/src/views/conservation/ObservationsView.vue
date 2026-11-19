@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import '../../styles/officer-copy.css'
+import { useOfficerCopyConfirmation } from '../../composables/useOfficerCopyConfirmation'
+const copyConfirmation = useOfficerCopyConfirmation({ schedule: (fn, ms) => window.setTimeout(fn, ms), cancel: id => window.clearTimeout(id as number) })
+const controlCopied = copyConfirmation.copied, controlToastKey = copyConfirmation.toastKey
+
 import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import SubmissionChanges from '../../components/conservation/SubmissionChanges.vue'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
@@ -6,17 +11,20 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type Directive } from
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { currentUser, sessionSnapshot, subscribeSession } from '../../services/auth'
-import { ReviewApiError, createReviewRequest, performObservationReview, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions, type ReviewDecision } from '../../services/observationReview'
+import { ReviewApiError, createReviewRequest, performObservationReview, observationReviewSnapshot, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions, type ReviewDecision } from '../../services/observationReview'
 import { mapLinkedSpeciesRequest, type LinkedSpeciesRequest } from '../../services/reviewSpeciesRequest'
+import type { ObservationEdit, ObservationEditQueueState } from '../../services/observationEdits'
+import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
+import ObservationEditQueue from '../../components/conservation/ObservationEditQueue.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import ObservationReviewHistory from '../../components/conservation/ObservationReviewHistory.vue'
-import { formatReviewTimestamp } from '../../services/observationReviewHistory'
 import { formatPlantId } from '../../utils/plantId'
 import { observationOrigin, observationQueueUrl, readQueuePage, type ObservationOrigin, type ObservationQueue } from '../../services/observationQueue'
 
 interface ObservationAsset { id: string; contentType: string }
 interface ObservationView {
+  reviewSnapshot: ReturnType<typeof observationReviewSnapshot>
   origin: ObservationOrigin
   id: string
   plantRawId: string
@@ -56,6 +64,18 @@ const navigationError = ref('')
 let navigationRequest = 0
 const { t, te, locale } = useI18n()
 const observations = ref<ObservationView[]>([])
+const proposalQueue = ref<InstanceType<typeof ObservationEditQueue> | null>(null)
+const proposalState = ref<ObservationEditQueueState>({ rows: [], names: {}, loading: false, error: '' })
+const submissionType = ref<'all' | 'original' | 'edit'>('all')
+function receiveProposalState(value: ObservationEditQueueState) {
+  proposalState.value = authorizedOfficer.value ? value : { rows: [], names: {}, loading: false, error: '' }
+}
+function openProposal(row: ObservationEdit) {
+  if (!authorizedOfficer.value || reviewSaving.value) return
+  closeModal(true)
+  proposalQueue.value?.view(row)
+}
+
 const queueOrigin = ref<ObservationQueue>('subsequent_observation')
 const hasMore = ref(false)
 const nextCursor = ref<string | null>(null)
@@ -81,6 +101,7 @@ const copyPending = ref(false)
 const copiedKey = ref('')
 let copyAttempt = 0
 function clearCopyState() {
+  copyConfirmation.clear()
   copyAttempt++
   copyFeedback.value = ''; copiedKey.value = ''; copyFailed.value = false; copyPending.value = false
 }
@@ -90,7 +111,7 @@ const species = ref('')
 const owner = ref('')
 const date = ref('')
 const modalText = (key: string) => t('observationModal.' + key)
-const modalDate = (value: string) => formatReviewTimestamp(value, locale.value)
+const modalDate = (value: string) => formatDate(value)
 const modalHeaders = new WeakMap<HTMLElement, { observer: ResizeObserver; observationId: string; measure: () => void }>()
 const vObservationDialog: Directive<HTMLElement, string> = {
   mounted(root, binding) {
@@ -131,6 +152,8 @@ const reviewNeedsReload = ref(false)
 const reviewAcknowledged = ref(true)
 const reviewFeedback = ref('')
 const reviewSuccess = ref(false)
+const reviewInfo = ref(false)
+const reviewFeedbackVariant = computed(() => reviewInfo.value ? 'info' : reviewSuccess.value ? 'success' : 'error')
 const commentFeedbackId = ref<number | null>(null)
 let commentFeedbackSequence = 0
 const reviewCommentError = computed(() => !reviewSuccess.value && reviewFeedback.value === rt('feedback.commentRequired'))
@@ -146,21 +169,27 @@ const authorizedOfficer = computed(() => !session.value.pending && session.value
 const unsubscribeSession = subscribeSession((user, pending) => {
   const previousId = session.value.user?.id
   session.value = { user, pending }
+  if (pending && user && previousId === user.id) {
+    if (reviewSaving.value || detailLoading.value) reviewNeedsReload.value = true
+    detailRequest++; detailLoading.value = false
+    return
+  }
   if (!authorizedOfficer.value || previousId !== user?.id) {
-    clearCopyState(); closeModal(true); invalidateList(); observations.value = []
+    clearCopyState(); closeModal(true); invalidateList(); observations.value = []; proposalState.value = { rows: [], names: {}, loading: false, error: '' }
   }
 })
 const reviewDecisions = computed(() => selected.value ? reviewTransitions[selected.value.status] || [] : [])
 const canReviewField = (item: ObservationView) => item.origin === 'subsequent_observation' &&
   reviewEligible(session.value.user, session.value.pending, { ...item, owner: item.ownerSubject })
-const reviewAllowed = computed(() => reviewMode.value && !detailLoading.value && !detailError.value && !reviewSaving.value && !reviewNeedsReload.value && reviewAcknowledged.value &&
+const reviewAllowed = computed(() => reviewMode.value && !historyModal.value && !detailLoading.value && !detailError.value && !reviewSaving.value && !reviewNeedsReload.value && reviewAcknowledged.value &&
   selected.value?.origin === 'subsequent_observation' &&
   Boolean(selected.value && reviewEligible(session.value.user, session.value.pending, { ...selected.value, owner: selected.value.ownerSubject })))
 const canOpenReview = computed(() => authorizedOfficer.value && !reviewSaving.value && !historyModal.value && !detailLoading.value && !detailError.value &&
   selected.value?.origin !== 'subsequent_observation' &&
   Boolean(selected.value && ['Pending Review', 'Flagged'].includes(selected.value.status)))
 
-const supportedStatuses = ['Draft', 'Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged']
+const canonicalStatuses = ['Draft', 'Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged', 'Withdrawn']
+const supportedStatuses = [...canonicalStatuses, 'Cancelled', 'Superseded']
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const stringValue = (value: unknown) =>
@@ -178,7 +207,7 @@ const summaryCounts = computed(() => {
   // Match list deduplication and origin semantics, without narrowing counts to
   // client-side table search/species/owner/date filters or a visible preview.
   const loaded = [...new Map(observations.value.map(item => [item.id, item])).values()]
-    .filter(item => queueOrigin.value === 'all' || item.origin === queueOrigin.value)
+    .filter(item => item.origin === 'subsequent_observation')
   return summaryStatuses.map(status => ({ status, count: available ? loaded.filter(item => canonicalStatus(item.status) === status).length : null }))
 })
 const keyFor = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '')
@@ -204,9 +233,11 @@ const formatDate = (value: string) => {
   if (!value) return '—'
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return '—'
-  return new Intl.DateTimeFormat(locale.value === 'ms' ? 'ms-MY' : locale.value, {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(parsed)
+  const parts = new Intl.DateTimeFormat(locale.value === 'ms' ? 'ms-MY' : locale.value, {
+    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kuching',
+  }).formatToParts(parsed)
+  const part = (type: string) => parts.find(part => part.type === type)?.value || ''
+  return `${part('day')} ${part('month')} ${part('year')}, ${part('hour')}:${part('minute')}`
 }
 
 const mapObservation = (value: unknown): ObservationView | null => {
@@ -226,6 +257,7 @@ const mapObservation = (value: unknown): ObservationView | null => {
   ) : {}
   const height = numericValue(content.heightCm, 0)
   return {
+    reviewSnapshot: observationReviewSnapshot(item),
     origin: observationOrigin(item.origin_type),
     id,
     plantRawId,
@@ -296,10 +328,6 @@ async function request(url: string, signal?: AbortSignal): Promise<Record<string
   return result
 }
 
-function changeQueue() {
-  closeModal()
-  void loadObservations()
-}
 function invalidateList() {
   listRequest++; listAbort?.abort(); listAbort = null
   hasMore.value = false; nextCursor.value = null; seenCursors.clear()
@@ -313,7 +341,7 @@ async function loadObservations(append = false) {
   listAbort?.abort()
   const token = ++listRequest
   const controller = new AbortController(); listAbort = controller
-  const origin = queueOrigin.value, selectedStatus = status.value
+  const origin = 'subsequent_observation', selectedStatus = canonicalStatuses.includes(status.value) ? status.value : ''
   const current = () => !disposed && token === listRequest && !controller.signal.aborted && authorizedOfficer.value
   let cursor = append ? nextCursor.value : null
   if (!append) { clearCopyState(); observations.value = []; nextCursor.value = null; hasMore.value = false; skippedRecords.value = 0; seenCursors.clear() }
@@ -333,7 +361,7 @@ async function loadObservations(append = false) {
       const mapped = result.observations.map(mapObservation)
       const rows = mapped.filter((item): item is ObservationView => item !== null)
       const previousIds = new Set(observations.value.map(item => item.id))
-      const found = rows.some(item => !previousIds.has(item.id) && (origin === 'all' || item.origin === origin) && (!selectedStatus || item.status === selectedStatus))
+      const found = rows.some(item => !previousIds.has(item.id) && item.origin === origin && (!selectedStatus || item.status === selectedStatus))
       skippedRecords.value += mapped.length - rows.length
       observations.value = [...new Map([...observations.value, ...rows].map(item => [item.id, item])).values()]
         .sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt))
@@ -366,6 +394,7 @@ async function open(item: ObservationView, reviewing = false, expectedOrigin?: O
   reviewNeedsReload.value = false
   reviewAcknowledged.value = true
   reviewFeedback.value = ''
+  reviewInfo.value = false
   commentFeedbackId.value = null
   reviewSuccess.value = false
   const requestId = ++detailRequest
@@ -400,7 +429,7 @@ function openHistory(item: ObservationView) {
   detailRequest++
   selected.value = item
   historyModal.value = true
-  queueOrigin.value = 'all'; status.value = ''; void loadObservations()
+  queueOrigin.value = 'subsequent_observation'; status.value = ''; void loadObservations()
   detailLoading.value = false
   detailError.value = ''
 }
@@ -409,6 +438,7 @@ function closeModal(force = false) {
   reviewMode.value = false
   reviewComment.value = ''
   reviewFeedback.value = ''
+  reviewInfo.value = false
   commentFeedbackId.value = null
   reviewNeedsReload.value = false
   detailRequest++
@@ -437,17 +467,37 @@ async function reloadReview() {
   if (!selected.value || reviewSaving.value || !authorizedOfficer.value) return
   const id = selected.value.id, token = detailRequest
   reviewSaving.value = true
+  reviewInfo.value = false
+  reviewSuccess.value = false
+  reviewFeedback.value = ''
   try {
     const row = await readReviewObservation(id)
     if (disposed || token !== detailRequest || selected.value?.id !== id) return
-    updateObservation(row); reviewNeedsReload.value = false; reviewAcknowledged.value = false; reviewFeedback.value = rt('feedback.reloaded')
-  } catch (error) { if (token === detailRequest) reviewFeedback.value = error instanceof Error ? error.message : rt('feedback.loadFailed') }
+    const changed = row.reviewSnapshot.observation !== selected.value.reviewSnapshot.observation
+    const mustInspect = !reviewAcknowledged.value
+    const draftComment = reviewComment.value
+    updateObservation(row)
+    reviewComment.value = draftComment
+    reviewNeedsReload.value = false
+    reviewAcknowledged.value = !changed && !mustInspect
+    reviewSuccess.value = false
+    reviewInfo.value = !changed && !mustInspect
+    reviewFeedback.value = reviewInfo.value ? modalText('upToDate') : rt('feedback.reloaded')
+  } catch (error) {
+    if (!disposed && token === detailRequest && selected.value?.id === id) {
+      reviewNeedsReload.value = true
+      reviewSuccess.value = false
+      reviewInfo.value = false
+      reviewFeedback.value = error instanceof Error ? error.message : rt('feedback.loadFailed')
+    }
+  }
   finally { reviewSaving.value = false }
 }
 async function decide(decision: ReviewDecision) {
   if (!reviewAllowed.value || !selected.value || !reviewDecisions.value.includes(decision) || !positiveRevision(selected.value.revision)) return
   if (!reviewCommentValid(decision, reviewComment.value)) {
     reviewSuccess.value = false
+    reviewInfo.value = false
     reviewFeedback.value = rt('feedback.commentRequired')
     commentFeedbackId.value = ++commentFeedbackSequence
     return
@@ -455,7 +505,7 @@ async function decide(decision: ReviewDecision) {
   commentFeedbackId.value = null
   const { id, revision } = selected.value
   const typedComment = reviewComment.value, token = detailRequest
-  reviewSaving.value = true; reviewFeedback.value = ''; reviewSuccess.value = false
+  reviewSaving.value = true; reviewFeedback.value = ''; reviewSuccess.value = false; reviewInfo.value = false
   try {
     try {
       const latest = await readReviewObservation(id)
@@ -510,12 +560,13 @@ function compactIdentifierTokens(values: readonly string[], part: (value: string
 const observationLabels = computed(() => compactIdentifierTokens(observations.value.map(item => item.id)))
 const observationLabel = (id: string) => `OBS-${observationLabels.value.get(id) || compactIdentifierTokens([id]).get(id) || id}`
 const subjectPart = (subject: string) => /^(staff|visitor):/.test(subject) ? subject.slice(subject.indexOf(':') + 1) : subject
-const subjectTokens = computed(() => compactIdentifierTokens(observations.value.map(item => item.ownerSubject).filter(Boolean), subjectPart))
+const subjectTokens = computed(() => compactIdentifierTokens([...observations.value.map(item => item.ownerSubject), ...proposalState.value.rows.map(row => row.owner_subject)].filter(Boolean), subjectPart))
 const submitterNames = ref<Record<string, string>>({})
 const submitterLabel = (subject: string) => {
   if (!subject) return textOrUnavailable('')
   const id = subject.startsWith('staff:') ? subject.slice(6) : ''
   if (id && submitterNames.value[id]) return submitterNames.value[id]
+  if (id && proposalState.value.names[id]) return proposalState.value.names[id]
   const account = session.value.user
   // The existing authenticated session can identify only this exact account.
   // Other submitters have no authorized name/directory mapping on this page.
@@ -523,7 +574,7 @@ const submitterLabel = (subject: string) => {
   const key = subject.startsWith('staff:') ? 'staffIdentifier' : subject.startsWith('visitor:') ? 'visitorIdentifier' : 'submitterIdentifier'
   return t('conservationPages.observations.' + key, { id: subjectTokens.value.get(subject) || compactIdentifierTokens([subject], subjectPart).get(subject) || subjectPart(subject) })
 }
-async function copyIdentifier(value: string, kind: 'observation' | 'subject', reviewSubject = false) {
+async function copyIdentifier(value: string, kind: 'observation' | 'subject', reviewSubject = false, controlKey = `${kind}:${value}`) {
   if (!authorizedOfficer.value || copyPending.value || !value) return
   const listed = observations.value.some(item => (kind === 'observation' ? item.id : item.ownerSubject) === value)
   const detail = selected.value
@@ -531,13 +582,14 @@ async function copyIdentifier(value: string, kind: 'observation' | 'subject', re
   if (!listed && !displayedInModal) return
   const attempt = ++copyAttempt, actor = session.value.user?.id
   const current = () => !disposed && attempt === copyAttempt && authorizedOfficer.value && actor === session.value.user?.id
+  copyConfirmation.reset(controlKey)
   copyPending.value = true; copiedKey.value = ''; copyFeedback.value = ''; copyFailed.value = false
   try {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
     await navigator.clipboard.writeText(value)
     if (!current()) return
     copiedKey.value = `${kind}:${value}`
-    copyFeedback.value = t('conservationPages.observations.' + (kind === 'observation' ? 'copiedObservation' : 'copiedSubject'), { id: kind === 'observation' ? observationLabel(value) : submitterLabel(value) })
+    copyFeedback.value = ''; copyConfirmation.confirm(controlKey)
   } catch {
     if (current()) { copyFailed.value = true; copyFeedback.value = t('conservationPages.observations.copyUnavailable') }
   } finally { if (current()) copyPending.value = false }
@@ -546,7 +598,7 @@ async function copyIdentifier(value: string, kind: 'observation' | 'subject', re
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()
   return observations.value.filter((item) => {
-    if (queueOrigin.value !== 'all' && item.origin !== queueOrigin.value) return false
+    if (item.origin !== 'subsequent_observation') return false
     const searchable = `${item.id} ${item.plantRawId} ${item.plantDisplayId} ${item.scientificName} ${item.commonName} ${item.ownerSubject} ${item.status} ${observationLabel(item.id)} ${submitterLabel(item.ownerSubject)}`
     return (!query || searchable.toLowerCase().includes(query)) &&
       (!status.value || item.status === status.value) &&
@@ -555,7 +607,30 @@ const filtered = computed(() => {
       (!date.value || dateKey(item.createdAt) === date.value)
   })
 })
-const filtersHideLoaded = computed(() => filtered.value.length < observations.value.filter(item => queueOrigin.value === 'all' || item.origin === queueOrigin.value).length)
+// Display-only union: proposal identity/revision never becomes a canonical Observation.
+const proposalItems = computed(() => proposalState.value.rows.flatMap(proposal => {
+  const baseline = mapObservation(proposal.observation_edit.current)
+  return baseline?.origin === 'subsequent_observation' ? [{ kind: 'edit' as const, key: `observation-edit:${proposal.id}`, proposal, baseline }] : []
+}))
+const proposalLabels = computed(() => { const tokens=compactIdentifierTokens(proposalState.value.rows.map(row=>row.id)); return new Map(proposalItems.value.map(row => [row.proposal.id, `CHANGE-${tokens.get(row.proposal.id) || row.proposal.id}`])) })
+const displayedRows = computed(() => {
+  const originals = submissionType.value === 'edit' ? [] : filtered.value.map(observation => ({ kind: 'original' as const, key: `observation:${observation.id}`, observation }))
+  const query = search.value.trim().toLowerCase()
+  const proposals = submissionType.value === 'original' ? [] : proposalItems.value.filter(({proposal,baseline}) => {
+    // Origin/species belong to the verified baseline. Status, owner and date belong to the proposal.
+    const searchable = `${proposal.id} CHANGE-${proposal.id} ${baseline.id} ${observationLabel(baseline.id)} ${baseline.plantRawId} ${baseline.plantDisplayId} ${baseline.scientificName} ${baseline.commonName} ${proposal.owner_subject} ${submitterLabel(proposal.owner_subject)} ${proposal.status}`
+    return (queueOrigin.value === 'all' || baseline.origin === queueOrigin.value) &&
+      (!query || searchable.toLowerCase().includes(query)) && (!status.value || proposal.status === status.value) &&
+      (!species.value || baseline.speciesId === species.value) && (!owner.value || proposal.owner_subject === owner.value) &&
+      (!date.value || dateKey(proposal.created_at) === date.value)
+  })
+  return [...originals, ...proposals].sort((a,b) => timestamp(b.kind === 'original' ? b.observation.createdAt : b.proposal.created_at) - timestamp(a.kind === 'original' ? a.observation.createdAt : a.proposal.created_at))
+})
+const proposalReviewable = (row: ObservationEdit) => authorizedOfficer.value && !reviewSaving.value && row.status === 'Pending Review' &&
+  Number.isSafeInteger(row.revision) && row.revision > 0 && row.owner_subject !== `staff:${session.value.user?.id}` && row.observation_edit.current.status === 'Approved'
+watch(displayedRows, () => { copyAttempt++; copyPending.value = false; copyConfirmation.clear() })
+const filtersHideLoaded = computed(() => filtered.value.length < observations.value.filter(item => item.origin === 'subsequent_observation').length)
+watch(filtered, () => { copyAttempt++; copyPending.value = false; copyConfirmation.clear() })
 const history = computed(() => selected.value
   ? observations.value.filter((item) => item.plantRawId === selected.value?.plantRawId) : [])
 const speciesOptions = computed(() => {
@@ -563,9 +638,10 @@ const speciesOptions = computed(() => {
   observations.value.forEach((item) => {
     if (item.speciesId) options.set(item.speciesId, item.commonName || item.scientificName || item.speciesId)
   })
+  proposalItems.value.forEach(({baseline}) => { if (baseline.speciesId) options.set(baseline.speciesId, baseline.commonName || baseline.scientificName || baseline.speciesId) })
   return [...options].map(([id, name]) => ({ id, name }))
 })
-const ownerOptions = computed(() => [...new Set(observations.value.map((item) => item.ownerSubject).filter(Boolean))])
+const ownerOptions = computed(() => [...new Set([...observations.value.map((item) => item.ownerSubject), ...proposalState.value.rows.map(row => row.owner_subject)].filter(Boolean))])
 
 // Notification links use the existing authorized detail endpoint, independently
 // of list pagination and filters. They never acknowledge notifications here.
@@ -575,7 +651,7 @@ async function resolveObservationQuery() {
   navigationError.value = ''
   if (reviewSaving.value) return
   closeModal()
-  if (!id || !authorizedOfficer.value || disposed) return
+  if (!id || route.query.observationEdit || !authorizedOfficer.value || disposed) return
   if (typeof id !== 'string' || !/^(?:[1-9][0-9]{0,18}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(id)) {
     navigationError.value = rt('feedback.invalidId'); return
   }
@@ -593,22 +669,33 @@ async function resolveObservationQuery() {
       navigationError.value = error instanceof Error ? error.message : t('conservationPages.observations.errors.invalidResponse')
   }
 }
-watch(() => [route.query.observation, authorizedOfficer.value, session.value.user?.id], resolveObservationQuery, { immediate: true })
+watch(() => route.query.observationEdit, id => {
+  if (typeof id === 'string' && id) { navigationRequest++; closeModal(true) }
+}, { immediate: true })
+watch(() => [route.query.observation, authorizedOfficer.value, session.value.user?.id], (next, previous) => {
+  // A same-account verification outage/recovery must not reopen or close a draft.
+  if (previous && next[0] === previous[0] && next[2] === previous[2] && session.value.user && (session.value.pending || selected.value)) return
+  void resolveObservationQuery()
+}, { immediate: true })
 
 onMounted(loadObservations)
 onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); detailRequest++; invalidateList(); unsubscribeSession() })
 </script>
 
 <template>
+  <span class="officer-copy-live" role="status" aria-live="polite" aria-atomic="true"><span v-if="controlToastKey && !controlToastKey.startsWith('submitter:')" :key="controlToastKey">{{ t('conservationPages.reviews.copiedToast') }}</span></span>
   <section class="page-intro"><div>
     <p class="page-kicker">{{ t('conservationPages.observations.eyebrow') }}</p>
     <h2>{{ t('conservationPages.observations.title') }}</h2>
     <p>{{ rt('queues.fieldIntro') }}</p>
   </div></section>
 
+  <ObservationEditQueue ref="proposalQueue" @state="receiveProposalState" />
+
   <p v-if="navigationError" role="alert">{{ navigationError }}</p>
 
   <section class="observation-summary" :aria-label="t('conservationPages.observations.summaryTitle')" :aria-busy="isLoading" aria-describedby="observation-summary-scope">
+    <h3>{{ t('unifiedObservations.originalCounts') }}</h3>
     <div class="summary-grid observation-summary-grid">
       <article v-for="card in summaryCounts" :key="card.status" class="summary-card observation-summary-card" :data-status="card.status">
         <div class="observation-summary-title">
@@ -627,12 +714,13 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
     <p id="observation-summary-scope" class="observation-summary-scope">{{ t('conservationPages.observations.summaryScope') }}</p>
   </section>
 
+  <details class="historical-access">
+    <summary>{{ t('unifiedObservations.historicalTitle') }}</summary>
+    <p>{{ t('unifiedObservations.historicalExplanation') }}</p>
+    <RouterLink :to="{ name: 'conservation-reviews', query: { legacy: '1' } }">{{ t('finalOfficerWorkflow.legacy') }}</RouterLink>
+  </details>
   <div class="control-bar">
-    <label class="field"><span>{{ rt('queues.reviewQueue') }}</span><select v-officer-dropdown v-model="queueOrigin" :disabled="reviewSaving" @change="changeQueue">
-      <option value="subsequent_observation">{{ rt('queues.fieldObservations') }}</option>
-      <option value="all">{{ rt('queues.allOrigins') }} · {{ rt('queues.history') }}</option>
-      <option value="unknown">{{ rt('queues.legacy') }}</option>
-    </select></label>
+    <label class="field"><span>{{ t('unifiedObservations.submissionType') }}</span><select v-officer-dropdown v-model="submissionType"><option value="all">{{ t('finalOfficerWorkflow.all') }}</option><option value="original">{{ t('finalOfficerWorkflow.original') }}</option><option value="edit">{{ t('finalOfficerWorkflow.edit') }}</option></select></label>
     <label class="field search-field"><span>{{ t('conservationPages.observations.search') }}</span><input v-model="search" :placeholder="t('conservationPages.observations.searchPlaceholder')" /></label>
     <label class="field"><span>{{ t('conservationPages.observations.status') }}</span><select v-officer-dropdown v-model="status" @change="loadObservations()"><option value="">{{ t('conservationPages.observations.allStatuses') }}</option><option v-for="item in supportedStatuses" :key="item" :value="item">{{ label(item) }}</option></select></label>
     <label class="field"><span>{{ t('conservationPages.observations.species') }}</span><select v-officer-dropdown v-model="species"><option value="">{{ t('conservationPages.observations.allSpecies') }}</option><option v-for="item in speciesOptions" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
@@ -641,18 +729,22 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
   </div>
 
   <section class="panel">
+    <p class="filter-scope-note">{{ t('unifiedObservations.filterScope') }}</p>
+    <p v-if="proposalState.error" class="proposal-warning" role="alert">{{ proposalState.error }} <button type="button" class="action-button" :disabled="!authorizedOfficer || proposalState.loading" @click="proposalQueue?.load()">{{ t('unifiedObservations.retry') }}</button></p>
+    <p v-else-if="proposalState.loading" class="proposal-loading-note" role="status">{{ t('dashboardObservationEdits.loading') }}</p>
     <p v-if="!isLoading && filtersHideLoaded" class="dataset-note" role="status">{{ t(hasMore ? 'conservationPages.observations.filteredMore' : 'conservationPages.observations.filteredLoaded') }}</p>
     <p v-if="!isLoading && hasMore && !loadError" class="dataset-note" role="status">{{ t(autoScanLimited ? 'conservationPages.observations.paginationPaused' : 'conservationPages.observations.paginationMore') }}</p>
     <p v-if="skippedRecords" class="dataset-note" role="status">{{ t('conservationPages.observations.skipped', { count: skippedRecords }) }}</p>
     <p class="copy-feedback" :class="{ warning: copyFailed }" role="status" aria-live="polite" aria-atomic="true">{{ copyFeedback }}</p>
     <div class="table-scroll observations-scroll" role="region" :aria-label="t('conservationPages.observations.title')" tabindex="0"><table class="observations-table">
-      <colgroup><col class="observation-column" /><col class="plant-column" /><col class="species-column" /><col class="submitter-column" /><col class="status-column" /><col class="created-column" /><col class="actions-column" /></colgroup>
-      <thead><tr><th scope="col">{{ t('conservationPages.observations.observationId') }}</th><th scope="col">{{ t('conservationPages.observations.plantId') }}</th><th scope="col">{{ t('conservationPages.observations.species') }}</th><th scope="col">{{ t('conservationPages.observations.submittedBy') }}</th><th scope="col">{{ t('conservationPages.observations.status') }}</th><th scope="col">{{ t('conservationPages.observations.created') }}</th><th scope="col">{{ t('conservationPages.observations.actions') }}</th></tr></thead>
+      <colgroup><col class="observation-column" /><col class="submission-column" /><col class="plant-column" /><col class="species-column" /><col class="submitter-column" /><col class="status-column" /><col class="created-column" /><col class="actions-column" /></colgroup>
+      <thead><tr><th scope="col">{{ t('unifiedObservations.submissionId') }}</th><th scope="col">{{ t('unifiedObservations.submissionType') }}</th><th scope="col">{{ t('conservationPages.observations.plantId') }}</th><th scope="col">{{ t('conservationPages.observations.species') }}</th><th scope="col">{{ t('conservationPages.observations.submittedBy') }}</th><th scope="col">{{ t('conservationPages.observations.status') }}</th><th scope="col">{{ t('conservationPages.observations.created') }}</th><th scope="col">{{ t('conservationPages.observations.actions') }}</th></tr></thead>
       <tbody>
-        <tr v-for="item in filtered" :key="item.id">
-          <td class="identity-cell"><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation')"><svg v-if="copiedKey !== `observation:${item.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></div><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></td><td>{{ item.plantDisplayId }}</td>
+        <tr v-for="row in displayedRows" :key="row.key" :class="{ 'terminal-read-only': ['Withdrawn','Cancelled'].includes(row.kind === 'original' ? row.observation.status : row.proposal.status), superseded: (row.kind === 'original' ? row.observation.status : String(row.proposal.status)) === 'Superseded' }">
+          <template v-if="row.kind === 'original'"><template v-for="item in [row.observation]" :key="item.id">
+          <td class="identity-cell"><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation', false, `observation-icon-0:${item.id}`)"><svg v-if="!controlCopied[`observation-icon-0:${item.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-0:${item.id}`" :key="`observation-icon-0:${item.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></td><td><span class="submission-type-badge submission-type-original">{{ t('finalOfficerWorkflow.original') }}</span></td><td class="plant-id-cell">{{ item.plantDisplayId }}</td>
           <td><em>{{ speciesName(item) }}</em><small v-if="item.commonName && item.scientificName">{{ item.commonName }}</small><small v-if="item.hasSpeciesRequest">{{ t('conservationPages.observations.newSpeciesRequest') }}</small></td>
-          <td class="identity-cell"><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject')"><svg v-if="copiedKey !== `subject:${item.ownerSubject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></div></td><td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(item.status)" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td><td>{{ formatDate(item.createdAt) }}</td>
+          <td class="identity-cell"><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject', false, `observation-icon-1:${item.id}:${item.ownerSubject}`)"><svg v-if="!controlCopied[`observation-icon-1:${item.id}:${item.ownerSubject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-1:${item.id}:${item.ownerSubject}`" :key="`observation-icon-1:${item.id}:${item.ownerSubject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></div></td><td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(item.status)" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td><td class="created-cell">{{ formatDate(item.createdAt) }}</td>
           <td class="actions-cell"><div class="action-group">
             <button v-if="canReviewField(item)" class="action-button" :disabled="reviewSaving" @click="open(item, true)">{{ t('conservationPages.observations.review') }}</button>
             <button v-else class="action-button" @click="open(item)">{{ t('common.viewDetails') }}</button>
@@ -661,10 +753,19 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
             <RouterLink class="action-button" :to="{ name: 'conservation-map', query: { plant: item.plantRawId } }">{{ t('conservationPages.observations.location') }}</RouterLink>
             <RouterLink v-if="authorizedOfficer && item.origin !== 'subsequent_observation' && (item.status === 'Pending Review' || item.status === 'Flagged')" class="action-button" :to="{ name: 'conservation-reviews', query: { review: item.id } }">{{ rt('queues.registrationReview') }}</RouterLink>
           </div></td>
+        </template></template>
+          <template v-else>
+            <td class="identity-cell"><MonitoringIdentifier :value="row.proposal.id" :labels="proposalLabels" /><small>{{ observationLabel(row.baseline.id) }}</small></td>
+            <td><span class="submission-type-badge submission-type-edit">{{ t('finalOfficerWorkflow.edit') }}</span></td><td class="plant-id-cell">{{ row.baseline.plantDisplayId }}</td>
+
+            <td><em>{{ speciesName(row.baseline) }}</em></td><td class="identity-cell"><MonitoringIdentifier :value="row.proposal.owner_subject" :labels="new Map([[row.proposal.owner_subject,submitterLabel(row.proposal.owner_subject)]])" /></td>
+            <td class="status-cell"><span class="badge" :style="workflowBadgeStyle(row.proposal.status)">{{ label(row.proposal.status) }}</span></td><td class="created-cell">{{ formatDate(row.proposal.created_at) }}</td>
+            <td class="actions-cell"><button type="button" class="action-button" :disabled="!authorizedOfficer || reviewSaving" @click="openProposal(row.proposal)">{{ proposalReviewable(row.proposal) ? t('dashboardObservationEdits.review') : t('common.viewDetails') }}</button></td>
+          </template>
         </tr>
-        <tr v-if="isLoading"><td colspan="7" class="state-cell">{{ t(scannedPages > 0 ? 'conservationPages.observations.scanning' : 'conservationPages.observations.loading') }}</td></tr>
-        <tr v-else-if="loadError"><td colspan="7" class="state-cell error-state"><strong>{{ t('conservationPages.observations.loadFailed') }}</strong><span>{{ loadError }}</span><button class="action-button" @click="loadObservations(Boolean(nextCursor))">{{ t('conservationPages.observations.retry') }}</button></td></tr>
-        <tr v-else-if="!filtered.length"><td colspan="7" class="state-cell">{{ hasMore ? t('conservationPages.observations.emptyMore') : filtersHideLoaded ? t('conservationPages.observations.filteredLoaded') : rt(queueOrigin === 'subsequent_observation' ? 'queues.noFieldObservations' : 'queues.noRecords') }}</td></tr>
+        <tr v-if="isLoading"><td colspan="8" class="state-cell">{{ t(scannedPages > 0 ? 'conservationPages.observations.scanning' : 'conservationPages.observations.loading') }}</td></tr>
+        <tr v-else-if="loadError"><td colspan="8" class="state-cell error-state"><strong>{{ t('conservationPages.observations.loadFailed') }}</strong><span>{{ loadError }}</span><button class="action-button" @click="loadObservations(Boolean(nextCursor))">{{ t('conservationPages.observations.retry') }}</button></td></tr>
+        <tr v-else-if="!displayedRows.length && !proposalState.loading"><td colspan="8" class="state-cell">{{ proposalState.error ? t('unifiedObservations.partial') : hasMore ? t('conservationPages.observations.emptyMore') : t('unifiedObservations.empty') }}</td></tr>
       </tbody>
     </table></div>
     <button v-if="hasMore || loadError" class="action-button" :disabled="isLoading" @click="loadObservations(Boolean(nextCursor))">{{ rt('queues.loadMore') }}</button>
@@ -674,7 +775,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
     <template #title>
       <span class="observation-title-layout">
         <span class="observation-title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 2 21 2c0 4-1 11-5 15-2 2-4 3-5 3ZM2 22l12-12" /></svg></span>
-        <span class="observation-title-copy"><span>{{ modalText('title') }}</span><span class="observation-title-subtitle"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation')"><svg v-if="copiedKey !== `observation:${selected.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></span></span></span>
+        <span class="observation-title-copy"><span>{{ modalText('title') }}</span><span class="observation-title-subtitle"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation', false, `observation-icon-2:${selected.id}`)"><svg v-if="!controlCopied[`observation-icon-2:${selected.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-2:${selected.id}`" :key="`observation-icon-2:${selected.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></span></span></span>
       </span>
     </template>
     <ActionFeedback v-if="commentFeedbackId !== null" :key="commentFeedbackId" :feedback-id="commentFeedbackId" variant="error" :message="rt('feedback.commentRequired')" @dismiss="dismissCommentFeedback" />
@@ -683,17 +784,18 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
       <p v-if="detailLoading" class="detail-state" role="status">{{ t('conservationPages.observations.loadingDetails') }}</p>
       <p v-if="detailError" class="detail-state error-state" role="alert">{{ detailError }}</p>
       <p v-if="selected.status === 'Rejected'" class="review-feedback error" role="status">{{ t('submissionChanges.finalRejected') }}</p>
-      <SubmissionChanges v-if="selected.status === 'Pending Review'" :update="selected.submissionUpdate" :revision="selected.revision" :busy="reviewSaving || detailLoading" @reload="reloadReview" />
-      <div v-if="!reviewAcknowledged || reviewNeedsReload" class="review-feedback error" role="alert"><p>{{ t('submissionChanges.conflict') }}</p><button type="button" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ t('submissionChanges.reload') }}</button></div>
+      <SubmissionChanges v-if="selected.status === 'Pending Review'" :update="selected.submissionUpdate" :revision="selected.revision" :initial-submission="selected.origin === 'subsequent_observation' && selected.revision === 1" :busy="reviewSaving || detailLoading" @reload="reloadReview" />
+      <div v-if="!reviewAcknowledged || reviewNeedsReload" class="review-feedback error" role="alert"><p>{{ t(!reviewAcknowledged ? 'submissionChanges.conflict' : 'submissionChanges.reloadRequired') }}</p><button type="button" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ t('submissionChanges.reload') }}</button></div>
+      <p class="observation-data-provenance" role="note">{{ modalText('currentRecordNotice') }}</p>
       <div class="observation-dialog-columns">
         <div class="observation-information-column">
           <template v-if="!reviewNeedsReload">
             <section class="observation-information-section">
               <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg>{{ modalText('details') }}</h3>
               <dl class="detail-list observation-details">
-                <div><dt>{{ t('conservationPages.observations.observationId') }}</dt><dd class="full-identifier"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation')"><svg v-if="copiedKey !== `observation:${selected.id}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></span></dd></div>
+                <div><dt>{{ t('conservationPages.observations.observationId') }}</dt><dd class="full-identifier"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation', false, `observation-icon-3:${selected.id}`)"><svg v-if="!controlCopied[`observation-icon-3:${selected.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-3:${selected.id}`" :key="`observation-icon-3:${selected.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></span></dd></div>
                 <div><dt>{{ t('conservationPages.observations.status') }}</dt><dd><span class="badge" :style="workflowBadgeStyle(selected.status)">{{ label(selected.status) }}</span></dd></div>
-                <div><dt>{{ t('conservationPages.observations.submittedBy') }}</dt><dd class="full-identifier"><span class="identifier-line"><span :title="selected.ownerSubject">{{ submitterLabel(selected.ownerSubject) }}</span><template v-if="selected.ownerSubject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" @click="copyIdentifier(selected.ownerSubject, 'subject')"><svg v-if="copiedKey !== `subject:${selected.ownerSubject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></span></dd></div>
+                <div><dt>{{ t('conservationPages.observations.submittedBy') }}</dt><dd class="full-identifier"><span class="identifier-line"><span :title="selected.ownerSubject">{{ submitterLabel(selected.ownerSubject) }}</span><template v-if="selected.ownerSubject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(selected.ownerSubject) })" @click="copyIdentifier(selected.ownerSubject, 'subject', false, `observation-icon-4:${selected.id}:${selected.ownerSubject}`)"><svg v-if="!controlCopied[`observation-icon-4:${selected.id}:${selected.ownerSubject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-4:${selected.id}:${selected.ownerSubject}`" :key="`observation-icon-4:${selected.id}:${selected.ownerSubject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></span></dd></div>
                 <div><dt>{{ t('conservationPages.observations.created') }}</dt><dd>{{ modalDate(selected.createdAt) }}</dd></div>
                 <div><dt>{{ t('conservationPages.observations.lastUpdated') }}</dt><dd>{{ modalDate(selected.updatedAt) }}</dd></div>
                 <div><dt>{{ t('conservationPages.observations.reviewedAt') }}</dt><dd>{{ modalDate(selected.reviewedAt) }}</dd></div>
@@ -743,14 +845,14 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
             <div class="observation-section-content">
       <p v-if="!reviewAllowed && !detailLoading && !reviewSaving && !reviewNeedsReload" role="status">{{ rt('reviewUnavailable') }}</p>
       <label class="field" for="observation-review-comment"><span>{{ rt('reviewComment') }}</span><textarea id="observation-review-comment" v-model="reviewComment" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :aria-invalid="reviewCommentError || undefined" :aria-describedby="reviewCommentError ? 'observation-review-comment-error' : undefined" maxlength="4000" rows="5" :disabled="reviewSaving || detailLoading" /></label>
-      <p v-if="reviewFeedback" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="{ error: !reviewSuccess, success: reviewSuccess, 'observation-comment-validation': reviewCommentError }"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
+      <p v-if="reviewFeedback" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewInfo || reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="[reviewFeedbackVariant, { 'observation-comment-validation': reviewCommentError }]"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
       <button v-if="reviewNeedsReload" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ rt('reloadLatest') }}</button>
       <label v-if="!reviewAcknowledged && !reviewNeedsReload"><input v-model="reviewAcknowledged" type="checkbox" :disabled="reviewSaving" /> {{ rt('acknowledgeLatest') }}</label>
       <p v-if="reviewSaving" role="status">{{ rt('saving') }}</p>
 
             </div>
           </section>
-          <ObservationReviewHistory v-if="authorizedOfficer" :observation-id="selected.id" :refresh-key="reviewHistoryRefresh"><template #reviewer="{ subject }"><span class="identifier-line"><span :title="subject">{{ submitterLabel(subject) }}</span><template v-if="subject"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" @click="copyIdentifier(subject, 'subject', true)"><svg v-if="copiedKey !== `subject:${subject}`" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button></template></span></template></ObservationReviewHistory>
+          <ObservationReviewHistory v-if="authorizedOfficer" :observation-id="selected.id" :refresh-key="reviewHistoryRefresh"><template #reviewer="{ subject, review }"><span class="identifier-line"><span :title="subject">{{ submitterLabel(subject) }}</span><template v-if="subject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(subject) })" @click="copyIdentifier(subject, 'subject', true, `observation-icon-5:${selected.id}:${review.id}:${subject}`)"><svg v-if="!controlCopied[`observation-icon-5:${selected.id}:${review.id}:${subject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-5:${selected.id}:${review.id}:${subject}`" :key="`observation-icon-5:${selected.id}:${review.id}:${subject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></span></template></ObservationReviewHistory>
     <div v-if="canOpenReview" class="modal-actions observation-review-actions">
       <RouterLink class="action-button modal-review-link" :to="{ name: 'conservation-reviews', query: { review: selected.id } }" @click="closeModal()">{{ t('conservationPages.observations.reviewSubmission') }}</RouterLink>
     </div>
@@ -768,11 +870,19 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
     <p v-if="isLoading" role="status">{{ t('conservationPages.observations.loading') }}</p>
     <p v-if="loadError" role="alert">{{ loadError }}</p>
     <button v-if="hasMore || loadError" class="action-button" :disabled="isLoading" @click="loadObservations(Boolean(nextCursor))">{{ rt('queues.loadMore') }}</button>
-    <div class="table-scroll"><table><thead><tr><th>{{ t('conservationPages.observations.id') }}</th><th>{{ t('conservationPages.observations.created') }}</th><th>{{ t('conservationPages.observations.height') }}</th><th>{{ t('conservationPages.observations.health') }}</th><th>{{ t('conservationPages.observations.status') }}</th></tr></thead><tbody><tr v-for="item in history" :key="item.id"><td>{{ item.id }}</td><td>{{ formatDate(item.createdAt) }}</td><td>{{ textOrUnavailable(item.height) }}</td><td>{{ label(item.healthStatus) }}</td><td>{{ label(item.status) }}</td></tr></tbody></table></div>
+    <p class="observation-data-provenance" role="note">{{ modalText('historyReadOnly') }}</p>
+    <div class="table-scroll"><table><thead><tr><th>{{ t('conservationPages.observations.id') }}</th><th>{{ t('conservationPages.observations.created') }}</th><th>{{ t('conservationPages.observations.height') }}</th><th>{{ t('conservationPages.observations.health') }}</th><th>{{ t('conservationPages.observations.status') }}</th></tr></thead><tbody><tr v-for="item in history" :key="item.id"><td>{{ item.id }}</td><td class="created-cell">{{ formatDate(item.createdAt) }}</td><td>{{ textOrUnavailable(item.height) }}</td><td>{{ label(item.healthStatus) }}</td><td>{{ label(item.status) }}</td></tr></tbody></table></div>
   </AppModal>
 </template>
 
 <style scoped>
+.filter-scope-note, .proposal-loading-note { color:#52685d; font-size:13px; line-height:1.5; }
+.proposal-warning { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:10px 14px; background:#fff7ed; color:#7c2d12; border-radius:8px; }
+.superseded > td { background:#f3f4f6; color:#4b5563; }
+.observations-table .submission-column { width: 14rem; }
+.terminal-read-only > td { background-color: #F3F4F6; color: #374151; }
+@media (max-width: 640px) { .observation-type-field { flex-basis: 100%; width: 100%; min-width: 0; } }
+
 .review-status-group { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .observations-table .status-cell .review-status-group .resubmission-tag { background: #FFF1DB; color: #926119; font-size: 12px; padding: 3px 8px; flex-shrink: 0; }
 
@@ -783,7 +893,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
 .officer-layout.officer-layout.officer-layout .observation-summary-title p { margin: 0; min-width: 0; color: inherit; font-size: .875rem; line-height: 1.5; }
 .observation-summary-title svg { flex: 0 0 20px; width: 20px; height: 20px; }
 .officer-layout.officer-layout.officer-layout .observation-summary-card strong { color: inherit; font-size: 1.875rem; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.observation-summary-card[data-status="Pending Review"] { --observation-summary-background: #e8f0f5; --observation-summary-ink: #315d78; }
+.observation-summary-card[data-status="Pending Review"] { --observation-summary-background: #FEF9C3; --observation-summary-ink: #854D0E; }
 .observation-summary-card[data-status="Correction Required"] { --observation-summary-background: #fff1db; --observation-summary-ink: #926119; }
 .observation-summary-card[data-status="Flagged"] { --observation-summary-background: #f0eaf8; --observation-summary-ink: #69459a; }
 .observation-summary-card[data-status="Rejected"] { --observation-summary-background: #fbe8e5; --observation-summary-ink: #a33f35; }
@@ -804,18 +914,30 @@ a.action-button { text-decoration: none; }
 .error-state .action-button { margin-top: 12px; }
 .observations-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
 .observations-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }
-.observations-table { width: 100%; min-width: 80rem; table-layout: auto; white-space: normal; border-collapse: separate; border-spacing: 0; }
+.observations-table { width: 100%; min-width: 92rem; table-layout: auto; white-space: normal; border-collapse: separate; border-spacing: 0; }
 .observations-table .observation-column { width: 11rem; }
 .observations-table .submitter-column { width: 13rem; }
 .observations-table .plant-column { width: 6rem; }
-.observations-table .species-column { width: 20%; }
-.observations-table .status-column, .observations-table .actions-column { width: 1%; }
+.observations-table .species-column { width: 15rem; }
+.observations-table .status-column { width: 10rem; }
+.observations-table .actions-column { width: 18rem; }
 .observations-table .created-column { width: 10rem; }
 .observations-table th, .observations-table td { padding: 12px 14px; text-align: left; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
+.observations-table th:nth-child(1), .observations-table td:nth-child(1) { min-width: 12rem; }
+.observations-table th:nth-child(2), .observations-table td:nth-child(2) { min-width: 14rem; }
+.observations-table th:nth-child(3), .observations-table td:nth-child(3) { min-width: 6rem; white-space: nowrap; overflow-wrap: normal; }
+.observations-table th:nth-child(4), .observations-table td:nth-child(4) { min-width: 14rem; }
+.observations-table th:nth-child(5), .observations-table td:nth-child(5) { min-width: 13rem; }
+.observations-table th:nth-child(7), .observations-table td:nth-child(7) { min-width: 10rem; white-space: nowrap; overflow-wrap: normal; }
+.observations-table td:first-child .identifier-line { flex-wrap: nowrap; width: max-content; }
+.observations-table td:first-child .identifier-line strong { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
+.observations-table td:nth-child(5) .identifier-line { flex-wrap: nowrap; align-items: center; }
+.observations-table td:nth-child(5) .identifier-line > span:first-child { white-space: normal; overflow-wrap: break-word; word-break: normal; }
 .observations-table th { background: #245443; color: #fff; border-bottom-color: #245443; font-size: 10px; font-weight: 700; line-height: 1.4; }
 .observations-table thead th:first-child { border-top-left-radius: 10px; }
 .observations-table thead th:last-child { border-top-right-radius: 10px; }
 .observations-table td { font-size: 12px; line-height: 1.5; }
+.observations-table th:nth-child(6), .observations-table th:nth-child(8) { min-width: 10rem; white-space: nowrap; overflow-wrap: normal; }
 .observations-table .status-cell, .observations-table .actions-cell { white-space: nowrap; }
 .observations-table .badge { display: inline-flex; align-items: center; width: max-content; max-width: none; box-sizing: border-box; white-space: nowrap; overflow-wrap: normal; font-size: 11px; line-height: 1.4; vertical-align: middle; }
 /* Auto-layout lets nonwrapping status/action content set its own minimum column width. */
@@ -841,6 +963,22 @@ a.action-button { text-decoration: none; }
 .submitted-image-preview { min-height: 150px; display: grid; place-items: center; background: #edf1e9; color: #63776d; }
 .submitted-image-preview img { width: 100%; height: 190px; object-fit: cover; }
 .asset-caption { padding: 12px; overflow-wrap: anywhere; }
+
+.historical-access { margin: 12px 0; color: #52665d; font-size: 12px; line-height: 1.5; }
+.historical-access summary { cursor: pointer; width: fit-content; }
+.historical-access summary:focus-visible { outline: 2px solid #33745d; outline-offset: 3px; }
+.historical-access p { margin: 6px 0; }
+.submission-type-badge { display: inline-flex; align-items: center; box-sizing: border-box; max-width: 100%; padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 700; line-height: 1.4; white-space: normal; overflow-wrap: normal; word-break: normal; }
+.submission-type-original { background-color: #e0f2fe; color: #075985; }
+.submission-type-edit { background-color: #f3e8ff; color: #6b21a8; }
 </style>
 
-<style src="../../styles/observation-dialog.css"></style>
+<style src="../../styles/observation-dialog.css">
+.historical-access { margin: 12px 0; color: #52665d; font-size: 12px; line-height: 1.5; }
+.historical-access summary { cursor: pointer; width: fit-content; }
+.historical-access summary:focus-visible { outline: 2px solid #33745d; outline-offset: 3px; }
+.historical-access p { margin: 6px 0; }
+.submission-type-badge { display: inline-flex; align-items: center; box-sizing: border-box; max-width: 100%; padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 700; line-height: 1.4; white-space: normal; overflow-wrap: normal; word-break: normal; }
+.submission-type-original { background-color: #e0f2fe; color: #075985; }
+.submission-type-edit { background-color: #f3e8ff; color: #6b21a8; }
+</style>

@@ -96,7 +96,7 @@ test('Login keeps advanced settings and account help in compact dialogs',async()
  assert.ok(find(collapsed.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Log In with Face ID'));
  assert.equal(find(collapsed.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Set Up Face ID'),undefined);
  assert.equal(find(collapsed.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Remove Face ID'),undefined);
- assert.equal(find(collapsed.tree,node=>node.type==='Text'&&text(node)==='Without a Visitor Account'),undefined);
+ assert.equal(find(collapsed.tree,node=>node.type==='Text'&&text(node)===english.login.exploreAsGuest),undefined);
  assert.equal(text(collapsed.tree).includes("Explore Niah's biodiversity as a visitor"),false);
  assert.equal(text(collapsed.tree).includes('Face flow:'),false);
  assert.ok(text(collapsed.tree).includes('Log in to your account'));
@@ -133,10 +133,10 @@ test('Login keeps advanced settings and account help in compact dialogs',async()
  assert.equal(find(expanded.tree,node=>node.type==='View'&&node.props?.style?.maxWidth===430).props.style.width,'100%');
  assert.ok(find(expanded.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Set Up Face ID'));
  assert.equal(find(expanded.tree,node=>node.props?.accessibilityLabel==='Previous account email'),undefined);
- assert.ok(find(expanded.tree,node=>node.type==='Text'&&text(node)==='Without a Visitor Account'));
- assert.ok(find(expanded.tree,node=>node.type==='Text'&&text(node)==='With a Visitor Account'));
+ assert.ok(find(expanded.tree,node=>node.type==='Text'&&text(node)===english.login.exploreAsGuest));
+ assert.ok(find(expanded.tree,node=>node.type==='Text'&&text(node)===english.login.visitorBenefitsHeading));
  assert.match(text(expanded.tree),/scan QR codes/);
- assert.match(text(expanded.tree),/authorized Botanists/);
+ assert.ok(text(expanded.tree).includes(english.login.visitorCompactBenefit));
  settingsModal.props.onRequestClose();
  assert.ok(expanded.assignments.some(([key,value])=>key===10&&value===false));
  find(expanded.tree,node=>node.type==='TouchableOpacity'&&text(node)==='Link Existing Face ID').props.onPress();

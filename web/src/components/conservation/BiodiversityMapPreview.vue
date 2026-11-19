@@ -35,7 +35,7 @@ const mappedPlants = computed(() =>
 const markerIcon = () =>
   L.divIcon({
     className: 'preview-plant-marker-host',
-    html: `<span class="preview-plant-marker-pin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 20v-5m0 0c-4.8 0-7-2.7-7-6.7 3.8-.5 6.4.9 7 4.1.6-3.2 3.2-4.6 7-4.1 0 4-2.2 6.7-7 6.7Z"/></svg></span>`,
+    html: `<span class="preview-plant-marker-pin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17,8C8,10,5.9,16.17,3.82,21.34L5.71,22l1-2.3A4.49,4.49,0,0,0,8,20C19,20,22,3,22,3,21,5,14,5.25,9,6.25S2,11.5,2,13.5a6.22,6.22,0,0,0,1.75,3.75C7,8,17,8,17,8Z"/></svg></span>`,
     iconSize: [38, 46],
     iconAnchor: [19, 44],
     tooltipAnchor: [0, -38],
@@ -197,7 +197,11 @@ onBeforeUnmount(() => {
 :deep(.preview-plant-marker-pin svg) {
   width: 22px;
   height: 22px;
-  fill: currentColor;
+  fill: #FFFFFF;
+  stroke: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   transform: rotate(45deg);
 }
 :deep(.preview-plant-marker-host:hover .preview-plant-marker-pin),

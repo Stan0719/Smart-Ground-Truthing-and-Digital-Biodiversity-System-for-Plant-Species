@@ -62,9 +62,9 @@ test("actual Observation Details renders Edit for an owned current Approved Obse
     { observationVersionSnapshot: { content: approved.content, status: "Approved" } })), false,
   "an approved historical snapshot remains read-only");
   for (const origin_type of ["initial_registration", "unknown"])
-    assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type })), true, origin_type);
+    assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type })), false, origin_type);
   assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type: "initial_registration" }, [], {},
-    { versioningActive: true, editCapabilityVerified: true })), true, "verified initial-registration origin is eligible");
+    { versioningActive: true, editCapabilityVerified: true })), false, "initial registration belongs to Edit Plant");
   assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type: undefined }, [], {},
     { versioningActive: true, editCapabilityVerified: true })), false, "missing provenance is not eligible in version-aware mode");
   assert.equal(hasEditObservationButton(renderObservationDetails({ ...approved, origin_type: "unknown", raw_origin_type: "initial_registration" }, [], {},
@@ -82,7 +82,7 @@ test("Observation Details renders the Plant-style summary, numbered sections, ph
   const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
   const text = (node) => typeof node === "string" ? node : children(node).map(text).join(" ");
   const find = (node, predicate) => predicate(node) ? node : children(node).map((child) => find(child, predicate)).find(Boolean);
-  const row = { id: "obs-20", plant_id: 20, owner_subject: "staff:owner", status: "Approved",
+  const row = { id: "obs-20", plant_id: 20, owner_subject: "staff:owner", status: "Approved", origin_type: "subsequent_observation",
     review_comment: "Current feedback", recorded_by_name: "Author Botanist",
     content: { heightCm: 40, healthStatus: "Healthy", lifeStage: "Mature", morphology: "Broad leaves",
       taxonomy: "Taxonomy note", notes: "Field note", latitude: 4.5, longitude: 113.7, accuracy_m: 3,
@@ -337,7 +337,7 @@ test("version-aware Observation editing requires verified origin and Officer dec
   assert.match(detail, /plantApi\("\/observation-edits\/capabilities"/);
   assert.match(detail, /versioningActive: capability\?\.versioning_available === true/);
   assert.match(detail, /editCapabilityVerified &&[\s\S]*canStartObservationEdit\(row, state\.editHistory, activeEdit, selectedDetail, accountId, state\.versioningActive\)/);
-  assert.match(helper, /\["initial_registration", "subsequent_observation"\]\.includes\(row\?\.origin_type\)/);
+  assert.match(helper, /row\?\.origin_type === "subsequent_observation"/);
   assert.match(review, /body: \{ decision, comment: comment\.trim\(\), revision: selected\.revision \}/);
 });
 
@@ -383,7 +383,7 @@ test("status badges, separate Officer Review, and active request actions cover a
   const owned = { owner_subject: "staff:owner", status: "Approved", origin_type: "subsequent_observation" };
   assert.equal(canStartObservationEdit(owned, { edits: [] }, null, false, "owner"), true);
   for (const origin_type of ["initial_registration", "unknown"])
-    assert.equal(canStartObservationEdit({ ...owned, origin_type }, { edits: [] }, null, false, "owner"), true);
+    assert.equal(canStartObservationEdit({ ...owned, origin_type }, { edits: [] }, null, false, "owner"), false);
   for (const status of ["Pending Review", "Correction Required", "Rejected", "Cancelled", "Superseded"])
     assert.equal(canStartObservationEdit({ ...owned, status }, { edits: [] }, null, false, "owner"), false, status);
   assert.equal(canStartObservationEdit(owned, { edits: [] }, { id: "active" }, false, "owner"), false);
@@ -609,3 +609,21 @@ test("Observation correction actions remain inside Officer Review after removing
   const foreign=renderObservationDetails({...row,owner_subject:"staff:other"});
   assert.equal(find(foreign,node=>node?.props?.testID==="observation-section-04"),undefined);
 });
+
+
+test('direct new-edit form rejects initial and missing origin while retaining existing proposal correction', () => {
+  const formSource = source('../screens/FieldCollection.js');
+  const start = formSource.indexOf('  function createDraft()');
+  const end = formSource.indexOf('  const autoSaveMeaningful', start);
+  const build = new Function('observationFields','form','photos','observationEditMode','originalObservation','user','editRequest','route','draftKey','t',
+    formSource.slice(start,end) + '\nreturn createDraft();');
+  for (const origin of ['initial_registration','unknown',undefined,'subsequent_observation']) {
+    const observation={id:'obs',plant_id:7,owner_subject:'staff:owner',status:'Approved',revision:1,origin_type:origin,assets:[]};
+    const call=request=>build([],{},[],true,observation,{id:'owner'},request,{params:{}},{current:'new-key'},key=>key);
+    if(origin==='subsequent_observation') assert.equal(call(null).path,'/observation-edits');
+    else assert.throws(()=>call(null),/ownedApprovedRequired/);
+    const correction=call({id:'legacy',revision:2,status:'Correction Required',retained_photo_ids:[]});
+    assert.equal(correction.path,'/observation-edits/legacy'); assert.equal(correction.body.revision,2);
+  }
+  assert.match(formSource, /currentObservation\.origin_type !== "subsequent_observation"/);
+})
