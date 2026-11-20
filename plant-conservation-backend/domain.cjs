@@ -3,6 +3,7 @@ const { observationHistory, captureApprovedReview, submittedHistoryForReview } =
 const { resolvePlantRegistrations, registrationLocation } = require("./plant-registration.cjs");
 const { finalRejection } = require("./final-rejection.cjs");
 const { withSubmissionUpdates } = require("./submission-updates.cjs");
+const { projectObservationGps } = require("./observation-gps.cjs");
 const { withResubmissionEvidence } = require('./observation-resubmission.cjs');
 const { randomUUID, randomBytes, createHash } = require("node:crypto");
 const { originColumnAvailable, classifyObservations } = require("./observation-origin.cjs");
@@ -825,6 +826,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             WHERE a.observation_id = o.id
           ), '[]') AS assets,
           p.species_id,
+          COALESCE(v.visibility, 'protected') = ANY($3::text[]) AS gps_visibility_allowed,
           CASE WHEN $1 OR COALESCE(v.visibility, 'protected') = ANY($3::text[]) THEN p.scientific_name END AS plant_scientific_name,
           CASE WHEN $1 OR COALESCE(v.visibility, 'protected') = ANY($3::text[]) THEN s.scientific_name END AS species_scientific_name,
           CASE
@@ -888,7 +890,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       const enriched = await enrichObservationRead(rows, officer);
       const updated = await withSubmissionUpdates(pool, enriched, officer);
       const projected = officer ? await observationHistory(pool, updated) : updated;
-      return res.json({ observation: projectGps(projected[0], req.user) });
+      return res.json({ observation: projectObservationGps(projected[0], req.user, subject(req.user), projectGps) });
     }
     const hasMore = pageOptions && rows.length > pageOptions.limit;
     const batch = pageOptions ? rows.slice(0, pageOptions.limit) : rows;
@@ -897,7 +899,8 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     const enriched = await enrichObservationRead(visible, officer, true);
     const updated = await withSubmissionUpdates(pool, enriched, officer);
     const projected = officer ? await observationHistory(pool, updated) : updated;
-    res.json({ observations: projectGps(projected.map(({ queue_created_at, ...row }) => row), req.user),
+    res.json({ observations: projected.map(({ queue_created_at, ...row }) =>
+      projectObservationGps(row, req.user, subject(req.user), projectGps)),
       ...(pageOptions ? { page: queuePage(batch, pageOptions, Boolean(hasMore)) } : {}) });
   };
   app.get(

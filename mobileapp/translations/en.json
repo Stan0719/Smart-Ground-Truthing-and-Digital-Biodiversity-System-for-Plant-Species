@@ -358,6 +358,7 @@
     "resume": "Resume",
     "savedStatus": "Saved",
     "lastSaved": "Last saved",
+    "notAvailable": "Not available",
     "savedLocally": "Saved on this device",
     "photoCount": "{{count}} saved photo(s)",
     "openDrafts": "Open My Drafts",
@@ -1580,6 +1581,7 @@
     "reviewComments": "Reviewer Comments"
   },
   "recordEdits": {
+    "noEditChanges": "Change at least one field or photo before submitting.",
     "registrationUnavailable": "The current approved Plant registration could not be verified. Your draft has not been changed.",
     "finalRejected": "Rejected is final. This submission is read-only and cannot be edited or resubmitted.",
     "automaticRejection": "Automatic linked registration rejection caused by the species decision",

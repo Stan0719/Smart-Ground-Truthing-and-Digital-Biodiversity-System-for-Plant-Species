@@ -29,6 +29,7 @@ function renderObservationDetails(observation, edits = [], params = {}, capabili
     "../utils/apiConfiguration": { mobileApiUrl: () => "https://example.invalid" },
     "@expo/vector-icons/Ionicons": { default: "Ionicons" },
     "../components/EditAction": { default: "EditAction" },
+    "../utils/statusRefresh": { watchStatus: () => () => {} },
     "../utils/observationDetails": { canStartObservationEdit, canWithdrawOriginalObservation, observationContentFields, observationDetailContent },
   };
   const code = ts.transpileModule(source("../screens/NotificationObservation.js"), { fileName: "NotificationObservation.jsx",
@@ -369,6 +370,19 @@ test("Observation Details displays every backend-supported content field from th
   assert.match(detail, /requestSelection = !originalSelection && Boolean\(route\.params\?\.editRequestId\)/);
   assert.match(detail, /originalSelection \? null : route\.params\?\.editRequestId/);
   assert.match(detail, /selectedDetail = historicalSelection \|\| requestSelection/);
+});
+
+test("Edit Observation reads original GPS from the selected Observation content", () => {
+  const form = source("../screens/FieldCollection.js");
+  assert.match(form, /const originalObservation = route\.params\?\.observation \|\| route\.params\?\.draft\?\.observation_snapshot/);
+  assert.match(form, /const originalObservationContent = originalObservation\?\.content \|\| \{\}/);
+  assert.match(form, /originalValue=\{originalObservationContent\[field\] \?\? originalObservation\?\.\[field\]\}/);
+  const first = { id: "first", content: { latitude: 0, longitude: 110.3, altitudeM: 0, accuracy_m: null } };
+  const second = { id: "second", content: { latitude: 1.5, longitude: 111, altitudeM: 19, accuracy_m: 13 } };
+  assert.equal(first.content.latitude ?? "Not available", 0);
+  assert.equal(second.content.latitude, 1.5);
+  assert.equal(first.content.accuracy_m ?? "Not available", "Not available");
+  assert.equal(second.content.accuracy_m, 13);
 });
 
 test("status badges, separate Officer Review, and active request actions cover all review states", () => {

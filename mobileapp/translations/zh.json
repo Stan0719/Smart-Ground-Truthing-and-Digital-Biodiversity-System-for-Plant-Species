@@ -368,6 +368,7 @@
     "resume": "继续编辑",
     "savedStatus": "已保存",
     "lastSaved": "上次保存",
+    "notAvailable": "暂无数据",
     "savedLocally": "已保存在此设备",
     "photoCount": "已保存 {{count}} 张照片",
     "openDrafts": "打开我的草稿",
@@ -1580,6 +1581,7 @@
     "reviewComments": "审核意见"
   },
   "recordEdits": {
+    "noEditChanges": "??????????????????",
     "registrationUnavailable": "????????????????????????",
     "finalRejected": "拒绝为最终决定。此提交仅供查看，无法编辑或重新提交。",
     "automaticRejection": "因物种审核决定而自动拒绝关联植株登记",

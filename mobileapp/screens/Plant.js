@@ -5,6 +5,7 @@ import LanguageSelector from "../components/LanguageSelector";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 
 import {
+  AppState,
   View,
   Text,
   StyleSheet,
@@ -216,11 +217,15 @@ export default function Species({
     } else {
       void loadSpeciesPlants(false);
     }
+    const subscription = !publicOnly ? AppState?.addEventListener("change", (state) => {
+      if (state === "active") void loadSpeciesPlants(true);
+    }) : null;
     return () => {
+      subscription?.remove();
       const { key, id, nextCursor, canResume } = requestRef.current;
       requestRef.current = { key, id: id + 1, nextCursor, canResume, promise: null };
     };
-  }, [listRequestKey, loadSpeciesPlants]));
+  }, [listRequestKey, loadSpeciesPlants, publicOnly]));
 
   const loadMorePlants = async (retry = false) => {
     const active = requestRef.current;

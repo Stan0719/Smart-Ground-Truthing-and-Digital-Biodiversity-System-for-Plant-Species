@@ -132,6 +132,25 @@ function plantRegistrationHistory(rows) {
   return visible;
 }
 
+export function formatSubmissionTimestamp(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const timestamp = value.trim();
+  const dateOnly = /^(\d{4})([-/])(\d{2})\2(\d{2})$/.exec(timestamp);
+  if (dateOnly) {
+    const [, year, , month, day] = dateOnly;
+    const isoDate = `${year}-${month}-${day}`;
+    const date = new Date(isoDate);
+    return Number.isFinite(date.getTime()) && date.toISOString().startsWith(isoDate)
+      ? `${year}/${month}/${day}` : "";
+  }
+  // Keep the API's offset, or local wall time when it supplies no offset.
+  const date = new Date(timestamp.replace(/^(\d{4}-\d{2}-\d{2}) (?=\d{2}:)/, "$1T"));
+  if (!Number.isFinite(date.getTime()) || !/\d{2}:\d{2}/.test(timestamp)) return "";
+  const pad = (number) => String(number).padStart(2, "0");
+  const hours = date.getHours();
+  return `${String(date.getFullYear()).padStart(4, "0")}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}, ${pad(hours % 12 || 12)}:${pad(date.getMinutes())} ${hours < 12 ? "AM" : "PM"}`;
+}
+
 export function versionCardItems(kind, targetId, response) {
   if (!response?.history_available) return [];
   const byKey = new Map();
@@ -338,6 +357,7 @@ export function groupStatusSummary(group) {
 
 export function versionDisplayLabel(row) {
   if (row.original) return t("recordEdits.originalLabel");
+  if (row.kind === "species" && (row.edited || row.versionNumber > 1)) return t("submissions.editWithoutNumber");
   if (row.kind === "plant") {
     if (row.plantEditNumber) return t("recordEdits.editNumber", { number: row.plantEditNumber });
     if (row.edited) return t("submissions.editWithoutNumber");
@@ -493,6 +513,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   const [versionHistoryAvailable, setVersionHistoryAvailable] = useState({});
   const versionRowsRef = useRef({});
   const versionHistoryAvailableRef = useRef({});
+  const versionSignaturesRef = useRef({});
   const loadedAccountRef = useRef(accountId);
   const [versionLoading, setVersionLoading] = useState(false);
   const [versionLoadFailed, setVersionLoadFailed] = useState(false);
@@ -503,6 +524,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   const [tab, setTab] = useState("plants");
   const [filter, setFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [versionOwner, setVersionOwner] = useState(accountId);
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -513,26 +535,41 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
     if (loadedAccountRef.current !== accountId) {
       loadedAccountRef.current = accountId;
       versionRowsRef.current = {}; versionHistoryAvailableRef.current = {};
+      versionSignaturesRef.current = {};
+      setVersionOwner(accountId);
       setVersionRows({}); setVersionHistoryAvailable({}); setExpandedGroups({});
     }
+    const signatures = {};
+    const targets = [...new Map([
+      ...plants.map((record) => ({ kind: "plant", id: record.id, record })),
+      ...requests.map((record) => ({ kind: "species", id: record.request_id, record })),
+    ].filter((item) => item.id != null).map((item) => [item.kind + ":" + item.id, item])).values()].filter(({ kind, id, record }) => {
+      const key = kind + ":" + id;
+      const changes = (recordChanges || []).filter((change) => String(kind === "plant" ? change.plant_id : change.base_snapshot?.request_id) === String(id));
+      signatures[key] = JSON.stringify([record.status, record.request_status, record.initialSubmissionStatus,
+        record.initialObservation?.revision, record.current_registration?.version_id, record.content_revision,
+        record.reviewed_at, changes.map((change) => [change.id, change.status, change.revision, change.reviewed_at])]);
+      return versionSignaturesRef.current[key] !== signatures[key];
+    });
+    if (!targets.length) { setVersionLoading(false); return undefined; }
     setVersionLoadFailed(false);
     setVersionLoading(true);
-    const targets = [...new Map([
-      ...plants.map((item) => ({ kind: "plant", id: item.id })),
-      ...requests.map((item) => ({ kind: "species", id: item.request_id })),
-    ].filter((item) => item.id != null).map((item) => [item.kind + ":" + item.id, item])).values()];
     const loadVersions = async () => {
       const loadedRows = {}, availability = {};
       let failed = false;
+      const verifiedSignatures = {};
       for (let offset = 0; offset < targets.length; offset += 5) {
+        if (!active) return;
         const batch = await Promise.all(targets.slice(offset, offset + 5).map(async ({ kind, id }) => {
           const key = kind + ":" + id;
           try {
             const response = await plantApi("/record-versions?kind=" + kind + "&id=" + encodeURIComponent(id), { expectedAccountId: accountId });
             const complete = mergeRecordChangeSubmissions(kind, id, response, recordChanges);
+            verifiedSignatures[key] = signatures[key];
             return [key, versionCardItems(kind, id, complete), Boolean(complete.history_available)];
           } catch {
             failed = true;
+            if (versionHistoryAvailableRef.current[key]) return null;
             const complete = mergeRecordChangeSubmissions(kind, id, null, recordChanges);
             return [key, versionCardItems(kind, id, complete), Boolean(complete.history_available)];
           }
@@ -552,6 +589,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
         });
       } catch { /* Keep version rows; their snapshots remain available through the detail screen. */ }
       if (active) {
+        versionSignaturesRef.current = { ...versionSignaturesRef.current, ...verifiedSignatures };
         versionRowsRef.current = { ...versionRowsRef.current, ...loadedRows };
         versionHistoryAvailableRef.current = { ...versionHistoryAvailableRef.current, ...availability };
         setVersionRows(versionRowsRef.current);
@@ -575,7 +613,8 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
 
   const records = tab === "plants" ? plants : requests;
   const kind = tab === "plants" ? "plant" : "species";
-  const groups = buildSubmissionGroups(records, kind, versionRows, versionHistoryAvailable);
+  const groups = buildSubmissionGroups(records, kind, versionOwner === accountId ? versionRows : {},
+    versionOwner === accountId ? versionHistoryAvailable : {});
   const data = filterSubmissionGroups(groups, filter);
   const searchedData = data.filter((group) => submissionGroupMatchesSearch(group, tab, searchQuery));
   const selectFilter = (value) => {
@@ -677,7 +716,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
       </TouchableOpacity>
       {expanded && <View style={styles.versionList}>{group.versions.map((version) => {
         const matchesFilter = filter !== "all" && statusMatches(version.status, filter);
-        const date = version.createdAt && Number.isFinite(Date.parse(version.createdAt)) ? new Date(version.createdAt).toLocaleDateString() : "";
+        const date = formatSubmissionTimestamp(version.createdAt);
         return <TouchableOpacity key={version.key} testID={"submission-version-" + group.key + "-" + version.key}
           style={[styles.versionRow, matchesFilter && styles.matchingVersionRow]} activeOpacity={0.78}
           accessibilityRole="button" accessibilityLabel={versionDisplayLabel(version) + ", " + (version.correctionResolved

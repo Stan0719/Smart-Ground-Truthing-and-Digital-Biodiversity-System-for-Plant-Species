@@ -32,7 +32,8 @@ export default function BotanistMyObservations({ navigation, user }) {
   const { width } = useWindowDimensions();
   const tablet = width >= 768;
   const accountId = user?.role?.toLowerCase() === "botanist" ? user.id : null;
-  const [items, setItems] = useState([]);
+  const [observed, setObserved] = useState({ accountId: null, items: [] });
+  const items = observed.accountId === accountId ? observed.items : [];
   const [versionHistoryError, setVersionHistoryError] = useState(false);
   const [loading, setLoading] = useState(Boolean(accountId));
   const [loaded, setLoaded] = useState(false);
@@ -42,16 +43,18 @@ export default function BotanistMyObservations({ navigation, user }) {
   const [filter, setFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const requestId = useRef(0);
+  const pendingRead = useRef(null);
   const filterRef = useRef(filter);
   const searchRef = useRef(searchQuery);
 
   const load = useCallback(async (refresh = false) => {
+    if (pendingRead.current?.accountId === accountId) return;
     const currentRequest = ++requestId.current;
     if (refresh) setRefreshing(true);
     else setLoading(true);
     setError("");
     if (!accountId) {
-      setItems([]);
+      setObserved({ accountId: null, items: [] });
       setExpandedIds(new Set());
       setError(t("myObservations.botanistAccountRequired"));
       setLoading(false);
@@ -59,17 +62,20 @@ export default function BotanistMyObservations({ navigation, user }) {
       setLoaded(true);
       return;
     }
+    pendingRead.current = { accountId, currentRequest };
     try {
       const result = await fetchMyObservations(accountId, user?.name || user?.displayName, plantApi);
       if (currentRequest !== requestId.current) return;
       const observations = await withObservationPhotoSources(result.observations, accountId, plantAssetSources);
       if (currentRequest !== requestId.current) return;
-      setItems(observations);
+      setObserved({ accountId, items: observations });
       setExpandedIds((currentIds) => retainVisibleObservationExpansion(currentIds, observations, filterRef.current, searchRef.current));
       setVersionHistoryError(result.versionHistoryError);
     } catch (cause) {
+      if (currentRequest === requestId.current && [401, 403].includes(cause?.status)) setObserved({ accountId: null, items: [] });
       if (currentRequest === requestId.current) setError(cause instanceof Error ? cause.message : t("myObservations.loadFailed"));
     } finally {
+      if (pendingRead.current?.currentRequest === currentRequest) pendingRead.current = null;
       if (currentRequest === requestId.current) {
         setLoading(false);
         setRefreshing(false);
@@ -80,7 +86,7 @@ export default function BotanistMyObservations({ navigation, user }) {
 
   useFocusEffect(useCallback(() => {
     void load(false);
-    return () => { requestId.current += 1; };
+    return () => { pendingRead.current = null; requestId.current += 1; };
   }, [load]));
 
   const visibleItems = items.filter((item) => observationMatchesFilter(item, filter) && observationMatchesSearch(item, searchQuery));

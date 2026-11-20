@@ -1,5 +1,34 @@
 import * as submissionSearch from '../utils/submissionSearch.js';
 import test from "node:test";
+import { watchStatus } from "../utils/statusRefresh.js";
+
+test("submission timestamps keep version precision and display in device-local time", () => {
+  const previous = process.env.TZ;
+  process.env.TZ = "Asia/Kuala_Lumpur";
+  try {
+    const { formatSubmissionTimestamp: format, versionCardItems } = submissionsUtils();
+    for (const kind of ["plant", "species"]) {
+      const versions = [
+        { id: "original", version_number: 1, status: "Approved", created_at: "2026-11-20T07:42:00Z" },
+        { id: "snapshot", version_number: 2, status: "Superseded", created_at: "2026-11-21T00:00:00+08:00" },
+        { id: "edit", version_number: 3, status: "Pending Review", created_at: "2026-11-22T12:05:00" },
+      ];
+      const rows = versionCardItems(kind, "8", { history_available: true, versions, prior_changes: [] });
+      assert.deepEqual(rows.map((row) => row.status), versions.map((row) => row.status));
+      assert.deepEqual(rows.map((row) => format(row.createdAt)),
+        ["2026/11/20, 03:42 PM", "2026/11/21, 12:00 AM", "2026/11/22, 12:05 PM"]);
+    }
+    for (const language of ["en", "ms", "zh"])
+      assert.equal(translatedSubmissions(language).formatSubmissionTimestamp("2026-11-20T07:42:00Z"), "2026/11/20, 03:42 PM");
+    assert.equal(format("2026-11-20"), "2026/11/20");
+    assert.equal(format("2026/11/20"), "2026/11/20");
+    assert.equal(format("2026-02-30"), "");
+    assert.equal(format(null), "");
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -171,6 +200,29 @@ test("actual Plant edits and correction revisions retain exact identifiers and d
   assert.equal(dashboard.submissionVersionRoute(rows[3], { id: "other" })[1].selectedChangeId, undefined);
   const corrected = dashboard.versionDetailParams(rows[2], { id: "owner" });
   assert.equal(corrected.versionId, "edit-a-r2"); assert.equal(corrected.historicalVersionNumber, 5);
+});
+
+test("Species request versions use unnumbered Edit labels while preserving each version", () => {
+  for (const language of ["en", "ms", "zh"]) {
+    const dashboard = translatedSubmissions(language);
+    const versions = [
+      { id: "species-original", version_number: 1, status: "Superseded", created_at: "2026-11-17T10:00:00Z", snapshot: { scientific_name: "Species A" } },
+      { id: "species-edit-1", version_number: 2, status: "Approved", created_at: "2026-11-18T10:00:00Z", snapshot: { scientific_name: "Species B" } },
+      { id: "species-edit-2", version_number: 3, status: "Approved", created_at: "2026-11-19T10:00:00Z", snapshot: { scientific_name: "Species C" } },
+      { id: "species-edit-3", version_number: 4, status: "Pending Review", created_at: "2026-11-20T10:00:00Z", snapshot: { scientific_name: "Species D" } },
+    ];
+    const rows = dashboard.versionCardItems("species", 4, { history_available: true, versions });
+    const catalog = JSON.parse(read(`translations/${language}.json`));
+    assert.deepEqual(rows.map(dashboard.versionDisplayLabel), [catalog.recordEdits.originalLabel, ...Array(3).fill(catalog.submissions.editWithoutNumber)]);
+    assert.deepEqual(rows.map((row) => row.versionId), versions.map((row) => row.id));
+    assert.deepEqual(rows.map((row) => row.createdAt), versions.map((row) => row.created_at));
+    assert.deepEqual(rows.map((row) => row.status), versions.map((row) => row.status));
+    for (let index = 0; index < rows.length; index++) {
+      const params = dashboard.submissionVersionRoute(rows[index], { id: "owner" })[1];
+      if (rows[index].current && rows[index].status === "Approved") assert.equal(params.requestId, "4");
+      else assert.equal(params.versionId, versions[index].id);
+    }
+  }
 });
 
 test("direct Plant correction is recognized from its owned same-Observation snapshot chain, not from null change_id", () => {
@@ -1109,11 +1161,11 @@ test("actual focus hook reads once per focus, avoids rerender loops and refreshe
   const hooks = { useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = initial; return [slots[i], (value) => { slots[i] = value; }]; },
     useMemo: (fn, deps) => { const i = index++; if (!slots[i] || deps.some((d, j) => d !== slots[i].deps[j])) slots[i] = { deps, value: fn() }; return slots[i].value; } };
   hooks.useCallback = (fn, deps) => hooks.useMemo(() => fn, deps);
-  const hook = moduleFrom("utils/useBotanistRecords.js", { react: hooks, "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } }, "react-native": { AppState: { addEventListener: () => ({ remove() {} }) } }, "./botanistRecords": { ...api, fetchBotanistRecords: async () => { reads++; return { plants: rows, observations, requests }; } } });
+  const hook = moduleFrom("utils/useBotanistRecords.js", { react: hooks, "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } }, "react-native": { AppState: { addEventListener: () => ({ remove() {} }) } }, "./statusRefresh": { watchStatus }, "./botanistRecords": { ...api, fetchBotanistRecords: async () => { reads++; return { plants: rows, observations, requests }; } } });
   const render = () => { index = 0; return hook.useBotanistRecords("owner"); };
   render(); const firstFocus = focus, cleanup = focus();
   await render().refresh(); assert.equal(reads, 1); render(); assert.equal(focus, firstFocus);
-  cleanup(); focus(); await render().refresh(); assert.equal(reads, 2);
+  cleanup(); const leaveAgain = focus(); await render().refresh(); assert.equal(reads, 2); leaveAgain();
 });
 test("actual plant detail loads the existing owned ID from API and displays its separate species information", async () => {
   let index = 0, slots = [], focus, requested;

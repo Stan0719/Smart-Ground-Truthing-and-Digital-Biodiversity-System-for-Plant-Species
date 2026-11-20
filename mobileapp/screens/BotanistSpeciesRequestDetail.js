@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import { AppState, ActivityIndicator, View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, submissionStatus, canWithdrawOriginalSpecies } from "../utils/botanistRecords";
 import EditAction from "../components/EditAction";
@@ -27,6 +27,10 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
   const withdrawalInFlight = useRef(false);
   useFocusEffect(useCallback(() => {
     let active = true;
+    const subscription = AppState?.addEventListener("change", (state) => {
+      if (state === "active") setRevision((value) => value + 1);
+    });
+    const leave = () => { active = false; subscription?.remove(); };
     setChangeInfo(null);
     setActiveSelectedChangeId(null);
     setChangeError("");
@@ -62,7 +66,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
       }).catch((error) => {
         if (active) setChangeError(error.message);
       });
-      return () => { active = false; };
+      return leave;
     }
     setEditAvailability("checking");
     setState((previous) => ({ key, request: previous.key === key ? previous.request : null, loading: true, error: "" }));
@@ -81,7 +85,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
       setChangeError(error.message);
       setEditAvailability("unavailable");
     });
-    return () => { active = false; };
+    return leave;
   }, [key, accountId, requestId, revision, historicalDetail, route.params?.historicalSnapshot,
     route.params?.selectedChangeId, route.params?.selectedChangeRevision,
     route.params?.historicalVersionStatus, route.params?.historicalVersionDate, route.params?.historicalReviewedAt,

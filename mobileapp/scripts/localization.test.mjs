@@ -195,6 +195,7 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
     "../components/GpsLocationPicker": { default: "GpsLocationPicker" },
     "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }), refresh: async () => { network.push(["inventory-refresh"]); return true; }, addGenerated: () => 1, retire: (id) => network.push(["inventory-retire", id]) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
     "../utils/qrPrint": { A4_PRINT_OPTIONS, buildQRPrintHtml }, "../data/mockData": { botanistPlantRecords: [] },
+    "../utils/statusRefresh": { watchStatus: () => () => {} },
     "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ items: notificationItems, loading: false, loaded: true, error: "", unreadCount: notificationItems.filter((item) => !item.read).length, refresh: async () => {} }) },
     "../utils/useBotanistRecords": { useBotanistRecords: () => ({ plants: [], observations: [], requests: [], loading: false, loaded: true, error: "", refresh: async () => {} }) },
     "../utils/botanistRecords": { submissionStatus: (value) => String(value).toLowerCase() === "pending review" ? "pending" : String(value).toLowerCase(),

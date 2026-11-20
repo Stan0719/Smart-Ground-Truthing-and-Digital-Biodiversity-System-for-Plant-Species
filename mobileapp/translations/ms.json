@@ -358,6 +358,7 @@
     "resume": "Sambung",
     "savedStatus": "Disimpan",
     "lastSaved": "Terakhir disimpan",
+    "notAvailable": "Tidak tersedia",
     "savedLocally": "Disimpan pada peranti ini",
     "photoCount": "{{count}} foto disimpan",
     "openDrafts": "Buka Draf Saya",
@@ -1580,6 +1581,7 @@
     "reviewComments": "Ulasan Penyemak"
   },
   "recordEdits": {
+    "noEditChanges": "Ubah sekurang-kurangnya satu medan atau foto sebelum menghantar.",
     "registrationUnavailable": "Pendaftaran Tumbuhan diluluskan semasa tidak dapat disahkan. Draf anda tidak diubah.",
     "finalRejected": "Penolakan adalah muktamad. Penyerahan ini hanya boleh dibaca dan tidak boleh disunting atau dihantar semula.",
     "automaticRejection": "Penolakan pendaftaran berkaitan secara automatik akibat keputusan spesies",
