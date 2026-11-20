@@ -48,7 +48,7 @@ test('transport sends versioned summary path with exact custom dates, device and
   } finally { globalThis.fetch = original }
 })
 const transpile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-function harness(responder = async (_filters, _device, metric) => fixture(metric), language = 'en') {
+function harness(responder = async (_filters, _device, metric) => fixture(metric), language = 'en', deviceOptions = [{ sensor_id: 'sensor', device_name: 'Sensor One' }, { sensor_id: 'second', device_name: 'Second' }]) {
   const filename = 'components/conservation/IoTEnvironmentalReport.vue', { descriptor } = parse(read(filename))
   const script = compileScript(descriptor, { id: 'iot-summary' })
   const template = compileTemplate({ source: descriptor.template.content, filename, id: 'iot-summary', compilerOptions: { bindingMetadata: script.bindings } })
@@ -65,7 +65,7 @@ function harness(responder = async (_filters, _device, metric) => fixture(metric
     if (name === 'vue') return { ...vue, onBeforeUnmount: fn => cleanup = fn, resolveComponent: name => name, withDirectives: node => node }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: (key, params = {}) => (resolve(key) || key).replace(/\{(\w+)\}/g, (_, name) => params[name] ?? `{${name}}`), te: key => !!resolve(key), locale }) }
     if (name === 'jspdf') return { jsPDF: class { save(name) { saves.push(name) } } }
-    if (name.includes('iotMonitoring')) return { loadCanonicalDevices: async () => [{ sensor_id: 'sensor', device_name: 'Sensor One' }, { sensor_id: 'second', device_name: 'Second' }] }
+    if (name.includes('iotMonitoring')) return { loadCanonicalDevices: async () => deviceOptions }
     if (name.includes('iotReporting')) return { measurementUnits, IoTReportError: class extends Error {}, requestIoTSummary: async (...args) => { calls.push(args); return responder(...args) } }
     if (name.includes('officerMonitoringDisplay')) return { monitoringDate: (date, lang) => new Intl.DateTimeFormat(lang, { timeZone: 'Asia/Kuala_Lumpur', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(date)) }
     if (name.includes('iotBucketDisplay')) return { iotBucketLabel, iotAxisLabel, iotDate, iotTimestamp, iotVisibleTickIndexes }
@@ -84,7 +84,7 @@ function harness(responder = async (_filters, _device, metric) => fixture(metric
 const flush = async () => { await vue.nextTick(); await new Promise(resolve => setImmediate(resolve)); await vue.nextTick() }
 function nodes(root) { const result = []; function walk(v) { if (Array.isArray(v)) return v.forEach(walk); if (!v || typeof v !== 'object') return; result.push(v); if (Array.isArray(v.children)) walk(v.children) } walk(root); return result }
 test('rendered report has four cards, seven columns, honest CSV, quality explanations and bounded PDF', async () => {
-  const h = harness(); await flush()
+  const h = harness(); await flush(); h.state.reportView.value = 'table'
   const tree = nodes(h.render())
   assert.equal(tree.filter(n => n.props?.class === 'iot-card').length, 4)
   assert.equal(tree.filter(n => n.type === 'th').length, 7)
@@ -97,6 +97,25 @@ test('rendered report has four cards, seven columns, honest CSV, quality explana
   assert.ok(h.models[0].notes.some(c => c.value.includes('Sensor availability has not been verified.')))
   assert.ok(!h.models[0].notes.some(c => c.value.includes('never arrived')))
   assert.equal(h.saves.length, 1); h.stop()
+})
+test('IoT environmental report switches between graph and table views', async () => {
+  const h = harness(); await flush()
+  let tree = nodes(h.render())
+  assert.ok(tree.some(node => node.props?.['aria-label'] === 'Graph'))
+  assert.ok(!tree.some(node => node.props?.['aria-label'] === 'Table'))
+  h.state.reportView.value = 'table'
+  tree = nodes(h.render())
+  assert.ok(tree.some(node => node.props?.['aria-label'] === 'Table'))
+  assert.ok(!tree.some(node => node.props?.['aria-label'] === 'Graph'))
+  h.stop()
+})
+test('plantsensordevice is the default when it is available, with other devices retained', async () => {
+  const options = [{ sensor_id: 'sensor', device_name: 'Sensor One' }, { sensor_id: 'plant-sensor-id', device_name: 'plantsensordevice' }, { sensor_id: 'second', device_name: 'Second' }]
+  const h = harness(undefined, 'en', options); await flush()
+  assert.equal(h.state.device.value, 'plant-sensor-id')
+  assert.equal(h.calls[0][1], 'plant-sensor-id')
+  assert.deepEqual(Array.from(h.state.devices.value, device => device.device_name), ['Sensor One', 'plantsensordevice', 'Second'])
+  h.stop()
 })
 test('selection, filters, stale results, errors and stale PDF language changes', async () => {
   let pending
@@ -381,6 +400,7 @@ test('Movement cards, five-column table, quality caveat and PDF use backend coun
     assert.equal(h.state.cards.value[3].unit, '%')
     assert.equal(h.state.headers.value.length, 5); assert.equal(h.state.rows.value[0].length, 5)
     assert.equal(h.state.rows.value[0][2], h.state.format(1))
+    h.state.reportView.value = 'table'
     assert.equal(nodes(h.render()).filter(n => n.type === 'th').length, 5)
     for (const key of ['movementDetected', 'detectionRate', 'movementTrend', 'movementDetectedReadings', 'movementCaveat', 'detectionRateNote']) assert.ok(!h.state.text(key).includes('iotSummary.'))
     const pdf = h.state.exportDocument()

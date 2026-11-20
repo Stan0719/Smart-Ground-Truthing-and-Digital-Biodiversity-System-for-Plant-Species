@@ -16,6 +16,7 @@ const text = (key: string) => t(`conservationPages.reports.iotSummary.${key}`)
 const rt = (key: string) => t(`conservationPages.reports.${key}`)
 const metricLabel = (key: string) => t(`conservationPages.reports.operational.${key}`)
 const devices = ref<IoTDevice[]>([]), device = ref(''), measurement = ref<Measurement>('temperature')
+const reportView = ref<'graph' | 'table'>('graph')
 const report = ref<IoTSummary | null>(null), loading = ref(false), error = ref(''), feedback = ref(''), exporting = ref(false)
 const chart = ref<InstanceType<typeof IoTSummaryChart> | null>(null)
 const measurements: Measurement[] = ['temperature', 'humidity', 'soilMoisture', 'rainfall', 'movement']
@@ -33,7 +34,10 @@ async function load() {
     const options = await loadCanonicalDevices(signal)
     if (disposed || token !== generation) return
     devices.value = options
-    if (!options.some(d => d.sensor_id === device.value)) device.value = options[0]?.sensor_id || ''
+    if (!options.some(d => d.sensor_id === device.value)) {
+      const preferred = options.find(d => [d.sensor_id, d.device_name].some(value => value.trim().toLowerCase() === 'plantsensordevice'))
+      device.value = preferred?.sensor_id || options[0]?.sensor_id || ''
+    }
     if (!device.value) return
     const requestSelection = selectionKey()
     const result = await requestIoTSummary({ ...props.filters }, device.value, measurement.value, signal)
@@ -174,8 +178,17 @@ defineExpose({ load, exportPdf, exportCsv, exportDocument })
     <article v-else-if="report" class="iot-content">
       <header><h2>{{ text('title') }}</h2><p>{{ text('subtitle') }}</p><p>{{ text('device') }}: <strong>{{ report.device.name }}</strong> · {{ period }} · {{ metricLabel(report.measurement.key) }} ({{ unit }})</p><p class="iot-meta">{{ text('reportGenerated') }}: {{ date(report.generatedAt) }} · {{ interval }}</p></header>
       <div class="iot-cards"><div v-for="card in cards" :key="card.key" class="iot-card"><span>{{ text(card.key) }}<template v-if="card.key !== 'validReadings' && !isMovement"> · {{ metricLabel(report.measurement.key) }}</template></span><strong>{{ format(card.value) }}<small v-if="card.unit && card.value !== null"> {{ card.unit }}</small></strong></div></div>
-      <section class="iot-chart-panel"><h3>{{ isMovement ? text('movementTrend') : `${metricLabel(report.measurement.key)} · ${text('trend')}` }}</h3><IoTSummaryChart v-if="hasChart" ref="chart" :report="report" /><p v-else role="status">{{ text(report.summary.receivedRows ? 'noValid' : 'noReadings') }}</p></section>
-      <div v-if="rows.length" class="iot-table-scroll" role="region" tabindex="0" :aria-label="text('tableTitle')"><table><thead><tr><th v-for="heading in headers" :key="heading" scope="col">{{ heading }}</th></tr></thead><tbody><tr v-for="(row, index) in rows" :key="report.buckets[index]!.startInclusive"><td v-for="(cell, col) in row" :key="col" :title="col === 0 ? `${date(report.buckets[index]!.startInclusive)} – ${date(report.buckets[index]!.endExclusive)}` : undefined">{{ cell }}</td></tr></tbody></table></div>
+      <div class="report-view-switch" role="group" :aria-label="rt('reportView')">
+        <button type="button" class="report-view-button" :class="{ active: reportView === 'graph' }" :aria-pressed="reportView === 'graph'" @click="reportView = 'graph'">{{ rt('graphView') }}</button>
+        <button type="button" class="report-view-button" :class="{ active: reportView === 'table' }" :aria-pressed="reportView === 'table'" @click="reportView = 'table'">{{ rt('tableView') }}</button>
+      </div>
+      <section v-if="reportView === 'graph'" class="report-data-view graph-view" :aria-label="rt('graphView')">
+        <section class="iot-chart-panel"><h3>{{ isMovement ? text('movementTrend') : `${metricLabel(report.measurement.key)} · ${text('trend')}` }}</h3><IoTSummaryChart v-if="hasChart" ref="chart" :report="report" /><p v-else role="status">{{ text(report.summary.receivedRows ? 'noValid' : 'noReadings') }}</p></section>
+      </section>
+      <section v-if="reportView === 'table'" class="report-data-view table-view" :aria-label="rt('tableView')">
+        <div v-if="rows.length" class="iot-table-scroll" role="region" tabindex="0" :aria-label="text('tableTitle')"><table><thead><tr><th v-for="heading in headers" :key="heading" scope="col">{{ heading }}</th></tr></thead><tbody><tr v-for="(row, index) in rows" :key="report.buckets[index]!.startInclusive"><td v-for="(cell, col) in row" :key="col" :title="col === 0 ? `${date(report.buckets[index]!.startInclusive)} – ${date(report.buckets[index]!.endExclusive)}` : undefined">{{ cell }}</td></tr></tbody></table></div>
+        <p v-else role="status">{{ text(report.summary.receivedRows ? 'noValid' : 'noReadings') }}</p>
+      </section>
       <aside class="iot-quality">
         <h3><span class="quality-info" aria-hidden="true">ⓘ</span>{{ text('qualityTitle') }}</h3>
         <div class="quality-badges">
@@ -200,6 +213,10 @@ defineExpose({ load, exportPdf, exportCsv, exportDocument })
 .iot-controls label > span { font-weight: 600; }
 .iot-controls select { width: 100%; min-width: 0; min-height: 44px; background: #f8faf8; border: 1px solid #d3dfd7; border-radius: 9px; padding: 10px; font: inherit; color: inherit; }
 .iot-content { background: #fff; border: 1px solid #d9e5de; border-radius: 14px; padding: 24px; box-shadow: 0 3px 15px #173e2f05; min-width: 0; }
+.report-view-switch { display: inline-flex; width: fit-content; gap: 2px; margin: 0 0 18px; padding: 3px; border: 1px solid #cbd9cf; border-radius: 8px; background: #f3f7f3; }
+.iot-report .report-view-button { min-width: 82px; min-height: 36px; padding: 6px 14px; border: 0; border-radius: 6px; background: transparent; color: #426554; font-size: 13px; }
+.iot-report .report-view-button.active { background: #315749; color: #fff; box-shadow: 0 1px 2px rgba(20, 48, 35, .15); }
+.report-data-view { min-width: 0; }
 header { text-align: center; margin-bottom: 24px; } h2 { margin: 0 0 8px; font-size: 1.6rem; color: #104b34; } h3 { margin: 0 0 16px; font-size: 1.2rem; color: #164f38; } header p { margin: 8px 0; }
 .iot-meta { font-size: .9rem; color: #61756b; line-height: 1.6; }
 .iot-cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; margin-bottom: 20px; }
