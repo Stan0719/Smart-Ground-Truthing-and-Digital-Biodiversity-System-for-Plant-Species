@@ -82,13 +82,8 @@ function markResolvedCorrections(rows, kind) {
 function plantRegistrationHistory(rows) {
   const isApprovalCapture = (row) => {
     const provenance = row.snapshot?.review_provenance;
-    return row.priorChangeId == null && row.status === "Approved" &&
-      provenance?.kind === "plant" && typeof provenance.review_id === "string" && provenance.review_id.length > 0 &&
-      row.snapshot?.observation_id != null && String(provenance.submission_id) === String(row.snapshot.observation_id);
+    return provenance?.evidence_type === "approval_capture";
   };
-  const registration = rows.find((row) => row.original && !isApprovalCapture(row));
-  const registrationObservationId = registration?.snapshot?.observation_id;
-  const hiddenCaptures = new Set();
   for (const row of rows.filter(isApprovalCapture)) {
     row.original = false; row.edited = false; row.historyType = "approvalSnapshot";
     const provenance = row.snapshot.review_provenance;
@@ -102,22 +97,14 @@ function plantRegistrationHistory(rows) {
           String(candidate.snapshot.species_id ?? "") === String(row.snapshot.species_id ?? "") &&
           candidate.snapshot.scientific_name === row.snapshot.scientific_name &&
           JSON.stringify(stableSnapshot(candidate.snapshot.content)) === JSON.stringify(stableSnapshot(row.snapshot.content))));
-    if (source && ["Approved", "Pending Review"].includes(source.status)) {
-      // One submission, two stored snapshots: retain the exact submitted-version
-      // identifier and fold only the explicit approval metadata into its row.
-      source.status = "Approved";
+    if (row.status === "Approved" && source?.status === "Approved") {
+      // Retain review metadata on an already Approved submission without
+      // changing its stored status or treating the capture as a Botanist edit.
       source.raw = { ...source.raw, reviewed_by: row.raw.reviewed_by,
         reviewed_at: row.raw.reviewed_at, review_comment: row.raw.review_comment };
-      hiddenCaptures.add(row);
-    } else if (registrationObservationId != null &&
-      String(row.snapshot.observation_id) !== String(registrationObservationId)) {
-      // Subsequent Observation approvals remain available through Observation
-      // history; they do not constitute Plant registration edits.
-      hiddenCaptures.add(row);
     }
   }
-  const visible = rows.filter((row) => !hiddenCaptures.has(row));
-  for (const row of visible) {
+  for (const row of rows) {
     if (row.historyType === "approvalSnapshot") continue;
     if (row.original) { row.historyType = "registration"; row.edited = false; continue; }
     const previous = row.raw?.previous_snapshot;
@@ -129,7 +116,7 @@ function plantRegistrationHistory(rows) {
     row.edited = row.priorChangeId != null || Boolean(directBase);
     row.historyType = row.edited ? (directBase?.status === "Correction Required" || Number(row.changeRevision) > 1 ? "plantCorrection" : "plantEdit") : "historicalSnapshot";
   }
-  return visible;
+  return rows;
 }
 
 export function formatSubmissionTimestamp(value) {
@@ -191,20 +178,38 @@ export function versionCardItems(kind, targetId, response) {
     if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return leftTime - rightTime;
     return (left.versionNumber || 0) - (right.versionNumber || 0);
   };
-  const approvedRows = rows.filter((row) => row.historyType !== "approvalSnapshot" && submissionStatus(row.status) === "approved").sort((left, right) =>
+  if (kind === "species") for (const row of rows) {
+    if (row.snapshot?.review_provenance?.evidence_type === "approval_capture") {
+      row.historyType = "approvalSnapshot";
+      row.edited = false;
+    }
+  }
+  const approvedRows = rows.filter((row) => (kind !== "plant" || row.historyType !== "approvalSnapshot") && submissionStatus(row.status) === "approved").sort((left, right) =>
     compareChronological(left, right));
   const latestApproved = approvedRows[approvedRows.length - 1];
+  const speciesCaptureSource = kind === "species" && latestApproved?.historyType === "approvalSnapshot"
+    ? rows.find((row) => row.versionId != null && row.versionId === latestApproved.snapshot?.review_provenance?.source_submitted_history_id &&
+      row.historyType !== "approvalSnapshot" && row.status === "Approved" && row.raw?.owner_subject === latestApproved.raw?.owner_subject)
+    : null;
+  const currentSubmitted = speciesCaptureSource || latestApproved;
   let editNumber = 0;
   let numberingKnown = rows.some((row) => row.original);
   if (kind === "plant") for (const row of rows.slice().sort(compareChronological)) {
     if (row.historyType === "historicalSnapshot") numberingKnown = false;
     if (row.edited && numberingKnown) row.plantEditNumber = ++editNumber;
   }
-  for (const row of rows) {
-    row.current = row.historyType !== "approvalSnapshot" && row === latestApproved;
-    row.superseded = Boolean(row.historyType !== "approvalSnapshot" && latestApproved && submissionStatus(row.status) === "approved" && row !== latestApproved);
+  if (kind === "species") for (const row of rows.slice().sort(compareChronological)) {
+    if (row.historyType !== "approvalSnapshot" && !row.original && row.edited && numberingKnown) {
+      row.speciesEditNumber = ++editNumber;
+    }
   }
-  return rows.sort(compareChronological);
+  for (const row of rows) {
+    row.current = row.historyType !== "approvalSnapshot" && row === currentSubmitted;
+    row.superseded = Boolean(row.historyType !== "approvalSnapshot" && currentSubmitted && submissionStatus(row.status) === "approved" && row !== currentSubmitted);
+  }
+  // Current Version is selected from classified history before system-only
+  // approval captures are removed from the Botanist submission cards.
+  return rows.sort(compareChronological).filter((row) => !["plant", "species"].includes(kind) || row.historyType !== "approvalSnapshot");
 }
 
 export function mergeRecordChangeSubmissions(kind, targetId, response, recordChanges = []) {
@@ -357,7 +362,11 @@ export function groupStatusSummary(group) {
 
 export function versionDisplayLabel(row) {
   if (row.original) return t("recordEdits.originalLabel");
-  if (row.kind === "species" && (row.edited || row.versionNumber > 1)) return t("submissions.editWithoutNumber");
+  if (row.kind === "species") {
+    if (row.historyType === "approvalSnapshot") return t("submissions.approvalSnapshot");
+    if (row.speciesEditNumber) return t("recordEdits.editNumber", { number: row.speciesEditNumber });
+    if (row.edited) return t("submissions.editWithoutNumber");
+  }
   if (row.kind === "plant") {
     if (row.plantEditNumber) return t("recordEdits.editNumber", { number: row.plantEditNumber });
     if (row.edited) return t("submissions.editWithoutNumber");

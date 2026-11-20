@@ -105,6 +105,7 @@ test('a slower request for the previous species cannot replace the selected spec
   for(const name of ['View','Text','TextInput','TouchableOpacity','ScrollView','FlatList','ActivityIndicator','Image','RefreshControl'])native[name]=name;
   const screen=load('screens/Plant.js',{
     react:{...React,...hooks},'react-native':native,
+    '@expo/vector-icons/Ionicons':{default:'Ionicons'},
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},
     '@react-navigation/native':{useFocusEffect:fn=>{focus=fn}},
     '../translations/i18n':{t:key=>key,translateLabel:value=>value,translateUIMessage:value=>value,dateLocale:'en',useAppTranslation(){},translateFieldValue:value=>value},

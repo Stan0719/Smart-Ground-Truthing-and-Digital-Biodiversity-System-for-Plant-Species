@@ -3,6 +3,7 @@ import { t, translateLabel, translateUIMessage, useAppTranslation, translateFiel
 import LanguageSelector from "../components/LanguageSelector";
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
+import Ionicons from "@expo/vector-icons/Ionicons";
 
 import {
   AppState,
@@ -683,7 +684,7 @@ export default function Species({
           </View>
         ) : (
           <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>????</Text>
+            <Ionicons name="leaf-outline" size={35} color="#2F6B4F" style={styles.emptyIcon} accessibilityElementsHidden importantForAccessibility="no" />
             <Text style={styles.emptyTitle}>
               {listViewState === "filtered-empty"
                 ? t("plant.noPlantsMatchYourCurrentSearchOrFilters")
@@ -1264,7 +1265,7 @@ filterToggle: {
   },
 
   emptyIcon: {
-    fontSize: 35,
+    textAlign: "center",
   },
 
   emptyTitle: {

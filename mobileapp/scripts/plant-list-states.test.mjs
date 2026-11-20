@@ -32,6 +32,18 @@ test("loading and API-error UI exclude the leaf empty state and Clear Filters", 
   assert.match(source, /const clearFilters = \(\) => \{[\s\S]*setSearchQuery\(""\)[\s\S]*setPlantStatusFilter\("allVisible"\)[\s\S]*setHealthFilter\("All"\)[\s\S]*setLifeStageFilter\("All"\)[\s\S]*setQrFilter\("All"\)[\s\S]*setZoneFilter\("All"\)[\s\S]*setSortOption\("default"\)/);
 });
 
+test("every Plants filter uses the same supported leaf icon for empty results", () => {
+  assert.match(source, /import Ionicons from "@expo\/vector-icons\/Ionicons"/);
+  assert.match(source, /ListEmptyComponent=\{listViewState === "loading"[\s\S]*?<Ionicons name="leaf-outline" size=\{35\} color="#2F6B4F"/);
+  assert.doesNotMatch(source, /<Text style=\{styles\.emptyIcon\}>\?\?\?\?<\/Text>/);
+  for (const filter of ["allVisible", "approved", "myPending", "myRejected"])
+    assert.match(source, new RegExp(`plantStatusFilter === "${filter}"|\\["${filter}",`));
+  for (const language of ["en", "ms", "zh"]) {
+    const catalog = JSON.parse(readFileSync(new URL(`../translations/${language}.json`, import.meta.url), "utf8"));
+    assert.ok(catalog.plant.noPlantsMatchYourCurrentSearchOrFilters, language);
+  }
+});
+
 test("Plant header, search, filters, and advanced filters stay fixed above the scrolling FlatList", () => {
   const header = source.indexOf('<View style={styles.header}>');
   const search = source.indexOf('<View style={styles.controls}>');
