@@ -17,7 +17,7 @@ const filters = { period: 'custom', start: '2026-11-01', end: '2026-11-01' }
 const statistics = { receivedRows: 3, validMeasurements: 2, missingMeasurements: 1, absentOrNullMeasurements: 1, invalidMeasurements: 0, average: 0, minimum: -2, maximum: 2 }
 function fixture(metric = 'temperature') {
   const stats = metric === 'movement' ? { ...statistics, average: .5, minimum: 0, maximum: 1, detectedSampleCount: 1, noMovementSampleCount: 1 } : statistics
-  return { contractVersion: 1, category: 'iot', complete: true, generatedAt: '2026-11-15T04:00:00Z', device: { id: 'sensor', name: 'Sensor One' }, measurement: { key: metric, unit: measurementUnits[metric] }, scope: { ...filters, startDate: filters.start, endDate: filters.end, timezone: 'Asia/Kuala_Lumpur', timestampBasis: 'sensor_reading.created_at', asOf: '2026-11-15T04:00:00Z', startInclusive: '2026-10-31T16:00:00Z', endExclusive: '2026-11-01T16:00:00Z', effectiveStartInclusive: '2026-10-31T16:00:00Z', effectiveEndExclusive: '2026-11-01T16:00:00Z' }, aggregation: { interval: 'day', step: 1, maximumBuckets: 520, bucketCount: 1, emptyBucketsIncluded: true }, summary: { ...stats }, buckets: [{ ...stats, startInclusive: '2026-10-31T16:00:00Z', endExclusive: '2026-11-01T16:00:00Z' }], observedSpan: { firstReceivedAt: '2026-10-31T16:00:00Z', lastReceivedAt: '2026-10-31T17:00:00Z', firstValidAt: '2026-10-31T16:00:00Z', lastValidAt: '2026-10-31T17:00:00Z' }, limitations: ['receipt_time_not_capture_time', 'missing_counts_apply_to_received_rows', 'expected_sampling_schedule_unavailable', 'availability_not_calculated', 'sample_weighted_average', 'uncalibrated_raw_units'] }
+  return { contractVersion: 1, category: 'iot', complete: true, generatedAt: '2026-11-15T04:00:00Z', device: { id: 'sensor', name: 'Sensor One' }, measurement: { key: metric, unit: measurementUnits[metric] }, temperatureThreshold: null, latestReading: { recordedAt: '2026-11-01T15:00:00Z', value: 2 }, scope: { ...filters, startDate: filters.start, endDate: filters.end, timezone: 'Asia/Kuala_Lumpur', timestampBasis: 'sensor_reading.created_at', asOf: '2026-11-15T04:00:00Z', startInclusive: '2026-10-31T16:00:00Z', endExclusive: '2026-11-01T16:00:00Z', effectiveStartInclusive: '2026-10-31T16:00:00Z', effectiveEndExclusive: '2026-11-01T16:00:00Z' }, aggregation: { interval: 'day', step: 1, maximumBuckets: 520, bucketCount: 1, emptyBucketsIncluded: true }, summary: { ...stats }, buckets: [{ ...stats, startInclusive: '2026-10-31T16:00:00Z', endExclusive: '2026-11-01T16:00:00Z' }], observedSpan: { firstReceivedAt: '2026-10-31T16:00:00Z', lastReceivedAt: '2026-10-31T17:00:00Z', firstValidAt: '2026-10-31T16:00:00Z', lastValidAt: '2026-10-31T17:00:00Z' }, limitations: ['receipt_time_not_capture_time', 'missing_counts_apply_to_received_rows', 'expected_sampling_schedule_unavailable', 'availability_not_calculated', 'sample_weighted_average', 'uncalibrated_raw_units'] }
 }
 test('strict response validation preserves zero/negative values and authoritative units for all six metrics', () => {
   for (const key of Object.keys(measurementUnits)) assert.ok(validIoTSummary(fixture(key), filters, 'sensor', key))
@@ -47,6 +47,19 @@ test('transport sends versioned summary path with exact custom dates, device and
     await assert.rejects(requestIoTSummary(filters, 'sensor', 'temperature'), e => e.code === 'invalidResponse')
   } finally { globalThis.fetch = original }
 })
+test('exact range requests validate and transmit both ISO boundaries', async () => {
+  const original = globalThis.fetch, range = { startAt: '2026-11-01T00:15:00.000Z', endAt: '2026-11-01T00:45:00.000Z' }
+  try {
+    globalThis.fetch = async url => {
+      const u = new URL(url, 'http://offline.test')
+      assert.equal(u.searchParams.get('startAt'), range.startAt); assert.equal(u.searchParams.get('endAt'), range.endAt)
+      const r = fixture(); r.scope.effectiveStartInclusive = range.startAt; r.scope.effectiveEndExclusive = range.endAt
+      r.buckets[0].startInclusive = range.startAt; r.buckets[0].endExclusive = range.endAt
+      return Response.json(r)
+    }
+    assert.equal((await requestIoTSummary(filters, 'sensor', 'temperature', undefined, range)).scope.effectiveStartInclusive, range.startAt)
+  } finally { globalThis.fetch = original }
+})
 const transpile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 function harness(responder = async (_filters, _device, metric) => fixture(metric), language = 'en', deviceOptions = [{ sensor_id: 'sensor', device_name: 'Sensor One' }, { sensor_id: 'second', device_name: 'Second' }]) {
   const filename = 'components/conservation/IoTEnvironmentalReport.vue', { descriptor } = parse(read(filename))
@@ -60,12 +73,12 @@ function harness(responder = async (_filters, _device, metric) => fixture(metric
   let blob, downloadName
   const context = { exports: {}, Intl, AbortController, Error, Blob, setTimeout: fn => fn(),
     URL: { createObjectURL: value => { blob = value; return 'blob:summary' }, revokeObjectURL: value => revoked.push(value) },
-    document: { body: { appendChild() {} }, createElement: () => ({ set href(value) {}, set download(value) { downloadName = value }, click() { downloads.push({ blob, filename: downloadName }) }, remove() {} }) },
+    document: { visibilityState: 'visible', addEventListener() {}, removeEventListener() {}, body: { appendChild() {} }, createElement: () => ({ set href(value) {}, set download(value) { downloadName = value }, click() { downloads.push({ blob, filename: downloadName }) }, remove() {} }) },
     require(name) {
-    if (name === 'vue') return { ...vue, onBeforeUnmount: fn => cleanup = fn, resolveComponent: name => name, withDirectives: node => node }
+    if (name === 'vue') return { ...vue, onMounted: () => {}, onBeforeUnmount: fn => cleanup = fn, resolveComponent: name => name, withDirectives: node => node }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: (key, params = {}) => (resolve(key) || key).replace(/\{(\w+)\}/g, (_, name) => params[name] ?? `{${name}}`), te: key => !!resolve(key), locale }) }
     if (name === 'jspdf') return { jsPDF: class { save(name) { saves.push(name) } } }
-    if (name.includes('iotMonitoring')) return { loadCanonicalDevices: async () => deviceOptions }
+    if (name.includes('iotMonitoring')) return { loadCanonicalDevices: async () => deviceOptions, loadCanonicalHistoryPage: async () => ({ readings: [], page: 1, limit: 100, hasMore: false }) }
     if (name.includes('iotReporting')) return { measurementUnits, IoTReportError: class extends Error {}, requestIoTSummary: async (...args) => { calls.push(args); return responder(...args) } }
     if (name.includes('officerMonitoringDisplay')) return { monitoringDate: (date, lang) => new Intl.DateTimeFormat(lang, { timeZone: 'Asia/Kuala_Lumpur', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(date)) }
     if (name.includes('iotBucketDisplay')) return { iotBucketLabel, iotAxisLabel, iotDate, iotTimestamp, iotVisibleTickIndexes }
@@ -86,14 +99,14 @@ function nodes(root) { const result = []; function walk(v) { if (Array.isArray(v
 test('rendered report has four cards, seven columns, honest CSV, quality explanations and bounded PDF', async () => {
   const h = harness(); await flush(); h.state.reportView.value = 'table'
   const tree = nodes(h.render())
-  assert.equal(tree.filter(n => n.props?.class === 'iot-card').length, 4)
+  assert.equal(tree.filter(n => n.props?.class === 'iot-card').length, 5)
   assert.equal(tree.filter(n => n.type === 'th').length, 7)
   assert.ok(tree.some(n => n.type === 'button' && n.props?.disabled === false && n.props?.['aria-describedby'] === 'iot-csv-note'))
   assert.equal(h.state.report.value.summary.average, 0)
   assert.ok(h.state.technicalRows.value.some(s => s.value.includes('never arrived')))
   await h.state.exportPdf()
-  assert.equal(h.models.length, 1); assert.equal(h.models[0].statistics.length, 4); assert.equal(h.models[0].rows.length, 1)
-  assert.equal(h.models[0].columns.length, 7); assert.equal(h.models[0].chart.length, 2)
+  assert.equal(h.models.length, 1); assert.equal(h.models[0].statistics.length, 5); assert.equal(h.models[0].rows.length, 1)
+  assert.equal(h.models[0].columns.length, 7); assert.equal(h.models[0].chart.length, 3)
   assert.ok(h.models[0].notes.some(c => c.value.includes('Sensor availability has not been verified.')))
   assert.ok(!h.models[0].notes.some(c => c.value.includes('never arrived')))
   assert.equal(h.saves.length, 1); h.stop()
@@ -141,7 +154,7 @@ test('all locales, six metrics, dual series, null gaps, responsive containment a
     assert.ok(!h.state.text('title').includes('?')); h.stop()
   }
   const chart = read('components/conservation/IoTSummaryChart.vue')
-  assert.match(chart, /\['average', 'maximum'\]/); assert.match(chart, /spanGaps: false/); assert.match(chart, /tension: 0/); assert.match(chart, /position: 'bottom'/)
+  assert.match(chart, /\['average', 'minimum', 'maximum'\]/); assert.match(chart, /spanGaps: false/); assert.match(chart, /tension: 0/); assert.match(chart, /position: 'bottom'/)
   for (const file of ['IoTSummaryChart.vue', 'IoTEnvironmentalReport.vue']) {
     const { descriptor } = parse(read('components/conservation/' + file))
     assert.deepEqual(compileStyle({ source: descriptor.styles[0].content, filename: file, id: 'summary' }).errors, [])
@@ -327,7 +340,7 @@ test('actual chart configurations preserve every bucket, null and spike across w
     report.buckets = Array.from({ length: count }, (_, index) => ({ ...statistics, startInclusive: new Date(Date.UTC(2026, 10, 3 + index, 16)).toISOString(), endExclusive: new Date(Date.UTC(2026, 10, 4 + index, 16)).toISOString(), average: index % 4 === 2 ? null : index, maximum: index % 4 === 2 ? null : index === 3 ? 999 : index + 1, validMeasurements: index % 4 === 2 ? 0 : 2 }))
     const h = chartHarness(report), config = h.state.configuration()
     assert.equal(config.data.labels.length, count)
-    for (const [series, key] of ['average', 'maximum'].entries()) {
+    for (const [series, key] of ['average', 'minimum', 'maximum'].entries()) {
       assert.deepEqual(Array.from(config.data.datasets[series].data, p => p.y), report.buckets.map(b => b[key]))
       assert.deepEqual(Array.from(config.data.datasets[series].data, p => p.x), Array.from({ length: count }, (_, i) => i))
       assert.equal(config.data.datasets[series].spanGaps, false)
@@ -437,11 +450,11 @@ test('Movement bars preserve valid-zero versus missing buckets, tooltip counts a
   }
   for (const metric of ['temperature', 'humidity', 'soilMoisture', 'rainfall']) {
     const h = chartHarness(fixture(metric)), config = h.state.configuration()
-    assert.equal(config.type, 'line'); assert.equal(config.data.datasets.length, 2)
-    assert.equal(config.data.datasets[0].borderColor, '#2c9148'); assert.equal(config.data.datasets[1].borderColor, '#f18418')
+    assert.equal(config.type, 'line'); assert.equal(config.data.datasets.length, 3)
+    assert.equal(config.data.datasets[0].borderColor, '#2c9148'); assert.equal(config.data.datasets[1].borderColor, '#3779a8'); assert.equal(config.data.datasets[2].borderColor, '#f18418')
     h.stop()
     const page = harness(async () => fixture(metric)); await flush()
-    assert.equal(page.state.headers.value.length, 7); assert.equal(page.state.cards.value[1].key, 'average'); page.stop()
+    assert.equal(page.state.headers.value.length, 7); assert.equal(page.state.cards.value[2].key, 'average'); page.stop()
   }
 })
 
@@ -562,10 +575,11 @@ test('Movement hover has no bottom details; keyboard uses floating tooltip and h
     assert.ok(!nodes(other.render()).some(n => String(n.props?.class).includes('iot-chart-inspection')))
     const config = other.state.configuration()
     assert.equal(config.data.datasets[0].borderColor, '#2c9148')
-    assert.equal(config.data.datasets[1].borderColor, '#f18418')
+    assert.equal(config.data.datasets[1].borderColor, '#3779a8')
+    assert.equal(config.data.datasets[2].borderColor, '#f18418')
     assert.equal(config.data.datasets[0].spanGaps, false)
     assert.ok(config.options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }]).includes('2026'))
-    assert.ok(config.options.plugins.tooltip.callbacks.afterBody([{ dataIndex: 0 }]).includes('validMeasurements'))
+    assert.ok(config.options.plugins.tooltip.callbacks.afterBody([{ dataIndex: 0 }]).some(line => line.includes('validMeasurements')))
     assert.equal(config.options.events, undefined)
     other.stop()
   }

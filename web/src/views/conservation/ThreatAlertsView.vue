@@ -55,10 +55,12 @@ const cameraLoading = ref(false)
 const cameraError = ref('')
 const cameraHasMore = ref(false)
 const playbackError = ref(false)
+const responseStaffNames = ref<Record<string, string>>({})
 let cameraRequest = 0
 let cameraController: AbortController | null = null
 let assignmentRequest = 0, evidenceRequest = 0
 let assignmentController: AbortController | null = null, evidenceController: AbortController | null = null
+let responseNameRequest = 0
 const assignmentFor = (alert: CanonicalThreatAlert) => assignmentRows.value[alert.id]?.device_id === alert.deviceId ? assignmentRows.value[alert.id]! : unavailableAssignment(alert.deviceId)
 const selectedAssignment = computed(() => evidence.value && evidence.value.alert.id === selectedAlert.value?.id ? evidence.value.current_assignment : selectedAlert.value ? assignmentFor(selectedAlert.value) : undefined)
 const eventReadings = computed(() => SENSOR_METRICS.filter(metric => metric !== 'sound' && evidence.value?.reading.state === 'verified' && Object.hasOwn(evidence.value.reading.values || {}, metric))
@@ -83,6 +85,7 @@ function closeAlert() {
 }
 function clearPrivate() {
   assignmentRequest++; assignmentController?.abort(); assignmentController = null; assignmentRows.value = {}; assignmentError.value = false
+  responseNameRequest++; responseStaffNames.value = {}
   generation++; saveGeneration++; loadController?.abort(); loadController = null; listWork = null; uncertainAlerts.clear(); closeAlert()
   alerts.value = []; hasLoaded.value = false; isLoading.value = false; isSavingResponse.value = false; isVerifying.value = false; isRefreshing.value = false
   refreshError.value = ''; errorMessage.value = ''; queueMeta.value = { alertsCapped: false, historyCapped: false }
@@ -136,6 +139,24 @@ const deviceLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item
 const readingLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.readingId)))
 const cameraLabels = computed(() => monitoringLabels(loadedAlerts.value.map(item => item.cameraId)))
 const subjectLabels = computed(() => monitoringLabels(loadedAlerts.value.flatMap(item => item.responses.map(response => response.officerSubject))))
+const responseStaffIds = computed(() => {
+  const subjects = loadedAlerts.value.flatMap(item => item.responses.map(response => response.officerSubject))
+  return [...new Set(subjects.filter(subject => subject.startsWith('staff:')).map(subject => subject.slice(6)))].slice(0, 100)
+})
+watch(() => responseStaffIds.value.join(','), async joined => {
+  const token = ++responseNameRequest, ids = joined ? joined.split(',').filter(Boolean) : []
+  responseStaffNames.value = {}
+  if (!ids.length || !eligible()) return
+  const actor = accountKey()
+  try {
+    const response = await fetch(`/api/conservation/submitter-names?ids=${encodeURIComponent(ids.join(','))}`, { credentials: 'same-origin', signal: AbortSignal.timeout(5000) })
+    if (!response.ok) return
+    const body = await response.json() as { names?: Record<string, unknown> }
+    if (disposed || token !== responseNameRequest || !eligible() || actor !== accountKey() || !body.names || typeof body.names !== 'object' || Array.isArray(body.names)) return
+    responseStaffNames.value = Object.fromEntries(Object.entries(body.names).filter(([id, name]) => ids.includes(id) && typeof name === 'string' && name.trim())) as Record<string, string>
+  } catch { /* Keep the safe identifier display when a name cannot be resolved. */ }
+})
+const responseActorName = (subject: string) => subject.startsWith('staff:') ? responseStaffNames.value[subject.slice(6)]?.trim() || '' : ''
 const formatAlertId = (id: string) => alertLabels.value.get(id) || id
 const detectionDate = threatAlertDay
 const recordingLabel = (event: CameraEvent) => ({ recording: 'Recording', processing: 'Processing', ready: 'Available', failed: 'Interrupted', unavailable: 'Unavailable' })[event.recordingStatus ?? 'unavailable']
@@ -435,7 +456,7 @@ const submitResponse = async () => {
         <section class="investigation-section response-history"><h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v13H8l-4 4V4Z" /><path d="M8 8h8M8 12h5" /></svg>{{ ct('Response History') }}</h3>
           <p class="evidence-note">{{ ct('Newest first. History covers responses returned by the service.') }}</p><p v-if="queueMeta.historyCapped" class="alert-notice" role="status">{{ ct('Response history may be incomplete because the service limit was reached.') }}</p>
           <div v-if="!selectedAlert.responses.length" class="evidence-unavailable"><strong>{{ ct('No response history recorded.') }}</strong><span>{{ ct('No responses are present in the loaded history.') }}</span></div>
-          <ol v-else class="response-timeline"><li v-for="response in [...selectedAlert.responses].sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))" :key="response.id"><div class="response-meta"><strong>{{ statusText(response.status) }}</strong><time :datetime="response.createdAt">{{ dt(response.createdAt) }}</time></div><p>{{ response.note }}</p><MonitoringIdentifier :value="response.officerSubject" :labels="subjectLabels" /></li></ol>
+          <ol v-else class="response-timeline"><li v-for="response in [...selectedAlert.responses].sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))" :key="response.id"><div class="response-meta"><strong>{{ statusText(response.status) }}</strong><time :datetime="response.createdAt">{{ dt(response.createdAt) }}</time></div><p>{{ response.note }}</p><span v-if="responseActorName(response.officerSubject)" class="response-actor">{{ responseActorName(response.officerSubject) }}</span><MonitoringIdentifier v-else :value="response.officerSubject" :labels="subjectLabels" /></li></ol>
         </section>
       </div>
       <section class="investigation-section officer-review"><h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H4v17h16V4h-4M8 2h8v5H8V2Zm0 12 3 3 5-6" /></svg>{{ ct('Officer Review') }}</h3>
@@ -550,6 +571,7 @@ const submitResponse = async () => {
 .response-meta { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 5px 12px; font-size: 12px; color: #385c49; }
 .response-meta time { color: #5a6d62; }
 .response-timeline p { white-space: pre-wrap; overflow-wrap: anywhere; color: #294437; font-size: 13px; line-height: 1.65; }
+.response-actor { display: inline-block; color: #385c49; font-size: 13px; font-weight: 600; }
 .officer-review { position: sticky; top: 0; }
 .officer-review > :not(h3) { margin-left: 15px; margin-right: 15px; }
 .officer-review .field { display: flex; flex-direction: column; margin-top: 18px; gap: 8px; color: #29493a; }

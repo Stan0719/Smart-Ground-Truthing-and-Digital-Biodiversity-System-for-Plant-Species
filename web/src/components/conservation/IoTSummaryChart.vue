@@ -38,7 +38,7 @@ const inspection = computed(() => {
   if (!bucket) return ''
   const number = (value: number | null) => value === null ? '—' : new Intl.NumberFormat(locale.value, { maximumFractionDigits: 4 }).format(value)
   if (r.measurement.key === 'movement') return `${bucketRange(selectedIndex.value!)} · ${label('movementDetectedReadings')}: ${number(bucket.validMeasurements ? bucket.detectedSampleCount! : null)} · ${label('validReadings')}: ${number(bucket.validMeasurements)} · ${label('missingMeasurements')}: ${number(bucket.missingMeasurements)}${bucket.validMeasurements ? '' : ` · ${label('noValid')}`} ${movementContext(selectedIndex.value!).join(' · ')}`.trim()
-  return `${bucketRange(selectedIndex.value!)} · ${label('average')}: ${number(bucket.average)} ${r.measurement.unit} · ${label('maximum')}: ${number(bucket.maximum)} ${r.measurement.unit} · ${label('validMeasurements')}: ${number(bucket.validMeasurements)}${bucket.validMeasurements ? '' : ` · ${label('noValid')}`}`
+  return `${bucketRange(selectedIndex.value!)} · ${label('average')}: ${number(bucket.average)} ${r.measurement.unit} · ${label('minimum')}: ${number(bucket.minimum)} ${r.measurement.unit} · ${label('maximum')}: ${number(bucket.maximum)} ${r.measurement.unit} · ${label('validMeasurements')}: ${number(bucket.validMeasurements)}${bucket.validMeasurements ? '' : ` · ${label('noValid')}`}`
 })
 function inspectKey(event: KeyboardEvent) {
   const last = props.report.buckets.length - 1
@@ -48,7 +48,37 @@ function inspectKey(event: KeyboardEvent) {
   selectedIndex.value = event.key === 'Home' ? 0 : event.key === 'End' ? last : Math.max(0, Math.min(last, current + (event.key === 'ArrowRight' ? 1 : -1)))
   showMovementTooltip()
 }
-let chart: Chart | null = null, generation = 0
+let chart: Chart | null = null, generation = 0, lastBucketCount = -1
+const viewport = ref<{ min: number; max: number } | null>(null)
+const canZoom = computed(() => props.report.measurement.key !== 'movement' && props.report.buckets.length > 5)
+function updateViewport() {
+  if (!chart) return
+  const x = chart.options.scales?.x as { min?: number; max?: number } | undefined
+  if (!x) return
+  if (viewport.value) { x.min = viewport.value.min; x.max = viewport.value.max }
+  else { delete x.min; delete x.max }
+  chart.update('none')
+}
+function zoom(factor: number) {
+  const length = props.report.buckets.length
+  if (!length) return
+  const current = viewport.value || { min: 0, max: length - 1 }
+  const visible = current.max - current.min + 1
+  const target = Math.max(5, Math.min(length, Math.round(visible * factor)))
+  if (target >= length) { viewport.value = null; updateViewport(); return }
+  const center = (current.min + current.max) / 2
+  let min = Math.round(center - (target - 1) / 2)
+  min = Math.max(0, Math.min(length - target, min))
+  viewport.value = { min, max: min + target - 1 }; updateViewport()
+}
+function pan(direction: -1 | 1) {
+  const length = props.report.buckets.length, current = viewport.value
+  if (!current || length < 2) return
+  const span = current.max - current.min + 1
+  const min = Math.max(0, Math.min(length - span, current.min + direction * Math.max(1, Math.floor(span * .7))))
+  viewport.value = { min, max: min + span - 1 }; updateViewport()
+}
+function resetViewport() { viewport.value = null; updateViewport() }
 function showMovementTooltip() {
   if (props.report.measurement.key !== 'movement' || !chart || selectedIndex.value === null) return
   const index = selectedIndex.value, bar = chart.getDatasetMeta(0).data[index]
@@ -75,7 +105,11 @@ function configuration(): ChartConfiguration<'line' | 'bar'> {
   const movement = r.measurement.key === 'movement'
   const axisLabels = r.buckets.map(b => iotAxisLabel(b, r.aggregation.interval, locale.value, r.scope.timezone))
   let visibleMovementLabels = new Set<number>()
-  return { type: movement ? 'bar' : 'line', data: { labels: r.buckets.map(b => iotAxisLabel(b, r.aggregation.interval, locale.value, r.scope.timezone)), datasets: movement ? [{ label: label('movementDetectedReadings'), data: r.buckets.map((b, bucketIndex) => ({ x: bucketIndex, y: b.validMeasurements ? b.detectedSampleCount! : null })), backgroundColor: movementHighlights.value.map(h => h.color), borderColor: movementHighlights.value.map(h => h.color), borderRadius: 3, maxBarThickness: 38, categoryPercentage: .8, barPercentage: .85 }] : (['average', 'maximum'] as const).map((key, index) => ({ label: `${label(key)} (${r.measurement.unit})`, data: r.buckets.map((b, bucketIndex) => ({ x: bucketIndex, y: b[key] })), borderColor: index ? '#f18418' : '#2c9148', backgroundColor: index ? '#f18418' : '#2c9148', spanGaps: false, tension: 0, pointRadius: r.buckets.length > 100 ? 0 : 3 })) }, options: {
+  const lineKeys = ['average', 'minimum', 'maximum'] as const
+  const lineColors = { average: '#2c9148', minimum: '#3779a8', maximum: '#f18418' }
+  const lineDatasets: ChartConfiguration<'line'>['data']['datasets'] = lineKeys.map(key => ({ label: `${label(key)} (${r.measurement.unit})`, data: r.buckets.map((b, bucketIndex) => ({ x: bucketIndex, y: b[key] })), borderColor: lineColors[key], backgroundColor: lineColors[key], spanGaps: true, tension: 0, pointRadius: r.buckets.length > 100 ? 0 : 3 }))
+  if (r.measurement.key === 'temperature' && r.temperatureThreshold !== null) lineDatasets.push({ label: `${label('configuredThreshold')} (${r.measurement.unit})`, data: r.buckets.map((_bucket, bucketIndex) => ({ x: bucketIndex, y: r.temperatureThreshold }),), borderColor: '#a34f43', backgroundColor: '#a34f43', borderDash: [6, 4], spanGaps: true, tension: 0, pointRadius: 0 })
+  return { type: movement ? 'bar' : 'line', data: { labels: r.buckets.map(b => iotAxisLabel(b, r.aggregation.interval, locale.value, r.scope.timezone)), datasets: movement ? [{ label: label('movementDetectedReadings'), data: r.buckets.map((b, bucketIndex) => ({ x: bucketIndex, y: b.validMeasurements ? b.detectedSampleCount! : null })), backgroundColor: movementHighlights.value.map(h => h.color), borderColor: movementHighlights.value.map(h => h.color), borderRadius: 3, maxBarThickness: 38, categoryPercentage: .8, barPercentage: .85 }] : lineDatasets }, options: {
     responsive: true, maintainAspectRatio: false, animation: false, parsing: false, locale: locale.value,
     layout: { padding: { left: 12, right: 12 } },
     interaction: { mode: 'index', intersect: false },
@@ -90,9 +124,16 @@ function configuration(): ChartConfiguration<'line' | 'bar'> {
       { text: label('highestDetectionCount'), fillStyle: '#E88936', strokeStyle: '#E88936', lineWidth: 0 },
     ] } } : {}) }, tooltip: { callbacks: {
       title: items => bucketRange(items[0]?.dataIndex ?? -1),
-      afterBody: items => { const bucket = r.buckets[items[0]?.dataIndex ?? -1]; return bucket ? movement ? [`${label('validReadings')}: ${new Intl.NumberFormat(locale.value).format(bucket.validMeasurements)}`, `${label('missingMeasurements')}: ${new Intl.NumberFormat(locale.value).format(bucket.missingMeasurements)}`, ...movementContext(items[0]?.dataIndex ?? -1)] : `${label('validMeasurements')}: ${new Intl.NumberFormat(locale.value).format(bucket.validMeasurements)}` : '' },
+      afterBody: items => {
+        const bucket = r.buckets[items[0]?.dataIndex ?? -1]
+        if (!bucket) return ''
+        const number = (value: number | null) => value === null ? '—' : new Intl.NumberFormat(locale.value, { maximumFractionDigits: 4 }).format(value)
+        return movement
+          ? [`${label('validReadings')}: ${number(bucket.validMeasurements)}`, `${label('missingMeasurements')}: ${number(bucket.missingMeasurements)}`, ...movementContext(items[0]?.dataIndex ?? -1)]
+          : [`${label('average')}: ${number(bucket.average)} ${r.measurement.unit}`, `${label('minimum')}: ${number(bucket.minimum)} ${r.measurement.unit}`, `${label('maximum')}: ${number(bucket.maximum)} ${r.measurement.unit}`, `${label('validMeasurements')}: ${number(bucket.validMeasurements)}`, ...(r.measurement.key === 'temperature' && r.temperatureThreshold !== null ? [`${label('configuredThreshold')}: ${number(r.temperatureThreshold)} ${r.measurement.unit}`] : [])]
+      },
     } } },
-    scales: { x: { type: 'category', ...(movement ? { offset: true } : {}), afterBuildTicks: scale => {
+    scales: { x: { type: 'category', ...(viewport.value && !movement ? { min: viewport.value.min, max: viewport.value.max } : {}), ...(movement ? { offset: true } : {}), afterBuildTicks: scale => {
       const labels = r.buckets.map(b => iotAxisLabel(b, r.aggregation.interval, locale.value, r.scope.timezone))
       scale.ctx.save()
       // Print charts set a larger font; measure the active chart, not globals.
@@ -108,7 +149,7 @@ function configuration(): ChartConfiguration<'line' | 'bar'> {
     }, ticks: { autoSkip: false, align: movement ? 'center' : 'inner', minRotation: 0, maxRotation: 0, ...(movement ? { callback: (value: string | number) => visibleMovementLabels.has(Number(value)) ? axisLabels[Number(value)] : '' } : {}) } }, y: { ...(movement ? { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#e7ece8' } } : {}), title: { display: true, text: movement ? label('movementDetectedReadings') : `${t(`conservationPages.reports.operational.${r.measurement.key}`)} (${r.measurement.unit})` } } },
   } }
 }
-watch(() => [props.report, locale.value], async () => { const token = ++generation; selectedIndex.value = null; keyboardActive.value = false; chart?.destroy(); chart = null; await nextTick(); if (canvas.value && token === generation) chart = new Chart(canvas.value, configuration()) }, { immediate: true })
+watch(() => [props.report, locale.value], async () => { const token = ++generation; selectedIndex.value = null; keyboardActive.value = false; if (lastBucketCount !== props.report.buckets.length) viewport.value = null; lastBucketCount = props.report.buckets.length; chart?.destroy(); chart = null; await nextTick(); if (canvas.value && token === generation) chart = new Chart(canvas.value, configuration()) }, { immediate: true })
 onBeforeUnmount(() => { generation++; chart?.destroy() })
 defineExpose({ toPrintDataUrl: () => {
   const config = configuration()
@@ -118,11 +159,14 @@ defineExpose({ toPrintDataUrl: () => {
   return printChart(config)
 } })
 </script>
-<template><div class="iot-chart-accessible"><div class="iot-trend"><canvas ref="canvas" role="img" :tabindex="report.buckets.length ? 0 : -1" :aria-label="`${label('chartDescription')} ${label('chartKeyboard')}`" @focus="focusChart" @blur="blurChart" @keydown="inspectKey">{{ label('chartDescription') }}</canvas></div><p class="iot-chart-note">{{ label(report.measurement.key === 'movement' ? 'movementPeriodNote' : 'categorySpacing') }}</p><p v-if="inspection && keyboardActive" class="iot-chart-inspection chart-screen-reader" role="status" aria-live="polite">{{ inspection }}</p></div></template>
+<template><div class="iot-chart-accessible"><div v-if="canZoom" class="chart-navigation" role="group" :aria-label="label('chartNavigation')"><button type="button" @click="zoom(.65)">{{ label('zoomIn') }}</button><button type="button" @click="zoom(1.5)">{{ label('zoomOut') }}</button><button type="button" :disabled="!viewport" @click="pan(-1)">{{ label('panEarlier') }}</button><button type="button" :disabled="!viewport" @click="pan(1)">{{ label('panLater') }}</button><button type="button" :disabled="!viewport" @click="resetViewport">{{ label('resetZoom') }}</button></div><div class="iot-trend"><canvas ref="canvas" role="img" :tabindex="report.buckets.length ? 0 : -1" :aria-label="`${label('chartDescription')} ${label('chartKeyboard')}`" @focus="focusChart" @blur="blurChart" @keydown="inspectKey">{{ label('chartDescription') }}</canvas></div><p class="iot-chart-note">{{ label(report.measurement.key === 'movement' ? 'movementPeriodNote' : 'categorySpacing') }}</p><p v-if="inspection && keyboardActive" class="iot-chart-inspection chart-screen-reader" role="status" aria-live="polite">{{ inspection }}</p></div></template>
 <style scoped>
 .iot-trend { position: relative; height: 340px; min-width: 0; max-width: 100%; }
 .iot-trend canvas { max-width: 100%; }
 .iot-chart-accessible { min-width: 0; max-width: 100%; }
+.chart-navigation { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.chart-navigation button { min-height: 34px; padding: 5px 11px; border: 1px solid #cbd9cf; border-radius: 7px; background: #fff; color: #315749; font: inherit; cursor: pointer; }
+.chart-navigation button:disabled { opacity: .5; cursor: not-allowed; }
 .iot-trend canvas:focus-visible { outline: 2px solid #569374; outline-offset: 2px; border-radius: 4px; }
 .iot-chart-note, .iot-chart-inspection { margin: 10px 0 0; font-size: .8rem; color: #61756b; line-height: 1.6; overflow-wrap: anywhere; }
 .chart-screen-reader { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; border: 0; }

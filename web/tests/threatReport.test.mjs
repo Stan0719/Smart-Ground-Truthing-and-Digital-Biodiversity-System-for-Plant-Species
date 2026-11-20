@@ -85,9 +85,21 @@ function harness(responder=async()=>fixture([row(),row('possible_plant_contact',
 const flat=value=>{const out=[];function visit(n){if(Array.isArray(n))return n.forEach(visit);if(!n||typeof n!=='object')return;out.push(n);if(Array.isArray(n.children))visit(n.children)}visit(value);return out}
 test('local filters never fetch, period changes reset them, and detail columns omit unsupported identities',async()=>{
  const h=harness();try{await flush();assert.equal(h.calls.length,1);h.state.source.value='Camera';h.state.status.value='Resolved';await flush();assert.equal(h.calls.length,1);assert.equal(h.state.view.value.rows.length,1)
- const tree=flat(h.render());assert.equal(tree.filter(n=>n.type==='th').length,9);assert.equal(tree.filter(n=>n.props?.class==='summary-item').length,5)
+ h.state.reportView.value='table';const tree=flat(h.render());assert.equal(tree.filter(n=>n.type==='th').length,9);assert.equal(tree.filter(n=>n.props?.class==='summary-item').length,5)
  const doc=h.state.documentModel();assert.ok(doc.columns.some(c=>c.includes('current device')));assert.ok(!doc.columns.includes('Severity'));assert.ok(doc.columns.includes('Alert ID'));assert.ok(h.state.view.value.rows.every(row=>row.id===null&&row.deviceId===null))
  h.props.filters={period:'this-month'};await flush();assert.equal(h.calls.length,2);assert.equal(h.state.source.value,'');assert.equal(h.state.status.value,'');assert.deepEqual(Object.keys(h.calls[1][1]),['period'])
+ }finally{h.stop()}
+})
+test('threat report switches Graph and Table and chart period selection filters table rows',async()=>{
+ const h=harness(async()=>fixture([row('temperature','New','2026-11-04T00:00:00Z'),row('possible_plant_contact','Resolved','2026-11-05T00:00:00Z')]))
+ try{
+  await flush();assert.equal(h.state.reportView.value,'graph');assert.equal(h.state.view.value.buckets.length,2)
+  let tree=flat(h.render());assert.ok(tree.some(n=>n.props?.class==='report-view-switch'));assert.equal(tree.filter(n=>n.type==='th').length,0)
+  h.state.selectBucket(0);h.state.reportView.value='table';await flush()
+  assert.equal(h.state.tableRows.value.length,1);assert.equal(h.state.tableRows.value[0].createdAt,'2026-11-04T00:00:00Z')
+  tree=flat(h.render());assert.equal(tree.filter(n=>n.type==='th').length,9);assert.ok(tree.some(n=>String(n.children||'').includes('Selected period')))
+  h.state.selectedBucketIndex.value=null;await flush();assert.equal(h.state.tableRows.value.length,2)
+  h.state.source.value='Camera';await flush();assert.equal(h.state.selectedBucketIndex.value,null);assert.equal(h.state.tableRows.value.length,1)
  }finally{h.stop()}
 })
 test('late old-period results cannot replace a newer request and failures do not become empty reports',async()=>{
@@ -145,6 +157,6 @@ test('clean header preserves generated time, omits period metadata and long expl
 test('exactly one full-width stacked trend is rendered and its print configuration has no source breakdown',()=>{
  const {descriptor}=parse(read('components/conservation/ThreatReportCharts.vue')),script=compileScript(descriptor,{id:'chart-test'}),template=compileTemplate({source:descriptor.template.content,filename:'ThreatReportCharts.vue',id:'chart-test',compilerOptions:{bindingMetadata:script.bindings}})
  assert.deepEqual(template.errors,[]);assert.equal((descriptor.template.content.match(/<canvas /g)||[]).length,1);assert.ok(!descriptor.template.content.includes('breakdown'));assert.ok(!script.content.includes("configuration('source')"));assert.match(descriptor.styles[0].content,/width: 100%/)
- const view=buildThreatReport(projected([row(),row('possible_plant_contact'),row('legacy')],[32,1,2]));const exports={};const context={exports,require(name){if(name==='vue')return{...vue,onBeforeUnmount(){}};if(name==='chart.js')return{Chart:class{static register(){}},registerables:[]};if(name==='vue-i18n')return{useI18n:()=>({t:x=>x,locale:vue.ref('en')})};if(name.endsWith('threatReport'))return model;if(name.endsWith('reportExport'))return{printChart:async config=>config};throw Error(name)}}
- vm.runInNewContext('(function(){'+js(script.content)+'})()',context);const effect=vue.effectScope(),state=effect.run(()=>exports.default.setup({view},{expose(){}}));const config=state.configuration();assert.equal(config.data.datasets.length,3);assert.equal(config.options.scales.x.stacked,true);assert.equal(config.data.datasets.flatMap(s=>s.data).reduce((a,b)=>a+b,0),3);effect.stop()
+ const view=buildThreatReport(projected([row(),row('possible_plant_contact','New','2026-11-05T00:00:00Z'),row('legacy','New','2026-11-06T00:00:00Z')],[32,1,2]));const exports={},selected=[];const context={exports,require(name){if(name==='vue')return{...vue,onBeforeUnmount(){}};if(name==='chart.js')return{Chart:class{static register(){}},registerables:[]};if(name==='vue-i18n')return{useI18n:()=>({t:x=>x,locale:vue.ref('en')})};if(name.endsWith('threatReport'))return model;if(name.endsWith('reportExport'))return{printChart:async config=>config};throw Error(name)}}
+ vm.runInNewContext('(function(){'+js(script.content)+'})()',context);const effect=vue.effectScope(),state=effect.run(()=>exports.default.setup({view,selectedBucketIndex:1},{expose(){},emit:(...args)=>selected.push(args)}));const config=state.configuration();assert.equal(config.data.datasets.length,3);assert.equal(config.options.scales.x.stacked,true);assert.equal(config.data.datasets.flatMap(s=>s.data).reduce((a,b)=>a+b,0),3);assert.equal(config.data.datasets[0].backgroundColor[0],'#245A4655');assert.equal(config.data.datasets[0].backgroundColor[1],'#245A46');config.options.onClick({},[{index:2}]);assert.deepEqual(selected,[['selectBucket',2]]);effect.stop()
 })
