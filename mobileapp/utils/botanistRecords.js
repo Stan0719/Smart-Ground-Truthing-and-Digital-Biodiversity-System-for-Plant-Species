@@ -108,12 +108,16 @@ async function fetchRecords(accountId, plantId) {
   if (observationsResult.status === "rejected") delete result.observations;
   if (requestsResult.status === "rejected") delete result.requests;
   if (recordChangesResult.status === "rejected") delete result.recordChanges;
+  const previews = (result.plants || []).flatMap((plant) => {
+    const asset = plant.status === "Approved"
+      ? (plant.registrationPhotoIds.length ? { id: plant.registrationPhotoIds[0] } : null)
+      : plant.latestObservation?.assets?.[0];
+    return asset ? [{ plant, asset }] : [];
+  });
   const photoResults = await Promise.allSettled([
-    Promise.all((result.plants || []).map(async (plant) => {
-      const assets = plant.status === "Approved"
-        ? plant.registrationPhotoIds.map(id => ({ id })) : plant.latestObservation?.assets || [];
-      if (assets.length) plant.thumbnail = (await plantAssetSources(assets.slice(0, 1), accountId, { ownSubmission: true }))[0];
-    })),
+    previews.length ? plantAssetSources(previews.map(({ asset }) => asset), accountId, { ownSubmission: true }).then((sources) => {
+      previews.forEach(({ plant }, index) => { plant.thumbnail = sources[index]; });
+    }) : Promise.resolve(),
     result.requests?.length ? speciesRequestPhotoSources(result.requests, accountId).then((sources) => {
       result.requests.forEach((request, index) => { request.thumbnail = sources[index]; });
     }) : Promise.resolve(),

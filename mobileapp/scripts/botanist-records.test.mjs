@@ -1439,7 +1439,14 @@ for (const language of ["en", "ms", "zh"]) {
     const botanist = { id: "owner", name: "Aina Botanist" };
     let tree;
     const renderDashboard = () => { index = 0; tree = screen.default({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args) } }); };
-    function children(node) { return node && typeof node === "object" ? React.Children.toArray(node.props?.children) : []; }
+    function children(node) {
+      if (node?.type === "FlatList" && node.props.testID === "correction-requests-list") {
+        const { data, renderItem, ListHeaderComponent, ListEmptyComponent } = node.props;
+        return React.Children.toArray([ListHeaderComponent, ...(data.length
+          ? data.map((item) => renderItem({ item })) : [ListEmptyComponent])]);
+      }
+      return node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
+    }
     const text = (node) => typeof node === "string" || typeof node === "number" ? String(node) : children(node).map(text).join(" ");
     function find(predicate, node = tree) { if (predicate(node)) return node; for (const child of children(node)) { const found = find(predicate, child); if (found) return found; } }
     renderDashboard(); assert.ok(text(tree).includes("Aina Botanist"));

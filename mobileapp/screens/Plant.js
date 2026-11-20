@@ -22,7 +22,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import BackButton from "../components/BackButton";
-import { fetchPlantRecords, fetchSpeciesCatalog, filterUniqueSpeciesPlantRecords, filterPlantRecordsForRole, getPlantDisplayObservation, getScopedPlantRecords, isOwnedPendingPlant, isOwnedRejectedPlant, mergeOwnedPendingPlantZones } from "../utils/plantApi";
+import { fetchPlantRecords, fetchPublicPlantPage, fetchSpeciesCatalog, filterUniqueSpeciesPlantRecords, filterPlantRecordsForRole, getPlantDisplayObservation, getScopedPlantRecords, isOwnedPendingPlant, isOwnedRejectedPlant, mergeOwnedPendingPlantZones } from "../utils/plantApi";
 import { getPlantCardZoneValue } from "../utils/plantCardDisplay";
 import RefreshButton from "../components/RefreshButton";
 import FavouriteHeart from "../components/FavouriteHeart";
@@ -107,45 +107,81 @@ export default function Species({
   const currentSlug = routeParams.slug;
   const requestKey = `${String(accountId ?? "")}:${String(role ?? "")}:${String(currentSpeciesId ?? "")}:${String(currentSlug ?? "")}`;
 
+  const [searchQuery, setSearchQuery] = useSpeciesScopedState(requestKey, "");
+  const [plantStatusFilter, setPlantStatusFilter] = useSpeciesScopedState(requestKey, "allVisible");
+  const [healthFilter, setHealthFilter] = useSpeciesScopedState(requestKey, "All");
+  const [lifeStageFilter, setLifeStageFilter] = useSpeciesScopedState(requestKey, "All");
+  const [qrFilter, setQrFilter] = useSpeciesScopedState(requestKey, "All");
+  const [zoneFilter, setZoneFilter] = useSpeciesScopedState(requestKey, "All");
+  const [sortOption, setSortOption] = useSpeciesScopedState(requestKey, "default");
+  const [filtersOpen, setFiltersOpen] = useSpeciesScopedState(requestKey, false);
+  const fullPublicList = publicOnly && Boolean(searchQuery.trim() || lifeStageFilter !== "All" || sortOption !== "default");
+  const listRequestKey = `${requestKey}:${fullPublicList}`;
+
   const [selectedSpecies, setSelectedSpecies] = useState(
     route.params?.species || getSpeciesBySlug(slug) || null
   );
   const [scopedSpeciesPlants, setScopedSpeciesPlants] = useState({ scope: null, records: [] });
-  const speciesPlants = getScopedPlantRecords(scopedSpeciesPlants, requestKey);
+  const speciesPlants = getScopedPlantRecords(scopedSpeciesPlants, listRequestKey);
+  const hasMore = scopedSpeciesPlants.scope === listRequestKey && Boolean(scopedSpeciesPlants.nextCursor);
+  const [moreState, setMoreState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const requestRef = useRef({ key: null, id: 0, promise: null });
   const loadSpeciesPlants = useCallback((isRefresh = false) => {
     const activeRequest = requestRef.current;
-    if (activeRequest?.key === requestKey && activeRequest.promise) {
+    if (activeRequest?.key === listRequestKey && activeRequest.promise && !activeRequest.more) {
       return activeRequest.promise;
     }
     const requestId = (activeRequest?.id || 0) + 1;
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     setErrorMessage("");
-    if (activeRequest?.key !== requestKey) {
-      setScopedSpeciesPlants({ scope: requestKey, records: [] });
+    setMoreState(null);
+    if (activeRequest?.key !== listRequestKey) {
+      setScopedSpeciesPlants({ scope: listRequestKey, records: [] });
     }
-    const request = (async () => {
+    const request = Promise.resolve().then(async () => {
+      let continuation = activeRequest?.key === listRequestKey ? activeRequest.nextCursor ?? null : null;
+      let canResume = false;
       try {
-        const catalog = await fetchSpeciesCatalog({ accountId, publicOnly });
-        let records = await fetchPlantRecords(catalog, { accountId, publicOnly });
-        if (isBotanist) {
-          const ownerRecords = await fetchPlantRecords(catalog, { accountId, scopeMine: true });
-          records = [
-            ...ownerRecords.filter((record) => isOwnedRejectedPlant(record, accountId)),
-            ...records,
-          ];
-          records = mergeOwnedPendingPlantZones(records, ownerRecords, accountId);
-        }
+        const routedSpecies = routeParams.species;
+        const canUseRoutedSpecies = !isRefresh && publicOnly && routedSpecies?.approvalStatus === "Approved" &&
+          !routedSpecies.privateRequest && /^[1-9]\d*$/.test(String(currentSpeciesId)) &&
+          String(routedSpecies.id) === String(currentSpeciesId);
+        const catalog = canUseRoutedSpecies ? [routedSpecies] : await fetchSpeciesCatalog({ accountId, publicOnly });
+        if (requestRef.current?.id !== requestId) return;
         const matchedSpecies = catalog.find((item) =>
-          currentSpeciesId != null
-            ? String(item.id) === String(currentSpeciesId)
-            : item.slug === currentSlug
+          currentSpeciesId != null ? String(item.id) === String(currentSpeciesId) : item.slug === currentSlug
         ) || routeParams.species || getSpeciesBySlug(currentSlug) || null;
         const matchedId = matchedSpecies?.id ?? currentSpeciesId;
+        let records;
+        let nextCursor = null;
+        let pageContext = null;
+        if (publicOnly && /^[1-9]\d*$/.test(String(matchedId))) {
+          pageContext = { catalog, matchedId };
+          records = [];
+          do {
+            const page = await fetchPublicPlantPage(catalog, matchedId, nextCursor, fullPublicList ? 50 : 20);
+            if (requestRef.current?.id !== requestId) return;
+            records.push(...page.records);
+            nextCursor = page.nextCursor;
+          } while (fullPublicList && nextCursor);
+        } else {
+          const [catalogueRecords, ownerRecords] = await Promise.all([
+            fetchPlantRecords(catalog, { accountId, publicOnly }),
+            isBotanist ? fetchPlantRecords(catalog, { accountId, scopeMine: true }) : [],
+          ]);
+          records = catalogueRecords;
+          if (isBotanist) {
+            records = [
+              ...ownerRecords.filter((record) => isOwnedRejectedPlant(record, accountId)),
+              ...catalogueRecords,
+            ];
+            records = mergeOwnedPendingPlantZones(records, ownerRecords, accountId);
+          }
+        }
         const recordsForSpecies = filterUniqueSpeciesPlantRecords(records, matchedId, currentSlug);
         const roleVisibleRecords = filterPlantRecordsForRole(recordsForSpecies, role, accountId, { publicOnly });
         const visibleRecords = publicOnly
@@ -153,8 +189,10 @@ export default function Species({
           : [...roleVisibleRecords, ...recordsForSpecies.filter((record) => isOwnedRejectedPlant(record, accountId))];
 
         if (requestRef.current?.id === requestId) {
+          continuation = nextCursor;
+          canResume = Boolean(pageContext) && !fullPublicList && visibleRecords.length > 0;
           setSelectedSpecies(matchedSpecies);
-          setScopedSpeciesPlants({ scope: requestKey, records: visibleRecords });
+          setScopedSpeciesPlants({ scope: listRequestKey, records: visibleRecords, nextCursor, pageContext });
         }
       } catch (error) {
         if (requestRef.current?.id === requestId) {
@@ -162,36 +200,56 @@ export default function Species({
         }
       } finally {
         if (requestRef.current?.id === requestId) {
-          requestRef.current = { key: requestKey, id: requestId, promise: null };
+          requestRef.current = { key: listRequestKey, id: requestId, promise: null, nextCursor: continuation, canResume };
           setLoading(false);
           setRefreshing(false);
         }
       }
-    })();
-    requestRef.current = { key: requestKey, id: requestId, promise: request };
+    });
+    requestRef.current = { key: listRequestKey, id: requestId, promise: request };
     return request;
-  }, [requestKey, currentSpeciesId, currentSlug, routeParams.species, accountId, role, isBotanist, publicOnly]);
+  }, [listRequestKey, currentSpeciesId, currentSlug, routeParams.species, accountId, role, isBotanist, publicOnly, fullPublicList]);
 
   useFocusEffect(useCallback(() => {
-    void loadSpeciesPlants(false);
-  }, [loadSpeciesPlants]));
+    if (requestRef.current.key === listRequestKey && requestRef.current.canResume) {
+      setMoreState(null);
+    } else {
+      void loadSpeciesPlants(false);
+    }
+    return () => {
+      const { key, id, nextCursor, canResume } = requestRef.current;
+      requestRef.current = { key, id: id + 1, nextCursor, canResume, promise: null };
+    };
+  }, [listRequestKey, loadSpeciesPlants]));
 
-
-  const [searchQuery, setSearchQuery] = useSpeciesScopedState(requestKey, "");
-
-  const [plantStatusFilter, setPlantStatusFilter] = useSpeciesScopedState(requestKey, "allVisible");
-
-  const [healthFilter, setHealthFilter] = useSpeciesScopedState(requestKey, "All");
-
-  const [lifeStageFilter, setLifeStageFilter] = useSpeciesScopedState(requestKey, "All");
-
-  const [qrFilter, setQrFilter] = useSpeciesScopedState(requestKey, "All");
-
-  const [zoneFilter, setZoneFilter] = useSpeciesScopedState(requestKey, "All");
-
-  const [sortOption, setSortOption] = useSpeciesScopedState(requestKey, "default");
-
-  const [filtersOpen, setFiltersOpen] = useSpeciesScopedState(requestKey, false);
+  const loadMorePlants = async (retry = false) => {
+    const active = requestRef.current;
+    const { nextCursor, pageContext } = scopedSpeciesPlants;
+    if (!hasMore || active.key !== listRequestKey || active.promise || active.more ||
+      active.nextCursor !== nextCursor || (active.pageError && !retry)) return;
+    const requestId = active.id + 1;
+    requestRef.current = { key: listRequestKey, id: requestId, nextCursor, more: true, canResume: true };
+    setMoreState({ loading: true });
+    let continuation = nextCursor;
+    let pageError = false;
+    try {
+      const { catalog, matchedId } = pageContext;
+      const page = await fetchPublicPlantPage(catalog, matchedId, nextCursor);
+      if (requestRef.current.id !== requestId) return;
+      const combined = filterUniqueSpeciesPlantRecords([...speciesPlants, ...page.records], matchedId, currentSlug);
+      const records = filterPlantRecordsForRole(combined, role, accountId, { publicOnly });
+      continuation = page.nextCursor;
+      setScopedSpeciesPlants({ scope: listRequestKey, records, nextCursor: page.nextCursor, pageContext });
+      setMoreState(null);
+    } catch (error) {
+      pageError = true;
+      if (requestRef.current.id === requestId) setMoreState({ error: error.message || "Unable to load plant records." });
+    } finally {
+      if (requestRef.current.id === requestId) {
+        requestRef.current = { key: listRequestKey, id: requestId, promise: null, nextCursor: continuation, pageError, canResume: true };
+      }
+    }
+  };
 
 
   // =====================================================
@@ -398,7 +456,7 @@ export default function Species({
           {filteredPlants.length}{" "}
           {filteredPlants.length === 1
             ? t("plant.plant")
-            : t("plant.plants")}{" "}{t("plant.found")}</Text>}
+            : t("plant.plants")}{" "}{t(hasMore ? "plant.loaded" : "plant.found")}</Text>}
 
         {!!favourites.mutationError && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(favourites.mutationError)}</Text>}
         {!!favourites.error && !favourites.loading && <Text accessibilityRole="alert" style={{ marginTop: 8, color: "#A52A3A" }}>{translateUIMessage(favourites.error)}</Text>}
@@ -586,6 +644,18 @@ export default function Species({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         alwaysBounceVertical
+        onEndReached={hasMore ? () => void loadMorePlants() : undefined}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={hasMore && !loading && !refreshing ? (
+          <View style={{ alignItems: "center", paddingVertical: 12 }}>
+            {moreState?.loading ? <ActivityIndicator color="#2F6B4F" /> : <>
+              {!!moreState?.error && <Text accessibilityRole="alert" style={styles.loadErrorText}>{translateUIMessage(moreState.error)}</Text>}
+              <TouchableOpacity accessibilityRole="button" style={styles.retryButton} onPress={() => void loadMorePlants(true)}>
+                <Text style={styles.retryText}>{t(moreState?.error ? "common.tryAgain" : "common.loadMore")}</Text>
+              </TouchableOpacity>
+            </>}
+          </View>
+        ) : null}
         refreshControl={
           <RefreshControl
             refreshing={refreshing || favourites.refreshing}

@@ -15,7 +15,7 @@ test("the catalogue has button and pull refresh backed by the shared API loader"
 
 for (const [file, loader, buttonId, guard] of [
   ["screens/SpeciesDetail.js", "loadSpeciesDetails", "species-detail-refresh", /if \(requestRef\.current\) return requestRef\.current/],
-  ["screens/Plant.js", "loadSpeciesPlants", "plant-list-refresh", /activeRequest\?\.key === requestKey && activeRequest\.promise/],
+  ["screens/Plant.js", "loadSpeciesPlants", "plant-list-refresh", /activeRequest\?\.key === listRequestKey && activeRequest\.promise && !activeRequest\.more/],
   ["screens/PlantDetail.js", "loadPlant", "plant-detail-refresh", /if \(requestRef\.current\) return requestRef\.current/],
 ]) {
   test(`${file} refreshes through its guarded loader without clearing successful content on failure`, () => {

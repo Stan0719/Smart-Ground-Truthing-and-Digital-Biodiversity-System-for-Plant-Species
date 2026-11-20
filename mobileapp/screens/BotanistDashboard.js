@@ -780,7 +780,15 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
       <TouchableOpacity style={styles.correctionEditButton} onPress={() => openCorrection(task)} accessibilityRole="button" accessibilityLabel={label}><Text style={styles.correctionEditButtonText}>{label}</Text></TouchableOpacity>
     </View>;
   };
-  return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><ScrollView contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent]} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void refresh(); }} tintColor="#2F6B4F" />}>
+  return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><FlatList
+    testID="correction-requests-list"
+    data={!loaded && (loading || error) ? [] : visibleCorrections}
+    keyExtractor={(task) => task.key}
+    renderItem={({ item }) => <View style={styles.correctionRow}>{renderCorrection(item)}</View>}
+    contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent]}
+    keyboardShouldPersistTaps="handled"
+    refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void refresh(); }} tintColor="#2F6B4F" />}
+    ListHeaderComponent={
     <View style={[styles.pageHeaderContent, styles.correctionHeaderContent]}>
       <TextInput style={styles.correctionSearch} value={correctionQuery} onChangeText={setCorrectionQuery}
         placeholder={t("botanistDashboard.searchCorrectionRequests")} placeholderTextColor="#7B8A80"
@@ -792,9 +800,12 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
         </TouchableOpacity>)}</View>
       {loaded && !error && <Text style={styles.correctionResultCount}>{t("botanistDashboard.matchingCorrectionRequests", { count: visibleCorrections.length })}</Text>}
       {!!error && <View style={styles.correctionErrorBox}><Text style={styles.correctionErrorText} accessibilityRole="alert">{error.split("\n").map(translateUIMessage).join("\n")}</Text><TouchableOpacity style={styles.correctionRetryButton} onPress={() => { void refresh(); }}><Text style={styles.correctionRetryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>}
-      {!loaded && loading ? <View style={styles.correctionMessage}><ActivityIndicator color="#2F6B4F" /><Text style={styles.correctionEmptyText}>{t("botanistDashboard.loadingCorrectionRequests")}</Text></View> : error && !loaded ? null : !visibleCorrections.length ? <View style={styles.correctionMessage}><Text style={styles.correctionEmptyText}>{corrections.length ? t("botanistDashboard.noMatchingCorrectionRequests") : t("botanistDashboard.noCorrectionRequests")}</Text></View> : visibleCorrections.map(renderCorrection)}
     </View>
-  </ScrollView></SafeAreaView>;
+    }
+    ListEmptyComponent={<View style={styles.correctionRow}>
+      {!loaded && loading ? <View style={styles.correctionMessage}><ActivityIndicator color="#2F6B4F" /><Text style={styles.correctionEmptyText}>{t("botanistDashboard.loadingCorrectionRequests")}</Text></View> : error && !loaded ? null : <View style={styles.correctionMessage}><Text style={styles.correctionEmptyText}>{corrections.length ? t("botanistDashboard.noMatchingCorrectionRequests") : t("botanistDashboard.noCorrectionRequests")}</Text></View>}
+    </View>}
+  /></SafeAreaView>;
 }
 
 // STYLES
@@ -843,6 +854,7 @@ const styles = StyleSheet.create({
   correctionCardBadge: { position: "absolute", top: 10, right: 10, minWidth: 22, height: 22, paddingHorizontal: 5, borderRadius: 11, backgroundColor: "#B84F43", alignItems: "center", justifyContent: "center", zIndex: 2 },
   pageHeaderContent: { width: "100%", maxWidth: 952, alignSelf: "center", paddingTop: 8 },
   correctionHeaderContent: { paddingTop: 18 },
+  correctionRow: { width: "100%", maxWidth: 952, alignSelf: "center" },
   submissionsHeaderContent: { paddingTop: 18 },
   pageHeading: { marginBottom: 18 },
   pageTitle: { color: "#2F6B4F", fontSize: 24, fontWeight: "800" },

@@ -3,6 +3,80 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 
+test('species counts use a compact public summary and support older full-list responses', async () => {
+  const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\r?\n/gm, '').replace(/export /g, '')
+  let payload = { species_counts: [{ species_id: 6, count: 521 }] }
+  const context = vm.createContext({
+    mobileApiUrl: () => 'https://example.invalid',
+    faceSession: { hasSession: () => true, withToken: () => assert.fail('Public catalogue requested a private session') },
+    fetch: async (url, options) => {
+      assert.equal(new URL(url).search, '?summary=species-counts')
+      assert.equal(options.credentials, 'omit')
+      return { ok: true, json: async () => payload }
+    },
+  })
+  vm.runInContext(source, context)
+  const readCounts = () => vm.runInContext('fetchPlantSpeciesCounts({ publicOnly: true })', context)
+  assert.equal((await readCounts())['6'], 521)
+  payload = { plants: [
+    { species_id: 6, rbac_status: 'Approved' },
+    { species_id: 6, rbac_status: 'Pending Review' },
+    { species_id: 7, rbac_status: 'Rejected' },
+  ] }
+  assert.deepEqual({ ...await readCounts() }, { 6: 1 })
+})
+
+test('Plant Details uses embedded authorized species and does not download the catalogue', async () => {
+  const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\r?\n/gm, '').replace(/export /g, '')
+  const calls = []
+  const context = vm.createContext({
+    mobileApiUrl: () => 'https://example.invalid',
+    faceSession: { hasSession: () => false },
+    fetch: async (url) => {
+      const { pathname } = new URL(url)
+      calls.push(pathname)
+      assert.ok(pathname !== '/api/species')
+      return { ok: true, json: async () => pathname === '/api/plants/8'
+        ? { plant: { plant_id: 8, species_id: 6, species_details: { species_id: 6, common_name: 'Fern' } } }
+        : { assets: [] } }
+    },
+  })
+  vm.runInContext(source, context)
+  const plant = await vm.runInContext('fetchPlantDetail("8")', context)
+  assert.equal(plant.species.name, 'Fern')
+  assert.deepEqual(calls, ['/api/plants/8', '/api/assets'])
+})
+
+test('public Plant pages keep credentials out of requests and support the legacy list response', async () => {
+  const source = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\r?\n/gm, '').replace(/export /g, '')
+  const requests = []
+  const context = vm.createContext({
+    mobileApiUrl: () => 'https://example.invalid',
+    faceSession: { hasSession: () => true, withToken: () => assert.fail('Public catalogue used private authentication') },
+    fetch: async (url, options) => {
+      requests.push([url, options])
+      const plants = [{ plant_id: 8, species_id: 2, rbac_status: 'Approved', plant_image_asset_id: 'preview-8' }]
+      return { ok: true, json: async () => requests.length === 1
+        ? { plants, page: { has_more: true, next_cursor: '8' } }
+        : { plants } }
+    },
+  })
+  vm.runInContext(source, context)
+  const first = await vm.runInContext('fetchPublicPlantPage([], "2")', context)
+  assert.equal(first.nextCursor, '8')
+  assert.equal(first.records[0].plantImage.uri, 'https://example.invalid/api/assets/preview-8')
+  assert.equal(first.records[0].plantImage.headers, undefined)
+  const legacy = await vm.runInContext('fetchPublicPlantPage([], "2", "8")', context)
+  assert.equal(legacy.nextCursor, null)
+  assert.deepEqual(requests.map(([url]) => new URL(url).search), [
+    '?species_id=2&page_size=20', '?species_id=2&page_size=20&before_plant_id=8',
+  ])
+  assert.ok(requests.every(([, options]) => options.credentials === 'omit' && !options.headers.Authorization))
+})
+
 test('Plant My Rejected chip filters only current owner Rejected records without changing other status chips', () => {
   const screen = readFileSync(new URL('../screens/Plant.js', import.meta.url), 'utf8')
   const api = readFileSync(new URL('../utils/plantApi.js', import.meta.url), 'utf8')

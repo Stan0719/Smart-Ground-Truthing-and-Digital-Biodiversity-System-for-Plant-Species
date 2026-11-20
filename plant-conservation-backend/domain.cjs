@@ -9,6 +9,7 @@ const { originColumnAvailable, classifyObservations } = require("./observation-o
 const observationVersions = require("./observation-submission-versions.cjs");
 const { canModifyPendingObservation } = require("./status-permissions.cjs");
 const { queueOptions, queuePage } = require("./observation-queue.cjs");
+const { publicPlantPageOptions, publicPlantPageMetadata, readPlantSpeciesCounts } = require("./plant-list-page.cjs");
 const {
   permitted,
   canReadScientificCatalogue,
@@ -424,7 +425,11 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       (!/^[1-9][0-9]{0,9}$/.test(plantId) || Number(plantId) > 2147483647)
     )
       fail(400, "Invalid plant identifier.");
+    const pageOptions = publicPlantPageOptions(req.query, plantId === null && !publicWeb && !mine && !req.user);
     const staff = canReadScientificCatalogue(req.user);
+    if (req.query.summary === "species-counts" && plantId === null && !publicWeb && !mine && !pageOptions) {
+      return res.json({ species_counts: await readPlantSpeciesCounts(pool, catalogueVisibilityFor(req.user), staff) });
+    }
     const rows = (
       await pool.query(
         `SELECT p.plant_id,p.species_id,p.scientific_name,p.rbac_status,p.registered_subject,p.registered_at,
@@ -547,7 +552,9 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             THEN p.rbac_status='Approved' OR (p.rbac_status='Pending Review' AND p.registered_subject=$2)
             ELSE p.rbac_status='Approved' OR p.registered_subject=$2 OR $3 END)
           AND ($7 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
-          AND ($4::integer IS NULL OR p.plant_id=$4) ORDER BY p.plant_id DESC LIMIT 500`,
+          AND ($4::integer IS NULL OR p.plant_id=$4)
+          ${pageOptions ? "AND p.species_id=$9 AND ($10::integer IS NULL OR p.plant_id<$10)" : ""}
+          ORDER BY p.plant_id DESC LIMIT ${pageOptions ? "$11" : "500"}`,
         [
           catalogueVisibilityFor(req.user),
           req.user ? subject(req.user) : "",
@@ -557,9 +564,12 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           permitted(req.user, "plants.create"),
           staff,
           req.user?.role === "Botanist",
+          ...(pageOptions ? [pageOptions.speciesId, pageOptions.before, pageOptions.limit + 1] : []),
         ],
       )
     ).rows;
+    const page = pageOptions ? publicPlantPageMetadata(rows, pageOptions.limit) : null;
+    if (page?.has_more) rows.pop();
     // Parent authorization above runs before resolving any private history.
     const registrations = await resolvePlantRegistrations(pool, rows.filter(r => r.rbac_status === "Approved").map(r => r.plant_id));
     for (const row of rows) {
@@ -645,7 +655,10 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       if (!plants.length) fail(404, "Plant unavailable.");
       return res.json({ plant: projectedPlants[0] });
     }
-    res.json({ plants: projectedPlants });
+    res.json({
+      plants: projectedPlants,
+      ...(page ? { page } : {}),
+    });
   };
   app.get("/api/plants", allow("plants.catalogue.read"), readPlants);
   app.get("/api/plants/:id", allow("plants.catalogue.read"), readPlants);

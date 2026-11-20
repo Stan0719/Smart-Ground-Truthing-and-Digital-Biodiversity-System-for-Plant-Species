@@ -4,33 +4,42 @@ const logPlantRequest = (entry) => {
  if(typeof __DEV__==='boolean'&&__DEV__)console.info('[plant-api]',entry);
 };
 
+function plantDiagnosticRoute(path) {
+  const route = path.split("?")[0].replace(/^\/api(?=\/)/, "");
+  const [, resource, part] = route.split("/");
+  if (["capabilities", "gallery", "detail", "read", "sync"].includes(part)) return `/${resource}/${part}`;
+  return part ? `/${resource}/:id` : `/${resource}`;
+}
+
 export async function plantApi(path,{method='GET',body,expectedAccountId,accountId=expectedAccountId}={}){
  const API_URL = mobileApiUrl("plant");
  if(!path.startsWith('/')||path.startsWith('//'))throw Error('Invalid plant API path.');
- const endpoint=API_URL+'/api'+path;
+ const endpoint=plantDiagnosticRoute(path);
+ const started=Date.now();
  try{return await faceSession.withToken(async(token,user)=>{
  if(accountId&&user.id!==accountId)throw Object.assign(Error('Sign in with the correct account.'),{code:'ACCOUNT_MISMATCH',status:403});
  if(path==='/species'&&['botanist','conservation-officer'].includes(user.role))path+='?scope=scientific';
- logPlantRequest({phase:'request_started',endpoint:API_URL+'/api'+path,method,credentialsIncluded:true,accountIdAvailable:Boolean(user.id),accountMatchesExpected:!accountId||user.id===accountId});
+ logPlantRequest({phase:'request_started',endpoint,method,credentialsIncluded:true,accountIdAvailable:Boolean(user.id),accountMatchesExpected:!accountId||user.id===accountId});
  let response;
  try{response=await fetch(API_URL+'/api'+path,{method,credentials:'omit',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(path==='/plant-submissions'?90000:15000)})}
  catch(cause){throw Object.assign(Error('Unable to reach the plant service. Check your connection and the running backend.'),{code:['AbortError','TimeoutError'].includes(cause.name)?'API_TIMEOUT':'API_UNREACHABLE',transient:true})}
- logPlantRequest({phase:'response_received',endpoint:API_URL+'/api'+path,method,status:response.status});
  const responseText=await response.text();
+ logPlantRequest({phase:'response_received',endpoint,method,status:response.status,durationMs:Date.now()-started,responseChars:responseText.length});
  let result;
  try{result=responseText?JSON.parse(responseText):{}}catch{
  throw Object.assign(Error(`Plant API returned a non-JSON response (HTTP ${response.status}) for ${method} ${path}. Check that the backend and tunnel are running the current code.`),{code:'API_NOT_JSON',status:response.status,transient:[502,503,504].includes(response.status)});
  }
  if(!response.ok)throw Object.assign(Error(result.error||`Plant request failed (HTTP ${response.status}).`),{status:response.status,code:response.status===401?'API_AUTH_REQUIRED':response.status===403?'API_ACCESS_DENIED':typeof result.code==='string'?result.code:'PLANT_API_ERROR',duplicateType:result.duplicate_type,speciesId:result.species_id,requestId:result.request_id,requestStatus:result.request_status,transient:[502,503,504].includes(response.status)});
- if(Array.isArray(result.plants))logPlantRequest({phase:'records_received',endpoint:API_URL+'/api'+path,status:response.status,recordCount:result.plants.length,ownedRecordCount:result.plants.filter(row=>row.registered_subject===`staff:${user.id}`).length});
+ if(Array.isArray(result.plants))logPlantRequest({phase:'records_received',endpoint,status:response.status,recordCount:result.plants.length});
  return result;
- });}catch(error){logPlantRequest({phase:'request_failed',endpoint,method,code:error.code||'PLANT_API_ERROR',...(error.status?{status:error.status}:{}),...(error.code==='SESSION_REQUIRED'?{credentialsIncluded:false}: {})});throw error;}
+ });}catch(error){logPlantRequest({phase:'request_failed',endpoint,method,durationMs:Date.now()-started,code:error.code||'PLANT_API_ERROR',...(error.status?{status:error.status}:{}),...(error.code==='SESSION_REQUIRED'?{credentialsIncluded:false}: {})});throw error;}
 }
 async function getJson(path, { accountId, publicOnly = false } = {}) {
   const API_URL = mobileApiUrl("plant");
-  if (publicOnly && !/^\/api\/(?:species(?:\/[1-9][0-9]*)?|plants)$/.test(path))
+  if (publicOnly && !/^\/api\/(?:species(?:\/[1-9][0-9]*)?|plants(?:\?(?:summary=species-counts|species_id=[1-9]\d*&page_size=\d+(?:&before_plant_id=[1-9]\d*)?))?)$/.test(path))
     throw new Error("Public catalogue access is limited to visible species and plant lists.");
   if(!publicOnly && (accountId || faceSession.hasSession()))return plantApi(path.replace(/^\/api/,''), { expectedAccountId: accountId });
+  const started = Date.now();
   let response;
   try {
     response = await fetch(`${API_URL}${path}`, { credentials: "omit", redirect: "error", headers: { Accept: "application/json" } });
@@ -42,7 +51,11 @@ async function getJson(path, { accountId, publicOnly = false } = {}) {
     throw new Error(`Backend request failed (${response.status}).`);
   }
 
-  return response.json();
+  const payload = await response.json();
+  logPlantRequest({ phase: "response_received", endpoint: plantDiagnosticRoute(path), method: "GET",
+    status: response.status, durationMs: Date.now() - started,
+    recordCount: (payload?.plants ?? payload?.species_counts ?? payload?.species)?.length });
+  return payload;
 }
 
 function unwrapList(payload, keys) {
@@ -96,6 +109,27 @@ export function mapBackendSpecies(species) {
 export async function fetchSpeciesCatalog(options = {}) {
   const payload = await getJson("/api/species", options);
   return speciesImageSources(unwrapList(payload, ["species", "data", "results"]).map(mapBackendSpecies), options);
+}
+
+export async function fetchPlantSpeciesCounts(options = {}) {
+  const payload = await getJson("/api/plants?summary=species-counts", options);
+  const counts = {};
+  if (Array.isArray(payload?.species_counts)) {
+    for (const { species_id, count } of payload.species_counts) {
+      if (!/^\d+$/.test(String(species_id)) || !Number.isSafeInteger(count) || count < 0)
+        throw Error("The backend returned invalid plant counts.");
+      counts[species_id] = count;
+    }
+    return counts;
+  }
+  // An older backend ignores the optional summary and returns its normal list.
+  for (const row of unwrapList(payload, ["plants", "data", "results"])) {
+    const { currentStatus, speciesId } = mapBackendPlant(row);
+    if (currentStatus === "Approved" && /^\d+$/.test(speciesId)) {
+      counts[speciesId] = (counts[speciesId] || 0) + 1;
+    }
+  }
+  return counts;
 }
 
 export async function fetchOwnedSpeciesRequests(accountId) {
@@ -433,10 +467,14 @@ export function filterPlantRecordsForRole(records, role, accountId, { publicOnly
   return rows.filter((plant) => isPlantVisibleInRoleCatalog(plant, role, accountId));
 }
 
+function plantAssetUri(assetId, ownSubmission = false) {
+  return mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(assetId) + (ownSubmission ? "?scope=mine" : "");
+}
+
 export async function plantAssetSources(assets, accountId, { ownSubmission = false } = {}) {
   return faceSession.withToken(async (token, user) => {
     if (accountId != null && String(user.id) !== String(accountId)) throw Error("Sign in with the correct account.");
-    return assets.map((asset) => ({ uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(asset.id) + (ownSubmission ? "?scope=mine" : ""),
+    return assets.map((asset) => ({ uri: plantAssetUri(asset.id, ownSubmission),
       headers: { Authorization: "Bearer " + token } }));
   });
 }
@@ -459,25 +497,40 @@ export async function recordChangePhotoSource(changeId, index, accountId) {
 
 export async function fetchPlantRecords(speciesCatalog = [], { scopeMine = false, publicOnly = false, ...options } = {}) {
   const payload = await getJson(`/api/plants${scopeMine ? "?scope=mine" : ""}`, { ...options, publicOnly });
+  return mapPlantRecords(payload, speciesCatalog, publicOnly, options.accountId);
+}
+
+export async function fetchPublicPlantPage(speciesCatalog, speciesId, cursor = null, limit = 20) {
+  const query = `species_id=${encodeURIComponent(speciesId)}&page_size=${limit}${cursor === null ? "" : `&before_plant_id=${encodeURIComponent(cursor)}`}`;
+  const payload = await getJson(`/api/plants?${query}`, { publicOnly: true });
+  const nextCursor = payload?.page?.has_more === true ? payload.page.next_cursor : null;
+  if (payload?.page?.has_more === true && (!/^[1-9]\d*$/.test(String(nextCursor)) ||
+    (cursor !== null && Number(nextCursor) >= Number(cursor)))) throw Error("The backend returned an invalid plant page.");
+  return { records: await mapPlantRecords(payload, speciesCatalog, true), nextCursor: nextCursor == null ? null : String(nextCursor) };
+}
+
+async function mapPlantRecords(payload, speciesCatalog, publicOnly, accountId) {
   const rawRecords = unwrapList(payload, ["plants", "data", "results"]);
   const speciesById = new Map(speciesCatalog.map((species) => [String(species.id), species]));
   const plants = rawRecords.map((record) =>
     mapBackendPlant(record, speciesById)
   );
-  const withPhotos = plants.filter((plant) => plant.plantImageAssetId);
-  if (!withPhotos.length) return plants;
-  const sourceByPlantId = new Map();
-  for (const plant of withPhotos) {
-    const ownPendingPreview = plant.currentStatus !== "Approved" &&
-      String(plant.registeredBy) === `staff:${options.accountId}`;
-    const source = faceSession.hasSession() && !publicOnly
-      ? (await plantAssetSources([{ id: plant.plantImageAssetId }], options.accountId, { ownSubmission: ownPendingPreview }))[0]
-      : { uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(plant.plantImageAssetId) };
-    sourceByPlantId.set(plant.id, source);
+  if (!plants.some((plant) => plant.plantImageAssetId)) return plants;
+  if (publicOnly || !faceSession.hasSession()) {
+    return plants.map((plant) => plant.plantImageAssetId
+      ? { ...plant, plantImage: { uri: plantAssetUri(plant.plantImageAssetId) } }
+      : plant);
   }
-  return plants.map((plant) => sourceByPlantId.has(plant.id)
-    ? { ...plant, plantImage: sourceByPlantId.get(plant.id) }
-    : plant);
+  return faceSession.withToken(async (token, user) => {
+    if (accountId != null && String(user.id) !== String(accountId)) throw Error("Sign in with the correct account.");
+    const headers = { Authorization: "Bearer " + token };
+    return plants.map((plant) => {
+      if (!plant.plantImageAssetId) return plant;
+      const ownPendingPreview = plant.currentStatus !== "Approved" &&
+        String(plant.registeredBy) === `staff:${accountId}`;
+      return { ...plant, plantImage: { uri: plantAssetUri(plant.plantImageAssetId, ownPendingPreview), headers } };
+    });
+  });
 }
 
 export function filterUniqueSpeciesPlantRecords(records, speciesId, speciesSlug) {
@@ -500,18 +553,23 @@ export async function fetchPlantDetail(plantId, { includeObservations = false, s
     throw new Error("The selected plant does not have a backend ID.");
   }
 
-  const [plantPayload, catalog] = await Promise.all([
-    getJson(`/api/plants/${encodeURIComponent(id)}${scopeMine ? "?scope=mine" : ""}`, { accountId }),
-    fetchSpeciesCatalog({ accountId }),
-  ]);
+  const plantPayload = await getJson(`/api/plants/${encodeURIComponent(id)}${scopeMine ? "?scope=mine" : ""}`, { accountId });
   const record = plantPayload?.plant ?? plantPayload;
+  const embeddedSpecies = record?.species_details?.species_id != null &&
+    String(record.species_details.species_id) === String(record.species_id ?? record.speciesId);
+  const assetsPath = `/api/assets?plant_id=${encodeURIComponent(id)}${scopeMine ? "&scope=mine" : ""}`;
+  const [catalog, photoResult] = await Promise.all([
+    embeddedSpecies ? [] : fetchSpeciesCatalog({ accountId }),
+    getJson(assetsPath, { accountId }).then((value) => ({ value }), () => ({ error: true })),
+  ]);
   const speciesById = new Map(catalog.map((species) => [String(species.id), species]));
   const plant = mapBackendPlant(record, speciesById);
   try {
-    const photoPayload = await getJson(`/api/assets?plant_id=${encodeURIComponent(id)}${scopeMine ? "&scope=mine" : ""}`, { accountId });
+    if (photoResult.error) throw Error("Plant photos are unavailable.");
+    const photoPayload = photoResult.value;
     const assets = (photoPayload?.assets || []).filter((asset) => asset?.id);
     const ownSubmission = scopeMine && plant.currentStatus !== "Approved" && String(plant.registeredBy) === `staff:${accountId}`;
-    const sources = accountId
+    const sources = !assets.length ? [] : accountId
       ? await plantAssetSources(assets, accountId, { ownSubmission })
       : assets.map((asset) => ({ uri: mobileApiUrl("plant") + "/api/assets/" + encodeURIComponent(asset.id) }));
     plant.photos = assets.map((asset, index) => ({ id: asset.id, ...sources[index] }));

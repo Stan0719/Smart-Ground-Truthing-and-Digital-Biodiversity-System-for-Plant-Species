@@ -17,6 +17,28 @@ test("scanner resolves inventory before recording visitor history or offering re
   assert.match(scan, /navigation\.navigate\("PlantDetails", \{ plantId: String\(plantId\) \}\)/);
 });
 
+test("an assigned Visitor scan opens Plant Details before the history write completes", async () => {
+  const source = scan.match(/async function handleBarcodeScanned\([\s\S]*?\n  }(?=\s*\/\/)/)[0];
+  const events = [];
+  let finishHistory;
+  const history = new Promise((resolve) => { finishHistory = resolve; });
+  const dependencies = {
+    scanInProgress: { current: false },
+    parsePlantQrPayload: () => "synthetic-qr",
+    fetchPlantByQRCode: async () => ({ assigned: true, plant: { plant_id: 8 } }),
+    recordVisitorScan: async () => { events.push("history-started"); await history; events.push("history-saved"); },
+    user: { id: "visitor", role: "Visitor" },
+    navigation: { navigate: (name, params) => events.push([name, params]) },
+  };
+  const handle = new Function(...Object.keys(dependencies), source + "\nreturn handleBarcodeScanned;")(...Object.values(dependencies));
+  await handle({ data: "synthetic-qr" });
+  await handle({ data: "synthetic-qr" });
+  assert.deepEqual(events, [["PlantDetails", { plantId: "8" }], "history-started"]);
+  finishHistory();
+  await history;
+  assert.equal(events.at(-1), "history-saved");
+});
+
 test("Add Plant matches backend inventory ID and token, keeps QR picker editable, and rechecks before submission", () => {
   assert.match(addPlant, /String\(code\.qr_id\) === String\(scannedId\) &&\s*code\.qr_code === route\.params\?\.scannedQrToken/);
   assert.match(addPlant, /if \(match\) setSelectedQRCode\(match\)/);

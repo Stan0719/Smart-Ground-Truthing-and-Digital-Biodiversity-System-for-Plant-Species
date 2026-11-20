@@ -30,7 +30,7 @@ function createApi() {
     mapBackendPlant: (row) => row,
     mapBackendSpecies: (row) => row,
   });
-  vm.runInContext(`${source}\nglobalThis.api={setVisitorFavourite,recordVisitorScan,fetchVisitorScanHistory,fetchVisitorFavourites};`, context);
+  vm.runInContext(`${source}\nglobalThis.api={setVisitorFavourite,recordVisitorScan,fetchVisitorScanHistory,fetchVisitorScanHistoryPage,fetchVisitorFavourites};`, context);
   return {
     api: context.api,
     requests,
@@ -73,6 +73,25 @@ test("scan history loads every server page before resolving distinct plant photo
     "/visitor/scan-history?limit=200&offset=1",
   ]);
   assert.deepEqual(JSON.parse(JSON.stringify(imageRequests)), [["plant-eight", "plant-nine"]]);
+});
+
+test("a scan page requests 20 rows and honours continuation on a short page", async () => {
+  const { api, requests, imageRequests, respondPages } = createApi();
+  respondPages([
+    { scans: [{ scan_id: 2, plant: { plant_id: 8, image_asset_id: "preview-8" } }], page: { has_more: true } },
+    { scans: [{ scan_id: 1, plant: { plant_id: 9 } }], page: { has_more: false } },
+  ]);
+  const first = await api.fetchVisitorScanHistoryPage("visitor-7");
+  assert.equal(first.nextOffset, 1);
+  assert.equal(first.scans[0].plant.image.uri, "https://api.test/assets/preview-8");
+  const last = await api.fetchVisitorScanHistoryPage("visitor-7", first.nextOffset);
+  assert.equal(last.nextOffset, null);
+  assert.equal(last.scans[0].plant.image, null);
+  assert.deepEqual(requests.map(({ path }) => path), [
+    "/visitor/scan-history?limit=20&offset=0", "/visitor/scan-history?limit=20&offset=1",
+  ]);
+  assert.ok(requests.every(({ options }) => options.accountId === "visitor-7"));
+  assert.deepEqual(JSON.parse(JSON.stringify(imageRequests)), [["preview-8"]]);
 });
 
 test("favourite plant photos use each plant asset while species favourites retain species portraits", async () => {
