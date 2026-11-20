@@ -162,6 +162,7 @@ test('real report uses the plant-backend proxy path and renders rows plus genera
     assert.equal(h.state.report.value.rows[0].approvedPlants, 3)
     assert.equal(h.state.totalSpecies.value, 2)
     assert.equal(h.state.totalApprovedPlants.value, 4)
+    h.state.reportView.value='table'
     const rendered = nodes(h.render())
     assert.ok(rendered.some((node) => node.children === 'Shorea alpha'))
     assert.ok(rendered.some((node) => String(node.children).includes('3 Nov 2026')))
@@ -175,6 +176,7 @@ test('successful empty report is not presented as an API failure', async () => {
     await h.state.loadReport()
     assert.equal(h.state.loadError.value, '')
     assert.equal(h.state.totalSpecies.value, 0)
+    h.state.reportView.value='table'
     assert.ok(nodes(h.render()).some((node) => node.children === 'No report data available.'))
   } finally { h.stop() }
 })
@@ -438,6 +440,21 @@ test('chart supports default top twelve, hides zero counts, and form submit supp
     let prevented=false
     await form.props.onSubmit({preventDefault(){prevented=true}})
     assert.equal(prevented,true);assert.equal(h.calls.length,2)
+  } finally {h.stop()}
+})
+
+test('species report switches between graph and table without changing report rows', async () => {
+  const h=harness(async()=>Response.json(reportFixture()))
+  try {
+    await h.state.loadReport()
+    let rendered=nodes(h.render())
+    assert.ok(rendered.some(node=>node.props?.['aria-label']==='Graph'))
+    assert.ok(!rendered.some(node=>node.props?.['aria-label']==='Table'))
+    h.state.reportView.value='table'
+    rendered=nodes(h.render())
+    assert.ok(rendered.some(node=>node.props?.['aria-label']==='Table'))
+    assert.ok(!rendered.some(node=>node.props?.['aria-label']==='Graph'))
+    assert.equal(h.state.filteredRows.value.length,2)
   } finally {h.stop()}
 })
 

@@ -46,6 +46,7 @@ const sort = ref<ReportSort>('scientific-asc')
 const chartSort = ref<'high-low' | 'low-high' | 'alphabetical'>('high-low')
 const chartLimit = ref<'5' | '10' | '12' | 'all'>('12')
 const includeZeroCounts = ref(false)
+const reportView = ref<'graph' | 'table'>('graph')
 const selectedChartIndex = ref<number | null>(null)
 const toast = ref<{ tone: 'success' | 'error'; message: string } | null>(null)
 const reportChart = ref<{ toDataUrl: () => string | null; toPrintDataUrl: () => Promise<string | null> } | null>(null)
@@ -239,7 +240,12 @@ onMounted(() => loadReport())
     <article v-else-if="report" class="report-preview">
       <header class="report-title"><h2>{{ rt('speciesApprovedSummary') }}</h2><p class="applied-scope" :aria-description="appliedScope">{{ appliedPeriodLabel }}</p><p>{{ rt('generatedAt') }}: <strong>{{ generatedAt }}</strong></p></header>
       <div class="metric-grid"><div class="metric"><span>{{ rt('totalSpecies') }}</span><strong>{{ totalSpecies }}</strong></div><div class="metric"><span>{{ rt('totalApprovedPlants') }}</span><strong>{{ totalApprovedPlants }}</strong></div><div class="metric"><span>{{ rt('matchingRows') }}</span><strong>{{ filteredRows.length }}</strong></div></div>
+      <div class="report-view-switch" role="group" :aria-label="rt('reportView')">
+        <button type="button" class="report-view-button" :class="{ active: reportView === 'graph' }" :aria-pressed="reportView === 'graph'" @click="reportView = 'graph'">{{ rt('graphView') }}</button>
+        <button type="button" class="report-view-button" :class="{ active: reportView === 'table' }" :aria-pressed="reportView === 'table'" @click="reportView = 'table'">{{ rt('tableView') }}</button>
+      </div>
       <p v-if="filteredRows.length && totalApprovedPlants === 0" class="chart-note" role="status">{{ rt('noPlantsInPeriod') }}</p>
+      <section v-if="reportView === 'graph'" class="report-data-view graph-view" :aria-label="rt('graphView')">
       <div v-if="filteredRows.length" class="chart-tools" :aria-label="rt('chartControls')">
         <label class="field chart-select"><span>{{ rt('chartSort') }}</span><select v-officer-dropdown v-model="chartSort"><option value="high-low">{{ rt('chartSortHigh') }}</option><option value="low-high">{{ rt('chartSortLow') }}</option><option value="alphabetical">{{ rt('chartSortAlphabetical') }}</option></select></label>
         <label class="field chart-select"><span>{{ rt('chartTop') }}</span><select v-officer-dropdown v-model="chartLimit"><option value="5">{{ rt('chartTop5') }}</option><option value="10">{{ rt('chartTop10') }}</option><option value="12">{{ rt('chartTop12') }}</option><option value="all">{{ rt('chartAll') }}</option></select></label>
@@ -250,8 +256,11 @@ onMounted(() => loadReport())
       <ReportChart v-if="chartRows.length" ref="reportChart" :title="chartSpec.title" :labels="chartSpec.labels" :scientific-names="chartSpec.scientificNames" :common-names="chartSpec.commonNames" :axis-title="chartSpec.axisTitle" :approved-label="chartSpec.approvedLabel" :values="chartSpec.values" :colors="chartSpec.colors" :selected-index="selectedChartIndex" @select="selectedChartIndex = selectedChartIndex === $event ? null : $event" />
       <p v-else-if="filteredRows.length" class="chart-note" role="status">{{ rt('chartNoRows') }}</p>
       <p v-if="chartRows.length < filteredRows.filter(row => includeZeroCounts || row.approvedPlants > 0).length" class="chart-note">{{ rt('chartLimit', { count: chartRows.length }) }}</p>
+      </section>
+      <section v-if="reportView === 'table'" class="report-data-view table-view" :aria-label="rt('tableView')">
       <div class="table-scroll officer-table-scroll" role="region" :aria-label="rt('speciesApprovedSummary')" tabindex="0">
         <table class="officer-data-table report-summary-table"><colgroup><col class="column-report-scientific" /><col class="column-report-common" /><col class="column-report-count" /></colgroup><thead><tr><th scope="col">{{ rt('scientificName') }}</th><th scope="col">{{ rt('commonName') }}</th><th scope="col">{{ rt('approvedPlants') }}</th></tr></thead><tbody><tr v-for="row in filteredRows" :key="row.speciesId || row.scientificName" :class="{ 'chart-row-selected': selectedChartRow === row }" tabindex="0" :aria-selected="selectedChartRow === row" @click="selectTableSpecies(row)" @keydown.enter.prevent="selectTableSpecies(row)"><td><em>{{ row.scientificName }}</em></td><td>{{ row.commonName || rt('unavailable') }}</td><td>{{ row.approvedPlants }}</td></tr><tr v-if="!filteredRows.length"><td colspan="3" class="empty-row">{{ report.rows.length ? rt('noMatches') : rt('empty') }}</td></tr></tbody></table></div>
+      </section>
       <div class="modal-actions report-actions"><button type="button" class="secondary-button" :disabled="isLoading || exporting || !filteredRows.length" @click="exportPdf">{{ rt('exportPdf') }}</button><button type="button" class="secondary-button" :disabled="isLoading || exporting || !filteredRows.length" @click="exportCsv">{{ rt('exportCsv') }}</button></div>
       <p class="persistence-note">{{ rt('downloadOnly') }}</p>
     </article>
@@ -294,6 +303,11 @@ onMounted(() => loadReport())
 .filter-error { flex-basis: 100%; margin: 0; color: #9b3d35; font-size: 12px; }
 .persistence-note, .chart-note { color: #63776d; font-size: 11px; }
 .chart-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 4px 0 -14px; color: #526b5f; font-size: 12px; }
+.report-view-switch { display: inline-flex; width: fit-content; gap: 2px; margin: 14px 0 2px; padding: 3px; border: 1px solid #cbd9cf; border-radius: 8px; background: #f3f7f3; }
+.report-view-button { min-width: 82px; min-height: 36px; padding: 6px 14px; border: 0; border-radius: 6px; background: transparent; color: #426554; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.report-view-button.active { background: #315749; color: #fff; box-shadow: 0 1px 2px rgba(20, 48, 35, .15); }
+.report-view-button:focus-visible { outline: 2px solid #477d62; outline-offset: 2px; }
+.report-data-view { min-width: 0; }
 .chart-tools .chart-select { min-width: 150px; margin: 0; }
 .chart-tools .chart-select select { min-height: 36px; }
 .chart-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
