@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { detailPhotoUrl } from './plantGallery.ts'
+import { trackDatabaseTranslationResponse } from './databaseTranslation.ts'
 export interface HistoryPhoto { id: string; url: string }
 export interface HistoryContent {
   heightCm: number | null; healthStatus: string | null; lifeStage: string | null; morphology: string | null; notes: string | null
@@ -68,7 +69,7 @@ export function createPlantHistory({ transport = fetch }: { transport?: typeof f
         typeof page.has_more !== 'boolean' || (page.has_more ? typeof page.next_cursor !== 'string' || !/^[A-Za-z0-9_-]{1,2000}$/.test(page.next_cursor) : page.next_cursor !== null)) return invalid()
       const next = page.next_cursor as string | null
       if (next && (seen.has(next) || next === after)) return invalid()
-      const rows = result.observations.map(o => mapObservation(o, plantId))
+      const rows = trackDatabaseTranslationResponse(result.observations.map(o => mapObservation(o, plantId)))
       const merged = new Map((append ? state.observations : []).map(o => [o.id, o]))
       for (const row of rows) {
         if (merged.has(row.id)) return invalid()

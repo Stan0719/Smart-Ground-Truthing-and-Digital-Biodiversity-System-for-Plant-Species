@@ -6,6 +6,7 @@ import { plants } from '../data/plants'
 import { plantRecords } from '../data/plantRecords'
 import { refreshSession } from '../composables/usePrototypeSession'
 import { plantThumbnailImages, speciesImageSelection } from './assetImages'
+import { trackDatabaseTranslationFields } from './databaseTranslation'
 export const knowledgeError = ref('')
 export const catalogueLimited = ref(false)
 let generation = 0
@@ -39,6 +40,7 @@ interface RecordRow {
     morphology: string
     notes?: string
   }
+  current_registration?: { observation_id?: string; content?: Record<string, unknown> } | null
 }
 export function refreshKnowledge(user?: AuthUser | null) {
   const key = sessionKey()
@@ -91,6 +93,12 @@ async function loadKnowledge(verifiedUser?: AuthUser | null) {
         sensitivityLevel: s.sensitivity,
         images: [],
       }))
+    trackDatabaseTranslationFields(nextPlants.flatMap((item) => [
+      { recordType: 'species' as const, recordId: item.speciesId, fieldName: 'description' as const, target: item, targetField: 'description' },
+      { recordType: 'species' as const, recordId: item.speciesId, fieldName: 'description' as const, target: item, targetField: 'overview' },
+      { recordType: 'species' as const, recordId: item.speciesId, fieldName: 'habitat' as const, target: item, targetField: 'habitat' },
+      ...(item.culturalSignificance ? [{ recordType: 'species' as const, recordId: item.speciesId, fieldName: 'culturalSignificance' as const, target: item, targetField: 'culturalSignificance' }] : []),
+    ]))
     const nextRecords = records.plants.map((r) => {
         const s = nextPlants.find((v) => v.speciesId === String(r.species_id))
         return {
@@ -107,6 +115,18 @@ async function loadKnowledge(verifiedUser?: AuthUser | null) {
           observations: [],
         }
       })
+    trackDatabaseTranslationFields(nextRecords.flatMap((item, index) => {
+      const source = records.plants[index]
+      const registration = source && typeof source.current_registration === 'object' && source.current_registration !== null
+        ? source.current_registration as { observation_id?: string }
+        : null
+      if (!registration?.observation_id) return []
+      const fields = [
+        { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'morphology' as const, target: item.latestApproved, targetField: 'morphology' },
+        { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'notes' as const, target: item.latestApproved, targetField: 'notes' },
+      ]
+      return fields
+    }))
     for (let i = 0; i < nextPlants.length; i += 10) {
       await Promise.all(
         nextPlants.slice(i, i + 10).map(async (s) => {

@@ -12,6 +12,7 @@ import { plantThumbnailImages, webAssetUrl } from '../services/assetImages'
 import { useCatalogueRefresh } from '../composables/useCatalogueRefresh'
 import type { AuthUser } from '../services/auth'
 import { mapPlantCardMetadata } from '../services/plantCardMapping'
+import { trackDatabaseTranslationFields } from '../services/databaseTranslation'
 
 type SortOption = 'default' | 'id-asc' | 'verified-newest' | 'verified-oldest'
 
@@ -65,6 +66,7 @@ interface ApiPlant {
   zone?: string | null
   observed_at?: string | null
   latest_approved?: Record<string, unknown> | null
+  current_registration?: { observation_id?: string; content?: Record<string, unknown> } | null
 }
 
 interface SpeciesResponse {
@@ -158,6 +160,23 @@ const fetchPlants = async (current: () => boolean, user: AuthUser | null) => {
     if (attempt !== loadRequest || !current()) return
     selectedSpecies.value = nextSpecies
     speciesPlants.value = nextPlants
+    trackDatabaseTranslationFields([
+      { recordType: 'species', recordId: speciesId, fieldName: 'description', target: nextSpecies, targetField: 'description' },
+      { recordType: 'species', recordId: speciesId, fieldName: 'description', target: nextSpecies, targetField: 'overview' },
+      { recordType: 'species', recordId: speciesId, fieldName: 'habitat', target: nextSpecies, targetField: 'habitat' },
+      ...plantsResult.plants.flatMap((row) => {
+        if (String(row.species_id) !== speciesId) return []
+        const registration = row.current_registration && typeof row.current_registration === 'object'
+          ? row.current_registration as { observation_id?: string }
+          : null
+        const card = nextPlants.find((plant) => plant.plantId === formatPlantId(row.plant_id))
+        if (!registration?.observation_id || !card) return []
+        return [
+          { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'morphology' as const, target: card.latestApproved, targetField: 'morphology' },
+          { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'notes' as const, target: card.latestApproved, targetField: 'notes' },
+        ]
+      }),
+    ])
     catalogueLimited.value = speciesResult.species.length >= 200 || plantsResult.plants.length >= 500
   } catch (error) {
     if (attempt === loadRequest && current()) {

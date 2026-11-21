@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { trackDatabaseTranslationResponse } from './databaseTranslation.ts'
 
 export interface ObservationReviewEntry {
   id: string
@@ -77,14 +78,14 @@ export function createObservationReviewHistory(transport: typeof fetch = fetch) 
           (page.has_more ? typeof page.next_cursor !== 'string' || !/^[A-Za-z0-9_-]{1,2000}$/.test(page.next_cursor) : page.next_cursor !== null)) throw Error('Invalid history')
       const next = page.next_cursor as string | null
       if (append && next && (seenCursors.has(next) || cursor === next)) throw Error('Repeated history cursor')
-      const reviews: ObservationReviewEntry[] = result.reviews.map(value => {
+      const reviews: ObservationReviewEntry[] = trackDatabaseTranslationResponse(result.reviews.map(value => {
         const row = object(value)
         if (!row || typeof row.id !== 'string' || !row.id.trim() || row.observation_id !== observationId ||
             !decisions.includes(String(row.decision)) || typeof row.comment !== 'string' ||
             (row.reviewer_subject !== null && typeof row.reviewer_subject !== 'string') ||
             (row.created_at !== null && typeof row.created_at !== 'string')) throw Error('Invalid review')
         return row as unknown as ObservationReviewEntry
-      })
+      }))
       const merged = append ? [...state.reviews, ...reviews] : reviews
       if (new Set(merged.map(row => row.id)).size !== merged.length) throw Error('Duplicate review')
       state.reviews = merged

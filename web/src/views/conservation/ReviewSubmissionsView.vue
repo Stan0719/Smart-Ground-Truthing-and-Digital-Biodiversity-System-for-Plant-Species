@@ -3,6 +3,7 @@ import { observationEditDestination } from '../../services/observationEdits'
 import RegistrationObservationEdits from '../../components/conservation/RegistrationObservationEdits.vue'
 import StandaloneSpeciesRows from '../../components/conservation/StandaloneSpeciesRows.vue'
 import { reviewQueueCache } from '../../services/reviewQueueCache'
+import { trackDatabaseTranslationFields } from '../../services/databaseTranslation'
 interface QueueSnapshot { observations: ReviewObservation[]; changes: RecordChange[]; species: LinkedSpeciesRequest[]; capped: boolean; skipped: number }
 const queueSnapshot = ref<QueueSnapshot>({ observations: [], changes: [], species: [], capped: false, skipped: 0 })
 const standaloneSpecies = computed({ get: () => queueSnapshot.value.species, set: species => { queueSnapshot.value = { ...queueSnapshot.value, species } } })
@@ -370,7 +371,7 @@ const mapObservation = (value: unknown): ReviewObservation | null => {
   )
     return null
   const height = numericValue(content.heightCm, 0)
-  return {
+  const mapped: ReviewObservation = {
     reviewSnapshot,
     speciesAssociation,
     historicalState,
@@ -427,6 +428,12 @@ const mapObservation = (value: unknown): ReviewObservation | null => {
     longitude: numericValue(content.longitude, -180, 180),
     speciesRequest: mapLinkedSpeciesRequest(item, true),
   }
+  trackDatabaseTranslationFields([
+    { recordType: 'observation', recordId: id, fieldName: 'morphology', target: mapped, targetField: 'morphology' },
+    { recordType: 'observation', recordId: id, fieldName: 'notes', target: mapped, targetField: 'notes' },
+    { recordType: 'review-comment', recordId: id, fieldName: 'comment', target: mapped, targetField: 'reviewComment' },
+  ])
+  return mapped
 }
 
 const countRecords = computed(() => [
