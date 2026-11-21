@@ -1,14 +1,14 @@
 import { t, translateLabel, translateUIMessage, useAppTranslation } from "../translations/i18n";
 // screens/Plant.js
 import LanguageSelector from "../components/LanguageSelector";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
+import { useTextSize } from "../components/TextSizeContext";
 
 import React, { useCallback, useMemo, useState } from "react";
 
 import {
   View,
-  Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   FlatList,
   ScrollView,
@@ -50,6 +50,8 @@ function SpeciesCardImage({ species }) {
 
 export default function Species({ navigation, user }) {
   useAppTranslation();
+  const { percent } = useTextSize();
+  const singleColumn = SCREEN_WIDTH < 500 && percent >= 150;
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isVisitor = user?.role?.toLowerCase() === "visitor";
   const isPublicViewer = !user || isVisitor;
@@ -103,7 +105,7 @@ export default function Species({ navigation, user }) {
 
 
     return (
-      <View style={styles.card}>
+      <View style={[styles.card, singleColumn && styles.wideCard]}>
         <View style={styles.imageWrapper}>
           <SpeciesCardImage species={item} />
 
@@ -117,8 +119,8 @@ export default function Species({ navigation, user }) {
         <View style={styles.cardContent}>
           <View style={styles.cardTitleRow}>
             <View style={styles.cardTitleCopy}>
-              <Text style={styles.cardTitle} numberOfLines={2}>{item.scientificName}</Text>
-              <Text style={styles.scientificName} numberOfLines={2}>{item.name}</Text>
+              <Text style={styles.cardTitle} numberOfLines={singleColumn ? undefined : 2}>{item.scientificName}</Text>
+              <Text style={styles.scientificName} numberOfLines={singleColumn ? undefined : 2}>{item.name}</Text>
             </View>
             {isVisitor && <FavouriteHeart
               active={favourites.isFavourite("species", item.id)}
@@ -330,14 +332,15 @@ export default function Species({ navigation, user }) {
       </View>
       <FlatList
         style={styles.resultsList}
+        key={singleColumn ? "species-large-text" : "species-grid"}
         data={filteredSpecies}
         refreshing={loading || favourites.refreshing}
         onRefresh={refreshAll}
         keyExtractor={(item) => item.slug}
         renderItem={renderSpeciesCard}
-        numColumns={2}
-        columnWrapperStyle={styles.columnWrapper}
-        contentContainerStyle={styles.listContent}
+        numColumns={singleColumn ? 1 : 2}
+        columnWrapperStyle={singleColumn ? undefined : styles.columnWrapper}
+        contentContainerStyle={[styles.listContent, singleColumn && styles.singleColumnContent]}
         showsVerticalScrollIndicator
         ListEmptyComponent={
           !loading && !errorMessage ? (
@@ -418,6 +421,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingBottom: 8,
   },
+  singleColumnContent: { paddingHorizontal: GRID_HORIZONTAL_PADDING },
 
   columnWrapper: {
     paddingHorizontal: GRID_HORIZONTAL_PADDING,
@@ -597,6 +601,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 6,
   },
+  wideCard: { width: "100%", maxWidth: 500, alignSelf: "center" },
 
   imageWrapper: {
     width: "100%",

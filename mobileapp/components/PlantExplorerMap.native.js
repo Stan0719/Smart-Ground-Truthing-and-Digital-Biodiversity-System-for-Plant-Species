@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker } from "react-native-maps";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "./ScaledText";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 import { initialMapCluster, SARAWAK_REGION, validMapPoint } from "../utils/mapCamera";
 

@@ -29,7 +29,7 @@ function loginFixture({cameraEnabled=false,register=false,pending=null,previousE
  deps['expo-constants']={default:{expoConfig:{hostUri:'192.0.2.1:8082'}}};
  deps['react-native-safe-area-context']={SafeAreaView:'SafeAreaView'};
  deps['../utils/faceApi'].probeAuthConnection=probe;
- new Function('require','module','exports','__DEV__',compiled)(name=>{assert.ok(name in deps,`Unexpected dependency ${name}`);return {...deps[name],__esModule:name!=='react'}},module,module.exports,development);
+ new Function('require','module','exports','__DEV__',compiled)(name=>{if(name==='../components/ScaledText')return{default:'Text',ScaledTextInput:'TextInput',__esModule:true};assert.ok(name in deps,`Unexpected dependency ${name}`);return {...deps[name],__esModule:name!=='react'}},module,module.exports,development);
  const tree=module.exports.default({navigation:{replace:()=>navigation.push('replace'),navigate:()=>navigation.push('navigate')},onLogin:()=>navigation.push('authenticated')});
  return {tree,assignments,requests,navigation,MandatoryScreen,cameras,alerts};
 }
@@ -45,7 +45,7 @@ function registerFixture(){
  deps['../components/PasswordVisibilityButton']={default:'PasswordVisibilityButton'};
  const compiled=ts.transpileModule(readFileSync(new URL('../screens/VisitorRegister.js',import.meta.url),'utf8'),{fileName:'VisitorRegister.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
- new Function('require','module','exports',compiled)(name=>{assert.ok(name in deps,`Unexpected dependency ${name}`);return {...deps[name],__esModule:name!=='react'}},module,module.exports);
+ new Function('require','module','exports',compiled)(name=>{if(name==='../components/ScaledText')return{default:'Text',ScaledTextInput:'TextInput',__esModule:true};assert.ok(name in deps,`Unexpected dependency ${name}`);return {...deps[name],__esModule:name!=='react'}},module,module.exports);
  return {tree:module.exports.default({navigation:{goBack:()=>navigation.push('back'),navigate:screen=>navigation.push(screen)}}),navigation,assignments,requests};
 }
 
@@ -268,7 +268,7 @@ test('actual camera shows registration consent and only missing enrollment exits
    '../utils/faceApi':{faceReference:()=> 'abcdef123456',faceDiagnostic:()=>{}},
    '../utils/faceCaptureFlow':{runFaceCapture:async()=>{throw Object.assign(Error('Synthetic capture rejection'),{code});}}};
   const compiled=ts.transpileModule(readFileSync(new URL('../components/FaceCameraModal.js',import.meta.url),'utf8'),{fileName:'Camera.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
-  const module={exports:{}};new Function('require','module','exports',compiled)(name=>({...deps[name],__esModule:name!=='react'}),module,module.exports);
+  const module={exports:{}};new Function('require','module','exports',compiled)(name=>name==='./ScaledText'?{default:'Text',__esModule:true}:{...deps[name],__esModule:name!=='react'},module,module.exports);
   const modal=module.exports.default({request:{mode,id:'camera-request'},isCurrent:()=>true,onResult:(...args)=>results.push(args)});
   const capture=modal.props.children;
   // A mounted native camera ref; no actual camera or image is used.
@@ -335,7 +335,7 @@ function faceCameraFixture({width=390,height=844,permission={granted:true},busy=
   '../utils/faceCaptureFlow':{runFaceCapture:async()=>{throw Object.assign(Error('Synthetic capture rejection'),{code});}}};
  const compiled=ts.transpileModule(readFileSync(new URL('../components/FaceCameraModal.js',import.meta.url),'utf8'),
   {fileName:'Camera.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
- const module={exports:{}};new Function('require','module','exports',compiled)(name=>({...deps[name],__esModule:name!=='react'}),module,module.exports);
+ const module={exports:{}};new Function('require','module','exports',compiled)(name=>name==='./ScaledText'?{default:'Text',__esModule:true}:{...deps[name],__esModule:name!=='react'},module,module.exports);
  const modal=module.exports.default({request:{mode:'recognize',id:'camera-request'},isCurrent:()=>true,
   onResult:()=>{},onClose:id=>closed.push(id)});
  return {tree:modal.props.children.type(modal.props.children.props),states,closed};
@@ -417,7 +417,7 @@ test('mandatory change UI contains only secure replacement fields and sign-out c
  const native={Alert:{alert:(...args)=>alerts.push(args)},StyleSheet:{create:styles=>styles},Platform:{OS:'android'}};
  for(const name of ['KeyboardAvoidingView','SafeAreaView','ScrollView','Text','TextInput','TouchableOpacity','View'])native[name]=name;
  const compiled=ts.transpileModule(readFileSync(new URL('../screens/MandatoryPasswordChange.js',import.meta.url),'utf8'),{fileName:'Mandatory.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;
- const module={exports:{}};new Function('require','module','exports',compiled)(name=>name==='../translations/i18n'?translationFixture:name==='react'?hooks:name==='../components/PasswordVisibilityButton'?{default:'PasswordVisibilityButton'}:native,module,module.exports);
+ const module={exports:{}};new Function('require','module','exports',compiled)(name=>name==='../translations/i18n'?translationFixture:name==='react'?hooks:name==='../components/PasswordVisibilityButton'?{default:'PasswordVisibilityButton'}:name==='../components/ScaledText'?{default:'Text',ScaledTextInput:'TextInput',__esModule:true}:native,module,module.exports);
  let submitted,signOuts=0;
  const tree=module.exports.default({onSubmit:async(...args)=>{submitted=args},onCancel:async()=>{signOuts++}});
  const card=find(tree,node=>node.type==='View'&&node.props.style?.maxWidth===390);

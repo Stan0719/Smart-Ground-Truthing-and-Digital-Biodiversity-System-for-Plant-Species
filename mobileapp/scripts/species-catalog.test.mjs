@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 const require=createRequire(import.meta.url),ts=require('typescript'),React=require('react');
-function load(file,deps){const source=readFileSync(new URL('../'+file,import.meta.url),'utf8');const code=ts.transpileModule(source,{fileName:file+'.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;const module={exports:{}};new Function('require','module','exports',code)((name)=>{if(name==='../components/BackButton')return{default:(props)=>React.createElement('TouchableOpacity',props,props.label||props.accessibilityLabel),__esModule:true};if(name==='../components/DiscoverableScrollView')return{default:'ScrollView',__esModule:true};assert.ok(name in deps,name);return {...deps[name],__esModule:name!=='react'}},module,module.exports);return module.exports;}
+let textSizePercent=100;
+function load(file,deps){const source=readFileSync(new URL('../'+file,import.meta.url),'utf8');const code=ts.transpileModule(source,{fileName:file+'.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;const module={exports:{}};new Function('require','module','exports',code)((name)=>{if(name==='../components/BackButton')return{default:(props)=>React.createElement('TouchableOpacity',props,props.label||props.accessibilityLabel),__esModule:true};if(name==='../components/DiscoverableScrollView')return{default:'ScrollView',__esModule:true};if(name==='../components/ScaledText')return{default:'Text',ScaledTextInput:'TextInput',__esModule:true};if(name==='../components/TextSizeContext')return{useTextSize:()=>({percent:textSizePercent}),__esModule:true};assert.ok(name in deps,name);return {...deps[name],__esModule:name!=='react'}},module,module.exports);return module.exports;}
 function fixture(api){let slots=[],index=0,focus,active,removed=0;const hooks={useState(initial){const i=index++;if(!(i in slots))slots[i]=initial;return[slots[i],value=>slots[i]=value]},useMemo(fn,deps){const i=index++;if(!slots[i]||deps.some((v,j)=>v!==slots[i].deps[j]))slots[i]={deps,value:fn()};return slots[i].value}};hooks.useCallback=(fn,deps)=>hooks.useMemo(()=>fn,deps);const module=load('utils/useSpeciesCatalog.js',{react:hooks,'@react-navigation/native':{useFocusEffect:fn=>focus=fn},'react-native':{AppState:{addEventListener:(_,fn)=>{active=fn;return{remove(){removed++}}}}},'./plantApi':api});return {render(account='owner',options={}){index=0;return module.useSpeciesCatalog(account,options)},focus:()=>focus(),active:()=>active('active'),removed:()=>removed};}
 
 test('catalogue refreshes on focus, foreground and pull and uses the approved counts summary',async()=>{let reads=0;const f=fixture({fetchSpeciesCatalog:async options=>{assert.equal(options.accountId,'owner');reads++;return [{id:'6'}]},fetchPlantSpeciesCounts:async()=>({'6':1})});f.render();const cleanup=f.focus();await f.render().refresh();assert.equal(reads,1);assert.equal(f.render().counts['6'],1);f.active();await f.render().refresh();assert.equal(reads,2);cleanup();assert.equal(f.removed(),1);const again=f.focus();await f.render().refresh();assert.equal(reads,3);again();});
@@ -237,7 +238,8 @@ test('actual catalogue renders an approved species and both refresh actions', ()
   assert.equal(list.type, 'FlatList');
   assert.equal(list.props.style.flex, 1, 'only the results list occupies the remaining scroll area');
   assert.equal(list.props.ListHeaderComponent, undefined, 'controls remain outside the scrolling list');
-  assert.ok(list.props.contentContainerStyle.paddingBottom > 0, 'last card clears the bottom tabs');
+  const listContentStyle = Object.assign({}, ...(Array.isArray(list.props.contentContainerStyle) ? list.props.contentContainerStyle : [list.props.contentContainerStyle]));
+  assert.ok(listContentStyle.paddingBottom > 0, 'last card clears the bottom tabs');
   assert.equal(list.props.data.length, 1);
   assert.equal(list.props.data[0].id, '6');
   assert.doesNotMatch(readFileSync(new URL('../screens/Species.js', import.meta.url), 'utf8'), /const categories\s*=|item\.category/);
@@ -252,6 +254,14 @@ test('actual catalogue renders an approved species and both refresh actions', ()
   const [guestHeader, guestList] = React.Children.toArray(guestTree.props.children);
   assert.deepEqual(guestList.props.data.map(item => item.id), ['6']);
   assert.equal(walk(guestHeader).filter(n => n.type === 'FlatList' && n.props.horizontal).length, 0);
+  textSizePercent = 150;
+  const largeTextTree = screen.default({ user: null, navigation: { navigate: (...args) => navigations.push(args) } });
+  const [, largeTextList] = React.Children.toArray(largeTextTree.props.children);
+  assert.equal(largeTextList.props.numColumns, 1, 'narrow Species cards use a readable single column at 150%');
+  const largeTextCard = largeTextList.props.renderItem({ item: { id: 'long', slug: 'long', scientificName: 'Agave angustifolia var. longissima', name: 'A very long translated common name', approvalStatus: 'Approved' } });
+  const cardTexts = walk(largeTextCard).filter((node) => node.type === 'Text');
+  assert.equal(cardTexts.find((node) => node.props.children === 'Agave angustifolia var. longissima')?.props.numberOfLines, undefined, 'long scientific names can wrap at larger text sizes');
+  textSizePercent = 100;
   for (const role of ['Officer', 'Admin']) {
     const roleTree = screen.default({ user: { id: 'owner', role }, navigation: { navigate: (...args) => navigations.push(args) } });
     const [roleHeader, roleList] = React.Children.toArray(roleTree.props.children);

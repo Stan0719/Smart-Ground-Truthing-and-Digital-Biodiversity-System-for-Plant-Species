@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
-import { AppState, ActivityIndicator, View, Text, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import { AppState, ActivityIndicator, View, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import Text from "../components/ScaledText";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, submissionStatus, canWithdrawOriginalSpecies } from "../utils/botanistRecords";

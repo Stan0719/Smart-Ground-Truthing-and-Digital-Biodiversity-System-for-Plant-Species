@@ -1,6 +1,7 @@
 import { useAppTranslation, t } from "../translations/i18n";
 import React from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "./ScaledText";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 export default function QRRefreshButton({ onPress, loading, label, style }) {

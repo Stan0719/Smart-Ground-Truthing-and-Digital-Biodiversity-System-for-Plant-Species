@@ -1,13 +1,13 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 // Home.js
 import LanguageSelector from "../components/LanguageSelector";
+import Text from "../components/ScaledText";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   View,
-  Text,
   StyleSheet,
   ImageBackground,
   Image,

@@ -36,6 +36,7 @@ function renderObservationDetails(observation, edits = [], params = {}, capabili
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
   new Function("require", "module", "exports", code)((name) => {
+    if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     assert.ok(name in mocks, `Missing mock ${name}`);
     return { ...mocks[name], __esModule: name !== "react" };
   }, module, module.exports);

@@ -5,17 +5,8 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-  AppState,
-  TextInput,
-  RefreshControl,
-  Platform,
-} from "react-native";
+  View, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, AppState, RefreshControl, Platform } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 
 import QRCode from "react-native-qrcode-svg";
 import Ionicons from "@expo/vector-icons/Ionicons";

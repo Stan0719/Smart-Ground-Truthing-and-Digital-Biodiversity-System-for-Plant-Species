@@ -1,5 +1,6 @@
 import React, { forwardRef, useCallback, useEffect, useRef, useState } from "react";
-import { FlatList, ScrollView, StyleSheet, Text, View } from "react-native";
+import { FlatList, ScrollView, StyleSheet, View } from "react-native";
+import Text from "./ScaledText";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useAppTranslation } from "../translations/i18n";
 import { hasMoreContent } from "../utils/scrollOverflow";

@@ -2,13 +2,8 @@ import { t, translateLabel, translateUIMessage, useAppTranslation } from "../tra
 import { can } from "../utils/rbac";
 import React, { useEffect, useState } from "react";
 import {
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  Image,
-} from "react-native";
+  ScrollView, TouchableOpacity, View, Image } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import PersistentKnowledgeMap from "./PersistentKnowledgeMap";
 import { plantApi } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";

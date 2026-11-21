@@ -1,7 +1,8 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { AppState, ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { AppState, ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import PlantExplorerMap from "../components/PlantExplorerMap";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 import { fetchPlantRecords, filterMapPlantsByStatus, isMapPlantVisible } from "../utils/plantApi";

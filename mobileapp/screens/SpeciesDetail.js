@@ -3,16 +3,8 @@ import { t, translateLabel, translateUIMessage, useAppTranslation, translateFiel
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
 
-import { AppState,
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  RefreshControl,
-  useWindowDimensions,
-} from "react-native";
+import { AppState, View, StyleSheet, ScrollView, TouchableOpacity, Image, RefreshControl, useWindowDimensions } from "react-native";
+import Text from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useFocusEffect } from "@react-navigation/native";

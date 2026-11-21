@@ -1,11 +1,10 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   AppState,
   View,
-  Text,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   useWindowDimensions,

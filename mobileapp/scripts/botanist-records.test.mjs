@@ -43,6 +43,7 @@ function moduleFrom(file, deps) {
     if (name === "../components/BackButton") return { default: (props) => React.createElement("TouchableOpacity", props, props.label || props.accessibilityLabel), __esModule: true };
     if (name === "../components/BotanicalSkeleton") return { CardListSkeleton: "CardListSkeleton", DetailSkeletonContent: "DetailSkeletonContent", __esModule: true };
     if (name === "../components/DiscoverableScrollView") return { default: "FlatList", __esModule: true };
+    if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     if (name === "../utils/submissionSearch") return { ...moduleFrom("utils/submissionSearch.js", {}), __esModule: true };
     assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" };
   }, module, module.exports);

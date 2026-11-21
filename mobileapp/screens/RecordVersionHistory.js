@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "../components/ScaledText";
 import { useFocusEffect } from "@react-navigation/native";
 import BackButton from "../components/BackButton";
 import { plantApi } from "../utils/plantApi";

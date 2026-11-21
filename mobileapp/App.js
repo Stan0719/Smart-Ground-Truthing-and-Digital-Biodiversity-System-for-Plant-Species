@@ -15,7 +15,9 @@ import {
   createNativeStackNavigator,
 } from "@react-navigation/native-stack";
 
-import { ActivityIndicator, AppState, View, Text } from "react-native";
+import { ActivityIndicator, AppState, View, useWindowDimensions } from "react-native";
+import ScaledText from "./components/ScaledText";
+import { useTextSize } from "./components/TextSizeContext";
 import { faceSession } from "./utils/faceSession";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -363,6 +365,9 @@ function MainTabs({
   onLogout,
 }) {
   useAppTranslation();
+  const { percent } = useTextSize();
+  const { fontScale } = useWindowDimensions();
+  const navigationTextScale = Math.max(1, percent / 100, fontScale || 1);
 
   return (
     <Tab.Navigator
@@ -376,10 +381,10 @@ function MainTabs({
         tabBarInactiveTintColor: "#6D7F75",
 
         tabBarStyle: {
-          height: 65,
+          height: Math.max(65, 45 + 20 * navigationTextScale),
 
-          paddingBottom: 8,
-          paddingTop: 5,
+          paddingBottom: Math.max(8, 8 * navigationTextScale),
+          paddingTop: Math.max(5, 5 * navigationTextScale),
 
           backgroundColor: "#F7FBF4",
 
@@ -389,10 +394,13 @@ function MainTabs({
           elevation: 4,
         },
 
-        tabBarLabelStyle: {
-          fontSize: 11,
-
-          fontWeight: "600",
+        tabBarLabel: ({ color }) => {
+          const label = route.name === "HomeTab" ? t("navigation.home")
+            : route.name === "PlantsTab" ? t("navigation.plants")
+              : route.name === "ScanTab" ? t("navigation.scan")
+                : route.name === "MapTab" ? t("navigation.map")
+                  : user?.role === "botanist" ? t("common.dashboard") : t("account.account");
+          return <ScaledText style={{ color, fontSize: 11, fontWeight: "600", textAlign: "center" }} numberOfLines={2}>{label}</ScaledText>;
         },
 
 
@@ -669,7 +677,7 @@ export default function App({ homeRequest }) {
   }
 
 
-  if (restoringSession) return <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#244B47" }}><ActivityIndicator color="#DEF9C4" /><Text style={{ color: "white", padding: 16 }}>{t("navigation.checkingSavedLogin")}</Text></View>;
+  if (restoringSession) return <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#244B47" }}><ActivityIndicator color="#DEF9C4" /><ScaledText style={{ color: "white", padding: 16 }}>{t("navigation.checkingSavedLogin")}</ScaledText></View>;
 
   return (
     <NavigationContainer

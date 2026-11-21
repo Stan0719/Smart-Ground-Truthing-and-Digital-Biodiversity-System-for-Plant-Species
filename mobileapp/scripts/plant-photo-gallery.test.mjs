@@ -157,6 +157,7 @@ test('Plant Detail thumbnail taps select a distinct image and the viewer navigat
   }
   const module = { exports: {} }
   new Function('require', 'module', 'exports', compiled)((name) => {
+    if (name === '../components/ScaledText') return { default: 'Text', ScaledTextInput: 'TextInput', __esModule: true };
     if (name === '../components/DiscoverableScrollView') return { default: 'ScrollView', __esModule: true }
     assert.ok(name in dependencies, name)
     const dependency = dependencies[name]

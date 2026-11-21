@@ -15,6 +15,7 @@ function loadModule(path, dependencies) {
   const module = { exports: {} };
   new Function("require", "module", "exports", transpile(path))((name) => {
     if (name.startsWith("../assets/")) return 1;
+    if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     assert.ok(name in dependencies, `Unexpected dependency: ${name}`);
     return { ...dependencies[name], __esModule: name !== "react" };
   }, module, module.exports);

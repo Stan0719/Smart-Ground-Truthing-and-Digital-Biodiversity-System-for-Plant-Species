@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { FlatList, Image, RefreshControl, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";

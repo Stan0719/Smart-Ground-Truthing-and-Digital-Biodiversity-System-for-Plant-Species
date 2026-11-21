@@ -3,15 +3,8 @@ import { canCollectDrafts } from "../utils/rbac";
 import React, { useEffect, useState, useRef } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  Image,
-  ActivityIndicator,
-  Alert,
-} from "react-native";
+  StyleSheet, TouchableOpacity, View, Image, ActivityIndicator, Alert } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import { plantApi, plantAssetSources } from "../utils/plantApi";

@@ -1,6 +1,7 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage, formatDateTime } from "../translations/i18n";
 import React, { useCallback, useRef, useState } from "react";
-import { FlatList, Image, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { FlatList, Image, RefreshControl, StyleSheet, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import Ionicons from "@expo/vector-icons/Ionicons";

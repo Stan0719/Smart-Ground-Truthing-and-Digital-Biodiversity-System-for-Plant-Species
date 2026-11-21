@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Platform, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "./ScaledText";
 import MapView from "react-native-maps";
 import { t, useAppTranslation } from "../translations/i18n";
 import { validGpsPoint } from "../utils/gpsLocation";

@@ -1,7 +1,8 @@
 import LanguageSelector from "../components/LanguageSelector";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Image, ActivityIndicator, Alert, useWindowDimensions, RefreshControl } from "react-native";
+import { View, TouchableOpacity, ScrollView, StyleSheet, Image, ActivityIndicator, Alert, useWindowDimensions, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { submissionStatus, fetchBotanistRecordChange } from "../utils/botanistRecords";
