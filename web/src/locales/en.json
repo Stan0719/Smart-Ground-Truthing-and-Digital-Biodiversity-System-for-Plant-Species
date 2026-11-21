@@ -524,6 +524,12 @@
     "sortNameAsc": "Name A–Z",
     "sortNameDesc": "Name Z–A",
     "sortScientific": "Scientific name A–Z",
+    "allFamilies": "All Families",
+      "filterByFamily": "Filter by Family",
+      "searchFamilies": "Search families",
+      "noFamiliesFound": "No families found",
+      "currentFilter": "Current filter: {family}",
+      "reset": "Reset",
     "imageComingSoon": "Image coming soon",
     "categories": {
       "all": "All",

@@ -524,6 +524,12 @@
     "sortNameAsc": "名称 A–Z",
     "sortNameDesc": "名称 Z–A",
     "sortScientific": "学名 A–Z",
+    "allFamilies": "所有科",
+      "filterByFamily": "按植物科筛选",
+      "searchFamilies": "搜索植物科",
+      "noFamiliesFound": "未找到植物科",
+      "currentFilter": "当前筛选：{family}",
+      "reset": "重置",
     "imageComingSoon": "图片即将提供",
     "categories": {
       "all": "全部",

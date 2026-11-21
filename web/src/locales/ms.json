@@ -524,6 +524,12 @@
     "sortNameAsc": "Nama A–Z",
     "sortNameDesc": "Nama Z–A",
     "sortScientific": "Nama saintifik A–Z",
+    "allFamilies": "Semua Famili",
+      "filterByFamily": "Tapis Mengikut Famili",
+      "searchFamilies": "Cari famili",
+      "noFamiliesFound": "Tiada famili ditemui",
+      "currentFilter": "Penapis semasa: {family}",
+      "reset": "Tetapkan Semula",
     "imageComingSoon": "Imej akan datang",
     "categories": {
       "all": "Semua",
