@@ -315,7 +315,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       const request = editRequest || route.params?.draft?.edit_request;
       if (!request?.id && observation.origin_type !== "subsequent_observation")
         throw Error(t("observationEdits.ownedApprovedRequired"));
-      return { client_key: draftKey.current, method: "OBSERVATION_EDIT",
+      return { client_key: draftKey.current, saved_at: new Date().toISOString(), method: "OBSERVATION_EDIT",
         path: request?.id ? `/observation-edits/${request.id}` : "/observation-edits",
         observation_id: String(observation.id), edit_request: request,
         observation_snapshot: { id: observation.id, plant_id: observation.plant_id, owner_subject: observation.owner_subject,
@@ -335,6 +335,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
         throw Error("Select an owned editable observation from the dashboard.");
       return {
         client_key: draftKey.current,
+        saved_at: new Date().toISOString(),
         method: "PATCH",
         path: `/observations/${observation.id}`,
         plant_id: observation.plant_id,
@@ -345,6 +346,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     if (newPlant) {
       return {
         client_key: draftKey.current,
+        saved_at: new Date().toISOString(),
         path: "/plants",
         body: {
           species_id: String(form.species_id),
@@ -361,6 +363,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     if (!/^\d+$/.test(plantId)) throw Error("Select a registered plant before saving this observation.");
     return {
       client_key: draftKey.current,
+      saved_at: new Date().toISOString(),
       path: `/plants/${plantId}/observations`,
       plant_id: plantId,
       body: { content: data, client_key: draftKey.current },

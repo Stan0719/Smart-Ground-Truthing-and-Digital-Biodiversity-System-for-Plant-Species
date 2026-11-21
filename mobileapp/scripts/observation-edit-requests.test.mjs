@@ -626,19 +626,33 @@ test("Observation correction actions remain inside Officer Review after removing
 });
 
 
-test('direct new-edit form rejects initial and missing origin while retaining existing proposal correction', () => {
+test('direct new-edit form rejects initial and missing origin while retaining existing proposal correction and save timestamp', async () => {
   const formSource = source('../screens/FieldCollection.js');
   const start = formSource.indexOf('  function createDraft()');
   const end = formSource.indexOf('  const autoSaveMeaningful', start);
-  const build = new Function('observationFields','form','photos','observationEditMode','originalObservation','user','editRequest','route','draftKey','t',
+  const build = new Function('observationFields','form','photos','observationEditMode','originalObservation','user','editRequest','route','draftKey','t','edit','newPlant','selectedPlantId',
     formSource.slice(start,end) + '\nreturn createDraft();');
   for (const origin of ['initial_registration','unknown',undefined,'subsequent_observation']) {
     const observation={id:'obs',plant_id:7,owner_subject:'staff:owner',status:'Approved',revision:1,origin_type:origin,assets:[]};
-    const call=request=>build([],{},[],true,observation,{id:'owner'},request,{params:{}},{current:'new-key'},key=>key);
-    if(origin==='subsequent_observation') assert.equal(call(null).path,'/observation-edits');
+      const call=request=>build([],{},[],true,observation,{id:'owner'},request,{params:{}},{current:'new-key'},key=>key,false,false,"");
+    if(origin==='subsequent_observation') {
+      const first = call(null);
+      assert.equal(first.path,'/observation-edits');
+      assert.ok(Number.isFinite(Date.parse(first.saved_at)), 'an Observation Edit draft receives a real save timestamp');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const savedAgain = call(null);
+      assert.ok(Date.parse(savedAgain.saved_at) > Date.parse(first.saved_at), 'saving the draft again refreshes its timestamp');
+    }
     else assert.throws(()=>call(null),/ownedApprovedRequired/);
     const correction=call({id:'legacy',revision:2,status:'Correction Required',retained_photo_ids:[]});
     assert.equal(correction.path,'/observation-edits/legacy'); assert.equal(correction.body.revision,2);
   }
+  const observationDraft = (plantId) => build(["plant_id", "notes"], { plant_id: plantId, notes: "Field note" }, [],
+    false, null, { id: "owner" }, null, { params: {} }, { current: "observation-draft" }, (key) => key, false, false, plantId);
+  const firstObservationSave = observationDraft("42");
+  assert.equal(firstObservationSave.path, "/plants/42/observations");
+  assert.ok(Number.isFinite(Date.parse(firstObservationSave.saved_at)), "new Observation drafts receive a real save timestamp");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.ok(Date.parse(observationDraft("42").saved_at) > Date.parse(firstObservationSave.saved_at), "saving the Observation draft again refreshes its timestamp");
   assert.match(formSource, /currentObservation\.origin_type !== "subsequent_observation"/);
 })

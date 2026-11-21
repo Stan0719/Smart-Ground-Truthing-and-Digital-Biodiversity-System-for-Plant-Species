@@ -119,7 +119,9 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
           { method: "POST", expectedAccountId: accountId, body: {} });
         setState((previous) => previous.key === key && previous.request
           ? { ...previous, request: { ...previous.request, request_status: "Withdrawn" } } : previous);
-        Alert.alert(t("speciesWithdrawal.successTitle"), t("speciesWithdrawal.successMessage"));
+        Alert.alert(t("speciesWithdrawal.successTitle"), t("speciesWithdrawal.successMessage"), [
+          { text: t("common.ok"), onPress: () => navigation.goBack() },
+        ]);
         setRevision((value) => value + 1);
       } catch (error) {
         setWithdrawError(translateUIMessage(error.message || t("speciesWithdrawal.failed")));

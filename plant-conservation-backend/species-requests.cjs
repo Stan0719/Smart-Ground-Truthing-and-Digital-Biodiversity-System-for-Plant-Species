@@ -293,7 +293,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       if (row.approved_species_id) fail(409, "An approved Species cannot be withdrawn.");
       if (row.proposed_species_id) {
         const links = (await c.query(`SELECT
-          EXISTS(SELECT 1 FROM plant_record WHERE species_id=$1) AS plants,
+          EXISTS(SELECT 1 FROM plant_record WHERE species_id=$1 AND rbac_status<>'Withdrawn') AS plants,
           EXISTS(SELECT 1 FROM species_request_submission WHERE request_id<>$2 AND
             (proposed_species_id=$1 OR approved_species_id=$1)) AS other_requests`,
         [row.proposed_species_id, key])).rows[0];

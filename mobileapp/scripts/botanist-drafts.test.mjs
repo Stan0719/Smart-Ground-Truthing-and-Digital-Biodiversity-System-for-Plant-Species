@@ -158,7 +158,7 @@ test("My Draft classifies supported form types and combines category and text se
     const position = index++; if (!(position in state)) state[position] = typeof initial === "function" ? initial() : initial;
     return [state[position], (next) => { state[position] = typeof next === "function" ? next(state[position]) : next; }];
   }, useRef: (initial) => refs[refIndex++] ||= { current: initial }, useEffect: (fn) => effects.push(fn) };
-  const { default: Drafts, draftCategory, filterBotanistDrafts } = moduleFrom("screens/BotanistMyDrafts.js", {
+  const { default: Drafts, draftCategory, filterBotanistDrafts, draftSavedTime, sortBotanistDraftsBySavedTime } = moduleFrom("screens/BotanistMyDrafts.js", {
     react: { default: React, ...hooks }, "react-native": native, "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
     "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } },
     "@expo/vector-icons/Ionicons": { default: "Icon" },
@@ -172,6 +172,22 @@ test("My Draft classifies supported form types and combines category and text se
     "../utils/draftVersionBadge": badges,
   });
   assert.deepEqual(storedDrafts.map(draftCategory), ["plant-records", "species-requests", "species-requests", "plant-records", "corrections", "observations", "plant-records"]);
+  assert.deepEqual(sortBotanistDraftsBySavedTime(storedDrafts).map((draft) => draft.client_key),
+    ["field-plant-1", "observation-1", "correction-1", "edit-1", "species-1", "species-new", "plant-1"],
+    "all draft types share one strict newest-first order");
+  const resavedObservation = { ...storedDrafts.find((draft) => draft.client_key === "observation-1"), saved_at: "2026-01-07T00:00:00Z" };
+  assert.equal(sortBotanistDraftsBySavedTime(storedDrafts.map((draft) => draft.client_key === "observation-1" ? resavedObservation : draft))[0].client_key,
+    "observation-1", "a re-saved older draft moves to the top regardless of type");
+  assert.deepEqual(sortBotanistDraftsBySavedTime([
+    { client_key: "z", saved_at: "2026-01-01T00:00:00Z" }, { client_key: "a", saved_at: "2026-01-01T00:00:00Z" },
+  ]).map((draft) => draft.client_key), ["a", "z"], "equal timestamps have deterministic ordering");
+  const legacyDrafts = [
+    { client_key: "missing", saved_at: "invalid" },
+    { client_key: "created", created_at: "2026-01-01T00:00:00Z" },
+    { client_key: "updated", saved_at: "invalid", updated_at: "2026-01-02T00:00:00Z" },
+  ];
+  assert.deepEqual(sortBotanistDraftsBySavedTime(legacyDrafts).map((draft) => draft.client_key), ["updated", "created", "missing"]);
+  assert.equal(draftSavedTime(legacyDrafts[0]), null, "missing legacy timestamps are not fabricated");
   assert.deepEqual(filterBotanistDrafts(storedDrafts, "plant-records", "field fern").map((draft) => draft.client_key), ["field-plant-1"]);
   assert.deepEqual(filterBotanistDrafts(storedDrafts, "corrections", "9").map((draft) => draft.client_key), ["correction-1"]);
   assert.deepEqual(filterBotanistDrafts(storedDrafts, "species-requests").map((draft) => draft.client_key), ["species-new", "species-1"]);
@@ -185,6 +201,17 @@ test("My Draft classifies supported form types and combines category and text se
   assert.ok(find((node) => node?.type === "CardListSkeleton"), "My Drafts shows draft-shaped placeholders while loading");
   focus(); await new Promise((resolve) => setImmediate(resolve));
   tree = render();
+  const renderedDraftIds = [];
+  const collectDraftIds = (node) => {
+    if (node?.props?.testID?.startsWith("my-draft-")) renderedDraftIds.push(node.props.testID.slice("my-draft-".length));
+    children(node).forEach(collectDraftIds);
+  };
+  collectDraftIds(tree);
+  assert.deepEqual(renderedDraftIds, ["field-plant-1", "observation-1", "correction-1", "edit-1", "species-1", "species-new", "plant-1"],
+    "the page renders mixed draft types by saved time, not by category");
+  const observationCard = find((node) => node?.props?.testID === "my-draft-observation-1");
+  assert.ok(text(observationCard).includes("botanistDrafts.lastSaved"), "Observation cards show the Last saved label");
+  assert.match(text(observationCard), /2026\/01\/\d{2}, \d{2}:\d{2}:\d{2}/, "Observation cards show local date, time and seconds");
   assert.ok(!text(tree).includes("common.goBack"));
   assert.ok(!text(tree).includes("recordEdits.draftFinal"), "My Drafts omits the rejected-draft informational sentence");
   assert.ok(!text(tree).includes("botanistDrafts.title"), "navigation header owns the page title");

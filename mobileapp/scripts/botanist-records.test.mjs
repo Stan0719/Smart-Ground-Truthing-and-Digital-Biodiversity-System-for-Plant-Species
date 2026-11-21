@@ -1803,6 +1803,15 @@ for (const language of ["en", "ms", "zh"]) {
     assert.equal(find((node) => node?.props?.testID === "correction-filter-observations", tree).props.accessibilityState.selected, true, "clearing search retains the category");
     assert.ok(text(tree).includes("Please add leaf details."));
     const edit = find((node) => node?.type === "TouchableOpacity" && text(node).includes(t("fieldCollection.correctObservation")), tree); assert.ok(edit); await edit.props.onPress(); assert.equal(navigations.at(-1)[0], "FieldCollectionEdit");
+    liveRecords = { ...projected, edits: [{ id: "observation-edit-correction", observation_id: projected.observations[0].id,
+      owner_subject: "staff:owner", status: "Correction Required", review_comment: "Update the observation notes." }] };
+    slots = []; index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
+    const observationEditCard = find((node) => node?.props?.testID === "correction-task-observation-edit:observation-edit-correction");
+    assert.ok(observationEditCard, "Observation edit correction remains visible");
+    assert.ok(!text(observationEditCard).includes(t("submissions.notRecorded")), "an empty Observation edit name does not show the irrelevant Not recorded fallback");
+    assert.ok(text(observationEditCard).includes(t("myObservations.observationId")), "the Observation ID remains visible");
+    assert.ok(text(observationEditCard).includes("Update the observation notes."), "Officer feedback remains visible");
+    liveRecords = projected;
     projected.plants[0].status = "Pending Review";
     slots = []; index = 0; tree = screen.BotanistCorrectionRequestsScreen({ route: { params: { botanist } }, navigation: { navigate: (...args) => navigations.push(args), goBack() {} } });
     const registration = find((node) => node?.type === "TouchableOpacity" && text(node).includes(t("recordEdits.correctPlantRegistration")), tree);
@@ -1881,7 +1890,8 @@ test("read-only request detail renders actual fields, review metadata and authen
     "../utils/plantApi": { plantApi: async (...args) => { withdrawalCalls.push(args); return {}; } },
     "@expo/vector-icons/Ionicons": { default: "Ionicons" },
   });
-  const render = () => { index = 0; return screen.default({ route: { params: { requestId: "1", botanist: { id: "owner" } } } }); };
+  let goBackCalls = 0;
+  const render = () => { index = 0; return screen.default({ route: { params: { requestId: "1", botanist: { id: "owner" } } }, navigation: { goBack: () => { goBackCalls++; } } }); };
   const initialRequestTree = render();
   function findSkeleton(node) { if (!node || typeof node !== "object") return null; if (node.type === "DetailSkeletonContent") return node; for (const child of React.Children.toArray(node.props?.children)) { const match = findSkeleton(child); if (match) return match; } return null; }
   assert.equal(findSkeleton(initialRequestTree)?.props.label, "submissions.loadingRequestDetails");
@@ -1910,6 +1920,10 @@ test("read-only request detail renders actual fields, review metadata and authen
   await alerts[0][2][1].onPress();
   assert.equal(withdrawalCalls[0][0], "/species-requests/1/withdraw");
   assert.equal(alerts[1][0], "speciesWithdrawal.successTitle");
+  assert.equal(alerts[1][2][0].text, "common.ok");
+  assert.equal(goBackCalls, 0, "success dialog remains visible until acknowledged");
+  alerts[1][2][0].onPress();
+  assert.equal(goBackCalls, 1, "acknowledging success returns to the refreshed list");
   cleanup();
   record.review_cycle = "2";
   record.reviewed_at = "2026-11-12T00:00:00Z";
