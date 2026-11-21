@@ -1,6 +1,7 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage, formatDateTime } from "../translations/i18n";
 import React, { useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "../components/ScaledText";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useBotanistNotifications } from "../utils/useBotanistNotifications";
 import { botanistNotifications, ownedNotificationObservation } from "../utils/botanistNotifications";

@@ -162,6 +162,7 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
     if (name.endsWith('assetImages')) return { assetUrlFromId }
     if (name.endsWith('officerMonitoringDisplay')) return { reviewDateTime, submitterIdentifierLabels }
       // DOM directives are not mounted by this VNode-only render harness.
+      if (name.endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {} }
       if (name === 'vue')
         return { ...vue, onMounted() {}, onBeforeUnmount(fn) { cleanup.push(fn) }, resolveComponent: name => name, withDirectives: (node) => node }
       if (name === 'vue-router')

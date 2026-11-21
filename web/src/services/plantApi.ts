@@ -1,4 +1,5 @@
 import { readApiResponse } from './apiResponse'
+import { trackDatabaseTranslationResponse } from './databaseTranslation'
 
 export interface Species {
   image_url?: string
@@ -57,7 +58,8 @@ export async function plantApi<T>(path: string, method = 'GET', body?: unknown):
     throw new Error('Unable to reach the plant data service. Please try again later.')
   }
   try {
-    return await readApiResponse<T>(response, 'The plant data service is unavailable. Please try again later.')
+    const result = await readApiResponse<T>(response, 'The plant data service is unavailable. Please try again later.')
+    return trackDatabaseTranslationResponse(result)
   } catch (error) {
     if (!response.ok && error instanceof Error) Object.assign(error, { status: response.status })
     throw error

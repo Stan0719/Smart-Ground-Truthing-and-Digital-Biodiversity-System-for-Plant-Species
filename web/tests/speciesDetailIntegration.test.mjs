@@ -29,6 +29,7 @@ function harness({ slug = '201', initial = null, handler, locale = 'en' } = {}) 
   const t = createI18n({ legacy: false, locale, messages: { [locale]: messages } }).global.t
   const body = { style: { overflow: 'auto' } }
   const context = { exports, document: { body, visibilityState: 'visible', addEventListener: (name, fn) => { events[name] = fn } }, window: { addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, setInterval: (fn, delay) => { timers.push({ fn, delay }); return 1 }, clearInterval() {}, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount(fn) { unmount.push(fn) }, resolveComponent: n => n }
     if (name === 'vue-router') return { useRoute: () => route }
     if (name === 'vue-i18n') return { useI18n: () => ({ t }) }

@@ -1,5 +1,6 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import Text from "./ScaledText";
 import { useAppTranslation, t } from "../translations/i18n";
 
 const isMissing = (value) => value === null || value === undefined || value === "";

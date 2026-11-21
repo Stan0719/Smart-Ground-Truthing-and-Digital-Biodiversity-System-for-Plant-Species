@@ -48,6 +48,7 @@ function renderCard({ user, language, tablet, speciesDetailCard = true, status =
   };
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled)((name) => {
+    if (name === "./ScaledText") return { default: "Text", __esModule: true };
     assert.ok(name in dependencies, name);
     return { ...dependencies[name], __esModule: name !== "react" };
   }, module, module.exports);

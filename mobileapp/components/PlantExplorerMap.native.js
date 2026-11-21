@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker } from "react-native-maps";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "./ScaledText";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 import { initialMapCluster, SARAWAK_REGION, validMapPoint } from "../utils/mapCamera";
 
@@ -60,7 +61,7 @@ export default function PlantExplorerMap({ plants, onViewDetails, focusRequest, 
       </MapView>
       {!!distantPlants.length && <View style={styles.distantBar}>
         <Text style={styles.distantLabel}>{t("map.otherMappedLocations")}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.distantChoices}
+        <ScrollView horizontal showsHorizontalScrollIndicator style={styles.distantChoices}
           contentContainerStyle={styles.distantChoiceContent}>
           {distantPlants.map((plant) => <TouchableOpacity key={plant.plantId} onPress={() => { onSelectPlant(plant.plantId); focusPlant(plant); }}
             accessibilityRole="button" accessibilityLabel={`${t("map.showPlantOnMap")} ${plant.plantId}`} style={styles.distantChoice}>

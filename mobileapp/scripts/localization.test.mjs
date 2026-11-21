@@ -208,6 +208,9 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
   const code = ts.transpileModule(readFileSync(new URL(`screens/${name}.js`, root), "utf8"), { fileName: name + ".jsx", compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} };
   new Function("require", "module", "exports", code)((dependency) => {
+    if (dependency === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
+    if (dependency === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
+    if (dependency === "../components/TextSizeContext") return { useTextSize: () => ({ percent: 100 }), __esModule: true };
     assert.ok(dependency in deps, `Unexpected screen dependency: ${dependency}`);
     return { ...deps[dependency], __esModule: dependency !== "react" };
   }, module, module.exports);

@@ -1,6 +1,7 @@
 import { t, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import React, { useRef, useState } from "react";
-import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import ScaledText from "./ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { faceApi, validateFaceSession, faceReference, faceDiagnostic } from "../utils/faceApi";
@@ -85,39 +86,39 @@ function Capture({ request, onClose, onResult, isCurrent }) {
     return () => clearTimeout(timer);
   }, [request.mode, permission?.granted, ready]);
   return <SafeAreaView style={styles.screen}>
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator>
       <View style={styles.content}>
         <TouchableOpacity style={styles.backButton} accessibilityRole="button" accessibilityLabel={t("faceCameraModal.backToLogin")}
           disabled={busy} onPress={onClose}>
-          <Text style={styles.backText}>{"\u2039  "}{t("faceCameraModal.backToLogin")}</Text>
+          <ScaledText style={styles.backText}>{"\u2039  "}{t("faceCameraModal.backToLogin")}</ScaledText>
         </TouchableOpacity>
-        <Text accessibilityRole="header" style={styles.title}>{request.mode === "enroll" ? t("faceCameraModal.faceRegistration") : t("faceCameraModal.faceLogin")}</Text>
-        <Text style={styles.subtitle}>{request.mode === "enroll"
+        <ScaledText accessibilityRole="header" style={styles.title}>{request.mode === "enroll" ? t("faceCameraModal.faceRegistration") : t("faceCameraModal.faceLogin")}</ScaledText>
+        <ScaledText style={styles.subtitle}>{request.mode === "enroll"
           ? request.legacyProof
             ? t("faceCameraModal.agreeToSaveANewLiveFacialTemplateForYour")
             : t("faceCameraModal.agreeToSendAFacePhotoToYourProjectS")
-          : t("faceCameraModal.positionFaceInsideFrame")}</Text>
+          : t("faceCameraModal.positionFaceInsideFrame")}</ScaledText>
         <View style={[styles.preview, { width: previewWidth }]}>
           {permission?.granted ? <>
             <CameraView ref={camera} style={styles.camera} facing="front" mirror={false} pictureSize={pictureSize}
               onCameraReady={cameraReady} onMountError={() => setError(t("faceCameraModal.cameraCouldNotStartUsePasswordLogin"))} />
             <View pointerEvents="none" accessible={false} style={styles.faceGuide} />
           </> : <View style={styles.permissionState}>
-            <Text style={styles.permissionText}>{!permission ? t("faceCameraModal.startingCamera") :
-              permission.canAskAgain === false ? t("faceCameraModal.cameraPermissionSettings") : t("faceCameraModal.cameraPermissionNeeded")}</Text>
+            <ScaledText style={styles.permissionText}>{!permission ? t("faceCameraModal.startingCamera") :
+              permission.canAskAgain === false ? t("faceCameraModal.cameraPermissionSettings") : t("faceCameraModal.cameraPermissionNeeded")}</ScaledText>
           </View>}
         </View>
-        {permission?.granted && <Text style={styles.hint}>{t("faceCameraModal.keepFaceVisible")}</Text>}
-        {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+        {permission?.granted && <ScaledText style={styles.hint}>{t("faceCameraModal.keepFaceVisible")}</ScaledText>}
+        {!!error && <ScaledText accessibilityRole="alert" style={styles.error}>{error}</ScaledText>}
         {permission && !permission.granted && permission.canAskAgain !== false ? <TouchableOpacity style={styles.primaryButton} accessibilityRole="button"
           accessibilityLabel={t("faceCameraModal.allowCamera")} onPress={askPermission}>
-          <Text style={styles.primaryText}>{t("faceCameraModal.allowCamera")}</Text>
+          <ScaledText style={styles.primaryText}>{t("faceCameraModal.allowCamera")}</ScaledText>
         </TouchableOpacity> : permission?.granted && <TouchableOpacity style={[styles.primaryButton, (!ready || busy) && styles.disabledButton]}
           accessibilityRole="button" accessibilityState={{ disabled: !ready || busy, busy }} disabled={!ready || busy}
           onPress={() => scan(request.mode === "enroll")}>
           {busy && <ActivityIndicator color="#173B36" size="small" />}
-          <Text style={styles.primaryText}>{busy ? t("faceCameraModal.checkingFace") : request.mode === "enroll"
-            ? t("faceCameraModal.agreeAndRegisterMyFace") : error ? t("faceCameraModal.retryFaceLogin") : t("faceCameraModal.scanAndSignIn")}</Text>
+          <ScaledText style={styles.primaryText}>{busy ? t("faceCameraModal.checkingFace") : request.mode === "enroll"
+            ? t("faceCameraModal.agreeAndRegisterMyFace") : error ? t("faceCameraModal.retryFaceLogin") : t("faceCameraModal.scanAndSignIn")}</ScaledText>
         </TouchableOpacity>}
       </View>
     </ScrollView>

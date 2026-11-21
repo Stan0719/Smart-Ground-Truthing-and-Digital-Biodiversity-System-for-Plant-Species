@@ -30,6 +30,7 @@ function harness(initial = null, handler = null, photoHandler = null, historyHan
   let verificationFailure = 0
   const mounted = [], events = {}, timers = []
   const exports = {}, context = { exports, console, window: { addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, document: { visibilityState: 'visible', addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, setInterval: (fn, delay) => { timers.push({ fn, delay }); return 1 }, clearInterval() {}, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount() {}, resolveComponent: name => name }
     if (name === 'vue-router') return { useRoute: () => route, useRouter: () => ({ options: { history: { state: { back: previous } } }, resolve(path) { return { name: path.startsWith('/conservation/') ? 'conservation-map' : path === '/species' ? 'species' : undefined, fullPath: path } } }) }

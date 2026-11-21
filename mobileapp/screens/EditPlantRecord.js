@@ -1,5 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -623,7 +625,7 @@ export default function EditPlantRecord({ route, navigation }) {
   const submitHint = validate() || (state.plant.status === "Approved" && !state.correctionChange && !hasMeaningfulChanges
     ? t("recordEdits.noEditChanges") : "");
   const submitDisabled = Boolean(saving || submitted || state.offlineDraft || draftConflict || submitHint);
-  return <ScrollView scrollEnabled={!mapInteracting} style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <DiscoverableScrollView scrollEnabled={!mapInteracting} style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <View style={styles.titleRow}>
       <Text style={styles.title}>{t(isCorrectionPage ? "recordEdits.correctPlantRegistration" : "recordEdits.editPlant")}</Text>
       {isCorrectionPage && <TouchableOpacity testID="plant-correction-refresh" style={styles.correctionRefreshButton} onPress={() => { void refreshCorrectionRecord(); }}
@@ -675,10 +677,10 @@ export default function EditPlantRecord({ route, navigation }) {
       </View> : <OriginalUpdatedField label={`${t("addPlantWorkflow.approvedSpecies")} *`} originalValue={originalSpecies}>
       <TextInput style={styles.input} value={speciesSearch} onChangeText={setSpeciesSearch}
         placeholder={t("addPlant.searchByScientificOrCommonName")} accessibilityLabel={t("addPlant.searchSpeciesInTheDatabase")} />
-      <ScrollView style={styles.optionList} nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
+      <DiscoverableScrollView nested hintKey="scrollHints.speciesList" style={styles.optionList} nestedScrollEnabled keyboardShouldPersistTaps="always">
       {(state.catalogSpecies || []).filter((item) => !speciesSearch.trim() || `${item.scientificName} ${item.commonName}`.toLocaleLowerCase().includes(speciesSearch.trim().toLocaleLowerCase()) || form.species_id === String(item.id)).map((item) => <TouchableOpacity key={item.id} style={[styles.speciesOption, form.species_id === String(item.id) && styles.selected]} onPress={() => change("species_id", String(item.id))} accessibilityRole="radio" accessibilityState={{ selected: form.species_id === String(item.id) }}>
         <Text style={styles.optionText}>{item.scientificName} · {item.commonName}</Text></TouchableOpacity>)}
-    </ScrollView>
+    </DiscoverableScrollView>
       </OriginalUpdatedField>}
       <Text style={styles.note}>{t("recordEdits.associatedSpeciesName")}: {state.plant.speciesScientificName || state.plant.speciesDetails?.scientificName || t("recordEdits.informationNotAvailable")}</Text>
       {fields.filter((field) => !["latitude", "longitude", "altitudeM", "accuracy_m"].includes(field)).map((field) => <OriginalUpdatedField key={field} label={`${t(field === "scientific_name" ? "recordEdits.plantScientificName" : `recordEdits.${field}`)}${requiredFields.has(field) ? " *" : ""}`} originalValue={originalFieldValue(field)}>
@@ -709,13 +711,13 @@ export default function EditPlantRecord({ route, navigation }) {
         {qrLoading ? <ActivityIndicator size="small" color="#28665E" /> : <Ionicons name="refresh-outline" size={18} color="#28665E" />}
         <Text style={styles.qrRefreshText}>{t("recordEdits.refreshQr")}</Text></TouchableOpacity>
       <OriginalUpdatedField label={t("recordEdits.qr_id")} originalValue={state.plant.qrCode || state.plant.qrId}>
-      <ScrollView style={styles.optionList} nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
+      <DiscoverableScrollView nested hintKey="scrollHints.qrList" style={styles.optionList} nestedScrollEnabled keyboardShouldPersistTaps="always">
         {!qrOptions.some((qr) => qr.id !== currentQrId) && <Text style={styles.optionEmpty}>{t("recordEdits.noReplacementQr")}</Text>}
         {qrOptions.map((qr) => <TouchableOpacity key={qr.id} style={[styles.speciesOption, form.qr_id === qr.id && styles.selected]}
           onPress={() => change("qr_id", qr.id)} accessibilityRole="radio" accessibilityState={{ selected: form.qr_id === qr.id }}>
           <Text style={styles.optionText}>{qr.label} · {qr.id === currentQrId ? t("recordEdits.currentQr") : t("recordEdits.availableQr")}</Text>
         </TouchableOpacity>)}
-      </ScrollView>
+      </DiscoverableScrollView>
       </OriginalUpdatedField>
     </View>
     <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.plantPhotos")}</Text>
@@ -769,7 +771,7 @@ export default function EditPlantRecord({ route, navigation }) {
     {!!submitHint && !state.offlineDraft && !draftConflict && !submitted && <Text style={styles.note}>{submitHint}</Text>}
     <TouchableOpacity style={styles.secondary} onPress={confirmLeave} disabled={saving}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity>
 
-  </ScrollView>;
+  </DiscoverableScrollView>;
 }
 
 const styles = StyleSheet.create({

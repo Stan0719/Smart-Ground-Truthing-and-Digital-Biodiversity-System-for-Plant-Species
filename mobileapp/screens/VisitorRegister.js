@@ -2,16 +2,8 @@ import { t, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import React, { useEffect, useRef, useState } from "react";
 
 import {
-  Animated,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
+  Animated, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -157,7 +149,7 @@ export default function VisitorRegisterScreen({ navigation }) {
       <KeyboardAvoidingView style={styles.keyboardView} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View pointerEvents="none" style={styles.topGlow} />
         <View pointerEvents="none" style={styles.bottomGlow} />
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator>
           <Animated.View style={[styles.content, { opacity: screenFade, transform: [{ translateY: screenSlide }] }]}>
             <View style={styles.iconCircle}>
               <Ionicons name={registeredEmail ? "checkmark" : "person-add"} size={23} color="#FFFFFF" />

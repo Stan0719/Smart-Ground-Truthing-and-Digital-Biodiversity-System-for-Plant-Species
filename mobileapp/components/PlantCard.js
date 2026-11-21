@@ -2,15 +2,8 @@ import { t, translateLabel, dateLocale, useAppTranslation, translateFieldValue }
 import React, { useState } from "react";
 
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-  useWindowDimensions,
-  Dimensions,
-  Platform,
-} from "react-native";
+  View, StyleSheet, TouchableOpacity, Image, useWindowDimensions, Dimensions, Platform } from "react-native";
+import Text from "./ScaledText";
 
 import { getPlantDisplayObservation } from "../utils/plantApi";
 import { getPlantCardZoneLabel } from "../utils/plantCardDisplay";

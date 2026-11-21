@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { clearDatabaseTranslationTargets, configureDatabaseTranslation } from './services/databaseTranslation'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { verifySession, sessionVerificationCurrent, sessionSnapshot, subscribeSession, logout } from './services/auth'
 import {refreshKnowledge} from './services/knowledge'
 import { useI18n } from 'vue-i18n'
 import SiteFooter from './components/SiteFooter.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+configureDatabaseTranslation(locale)
 const reconnectText = computed(() => t('sessionVerification.unavailable'))
 const retryText = computed(() => t('sessionVerification.retry'))
 const route = useRoute()
+watch(() => route.fullPath, clearDatabaseTranslationTargets, { flush: 'sync' })
 const showSiteFooter = computed(
   () => !route.path.startsWith('/admin') && !route.path.startsWith('/conservation'),
 )

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,6 +10,7 @@ import { plantApi } from "../utils/plantApi";
 import { deleteBotanistFormDraft, findBotanistFormDraft, getBotanistFormDraft, saveBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import SpeciesDictionary from "../components/SpeciesDictionary";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 const conservationStatuses = ["Not Assessed", "Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered"];
 const makeKey = () => `species-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -119,7 +121,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
         ["scientific_name", "scientificName", "eGNepenthesMirabilis"], ["common_name", "commonName", "eGSwampPitcherPlant"],
     ["genus_name", "genus", "eGNepenthes"], ["family_name", "family", "eGNepenthaceae"],
   ];
-  return <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <DiscoverableScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
     <Text style={styles.title}>{t("speciesRequestForm.title")}</Text>
     <Text style={styles.note}>{t("speciesRequestForm.description")}</Text>
     <View style={styles.card}>
@@ -166,7 +168,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
       </TouchableOpacity>
       <TouchableOpacity style={styles.cancel} onPress={() => navigation.goBack()} disabled={saving} accessibilityRole="button"><Text style={styles.cancelText}>{t("common.cancel")}</Text></TouchableOpacity>
     </View>
-  </ScrollView>;
+  </DiscoverableScrollView>;
 }
 
 const styles = StyleSheet.create({

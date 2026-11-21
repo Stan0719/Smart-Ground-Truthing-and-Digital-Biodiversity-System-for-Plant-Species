@@ -49,6 +49,7 @@ test('actual Vite configuration routes asset paths to Plant API while preserving
   const exports = {}
   const source = load('../vite.config.ts').replaceAll('import.meta.url', JSON.stringify(new URL('../vite.config.ts', import.meta.url).href))
   vm.runInNewContext(js(source), { exports, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'node:url') return { URL, fileURLToPath: value => new URL(value).pathname }
     if (name === 'vite') return { defineConfig: value => value }
@@ -72,6 +73,7 @@ test('actual Vite configuration routes asset paths to Plant API while preserving
 test('knowledge refresh retains plant thumbnails and separates preview fallback from reference galleries', async () => {
   const plants = vue.reactive([]), records = vue.reactive([]), calls = [], exports = {}
   vm.runInNewContext(js(load('../src/services/knowledge.ts')), { exports, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return vue
     if (name.endsWith('/assetImages')) return images
@@ -124,6 +126,7 @@ test('plant card replaces missing/broken images with a placeholder and accepts a
   const loggedIn = vue.ref(false), role = vue.ref(null)
   const props = vue.reactive({ compact: false, plant: { plantId: '1', speciesSlug: '1', description: 'Private preview description fixture', images: [], location: {}, latestApproved: {}, qr: {} } })
   const context = { exports, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return { ...vue, resolveComponent: value => value }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x, te: () => false, locale: vue.ref('en') }) }
@@ -210,6 +213,7 @@ test('direct species-plants navigation maps actual API thumbnails without a prel
       { plant_id: '2', species_id: '1', rbac_status: 'Pending Review', registered_at: '2026-11-05', latitude: null, latest_submission: { heightCm: 99, lifeStage: 'Young', zone: 'Pending zone' } },
     ] })
   }, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name.endsWith('/workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return vue
     if (name === 'vue-router') return { useRoute: () => vue.reactive({ params: { slug: '1' } }) }
@@ -262,6 +266,7 @@ test('Administrator shared knowledge loader requests scientific catalogue and ma
   const plants = vue.reactive([]), records = vue.reactive([]), calls = [], exports = {}
   const administrator = { id: 'fixture-admin', role: 'Administrator', status: 'Active', mustChangePassword: false }
   vm.runInNewContext(js(load('../src/services/knowledge.ts')), { exports, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return vue
     if (name.endsWith('/assetImages')) return images
     if (name.endsWith('/plantCardMapping')) return cardMapping

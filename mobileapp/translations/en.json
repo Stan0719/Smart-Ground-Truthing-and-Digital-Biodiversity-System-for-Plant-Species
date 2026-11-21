@@ -1,4 +1,7 @@
 {
+  "textSize": { "title": "Language & Accessibility", "size": "Text Size", "normal": "Normal", "maximum": "Maximum", "preview": "Preview", "saveFailed": "The text size changed for this session but could not be saved. Please try again." },
+  "correctionBadge": { "plant": "Plant", "species": "Species", "observation": "Observation", "original": "{{type}} Original", "edit": "{{type}} Edit {{number}}", "editWithoutNumber": "{{type}} Edit" },
+  "scrollHints": { "vertical": "Scroll down for more", "horizontal": "Swipe to see more", "speciesList": "Scroll for more species", "qrList": "Scroll for more QR codes", "searchResults": "Scroll for more results" },
   "observationEdits": {
     "editObservation": "Edit Observation",
     "editProposal": "Observation edit",

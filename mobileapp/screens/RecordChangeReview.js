@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
 import { plantApi } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
@@ -95,7 +97,7 @@ export default function RecordChangeReview() {
   const proposed = selected?.plant_id || selected?.observationEdit ? { ...original, ...flattened(selected?.proposed_snapshot) } : flattened(selected?.proposed_snapshot);
   const labels = [...new Set([...Object.keys(original), ...Object.keys(proposed)])]
     .filter((field) => JSON.stringify(original[field] ?? null) !== JSON.stringify(proposed[field] ?? null));
-  return <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+  return <DiscoverableScrollView style={styles.page} contentContainerStyle={styles.content}>
     <Text style={styles.title}>{t("recordEdits.reviewTitle")}</Text>
     {state.loading && <ActivityIndicator color="#468585" />}
     {!!state.error && <View style={styles.card}><Text style={styles.error}>{translateUIMessage(state.error)}</Text>
@@ -135,7 +137,7 @@ export default function RecordChangeReview() {
         <TouchableOpacity style={styles.secondary} onPress={() => review("Correction Required")} disabled={busy}><Text style={styles.secondaryText}>{t("observationEdits.requestCorrection")}</Text></TouchableOpacity>
       </View>}
     </>}
-  </ScrollView>;
+  </DiscoverableScrollView>;
 }
 
 const styles = StyleSheet.create({ page: { flex: 1, backgroundColor: "#F7FBF4" }, content: { width: "100%", maxWidth: 850, alignSelf: "center", padding: 20, paddingBottom: 50, gap: 14 },

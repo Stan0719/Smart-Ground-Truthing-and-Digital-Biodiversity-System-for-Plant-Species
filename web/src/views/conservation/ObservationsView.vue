@@ -21,6 +21,7 @@ import ActionFeedback from '../../components/ActionFeedback.vue'
 import ObservationReviewHistory from '../../components/conservation/ObservationReviewHistory.vue'
 import { formatPlantId } from '../../utils/plantId'
 import { observationOrigin, observationQueueUrl, readQueuePage, type ObservationOrigin, type ObservationQueue } from '../../services/observationQueue'
+import { trackDatabaseTranslationFields } from '../../services/databaseTranslation'
 
 interface ObservationAsset { id: string; contentType: string }
 interface ObservationView {
@@ -282,7 +283,7 @@ const mapObservation = (value: unknown): ObservationView | null => {
     }),
   ) : {}
   const height = numericValue(content.heightCm, 0)
-  return {
+  const mapped: ObservationView = {
     reviewSnapshot: observationReviewSnapshot(item),
     origin: observationOrigin(item.origin_type),
     id,
@@ -321,6 +322,12 @@ const mapObservation = (value: unknown): ObservationView | null => {
     speciesRequest: mapLinkedSpeciesRequest(item),
     hasSpeciesRequest: Boolean(stringValue(item.species_request_id) || record(item.species_request)),
   }
+  trackDatabaseTranslationFields([
+    { recordType: 'observation', recordId: id, fieldName: 'morphology', sourceVersion: String(item.revision), target: mapped, targetField: 'morphology' },
+    { recordType: 'observation', recordId: id, fieldName: 'notes', sourceVersion: String(item.revision), target: mapped, targetField: 'notes' },
+    { recordType: 'review-comment', recordId: id, fieldName: 'comment', target: mapped, targetField: 'reviewComment' },
+  ])
+  return mapped
 }
 
 class ObservationApiError extends Error {

@@ -8,6 +8,7 @@ import type { PlantRecord } from '../data/plantRecords'
 import { assetUrlFromId, plantThumbnailImages, webAssetUrl } from '../services/assetImages'
 import { mapPlantCardMetadata } from '../services/plantCardMapping'
 import { requestPlantApi } from '../services/plantIntegration'
+import { trackDatabaseTranslationFields } from '../services/databaseTranslation'
 import { formatPlantId } from '../utils/plantId'
 import { conservationBadgeStyle } from '../utils/conservationBadge'
 import { api, sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
@@ -148,6 +149,10 @@ async function loadSpecies(background = false) {
       conservationStatus: scientific.value ? text(item.conservation_status) : '',
       image: webAssetUrl(item.image_url) || assetUrlFromId(item.image_asset_id),
     }
+    trackDatabaseTranslationFields([
+      { recordType: 'species', recordId: id, fieldName: 'description', target: nextProfile, targetField: 'description' },
+      { recordType: 'species', recordId: id, fieldName: 'habitat', target: nextProfile, targetField: 'habitat' },
+    ])
     const profile = nextProfile
     if (!background) { selectedSpecies.value = nextProfile; isLoading.value = false; plantsLoading.value = true }
     let nextImages: string[] | null = null
@@ -158,8 +163,9 @@ async function loadSpecies(background = false) {
           const result = await requestPlantApi(user.value ? '/api/data/plants' : '/api/data/plants?scope=public-web')
           if (!current()) return
           if (!Array.isArray(result.plants)) throw Error()
-          plantsLimited.value = result.plants.length >= 500
-          const nextPlants = result.plants.flatMap(value => {
+          const plantRows = result.plants as unknown[]
+          plantsLimited.value = plantRows.length >= 500
+          const nextPlants = plantRows.flatMap(value => {
             const row = object(value)
             if (!row || String(row.species_id) !== id || (row.rbac_status !== undefined && row.rbac_status !== 'Approved')) return []
             const plantId = validId(row.plant_id) ? formatPlantId(String(row.plant_id)) : null
@@ -169,6 +175,21 @@ async function loadSpecies(background = false) {
               qr: { code: '', status: '' }, registeredBy: '', registeredAt: '',
               images: plantThumbnailImages(row), observations: [] }]
           })
+          trackDatabaseTranslationFields(nextPlants.flatMap((plant) => {
+            const row = plantRows.find((value) => {
+              const candidate = object(value)
+              const plantId = candidate?.plant_id
+              return (typeof plantId === 'string' || typeof plantId === 'number') && formatPlantId(plantId) === plant.plantId
+            })
+            const registration = object(row)?.current_registration
+            const registrationRow = object(registration)
+            const observationId = registrationRow?.observation_id
+            if (typeof observationId !== 'string' || !observationId) return []
+            return [
+              { recordType: 'observation' as const, recordId: observationId, fieldName: 'morphology' as const, historical: true, target: plant.latestApproved, targetField: 'morphology' },
+              { recordType: 'observation' as const, recordId: observationId, fieldName: 'notes' as const, historical: true, target: plant.latestApproved, targetField: 'notes' },
+            ]
+          }))
           if (JSON.stringify(linkedPlants.value) !== JSON.stringify(nextPlants)) linkedPlants.value = nextPlants
         } catch { if (current()) plantsError.value = t('species.detail.plantsFailed') }
         finally { if (current()) plantsLoading.value = false }

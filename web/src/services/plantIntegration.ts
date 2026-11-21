@@ -1,5 +1,6 @@
 import { formatPlantId, parsePlantId } from '../utils/plantId.ts'
 import { webAssetUrl } from './assetImages.ts'
+import { trackDatabaseTranslationResponse } from './databaseTranslation.ts'
 
 export interface SpeciesContract {
   id: string
@@ -223,5 +224,5 @@ export async function requestPlantApi(url: string): Promise<Record<string, unkno
     throw new PlantApiError(backendMessage || fallback, response.status)
   }
   if (!result) throw new PlantApiError('The plant service returned an invalid response.', response.status, 'invalid')
-  return result
+  return trackDatabaseTranslationResponse(result)
 }

@@ -1,5 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
-import { AppState, ActivityIndicator, View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import { AppState, ActivityIndicator, View, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import Text from "../components/ScaledText";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, submissionStatus, canWithdrawOriginalSpecies } from "../utils/botanistRecords";
 import EditAction from "../components/EditAction";
@@ -126,7 +128,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
   ]);
   const field = (label, value) => value || historicalDetail ? <View key={label} style={styles.field}><Text style={styles.label}>{t(`submissions.${label}`)}</Text><Text style={styles.value}>{value == null || value === "" ? t("recordEdits.historicalFieldUnavailable") : value}</Text></View> : null;
   const date = (value) => value ? new Date(value).toLocaleString() : "";
-  return <ScrollView style={styles.page} contentContainerStyle={styles.content}
+  return <DiscoverableScrollView style={styles.page} contentContainerStyle={styles.content}
     refreshControl={!historicalDetail ? <RefreshControl refreshing={current.loading} onRefresh={refresh} tintColor="#468585" /> : undefined}>
     {!!current.error && <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorText}>{translateUIMessage(current.error)}</Text>
       <TouchableOpacity accessibilityRole="button" onPress={refresh} style={styles.retry}><Text style={styles.retryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>}
@@ -214,7 +216,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
         {field("status", translateLabel(request.request_status))}{field("reviewed", date(request.reviewed_at))}
       </View>
     </>}
-  </ScrollView>;
+  </DiscoverableScrollView>;
 }
 
 const styles = StyleSheet.create({

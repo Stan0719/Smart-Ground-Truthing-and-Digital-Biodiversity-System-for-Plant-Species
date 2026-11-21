@@ -1,12 +1,14 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { AppState, ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { AppState, ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import PlantExplorerMap from "../components/PlantExplorerMap";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 import { fetchPlantRecords, filterMapPlantsByStatus, isMapPlantVisible } from "../utils/plantApi";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 import LanguageSelector from "../components/LanguageSelector";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 const statusColors = {
   approved: ["#E2F4E6", "#257344"],
@@ -176,7 +178,7 @@ export default function MapScreen({ navigation, user }) {
 
   return (
     <View style={styles.container}>
-      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadPlants(true)} tintColor="#267348" colors={["#267348"]} />}>
         <View style={styles.header}>
           <View style={styles.headerTop}>
@@ -220,7 +222,7 @@ export default function MapScreen({ navigation, user }) {
               {!!search && <TouchableOpacity onPress={() => updateSearch("")} accessibilityRole="button"
                 accessibilityLabel={t("map.clearSearch")}><Ionicons name="close-circle" size={20} color="#789181" /></TouchableOpacity>}
             </View>
-            {isBotanist && <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            {isBotanist && <DiscoverableScrollView horizontal
               contentContainerStyle={styles.statusFilters} accessibilityLabel={t("plant.recordVisibilityFilters")}>
               {[["allVisible", t("plant.allVisible")], ["approved", t("plant.approvedOnly")],
                 ["myPending", t("plant.myPending")]].map(([value, label]) => {
@@ -231,7 +233,7 @@ export default function MapScreen({ navigation, user }) {
                   <Text style={[styles.statusFilterText, selected && styles.statusFilterTextSelected]}>{label}</Text>
                 </TouchableOpacity>;
               })}
-            </ScrollView>}
+            </DiscoverableScrollView>}
             {filteredPlants.length ? (
               <FlatList data={filteredPlants} keyExtractor={(item) => item.plantId} numColumns={2}
                 scrollEnabled={false} columnWrapperStyle={styles.plantGrid}

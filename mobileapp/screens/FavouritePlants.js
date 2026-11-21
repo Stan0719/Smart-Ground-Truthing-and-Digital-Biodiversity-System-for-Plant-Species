@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { FlatList, Image, RefreshControl, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
@@ -27,7 +28,7 @@ export default function FavouritePlantsScreen({ navigation, user }) {
         data={favourites.loading ? [] : items}
         keyExtractor={(item) => `${tab}:${isSpecies ? item.id : item.plantId}`}
         contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
         refreshControl={<RefreshControl refreshing={favourites.refreshing} onRefresh={() => void favourites.refresh(true)} tintColor="#468585" colors={["#468585"]} />}
         ListHeaderComponent={<>
         <View style={styles.header}>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Text, View, StyleSheet } from "react-native";
+import { View, StyleSheet } from "react-native";
+import Text from "./ScaledText";
 
 const COLORS = { background: "#FAFBF7", card: "#FFFFFF", skeleton: "#E8EDDA", border: "#DCEBDD", text: "#2F6B4F", muted: "#718078" };
 

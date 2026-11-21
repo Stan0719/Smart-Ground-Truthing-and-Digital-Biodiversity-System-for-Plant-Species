@@ -1,6 +1,7 @@
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 ﻿import React, { useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import PasswordVisibilityButton from "../components/PasswordVisibilityButton";
 
@@ -34,7 +35,7 @@ export default function MandatoryPasswordChangeScreen({ onSubmit, onCancel }) {
     <KeyboardAvoidingView style={styles.keyboardView} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <View pointerEvents="none" style={styles.topGlow} />
       <View pointerEvents="none" style={styles.bottomGlow} />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator>
         <View style={styles.card}>
           <Text accessibilityRole="header" style={styles.title}>{t("mandatoryPasswordChange.changeYourTemporaryPassword")}</Text>
           <Text style={styles.description}>{t("mandatoryPasswordChange.chooseANewPasswordWith15To128CharactersBefore")}</Text>

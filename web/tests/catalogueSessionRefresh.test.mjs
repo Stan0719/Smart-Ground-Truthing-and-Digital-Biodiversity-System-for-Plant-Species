@@ -19,6 +19,7 @@ function authHarness() {
   const { descriptor } = parse(read('components/NavigationBar.vue')), script = compileScript(descriptor, { id: 'session-navbar' })
   const scope = vue.effectScope(), exports = {}, route = vue.reactive({ path: '/species' })
   vm.runInNewContext(js(script.content), { exports, window: { removeEventListener() {} }, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount() {} }
     if (name === 'vue-router') return { useRoute: () => route, useRouter: () => ({ push() {} }) }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x }) }
@@ -73,6 +74,7 @@ function knowledgeHarness() {
   const species = [{ species_id: 6, scientific_name: 'Canonical species', family_name: 'Family A' }]
   handler = async path => path.startsWith('/species?') ? { species } : path.startsWith('/plants') ? { plants: [] } : { assets: [] }
   vm.runInNewContext(js(read('services/knowledge.ts')), { exports, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return vue
     if (name.endsWith('/auth')) return auth
     if (name.endsWith('/plants')) return { plants }

@@ -42,6 +42,8 @@ function moduleFrom(file, deps) {
   new Function("require", "module", "exports", code)((name) => {
     if (name === "../components/BackButton") return { default: (props) => React.createElement("TouchableOpacity", props, props.label || props.accessibilityLabel), __esModule: true };
     if (name === "../components/BotanicalSkeleton") return { CardListSkeleton: "CardListSkeleton", DetailSkeletonContent: "DetailSkeletonContent", __esModule: true };
+    if (name === "../components/DiscoverableScrollView") return { default: "FlatList", __esModule: true };
+    if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     if (name === "../utils/submissionSearch") return { ...moduleFrom("utils/submissionSearch.js", {}), __esModule: true };
     assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" };
   }, module, module.exports);
@@ -1634,6 +1636,47 @@ test("Correction Requests include creator-owned observations on another plant an
   assert.deepEqual(new Set(tasks.filter((task) => matches(task, "observations")).map((task) => task.kind)), new Set(["observation", "observationEdit"]));
   assert.equal(matches(tasks.find((task) => task.id === "12"), "plants"), true, "initial registration correction remains a Plant correction");
   assert.equal(matches(tasks.find((task) => task.id === "12"), "observations"), false);
+});
+
+test("Correction badges use linked edit history, ignore approval captures, and fall back for uncertain provenance", () => {
+  assert.match(read("screens/BotanistDashboard.js"), /correctionStatusText\}>\{correctionBadgeLabel\(task, history\)\}/);
+  const base = { id: "original", version_number: 1, status: "Superseded", owner_subject: "staff:owner",
+    created_at: "2026-11-01T00:00:00Z", snapshot: { observation_id: "registration", request_id: 8 } };
+  const capture = { id: "capture", version_number: 2, status: "Approved", owner_subject: "staff:owner",
+    created_at: "2026-11-02T00:00:00Z", snapshot: { observation_id: "registration", request_id: 8,
+      review_provenance: { evidence_type: "approval_capture", source_submitted_history_id: "original" } } };
+  const edits = ["first", "second", "third"].map((id, index) => ({ id: `version-${id}`, version_number: index + 3,
+    change_id: id, status: index === 1 ? "Cancelled" : "Correction Required", owner_subject: "staff:owner",
+    created_at: `2026-11-0${index + 3}T00:00:00Z`, snapshot: { observation_id: "registration", request_id: 8 } }));
+  const history = { history_available: true, versions: [base, capture, ...edits, { ...edits[0], id: "first-revision-2",
+    version_number: 6, change_revision: 2, created_at: "2026-11-07T00:00:00Z" }], prior_changes: [] };
+  for (const language of ["en", "ms", "zh"]) {
+    const catalog = JSON.parse(read(`translations/${language}.json`));
+    const badge = translatedSubmissions(language).correctionBadgeLabel;
+    for (const [kind, type] of [["plant", catalog.correctionBadge.plant], ["species", catalog.correctionBadge.species],
+      ["observation", catalog.correctionBadge.observation]]) {
+      const originType = kind === "plant" ? "initial_registration" : "subsequent_observation";
+      assert.equal(badge({ kind, originType, status: "Correction Required" }),
+        catalog.correctionBadge.original.replace("{{type}}", type));
+    }
+    for (const [kind, type, target] of [["plantEdit", catalog.correctionBadge.plant, { plantId: "8" }],
+      ["speciesEdit", catalog.correctionBadge.species, { requestId: "8" }]]) {
+      for (const [index, id] of ["first", "second", "third"].entries())
+        assert.equal(badge({ kind, ...target, proposalId: id, status: "Correction Required" }, history),
+          catalog.correctionBadge.edit.replace("{{type}}", type).replace("{{number}}", String(index + 1)));
+    }
+    for (const number of [1, 2, 3]) assert.equal(badge({ kind: "observationEdit", originType: "subsequent_observation",
+      editNumber: number, status: "Correction Required" }), catalog.correctionBadge.edit
+      .replace("{{type}}", catalog.correctionBadge.observation).replace("{{number}}", String(number)));
+    assert.equal(badge({ kind: "plantEdit", plantId: "8", proposalId: "missing", status: "Correction Required" }, history), "Correction Required");
+    assert.equal(badge({ kind: "speciesEdit", requestId: "8", proposalId: "third", status: "Correction Required" }, null), "Correction Required");
+    assert.equal(badge({ kind: "plantEdit", plantId: "8", proposalId: "third", status: "Correction Required" },
+      { ...history, versions: history.versions.slice(1) }), "Correction Required");
+    assert.equal(badge({ kind: "plantEdit", plantId: "8", proposalId: "third", status: "Correction Required" },
+      { ...history, versions: Array.from({ length: 200 }, (_, index) => ({ ...base, id: `row-${index}` })) }), "Correction Required");
+    assert.equal(badge({ kind: "observationEdit", originType: "initial_registration", editNumber: 1, status: "Correction Required" }), "Correction Required");
+    assert.equal(badge({ kind: "plant", status: "Correction Required" }), "Correction Required");
+  }
 });
 
 for (const language of ["en", "ms", "zh"]) {

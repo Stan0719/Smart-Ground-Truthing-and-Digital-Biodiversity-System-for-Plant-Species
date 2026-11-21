@@ -44,7 +44,7 @@ test('Species Details sorts only authorized results and exposes every record in 
   assert.match(source, /isPlantVisibleInRoleCatalog\(record, user\?\.role, user\?\.id\)[\s\S]*?\|\| isOwnedRejectedPlant\(record, user\?\.id\)/)
   assert.match(source, /orderSpeciesPlantRecords\(speciesPlants\)/)
   assert.match(source, /orderedSpeciesPlants\.length <= 3/)
-  assert.match(source, /<ScrollView[\s\S]*?nestedScrollEnabled[\s\S]*?directionalLockEnabled/)
+  assert.match(source, /<DiscoverableScrollView nested hintKey="speciesDetail\.scrollToSeeMorePlants"[\s\S]*?nestedScrollEnabled[\s\S]*?directionalLockEnabled/)
   assert.match(source, /\{orderedSpeciesPlants\.map\(\(plant\) =>/)
   assert.doesNotMatch(source, /speciesPlants\s*\.slice\(0,\s*3\)/)
   assert.match(source, /navigation=\{navigation\}[\s\S]*?speciesDetailCard/)

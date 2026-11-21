@@ -188,6 +188,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
     if (name.includes('useOfficerCopyConfirmation')) return { useOfficerCopyConfirmation }
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
+      if (name.endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {} }
       if (name === 'vue') return {
         ...vue,
         onMounted() {},

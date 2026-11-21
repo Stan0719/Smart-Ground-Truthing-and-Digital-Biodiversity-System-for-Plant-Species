@@ -59,7 +59,7 @@ test('Botanist combines approved catalogue with private requests without duplica
 test('catalogue filter and protected request navigation stay Botanist-only', () => {
   const source = read('../screens/Species.js')
   assert.match(source, /includeOwnedRequests: isBotanist/)
-  assert.match(source, /isBotanist && <ScrollView horizontal showsHorizontalScrollIndicator=\{false\}/)
+  assert.match(source, /isBotanist && <ScrollView horizontal showsHorizontalScrollIndicator\s/)
   assert.match(source, /style=\{\[styles\.filterToggle, filtersOpen && styles\.filterToggleActive\]\}/)
   assert.match(source, /\["Rejected", t\("species\.myRejected"\)\]/)
   assert.match(source, /\(isBotanist \? filtersOpen : sortOpen\)/)

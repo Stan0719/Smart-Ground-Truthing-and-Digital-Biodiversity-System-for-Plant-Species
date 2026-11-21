@@ -12,7 +12,9 @@ const transpile = (file) => ts.transpileModule(readFileSync(new URL(`../${file}`
 function screen(file, dependencies) {
   const module = { exports: {} };
   new Function("require", "module", "exports", transpile(file))((name) => {
+    if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     if (name === "../components/BackButton") return { default: "TouchableOpacity", __esModule: true };
+    if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     assert.ok(name in dependencies, `Missing mock: ${name}`);
     return { ...dependencies[name], __esModule: name !== "react" };
   }, module, module.exports);

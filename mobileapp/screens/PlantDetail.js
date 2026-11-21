@@ -3,16 +3,8 @@ import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, t
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import { AppState,
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  RefreshControl,
-  Modal,
-} from "react-native";
+import { AppState, View, StyleSheet, ScrollView, TouchableOpacity, Image, RefreshControl, Modal } from "react-native";
+import Text from "../components/ScaledText";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -26,6 +18,7 @@ import RefreshButton from "../components/RefreshButton";
 import BackButton from "../components/BackButton";
 import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 import { stepPhotoIndex, uniquePlantPhotos } from "../utils/plantPhotoGallery";
 import { fetchPlantObservationEligibility } from "../utils/fieldSync";
@@ -265,9 +258,9 @@ export default function PlantDetail({
   return (
     <SafeAreaView style={styles.viewerRoot} edges={["top", "left", "right"]}>
     {header}
-    <ScrollView
+    <DiscoverableScrollView
       style={styles.container}
-      showsVerticalScrollIndicator={false}
+      showsVerticalScrollIndicator
       refreshControl={
         <RefreshControl
           refreshing={refreshing || favourites.refreshing}
@@ -315,7 +308,7 @@ export default function PlantDetail({
 
       {displayablePhotos.length > 1 && (
         <>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnailList}>
+          <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.thumbnailList}>
             {displayablePhotos.map((photo, index) => (
               <TouchableOpacity
                 key={photo.uri}
@@ -748,7 +741,7 @@ export default function PlantDetail({
       </View>
       )}
 
-    </ScrollView>
+    </DiscoverableScrollView>
     <Modal visible={imageViewerVisible && Boolean(selectedPhoto)} animationType="fade" onRequestClose={() => setImageViewerVisible(false)}>
       <View style={styles.imageViewer}>
         <View style={styles.viewerTopBar}>

@@ -1,6 +1,7 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage, translateFieldValue, translateFieldLabel, formatDateTime } from "../translations/i18n";
 import React, { useCallback, useRef, useState } from "react";
-import { AppState, ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { AppState, ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "../components/ScaledText";
 import { useFocusEffect } from "@react-navigation/native";
 import { ownedNotificationObservation } from "../utils/botanistNotifications";
 import { getObservationRecorderDisplayName, plantApi, plantAssetSources } from "../utils/plantApi";

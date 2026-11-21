@@ -3,16 +3,8 @@ import { canCollectDrafts } from "../utils/rbac";
 import React, { useEffect, useState, useRef } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
-  StyleSheet,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  Image,
-  ActivityIndicator,
-  Alert,
-} from "react-native";
+  StyleSheet, TouchableOpacity, View, Image, ActivityIndicator, Alert } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
 import { plantApi, plantAssetSources } from "../utils/plantApi";
@@ -25,6 +17,7 @@ import { fieldFormStyles } from "../components/fieldFormStyles";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
 import RefreshButton from "../components/RefreshButton";
 import GpsLocationPicker from "../components/GpsLocationPicker";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
 const fieldCapture = createFieldCapture({
   imagePicker: ImagePicker,
@@ -528,7 +521,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     ]);
   };
   return (
-    <ScrollView scrollEnabled={!mapInteracting} style={styles.screen} contentContainerStyle={styles.scrollContent}
+    <DiscoverableScrollView scrollEnabled={!mapInteracting} style={styles.screen} contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
       <View style={[styles.page, isNewObservation && styles.observationPage]}>
       <View style={styles.pageHeadingRow}>
@@ -751,7 +744,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       {!!qr && <QrDisplay value={qr} />}
       </View>
 
-    </ScrollView>
+    </DiscoverableScrollView>
   );
 }
 function QrDisplay({ value }) {
