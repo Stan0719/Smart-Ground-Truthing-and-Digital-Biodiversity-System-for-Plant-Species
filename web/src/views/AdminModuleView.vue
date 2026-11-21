@@ -25,6 +25,30 @@ const roleSummaries = computed(() => [
   { role: 'Botanist', initial: 'B', key: 'botanist' },
   { role: 'Visitor', initial: 'V', key: 'visitor' },
 ].map(item => ({ ...item, count: assignedUsers.value.filter(user => user.role === item.role).length })))
+const platformRoleKeys = ['administrator', 'officer', 'botanist', 'visitor'] as const
+const permissionLabel = (permission: string) => {
+  const key = `adminRoles.permissionLabels.${permission.replaceAll('.', '_')}`
+  return te(key) ? t(key) : permission
+}
+const permissionGroupDefinitions = [
+  { label: 'plants', rules: ['plants.catalogue.read', 'plants.catalogue.scientific.read', 'plants.detail.public.read', 'plants.detail.read', 'plants.public.read', 'plants.scientific.read', 'plants.protected.read', 'plants.gps.exact.read', 'plants.gps.approved.read', 'plants.create'] },
+  { label: 'observations', rules: ['observations.create', 'observations.edit.own', 'observations.review'] },
+  { label: 'conservation', rules: ['species.manage', 'reports.read', 'responses.manage'] },
+  { label: 'sensors', rules: ['devices.manage', 'thresholds.manage', 'devices.read', 'readings.read', 'alerts.read'] },
+  { label: 'administration', rules: ['accounts.manage', 'permissions.manage', 'audit.read', 'security.manage', 'system.read'] },
+] as const
+const knownPermissionIds = new Set<string>(permissionGroupDefinitions.flatMap(group => [...group.rules]))
+const permissionGroups = computed(() => [
+  ...permissionGroupDefinitions.map(group => ({
+    ...group,
+    rows: group.rules.filter(rule => Object.prototype.hasOwnProperty.call(enforced.value, rule)),
+  })),
+  {
+    label: 'other',
+    rules: [] as string[],
+    rows: Object.keys(enforced.value).filter(rule => !knownPermissionIds.has(rule)),
+  },
+].filter(group => group.rows.length))
 onMounted(async()=>{try{if(props.section==='settings')security.value=(await api<{settings:typeof security.value}>('/admin/settings')).settings; if(props.section==='roles'){const [permissions,users]=await Promise.all([api<{permissions:Record<string,string[]>}>('/admin/permissions'),api<{users:{role:string}[]}>('/admin/users')]);enforced.value=permissions.permissions;assignedUsers.value=users.users} if(props.section==='activity')persistedEvents.value=(await api<{events:typeof persistedEvents.value}>('/admin/audit')).events}catch(e){serverError.value=e instanceof Error?e.message:'Unable to load authorized data.'}finally{serverLoading.value=false}})
 const search = ref('')
 const filter = ref('All')
@@ -1036,10 +1060,56 @@ const confirmDeleteSensor = () => {
       <span class="system-role-label">{{ t('adminRoles.systemDefined') }}</span>
     </article>
   </section>
+  <section class="panel permission-panel platform-access-panel">
+    <div class="panel-head admin-table-title">
+      <div>
+        <p>{{ t('adminRoles.platformEyebrow') }}</p>
+        <h2>{{ t('adminRoles.platformTitle') }}</h2>
+      </div>
+      <span>{{ t('adminRoles.platformScope') }}</span>
+    </div>
+    <div class="table-scroll admin-table-scroll" tabindex="0" role="region" :aria-label="t('adminRoles.platformTitle')">
+      <table class="admin-data-table admin-permission-table platform-permission-table">
+        <thead>
+          <tr>
+            <th>{{ t('adminRoles.platformRole') }}</th>
+            <th>{{ t('adminRoles.website') }}</th>
+            <th>{{ t('adminRoles.mobileApp') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="key in platformRoleKeys" :key="key">
+            <th>{{ t(`adminRoles.roles.${key}.name`) }}</th>
+            <td>{{ t(`adminRoles.platformAccess.${key}.website`) }}</td>
+            <td>{{ t(`adminRoles.platformAccess.${key}.mobile`) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="read-only-note platform-note">{{ t('adminRoles.platformNote') }}</p>
+  </section>
   <p class="read-only-note">{{ t('adminRoles.readOnlyNotice') }}</p>
   <section class="panel permission-panel">
     <div class="panel-head admin-table-title"><div><p>{{ t('adminRoles.matrixEyebrow') }}</p><h2>{{ t('adminRoles.modulePermissions') }}</h2></div><span>{{ t('adminRoles.allowedRestricted') }}</span></div>
-    <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="Role permissions"><table class="admin-data-table admin-permission-table"><thead><tr><th>{{ t('adminRoles.systemModule') }}</th><th v-for="item in roleSummaries" :key="item.role">{{ t(`adminRoles.roles.${item.key}.name`) }}</th></tr></thead><tbody><tr v-for="(roles,permission) in enforced" :key="permission"><th>{{ permission }}</th><td v-for="item in roleSummaries" :key="item.role"><span :class="roles.includes(item.role)?'allowed':'restricted'">{{ roles.includes(item.role)?'✓':'—' }}</span></td></tr></tbody></table></div>
+    <p class="permission-matrix-intro">{{ t('adminRoles.backendMatrixIntro') }}</p>
+    <div class="table-scroll admin-table-scroll" tabindex="0" role="region" :aria-label="t('adminRoles.modulePermissions')">
+      <table class="admin-data-table admin-permission-table readable-permission-table">
+        <thead><tr><th>{{ t('adminRoles.permissionAction') }}</th><th v-for="item in roleSummaries" :key="item.role">{{ t(`adminRoles.roles.${item.key}.name`) }}</th></tr></thead>
+        <tbody>
+          <template v-for="group in permissionGroups" :key="group.label">
+            <tr class="permission-group-row"><th colspan="5">{{ t(`adminRoles.permissionGroups.${group.label}`) }}</th></tr>
+            <tr v-for="permission in group.rows" :key="permission">
+              <th>{{ permissionLabel(permission) }}</th>
+              <td v-for="item in roleSummaries" :key="item.role">
+                <span :class="(enforced[permission] || []).includes(item.role) ? 'allowed' : 'restricted'" :aria-label="(enforced[permission] || []).includes(item.role) ? t('adminRoles.allowed') : t('adminRoles.restricted')">
+                  {{ (enforced[permission] || []).includes(item.role) ? '✓' : '—' }}
+                </span>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </section>
 </template>
 <template v-if="section==='activity'&&!serverLoading&&!serverError"><p v-if="!persistedEvents.length">No account activity recorded.</p><div v-else class="admin-table-scroll" tabindex="0" role="region" aria-label="Account activity"><table class="admin-data-table admin-activity-table"><thead><tr><th>Time</th><th>Account</th><th>Actor</th><th>Action</th></tr></thead><tbody><tr v-for="event in persistedEvents" :key="event.id"><td>{{new Date(Number(event.created_at)).toLocaleString()}}</td><td><AdminTableIdentifier :value="event.user_id||'Anonymous'" /></td><td><AdminTableIdentifier :value="event.actor_id||'Self'" /></td><td>{{event.reason}}</td></tr></tbody></table></div></template>
@@ -2442,6 +2512,48 @@ const confirmDeleteSensor = () => {
   color: #405f52;
   font-size: 9px;
   line-height: 1.5;
+}
+.platform-access-panel {
+  margin-top: 18px;
+}
+.platform-permission-table {
+  min-width: 760px;
+  white-space: normal;
+}
+.platform-permission-table th:first-child {
+  min-width: 155px;
+}
+.platform-permission-table td {
+  min-width: 250px;
+  white-space: normal;
+  line-height: 1.5;
+}
+.platform-note {
+  margin-top: 12px;
+}
+.permission-matrix-intro {
+  margin: 0 0 12px;
+  color: #6f7f78;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.readable-permission-table {
+  min-width: 760px;
+  white-space: normal;
+}
+.readable-permission-table thead th:first-child {
+  min-width: 340px;
+}
+.readable-permission-table td {
+  min-width: 85px;
+  text-align: center;
+}
+.readable-permission-table .permission-group-row th {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  background: #edf4ef;
+  color: #34745b;
+  font-size: 9px;
 }
 .table-scroll {
   overflow-x: auto;

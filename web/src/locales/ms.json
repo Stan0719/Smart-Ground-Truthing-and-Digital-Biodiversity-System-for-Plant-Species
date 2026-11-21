@@ -1423,7 +1423,7 @@
   "adminRoles": {
     "title": "Peranan & Kebenaran",
     "eyebrow": "Kawalan Akses",
-    "intro": "Semak peranan sistem yang dipratentukan serta kebenaran akses yang diberikan.",
+    "intro": "Bandingkan akses peranan di laman web dan aplikasi mudah alih, kemudian semak peraturan kebenaran yang dikuatkuasakan oleh pelayan.",
     "systemRoles": "Peranan Sistem",
     "predefinedGroups": "Kumpulan akses dipratentukan",
     "assignedUsers": "Pengguna Ditugaskan",
@@ -1435,28 +1435,93 @@
     "systemDefined": "Peranan ditentukan sistem",
     "readOnlyNotice": "Kebenaran peranan dipratentukan oleh sistem dan tidak boleh diubah daripada halaman ini.",
     "matrixEyebrow": "Matriks Akses",
-    "modulePermissions": "Kebenaran Modul",
+    "modulePermissions": "Perkara yang Boleh Dilakukan oleh Setiap Peranan",
     "allowedRestricted": "✓ Dibenarkan — Terhad",
     "systemModule": "Modul sistem",
+    "permissionAction": "Kebenaran atau tindakan",
+    "allowed": "Dibenarkan",
+    "restricted": "Terhad",
+    "permissionGroups": {
+      "plants": "Maklumat tumbuhan dan spesies",
+      "observations": "Pemerhatian lapangan",
+      "conservation": "Kerja pemuliharaan",
+      "sensors": "Sensor dan amaran",
+      "administration": "Pentadbiran dan keselamatan",
+      "other": "Kebenaran lain"
+    },
+    "permissionLabels": {
+      "plants_catalogue_read": "Layari katalog awam tumbuhan dan spesies",
+      "plants_catalogue_scientific_read": "Lihat katalog saintifik penuh",
+      "plants_detail_public_read": "Lihat butiran awam tumbuhan dan spesies",
+      "plants_detail_read": "Lihat butiran rekod tumbuhan dalaman",
+      "plants_public_read": "Lihat maklumat awam tumbuhan",
+      "plants_scientific_read": "Lihat maklumat saintifik tumbuhan",
+      "plants_protected_read": "Lihat maklumat tumbuhan yang dilindungi",
+      "plants_gps_exact_read": "Lihat koordinat GPS tepat tumbuhan",
+      "plants_gps_approved_read": "Lihat butiran lokasi tumbuhan yang diluluskan",
+      "plants_create": "Hantar rekod tumbuhan baharu",
+      "observations_create": "Hantar pemerhatian lapangan",
+      "observations_edit_own": "Edit pemerhatian sendiri",
+      "observations_review": "Semak pemerhatian yang dihantar",
+      "species_manage": "Urus rekod spesies",
+      "reports_read": "Lihat laporan pemuliharaan",
+      "responses_manage": "Bertindak terhadap amaran pemuliharaan",
+      "devices_manage": "Daftar dan urus sensor",
+      "thresholds_manage": "Urus ambang amaran sensor",
+      "devices_read": "Lihat peranti sensor",
+      "readings_read": "Lihat bacaan sensor",
+      "alerts_read": "Lihat amaran ancaman",
+      "accounts_manage": "Urus akaun pengguna",
+      "permissions_manage": "Lihat peraturan peranan dan kebenaran",
+      "audit_read": "Lihat aktiviti sistem dan rekod audit",
+      "security_manage": "Urus keselamatan log masuk dan sesi",
+      "system_read": "Lihat maklumat peringkat sistem"
+    },
+    "platformEyebrow": "AKSES PLATFORM",
+    "platformTitle": "Akses laman web dan aplikasi mudah alih",
+    "platformScope": "Tingkah laku log masuk dan laluan semasa",
+    "platformRole": "Peranan akaun",
+    "website": "Laman web",
+    "mobileApp": "Aplikasi mudah alih",
+    "platformNote": "Tetamu ialah keadaan akses awam tanpa pengesahan, bukannya peranan akaun berdaftar. Log masuk mudah alih semasa menerima akaun Ahli Botani dan Pelawat. Laluan khusus pegawai tersedia dalam aplikasi, tetapi pengesahan mudah alih pada masa ini tidak menerima akaun Pegawai Pemuliharaan.",
+    "backendMatrixIntro": "Tanda semak menunjukkan peranan yang dibenarkan oleh API bahagian belakang untuk setiap tindakan. Akses masih boleh bergantung pada pemilikan rekod, status kelulusan atau jenis data yang selamat untuk dipaparkan.",
+    "platformAccess": {
+      "administrator": {
+        "website": "Papan pemuka pentadbir: pengurusan pengguna dan peranan, aktiviti sistem, keselamatan, sensor, IoT dan amaran.",
+        "mobile": "Akaun atau papan pemuka Pentadbir mudah alih belum disokong."
+      },
+      "officer": {
+        "website": "Papan pemuka pemuliharaan: spesies, semakan pemerhatian, peta biodiversiti, IoT, amaran dan laporan.",
+        "mobile": "Laluan semakan dan sejarah khusus pegawai tersedia, tetapi pengesahan mudah alih semasa tidak menerima peranan ini."
+      },
+      "botanist": {
+        "website": "Pelayaran awam sahaja; log masuk kakitangan laman web tidak memberikan akses papan pemuka Ahli Botani.",
+        "mobile": "Kerja lapangan: hantar tumbuhan, permohonan spesies dan pemerhatian; urus draf serta rekod sendiri; lihat sejarah rekod."
+      },
+      "visitor": {
+        "website": "Pelayaran awam; akaun Pelawat tidak mempunyai log masuk papan pemuka laman web.",
+        "mobile": "Pelayaran awam, kegemaran dan sejarah imbasan QR. Tiada alat kakitangan atau penghantaran."
+      }
+    },
     "roles": {
       "administrator": {
         "name": "Pentadbir",
-        "access": "Akses sistem penuh",
+        "access": "Pentadbiran laman web",
         "description": "Mengurus akaun, peranan, sensor, amaran dan aktiviti sistem."
       },
       "officer": {
         "name": "Pegawai Pemuliharaan",
-        "access": "Operasi pemuliharaan",
+        "access": "Operasi pemuliharaan di laman web",
         "description": "Memantau sensor, mengendalikan ancaman dan menyemak pemerhatian lapangan."
       },
       "botanist": {
         "name": "Ahli Botani",
-        "access": "Akses penyelidikan",
+        "access": "Penyelidikan lapangan mudah alih",
         "description": "Mendokumentasikan pemerhatian tumbuhan dan menyumbang maklumat saintifik."
       },
       "visitor": {
         "name": "Pelawat",
-        "access": "Akses awam",
+        "access": "Pelayaran awam",
         "description": "Melayari maklumat biodiversiti awam dan menggunakan ciri untuk pelawat."
       }
     },

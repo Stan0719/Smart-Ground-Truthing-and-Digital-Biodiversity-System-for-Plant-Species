@@ -1289,7 +1289,7 @@
   "adminRoles": {
     "title": "Role & Permission",
     "eyebrow": "Access Control",
-    "intro": "Review the predefined system roles and their assigned access permissions.",
+    "intro": "Compare role access across the website and mobile app, then review the server-enforced permission rules.",
     "systemRoles": "System Roles",
     "predefinedGroups": "Predefined access groups",
     "assignedUsers": "Assigned Users",
@@ -1301,28 +1301,93 @@
     "systemDefined": "System-defined role",
     "readOnlyNotice": "Role permissions are predefined by the system and cannot be modified from this page.",
     "matrixEyebrow": "Access Matrix",
-    "modulePermissions": "Module Permissions",
+    "modulePermissions": "What Each Role Can Do",
     "allowedRestricted": "✓ Allowed — Restricted",
     "systemModule": "System module",
+    "permissionAction": "Permission or action",
+    "allowed": "Allowed",
+    "restricted": "Restricted",
+    "permissionGroups": {
+      "plants": "Plant and species information",
+      "observations": "Field observations",
+      "conservation": "Conservation work",
+      "sensors": "Sensors and alerts",
+      "administration": "Administration and security",
+      "other": "Other permissions"
+    },
+    "permissionLabels": {
+      "plants_catalogue_read": "Browse the public plant and species catalogue",
+      "plants_catalogue_scientific_read": "View the full scientific catalogue",
+      "plants_detail_public_read": "View public plant and species details",
+      "plants_detail_read": "View internal plant record details",
+      "plants_public_read": "View public plant information",
+      "plants_scientific_read": "View scientific plant information",
+      "plants_protected_read": "View protected plant information",
+      "plants_gps_exact_read": "View exact plant GPS coordinates",
+      "plants_gps_approved_read": "View approved plant location details",
+      "plants_create": "Submit new plant records",
+      "observations_create": "Submit field observations",
+      "observations_edit_own": "Edit own observations",
+      "observations_review": "Review submitted observations",
+      "species_manage": "Manage species records",
+      "reports_read": "View conservation reports",
+      "responses_manage": "Respond to conservation alerts",
+      "devices_manage": "Register and manage sensors",
+      "thresholds_manage": "Manage sensor alert thresholds",
+      "devices_read": "View sensor devices",
+      "readings_read": "View sensor readings",
+      "alerts_read": "View threat alerts",
+      "accounts_manage": "Manage user accounts",
+      "permissions_manage": "View role and permission rules",
+      "audit_read": "View system activity and audit records",
+      "security_manage": "Manage login and session security",
+      "system_read": "View system-level information"
+    },
+    "platformEyebrow": "PLATFORM ACCESS",
+    "platformTitle": "Website and mobile app access",
+    "platformScope": "Current sign-in and route behavior",
+    "platformRole": "Account role",
+    "website": "Website",
+    "mobileApp": "Mobile app",
+    "platformNote": "Guest is an unauthenticated public-access state, not a registered role. Current mobile sign-in accepts Botanist and Visitor accounts. Officer-only app routes exist, but Conservation Officer accounts are not currently accepted by mobile authentication.",
+    "backendMatrixIntro": "The check marks show which roles the backend API allows for each action. Access can still depend on record ownership, approval status, or which data is safe to show.",
+    "platformAccess": {
+      "administrator": {
+        "website": "Administrator dashboard: user and role management, system activity, security, sensors, IoT, and alerts.",
+        "mobile": "No Administrator mobile account or dashboard is currently supported."
+      },
+      "officer": {
+        "website": "Conservation dashboard: species, observation review, biodiversity map, IoT, alerts, and reports.",
+        "mobile": "Officer-only review/history routes are present, but current mobile authentication does not accept this role."
+      },
+      "botanist": {
+        "website": "Public browsing only; the website staff login does not grant Botanist dashboard access.",
+        "mobile": "Fieldwork: submit plants, species requests, and observations; manage own drafts and records; view record history."
+      },
+      "visitor": {
+        "website": "Public browsing; Visitor accounts do not have website dashboard sign-in.",
+        "mobile": "Public browsing, favourites, and QR scan history. No staff or submission tools."
+      }
+    },
     "roles": {
       "administrator": {
         "name": "Administrator",
-        "access": "Full system access",
+        "access": "Website administration",
         "description": "Manages accounts, roles, sensors, alerts, and system activity."
       },
       "officer": {
         "name": "Conservation Officer",
-        "access": "Conservation operations",
+        "access": "Website conservation operations",
         "description": "Monitors sensors, handles threats, and reviews field observations."
       },
       "botanist": {
         "name": "Botanist",
-        "access": "Research access",
+        "access": "Mobile field research",
         "description": "Documents plant observations and contributes scientific information."
       },
       "visitor": {
         "name": "Visitor",
-        "access": "Public access",
+        "access": "Public browsing",
         "description": "Browses public biodiversity information and uses visitor-facing features."
       }
     },

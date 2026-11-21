@@ -1435,28 +1435,93 @@
     "systemDefined": "系统定义角色",
     "readOnlyNotice": "角色权限由系统预先定义，无法在此页面修改。",
     "matrixEyebrow": "访问矩阵",
-    "modulePermissions": "模块权限",
+    "modulePermissions": "各角色可以执行的操作",
     "allowedRestricted": "✓ 允许 — 受限",
     "systemModule": "系统模块",
+    "permissionAction": "权限或操作",
+    "allowed": "允许",
+    "restricted": "受限",
+    "permissionGroups": {
+      "plants": "植物与物种信息",
+      "observations": "野外观察记录",
+      "conservation": "自然保护工作",
+      "sensors": "传感器与警报",
+      "administration": "管理与安全",
+      "other": "其他权限"
+    },
+    "permissionLabels": {
+      "plants_catalogue_read": "浏览公开植物和物种目录",
+      "plants_catalogue_scientific_read": "查看完整科学目录",
+      "plants_detail_public_read": "查看公开植物和物种详情",
+      "plants_detail_read": "查看内部植物记录详情",
+      "plants_public_read": "查看公开植物信息",
+      "plants_scientific_read": "查看植物科学信息",
+      "plants_protected_read": "查看受保护的植物信息",
+      "plants_gps_exact_read": "查看植物的精确 GPS 坐标",
+      "plants_gps_approved_read": "查看已批准的植物位置详情",
+      "plants_create": "提交新的植物记录",
+      "observations_create": "提交野外观察记录",
+      "observations_edit_own": "编辑自己的观察记录",
+      "observations_review": "审核已提交的观察记录",
+      "species_manage": "管理物种记录",
+      "reports_read": "查看自然保护报告",
+      "responses_manage": "处理自然保护警报",
+      "devices_manage": "注册和管理传感器",
+      "thresholds_manage": "管理传感器警报阈值",
+      "devices_read": "查看传感器设备",
+      "readings_read": "查看传感器读数",
+      "alerts_read": "查看威胁警报",
+      "accounts_manage": "管理用户账户",
+      "permissions_manage": "查看角色和权限规则",
+      "audit_read": "查看系统活动和审计记录",
+      "security_manage": "管理登录和会话安全",
+      "system_read": "查看系统级信息"
+    },
+    "platformEyebrow": "平台访问权限",
+    "platformTitle": "网站与移动应用访问权限",
+    "platformScope": "当前登录和路由行为",
+    "platformRole": "账户角色",
+    "website": "网站",
+    "mobileApp": "移动应用",
+    "platformNote": "访客是未登录的公共访问状态，并非注册账户角色。目前移动端登录仅接受植物学家和访客账户。应用中存在专员专用审核路由，但当前移动端认证尚不接受自然保护专员账户。",
+    "backendMatrixIntro": "勾选表示后端 API 允许该角色执行相应操作。访问仍可能受到记录所有权、审核状态或可安全展示的数据范围限制。",
+    "platformAccess": {
+      "administrator": {
+        "website": "管理员仪表板：用户与角色管理、系统活动、安全、传感器、物联网和警报。",
+        "mobile": "目前不支持管理员移动账户或移动仪表板。"
+      },
+      "officer": {
+        "website": "自然保护仪表板：物种、观察记录审核、生物多样性地图、物联网、警报和报告。",
+        "mobile": "应用中存在专员专用审核和历史路由，但当前移动端认证不接受此角色。"
+      },
+      "botanist": {
+        "website": "仅可浏览公开内容；网站员工登录不会授予植物学家仪表板权限。",
+        "mobile": "野外工作：提交植物、物种申请和观察记录；管理自己的草稿与记录；查看记录历史。"
+      },
+      "visitor": {
+        "website": "可浏览公开内容；访客账户没有网站仪表板登录权限。",
+        "mobile": "浏览公开内容、收藏项目和查看二维码扫描历史。没有员工或提交功能。"
+      }
+    },
     "roles": {
       "administrator": {
         "name": "管理员",
-        "access": "完整系统访问权限",
+        "access": "网站管理",
         "description": "管理账户、角色、传感器、警报和系统活动。"
       },
       "officer": {
         "name": "保育员",
-        "access": "保育工作权限",
+        "access": "网站自然保护工作",
         "description": "监控传感器、处理威胁并审核实地观察记录。"
       },
       "botanist": {
         "name": "植物学家",
-        "access": "研究访问权限",
+        "access": "移动端野外研究",
         "description": "记录植物观察结果并贡献科学信息。"
       },
       "visitor": {
         "name": "访客",
-        "access": "公众访问权限",
+        "access": "公共浏览",
         "description": "浏览公开的生物多样性信息并使用访客功能。"
       }
     },

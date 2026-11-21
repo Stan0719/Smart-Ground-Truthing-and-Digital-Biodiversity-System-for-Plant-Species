@@ -59,9 +59,9 @@ test('identity changes invalidate late clipboard feedback and meaningful codes d
   } finally { h.stop() }
 })
 
-test('only the seven active Administrator tables opt into shared styling and all templates compile', () => {
+test('only the eight active Administrator tables opt into shared styling and all templates compile', () => {
   const files = ['views/AdminDashboardView.vue', 'views/AdminModuleView.vue', 'views/AdminOperationsView.vue']
-  const counts = [2, 4, 1]
+  const counts = [2, 5, 1]
   for (const [index, file] of files.entries()) {
     const source = read(file), { descriptor } = parse(source)
     assert.equal((descriptor.template.content.match(/class="admin-data-table /g) || []).length, counts[index], file)
@@ -69,6 +69,7 @@ test('only the seven active Administrator tables opt into shared styling and all
     assert.equal(compileTemplate({ source: descriptor.template.content, filename: file, id: 'table-test', compilerOptions: { bindingMetadata: script.bindings } }).errors.length, 0)
   }
   assert.doesNotMatch(read('views/AdminUserManagementView.vue'), /admin-data-table|AdminTableIdentifier/)
+  assert.match(read('views/AdminModuleView.vue'), /class="admin-data-table admin-permission-table platform-permission-table"/)
   for (const file of ['views/AdminProfileView.vue', 'components/AccountProfile.vue']) assert.doesNotMatch(read(file), /admin-data-table/)
   const sheet = postcss.parse(css)
   sheet.walkRules(rule => assert.ok(rule.selector.startsWith('.admin-shell.admin-shell.admin-shell '), rule.selector))
