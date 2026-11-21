@@ -11,6 +11,7 @@ import AppModal from '../../components/conservation/AppModal.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { loadCanonicalAlerts, CANONICAL_ALERT_CAP } from '../../services/threatAlerts'
 import CameraMonitoringSection from '../../components/CameraMonitoringSection.vue'
+import SensorThresholdStatus from '../../components/conservation/SensorThresholdStatus.vue'
 import SensorHistoryChart, {
   type SensorChartPoint,
 } from '../../components/conservation/SensorHistoryChart.vue'
@@ -106,10 +107,11 @@ const refreshReadings = async () => {
     if (version !== generation || disposed) return
     readingDevices.value = result
     const latestByDevice = new Map(result.map(device => [String(device.sensor_id), device.latest_reading]))
+    const thresholdsByDevice = new Map(result.map(device => [String(device.sensor_id), device.thresholds]))
     devices.value = devices.value.map(device => {
       const key = String(device.sensor_id)
       return latestByDevice.has(key)
-        ? { ...device, latest_reading: latestByDevice.get(key) ?? null }
+        ? { ...device, latest_reading: latestByDevice.get(key) ?? null, thresholds: thresholdsByDevice.get(key) || device.thresholds }
         : device
     })
     if (selectedDevice.value) {
@@ -118,6 +120,7 @@ const refreshReadings = async () => {
         selectedDevice.value = {
           ...selectedDevice.value,
           latest_reading: latestByDevice.get(key) ?? null,
+          thresholds: thresholdsByDevice.get(key) || selectedDevice.value.thresholds,
         }
       }
     }
@@ -473,16 +476,17 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               </td>
               <td><MonitoringIdentifier :value="item.device.sensor_id" :labels="deviceLabels" /></td>
               <td>{{ plantDisplayId(item.reading) }}</td>
-              <td>{{ valueOrDash(item.reading.temperature_c, ' °C') }}</td>
-              <td>{{ valueOrDash(item.reading.humidity, '%') }}</td>
-              <td>{{ valueOrDash(item.reading.soil_moisture) }}</td>
+              <td>{{ valueOrDash(item.reading.temperature_c, ' °C') }}<SensorThresholdStatus :value="item.reading.temperature_c" :configured="item.device.thresholds?.temperature" /></td>
+              <td>{{ valueOrDash(item.reading.humidity, '%') }}<SensorThresholdStatus :value="item.reading.humidity" :configured="item.device.thresholds?.humidity" /></td>
+              <td>{{ valueOrDash(item.reading.soil_moisture) }}<SensorThresholdStatus :value="item.reading.soil_moisture" :configured="item.device.thresholds?.soilMoisture" /></td>
               <td>{{ soilCondition(item.reading.soil_moisture) }}</td>
-              <td>{{ valueOrDash(item.reading.rainfall_mm) }}</td>
+              <td>{{ valueOrDash(item.reading.rainfall_mm) }}<SensorThresholdStatus :value="item.reading.rainfall_mm" :configured="item.device.thresholds?.rainfall" /></td>
               <td>{{ surfaceCondition(item.reading.rainfall_mm) }}</td>
               <td>
                 <span class="badge" :class="item.reading.motion_detected ? 'high' : 'approved'">{{
                   motionValue(item.reading)
                 }}</span>
+                <SensorThresholdStatus :value="item.reading.motion_detected == null ? null : Number(item.reading.motion_detected)" :configured="item.device.thresholds?.movement" />
               </td>
               <td><span class="badge sensor-health" :class="sensorHealthClass(item.reading.dht_status)">{{ dhtStatusValue(item.reading) }}</span></td>
               <td><span class="badge sensor-health" :class="sensorHealthClass(item.reading.mpu_connected)">{{ mpuStatusValue(item.reading) }}</span></td>

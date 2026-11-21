@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+import * as sensorThresholds from '../src/services/sensorThresholds.ts'
 const read = p => readFileSync(new URL('../src/' + p, import.meta.url), 'utf8')
 const js = s => ts.transpileModule(s, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const plain = x => JSON.parse(JSON.stringify(x))
@@ -34,6 +35,7 @@ function harness(file, api, { picker = false, user = admin } = {}) {
     if (name.endsWith('/auth')) return { api, logout: async () => {}, sessionSnapshot: () => session, subscribeSession: fn => { listener = fn; return () => { listener = null } } }
     if (name.endsWith('plantApi')) return { plantApi: api }
     if (name.endsWith('deviceAssignment')) return policy
+    if (name.endsWith('sensorThresholds')) return sensorThresholds
     if (name.endsWith('.vue')) return { name }
     throw Error(name)
   } }
@@ -50,6 +52,25 @@ function nodes(root) {
 }
 const plant = (id, status = 'Approved') => ({ plant_id: id, rbac_status: status, scientific_name: `Plant ${id}` })
 const device = (extra = {}) => ({ id: 'device', name: 'Camera-looking name', status: 'Inactive', thresholds: { temperature: 31 }, last_seen: null, ...extra })
+
+test('Admin saves only the selected metric range, preserves optional zero limits and rejects reversed limits', async () => {
+  const calls = [], sensor = device({ device_type: 'Sensor', thresholds: { temperature: 31, humidity: { min: 40, max: 80 } } })
+  const h = harness('views/AdminOperationsView.vue', async (...args) => {
+    calls.push(args)
+    return args[0] === '/devices' ? { devices: [sensor] } : args[0] === '/readings' ? { readings: [] } : {}
+  })
+  try {
+    h.state.open('threshold', sensor)
+    assert.equal(h.state.form.value.minimum, ''); assert.equal(h.state.form.value.maximum, '31')
+    h.state.form.value.minimum = 0; h.state.form.value.maximum = '35'
+    await h.state.saveDevice()
+    assert.deepEqual(plain(calls.find(call => call[1] === 'PATCH')[2]), { thresholds: { temperature: { min: 0, max: 35 } } })
+    h.state.open('threshold', sensor); h.state.form.value.minimum = '40'; h.state.form.value.maximum = '30'
+    const count = calls.length; await h.state.saveDevice(); assert.equal(calls.length, count); assert.equal(h.state.modal.value, 'threshold')
+    h.state.form.value.minimum = ''; h.state.form.value.maximum = ''; await h.state.saveDevice()
+    assert.deepEqual(plain(calls.filter(call => call[1] === 'PATCH').at(-1)[2]), { thresholds: { temperature: null } })
+  } finally { h.stop() }
+})
 const key = value => ({ key: value, preventDefault() {}, stopPropagation() {} })
 
 test('one closed selector opens a labelled combobox with no old explanation or standalone search form', async () => {

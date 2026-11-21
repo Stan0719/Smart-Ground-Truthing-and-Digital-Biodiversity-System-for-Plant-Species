@@ -1,5 +1,6 @@
 export const IOT_DEVICES_PATH = '/api/data/devices'
 export const IOT_HISTORY_LIMIT = 100
+import type { SensorThresholds } from './sensorThresholds'
 
 export interface IoTReading {
   reading_id: string
@@ -27,6 +28,7 @@ export interface IoTDevice {
   status: string
   installed_at: null
   latest_reading: IoTReading | null
+  thresholds: SensorThresholds
 }
 
 export interface IoTHistory {
@@ -99,6 +101,7 @@ export const mapCanonicalDevice = (value: unknown): IoTDevice | null => {
     status,
     installed_at: null,
     latest_reading: latest,
+    thresholds: record(item.thresholds) as SensorThresholds || {},
   }
 }
 
@@ -192,7 +195,7 @@ export async function loadCanonicalHistoryPage(device: IoTDevice, page: number, 
   return result
 }
 
-// Reuse the authorized history endpoint; fetch one latest stored row per known device.
+// Reuse the authorized endpoint for the transient latest reading and current thresholds.
 // Four workers bound concurrent traffic. Inventory and camera state are never updated.
 export async function loadLatestReadings(devices: IoTDevice[], signal: AbortSignal): Promise<IoTDevice[]> {
   const result: IoTDevice[] = new Array(devices.length)
@@ -201,12 +204,14 @@ export async function loadLatestReadings(devices: IoTDevice[], signal: AbortSign
     while (next < devices.length) {
       signal.throwIfAborted()
       const index = next++, device = devices[index]!
-      const history = mapCanonicalHistory(await request(
+      const response = await request(
         `/api/data/devices/${encodeURIComponent(device.sensor_id)}/readings?page=1&limit=1`, signal,
-      ), device.plant_id)
+      )
+      const history = mapCanonicalHistory(response, device.plant_id)
       if (!history || history.readings.length > 1)
         throw new IoTApiError('The IoT service returned an invalid reading response.', 200, 'invalid')
-      result[index] = { ...device, latest_reading: history.readings[0] ?? null }
+      result[index] = { ...device, latest_reading: history.readings[0] ?? null,
+        thresholds: record(record(response)?.thresholds) as SensorThresholds || device.thresholds }
     }
   }
   await Promise.all(Array.from({ length: Math.min(4, devices.length) }, worker))

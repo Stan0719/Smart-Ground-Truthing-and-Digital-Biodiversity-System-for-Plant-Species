@@ -9,6 +9,7 @@ const {
   hash,
 } = require("./domain.cjs");
 const { projectGps } = require("../shared/rbac.cjs");
+const { range, validateThresholds, violation, evidenceReady } = require('./sensor-thresholds.cjs');
 const {
   addReading,
   bucketStart,
@@ -226,24 +227,31 @@ function mountDeviceIngestion(app, { pool }) {
         candidate.lastObservedAt = observedAt;
         candidate.lastPayloadHash = acceptedHash;
 
+        let snapshotReady;
+        const receivedAt = new Date().toISOString();
         for (const metric of metrics) {
-          const threshold = device.thresholds[metric];
-          const wasActive = candidate.activeThresholds[metric] === true;
-          if (threshold === undefined) {
-            if (wasActive) {
-              candidate.activeThresholds[metric] = false;
-            }
-            continue;
-          }
+          const limits = range(device.thresholds[metric]);
+          const previous = candidate.activeThresholds[metric];
+          const wasActive = previous === true ? 'high' : previous;
+          if (!limits) { candidate.activeThresholds[metric] = false; continue; }
           const value = b.values[metric];
           if (value === undefined) continue;
-          const isActive = value > threshold;
-          if (isActive !== wasActive) {
-            candidate.activeThresholds[metric] = isActive;
-            if (isActive) await c.query(
-              "INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value) VALUES($1,$2,NULL,$3,$4)",
-              [randomUUID(), device.id, metric, value],
-            );
+          const direction = violation(value, limits);
+          candidate.activeThresholds[metric] = direction || false;
+          if (direction && direction !== wasActive) {
+            snapshotReady ??= await evidenceReady(c);
+            const id = randomUUID();
+            if (snapshotReady) {
+              const evidence = { version: 1, device_id: device.id, plant_id: device.plant_id == null ? null : String(device.plant_id),
+                metric, value, limits, direction, values: { ...b.values },
+                captured_at: capture?.observed_at || null, received_at: receivedAt };
+              await c.query('INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value,sensor_evidence,detected_at) VALUES($1,$2,NULL,$3,$4,$5,$6)',
+                [id, device.id, metric, value, evidence, receivedAt]);
+            } else {
+              // Keep pre-034 numeric maximum deployments operational; range saves require 034.
+              if (typeof device.thresholds[metric] !== 'number') fail(503, 'Sensor alert evidence requires reviewed migration 034.');
+              await c.query('INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value) VALUES($1,$2,NULL,$3,$4)', [id, device.id, metric, value]);
+            }
           }
         }
 
@@ -406,7 +414,7 @@ function mountIoT(app, { pool, allow }) {
       const limit = pageNumber(req.query.limit, 50, 100);
       const page = pageNumber(req.query.page, 1, 10000);
       const device = (
-        await pool.query("SELECT id FROM iot_device WHERE id=$1", [
+        await pool.query("SELECT id,thresholds FROM iot_device WHERE id=$1", [
           req.params.id,
         ])
       ).rows[0];
@@ -421,6 +429,7 @@ function mountIoT(app, { pool, allow }) {
       ).rows;
       res.json({
         readings: isLiveLatestRequest ? (live ? [live] : []) : rows.slice(0, limit),
+        thresholds: device.thresholds,
         page,
         limit,
         hasMore: isLiveLatestRequest ? rows.length > 0 : rows.length > limit,
@@ -482,11 +491,20 @@ function mountIoT(app, { pool, allow }) {
     "/api/devices/:id/thresholds",
     allow("thresholds.manage"),
     async (req, res) => {
-      thresholds(req.body.thresholds);
+      validateThresholds(req.body.thresholds);
       await transaction(pool, async (c) => {
+        const current = (await c.query('SELECT device_type,thresholds FROM iot_device WHERE id=$1 FOR UPDATE', [req.params.id])).rows[0];
+        if (!current) fail(404, 'Device not found.');
+        if (current.device_type !== 'Sensor') fail(400, 'Only Sensor devices support environmental thresholds.');
+        if (Object.values(req.body.thresholds).some(value => value !== null && typeof value === 'object') && !await evidenceReady(c))
+          fail(503, 'Minimum/maximum thresholds require reviewed migration 034.');
+        const updated = { ...current.thresholds };
+        for (const [metric, value] of Object.entries(req.body.thresholds)) {
+          if (value === null) delete updated[metric]; else updated[metric] = value;
+        }
         const result = await c.query(
           "UPDATE iot_device SET thresholds=$1 WHERE id=$2 RETURNING id",
-          [req.body.thresholds, req.params.id],
+          [updated, req.params.id],
         );
         if (!result.rows.length) fail(404, "Device not found.");
         await audit(c, req.user, "thresholds_updated", req.params.id);

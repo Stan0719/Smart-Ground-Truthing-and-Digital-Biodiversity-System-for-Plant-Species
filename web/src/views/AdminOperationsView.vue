@@ -9,6 +9,7 @@ import AdminTableIdentifier from '../components/AdminTableIdentifier.vue'
 import StaffDialog from '../components/StaffDialog.vue'
 import { api, logout, type AuthUser } from '../services/auth'
 import { plantApi, type Device } from '../services/plantApi'
+import { sensorLimits, thresholdLabel, type SensorThresholds } from '../services/sensorThresholds'
 const { t } = useI18n()
 const da = (key: string) => t('adminDeviceAssignment.' + key)
 const assignmentLabel = (device: Device) => { const a = currentAssignment(device); return a.state === 'assigned' ? plantLabel(a.id) : da(a.state) }
@@ -70,7 +71,7 @@ const settings = ref({ session_hours: 8, login_limit: 30 }),
 const modal = ref<'register' | 'edit' | 'threshold' | 'settings' | null>(null),
   selected = ref<Device | null>(null),
   key = ref('')
-const form = ref({ name: '', status: 'Active', metric: 'temperature', threshold: '', plant: '' })
+const form = ref({ name: '', status: 'Active', metric: 'temperature', minimum: '', maximum: '', plant: '' })
 const roles = ['Administrator', 'Conservation Officer', 'Botanist', 'Visitor', 'Guest']
 const metrics = ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall', 'sound']
 const date = (value: string | number | null | undefined) => {
@@ -86,6 +87,7 @@ const measurement = (values: Record<string, number>) =>
         `${metric}: ${value}${metric === 'temperature' ? ' °C' : metric === 'humidity' ? ' %' : ''}`,
     )
     .join(' · ')
+const configuredThresholds = (values: SensorThresholds) => Object.entries(values).map(([metric, limits]) => `${metric}: ${thresholdLabel(limits)}`).join(' · ')
 const filteredDevices = computed(() =>
   devices.value.filter(
     (d) =>
@@ -171,8 +173,8 @@ function open(kind: 'register' | 'edit' | 'threshold', device?: Device) {
     status: device?.status || 'Active',
     metric: 'temperature',
     plant: kind === 'edit' ? KEEP_ASSIGNMENT : '',
-    threshold:
-      device?.thresholds.temperature === undefined ? '' : String(device.thresholds.temperature),
+    minimum: sensorLimits(device?.thresholds.temperature)?.min?.toString() ?? '',
+    maximum: sensorLimits(device?.thresholds.temperature)?.max?.toString() ?? '',
   }
   error.value = ''
   modal.value = kind
@@ -180,10 +182,9 @@ function open(kind: 'register' | 'edit' | 'threshold', device?: Device) {
 watch(
   () => form.value.metric,
   (metric) => {
-    form.value.threshold =
-      selected.value?.thresholds[metric] === undefined
-        ? ''
-        : String(selected.value.thresholds[metric])
+    const limits = sensorLimits(selected.value?.thresholds[metric])
+    form.value.minimum = limits?.min?.toString() ?? ''
+    form.value.maximum = limits?.max?.toString() ?? ''
   },
 )
 async function saveDevice() {
@@ -207,11 +208,11 @@ async function saveDevice() {
       message.value = 'Sensor updated.'
     } else if (modal.value === 'threshold' && selected.value) {
       if (deviceType(selected.value) !== 'Sensor') throw Error(da('thresholdUnavailable'))
-      const value = Number(form.value.threshold)
-      if (!String(form.value.threshold).trim() || !Number.isFinite(value))
-        throw Error('Enter a finite numeric threshold.')
+      const minimum = String(form.value.minimum).trim(), maximum = String(form.value.maximum).trim()
+      const limits = { ...(minimum ? { min: Number(minimum) } : {}), ...(maximum ? { max: Number(maximum) } : {}) }
+      if ((minimum || maximum) && !sensorLimits(limits)) throw Error('Enter finite limits with minimum no greater than maximum.')
       await plantApi(`/devices/${selected.value.id}/thresholds`, 'PATCH', {
-        thresholds: { ...selected.value.thresholds, [form.value.metric]: value },
+        thresholds: { [form.value.metric]: minimum || maximum ? limits : null },
       })
       message.value = 'Alert threshold saved.'
     }
@@ -371,7 +372,7 @@ watch(section, () => {
                 <td v-else>
                   {{
                     Object.keys(d.thresholds).length
-                      ? measurement(d.thresholds)
+                      ? configuredThresholds(d.thresholds)
                       : 'No thresholds configured'
                   }}
                 </td>
@@ -543,10 +544,11 @@ watch(section, () => {
                   <option v-for="metric in metrics" :key="metric">{{ metric }}</option>
                 </select></label
               ><label
-                >Threshold<input v-model="form.threshold" type="number" step="any" required
+                >Minimum<input v-model="form.minimum" type="number" step="any"
               /></label>
+              <label>Maximum<input v-model="form.maximum" type="number" step="any" /></label>
               <p>
-                An alert is generated when a received measurement exceeds this threshold.
+                An alert is generated below the minimum or above the maximum. Either limit is optional; leave both blank to disable this metric's alerts.
               </p></template
             >
             <div class="actions">

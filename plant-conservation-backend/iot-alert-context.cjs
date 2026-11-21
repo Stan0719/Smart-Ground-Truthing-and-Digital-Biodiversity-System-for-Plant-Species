@@ -1,5 +1,6 @@
 "use strict";
 const { fail } = require("./domain.cjs");
+const { range, violation } = require('./sensor-thresholds.cjs');
 const metrics = ["temperature", "humidity", "soilMoisture", "movement", "rainfall", "sound"];
 const validId = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(value);
 const validPlant = value => typeof value === "string" && /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= 9223372036854775807n;
@@ -43,6 +44,24 @@ function readingContext(row) {
     values: Object.fromEntries(metrics.filter(metric => Object.hasOwn(values, metric)).map(metric => [metric, values[metric]])) };
 }
 
+function snapshotContext(row) {
+  const s = row.sensor_evidence;
+  if (s == null) return null;
+  const limits = range(s.limits);
+  if (s.version !== 1 || s.device_id !== row.device_id || s.metric !== row.metric || s.value !== row.value ||
+      row.device_type !== 'Sensor' || row.camera_id !== null || !limits || violation(s.value, limits) !== s.direction ||
+      (s.plant_id !== null && !validPlant(s.plant_id)) ||
+      (s.captured_at !== null && (typeof s.captured_at !== 'string' || !Number.isFinite(Date.parse(s.captured_at)))))
+    fail(503, 'Sensor alert snapshot is invalid.');
+  const frame = readingContext({ ...row, reading_id: row.alert_id, verified_reading_id: row.alert_id,
+    reading_device_id: row.device_id, reading_values: s.values, reading_received_at: s.received_at });
+  if (frame.state !== 'verified') fail(503, 'Sensor alert snapshot is invalid.');
+  return { reading: { ...frame, id: row.reading_id, basis: 'alert_snapshot', captured_at: s.captured_at },
+    historical_threshold: { min: limits.min ?? null, max: limits.max ?? null, direction: s.direction,
+      limit: s.direction === 'low' ? limits.min : limits.max },
+    plant_at_detection: { state: s.plant_id === null ? 'not_linked' : 'verified', plant_id: s.plant_id } };
+}
+
 function mountAlertContext(app, { pool, allow }) {
   // Lightweight bounded list projection: no per-row HTTP calls or reading/threshold overfetching.
   app.get("/api/alerts/current-assignments", allow("alerts.read"), allow("devices.read"), async (req, res) => {
@@ -54,14 +73,15 @@ function mountAlertContext(app, { pool, allow }) {
   });
   app.get("/api/alerts/:id/context", allow("alerts.read"), allow("devices.read"), allow("readings.read"), async (req, res) => {
     if (!validId(req.params.id) || Object.keys(req.query).length) fail(400, "Invalid alert identifier.");
-    const row = (await pool.query(`SELECT ${projection},a.reading_id,a.metric,a.value,
+    const row = (await pool.query(`SELECT ${projection},a.reading_id,a.metric,a.value,to_jsonb(a)->'sensor_evidence' AS sensor_evidence,
       r.id AS verified_reading_id,r.device_id AS reading_device_id,r."values" AS reading_values,r.created_at AS reading_received_at
       ${joins} LEFT JOIN sensor_reading r ON r.id=a.reading_id WHERE a.id=$1`, [req.params.id])).rows[0];
     if (!row) fail(404, "Alert not found.");
     if (!validId(row.alert_id) || !validId(row.device_id) || typeof row.metric !== "string" || typeof row.value !== "number" || !Number.isFinite(row.value))
       fail(503, "Alert context is unavailable.");
+    const snapshot = snapshotContext(row);
     res.json({ contract_version: 1, alert: { id: row.alert_id, device_id: row.device_id, reading_id: row.reading_id, metric: row.metric, value: row.value },
-      current_assignment: currentAssignment(row), reading: readingContext(row), historical_threshold: null });
+      current_assignment: currentAssignment(row), reading: readingContext(row), historical_threshold: null, ...snapshot });
   });
 }
-module.exports = { mountAlertContext, currentAssignment, readingContext };
+module.exports = { mountAlertContext, currentAssignment, readingContext, snapshotContext };

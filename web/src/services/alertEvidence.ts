@@ -8,8 +8,9 @@ export interface CurrentAssignment {
 export interface AlertContext {
   alert: { id: string; device_id: string; reading_id: string | null; metric: string; value: number }
   current_assignment: CurrentAssignment
-  reading: { state: 'verified' | 'missing' | 'missing_device' | 'mismatched_device' | 'invalid_values' | 'trigger_mismatch'; id: string | null; device_id: string | null; received_at: string | null; values: Partial<Record<SensorMetric, number>> | null }
-  historical_threshold: null
+  reading: { state: 'verified' | 'missing' | 'missing_device' | 'mismatched_device' | 'invalid_values' | 'trigger_mismatch'; id: string | null; device_id: string | null; received_at: string | null; values: Partial<Record<SensorMetric, number>> | null; basis?: 'alert_snapshot'; captured_at?: string | null }
+  historical_threshold: { min: number | null; max: number | null; direction: 'low' | 'high'; limit: number } | null
+  plant_at_detection?: { state: 'verified' | 'not_linked'; plant_id: string | null }
 }
 const object = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const validId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(v)
@@ -35,19 +36,36 @@ export async function loadAlertContext(alert: CanonicalThreatAlert, signal?: Abo
   if (!validId(alert.id)) return invalid()
   const result = await request(`/api/data/alerts/${encodeURIComponent(alert.id)}/context`, signal, transport)
   const identity = object(result?.alert), reading = object(result?.reading)
-  if (!result || result.contract_version !== 1 || result.historical_threshold !== null || !identity || !reading ||
+  if (!result || result.contract_version !== 1 || !identity || !reading ||
     identity.id !== alert.id || identity.device_id !== alert.deviceId || identity.reading_id !== alert.readingId || identity.metric !== alert.metric || identity.value !== alert.value ||
     reading.id !== alert.readingId || typeof reading.state !== 'string' || !['verified', 'missing', 'missing_device', 'mismatched_device', 'invalid_values', 'trigger_mismatch'].includes(reading.state)) return invalid()
+  const snapshot = reading.basis === 'alert_snapshot'
+  let historical: AlertContext['historical_threshold'] = null
+  let eventPlant: AlertContext['plant_at_detection']
+  if (snapshot) {
+    const limits = object(result.historical_threshold), plant = object(result.plant_at_detection)
+    const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+    if (reading.state !== 'verified' || !limits || !plant ||
+      !(limits.min === null || finite(limits.min)) || !(limits.max === null || finite(limits.max)) ||
+      (finite(limits.min) && finite(limits.max) && limits.min > limits.max) ||
+      !finite(limits.limit) ||
+      (limits.direction === 'low' ? limits.limit !== limits.min || alert.value >= limits.limit : limits.direction === 'high' ? limits.limit !== limits.max || alert.value <= limits.limit : true) ||
+      (plant.state === 'verified' ? !validPlant(plant.plant_id) : plant.state !== 'not_linked' || plant.plant_id !== null) ||
+      (reading.captured_at !== null && (typeof reading.captured_at !== 'string' || !Number.isFinite(Date.parse(reading.captured_at))))) return invalid()
+    historical = limits as unknown as NonNullable<AlertContext['historical_threshold']>
+    eventPlant = plant as unknown as AlertContext['plant_at_detection']
+  } else if (result.historical_threshold !== null || result.plant_at_detection != null) return invalid()
   if (reading.state === 'verified') {
     const values = object(reading.values)
-    if (!values || reading.device_id !== alert.deviceId || !validId(reading.id) || typeof reading.received_at !== 'string' || !Number.isFinite(Date.parse(reading.received_at)) ||
+    if (!values || reading.device_id !== alert.deviceId || (!snapshot && !validId(reading.id)) || typeof reading.received_at !== 'string' || !Number.isFinite(Date.parse(reading.received_at)) ||
       Object.entries(values).some(([key, value]) => !SENSOR_METRICS.includes(key as SensorMetric) || typeof value !== 'number' || !Number.isFinite(value) ||
         (key === 'movement' && value !== 0 && value !== 1) || (key === 'humidity' && (value < 0 || value > 100)) ||
         (key === 'temperature' && value < -273.15) || (['soilMoisture','rainfall','sound'].includes(key) && value < 0)) ||
       (SENSOR_METRICS.includes(alert.metric as SensorMetric) && values[alert.metric] !== alert.value)) return invalid()
   } else if (reading.device_id !== null || reading.received_at !== null || reading.values !== null) return invalid()
   return { alert: identity as unknown as AlertContext['alert'], reading: reading as unknown as AlertContext['reading'],
-    current_assignment: assignment(result.current_assignment, alert.deviceId), historical_threshold: null }
+    current_assignment: assignment(result.current_assignment, alert.deviceId), historical_threshold: historical,
+    ...(eventPlant ? { plant_at_detection: eventPlant } : {}) }
 }
 
 export async function loadCurrentAssignments(alerts: CanonicalThreatAlert[], signal?: AbortSignal, transport = fetch) {

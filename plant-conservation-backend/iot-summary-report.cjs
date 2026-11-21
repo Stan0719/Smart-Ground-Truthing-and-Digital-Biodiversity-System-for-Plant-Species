@@ -1,5 +1,6 @@
 "use strict";
 const { reportPeriod } = require("./report-period.cjs");
+const { range: thresholdRange } = require('./sensor-thresholds.cjs');
 const units = Object.freeze({ temperature: "°C", humidity: "%", soilMoisture: "raw", rainfall: "raw", sound: "raw", movement: "0/1" });
 const MAX_BUCKETS = 520, MAX_BYTES = 1048576;
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, reportCode: code }); };
@@ -137,7 +138,7 @@ async function generateIoTSummary(client, query, now = new Date()) {
   }
   return {
     contractVersion: 1, category: "iot", generatedAt: now.toISOString(), device: { id: identity.id, name: identity.name },
-    temperatureThreshold: measurement === "temperature" && Number.isFinite(identity.thresholds?.temperature) ? identity.thresholds.temperature : null,
+    temperatureThreshold: measurement === "temperature" ? thresholdRange(identity.thresholds?.temperature)?.max ?? null : null,
     latestReading: total.latest_recorded_at && (!coverage.last_window || Date.parse(coverage.last_window)<Date.parse(total.latest_recorded_at)) && Number.isFinite(Number(total.latest_value)) ? { recordedAt: iso(total.latest_recorded_at), value: Number(total.latest_value) } : null,
     measurement: { key: measurement, unit: units[measurement] },
     scope: { ...scope, timestampBasis: hasWindows ? "mixed_raw_and_aggregate_windows" : "sensor_reading.created_at", asOf: now.toISOString(), effectiveStartInclusive: start, effectiveEndExclusive: end },

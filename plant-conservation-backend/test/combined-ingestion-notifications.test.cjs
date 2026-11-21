@@ -10,6 +10,7 @@ const {createOfficerNotificationDelivery}=require('../officer-notification-deliv
 const prerequisites=['004-species-requests.sql','006-atomic-plant-submissions.sql','008-record-change-submissions.sql','009-record-version-history.sql','013-staff-notification-foundation.sql','016-species-request-content-revision.sql','017-species-review-cycle.sql','021-observation-edit-requests.sql','022-cancel-edit-requests.sql','024-record-change-review-events.sql','025-original-plant-withdrawal.sql','026-original-species-withdrawal.sql','027-original-observation-withdrawal.sql','028-immutable-record-version-revisions.sql','029-observation-submission-versions.sql','030-observation-edit-officer-notifications.sql','031-iot-live-reading-aggregates.sql','032-canonical-threat-officer-notifications.sql'];
 test('combined incoming Sensor/Camera producers retain atomic, deduplicated local threat notifications',async t=>{
  const db=await createPlantDatabase();t.after(()=>db.end());
+ await db.query(readFileSync(join(__dirname,'../migrations/034-sensor-alert-evidence.sql'),'utf8'));
  for(const f of prerequisites)await db.query(readFileSync(join(__dirname,'../migrations',f),'utf8'));
  await db.query("INSERT INTO species(scientific_name) VALUES('Combined synthetic'); INSERT INTO plant_record(species_id,registered_subject,qr_token) VALUES(1,'staff:bot','combined');");
  const sensorKey='a'.repeat(64),cameraKey='b'.repeat(64);
@@ -27,6 +28,8 @@ test('combined incoming Sensor/Camera producers retain atomic, deduplicated loca
  const sample=(at,values=high)=>({device_id:'combined-sensor',client_key:'synthetic-'+at,values,capture:{observed_at:at,mpu_connected:true,dht_status:'Operational'}});
  const first=sample('2026-11-19T00:01:00.000Z');await send('/device/readings',first,sensorKey);
  let events=(await db.query("SELECT * FROM staff_notification_event WHERE resource_kind='threat_alert'")).rows;assert.equal(events.length,6);assert.ok(events.every(e=>e.metadata.source==='Sensor'&&e.metadata.reading_id===null));
+ const saved=(await db.query("SELECT sensor_evidence FROM threat_alert_history WHERE device_id='combined-sensor'")).rows;
+ assert.equal(saved.length,6);assert.ok(saved.every(row=>row.sensor_evidence.values.temperature===30&&row.sensor_evidence.plant_id==='1'));
  await send('/device/readings',first,sensorKey);await send('/device/readings',sample('2026-11-19T00:02:00.000Z'),sensorKey);
  assert.equal((await db.query("SELECT count(*)::int AS n FROM staff_notification_event WHERE resource_kind='threat_alert'")).rows[0].n,6);
  const event={eventId:'c'.repeat(32),plantId:'1',eventType:'possible_plant_contact',title:'Synthetic contact',description:'Synthetic only',detectedAt:'2026-11-19T00:01:00.000Z',recordingStartedAt:'2026-11-19T00:01:00.000Z',recordingEndedAt:null,recordingStatus:'recording'};

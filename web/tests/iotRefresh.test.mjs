@@ -81,9 +81,10 @@ test('latest and historical tables derive conditions from each row without chang
       for (const tableClass of ['iot-reading-table', 'iot-history-table']) {
         const table = h.render().find(n => n.type === 'table' && n.props.class.includes(tableClass))
         const cells = flat(table).filter(n => n.type === 'td')
-        assert.equal(cells[5].children, soil === null ? '\u2014' : String(soil))
+        const cellValue = cell => Array.isArray(cell.children) ? cell.children[0].children : cell.children
+        assert.equal(cellValue(cells[5]), soil === null ? '\u2014' : String(soil))
         assert.equal(cells[6].children, expectedSoil)
-        assert.equal(cells[7].children, rain === null ? '\u2014' : String(rain))
+        assert.equal(cellValue(cells[7]), rain === null ? '\u2014' : String(rain))
         assert.equal(cells[8].children, expectedSurface)
       }
       const modal = h.render().find(n => n.type?.name === 'AppModal.vue' && n.props?.title === 'Sensor Reading Details')

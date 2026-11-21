@@ -350,6 +350,30 @@ for (const boundary of ['selection', 'logout', 'pending', 'account', 'unmount'])
   } finally { h.stop(); globalThis.fetch = original }
 })
 
+test('saved Sensor evidence renders original Plant, threshold, direction and capture time', async () => {
+  const h = pageHarness({ withEvidence: true }), original = globalThis.fetch
+  const fixture = sensorAlertFixture()
+  fixture.alert.reading_id = null; fixture.context.alert.reading_id = null; fixture.context.reading.id = null
+  fixture.context.reading.basis = 'alert_snapshot'; fixture.context.reading.captured_at = '2026-11-18T06:28:59Z'
+  fixture.context.historical_threshold = { min: 20, max: 35, direction: 'high', limit: 35 }
+  fixture.context.plant_at_detection = { state: 'verified', plant_id: '1' }
+  globalThis.fetch = async url => url.includes('current-assignments') ? Response.json({ contract_version: 1, assignments: [{ alert_id: fixture.alert.id, ...fixture.assignment }] })
+    : url.endsWith('/context') ? Response.json(fixture.context) : Response.json({ alerts: [fixture.alert], responses: [] })
+  try {
+    await h.state.loadAlerts(); await new Promise(setImmediate)
+    h.state.openAlert(h.state.alerts.value[0]); await new Promise(setImmediate)
+    const tree = nodes(h.render())
+    assert.ok(tree.some(n => n.props?.to === '/plant/1'))
+    assert.ok(tree.some(n => n.props?.to === '/plant/32'))
+    assert.ok(tree.some(n => n.children === 'Above maximum'))
+    assert.ok(tree.some(n => n.children === 'Plant at detection'))
+    assert.ok(tree.some(n => n.children === 'Captured at'))
+    assert.ok(!tree.some(n => n.children === 'Threshold unavailable'))
+    assert.equal(h.state.savedThreshold.value.limit, 35)
+    assert.equal(h.state.eventReadings.value[0].value, 38)
+  } finally { h.stop(); globalThis.fetch = original }
+})
+
 test('isolated Sensor fixture renders exact frame roles and verified current Plant without writes', async () => {
   const h = pageHarness({ withEvidence: true }), original = globalThis.fetch
   const fixture = sensorAlertFixture(), calls = []

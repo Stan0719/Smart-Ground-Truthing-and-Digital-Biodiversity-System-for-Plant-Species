@@ -4,6 +4,27 @@ import { loadAlertContext, loadCurrentAssignments, assignedPlantLabel } from '..
 import { sensorAlertFixture } from './fixtures/sensorAlertContext.mjs'
 const canonical = a => ({ id: a.id, deviceId: a.device_id, readingId: a.reading_id, metric: a.metric, value: a.value })
 
+test('saved Sensor snapshot accepts null raw reference and preserves event Plant and thresholds', async () => {
+  const make = () => {
+    const { alert, context } = sensorAlertFixture()
+    alert.reading_id = null; context.alert.reading_id = null
+    context.reading.id = null; context.reading.basis = 'alert_snapshot'; context.reading.captured_at = '2026-11-21T01:00:00Z'
+    context.historical_threshold = { min: 20, max: 35, direction: 'high', limit: 35 }
+    context.plant_at_detection = { state: 'verified', plant_id: '1' }
+    return { alert, context }
+  }
+  const { alert, context } = make()
+  const result = await loadAlertContext(canonical(alert), undefined, async () => Response.json(context))
+  assert.equal(result.plant_at_detection.plant_id, '1'); assert.equal(result.current_assignment.plant_id, '32')
+  assert.equal(result.historical_threshold.max, 35); assert.equal(result.reading.id, null)
+  for (const mutate of [c => c.historical_threshold.limit = 999, c => c.historical_threshold.direction = 'low',
+    c => c.plant_at_detection.plant_id = '../private', c => c.reading.values.temperature = -10, c => c.reading.captured_at = 'invalid',
+    c => delete c.reading.basis, c => c.historical_threshold.min = 99]) {
+    const fixture = make(); mutate(fixture.context)
+    await assert.rejects(loadAlertContext(canonical(fixture.alert), undefined, async () => Response.json(fixture.context)), { kind: 'invalid' })
+  }
+})
+
 test('exact fixture evidence preserves six metrics, zeros and current-only assignment', async () => {
   const { alert, context } = sensorAlertFixture()
   const result = await loadAlertContext(canonical(alert), undefined, async (url, options) => {
