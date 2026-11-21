@@ -216,12 +216,18 @@ export function retainVisibleObservationExpansion(expandedIds, observations, fil
 export async function fetchMyObservations(accountId, botanistName, api) {
   if (!accountId) throw new Error("A signed-in Botanist account is required.");
   if (typeof api !== "function") throw new Error("The authenticated observation service is unavailable.");
-  const ownRows = await fetchObservationPages(accountId, api);
-  const capability = await api("/observation-edits/capabilities", { expectedAccountId: accountId }).catch((error) => {
+  const options = { expectedAccountId: accountId };
+  const editCapability = api("/observation-edits/capabilities", options).catch((error) => {
     if ([404, 503].includes(error?.status)) return { available: false };
     throw error;
   });
-  const editRows = capability.available ? (await api("/observation-edits", { expectedAccountId: accountId })).edits : [];
+  const [ownRows, { capability, editRows }] = await Promise.all([
+    fetchObservationPages(accountId, api),
+    editCapability.then(async (capability) => ({
+      capability,
+      editRows: capability.available ? (await api("/observation-edits", options)).edits : [],
+    })),
+  ]);
   if (!Array.isArray(editRows) || editRows.some((edit) => edit?.owner_subject !== `staff:${accountId}`))
     throw new Error("The owner-scoped observation edit list did not match this account.");
   const editsByObservation = new Map();

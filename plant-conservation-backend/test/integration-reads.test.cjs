@@ -193,12 +193,15 @@ test("detail visibility, observation ownership, latest readings and bounded devi
   assert.equal((await call("/observations/1", "other")).status, 404);
   const botanistObservation = await call("/observations/1", "bot");
   assert.equal(botanistObservation.data.observation.id, "1");
-  assert.equal(botanistObservation.data.observation.content.latitude, undefined);
-  assert.equal(botanistObservation.data.observation.content.longitude, undefined);
+  assert.equal(botanistObservation.data.observation.content.latitude, 1);
+  assert.equal(botanistObservation.data.observation.content.longitude, 2);
   const officerObservation = await call("/observations/1", "officer");
   assert.equal(officerObservation.data.observation.content.latitude, 1);
   assert.equal(officerObservation.data.observation.content.longitude, 2);
-  assert.equal((await call("/observations/3", "bot")).data.observation.content.latitude, undefined);
+  assert.equal((await call("/observations/3", "bot")).data.observation.content.latitude, 11);
+  assert.equal((await call("/observations/3", "other")).data.observation.content.latitude, 11);
+  assert.equal((await call("/observations/4", "bot")).data.observation.content.latitude, 33);
+  assert.equal((await call("/observations/4", "other")).status, 404);
   assert.equal((await call("/observations/3", "officer")).data.observation.content.latitude, 11);
 
   const draftContent = {

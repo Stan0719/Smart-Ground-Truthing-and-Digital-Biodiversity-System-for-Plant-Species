@@ -9,6 +9,7 @@ import OriginalUpdatedField from "../components/OriginalUpdatedField";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 
 import {
+  AppState,
   View,
   Text,
   ActivityIndicator,
@@ -351,6 +352,10 @@ function findPlant() {
 
   useFocusEffect(useCallback(() => {
     let active = true;
+    const subscription = AppState?.addEventListener("change", (state) => {
+      if (state === "active") setRetry((value) => value + 1);
+    });
+    const leave = () => { active = false; subscription?.remove(); };
     const checkWithdrawal = (record = null, selectedOriginalId = null) => {
       if (record && !(canWithdrawOriginalPlant(record, botanistId) ||
           (record.isServerRecord && ["Pending Review", "Correction Required"].includes(record.status) && !record.hasApprovedObservation &&
@@ -449,7 +454,7 @@ function findPlant() {
           });
       }
       setLoading(false);
-      return () => { active = false; };
+      return leave;
     }
     fetchBotanistPlant(botanistId, plantId).then((record) => {
       if (active) {
@@ -467,7 +472,7 @@ function findPlant() {
       setChangeError(error.message);
       setEditAvailability("unavailable");
     });
-    return () => { active = false; };
+    return leave;
   }, [botanistId, botanistName, plantId, retry, historicalDetail, route.params?.historicalSnapshot,
     route.params?.selectedChangeId, route.params?.selectedChangeRevision,
     route.params?.historicalVersionStatus, route.params?.submissionVersionLabel, route.params?.historicalCurrent,

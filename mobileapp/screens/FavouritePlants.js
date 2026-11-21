@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
@@ -23,11 +23,13 @@ export default function FavouritePlantsScreen({ navigation, user }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
+      <FlatList
+        data={favourites.loading ? [] : items}
+        keyExtractor={(item) => `${tab}:${isSpecies ? item.id : item.plantId}`}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={favourites.refreshing} onRefresh={() => void favourites.refresh(true)} tintColor="#468585" colors={["#468585"]} />}
-      >
+        ListHeaderComponent={<>
         <View style={styles.header}>
           <BackButton accessibilityLabel={t("common.goBack")} onPress={() => navigation.goBack()} />
           <Text style={styles.title}>{t("navigation.favouritePlants")}</Text>
@@ -44,7 +46,8 @@ export default function FavouritePlantsScreen({ navigation, user }) {
 
         {!!favourites.mutationError && <Text accessibilityRole="alert" style={styles.error}>{translateUIMessage(favourites.mutationError)}</Text>}
         {!favourites.loading && !!favourites.error && <Text accessibilityRole="alert" style={styles.error}>{translateUIMessage(favourites.error)}</Text>}
-        {favourites.loading ? (
+        </>}
+        ListEmptyComponent={favourites.loading ? (
           <View style={styles.state}><Ionicons name="leaf-outline" size={34} color="#77A68A" /><Text style={styles.stateText}>{t("favourites.loading")}</Text></View>
         ) : !favourites.error && items.length === 0 ? (
           <View style={styles.state}>
@@ -52,13 +55,12 @@ export default function FavouritePlantsScreen({ navigation, user }) {
             <Text style={styles.emptyTitle}>{isSpecies ? t("favourites.noFavouriteSpecies") : t("favouritePlants.noFavouritePlants")}</Text>
             <Text style={styles.stateText}>{isSpecies ? t("favourites.noFavouriteSpeciesHint") : t("favouritePlants.plantsYouFavouriteWillAppearHere")}</Text>
           </View>
-        ) : (
-          items.map((item) => {
+        ) : null}
+        renderItem={({ item }) => {
             const id = isSpecies ? item.id : item.plantId;
-            const commonName = isSpecies ? item.commonName : item.commonName;
-            const scientificName = isSpecies ? item.scientificName : item.scientificName;
+            const { commonName, scientificName } = item;
             return (
-              <View key={`${tab}:${id}`} style={styles.card}>
+              <View style={styles.card}>
                 <TouchableOpacity accessibilityRole="button" style={styles.cardMain} activeOpacity={0.8} onPress={() => openItem(item)}>
                   <View style={styles.imageFrame}>
                     {item.image && (isSpecies || !failedPlantImageUris.has(item.image.uri))
@@ -79,9 +81,8 @@ export default function FavouritePlantsScreen({ navigation, user }) {
                 <FavouriteHeart active pending={favourites.isPending(isSpecies ? "species" : "plant", id)} onPress={() => void favourites.toggle(isSpecies ? "species" : "plant", id)} style={styles.heart} />
               </View>
             );
-          })
-        )}
-      </ScrollView>
+        }}
+      />
     </SafeAreaView>
   );
 }

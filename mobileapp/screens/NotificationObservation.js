@@ -1,6 +1,6 @@
 import { useAppTranslation, t, translateLabel, translateUIMessage, translateFieldValue, translateFieldLabel, formatDateTime } from "../translations/i18n";
 import React, { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { AppState, ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { ownedNotificationObservation } from "../utils/botanistNotifications";
 import { getObservationRecorderDisplayName, plantApi, plantAssetSources } from "../utils/plantApi";
@@ -9,6 +9,7 @@ import { mobileApiUrl } from "../utils/apiConfiguration";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { observationContentFields, observationDetailContent, canStartObservationEdit, canWithdrawOriginalObservation } from "../utils/observationDetails";
 import EditAction from "../components/EditAction";
+import { watchStatus } from "../utils/statusRefresh";
 
 const fieldLabel = (field) => ["zone", "altitudeM"].includes(field) ? t(`recordEdits.${field}`) : translateFieldLabel(field);
 const statusTone = (status) => status === "Approved" ? styles.approvedBadge : status === "Rejected" ? styles.rejectedBadge : ["Cancelled", "Withdrawn"].includes(status) ? styles.terminalBadge
@@ -45,36 +46,50 @@ export default function NotificationObservation({ route, navigation, user }) {
       versioningActive: false, editCapabilityVerified: false });
     if (!accountId) { setState({ loading: false, observation: null, editHistory: null, error: "Sign in as the Botanist who submitted this observation.",
       versioningActive: false, editCapabilityVerified: false }); return undefined; }
-    const observationRead = readOnlyApproved
-      ? plantApi(`/observations/${encodeURIComponent(observationId)}`, { expectedAccountId: accountId })
-        .then(async (payload) => {
-          const observation = payload?.observation;
-          if (observation?.status !== "Approved") throw Error(t("recordEdits.informationNotAvailable"));
-          const assets = (observation.assets || []).filter((asset) => asset?.id && ["image/jpeg", "image/png"].includes(String(asset.content_type || "").toLowerCase()));
-          const sources = assets.length ? await plantAssetSources(assets, accountId).catch(() => []) : [];
-          return { ...observation, photos: sources.map((source, index) => ({ ...source, id: assets[index].id })) };
-        })
-      : ownedNotificationObservation(accountId, observationId);
-    const capabilityRead = readOnlyApproved ? Promise.resolve({ available: false, versioning_available: false })
-      : plantApi("/observation-edits/capabilities", { expectedAccountId: accountId }).catch(() => null);
-    Promise.all([observationRead, capabilityRead]).then(async ([observation, capability]) => {
-      let editHistory = null, editHistoryError = "";
-      if (!readOnlyApproved && capability?.available) {
-        try { editHistory = await plantApi(`/observations/${encodeURIComponent(observationId)}/edit-history`, { expectedAccountId: accountId }); }
-        catch (error) { if (![404, 503].includes(error?.status)) editHistoryError = error?.message || t("observationEdits.historyUnavailable"); }
-      }
-      const selectedPhotoContext = Boolean(route.params?.observationVersionId || route.params?.editRequestId || route.params?.observationVersionSnapshot);
-      const photoToken = selectedPhotoContext && (editHistory?.versions?.some((version) => version.photo_ids?.length) ||
-        editHistory?.edits?.some((edit) => edit.retained_photo_ids?.length || edit.added_photo_count) ||
-        route.params?.observationVersionSnapshot?.photoIds?.length)
-        ? await faceSession.withToken(async (token) => token).catch(() => "") : "";
-      if (active) setState({ loading: false, observation, editHistory, editHistoryError, photoToken, error: "",
-        versioningActive: capability?.versioning_available === true, editCapabilityVerified: Boolean(capability) });
-    }).catch((error) => {
-      if (active) setState({ loading: false, observation: null, editHistory: null, error: `${error.message} The record may be unavailable or you may be offline.`,
-        versioningActive: true, editCapabilityVerified: false });
-    });
-    return () => { active = false; };
+    let pending = null;
+    const load = (background = false) => {
+      if (pending) return pending;
+      const observationRead = readOnlyApproved
+        ? plantApi(`/observations/${encodeURIComponent(observationId)}`, { expectedAccountId: accountId })
+          .then(async (payload) => {
+            const observation = payload?.observation;
+            if (observation?.status !== "Approved") throw Error(t("recordEdits.informationNotAvailable"));
+            const assets = (observation.assets || []).filter((asset) => asset?.id && ["image/jpeg", "image/png"].includes(String(asset.content_type || "").toLowerCase()));
+            const sources = assets.length ? await plantAssetSources(assets, accountId).catch(() => []) : [];
+            return { ...observation, photos: sources.map((source, index) => ({ ...source, id: assets[index].id })) };
+          })
+        : ownedNotificationObservation(accountId, observationId);
+      const capabilityRead = readOnlyApproved ? Promise.resolve({ available: false, versioning_available: false })
+        : plantApi("/observation-edits/capabilities", { expectedAccountId: accountId }).catch(() => null);
+      pending = Promise.all([observationRead, capabilityRead]).then(async ([observation, capability]) => {
+        let editHistory = null, editHistoryError = "";
+        if (!readOnlyApproved && capability?.available) {
+          try { editHistory = await plantApi(`/observations/${encodeURIComponent(observationId)}/edit-history`, { expectedAccountId: accountId }); }
+          catch (error) { if (![404, 503].includes(error?.status)) editHistoryError = error?.message || t("observationEdits.historyUnavailable"); }
+        }
+        const selectedPhotoContext = Boolean(route.params?.observationVersionId || route.params?.editRequestId || route.params?.observationVersionSnapshot);
+        const photoToken = selectedPhotoContext && (editHistory?.versions?.some((version) => version.photo_ids?.length) ||
+          editHistory?.edits?.some((edit) => edit.retained_photo_ids?.length || edit.added_photo_count) ||
+          route.params?.observationVersionSnapshot?.photoIds?.length)
+          ? await faceSession.withToken(async (token) => token).catch(() => "") : "";
+        if (active) setState((previous) => {
+          const retainHistory = background && (editHistoryError || !capability);
+          return { loading: false, observation, editHistory: retainHistory ? previous.editHistory : editHistory,
+            editHistoryError, photoToken: photoToken || (retainHistory ? previous.photoToken : ""), error: "",
+            versioningActive: capability?.versioning_available === true || Boolean(retainHistory && previous.versioningActive),
+            editCapabilityVerified: Boolean(capability) };
+        });
+      }).catch((error) => {
+        if (active && (!background || [401, 403, 404].includes(error?.status) ||
+          ["SESSION_REQUIRED", "SESSION_CHANGED", "ACCOUNT_MISMATCH"].includes(error?.code)))
+          setState({ loading: false, observation: null, editHistory: null, error: `${error.message} The record may be unavailable or you may be offline.`,
+          versioningActive: true, editCapabilityVerified: false });
+      }).finally(() => { pending = null; });
+      return pending;
+    };
+    void load();
+    const stop = watchStatus(AppState, () => load(true));
+    return () => { active = false; stop(); };
   }, [accountId, observationId, retry, readOnlyApproved, route.params?.observationVersionSnapshot, route.params?.observationVersionId, route.params?.editRequestId]));
 
   const row = state.observation?.owner_subject === `staff:${accountId}` ||

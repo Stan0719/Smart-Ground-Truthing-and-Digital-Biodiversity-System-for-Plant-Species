@@ -14,8 +14,12 @@ const find = (selector, property, value) => rules.find(r => r.selector.includes(
 test('both sidebars retain real logout icons, translated labels and original click handlers', () => {
   for (const [file, handler] of [['layouts/ConservationOfficerLayout.vue', 'signOut'], ['components/AdminPageShell.vue', 'logout']]) {
     const { descriptor } = parse(readFileSync(new URL('../src/' + file, import.meta.url), 'utf8'))
-    const button = descriptor.template.content.match(new RegExp('<button type="button" @click="' + handler + '">([\\s\\S]*?)</button>'))?.[1]
+    const button = descriptor.template.content.match(new RegExp('<button(?=[^>]*type="button")[^>]*@click="' + handler + '"[^>]*>([\\s\\S]*?)</button>'))?.[1]
     assert.ok(button, file)
+    if (handler === 'signOut') {
+      assert.match(descriptor.template.content, /:disabled="logoutPending"/)
+      assert.match(descriptor.template.content, /:aria-busy="logoutPending"/)
+    }
     assert.match(button, /<svg class="logout-icon"/)
     assert.match(button, /stroke="currentColor"/)
     assert.match(button, /aria-hidden="true"/)

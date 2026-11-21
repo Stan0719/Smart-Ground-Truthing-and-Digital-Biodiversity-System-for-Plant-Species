@@ -191,8 +191,11 @@ export function validateObservationDraft(draft) {
   return { ...draft, body: normalizedBody };
 }
 
-export function syncDrafts(accountId, { onSubmitted } = {}) {
-  if (running.has(accountId)) return running.get(accountId);
+export function syncDrafts(accountId, { onSubmitted, clientKey } = {}) {
+  if (running.has(accountId)) {
+    if (clientKey) return running.get(accountId).catch(() => {}).then(() => syncDrafts(accountId, { onSubmitted, clientKey }));
+    return running.get(accountId);
+  }
   const task = (async () => {
     const user = await faceSession.restore();
     if (user?.id !== accountId || user.role !== "botanist")
@@ -201,7 +204,8 @@ export function syncDrafts(accountId, { onSubmitted } = {}) {
     const completedKeys = [];
     let activeDraft = null;
     try {
-      const queued = (await readDrafts(accountId)).filter((draft) => draft.kind !== "botanist-form");
+      const queued = (await readDrafts(accountId)).filter((draft) => draft.kind !== "botanist-form" &&
+        (clientKey == null || draft.client_key === clientKey));
       // Validate the complete queue before starting any upload. A partial draft
       // must never be submitted or have its photos uploaded by a bulk sync.
       const validated = queued.map((draft) => ({

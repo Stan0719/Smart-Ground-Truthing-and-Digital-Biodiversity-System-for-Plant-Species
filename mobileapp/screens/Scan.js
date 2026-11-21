@@ -101,14 +101,6 @@ export default function ScanScreen({ navigation, user }) {
       const token = parsePlantQrPayload(data);
 
       const result = await fetchPlantByQRCode(token);
-      let historyError = null;
-      if (result?.assigned && user?.role?.toLowerCase() === "visitor") {
-        try {
-          await recordVisitorScan(user.id, token);
-        } catch (error) {
-          historyError = error;
-        }
-      }
       if (result?.assigned === false) {
         const botanist = user?.role?.toLowerCase() === "botanist";
         setPrompt({ kind: result.status === "retired" ? "retired" : result.status === "generated" ? "unassigned" : "unavailable",
@@ -119,11 +111,15 @@ export default function ScanScreen({ navigation, user }) {
       }
       const plantId = result?.plant?.plant_id;
       if (!plantId) throw new Error("The QR code did not resolve to a plant record.");
-      if (historyError) Alert.alert(t("scanHistory.historySaveFailedTitle"), translateUIMessage(historyError.message || "Unable to save this scan."));
       // PlantDetail loads by the plantId route parameter. Passing a plant object
       // here left its required ID undefined and rendered the not-found screen.
       navigation.navigate("PlantDetails", { plantId: String(plantId) });
       navigated = true;
+      if (result?.assigned && user?.role?.toLowerCase() === "visitor") {
+        void recordVisitorScan(user.id, token).catch((error) => {
+          Alert.alert(t("scanHistory.historySaveFailedTitle"), translateUIMessage(error.message || "Unable to save this scan."));
+        });
+      }
     } catch (error) {
       Alert.alert(
         t("scan.plantQrUnavailable"),

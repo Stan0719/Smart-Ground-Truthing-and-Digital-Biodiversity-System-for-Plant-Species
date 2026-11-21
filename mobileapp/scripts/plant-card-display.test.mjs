@@ -77,9 +77,9 @@ test("plant list refresh retains the current account's records and hides another
   assert.deepEqual(Array.from(context.getScopedPlantRecords(state, "different-owner:botanist:species:6")), []);
 
   const list = read("../screens/Plant.js");
-  assert.match(list, /getScopedPlantRecords\(scopedSpeciesPlants, requestKey\)/);
-  assert.match(list, /if \(activeRequest\?\.key !== requestKey\) \{\s*setScopedSpeciesPlants\(\{ scope: requestKey, records: \[\] \}\);\s*\}/);
-  assert.match(list, /setScopedSpeciesPlants\(\{ scope: requestKey, records: visibleRecords \}\)/);
+  assert.match(list, /getScopedPlantRecords\(scopedSpeciesPlants, listRequestKey\)/);
+  assert.match(list, /if \(activeRequest\?\.key !== listRequestKey\) \{\s*setScopedSpeciesPlants\(\{ scope: listRequestKey, records: \[\] \}\);\s*\}/);
+  assert.match(list, /setScopedSpeciesPlants\(\{ scope: listRequestKey, records: visibleRecords, nextCursor, pageContext \}\)/);
 });
 
 test("the Zone change keeps the existing search, approval filters, and sorting predicates", () => {

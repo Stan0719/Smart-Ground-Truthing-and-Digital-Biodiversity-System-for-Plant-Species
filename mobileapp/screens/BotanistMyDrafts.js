@@ -114,8 +114,19 @@ export default function BotanistMyDrafts({ route, navigation }) {
       } catch (error) { setState((old) => ({ ...old, error: error.message || t("botanistDrafts.deleteFailed") })); }
     })(); } },
   ]);
+  const savedTime = (draft) => {
+    const value = draft.saved_at ?? draft.updated_at;
+    const time = typeof value === "number" || typeof value === "string" && value.trim() ? new Date(value).getTime() : NaN;
+    return Number.isFinite(time) ? time : null;
+  };
+  const formatSaved = (draft) => {
+    const time = savedTime(draft);
+    if (time === null) return t("botanistDrafts.notAvailable");
+    const date = new Date(time), two = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}/${two(date.getMonth() + 1)}/${two(date.getDate())}, ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+  };
   const visibleDrafts = filterBotanistDrafts(state.drafts, category, query).slice()
-    .sort((a, b) => new Date(b.saved_at || b.updated_at || 0) - new Date(a.saved_at || a.updated_at || 0));
+    .sort((a, b) => (savedTime(b) ?? -Infinity) - (savedTime(a) ?? -Infinity) || String(a.client_key).localeCompare(String(b.client_key)));
   const categories = ["all", "plant-records", "species-requests", "observations", "corrections"];
 
   return <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
@@ -151,7 +162,7 @@ export default function BotanistMyDrafts({ route, navigation }) {
               <View style={styles.cardHeading}><Text style={styles.formType}>{draftLabel(draft)}</Text><Text style={styles.identifier}>{draftDescription(draft)}</Text></View>
               <View style={styles.status}><Text style={styles.statusText}>{t("botanistDrafts.savedStatus")}</Text></View>
             </View>
-            <Text style={styles.date}>{draft.saved_at || draft.updated_at ? `${t("botanistDrafts.lastSaved")}: ${new Date(draft.saved_at || draft.updated_at).toLocaleString()}` : t("botanistDrafts.savedLocally")}</Text>
+            <Text style={styles.date}>{t("botanistDrafts.lastSaved")}: {formatSaved(draft)}</Text>
             {(draft.photo_refs?.length || draft.assets?.length) > 0 && <Text style={styles.photoCount}>{t("botanistDrafts.photoCount", { count: draft.photo_refs?.length || draft.assets?.length })}</Text>}
             <View style={styles.actions}>
               <TouchableOpacity style={styles.resume} onPress={() => resume(draft)} accessibilityRole="button"><Ionicons name="play-outline" size={17} color="#FFFFFF" /><Text style={styles.resumeText}>{t("botanistDrafts.resume")}</Text></TouchableOpacity>

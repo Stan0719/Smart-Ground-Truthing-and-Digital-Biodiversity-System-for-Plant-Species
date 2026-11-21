@@ -425,7 +425,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       setMessage(edit ? "Correction draft saved on this device." : "Draft saved on this device.");
       let submittedItem = null;
       if (online) {
-        const synced = await syncDrafts(user.id, { onSubmitted: (item) => {
+        const synced = await syncDrafts(user.id, { clientKey: draft.client_key, onSubmitted: (item) => {
           if (item.clientKey === draft.client_key) submittedItem = item;
         } });
         setMessage(t("fieldCollection.recordSSynchronizedForOfficerReview", { synced }));

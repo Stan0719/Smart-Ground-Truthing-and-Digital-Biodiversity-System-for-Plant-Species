@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import ActionFeedback from '../ActionFeedback.vue'
 import { vOfficerDropdown } from './officerDropdown'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -10,14 +9,14 @@ import { reportCsv, reportFilename, renderReportPdf, reportPalette, type ReportD
 import type { ReportFilters } from '../../services/reporting'
 import { monitoringDate } from '../../utils/officerMonitoringDisplay'
 const props = defineProps<{ category: OperationalCategory; filters: ReportFilters }>()
-const exportFailed = ref(false), exportSequence = ref(0)
 const emit = defineEmits<{ busy: [value: boolean] }>()
 const { t, te, locale } = useI18n()
-const text = (key: string): string => key === 'iot' ? t('conservationPages.reports.iotSummary.title') : te(`conservationPages.reports.operational.${key}`) ? t(`conservationPages.reports.operational.${key}`) : key
+const text = (key: string) => te(`conservationPages.reports.operational.${key}`) ? t(`conservationPages.reports.operational.${key}`) : key
 const rt = (key: string) => t(`conservationPages.reports.${key}`)
 const report = ref<OperationalReport | null>(null), loading = ref(false), error = ref(''), feedback = ref('')
 const device = ref(''), measurement = ref('temperature')
 const chart = ref<InstanceType<typeof OperationalReportChart> | null>(null)
+const reportView = ref<'graph' | 'table'>('graph'), selectedPeriodIndex = ref<number | null>(null)
 const exporting = ref(false)
 let request = 0, disposed = false
 async function load() {
@@ -31,7 +30,7 @@ async function load() {
   } catch { if (!disposed && token === request) error.value = text('unavailable') }
   finally { if (!disposed && token === request) { loading.value = false; emit('busy', false) } }
 }
-watch(() => [props.category, props.filters], () => { device.value = ''; void load() }, { immediate: true, deep: true })
+watch(() => [props.category, props.filters], () => { device.value = ''; reportView.value = 'graph'; selectedPeriodIndex.value = null; void load() }, { immediate: true, deep: true })
 onBeforeUnmount(() => { disposed = true; request++; emit('busy', false) })
 const display = (value: Cell, column = '') => {
   if (value === null) return '\u2014'
@@ -55,6 +54,33 @@ const latestParts = (value: Cell) => {
 }
 const hasStatUnit = (key: string, value: Cell) => props.category === 'iot' && value !== null && ['minimum', 'average', 'maximum'].includes(key)
 const hasChart = computed(() => report.value?.chart.series.some(series => series.values.some(value => value !== null && (report.value?.chart.kind === 'line' || value > 0))))
+const isObservationReport = computed(() => props.category === 'observations')
+const selectedPeriodLabel = computed(() => {
+  const label = selectedPeriodIndex.value === null ? null : report.value?.chart.labels[selectedPeriodIndex.value]
+  return label ? monitoringDate(label, locale.value) : ''
+})
+const tableRows = computed(() => {
+  const rows = report.value?.rows || []
+  if (props.category !== 'observations' || selectedPeriodIndex.value === null) return rows
+  const selected = report.value?.chart.labels[selectedPeriodIndex.value]
+  return selected ? rows.filter(row => row[0] === selected) : rows
+})
+const observationStory = computed(() => {
+  const current = report.value
+  if (props.category !== 'observations' || !current?.chart.labels.length) return ''
+  const index = current.chart.labels.length - 1
+  const totalAt = (periodIndex: number) => current.chart.series.reduce((sum, series) => sum + (series.values[periodIndex] ?? 0), 0)
+  const latestTotal = totalAt(index), previousTotal = index > 0 ? totalAt(index - 1) : null
+  const status = [...current.chart.series].sort((a, b) => (b.values[index] ?? 0) - (a.values[index] ?? 0))[0]
+  const params = { latestPeriod: monitoringDate(current.chart.labels[index]!, locale.value), latestTotal: latestTotal.toLocaleString(locale.value), topStatus: status ? text(status.key) : '', statusCount: (status?.values[index] ?? 0).toLocaleString(locale.value), periodCount: current.chart.labels.length.toLocaleString(locale.value), total: String(current.statistics.find(stat => stat.key === 'totalObservations')?.value ?? latestTotal) }
+  if (previousTotal === null) return t('conservationPages.reports.operational.observationStorySingle', params)
+  const change = latestTotal - previousTotal
+  const comparison = { ...params, previousPeriod: monitoringDate(current.chart.labels[index - 1]!, locale.value), previousTotal: previousTotal.toLocaleString(locale.value) }
+  return change === 0 ? t('conservationPages.reports.operational.observationStoryNoChange', comparison)
+    : t('conservationPages.reports.operational.observationStoryChange', { ...comparison, changeDirection: text(change > 0 ? 'observationIncrease' : 'observationDecrease'), changeAmount: Math.abs(change).toLocaleString(locale.value) })
+})
+function selectObservationPeriod(index: number) { selectedPeriodIndex.value = selectedPeriodIndex.value === index ? null : index }
+const showTable = computed(() => !isObservationReport.value || reportView.value === 'table')
 const exportDocument = (): ReportDocument => {
   const r = report.value!
   const context = r.category === 'iot' ? [
@@ -71,7 +97,6 @@ const exportDocument = (): ReportDocument => {
     })), columns: r.columns.map(text),
     rows: r.rows.map(row => row.map((value, index) => ['status', 'measurement', 'unit'].includes(r.columns[index]!) && value !== null ? text(String(value)) : value)),
     displayRows: r.rows.map(row => row.map((value, index) => display(value, r.columns[index]!))),
-    notes: r.category === 'iot' ? [{ label: text('iot'), value: text('iotStorageScope') }] : [],
     chart: r.chart.series.flatMap(series => r.chart.labels.map((point, index) => ({ series: text(series.key), point, value: series.values[index] ?? null, unit: text(r.chart.unit) }))), context,
   }
 }
@@ -79,7 +104,7 @@ async function exportFile(kind: 'csv' | 'pdf') {
   if (loading.value || exporting.value || !report.value?.rows.length) return
   const snapshot = report.value, token = request, language = locale.value
   const current = () => !disposed && !loading.value && request === token && report.value === snapshot && locale.value === language
-  exporting.value = true; feedback.value = ''; exportFailed.value = false; exportSequence.value++
+  exporting.value = true; feedback.value = ''
   try {
     const model = exportDocument()
     if (kind === 'csv') {
@@ -95,11 +120,11 @@ async function exportFile(kind: 'csv' | 'pdf') {
       pdf.save(reportFilename(model, 'pdf'))
     }
     if (current()) feedback.value = rt(kind === 'csv' ? 'csvDownloaded' : 'pdfDownloaded')
-  } catch { exportFailed.value = true; if (current()) feedback.value = t('conservationPages.reports.errors.export') }
+  } catch { if (current()) feedback.value = t('conservationPages.reports.errors.export') }
   finally { exporting.value = false }
 }
 
-defineExpose({ load, exportFile, exportDocument })
+defineExpose({ load, exportFile, exportDocument, reportView, selectedPeriodIndex, tableRows, observationStory, selectObservationPeriod })
 </script>
 <template>
   <section class="operational-report" :aria-label="text(category)">
@@ -108,7 +133,6 @@ defineExpose({ load, exportFile, exportDocument })
     <p v-else-if="error" role="alert">{{ error }}</p>
     <template v-else-if="report">
       <h2>{{ text(category) }}</h2>
-      <p v-if="category === 'iot'" class="scope" role="note">{{ text('iotStorageScope') }}</p>
       <p class="scope">{{ displayScopeLabel }} · {{ monitoringDate(report.generatedAt, locale) }}</p>
       <p v-if="category === 'threats'" class="scope">{{ text(report.basis) }}</p>
       <p v-else-if="category === 'observations'" class="scope">{{ text('observationScopeShort') }}</p>
@@ -126,15 +150,20 @@ defineExpose({ load, exportFile, exportDocument })
           </strong>
         </div>
       </div>
-      <OperationalReportChart v-if="hasChart" ref="chart" :report="report" />
-      <p v-else-if="report.rows.length" role="status">{{ rt('empty') }}</p>
+      <aside v-if="category === 'observations' && observationStory" class="observation-story" aria-live="polite"><h3>{{ text('observationStoryTitle') }}</h3><p>{{ observationStory }}</p><p class="story-note">{{ text('observationStoryNote') }}</p></aside>
+      <div v-if="category === 'observations'" class="observation-view-switch" role="group" :aria-label="rt('reportView')"><button type="button" :class="{ active: reportView === 'graph' }" :aria-pressed="reportView === 'graph'" @click="reportView = 'graph'">{{ rt('graphView') }}</button><button type="button" :class="{ active: reportView === 'table' }" :aria-pressed="reportView === 'table'" @click="reportView = 'table'">{{ rt('tableView') }}</button></div>
+      <p v-if="category === 'observations' && selectedPeriodLabel" class="period-selection" role="status"><strong>{{ text('selectedObservationPeriod') }}:</strong> {{ selectedPeriodLabel }} <button type="button" class="clear-period-selection" @click="selectedPeriodIndex = null">{{ text('clearObservationPeriod') }}</button></p>
+      <p v-if="category === 'observations' && reportView === 'graph'" class="chart-interaction-note">{{ text('observationChartInteraction') }}</p>
+      <OperationalReportChart v-if="hasChart && (!isObservationReport || reportView === 'graph')" ref="chart" :report="report" :selected-period-index="isObservationReport ? selectedPeriodIndex : null" @select-period="selectObservationPeriod" />
+      <p v-if="category === 'observations' && reportView === 'graph' && !hasChart && report.rows.length" role="status">{{ rt('empty') }}</p>
+      <p v-if="category !== 'observations' && !hasChart && report.rows.length" role="status">{{ rt('empty') }}</p>
       <p v-if="!report.rows.length" role="status">{{ rt('empty') }}</p>
-      <div v-else class="operational-scroll" :class="'table-' + category" role="region" :aria-label="text(category)" tabindex="0">
-        <table><thead><tr><th v-for="column in report.columns" :key="column" scope="col">{{ text(column) }}</th></tr></thead><tbody><tr v-for="(row, index) in report.rows" :key="index"><td v-for="(value, col) in row" :key="col"><span :class="{ 'report-status': report.columns[col] === 'status' }">{{ display(value, report.columns[col]) }}</span></td></tr></tbody></table>
+      <div v-if="showTable && tableRows.length" class="operational-scroll" :class="'table-' + category" role="region" :aria-label="text(category)" tabindex="0">
+        <table><thead><tr><th v-for="column in report.columns" :key="column" scope="col">{{ text(column) }}</th></tr></thead><tbody><tr v-for="(row, index) in tableRows" :key="index"><td v-for="(value, col) in row" :key="col"><span :class="{ 'report-status': report.columns[col] === 'status' }">{{ display(value, report.columns[col]) }}</span></td></tr></tbody></table>
       </div>
       <div class="operational-actions"><button class="secondary-button" type="button" :disabled="loading || exporting || !report.rows.length" @click="exportFile('pdf')">{{ rt('exportPdf') }}</button><button class="secondary-button" type="button" :disabled="loading || exporting || !report.rows.length" @click="exportFile('csv')">{{ rt('exportCsv') }}</button></div>
     </template>
-    <ActionFeedback v-if="feedback" :key="exportSequence" :feedback-id="exportSequence" :variant="exportFailed ? 'error' : 'success'" :message="feedback" @dismiss="feedback = ''" />
+    <p v-if="feedback" role="status">{{ feedback }}</p>
   </section>
 </template>
 <style scoped>
@@ -167,6 +196,16 @@ defineExpose({ load, exportFile, exportDocument })
 .observation-rejected { --stat-background: #fbe8e5; --stat-ink: #a33f35; }
 .observation-correction { --stat-background: #fff1db; --stat-ink: #926119; }
 .observation-flagged { --stat-background: #f0eaf8; --stat-ink: #69459a; }
+.observation-story { margin: 18px 0 14px; padding: 16px 18px; border: 1px solid #d5e3d8; border-left: 4px solid #477d62; border-radius: 10px; background: #f4f8f3; color: #315749; }
+.observation-story h3 { margin: 0 0 7px; font-size: 15px; }
+.observation-story p { margin: 0; font-size: 13px; line-height: 1.65; }
+.observation-story .story-note { margin-top: 7px; color: #60756b; font-size: 11px; }
+.observation-view-switch { display: inline-flex; gap: 3px; margin: 8px 0 2px; padding: 3px; border: 1px solid #cbd9cf; border-radius: 8px; background: #f3f7f3; }
+.observation-view-switch button { min-width: 82px; min-height: 36px; padding: 6px 14px; border: 0; border-radius: 6px; background: transparent; color: #426554; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.observation-view-switch button.active { background: #315749; color: #fff; box-shadow: 0 1px 2px #14302326; }
+.period-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid #477d62; background: #f3f7f3; color: #315749; font-size: 13px; }
+.clear-period-selection { border: 0; padding: 4px 0; background: transparent; color: #32745b; text-decoration: underline; font: inherit; cursor: pointer; }
+.chart-interaction-note { color: #5e7468; font-size: 12px; line-height: 1.5; margin: 12px 0 -10px; }
 .iot-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
 .latest-stat time { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 .25em; }
 .officer-layout.officer-layout.officer-layout .operational-report .report-stat .timestamp-part { min-width: 0; max-width: 100%; font-size: inherit; line-height: inherit; color: inherit; white-space: normal; overflow-wrap: anywhere; }
@@ -177,6 +216,19 @@ defineExpose({ load, exportFile, exportDocument })
 @container (max-width: 520px) {
   .operational-metrics, .iot-metrics { grid-template-columns: minmax(0, 1fr); }
   .officer-layout.officer-layout.officer-layout .operational-report .control-bar { grid-template-columns: minmax(0, 1fr); }
+}
+@container (min-width: 801px) {
+  .operational-report .operational-scroll.table-observations { overflow-x: visible; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations table { min-width: 0; width: 100%; table-layout: fixed; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations :is(th, td) { padding: 10px 8px; white-space: normal; overflow-wrap: anywhere; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations th { font-size: 10px; line-height: 1.35; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations :is(th, td):nth-child(1) { width: 12%; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations :is(th, td):nth-child(2) { width: 17%; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations :is(th, td):nth-child(3) { width: 16%; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations :is(th, td):nth-child(4) { width: 12%; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations :is(th, td):nth-child(5) { width: 11%; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations :is(th, td):nth-child(6) { width: 19%; }
+  .officer-layout.officer-layout.officer-layout .operational-report .operational-scroll.table-observations :is(th, td):nth-child(7) { width: 13%; }
 }
 .operational-scroll { min-width: 0; max-width: 100%; width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
 .officer-layout .operational-scroll table { min-width: 760px; width: 100%; border-collapse: separate; border-spacing: 0; }

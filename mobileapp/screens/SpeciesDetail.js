@@ -3,7 +3,7 @@ import { t, translateLabel, translateUIMessage, useAppTranslation, translateFiel
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
 
-import {
+import { AppState,
   View,
   Text,
   StyleSheet,
@@ -91,6 +91,8 @@ export default function SpeciesDetail({
 
   useFocusEffect(useCallback(() => {
     void loadSpeciesDetails(false);
+    const subscription = AppState?.addEventListener("change", (state) => { if (state === "active") void loadSpeciesDetails(true); });
+    return () => subscription?.remove();
   }, [loadSpeciesDetails]));
 
   const primaryImageSource = selectedSpecies?.speciesImageVerified ? getSpeciesImageSource(selectedSpecies) : null;

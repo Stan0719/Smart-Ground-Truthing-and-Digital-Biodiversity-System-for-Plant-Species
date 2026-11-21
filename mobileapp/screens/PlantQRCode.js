@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  AppState,
   ScrollView,
   TextInput,
   RefreshControl,
@@ -26,8 +27,10 @@ import { plantApi } from "../utils/plantApi";
 import RefreshButton from "../components/RefreshButton";
 
 import { createQRInventoryLoader, emptyQRInventory } from "../utils/qrInventory";
+import { watchStatus } from "../utils/statusRefresh";
 import { A4_PRINT_OPTIONS, buildQRPrintHtml } from "../utils/qrPrint";
 
+const QR_DISPLAY_PAGE_SIZE = 20;
 
 export default function PlantQRCodeScreen({ route }) {
   useAppTranslation();
@@ -39,19 +42,26 @@ export default function PlantQRCodeScreen({ route }) {
   const [generating, setGenerating] = useState(false);
   const [printingId, setPrintingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [visibleLimit, setVisibleLimit] = useState(QR_DISPLAY_PAGE_SIZE);
+  const [inventoryOwner, setInventoryOwner] = useState(accountId);
   const generatingRef = useRef(false);
   const printingRef = useRef(false);
   const deletingRef = useRef(false);
   const focusedRef = useRef(false);
   const loader = useMemo(() => createQRInventoryLoader(
     () => plantApi("/qr-codes", { expectedAccountId: accountId }),
-    setInventory,
+    (next) => { setInventoryOwner(accountId); setInventory(next); },
   ), [accountId]);
-  const { records: plantQRCodes, loading: loadingRecords, hasLoaded, error: loadError } = inventory;
+  const { records: plantQRCodes, loading: loadingRecords, hasLoaded, error: loadError } =
+    inventoryOwner === accountId ? inventory : emptyQRInventory();
   const availableQRCodes = plantQRCodes.filter((qr) => !qr.plantId && qr.status === "generated");
   const assignedQRCodes = plantQRCodes.filter((qr) => qr.status !== "retired" && (Boolean(qr.plantId) || qr.status === "assigned" || qr.status === "active"));
   const activeQRCodesCount = availableQRCodes.length + assignedQRCodes.length;
   const visibleQRCodes = activeTab === "assigned" ? assignedQRCodes : availableQRCodes;
+  const canShowMore = visibleQRCodes.length > visibleLimit;
+  const showMore = () => {
+    if (canShowMore) setVisibleLimit(visibleLimit + QR_DISPLAY_PAGE_SIZE);
+  };
   const loadingPrint = printingId !== null;
 
   const loadPlantQRCodes = useCallback(() => {
@@ -63,7 +73,9 @@ export default function PlantQRCodeScreen({ route }) {
     useCallback(() => {
       focusedRef.current = true;
       void loadPlantQRCodes();
+      const stop = watchStatus(AppState, loadPlantQRCodes);
       return () => {
+        stop();
         focusedRef.current = false;
         loader.cancel();
       };
@@ -90,6 +102,7 @@ export default function PlantQRCodeScreen({ route }) {
       const generated = loader.addGenerated(result);
       setActiveTab("unused");
       setExpandedQrId(null);
+      setVisibleLimit(QR_DISPLAY_PAGE_SIZE);
       await loader.refresh();
       if (focusedRef.current) Alert.alert(t("plantQRCode.qrCodesGenerated"), t("plantQRCode.generatedReady", { count: generated }));
     } catch (error) {
@@ -181,6 +194,10 @@ export default function PlantQRCodeScreen({ route }) {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        scrollEventThrottle={32}
+        onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
+          if (contentSize.height - contentOffset.y - layoutMeasurement.height < 240) showMore();
+        }}
         refreshControl={
           <RefreshControl
             refreshing={hasLoaded && loadingRecords}
@@ -273,7 +290,7 @@ export default function PlantQRCodeScreen({ route }) {
                 <TouchableOpacity
                   key={tab.key}
                   style={[styles.tab, selected && styles.selectedTab]}
-                  onPress={() => { setActiveTab(tab.key); setExpandedQrId(null); }}
+                  onPress={() => { setActiveTab(tab.key); setExpandedQrId(null); setVisibleLimit(QR_DISPLAY_PAGE_SIZE); }}
                   activeOpacity={0.8}
                   accessibilityRole="tab"
                   accessibilityState={{ selected }}
@@ -302,7 +319,7 @@ export default function PlantQRCodeScreen({ route }) {
             </View>
           ) : (
             <View style={styles.codeList}>
-              {visibleQRCodes.map((qr) => {
+              {visibleQRCodes.slice(0, visibleLimit).map((qr) => {
                 const expanded = expandedQrId === qr.id;
                 const unused = !qr.plantId && qr.status === "generated";
                 const statusLabel = unused ? t("plantQRCode.unused") : t("plantQRCode.assigned");
@@ -366,6 +383,10 @@ export default function PlantQRCodeScreen({ route }) {
                 );
               })}
 
+              {canShowMore && <TouchableOpacity style={styles.moreButton} onPress={showMore} accessibilityRole="button">
+                <Text style={styles.moreButtonText}>{t("common.loadMore")}</Text>
+              </TouchableOpacity>}
+
               {activeTab === "unused" && availableQRCodes.length > 0 && <TouchableOpacity
                 style={[styles.printAllButton, loadingPrint && styles.disabledButton]}
                 onPress={handlePrintAll}
@@ -426,6 +447,8 @@ const styles = StyleSheet.create({
   tabCount: { color: "#718078", fontSize: 10, fontWeight: "700" },
   selectedTabText: { color: "#2F6B4F" },
   codeList: { gap: 8, marginTop: 10 },
+  moreButton: { minHeight: 44, alignItems: "center", justifyContent: "center" },
+  moreButtonText: { color: "#2F6B4F", fontWeight: "700" },
   qrCard: { overflow: "hidden", borderWidth: 1, borderColor: "#E1EAE4", borderRadius: 13, backgroundColor: "#FFFFFF" },
   expandedQrCard: { borderColor: "#BFD8C6" },
   qrCardHeader: { minHeight: 68, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 12, paddingVertical: 10 },

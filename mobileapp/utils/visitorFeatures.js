@@ -99,20 +99,36 @@ export async function recordVisitorScan(accountId, qrCode) {
   });
 }
 
-export async function fetchVisitorScanHistory(accountId) {
+export async function fetchVisitorScanHistoryPage(accountId, offset = 0, limit = 20) {
+  requireAccountId(accountId);
+  const page = await readScanPage(accountId, offset, limit);
+  return { scans: await mapScanRows(page.rows, accountId), nextOffset: page.nextOffset };
+}
+
+async function readScanPage(accountId, offset, limit) {
+  const payload = await requestVisitorApi(`/visitor/scan-history?limit=${limit}&offset=${offset}`, { accountId });
+  if (!Array.isArray(payload?.scans)) throw Error("The backend returned an invalid scan history response.");
+  const rows = payload.scans;
+  const hasMore = payload.page?.has_more ?? (rows.length === limit);
+  if (hasMore && !rows.length) throw Error("The backend returned an invalid scan history response.");
+  return { rows, nextOffset: hasMore ? offset + rows.length : null };
+}
+
+export async function fetchVisitorScanHistory(accountId, isCurrent = () => true) {
   requireAccountId(accountId);
   const pageSize = 200;
   const rows = [];
   let offset = 0;
-  while (true) {
-    const payload = await requestVisitorApi(`/visitor/scan-history?limit=${pageSize}&offset=${offset}`, { accountId });
-    if (!Array.isArray(payload?.scans)) throw Error("The backend returned an invalid scan history response.");
-    rows.push(...payload.scans);
-    const hasMore = payload.page?.has_more === true ||
-      (payload.page?.has_more === undefined && payload.scans.length === pageSize);
-    if (!hasMore || payload.scans.length === 0) break;
-    offset += payload.scans.length;
+  while (offset !== null) {
+    const page = await readScanPage(accountId, offset, pageSize);
+    if (!isCurrent()) return [];
+    rows.push(...page.rows);
+    offset = page.nextOffset;
   }
+  return mapScanRows(rows, accountId);
+}
+
+async function mapScanRows(rows, accountId) {
   let images = new Map();
   try {
     images = await addAuthenticatedImages(rows.map((row) => row.plant || {}), accountId);

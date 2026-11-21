@@ -210,6 +210,21 @@ test("Resume restores the exact draft, photos and QR; Start New removes only the
   } finally { await e.close(); }
 });
 
+test("resuming a draft warns when its QR is unavailable and preserves the saved form", async () => {
+  const e = environment();
+  try {
+    await e.seed("used-qr", { plantScientificName: "Saved plant", selectedQRCode: { qr_id: 17, qr_code: "unused-17" } });
+    e.setQrAvailable(false);
+    const h = e.mount({ formDraftKey: "used-qr" });
+    await h.settle();
+    assert.equal(h.value("plantScientificName"), "Saved plant");
+    assert.equal(h.value("selectedQRCode").qr_id, 17);
+    assert.ok(e.nodes(h.tree).some((node) => node.props?.accessibilityRole === "alert" &&
+      node.props.children === "addPlant.scannedQrUnavailable"));
+    assert.ok(e.rows.get("owner").some((row) => row.client_key === "used-qr"));
+  } finally { await e.close(); }
+});
+
 test("Start New then leave untouched never recreates the draft; meaningful edits remain resumable", async () => {
   const e = environment();
   try {

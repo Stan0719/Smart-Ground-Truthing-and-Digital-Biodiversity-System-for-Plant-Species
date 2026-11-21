@@ -64,6 +64,19 @@ test("sync submits draft and removes it only after server confirmation", async (
   assert.equal(f.notifications[0].count, 1);
   assert.equal(f.notifications[0].accountId, "owner");
 });
+test("submitting height 100 ignores an unrelated incomplete autosaved draft", async () => {
+  const current = validDraft();
+  current.body.content.heightCm = "100";
+  const incomplete = validDraft({ client_key: "unfinished" });
+  incomplete.body.content.heightCm = "";
+  const f = await fixture({ drafts: [incomplete, current] });
+  assert.equal(await f.sync("owner", { clientKey: "key" }), 1);
+  assert.equal(f.calls.find((call) => call.path === "/plants/7/observations").options.body.content.heightCm, 100);
+  assert.deepEqual(f.removed, ["key"]);
+  const bulk = await fixture({ drafts: [incomplete, current] });
+  await assert.rejects(bulk.sync("owner"), /valid plant height/);
+  assert.equal(bulk.calls.length, 0);
+});
 test("sync returns the actual submitted observation identity to the originating form", async () => {
   const f = await fixture();
   const submitted = [];

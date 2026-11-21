@@ -1,10 +1,11 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { t, dateLocale, translateUIMessage, useAppTranslation } from "../translations/i18n";
-import { fetchVisitorFavouritePlantIds, fetchVisitorScanHistory } from "../utils/visitorFeatures";
+import { fetchVisitorFavouritePlantIds, fetchVisitorScanHistory, fetchVisitorScanHistoryPage } from "../utils/visitorFeatures";
+import { createScanHistoryLoader, emptyScanHistory } from "../utils/scanHistoryLoader";
 import { calendarWeeks, filterAndSortScanHistory, formatDateKey, isCalendarDateSelected, localDateKey, shiftCalendarMonth } from "../utils/scanHistoryFilters";
 import RefreshButton from "../components/RefreshButton";
 import BackButton from "../components/BackButton";
@@ -23,11 +24,16 @@ function formatScanDate(value) {
 
 export default function ScanHistoryScreen({ navigation, user }) {
   useAppTranslation();
-  const accountId = user?.id;
-  const [scans, setScans] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
+  return <AccountScanHistory key={user?.id} navigation={navigation} accountId={user?.id} />;
+}
+
+function AccountScanHistory({ navigation, accountId }) {
+  useAppTranslation();
+  const [history, setHistory] = useState(emptyScanHistory);
+  const historyLoader = useMemo(() => createScanHistoryLoader({
+    fetchPage: (offset) => fetchVisitorScanHistoryPage(accountId, offset),
+    fetchAll: (isCurrent) => fetchVisitorScanHistory(accountId, isCurrent),
+  }, setHistory), [accountId]);
   const [failedImageUris, setFailedImageUris] = useState(() => new Set());
   const [search, setSearch] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -42,30 +48,34 @@ export default function ScanHistoryScreen({ navigation, user }) {
   const [uniquePlantsOnly, setUniquePlantsOnly] = useState(false);
   const [sortOrder, setSortOrder] = useState("newest");
 
-  const load = useCallback(async (pull = false) => {
-    if (pull) setRefreshing(true);
-    else setLoading(true);
-    setError("");
-    try {
-      const result = await fetchVisitorScanHistory(accountId);
-      setScans(result);
-      if (favouritesOnlyRef.current) {
-        try {
-          setFavouritePlantIds(await fetchVisitorFavouritePlantIds(accountId));
-          setFilterError("");
-        } catch (cause) {
-          setFilterError(cause?.message || "Unable to refresh favourite plants.");
-        }
-      }
-    } catch (cause) {
-      setError(cause?.message || "Unable to load scan history.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [accountId]);
+  const mode = search.trim() || dateFilter.type !== "all" || favouritesOnly || uniquePlantsOnly || sortOrder === "oldest"
+    ? "all" : "paged";
+  const isCurrentMode = mode === history.mode;
+  const scans = history.scans;
+  const loading = !isCurrentMode || history.phase === "initial";
+  const refreshing = isCurrentMode && history.phase === "refresh";
+  const error = isCurrentMode ? history.error : null;
 
-  useFocusEffect(useCallback(() => { void load(false); }, [load]));
+  const load = useCallback(async (pull = false) => {
+    const request = historyLoader.refresh(mode, pull);
+    if (favouritesOnlyRef.current) {
+      try {
+        const ids = await fetchVisitorFavouritePlantIds(accountId);
+        if (favouritesOnlyRef.current) {
+          setFavouritePlantIds(ids);
+          setFilterError("");
+        }
+      } catch (cause) {
+        if (favouritesOnlyRef.current) setFilterError(cause?.message || "Unable to refresh favourite plants.");
+      }
+    }
+    await request;
+  }, [accountId, historyLoader, mode]);
+
+  useFocusEffect(useCallback(() => {
+    if (!historyLoader.resume(mode)) void load();
+    return historyLoader.cancel;
+  }, [historyLoader, load, mode]));
   const matchingScans = useMemo(() => filterAndSortScanHistory(scans, {
     search,
     dateFilter,
@@ -117,11 +127,16 @@ export default function ScanHistoryScreen({ navigation, user }) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
+      <FlatList
+        data={loading ? [] : matchingScans}
+        keyExtractor={(scan) => String(scan.scan_id)}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor="#468585" colors={["#468585"]} />}
-      >
+        onEndReached={mode === "paged" && isCurrentMode ? () => void historyLoader.loadMore() : undefined}
+        onEndReachedThreshold={0.4}
+        ListHeaderComponent={<>
         <View style={styles.header}>
           <BackButton accessibilityLabel={t("common.goBack")} onPress={() => navigation.goBack()} />
           <Text style={styles.title}>{t("account.scanHistory")}</Text>
@@ -156,12 +171,13 @@ export default function ScanHistoryScreen({ navigation, user }) {
           </TouchableOpacity>
         </View>
         <View style={styles.resultRow}>
-          <Text style={styles.resultCount}>{t("scanHistory.matchingScans", { count: loading ? "—" : matchingScans.length })}</Text>
+          <Text style={styles.resultCount}>{t(mode === "paged" && history.nextOffset !== null ? "scanHistory.loadedScans" : "scanHistory.matchingScans", { count: loading ? "—" : matchingScans.length })}</Text>
           {activeFilterCount > 0 && <Text style={styles.activeFilters} numberOfLines={1}>{activeFilterSummary}</Text>}
         </View>
 
-        {!!error && <Text accessibilityRole="alert" style={styles.error}>{translateUIMessage(error)}</Text>}
-        {loading ? (
+        {!!error && <Text accessibilityRole="alert" style={styles.error}>{translateUIMessage(error.message || "Unable to load scan history.")}</Text>}
+        </>}
+        ListEmptyComponent={loading || refreshing ? (
           <View style={styles.state}><Ionicons name="scan-outline" size={38} color="#77A68A" /><Text style={styles.stateText}>{t("scanHistory.loading")}</Text></View>
         ) : !error && scans.length === 0 ? (
           <View style={styles.state}>
@@ -169,7 +185,7 @@ export default function ScanHistoryScreen({ navigation, user }) {
             <Text style={styles.emptyTitle}>{t("scanHistory.noScanHistory")}</Text>
             <Text style={styles.stateText}>{t("scanHistory.plantsYouScanWillAppearHere")}</Text>
           </View>
-        ) : matchingScans.length === 0 ? (
+        ) : !error ? (
           <View style={styles.state}>
             <Ionicons name="search-outline" size={48} color="#91BFA0" />
             <Text style={styles.emptyTitle}>{t("scanHistory.noMatchingScans")}</Text>
@@ -178,9 +194,18 @@ export default function ScanHistoryScreen({ navigation, user }) {
               <Text style={styles.resetEmptyText}>{t("scanHistory.resetFilters")}</Text>
             </TouchableOpacity>
           </View>
-        ) : matchingScans.map((scan) => (
+        ) : null}
+        ListFooterComponent={mode === "paged" && isCurrentMode && (
+          history.phase === "more" ? <ActivityIndicator color="#468585" style={styles.pageFooter} />
+            : history.nextOffset !== null && <View style={styles.pageFooter}>
+              {!!history.pageError && <Text accessibilityRole="alert" style={styles.error}>{translateUIMessage(history.pageError.message || "Unable to load scan history.")}</Text>}
+              <TouchableOpacity accessibilityRole="button" style={styles.resetEmptyButton} onPress={() => void historyLoader.loadMore({ retry: true })}>
+                <Text style={styles.resetEmptyText}>{t(history.pageError ? "common.tryAgain" : "common.loadMore")}</Text>
+              </TouchableOpacity>
+            </View>
+        )}
+        renderItem={({ item: scan }) => (
           <TouchableOpacity
-            key={String(scan.scan_id)}
             accessibilityRole="button"
             disabled={!scan.plant?.plantId}
             activeOpacity={0.8}
@@ -205,8 +230,8 @@ export default function ScanHistoryScreen({ navigation, user }) {
             </View>
             <Ionicons name="chevron-forward" size={20} color="#91A89A" />
           </TouchableOpacity>
-        ))}
-      </ScrollView>
+        )}
+      />
 
       <Modal visible={filtersOpen} transparent animationType="slide" onRequestClose={() => setFiltersOpen(false)}>
         <View style={styles.modalBackdrop}>
@@ -322,6 +347,7 @@ const styles = StyleSheet.create({
   stateText: { color: "#6D7F75", fontSize: 14, textAlign: "center" },
   error: { color: "#A52A3A", fontSize: 13, marginBottom: 12 },
   resetEmptyButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 16, marginTop: 4, borderRadius: 12, backgroundColor: "#E7F2E2" },
+  pageFooter: { alignItems: "center", paddingVertical: 12 },
   resetEmptyText: { color: "#3D735E", fontSize: 14, fontWeight: "700" },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(23, 42, 32, 0.28)" },
   modalDismiss: { ...StyleSheet.absoluteFillObject },

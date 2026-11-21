@@ -7,13 +7,40 @@ const require=createRequire(import.meta.url),ts=require('typescript'),React=requ
 function load(file,deps){const source=readFileSync(new URL('../'+file,import.meta.url),'utf8');const code=ts.transpileModule(source,{fileName:file+'.jsx',compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true,target:ts.ScriptTarget.ES2022}}).outputText;const module={exports:{}};new Function('require','module','exports',code)((name)=>{if(name==='../components/BackButton')return{default:(props)=>React.createElement('TouchableOpacity',props,props.label||props.accessibilityLabel),__esModule:true};assert.ok(name in deps,name);return {...deps[name],__esModule:name!=='react'}},module,module.exports);return module.exports;}
 function fixture(api){let slots=[],index=0,focus,active,removed=0;const hooks={useState(initial){const i=index++;if(!(i in slots))slots[i]=initial;return[slots[i],value=>slots[i]=value]},useMemo(fn,deps){const i=index++;if(!slots[i]||deps.some((v,j)=>v!==slots[i].deps[j]))slots[i]={deps,value:fn()};return slots[i].value}};hooks.useCallback=(fn,deps)=>hooks.useMemo(()=>fn,deps);const module=load('utils/useSpeciesCatalog.js',{react:hooks,'@react-navigation/native':{useFocusEffect:fn=>focus=fn},'react-native':{AppState:{addEventListener:(_,fn)=>{active=fn;return{remove(){removed++}}}}},'./plantApi':api});return {render(account='owner',options={}){index=0;return module.useSpeciesCatalog(account,options)},focus:()=>focus(),active:()=>active('active'),removed:()=>removed};}
 
-test('catalogue refreshes on focus, foreground and pull; counts include approved plants only',async()=>{let reads=0;const f=fixture({fetchSpeciesCatalog:async options=>{assert.equal(options.accountId,'owner');reads++;return [{id:'6'}]},fetchPlantRecords:async()=>[{speciesId:'6',currentStatus:'Approved'},{speciesId:'6',currentStatus:'Pending Review'}]});f.render();const cleanup=f.focus();await f.render().refresh();assert.equal(reads,1);assert.equal(f.render().counts['6'],1);f.active();await f.render().refresh();assert.equal(reads,2);cleanup();assert.equal(f.removed(),1);const again=f.focus();await f.render().refresh();assert.equal(reads,3);again();});
+test('catalogue refreshes on focus, foreground and pull and uses the approved counts summary',async()=>{let reads=0;const f=fixture({fetchSpeciesCatalog:async options=>{assert.equal(options.accountId,'owner');reads++;return [{id:'6'}]},fetchPlantSpeciesCounts:async()=>({'6':1})});f.render();const cleanup=f.focus();await f.render().refresh();assert.equal(reads,1);assert.equal(f.render().counts['6'],1);f.active();await f.render().refresh();assert.equal(reads,2);cleanup();assert.equal(f.removed(),1);const again=f.focus();await f.render().refresh();assert.equal(reads,3);again();});
 
-test('Guest and Visitor catalogue callers use public-only data and account changes clear prior catalogue state',async()=>{const reads=[];const f=fixture({fetchSpeciesCatalog:async options=>{reads.push(['species',options]);return[{id:'6'}]},fetchPlantRecords:async(_species,options)=>{reads.push(['plants',options]);return[{speciesId:'6',currentStatus:'Approved'}]}});f.render('visitor',{publicOnly:true});const visitorCleanup=f.focus();await f.render('visitor',{publicOnly:true}).refresh();assert.equal(f.render('visitor',{publicOnly:true}).counts['6'],1);assert.deepEqual(reads.map(([kind,options])=>[kind,options.accountId,options.publicOnly]),[['species','visitor',true],['plants','visitor',true]]);f.render(null,{publicOnly:true});assert.equal(f.render(null,{publicOnly:true}).species.length,0);const guestCleanup=f.focus();await f.render(null,{publicOnly:true}).refresh();assert.deepEqual(reads.slice(2).map(([kind,options])=>[kind,options.accountId,options.publicOnly]),[['species',null,true],['plants',null,true]]);visitorCleanup();guestCleanup();});
+test('Guest and Visitor catalogue callers use public-only data and account changes clear prior catalogue state',async()=>{const reads=[];const f=fixture({fetchSpeciesCatalog:async options=>{reads.push(['species',options]);return[{id:'6'}]},fetchPlantSpeciesCounts:async options=>{reads.push(['counts',options]);return{'6':1}}});f.render('visitor',{publicOnly:true});const visitorCleanup=f.focus();await f.render('visitor',{publicOnly:true}).refresh();assert.equal(f.render('visitor',{publicOnly:true}).counts['6'],1);assert.deepEqual(reads.map(([kind,options])=>[kind,options.accountId,options.publicOnly]),[['species','visitor',true],['counts','visitor',true]]);f.render(null,{publicOnly:true});assert.equal(f.render(null,{publicOnly:true}).species.length,0);const guestCleanup=f.focus();await f.render(null,{publicOnly:true}).refresh();assert.deepEqual(reads.slice(2).map(([kind,options])=>[kind,options.accountId,options.publicOnly]),[['species',null,true],['counts',null,true]]);visitorCleanup();guestCleanup();});
 
-test('successful species are visible even if secondary plant counts fail; network errors retain them and auth clears them',async()=>{let failSpecies,failCounts=false;const f=fixture({fetchSpeciesCatalog:async()=>{if(failSpecies)throw failSpecies;return [{id:'6'}]},fetchPlantRecords:async()=>{if(failCounts)throw Error('Offline');return []}});f.render();const cleanup=f.focus();await f.render().refresh();failCounts=true;await f.render().refresh();assert.equal(f.render().species[0].id,'6');assert.equal(f.render().counts,null);assert.match(f.render().error,/counts/);failSpecies=Error('Network unavailable');await f.render().refresh();assert.equal(f.render().species[0].id,'6');assert.match(f.render().error,/Network/);failSpecies=Object.assign(Error('Session expired'),{status:401});await f.render().refresh();assert.equal(f.render().species.length,0);cleanup();});
+test('successful species are visible even if secondary plant counts fail; network errors retain them and auth clears them',async()=>{let failSpecies,failCounts=false;const f=fixture({fetchSpeciesCatalog:async()=>{if(failSpecies)throw failSpecies;return [{id:'6'}]},fetchPlantSpeciesCounts:async()=>{if(failCounts)throw Error('Offline');return {}}});f.render();const cleanup=f.focus();await f.render().refresh();failCounts=true;await f.render().refresh();assert.equal(f.render().species[0].id,'6');assert.equal(f.render().counts,null);assert.match(f.render().error,/counts/);failSpecies=Error('Network unavailable');await f.render().refresh();assert.equal(f.render().species[0].id,'6');assert.match(f.render().error,/Network/);failSpecies=Object.assign(Error('Session expired'),{status:401});await f.render().refresh();assert.equal(f.render().species.length,0);cleanup();});
 
-test('late catalogue results cannot replace a newer focus visit and account changes hide old data',async()=>{let resolveOld,reads=0;const old=new Promise(r=>resolveOld=r);const f=fixture({fetchSpeciesCatalog:async()=>++reads===1?old:[{id:'fresh'}],fetchPlantRecords:async()=>[]});f.render();const first=f.focus();const pending=f.render().refresh();first();const second=f.focus();await f.render().refresh();resolveOld([{id:'stale'}]);await pending;assert.equal(f.render().species[0].id,'fresh');assert.equal(f.render('different').species.length,0);second();});
+test('late catalogue results cannot replace a newer focus visit and account changes hide old data',async()=>{let resolveOld,reads=0;const old=new Promise(r=>resolveOld=r);const f=fixture({fetchSpeciesCatalog:async()=>++reads===1?old:[{id:'fresh'}],fetchPlantSpeciesCounts:async()=>({})});f.render();const first=f.focus();const pending=f.render().refresh();first();const second=f.focus();await f.render().refresh();resolveOld([{id:'stale'}]);await pending;assert.equal(f.render().species[0].id,'fresh');assert.equal(f.render('different').species.length,0);second();});
+
+test('public catalogue shows species before counts, shares pending work and reuses a recent visit', async () => {
+  let resolveCounts;
+  let reads = 0;
+  const counts = new Promise((resolve) => { resolveCounts = resolve; });
+  const f = fixture({
+    fetchSpeciesCatalog: async () => { reads++; return [{ id: '6' }]; },
+    fetchPlantSpeciesCounts: () => counts,
+  });
+  const render = () => f.render('visitor', { publicOnly: true });
+  render();
+  const leave = f.focus();
+  const refresh = render().refresh();
+  await Promise.resolve();
+  assert.equal(render().species[0].id, '6');
+  assert.equal(render().counts, null);
+  assert.equal(render().refresh(), refresh);
+  resolveCounts({ '6': 23 });
+  await refresh;
+  leave();
+  const leaveAgain = f.focus();
+  assert.equal(reads, 1);
+  assert.equal(render().counts['6'], 23);
+  await render().refresh();
+  assert.equal(reads, 2);
+  leaveAgain();
+});
 
 test('species search and sort retain records from every family',()=>{
   const source=readFileSync(new URL('../utils/speciesFilters.js',import.meta.url),'utf8').replace(/export /g,'');
@@ -46,7 +73,7 @@ test('species-specific Plants reloads are scoped to the selected route and API f
   assert.match(species,/navigation\.navigate\("Species",\s*\{\s*slug:\s*item\.slug,\s*speciesId:\s*pendingRequest \? item\.proposedSpeciesId : item\.id/);
   assert.match(detail,/slug:\s*selectedSpecies\.slug,\s*speciesId:\s*selectedSpecies\.id/);
   assert.match(list,/const requestKey = .*currentSpeciesId.*currentSlug/);
-  assert.match(list,/activeRequest\?\.key === requestKey && activeRequest\.promise/);
+  assert.match(list,/activeRequest\?\.key === listRequestKey && activeRequest\.promise && !activeRequest\.more/);
   assert.match(list,/requestRef\.current\?\.id === requestId/);
   assert.match(list,/filterUniqueSpeciesPlantRecords\(records, matchedId, currentSlug\)/);
   assert.match(list,/filterPlantRecordsForRole\(recordsForSpecies, role, accountId, \{ publicOnly \}\)/);
@@ -63,6 +90,9 @@ test('species-specific Plants reloads are scoped to the selected route and API f
 
 test('a slower request for the previous species cannot replace the selected species plants',async()=>{
   let state=[],refs=[],stateIndex=0,refIndex=0,focus;
+  const pageReads=[];
+  const plant = (id, speciesId) => ({ id, plantId:id, speciesId, currentStatus:'Approved' });
+  let failNextPage=true;
   let resolveFirst,resolveSecond,catalogReads=0;
   const firstCatalog=new Promise(resolve=>{resolveFirst=resolve});
   const secondCatalog=new Promise(resolve=>{resolveSecond=resolve});
@@ -75,12 +105,22 @@ test('a slower request for the previous species cannot replace the selected spec
   for(const name of ['View','Text','TextInput','TouchableOpacity','ScrollView','FlatList','ActivityIndicator','Image','RefreshControl'])native[name]=name;
   const screen=load('screens/Plant.js',{
     react:{...React,...hooks},'react-native':native,
+    '@expo/vector-icons/Ionicons':{default:'Ionicons'},
     'react-native-safe-area-context':{SafeAreaView:'SafeAreaView'},
     '@react-navigation/native':{useFocusEffect:fn=>{focus=fn}},
     '../translations/i18n':{t:key=>key,translateLabel:value=>value,translateUIMessage:value=>value,dateLocale:'en',useAppTranslation(){},translateFieldValue:value=>value},
     '../components/LanguageSelector':{default:'LanguageSelector'},'../data/mockData':{getSpeciesBySlug:()=>null},
     '../utils/plantApi':{
       fetchSpeciesCatalog:()=>++catalogReads===1?firstCatalog:secondCatalog,
+      fetchPublicPlantPage:async(_catalog,id,cursor=null,limit=20)=>{
+        pageReads.push([id,cursor,limit]);
+        if (cursor && failNextPage) {
+          failNextPage=false;
+          throw Error('Network unavailable');
+        }
+        return cursor ? {records:[plant('7',id)],nextCursor:null}
+          : {records:[plant(id==='6'?'8':'5',id)],nextCursor:'8'};
+      },
       fetchPlantRecords:async()=>[
         {id:'8',plantId:'8',speciesId:'6',currentStatus:'Approved'},
         {id:'5',plantId:'5',speciesId:'5',currentStatus:'Approved'},
@@ -94,7 +134,7 @@ test('a slower request for the previous species cannot replace the selected spec
     '../hooks/useVisitorFavourites':{default:()=>({refresh:async()=>{},refreshing:false,loading:false,error:'',mutationError:'',isFavourite:()=>false,isPending:()=>false,toggle:async()=>{}})},
   });
   let screenTree;
-  const render=(id,slug)=>{stateIndex=0;refIndex=0;screenTree=screen.default({route:{params:{speciesId:id,slug,species:{id,slug,name:`Species ${id}`}}},navigation:{navigate(){},goBack(){}},user:{id:'visitor',role:'Visitor'}});return refs[0].current.promise};
+  const render=(id,slug,approvalStatus)=>{stateIndex=0;refIndex=0;screenTree=screen.default({route:{params:{speciesId:id,slug,species:{id,slug,name:`Species ${id}`,approvalStatus}}},navigation:{navigate(){},goBack(){}},user:{id:'visitor',role:'Visitor'}});return refs[0].current.promise};
   render('5','species-5');
   focus();
   const previousRequest=refs[0].current.promise;
@@ -105,7 +145,7 @@ test('a slower request for the previous species cannot replace the selected spec
   resolveFirst([{id:'5',slug:'species-5',name:'Species 5'}]);
   resolveSecond([{id:'6',slug:'species-6',name:'Species 6'}]);
   await Promise.all([previousRequest,selectedRequest]);
-  assert.deepEqual(state[1].records.map(plant=>plant.plantId),['8']);
+  assert.deepEqual(state.find(value=>value?.records?.length).records.map(plant=>plant.plantId),['8']);
   render('6','species-6');
   assert.equal(screenTree.type,'SafeAreaView');
   assert.deepEqual(screenTree.props.edges,['top','left','right']);
@@ -129,12 +169,40 @@ test('a slower request for the previous species cannot replace the selected spec
   assert.equal(scrollNodes.filter(node=>node.type==='TextInput').length,0,'virtualized rows do not duplicate search controls');
   assert.equal(typeof nodes(controls).find(node=>node.type==='TextInput').props.onChangeText,'function');
   assert.ok(headerNodes.some(node=>node.props?.children==='plant.allVisiblePlants'));
+  assert.deepEqual(pageReads,[['6',null,20]],'the stale species fetch never starts and only page one loads initially');
+  scroll.props.onEndReached();
+  scroll.props.onEndReached();
+  await new Promise(setImmediate);
+  render('6','species-6');
+  const failedPage=nodes(screenTree).find(node=>node.type==='FlatList');
+  assert.deepEqual(failedPage.props.data.map(record=>record.plantId),['8']);
+  assert.deepEqual(pageReads,[['6',null,20],['6','8',20]],'rapid scrolling shares one load-more request');
+  const retry=nodes(failedPage.props.ListFooterComponent).find(node=>node.props?.onPress);
+  retry.props.onPress();
+  await new Promise(setImmediate);
+  render('6','species-6');
+  const lastPage=nodes(screenTree).find(node=>node.type==='FlatList');
+  assert.deepEqual(lastPage.props.data.map(record=>record.plantId),['8','7']);
+  assert.equal(lastPage.props.onEndReached,undefined);
   const refresh=headerNodes.find(node=>node.type==='RefreshButton');
   assert.equal(refresh.props.testID,'plant-list-refresh');
   refresh.props.onPress();
   await refs[0].current.promise;
   render('6','species-6');
   assert.equal(React.Children.toArray(screenTree.props.children)[0].type,'View','header stays outside scroll after refresh');
+  nodes(screenTree).find(node=>node.type==='TextInput').props.onChangeText('7');
+  render('6','species-6');
+  focus();
+  await refs[0].current.promise;
+  render('6','species-6');
+  assert.deepEqual(pageReads.slice(-2),[['6',null,50],['6','8',50]],'search checks every page for the species');
+  assert.deepEqual(nodes(screenTree).find(node=>node.type==='FlatList').props.data.map(record=>record.plantId),['7']);
+  const beforeOpen = catalogReads;
+  render('5','species-5','Approved');
+  focus();
+  await refs[0].current.promise;
+  assert.equal(catalogReads,beforeOpen,'approved public route metadata avoids a catalogue request');
+  assert.deepEqual(pageReads.at(-1),['5',null,20]);
 
 });
 

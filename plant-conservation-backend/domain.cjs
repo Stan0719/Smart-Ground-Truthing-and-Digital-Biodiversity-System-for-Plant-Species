@@ -3,12 +3,14 @@ const { observationHistory, captureApprovedReview, submittedHistoryForReview } =
 const { resolvePlantRegistrations, registrationLocation } = require("./plant-registration.cjs");
 const { finalRejection } = require("./final-rejection.cjs");
 const { withSubmissionUpdates } = require("./submission-updates.cjs");
+const { projectObservationGps } = require("./observation-gps.cjs");
 const { withResubmissionEvidence } = require('./observation-resubmission.cjs');
 const { randomUUID, randomBytes, createHash } = require("node:crypto");
 const { originColumnAvailable, classifyObservations } = require("./observation-origin.cjs");
 const observationVersions = require("./observation-submission-versions.cjs");
 const { canModifyPendingObservation } = require("./status-permissions.cjs");
 const { queueOptions, queuePage } = require("./observation-queue.cjs");
+const { publicPlantPageOptions, publicPlantPageMetadata, readPlantSpeciesCounts } = require("./plant-list-page.cjs");
 const {
   permitted,
   canReadScientificCatalogue,
@@ -424,7 +426,11 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       (!/^[1-9][0-9]{0,9}$/.test(plantId) || Number(plantId) > 2147483647)
     )
       fail(400, "Invalid plant identifier.");
+    const pageOptions = publicPlantPageOptions(req.query, plantId === null && !publicWeb && !mine && !req.user);
     const staff = canReadScientificCatalogue(req.user);
+    if (req.query.summary === "species-counts" && plantId === null && !publicWeb && !mine && !pageOptions) {
+      return res.json({ species_counts: await readPlantSpeciesCounts(pool, catalogueVisibilityFor(req.user), staff) });
+    }
     const rows = (
       await pool.query(
         `SELECT p.plant_id,p.species_id,p.scientific_name,p.rbac_status,p.registered_subject,p.registered_at,
@@ -547,7 +553,9 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             THEN p.rbac_status='Approved' OR (p.rbac_status='Pending Review' AND p.registered_subject=$2)
             ELSE p.rbac_status='Approved' OR p.registered_subject=$2 OR $3 END)
           AND ($7 OR COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved')
-          AND ($4::integer IS NULL OR p.plant_id=$4) ORDER BY p.plant_id DESC LIMIT 500`,
+          AND ($4::integer IS NULL OR p.plant_id=$4)
+          ${pageOptions ? "AND p.species_id=$9 AND ($10::integer IS NULL OR p.plant_id<$10)" : ""}
+          ORDER BY p.plant_id DESC LIMIT ${pageOptions ? "$11" : "500"}`,
         [
           catalogueVisibilityFor(req.user),
           req.user ? subject(req.user) : "",
@@ -557,9 +565,12 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           permitted(req.user, "plants.create"),
           staff,
           req.user?.role === "Botanist",
+          ...(pageOptions ? [pageOptions.speciesId, pageOptions.before, pageOptions.limit + 1] : []),
         ],
       )
     ).rows;
+    const page = pageOptions ? publicPlantPageMetadata(rows, pageOptions.limit) : null;
+    if (page?.has_more) rows.pop();
     // Parent authorization above runs before resolving any private history.
     const registrations = await resolvePlantRegistrations(pool, rows.filter(r => r.rbac_status === "Approved").map(r => r.plant_id));
     for (const row of rows) {
@@ -645,7 +656,10 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       if (!plants.length) fail(404, "Plant unavailable.");
       return res.json({ plant: projectedPlants[0] });
     }
-    res.json({ plants: projectedPlants });
+    res.json({
+      plants: projectedPlants,
+      ...(page ? { page } : {}),
+    });
   };
   app.get("/api/plants", allow("plants.catalogue.read"), readPlants);
   app.get("/api/plants/:id", allow("plants.catalogue.read"), readPlants);
@@ -812,6 +826,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             WHERE a.observation_id = o.id
           ), '[]') AS assets,
           p.species_id,
+          COALESCE(v.visibility, 'protected') = ANY($3::text[]) AS gps_visibility_allowed,
           CASE WHEN $1 OR COALESCE(v.visibility, 'protected') = ANY($3::text[]) THEN p.scientific_name END AS plant_scientific_name,
           CASE WHEN $1 OR COALESCE(v.visibility, 'protected') = ANY($3::text[]) THEN s.scientific_name END AS species_scientific_name,
           CASE
@@ -875,7 +890,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
       const enriched = await enrichObservationRead(rows, officer);
       const updated = await withSubmissionUpdates(pool, enriched, officer);
       const projected = officer ? await observationHistory(pool, updated) : updated;
-      return res.json({ observation: projectGps(projected[0], req.user) });
+      return res.json({ observation: projectObservationGps(projected[0], req.user, subject(req.user), projectGps) });
     }
     const hasMore = pageOptions && rows.length > pageOptions.limit;
     const batch = pageOptions ? rows.slice(0, pageOptions.limit) : rows;
@@ -884,7 +899,8 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     const enriched = await enrichObservationRead(visible, officer, true);
     const updated = await withSubmissionUpdates(pool, enriched, officer);
     const projected = officer ? await observationHistory(pool, updated) : updated;
-    res.json({ observations: projectGps(projected.map(({ queue_created_at, ...row }) => row), req.user),
+    res.json({ observations: projected.map(({ queue_created_at, ...row }) =>
+      projectObservationGps(row, req.user, subject(req.user), projectGps)),
       ...(pageOptions ? { page: queuePage(batch, pageOptions, Boolean(hasMore)) } : {}) });
   };
   app.get(

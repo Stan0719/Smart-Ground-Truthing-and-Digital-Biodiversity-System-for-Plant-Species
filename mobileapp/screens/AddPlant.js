@@ -2,6 +2,7 @@ import { useAppTranslation, t, translateLabel, translateUIMessage } from "../tra
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  AppState,
   View,
   Text,
   TextInput,
@@ -129,6 +130,8 @@ export function AddPlantForm({
   const [submittedQr, setSubmittedQr] = useState(null);
   const [availableQRCodes, setAvailableQRCodes] = useState([]);
   const [selectedQRCode, setSelectedQRCode] = useState(null);
+  const [unavailableQr, setUnavailableQr] = useState(null);
+  const qrFocus = useRef(false);
   const [showQRDropdown, setShowQRDropdown] = useState(false);
   const [loadingQRCodes, setLoadingQRCodes] = useState(true);
   const [qrLoadError, setQrLoadError] = useState("");
@@ -250,9 +253,37 @@ export function AddPlantForm({
   }, [accountId]);
 
   useFocusEffect(useCallback(() => {
+    qrFocus.current = true;
     void loadSpeciesCatalog();
     void loadAvailableQRCodes();
+    const subscription = AppState?.addEventListener("change", (state) => {
+      if (state === "active") void loadAvailableQRCodes();
+    });
+    return () => { qrFocus.current = false; subscription?.remove(); };
   }, [loadSpeciesCatalog, loadAvailableQRCodes]));
+
+  const selectedQrId = selectedQRCode?.qr_id;
+  const selectedQrToken = selectedQRCode?.qr_code;
+  useEffect(() => {
+    if (!accountId || !selectedQrId || !selectedQrToken) return undefined;
+    let active = true, pending = false;
+    const check = async () => {
+      if (!qrFocus.current || pending) return;
+      pending = true;
+      try {
+        const result = await plantApi(`/qr-codes?qr_id=${encodeURIComponent(String(selectedQrId))}`, { expectedAccountId: accountId });
+        if (!active || !Array.isArray(result?.qr_codes)) return;
+        const available = result.qr_codes.some((code) => String(code.qr_id) === String(selectedQrId) &&
+          code.qr_code === selectedQrToken && code.status === "generated" && code.plant_id == null);
+        setUnavailableQr(available ? null : selectedQrId);
+        if (!available) setAvailableQRCodes((codes) => codes.filter((code) => String(code.qr_id) !== String(selectedQrId)));
+      } catch { /* Keep the selection until availability is confirmed. */ }
+      finally { pending = false; }
+    };
+    if (String(restoredDraftRef.current?.form?.selectedQRCode?.qr_id) === String(selectedQrId)) void check();
+    const subscription = AppState?.addEventListener("change", (state) => { if (state === "active") void check(); });
+    return () => { active = false; subscription?.remove(); };
+  }, [accountId, selectedQrId, selectedQrToken]);
 
   useEffect(() => {
     const scannedId = route.params?.scannedQrId;
@@ -1765,6 +1796,8 @@ function handleRemoveSpeciesPhoto(index) {
                 />
               </TouchableOpacity>
 
+              {selectedQrId != null && unavailableQr === selectedQrId &&
+                <Text accessibilityRole="alert" style={styles.noQRText}>{t("addPlant.scannedQrUnavailable")}</Text>}
               {showQRDropdown && (
                 <View style={styles.qrDropdown}>
                   <ScrollView style={[styles.qrOptionsList, { maxHeight: Math.min(270, Math.max(240, screenHeight * 0.3)) }]}

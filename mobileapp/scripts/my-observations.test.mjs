@@ -10,6 +10,24 @@ const detail = readFileSync(new URL("../screens/NotificationObservation.js", imp
 const utility = readFileSync(new URL("../utils/myObservations.js", import.meta.url), "utf8");
 const detailUtility = readFileSync(new URL("../utils/observationDetails.js", import.meta.url), "utf8");
 
+test("observation edit capabilities and listing start while observation pages are still pending", async () => {
+  let finishObservations;
+  const page = new Promise((resolve) => { finishObservations = resolve; });
+  const calls = [];
+  const loading = fetchMyObservations("owner", "Owner", async (path) => {
+    calls.push(path);
+    if (path.startsWith("/observations?")) return page;
+    if (path.endsWith("/capabilities")) return { available: true };
+    assert.equal(path, "/observation-edits");
+    return { edits: [] };
+  });
+  await new Promise(setImmediate);
+  assert.ok(calls.some((path) => path.startsWith("/observations?")));
+  assert.ok(calls.includes("/observation-edits"));
+  finishObservations({ observations: [] });
+  assert.deepEqual((await loading).observations, []);
+});
+
 test("verified Observation revisions keep their own statuses, reviews, and navigation targets", () => {
   const observation = { id: "field-1", status: "Approved", date: "2026-11-16T00:00:00Z", content: {} };
   const versions = [

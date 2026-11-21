@@ -82,13 +82,8 @@ function markResolvedCorrections(rows, kind) {
 function plantRegistrationHistory(rows) {
   const isApprovalCapture = (row) => {
     const provenance = row.snapshot?.review_provenance;
-    return row.priorChangeId == null && row.status === "Approved" &&
-      provenance?.kind === "plant" && typeof provenance.review_id === "string" && provenance.review_id.length > 0 &&
-      row.snapshot?.observation_id != null && String(provenance.submission_id) === String(row.snapshot.observation_id);
+    return provenance?.evidence_type === "approval_capture";
   };
-  const registration = rows.find((row) => row.original && !isApprovalCapture(row));
-  const registrationObservationId = registration?.snapshot?.observation_id;
-  const hiddenCaptures = new Set();
   for (const row of rows.filter(isApprovalCapture)) {
     row.original = false; row.edited = false; row.historyType = "approvalSnapshot";
     const provenance = row.snapshot.review_provenance;
@@ -102,22 +97,14 @@ function plantRegistrationHistory(rows) {
           String(candidate.snapshot.species_id ?? "") === String(row.snapshot.species_id ?? "") &&
           candidate.snapshot.scientific_name === row.snapshot.scientific_name &&
           JSON.stringify(stableSnapshot(candidate.snapshot.content)) === JSON.stringify(stableSnapshot(row.snapshot.content))));
-    if (source && ["Approved", "Pending Review"].includes(source.status)) {
-      // One submission, two stored snapshots: retain the exact submitted-version
-      // identifier and fold only the explicit approval metadata into its row.
-      source.status = "Approved";
+    if (row.status === "Approved" && source?.status === "Approved") {
+      // Retain review metadata on an already Approved submission without
+      // changing its stored status or treating the capture as a Botanist edit.
       source.raw = { ...source.raw, reviewed_by: row.raw.reviewed_by,
         reviewed_at: row.raw.reviewed_at, review_comment: row.raw.review_comment };
-      hiddenCaptures.add(row);
-    } else if (registrationObservationId != null &&
-      String(row.snapshot.observation_id) !== String(registrationObservationId)) {
-      // Subsequent Observation approvals remain available through Observation
-      // history; they do not constitute Plant registration edits.
-      hiddenCaptures.add(row);
     }
   }
-  const visible = rows.filter((row) => !hiddenCaptures.has(row));
-  for (const row of visible) {
+  for (const row of rows) {
     if (row.historyType === "approvalSnapshot") continue;
     if (row.original) { row.historyType = "registration"; row.edited = false; continue; }
     const previous = row.raw?.previous_snapshot;
@@ -129,7 +116,26 @@ function plantRegistrationHistory(rows) {
     row.edited = row.priorChangeId != null || Boolean(directBase);
     row.historyType = row.edited ? (directBase?.status === "Correction Required" || Number(row.changeRevision) > 1 ? "plantCorrection" : "plantEdit") : "historicalSnapshot";
   }
-  return visible;
+  return rows;
+}
+
+export function formatSubmissionTimestamp(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const timestamp = value.trim();
+  const dateOnly = /^(\d{4})([-/])(\d{2})\2(\d{2})$/.exec(timestamp);
+  if (dateOnly) {
+    const [, year, , month, day] = dateOnly;
+    const isoDate = `${year}-${month}-${day}`;
+    const date = new Date(isoDate);
+    return Number.isFinite(date.getTime()) && date.toISOString().startsWith(isoDate)
+      ? `${year}/${month}/${day}` : "";
+  }
+  // Keep the API's offset, or local wall time when it supplies no offset.
+  const date = new Date(timestamp.replace(/^(\d{4}-\d{2}-\d{2}) (?=\d{2}:)/, "$1T"));
+  if (!Number.isFinite(date.getTime()) || !/\d{2}:\d{2}/.test(timestamp)) return "";
+  const pad = (number) => String(number).padStart(2, "0");
+  const hours = date.getHours();
+  return `${String(date.getFullYear()).padStart(4, "0")}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}, ${pad(hours % 12 || 12)}:${pad(date.getMinutes())} ${hours < 12 ? "AM" : "PM"}`;
 }
 
 export function versionCardItems(kind, targetId, response) {
@@ -172,20 +178,38 @@ export function versionCardItems(kind, targetId, response) {
     if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return leftTime - rightTime;
     return (left.versionNumber || 0) - (right.versionNumber || 0);
   };
-  const approvedRows = rows.filter((row) => row.historyType !== "approvalSnapshot" && submissionStatus(row.status) === "approved").sort((left, right) =>
+  if (kind === "species") for (const row of rows) {
+    if (row.snapshot?.review_provenance?.evidence_type === "approval_capture") {
+      row.historyType = "approvalSnapshot";
+      row.edited = false;
+    }
+  }
+  const approvedRows = rows.filter((row) => (kind !== "plant" || row.historyType !== "approvalSnapshot") && submissionStatus(row.status) === "approved").sort((left, right) =>
     compareChronological(left, right));
   const latestApproved = approvedRows[approvedRows.length - 1];
+  const speciesCaptureSource = kind === "species" && latestApproved?.historyType === "approvalSnapshot"
+    ? rows.find((row) => row.versionId != null && row.versionId === latestApproved.snapshot?.review_provenance?.source_submitted_history_id &&
+      row.historyType !== "approvalSnapshot" && row.status === "Approved" && row.raw?.owner_subject === latestApproved.raw?.owner_subject)
+    : null;
+  const currentSubmitted = speciesCaptureSource || latestApproved;
   let editNumber = 0;
   let numberingKnown = rows.some((row) => row.original);
   if (kind === "plant") for (const row of rows.slice().sort(compareChronological)) {
     if (row.historyType === "historicalSnapshot") numberingKnown = false;
     if (row.edited && numberingKnown) row.plantEditNumber = ++editNumber;
   }
-  for (const row of rows) {
-    row.current = row.historyType !== "approvalSnapshot" && row === latestApproved;
-    row.superseded = Boolean(row.historyType !== "approvalSnapshot" && latestApproved && submissionStatus(row.status) === "approved" && row !== latestApproved);
+  if (kind === "species") for (const row of rows.slice().sort(compareChronological)) {
+    if (row.historyType !== "approvalSnapshot" && !row.original && row.edited && numberingKnown) {
+      row.speciesEditNumber = ++editNumber;
+    }
   }
-  return rows.sort(compareChronological);
+  for (const row of rows) {
+    row.current = row.historyType !== "approvalSnapshot" && row === currentSubmitted;
+    row.superseded = Boolean(row.historyType !== "approvalSnapshot" && currentSubmitted && submissionStatus(row.status) === "approved" && row !== currentSubmitted);
+  }
+  // Current Version is selected from classified history before system-only
+  // approval captures are removed from the Botanist submission cards.
+  return rows.sort(compareChronological).filter((row) => !["plant", "species"].includes(kind) || row.historyType !== "approvalSnapshot");
 }
 
 export function mergeRecordChangeSubmissions(kind, targetId, response, recordChanges = []) {
@@ -338,6 +362,11 @@ export function groupStatusSummary(group) {
 
 export function versionDisplayLabel(row) {
   if (row.original) return t("recordEdits.originalLabel");
+  if (row.kind === "species") {
+    if (row.historyType === "approvalSnapshot") return t("submissions.approvalSnapshot");
+    if (row.speciesEditNumber) return t("recordEdits.editNumber", { number: row.speciesEditNumber });
+    if (row.edited) return t("submissions.editWithoutNumber");
+  }
   if (row.kind === "plant") {
     if (row.plantEditNumber) return t("recordEdits.editNumber", { number: row.plantEditNumber });
     if (row.edited) return t("submissions.editWithoutNumber");
@@ -493,6 +522,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   const [versionHistoryAvailable, setVersionHistoryAvailable] = useState({});
   const versionRowsRef = useRef({});
   const versionHistoryAvailableRef = useRef({});
+  const versionSignaturesRef = useRef({});
   const loadedAccountRef = useRef(accountId);
   const [versionLoading, setVersionLoading] = useState(false);
   const [versionLoadFailed, setVersionLoadFailed] = useState(false);
@@ -503,6 +533,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   const [tab, setTab] = useState("plants");
   const [filter, setFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [versionOwner, setVersionOwner] = useState(accountId);
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -513,26 +544,41 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
     if (loadedAccountRef.current !== accountId) {
       loadedAccountRef.current = accountId;
       versionRowsRef.current = {}; versionHistoryAvailableRef.current = {};
+      versionSignaturesRef.current = {};
+      setVersionOwner(accountId);
       setVersionRows({}); setVersionHistoryAvailable({}); setExpandedGroups({});
     }
+    const signatures = {};
+    const targets = [...new Map([
+      ...plants.map((record) => ({ kind: "plant", id: record.id, record })),
+      ...requests.map((record) => ({ kind: "species", id: record.request_id, record })),
+    ].filter((item) => item.id != null).map((item) => [item.kind + ":" + item.id, item])).values()].filter(({ kind, id, record }) => {
+      const key = kind + ":" + id;
+      const changes = (recordChanges || []).filter((change) => String(kind === "plant" ? change.plant_id : change.base_snapshot?.request_id) === String(id));
+      signatures[key] = JSON.stringify([record.status, record.request_status, record.initialSubmissionStatus,
+        record.initialObservation?.revision, record.current_registration?.version_id, record.content_revision,
+        record.reviewed_at, changes.map((change) => [change.id, change.status, change.revision, change.reviewed_at])]);
+      return versionSignaturesRef.current[key] !== signatures[key];
+    });
+    if (!targets.length) { setVersionLoading(false); return undefined; }
     setVersionLoadFailed(false);
     setVersionLoading(true);
-    const targets = [...new Map([
-      ...plants.map((item) => ({ kind: "plant", id: item.id })),
-      ...requests.map((item) => ({ kind: "species", id: item.request_id })),
-    ].filter((item) => item.id != null).map((item) => [item.kind + ":" + item.id, item])).values()];
     const loadVersions = async () => {
       const loadedRows = {}, availability = {};
       let failed = false;
+      const verifiedSignatures = {};
       for (let offset = 0; offset < targets.length; offset += 5) {
+        if (!active) return;
         const batch = await Promise.all(targets.slice(offset, offset + 5).map(async ({ kind, id }) => {
           const key = kind + ":" + id;
           try {
             const response = await plantApi("/record-versions?kind=" + kind + "&id=" + encodeURIComponent(id), { expectedAccountId: accountId });
             const complete = mergeRecordChangeSubmissions(kind, id, response, recordChanges);
+            verifiedSignatures[key] = signatures[key];
             return [key, versionCardItems(kind, id, complete), Boolean(complete.history_available)];
           } catch {
             failed = true;
+            if (versionHistoryAvailableRef.current[key]) return null;
             const complete = mergeRecordChangeSubmissions(kind, id, null, recordChanges);
             return [key, versionCardItems(kind, id, complete), Boolean(complete.history_available)];
           }
@@ -552,6 +598,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
         });
       } catch { /* Keep version rows; their snapshots remain available through the detail screen. */ }
       if (active) {
+        versionSignaturesRef.current = { ...versionSignaturesRef.current, ...verifiedSignatures };
         versionRowsRef.current = { ...versionRowsRef.current, ...loadedRows };
         versionHistoryAvailableRef.current = { ...versionHistoryAvailableRef.current, ...availability };
         setVersionRows(versionRowsRef.current);
@@ -575,7 +622,8 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
 
   const records = tab === "plants" ? plants : requests;
   const kind = tab === "plants" ? "plant" : "species";
-  const groups = buildSubmissionGroups(records, kind, versionRows, versionHistoryAvailable);
+  const groups = buildSubmissionGroups(records, kind, versionOwner === accountId ? versionRows : {},
+    versionOwner === accountId ? versionHistoryAvailable : {});
   const data = filterSubmissionGroups(groups, filter);
   const searchedData = data.filter((group) => submissionGroupMatchesSearch(group, tab, searchQuery));
   const selectFilter = (value) => {
@@ -677,7 +725,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
       </TouchableOpacity>
       {expanded && <View style={styles.versionList}>{group.versions.map((version) => {
         const matchesFilter = filter !== "all" && statusMatches(version.status, filter);
-        const date = version.createdAt && Number.isFinite(Date.parse(version.createdAt)) ? new Date(version.createdAt).toLocaleDateString() : "";
+        const date = formatSubmissionTimestamp(version.createdAt);
         return <TouchableOpacity key={version.key} testID={"submission-version-" + group.key + "-" + version.key}
           style={[styles.versionRow, matchesFilter && styles.matchingVersionRow]} activeOpacity={0.78}
           accessibilityRole="button" accessibilityLabel={versionDisplayLabel(version) + ", " + (version.correctionResolved
@@ -780,7 +828,15 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
       <TouchableOpacity style={styles.correctionEditButton} onPress={() => openCorrection(task)} accessibilityRole="button" accessibilityLabel={label}><Text style={styles.correctionEditButtonText}>{label}</Text></TouchableOpacity>
     </View>;
   };
-  return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><ScrollView contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent]} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void refresh(); }} tintColor="#2F6B4F" />}>
+  return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><FlatList
+    testID="correction-requests-list"
+    data={!loaded && (loading || error) ? [] : visibleCorrections}
+    keyExtractor={(task) => task.key}
+    renderItem={({ item }) => <View style={styles.correctionRow}>{renderCorrection(item)}</View>}
+    contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent]}
+    keyboardShouldPersistTaps="handled"
+    refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void refresh(); }} tintColor="#2F6B4F" />}
+    ListHeaderComponent={
     <View style={[styles.pageHeaderContent, styles.correctionHeaderContent]}>
       <TextInput style={styles.correctionSearch} value={correctionQuery} onChangeText={setCorrectionQuery}
         placeholder={t("botanistDashboard.searchCorrectionRequests")} placeholderTextColor="#7B8A80"
@@ -792,9 +848,12 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
         </TouchableOpacity>)}</View>
       {loaded && !error && <Text style={styles.correctionResultCount}>{t("botanistDashboard.matchingCorrectionRequests", { count: visibleCorrections.length })}</Text>}
       {!!error && <View style={styles.correctionErrorBox}><Text style={styles.correctionErrorText} accessibilityRole="alert">{error.split("\n").map(translateUIMessage).join("\n")}</Text><TouchableOpacity style={styles.correctionRetryButton} onPress={() => { void refresh(); }}><Text style={styles.correctionRetryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>}
-      {!loaded && loading ? <View style={styles.correctionMessage}><ActivityIndicator color="#2F6B4F" /><Text style={styles.correctionEmptyText}>{t("botanistDashboard.loadingCorrectionRequests")}</Text></View> : error && !loaded ? null : !visibleCorrections.length ? <View style={styles.correctionMessage}><Text style={styles.correctionEmptyText}>{corrections.length ? t("botanistDashboard.noMatchingCorrectionRequests") : t("botanistDashboard.noCorrectionRequests")}</Text></View> : visibleCorrections.map(renderCorrection)}
     </View>
-  </ScrollView></SafeAreaView>;
+    }
+    ListEmptyComponent={<View style={styles.correctionRow}>
+      {!loaded && loading ? <View style={styles.correctionMessage}><ActivityIndicator color="#2F6B4F" /><Text style={styles.correctionEmptyText}>{t("botanistDashboard.loadingCorrectionRequests")}</Text></View> : error && !loaded ? null : <View style={styles.correctionMessage}><Text style={styles.correctionEmptyText}>{corrections.length ? t("botanistDashboard.noMatchingCorrectionRequests") : t("botanistDashboard.noCorrectionRequests")}</Text></View>}
+    </View>}
+  /></SafeAreaView>;
 }
 
 // STYLES
@@ -843,6 +902,7 @@ const styles = StyleSheet.create({
   correctionCardBadge: { position: "absolute", top: 10, right: 10, minWidth: 22, height: 22, paddingHorizontal: 5, borderRadius: 11, backgroundColor: "#B84F43", alignItems: "center", justifyContent: "center", zIndex: 2 },
   pageHeaderContent: { width: "100%", maxWidth: 952, alignSelf: "center", paddingTop: 8 },
   correctionHeaderContent: { paddingTop: 18 },
+  correctionRow: { width: "100%", maxWidth: 952, alignSelf: "center" },
   submissionsHeaderContent: { paddingTop: 18 },
   pageHeading: { marginBottom: 18 },
   pageTitle: { color: "#2F6B4F", fontSize: 24, fontWeight: "800" },

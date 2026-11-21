@@ -3,7 +3,7 @@ import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, t
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import {
+import { AppState,
   View,
   Text,
   StyleSheet,
@@ -146,7 +146,12 @@ export default function PlantDetail({
 
   useFocusEffect(useCallback(() => {
     void loadPlant(false);
-  }, [loadPlant]));
+    // Botanist details also load paginated Observation history.
+    const subscription = !isBotanist ? AppState?.addEventListener("change", (state) => {
+      if (state === "active") void loadPlant(true);
+    }) : null;
+    return () => subscription?.remove();
+  }, [isBotanist, loadPlant]));
 
   // =====================================================
   // PLANT NOT FOUND

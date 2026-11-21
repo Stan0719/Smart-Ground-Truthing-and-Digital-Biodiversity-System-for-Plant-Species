@@ -170,8 +170,8 @@ export async function loadCanonicalDevices(signal?: AbortSignal): Promise<IoTDev
   return devices as IoTDevice[]
 }
 
-export const canonicalHistoryPath = (deviceId: string) =>
-  `/api/data/devices/${encodeURIComponent(deviceId)}/readings?page=1&limit=${IOT_HISTORY_LIMIT}`
+export const canonicalHistoryPath = (deviceId: string, page = 1) =>
+  `/api/data/devices/${encodeURIComponent(deviceId)}/readings?page=${page}&limit=${IOT_HISTORY_LIMIT}`
 
 export async function loadCanonicalHistory(device: IoTDevice): Promise<IoTHistory> {
   const result = mapCanonicalHistory(
@@ -179,6 +179,15 @@ export async function loadCanonicalHistory(device: IoTDevice): Promise<IoTHistor
     device.plant_id,
   )
   if (!result)
+    throw new IoTApiError('The IoT service returned an invalid reading response.', 200, 'invalid')
+  return result
+}
+
+export async function loadCanonicalHistoryPage(device: IoTDevice, page: number, signal?: AbortSignal): Promise<IoTHistory> {
+  if (!Number.isSafeInteger(page) || page < 1 || page > 10000)
+    throw new IoTApiError('The IoT history page is invalid.', 400, 'invalid')
+  const result = mapCanonicalHistory(await request(canonicalHistoryPath(device.sensor_id, page), signal), device.plant_id)
+  if (!result || result.page !== page || result.readings.length > IOT_HISTORY_LIMIT)
     throw new IoTApiError('The IoT service returned an invalid reading response.', 200, 'invalid')
   return result
 }

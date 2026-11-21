@@ -195,6 +195,7 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
     "../components/GpsLocationPicker": { default: "GpsLocationPicker" },
     "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }), refresh: async () => { network.push(["inventory-refresh"]); return true; }, addGenerated: () => 1, retire: (id) => network.push(["inventory-retire", id]) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
     "../utils/qrPrint": { A4_PRINT_OPTIONS, buildQRPrintHtml }, "../data/mockData": { botanistPlantRecords: [] },
+    "../utils/statusRefresh": { watchStatus: () => () => {} },
     "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ items: notificationItems, loading: false, loaded: true, error: "", unreadCount: notificationItems.filter((item) => !item.read).length, refresh: async () => {} }) },
     "../utils/useBotanistRecords": { useBotanistRecords: () => ({ plants: [], observations: [], requests: [], loading: false, loaded: true, error: "", refresh: async () => {} }) },
     "../utils/botanistRecords": { submissionStatus: (value) => String(value).toLowerCase() === "pending review" ? "pending" : String(value).toLowerCase(),
@@ -359,6 +360,33 @@ test("QR inventory expands one code at a time and collapses the selected code", 
   closeSecond.props.onPress();
   tree = qr.render();
   assert.equal(findAll(tree, (node) => node?.type === "QRCode").length, 0);
+});
+
+test("QR inventory renders 20 cards first and loads more without changing tab counts or print actions", () => {
+  const app = fixture();
+  const unused = Array.from({ length: 25 }, (_, index) => ({
+    id: String(index + 1), label: `QR-${String(index + 1).padStart(4, "0")}`,
+    plantId: null, value: `payload-${index}`, status: "generated",
+  }));
+  const assigned = { id: "26", label: "QR-0026", plantId: "1", value: "payload-26", status: "assigned" };
+  const qr = screenFixture("PlantQRCode", app, [
+    "3", "unused", null, { records: [...unused, assigned], hasLoaded: true, loading: false, error: "" }, false, null, null,
+  ]);
+  const cards = (tree) => findAll(tree, (node) => node?.props?.accessibilityState?.expanded === false);
+  const printAll = (tree) => find(tree, (node) => node?.props?.accessibilityLabel === app.i18n.t("plantQRCode.printAllUnusedQrCodes"));
+  assert.equal(cards(qr.tree).length, 20);
+  assert.ok(printAll(qr.tree));
+  const scroll = find(qr.tree, (node) => node?.props?.onScroll);
+  scroll.props.onScroll({ nativeEvent: { contentOffset: { y: 800 }, contentSize: { height: 1450 }, layoutMeasurement: { height: 600 } } });
+  const expanded = qr.render();
+  assert.equal(cards(expanded).length, 25);
+  assert.ok(printAll(expanded));
+  const tabs = findAll(expanded, (node) => node?.props?.accessibilityRole === "tab");
+  assert.ok(find(tabs[0], (node) => node?.type === "Text" && node.props.children === 25));
+  tabs[1].props.onPress();
+  const assignedTree = qr.render();
+  assert.equal(cards(assignedTree).length, 1);
+  assert.equal(printAll(assignedTree), undefined);
 });
 
 test("language selector exposes the English, Bahasa Melayu and 中文 options", () => {

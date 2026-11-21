@@ -83,9 +83,12 @@ test('only table wrappers scroll, category minimum widths are appropriate and ex
   const operational = values(find('OperationalReport.vue', '.operational-scroll'))
   assert.equal(operational['overflow-x'], 'auto'); assert.equal(operational['min-width'], '0'); assert.equal(operational.width, '100%')
   for (const [category, width] of [['observations', '50rem'], ['threats', '48rem'], ['iot', '44rem']]) {
-    const rule = files['OperationalReport.vue'].rules.find(rule => rule.selector.includes(`.table-${category} table`))
+    const rule = files['OperationalReport.vue'].rules.find(rule => rule.selector.includes(`.table-${category} table`) && rule.parent.type === 'root')
     assert.equal(values(rule)['min-width'], width)
   }
+  const wideObservationTable = files['OperationalReport.vue'].rules.find(rule => rule.selector.includes('.table-observations table') && rule.parent.name === 'container' && rule.parent.params === '(min-width: 801px)')
+  assert.equal(values(wideObservationTable)['min-width'], '0')
+  assert.equal(values(wideObservationTable)['table-layout'], 'fixed')
   const species = files['ReportsView.vue'].rules.find(rule => rule.selector.endsWith('.report-summary-table'))
   assert.equal(values(species)['min-width'], '38rem')
   for (const filename of ['ReportsView.vue', 'OperationalReport.vue']) {
