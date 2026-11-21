@@ -1,12 +1,13 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { AppState, ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import PlantExplorerMap from "../components/PlantExplorerMap";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 import { fetchPlantRecords, filterMapPlantsByStatus, isMapPlantVisible } from "../utils/plantApi";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 import LanguageSelector from "../components/LanguageSelector";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 const statusColors = {
   approved: ["#E2F4E6", "#257344"],
@@ -15,6 +16,7 @@ const statusColors = {
   rejected: ["#FCE8E8", "#B42F35"],
   withdrawn: ["#ECEFF1", "#52616A"],
 };
+const emptyPlants = [];
 
 function PlantCard({ plant, onPress, onMapPress }) {
   useAppTranslation();
@@ -76,7 +78,8 @@ export default function MapScreen({ navigation, user }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("allVisible");
   const isBotanist = String(user?.role || "").toLowerCase() === "botanist";
-  const [plants, setPlants] = useState([]);
+  const [plantState, setPlantState] = useState({ accountId: null, records: [] });
+  const plants = plantState.accountId === user?.id ? plantState.records : emptyPlants;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -85,17 +88,21 @@ export default function MapScreen({ navigation, user }) {
   const scrollRef = useRef(null);
   const mapOffset = useRef(0);
   const focusSequence = useRef(0);
+  const pendingRead = useRef(null);
 
   const loadPlants = useCallback(async (pullToRefresh = false, isCurrent = () => true) => {
     if (!user?.id) {
       if (isCurrent()) {
-        setPlants([]);
+        setPlantState({ accountId: null, records: [] });
         setError(t("botanistRecords.sessionRequired"));
         setLoading(false);
         setRefreshing(false);
       }
       return;
     }
+    if (pendingRead.current?.accountId === user.id) return;
+    const read = { accountId: user.id };
+    pendingRead.current = read;
     if (pullToRefresh) setRefreshing(true);
     else setLoading(true);
     setError("");
@@ -106,19 +113,22 @@ export default function MapScreen({ navigation, user }) {
       ]);
       const recordsById = new Map(catalogRecords.map((record) => [record.plantId, record]));
       for (const record of ownedRecords) recordsById.set(record.plantId, record);
-      if (isCurrent()) setPlants([...recordsById.values()].filter((record) =>
+      if (isCurrent() && pendingRead.current === read) setPlantState({ accountId: user.id, records: [...recordsById.values()].filter((record) =>
         record.plantId && record.plantId !== "Unknown ID" &&
         isMapPlantVisible(record, user.role, user.id)
-      ));
+      ) });
     } catch (loadError) {
-      if (isCurrent()) {
-        setPlants([]);
+      if (isCurrent() && pendingRead.current === read) {
+        if ([401, 403].includes(loadError?.status)) setPlantState({ accountId: null, records: [] });
         setError(loadError?.message || t("common.error"));
       }
     } finally {
-      if (isCurrent()) {
-        setLoading(false);
-        setRefreshing(false);
+      if (pendingRead.current === read) {
+        pendingRead.current = null;
+        if (isCurrent()) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     }
   }, [user]);
@@ -126,7 +136,8 @@ export default function MapScreen({ navigation, user }) {
   useFocusEffect(useCallback(() => {
     let current = true;
     void loadPlants(false, () => current);
-    return () => { current = false; };
+    const subscription = AppState?.addEventListener("change", (state) => { if (state === "active") void loadPlants(true, () => current); });
+    return () => { subscription?.remove(); current = false; pendingRead.current = null; };
   }, [loadPlants]));
 
   const documentedPlants = useMemo(() => plants.map((record) => ({
@@ -166,7 +177,7 @@ export default function MapScreen({ navigation, user }) {
 
   return (
     <View style={styles.container}>
-      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadPlants(true)} tintColor="#267348" colors={["#267348"]} />}>
         <View style={styles.header}>
           <View style={styles.headerTop}>
@@ -175,7 +186,7 @@ export default function MapScreen({ navigation, user }) {
           </View>
           <Text style={styles.subtitle}>{t("map.discoverDocumentedPlantsInNiahNationalPark")}</Text>
         </View>
-        {loading || error ? (
+        {(loading || error) && !plants.length ? (
           <View style={styles.message}>
             {loading ? <ActivityIndicator color="#267348" /> : <Text style={styles.messageTitle}>{t("common.error")}</Text>}
             <Text style={styles.messageText}>{loading ? t("plant.loadingPlantRecords") : error}</Text>
@@ -185,6 +196,7 @@ export default function MapScreen({ navigation, user }) {
           </View>
         ) : (
           <>
+            {!!error && <Text accessibilityRole="alert" style={styles.messageText}>{error}</Text>}
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>{t("map.biodiversityMap")}</Text>
               <Text style={styles.sectionSubtitle}>{t("map.tapAMarkerForDetails")}</Text>
@@ -209,7 +221,7 @@ export default function MapScreen({ navigation, user }) {
               {!!search && <TouchableOpacity onPress={() => updateSearch("")} accessibilityRole="button"
                 accessibilityLabel={t("map.clearSearch")}><Ionicons name="close-circle" size={20} color="#789181" /></TouchableOpacity>}
             </View>
-            {isBotanist && <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            {isBotanist && <DiscoverableScrollView horizontal
               contentContainerStyle={styles.statusFilters} accessibilityLabel={t("plant.recordVisibilityFilters")}>
               {[["allVisible", t("plant.allVisible")], ["approved", t("plant.approvedOnly")],
                 ["myPending", t("plant.myPending")]].map(([value, label]) => {
@@ -220,7 +232,7 @@ export default function MapScreen({ navigation, user }) {
                   <Text style={[styles.statusFilterText, selected && styles.statusFilterTextSelected]}>{label}</Text>
                 </TouchableOpacity>;
               })}
-            </ScrollView>}
+            </DiscoverableScrollView>}
             {filteredPlants.length ? (
               <FlatList data={filteredPlants} keyExtractor={(item) => item.plantId} numColumns={2}
                 scrollEnabled={false} columnWrapperStyle={styles.plantGrid}

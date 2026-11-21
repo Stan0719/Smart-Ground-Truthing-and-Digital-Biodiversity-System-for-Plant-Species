@@ -195,6 +195,7 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
     "../components/GpsLocationPicker": { default: "GpsLocationPicker" },
     "../utils/qrInventory": { createQRInventoryLoader: () => ({ getState: () => ({ loading: false }), refresh: async () => { network.push(["inventory-refresh"]); return true; }, addGenerated: () => 1, retire: (id) => network.push(["inventory-retire", id]) }), emptyQRInventory: () => ({ records: [], loading: true, hasLoaded: false, error: "" }) },
     "../utils/qrPrint": { A4_PRINT_OPTIONS, buildQRPrintHtml }, "../data/mockData": { botanistPlantRecords: [] },
+    "../utils/statusRefresh": { watchStatus: () => () => {} },
     "../utils/useBotanistNotifications": { useBotanistNotifications: () => ({ items: notificationItems, loading: false, loaded: true, error: "", unreadCount: notificationItems.filter((item) => !item.read).length, refresh: async () => {} }) },
     "../utils/useBotanistRecords": { useBotanistRecords: () => ({ plants: [], observations: [], requests: [], loading: false, loaded: true, error: "", refresh: async () => {} }) },
     "../utils/botanistRecords": { submissionStatus: (value) => String(value).toLowerCase() === "pending review" ? "pending" : String(value).toLowerCase(),
@@ -207,6 +208,7 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
   const code = ts.transpileModule(readFileSync(new URL(`screens/${name}.js`, root), "utf8"), { fileName: name + ".jsx", compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} };
   new Function("require", "module", "exports", code)((dependency) => {
+    if (dependency === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     assert.ok(dependency in deps, `Unexpected screen dependency: ${dependency}`);
     return { ...deps[dependency], __esModule: dependency !== "react" };
   }, module, module.exports);

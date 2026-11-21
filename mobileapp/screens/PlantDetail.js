@@ -3,7 +3,7 @@ import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, t
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import {
+import { AppState,
   View,
   Text,
   StyleSheet,
@@ -26,6 +26,7 @@ import RefreshButton from "../components/RefreshButton";
 import BackButton from "../components/BackButton";
 import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 import { stepPhotoIndex, uniquePlantPhotos } from "../utils/plantPhotoGallery";
 import { fetchPlantObservationEligibility } from "../utils/fieldSync";
@@ -146,7 +147,12 @@ export default function PlantDetail({
 
   useFocusEffect(useCallback(() => {
     void loadPlant(false);
-  }, [loadPlant]));
+    // Botanist details also load paginated Observation history.
+    const subscription = !isBotanist ? AppState?.addEventListener("change", (state) => {
+      if (state === "active") void loadPlant(true);
+    }) : null;
+    return () => subscription?.remove();
+  }, [isBotanist, loadPlant]));
 
   // =====================================================
   // PLANT NOT FOUND
@@ -260,9 +266,9 @@ export default function PlantDetail({
   return (
     <SafeAreaView style={styles.viewerRoot} edges={["top", "left", "right"]}>
     {header}
-    <ScrollView
+    <DiscoverableScrollView
       style={styles.container}
-      showsVerticalScrollIndicator={false}
+      showsVerticalScrollIndicator
       refreshControl={
         <RefreshControl
           refreshing={refreshing || favourites.refreshing}
@@ -310,7 +316,7 @@ export default function PlantDetail({
 
       {displayablePhotos.length > 1 && (
         <>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnailList}>
+          <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.thumbnailList}>
             {displayablePhotos.map((photo, index) => (
               <TouchableOpacity
                 key={photo.uri}
@@ -743,7 +749,7 @@ export default function PlantDetail({
       </View>
       )}
 
-    </ScrollView>
+    </DiscoverableScrollView>
     <Modal visible={imageViewerVisible && Boolean(selectedPhoto)} animationType="fade" onRequestClose={() => setImageViewerVisible(false)}>
       <View style={styles.imageViewer}>
         <View style={styles.viewerTopBar}>

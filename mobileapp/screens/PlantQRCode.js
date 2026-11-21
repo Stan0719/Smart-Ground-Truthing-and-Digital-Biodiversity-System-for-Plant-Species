@@ -11,7 +11,7 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  ScrollView,
+  AppState,
   TextInput,
   RefreshControl,
   Platform,
@@ -19,6 +19,7 @@ import {
 
 import QRCode from "react-native-qrcode-svg";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 import * as Print from "expo-print";
 
@@ -26,6 +27,7 @@ import { plantApi } from "../utils/plantApi";
 import RefreshButton from "../components/RefreshButton";
 
 import { createQRInventoryLoader, emptyQRInventory } from "../utils/qrInventory";
+import { watchStatus } from "../utils/statusRefresh";
 import { A4_PRINT_OPTIONS, buildQRPrintHtml } from "../utils/qrPrint";
 
 const QR_DISPLAY_PAGE_SIZE = 20;
@@ -41,15 +43,17 @@ export default function PlantQRCodeScreen({ route }) {
   const [printingId, setPrintingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [visibleLimit, setVisibleLimit] = useState(QR_DISPLAY_PAGE_SIZE);
+  const [inventoryOwner, setInventoryOwner] = useState(accountId);
   const generatingRef = useRef(false);
   const printingRef = useRef(false);
   const deletingRef = useRef(false);
   const focusedRef = useRef(false);
   const loader = useMemo(() => createQRInventoryLoader(
     () => plantApi("/qr-codes", { expectedAccountId: accountId }),
-    setInventory,
+    (next) => { setInventoryOwner(accountId); setInventory(next); },
   ), [accountId]);
-  const { records: plantQRCodes, loading: loadingRecords, hasLoaded, error: loadError } = inventory;
+  const { records: plantQRCodes, loading: loadingRecords, hasLoaded, error: loadError } =
+    inventoryOwner === accountId ? inventory : emptyQRInventory();
   const availableQRCodes = plantQRCodes.filter((qr) => !qr.plantId && qr.status === "generated");
   const assignedQRCodes = plantQRCodes.filter((qr) => qr.status !== "retired" && (Boolean(qr.plantId) || qr.status === "assigned" || qr.status === "active"));
   const activeQRCodesCount = availableQRCodes.length + assignedQRCodes.length;
@@ -69,7 +73,9 @@ export default function PlantQRCodeScreen({ route }) {
     useCallback(() => {
       focusedRef.current = true;
       void loadPlantQRCodes();
+      const stop = watchStatus(AppState, loadPlantQRCodes);
       return () => {
+        stop();
         focusedRef.current = false;
         loader.cancel();
       };
@@ -185,8 +191,8 @@ export default function PlantQRCodeScreen({ route }) {
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
+      <DiscoverableScrollView
+        showsVerticalScrollIndicator
         contentContainerStyle={styles.scrollContent}
         scrollEventThrottle={32}
         onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
@@ -397,7 +403,7 @@ export default function PlantQRCodeScreen({ route }) {
             </View>
           )}
         </View>
-      </ScrollView>
+      </DiscoverableScrollView>
     </View>
   );
 }

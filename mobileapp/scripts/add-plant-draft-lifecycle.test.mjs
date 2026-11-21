@@ -17,6 +17,7 @@ function load(path, dependencies) {
   } }).outputText);
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled.get(path))((name) => {
+    if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     assert.ok(name in dependencies, `Unexpected dependency ${name}`);
     return { ...dependencies[name], __esModule: name !== "react" };
   }, module, module.exports);
@@ -207,6 +208,21 @@ test("Resume restores the exact draft, photos and QR; Start New removes only the
     const fresh = e.mount({ skipRecovery: true }); await fresh.settle();
     assert.equal(fresh.value("plantScientificName"), ""); assert.equal(fresh.value("selectedQRCode"), null);
     assert.equal(fresh.value("selectedSpecies"), null); assert.equal(fresh.value("guidedPhotos").wholePlant, null);
+  } finally { await e.close(); }
+});
+
+test("resuming a draft warns when its QR is unavailable and preserves the saved form", async () => {
+  const e = environment();
+  try {
+    await e.seed("used-qr", { plantScientificName: "Saved plant", selectedQRCode: { qr_id: 17, qr_code: "unused-17" } });
+    e.setQrAvailable(false);
+    const h = e.mount({ formDraftKey: "used-qr" });
+    await h.settle();
+    assert.equal(h.value("plantScientificName"), "Saved plant");
+    assert.equal(h.value("selectedQRCode").qr_id, 17);
+    assert.ok(e.nodes(h.tree).some((node) => node.props?.accessibilityRole === "alert" &&
+      node.props.children === "addPlant.scannedQrUnavailable"));
+    assert.ok(e.rows.get("owner").some((row) => row.client_key === "used-qr"));
   } finally { await e.close(); }
 });
 

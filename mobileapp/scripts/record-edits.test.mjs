@@ -13,6 +13,7 @@ function screen(file, dependencies) {
   const module = { exports: {} };
   new Function("require", "module", "exports", transpile(file))((name) => {
     if (name === "../components/BackButton") return { default: "TouchableOpacity", __esModule: true };
+    if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     assert.ok(name in dependencies, `Missing mock: ${name}`);
     return { ...dependencies[name], __esModule: name !== "react" };
   }, module, module.exports);
@@ -58,7 +59,7 @@ function harness(file, { record, approved, species = false, correction = false, 
     "../components/OriginalUpdatedField": { default: ({ children, label, originalContent, originalValue }) =>
       React.createElement("View", null,
         label ? React.createElement("Text", null, label) : null,
-        React.createElement("Text", null, originalContent || String(originalValue ?? "")),
+        React.createElement("Text", null, originalContent || String(originalValue ?? "recordEdits.informationNotAvailable")),
         children) },
     "../utils/qrInventory": { normalizeQRCodes: (payload) => payload.qr_codes.map((qr) => ({ id: String(qr.qr_id), label: `QR-${String(qr.qr_id).padStart(4, "0")}`, plantId: qr.plant_id == null ? null : String(qr.plant_id), status: qr.status })) },
     "../utils/botanistRecords": { ...(species ? { fetchBotanistSpeciesRequest: async () => { if (speciesFetchCount++ > 0 && record.failReload) throw Error("offline"); return { ...record }; } } : { fetchBotanistPlant: async () => { if (plantFetchCount++ > 0 && refreshError) throw Error("network unavailable"); return plantFetchCount > 1 && refreshedRecord ? refreshedRecord : record; } }),
@@ -99,7 +100,7 @@ function harness(file, { record, approved, species = false, correction = false, 
   }
   const text = (node) => typeof node === "string" ? node : node && typeof node.type === "function"
     ? text(node.type(node.props)) : React.Children.toArray(node?.props?.children).map(text).join(" ");
-  return { render, walk, collect, text, get focus() { return focus; }, get alert() { return alert; }, calls, draftSaves, navigations, get photoReads() { return photoReads; } };
+  return { render, route, walk, collect, text, get focus() { return focus; }, get alert() { return alert; }, calls, draftSaves, navigations, get photoReads() { return photoReads; } };
 }
 const plant = (status) => ({
   registrationState: status === "Approved" ? "available" : "unavailable",
@@ -113,6 +114,83 @@ const plant = (status) => ({
 const request = (status) => ({ request_id: 1, content_revision: 1, request_status: status, scientific_name: "Species A", common_name: "Common A",
   genus_name: "Genus A", family_name: "Family A", conservation_status: "Least Concern", description: "Original", habitat: "Forest",
   photo: { uri: "https://example.invalid/species" } });
+
+test("restored approved Plant draft ignores baseline key order and validates genuine changes", async () => {
+  const record = plant("Approved");
+  const open = async (savedDraft) => {
+    const h = harness("screens/EditPlantRecord.js", { record, savedDraft });
+    h.render(); h.focus(); await new Promise(setImmediate);
+    return h;
+  };
+  const button = (h, label) => h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === label);
+  const submit = (h) => button(h, "recordEdits.submitChanges");
+  const field = (h, key) => h.walk(h.walk(h.render(), (node) => node.type === "View" &&
+    React.Children.toArray(node.props.children).some((child) => child.props?.children === key)),
+  (node) => node.type === "TextInput");
+  const h = await open();
+  assert.equal(submit(h).props.disabled, true);
+  assert.match(h.text(h.render()), /recordEdits.noEditChanges/);
+  field(h, "recordEdits.zone").props.onChangeText("Zone B");
+  assert.equal(submit(h).props.disabled, false);
+  field(h, "recordEdits.notes").props.onChangeText("New note");
+  field(h, "recordEdits.zone").props.onChangeText("");
+  assert.equal(submit(h).props.disabled, false);
+  await button(h, "botanistDrafts.saveDraft").props.onPress();
+  const draft = h.draftSaves[0].draft;
+  const snapshot = JSON.parse(draft.base_signature);
+  draft.base_signature = JSON.stringify(Object.fromEntries(Object.entries(snapshot).reverse()));
+  const restored = harness("screens/EditPlantRecord.js", { record, savedDraft: draft, findDraftCandidate: draft });
+  delete restored.route.params.formDraftKey;
+  restored.render(); restored.focus(); await new Promise(setImmediate);
+  const continueDraft = restored.alert[2].find((action) => action.text === "botanistDrafts.continueDraft");
+  await continueDraft.onPress();
+  assert.equal(field(restored, "recordEdits.notes").props.value, "New note");
+  assert.equal(submit(restored).props.disabled, false);
+  const unchanged = await open({ ...draft, form: { ...draft.form, notes: "" } });
+  assert.equal(submit(unchanged).props.disabled, true);
+  const invalid = await open({ ...draft, form: { ...draft.form, heightCm: "" } });
+  assert.equal(submit(invalid).props.disabled, true);
+  assert.match(invalid.text(invalid.render()), /addPlantWorkflow.invalidHeight/);
+  submit(restored).props.onPress();
+  const confirm = restored.alert[2][1].onPress;
+  await Promise.all([confirm(), confirm()]);
+  const writes = restored.calls.filter(([path, options]) => path === "/record-changes" && options?.method === "POST");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0][1].body.proposed.content.notes, "New note");
+  assert.equal(writes[0][1].body.proposed.content.latitude, 4.5);
+  assert.equal(writes[0][1].body.proposed.content.longitude, 113.7);
+  assert.equal(record.registration.notes, "");
+});
+
+test("Edit Plant uses the approved location Zone in both columns and changes only the proposal", async () => {
+  const open = async (zone) => {
+    const record = { ...plant("Approved"), location: { latitude: 4.5, longitude: 113.7, zone } };
+    record.latestObservation.content.zone = "Unrelated Observation Zone";
+    const h = harness("screens/EditPlantRecord.js", { record });
+    h.render(); h.focus(); await new Promise(setImmediate);
+    return h;
+  };
+  const zoneField = (h) => h.walk(h.render(), (node) => node.type === "View" &&
+    React.Children.toArray(node.props.children).some((child) => child.props?.children === "recordEdits.zone"));
+  const input = (h) => h.walk(zoneField(h), (node) => node.type === "TextInput");
+  const h = await open("Zone A");
+  assert.match(h.text(zoneField(h)), /Zone A/);
+  assert.equal(input(h).props.value, "Zone A");
+  input(h).props.onChangeText("Zone B");
+  assert.match(h.text(zoneField(h)), /Zone A/);
+  h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.onPress();
+  await h.alert[2][1].onPress();
+  const { content } = h.calls.find(([path, options]) => path === "/record-changes" && options?.method === "POST")[1].body.proposed;
+  assert.equal(content.zone, "Zone B");
+  assert.equal(content.latitude, 4.5);
+  assert.equal(content.longitude, 113.7);
+  const missing = await open(null);
+  assert.match(missing.text(zoneField(missing)), /recordEdits.informationNotAvailable/);
+  assert.equal(input(missing).props.value, "");
+  const approved = await open("Zone B");
+  assert.match(approved.text(zoneField(approved)), /Zone B/);
+  assert.equal(input(approved).props.value, "Zone B");
+});
 
 test("Plant edit and correction labels mark only required inputs", async () => {
   for (const status of ["Pending Review", "Approved"]) {
@@ -291,7 +369,7 @@ test("Plant correction resolves original photos by baseline asset ID, not galler
     base_snapshot: { photo_ids: ["photo-3", "photo-1"] }, proposed_snapshot: {}, proposal_photo_count: 0 };
   const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), correctionChange });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
-  const originals = h.collect(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox");
+  const originals = h.collect(h.render(), (node) => node.type === "View" && node.props.accessibilityLabel?.startsWith("recordEdits.originalPhoto"));
   assert.equal(originals.length, 2);
   assert.equal(h.walk(originals[0], (node) => node.type === "Image")?.props.source.uri, "https://example.invalid/existing-3");
   assert.equal(h.walk(originals[1], (node) => node.type === "Image")?.props.source.uri, "https://example.invalid/existing-1");
@@ -485,8 +563,6 @@ test("latest Pending Review Plant history revision opens its current owned data 
 test("approved plant edit with a pending reviewed change blocks before reading selected photo files", async () => {
   const h = harness("screens/EditPlantRecord.js", { record: plant("Approved"), pendingEdit: true });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
-  const originals = h.collect(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox" && node.props.accessibilityLabel?.startsWith("recordEdits.originalPhoto"));
-  originals.forEach((original) => original.props.onPress());
   const submit = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges");
   submit.props.onPress();
   await h.alert[2][1].onPress();
@@ -715,9 +791,6 @@ test("plant editor reuses originals, removes one only from the selection, and mi
   const h = harness("screens/EditPlantRecord.js", { record: plant("Approved") });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
   let tree = h.render();
-  const originals = h.collect(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox" && node.props.accessibilityLabel?.startsWith("recordEdits.originalPhoto"));
-  originals.forEach((photo) => photo.props.onPress());
-  tree = h.render();
   const remove = h.walk(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto");
   remove.props.onPress();
   tree = h.render();
@@ -750,9 +823,11 @@ for (const { name, indexes, cameraCount, expected } of [
 ]) test(`plant editor submits ${name} with new photos and no other original IDs`, async () => {
   const h = harness("screens/EditPlantRecord.js", { record: plant("Approved") });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
-  let tree = h.render();
-  const reuse = h.collect(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox" && node.props.accessibilityLabel?.startsWith("recordEdits.originalPhoto"));
-  indexes.forEach((index) => reuse[index].props.onPress());
+  for (const index of [2, 1, 0].filter((photoIndex) => !indexes.includes(photoIndex))) {
+    const remove = h.collect(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto")[index];
+    remove.props.onPress();
+  }
+  let tree;
   for (let i = 0; i < cameraCount; i++) {
     tree = h.render();
     const camera = h.walk(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.takePhoto");
@@ -765,18 +840,22 @@ for (const { name, indexes, cameraCount, expected } of [
   assert.equal(sent[1].body.proposed.photos.length, cameraCount);
 });
 
-test("tapping an original twice does not duplicate it, and the user can select other originals individually", async () => {
+test("original photos are read-only and updated photos retain originals until removed or restored", async () => {
   const h = harness("screens/EditPlantRecord.js", { record: plant("Approved") });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
   let tree = h.render();
-  h.collect(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox" && node.props.accessibilityLabel?.startsWith("recordEdits.originalPhoto"))[0].props.onPress();
+  const images = h.collect(tree, (node) => node.type === "Image" && node.props.source?.uri?.includes("existing-"));
+  assert.equal(images.length, 6, "all three source photos appear read-only and in the proposed collection");
+  assert.equal(h.collect(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox").length, 0);
+  const remove = h.collect(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto");
+  assert.equal(remove.length, 3);
+  remove[1].props.onPress();
   tree = h.render();
-  const originals = h.collect(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox" && node.props.accessibilityLabel?.startsWith("recordEdits.originalPhoto"));
-  originals[0].props.onPress();
-  originals[1].props.onPress();
-  originals[2].props.onPress();
-  const selected = h.collect(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto");
-  assert.equal(selected.length, 3);
+  assert.equal(h.collect(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto").length, 2);
+  const restore = h.collect(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "button" && node.props.accessibilityLabel?.startsWith("recordEdits.originalPhoto"));
+  assert.equal(restore.length, 1);
+  restore[0].props.onPress();
+  assert.equal(h.collect(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto").length, 3);
   const submit = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges");
   submit.props.onPress(); await h.alert[2][1].onPress();
   const sent = h.calls.find(([path]) => path === "/record-changes");
@@ -802,8 +881,8 @@ test("plant editor keeps the existing 3–8 photo validation for changed sets", 
 });
 
 function hReuseOne(h) {
-  const photo = h.collect(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox" && node.props.accessibilityLabel?.startsWith("recordEdits.originalPhoto"))[0];
-  photo.props.onPress();
+  const remove = h.collect(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto");
+  remove.slice(1).forEach((photo) => photo.props.onPress());
 }
 
 test("version history screen opens an actual version and shows only its changed values", async () => {

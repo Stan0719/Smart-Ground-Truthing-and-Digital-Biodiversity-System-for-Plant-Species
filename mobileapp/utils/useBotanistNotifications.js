@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { botanistNotifications } from "./botanistNotifications";
+import { watchStatus } from "./statusRefresh";
 
 export function useBotanistNotifications(accountId) {
   const [state, setState] = useState({ accountId, items: [], loading: true, loaded: false, error: "" });
@@ -30,11 +31,7 @@ export function useBotanistNotifications(accountId) {
     let focused = true;
     visit.current += 1;
     void refresh();
-    let lastAppState = AppState.currentState;
-    const appState = AppState.addEventListener("change", (next) => {
-      if (focused && next === "active" && lastAppState !== "active") void refresh();
-      lastAppState = next;
-    });
+    const stop = accountId ? watchStatus(AppState, refresh) : () => {};
     const unsubscribe = botanistNotifications.subscribe((owner) => {
       if (owner !== accountId) return;
       if (pending.current) void pending.current.then(() => { if (focused) return refresh(false); });
@@ -44,7 +41,7 @@ export function useBotanistNotifications(accountId) {
       focused = false;
       visit.current += 1;
       pending.current = null;
-      appState.remove();
+      stop();
       unsubscribe();
     };
   }, [accountId, refresh]));

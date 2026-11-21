@@ -34,7 +34,7 @@ export default function MandatoryPasswordChangeScreen({ onSubmit, onCancel }) {
     <KeyboardAvoidingView style={styles.keyboardView} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <View pointerEvents="none" style={styles.topGlow} />
       <View pointerEvents="none" style={styles.bottomGlow} />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator>
         <View style={styles.card}>
           <Text accessibilityRole="header" style={styles.title}>{t("mandatoryPasswordChange.changeYourTemporaryPassword")}</Text>
           <Text style={styles.description}>{t("mandatoryPasswordChange.chooseANewPasswordWith15To128CharactersBefore")}</Text>

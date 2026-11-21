@@ -1,4 +1,6 @@
 {
+  "correctionBadge": { "plant": "Tumbuhan", "species": "Spesies", "observation": "Pemerhatian", "original": "{{type}} Asal", "edit": "Edit {{type}} {{number}}", "editWithoutNumber": "Edit {{type}}" },
+  "scrollHints": { "vertical": "Tatal ke bawah untuk melihat lagi", "horizontal": "Leret untuk melihat lagi", "speciesList": "Tatal untuk lebih banyak spesies", "qrList": "Tatal untuk lebih banyak kod QR", "searchResults": "Tatal untuk lebih banyak hasil" },
   "observationEdits": {
     "editObservation": "Edit Pemerhatian",
     "editProposal": "Edit pemerhatian",
@@ -358,6 +360,7 @@
     "resume": "Sambung",
     "savedStatus": "Disimpan",
     "lastSaved": "Terakhir disimpan",
+    "notAvailable": "Tidak tersedia",
     "savedLocally": "Disimpan pada peranti ini",
     "photoCount": "{{count}} foto disimpan",
     "openDrafts": "Buka Draf Saya",
@@ -1580,6 +1583,7 @@
     "reviewComments": "Ulasan Penyemak"
   },
   "recordEdits": {
+    "noEditChanges": "Ubah sekurang-kurangnya satu medan atau foto sebelum menghantar.",
     "registrationUnavailable": "Pendaftaran Tumbuhan diluluskan semasa tidak dapat disahkan. Draf anda tidak diubah.",
     "finalRejected": "Penolakan adalah muktamad. Penyerahan ini hanya boleh dibaca dan tidak boleh disunting atau dihantar semula.",
     "automaticRejection": "Penolakan pendaftaran berkaitan secara automatik akibat keputusan spesies",

@@ -2,6 +2,7 @@ import { useAppTranslation, t, translateLabel, translateUIMessage } from "../tra
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  AppState,
   View,
   Text,
   TextInput,
@@ -30,6 +31,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft, hasMeaningfulAddPlantDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave, stopBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import SpeciesDictionary from "../components/SpeciesDictionary";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 const createPlantClientKey = () =>
   `plant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -129,6 +131,8 @@ export function AddPlantForm({
   const [submittedQr, setSubmittedQr] = useState(null);
   const [availableQRCodes, setAvailableQRCodes] = useState([]);
   const [selectedQRCode, setSelectedQRCode] = useState(null);
+  const [unavailableQr, setUnavailableQr] = useState(null);
+  const qrFocus = useRef(false);
   const [showQRDropdown, setShowQRDropdown] = useState(false);
   const [loadingQRCodes, setLoadingQRCodes] = useState(true);
   const [qrLoadError, setQrLoadError] = useState("");
@@ -250,9 +254,37 @@ export function AddPlantForm({
   }, [accountId]);
 
   useFocusEffect(useCallback(() => {
+    qrFocus.current = true;
     void loadSpeciesCatalog();
     void loadAvailableQRCodes();
+    const subscription = AppState?.addEventListener("change", (state) => {
+      if (state === "active") void loadAvailableQRCodes();
+    });
+    return () => { qrFocus.current = false; subscription?.remove(); };
   }, [loadSpeciesCatalog, loadAvailableQRCodes]));
+
+  const selectedQrId = selectedQRCode?.qr_id;
+  const selectedQrToken = selectedQRCode?.qr_code;
+  useEffect(() => {
+    if (!accountId || !selectedQrId || !selectedQrToken) return undefined;
+    let active = true, pending = false;
+    const check = async () => {
+      if (!qrFocus.current || pending) return;
+      pending = true;
+      try {
+        const result = await plantApi(`/qr-codes?qr_id=${encodeURIComponent(String(selectedQrId))}`, { expectedAccountId: accountId });
+        if (!active || !Array.isArray(result?.qr_codes)) return;
+        const available = result.qr_codes.some((code) => String(code.qr_id) === String(selectedQrId) &&
+          code.qr_code === selectedQrToken && code.status === "generated" && code.plant_id == null);
+        setUnavailableQr(available ? null : selectedQrId);
+        if (!available) setAvailableQRCodes((codes) => codes.filter((code) => String(code.qr_id) !== String(selectedQrId)));
+      } catch { /* Keep the selection until availability is confirmed. */ }
+      finally { pending = false; }
+    };
+    if (String(restoredDraftRef.current?.form?.selectedQRCode?.qr_id) === String(selectedQrId)) void check();
+    const subscription = AppState?.addEventListener("change", (state) => { if (state === "active") void check(); });
+    return () => { active = false; subscription?.remove(); };
+  }, [accountId, selectedQrId, selectedQrToken]);
 
   useEffect(() => {
     const scannedId = route.params?.scannedQrId;
@@ -1024,13 +1056,13 @@ function handleRemoveSpeciesPhoto(index) {
           SCROLL FORM
       ================================================= */}
 
-      <ScrollView scrollEnabled={!mapInteracting} ref={formScrollRef}
+      <DiscoverableScrollView scrollEnabled={!mapInteracting} ref={formScrollRef}
         style={styles.scrollView}
         contentContainerStyle={
           styles.scrollContent
         }
         keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
       >
 
 
@@ -1040,9 +1072,15 @@ function handleRemoveSpeciesPhoto(index) {
 
         <View style={styles.card}>
 
-          <Text
-            style={styles.sectionTitle}
-          >{t("addPlant.plantInformation")}</Text>
+          <View style={styles.plantHeadingRow}>
+            <Text style={[styles.sectionTitle, styles.plantHeadingTitle]}>{t("addPlant.plantInformation")}</Text>
+            {!showSpeciesForm && <RefreshButton
+              onPress={loadSpeciesCatalog}
+              loading={loadingSpeciesCatalog}
+              label={t("addPlantWorkflow.refreshSpecies")}
+              testID="add-plant-species-refresh"
+            />}
+          </View>
 
           {/* ---------------------------------------------
               Category
@@ -1101,9 +1139,8 @@ function handleRemoveSpeciesPhoto(index) {
 
             <Text style={styles.label}>{t("addPlantWorkflow.selectExistingSpecies")}</Text>
             <Text style={styles.speciesPickerHint}>{t("addPlant.chooseASpeciesThatIsAlreadyAvailableToYourAccount")}</Text>
-            <View style={styles.speciesSelectionRow}>
               <TextInput
-                style={[styles.input, styles.speciesSelectionInput]}
+                style={styles.input}
                 value={speciesSearch}
                 onFocus={() => setShowSpeciesPicker(true)}
                 onChangeText={(value) => {
@@ -1116,13 +1153,6 @@ function handleRemoveSpeciesPhoto(index) {
                 editable={!loadingSpeciesCatalog}
                 accessibilityLabel={t("addPlant.searchSpeciesInTheDatabase")}
               />
-              <RefreshButton
-                onPress={loadSpeciesCatalog}
-                loading={loadingSpeciesCatalog}
-                label={t("addPlantWorkflow.refreshSpecies")}
-                testID="add-plant-species-refresh"
-              />
-            </View>
 
             {!!speciesCatalogError && (
               <View style={styles.speciesPickerMessage}>
@@ -1142,7 +1172,7 @@ function handleRemoveSpeciesPhoto(index) {
             )}
 
             {showSpeciesPicker && !loadingSpeciesCatalog && !speciesCatalogError && (
-              <ScrollView style={[styles.speciesPickerList, { maxHeight: Math.min(280, Math.max(220, screenHeight * 0.32)) }]}
+              <DiscoverableScrollView nested hintKey="scrollHints.speciesList" style={[styles.speciesPickerList, { maxHeight: Math.min(280, Math.max(220, screenHeight * 0.32)) }]}
                 nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
                 {filteredSpecies.length ? (
                   filteredSpecies.map((species, index) => (
@@ -1175,7 +1205,7 @@ function handleRemoveSpeciesPhoto(index) {
                 ) : (
                   <Text style={styles.speciesPickerEmpty}>{t("addPlant.noMatchingSpeciesInTheDatabaseAskAConservationOfficer")}</Text>
                 )}
-              </ScrollView>
+              </DiscoverableScrollView>
             )}
 
             {selectedSpecies && (
@@ -1500,7 +1530,7 @@ function handleRemoveSpeciesPhoto(index) {
               {speciesImages.length > 0 && (
                 <ScrollView
                   horizontal
-                  showsHorizontalScrollIndicator={false}
+                  showsHorizontalScrollIndicator
                   style={styles.speciesPhotoScroll}
                   contentContainerStyle={styles.speciesPhotoRow}
                 >
@@ -1765,9 +1795,11 @@ function handleRemoveSpeciesPhoto(index) {
                 />
               </TouchableOpacity>
 
+              {selectedQrId != null && unavailableQr === selectedQrId &&
+                <Text accessibilityRole="alert" style={styles.noQRText}>{t("addPlant.scannedQrUnavailable")}</Text>}
               {showQRDropdown && (
                 <View style={styles.qrDropdown}>
-                  <ScrollView style={[styles.qrOptionsList, { maxHeight: Math.min(270, Math.max(240, screenHeight * 0.3)) }]}
+                  <DiscoverableScrollView nested hintKey="scrollHints.qrList" style={[styles.qrOptionsList, { maxHeight: Math.min(270, Math.max(240, screenHeight * 0.3)) }]}
                     nestedScrollEnabled keyboardShouldPersistTaps="always" showsVerticalScrollIndicator>
                     {availableQRCodes.length === 0 ? (
                       <Text style={styles.noQRText}>
@@ -1788,7 +1820,7 @@ function handleRemoveSpeciesPhoto(index) {
                         </TouchableOpacity>
                       ))
                     )}
-                  </ScrollView>
+                  </DiscoverableScrollView>
                   <TouchableOpacity
                     style={[styles.qrGenerateButton, (generatingQR || submitting) && styles.disabledAction]}
                     onPress={generateQRInForm}
@@ -2107,7 +2139,7 @@ function handleRemoveSpeciesPhoto(index) {
         </TouchableOpacity>
 
 
-      </ScrollView>
+      </DiscoverableScrollView>
 
 
     </View>
@@ -2202,15 +2234,8 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
 
-  speciesSelectionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  speciesSelectionInput: {
-    flex: 1,
-    minWidth: 0,
-  },
+  plantHeadingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 },
+  plantHeadingTitle: { flex: 1, minWidth: 0, marginBottom: 0 },
   speciesPickerHint: {
     color: "#6D7F75",
     fontSize: 12,
@@ -2243,7 +2268,6 @@ const styles = StyleSheet.create({
 
   speciesPickerList: {
     marginTop: 6,
-    marginRight: 52,
     borderWidth: 1,
     borderColor: "#DCE8D6",
     borderRadius: 10,

@@ -85,7 +85,7 @@ function Capture({ request, onClose, onResult, isCurrent }) {
     return () => clearTimeout(timer);
   }, [request.mode, permission?.granted, ready]);
   return <SafeAreaView style={styles.screen}>
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator>
       <View style={styles.content}>
         <TouchableOpacity style={styles.backButton} accessibilityRole="button" accessibilityLabel={t("faceCameraModal.backToLogin")}
           disabled={busy} onPress={onClose}>

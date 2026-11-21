@@ -79,7 +79,7 @@ function harness(category, responder = async selected => fixture(selected), lang
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if(name.includes('reportExport')){if(!exportUtilities){const helper={...context,exports:{}};vm.runInNewContext(transpile(read('utils/reportExport.ts')),helper);exportUtilities=helper.exports}return exportUtilities}
       if(name==='vue')return{...vue,onBeforeUnmount:fn=>{cleanup=fn},resolveComponent:name=>name,withDirectives:node=>node}
-      if(name==='vue-i18n')return{useI18n:()=>({t:key=>resolve(key)||key,te:key=>typeof resolve(key)==='string',locale})}
+      if(name==='vue-i18n')return{useI18n:()=>({t:(key,params={})=>(resolve(key)||key).replace(/\{(\w+)\}/g,(_,name)=>params[name]??`{${name}}`),te:key=>typeof resolve(key)==='string',locale})}
       if(name==='jspdf')return{jsPDF:class{constructor(){pdfs.push(this);this.pages=0}addPage(){this.pages++}addImage(){}save(name){this.name=name}}}
       if(name.includes('operationalReporting'))return{...api,requestOperationalReport:async(...args)=>{calls.push(args);return responder(...args)}}
       if(name.includes('officerMonitoringDisplay'))return{monitoringDate}
@@ -100,10 +100,11 @@ for(const category of ['observations','threats','iot'])test(`${category}: real c
   const h=harness(category)
   try{
     await flush();assert.equal(h.state.report.value.category,category)
-    const tree=nodes(h.render())
-    assert.equal(tree.filter(n=>n.type==='th').length,fixture(category).columns.length)
+    let tree=nodes(h.render())
+    assert.equal(tree.filter(n=>n.type==='th').length,category==='observations'?0:fixture(category).columns.length)
     const chart=tree.find(n=>n.props?.report)
     assert.ok(chart);assert.equal(chart.props.report.chart.kind,fixture(category).chart.kind)
+    if(category==='observations'){h.state.reportView.value='table';tree=nodes(h.render());assert.equal(tree.filter(n=>n.type==='th').length,fixture(category).columns.length)}
     await h.state.exportFile('csv');assert.equal(h.blobs.length,1)
     const csv=await h.blobs[0].text();assert.ok(csv.startsWith(h.state.exportDocument().columns.map(value=>'"'+value+'"').join(',')));assert.ok(!csv.includes(h.state.exportDocument().title));assert.equal(csv.split('\r\n').length,h.state.exportDocument().rows.length+1)
     await h.state.exportFile('pdf');assert.equal(h.pdfs.length,1);assert.ok(h.pdfs[0].name.includes(category));assert.ok(h.drawn.join(' ').includes(category==='iot'?'Sensor one':category==='observations'?'Nov 1, 2026':'Test species'))
@@ -173,6 +174,27 @@ test('charts preserve missing points, actual x timestamps, status colors, min/ma
   assert.match(page,/role="region"/);assert.match(chart,/role="img"/)
 })
 
+test('Observation chart click selects a period, keeps status series interactive and prints without transient highlighting',async()=>{
+  const {descriptor}=parse(read('components/conservation/OperationalReportChart.vue')),script=compileScript(descriptor,{id:'observation-chart-test'}),exports={},locale=vue.ref('en'),selected=[]
+  const report=fixture('observations');report.chart={kind:'stacked',labels:['2026-10-01','2026-11-01'],unit:'count',series:[{key:'Pending Review',values:[0,12]},{key:'Approved',values:[1,15]}]}
+  const context={exports,require(name){
+    if(name==='vue')return{...vue,onMounted(){},onBeforeUnmount(){}}
+    if(name==='vue-i18n')return{useI18n:()=>({t:key=>key.split('.').at(-1),te:()=>true,locale})}
+    if(name==='chart.js')return{Chart:class{static register(){}},registerables:[]}
+    if(name.includes('officerMonitoringDisplay'))return{monitoringDate}
+    if(name.includes('reportSeries'))return{reportSeries}
+    if(name.includes('reportExport'))return{printChart:async config=>config}
+    throw Error(name)
+  }}
+  vm.runInNewContext(`(function(){${transpile(script.content)}})()`,context)
+  const scope=vue.effectScope();let exposed
+  const state=scope.run(()=>exports.default.setup({report,selectedPeriodIndex:1},{expose:value=>exposed=value,emit:(...args)=>selected.push(args)}))
+  const config=state.configuration();config.options.onClick({},[{index:1}]);assert.deepEqual(selected,[['selectPeriod',1]])
+  assert.equal(config.data.datasets[0].backgroundColor[0],'#2969a255')
+  const printed=await exposed.toPrintDataUrl();assert.equal(printed.data.datasets[0].backgroundColor[0],'#2969a2');assert.equal(printed.data.datasets[0].backgroundColor[1],'#2969a2')
+  scope.stop()
+})
+
 test('time-series downsampling preserves spikes, zero, null boundaries and long interruptions without changing source rows',()=>{
   const labels=Array.from({length:5000},(_,index)=>new Date(Date.UTC(2026,10,1)+index*60000).toISOString())
   const values=labels.map(()=>10);values[123]=999;values[321]=-5;values[444]=null;values[445]=0
@@ -213,6 +235,28 @@ test('all six Observation cards get canonical status themes without changing dyn
     const themes=['total','pending','approved','rejected','correction','flagged']
     cards.forEach((card,index)=>{assert.ok(card.props.class.includes('observation-'+themes[index]));assert.equal(renderedText(nodes(card).find(node=>node.type==='strong')).trim(),String(index+1))})
     for(const stat of stats)assert.equal(h.state.exportDocument().statistics.find(item=>item.label===h.state.text(stat.key)).value,stat.value)
+  }finally{h.stop()}
+})
+
+test('Observation report tells the latest-period story and switches between chart and period-filtered table',async()=>{
+  const h=harness('observations',async()=>{
+    const result=fixture('observations')
+    result.columns=['period','totalObservations','Pending Review','Approved','Rejected','Correction Required','Flagged']
+    result.rows=[['2026-10-01',1,0,1,0,0,0],['2026-11-01',34,12,15,4,2,1]]
+    result.statistics=[{key:'totalObservations',value:35},{key:'Pending Review',value:12},{key:'Approved',value:16},{key:'Rejected',value:4},{key:'Correction Required',value:2},{key:'Flagged',value:1}]
+    result.chart={kind:'stacked',labels:['2026-10-01','2026-11-01'],unit:'count',series:[
+      {key:'Pending Review',values:[0,12]},{key:'Approved',values:[1,15]},{key:'Rejected',values:[0,4]},{key:'Correction Required',values:[0,2]},{key:'Flagged',values:[0,1]},
+    ]}
+    return result
+  })
+  try{
+    await flush();assert.equal(h.state.reportView.value,'graph');assert.ok(h.state.observationStory.value.includes('increased by 33'));assert.ok(h.state.observationStory.value.includes('Approved'))
+    let tree=nodes(h.render());assert.ok(tree.some(node=>node.props?.class==='observation-story'));assert.equal(tree.filter(node=>node.type==='th').length,0)
+    h.state.selectObservationPeriod(1);h.state.reportView.value='table';await flush()
+    assert.equal(h.state.tableRows.value.length,1);assert.equal(h.state.tableRows.value[0][0],'2026-11-01')
+    tree=nodes(h.render());assert.equal(tree.filter(node=>node.type==='th').length,7);assert.ok(tree.some(node=>node.props?.class==='period-selection'))
+    h.state.selectedPeriodIndex.value=null;await flush();assert.equal(h.state.tableRows.value.length,2)
+    h.state.reportView.value='graph';await flush();assert.equal(nodes(h.render()).filter(node=>node.type==='th').length,0)
   }finally{h.stop()}
 })
 

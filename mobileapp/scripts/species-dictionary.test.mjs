@@ -98,7 +98,7 @@ test("Add Plant dictionary bounds nested results and presents a botanical review
   assert.match(component, /card: \{ backgroundColor: "#F0F7EF"/);
   assert.match(component, /searchRow: \{[^\n]*backgroundColor: "#FFFFFF"/);
   assert.match(component, /result: \{ backgroundColor: "#FFFFFF"/);
-  assert.match(component, /<ScrollView ref=\{resultsScroll\} nestedScrollEnabled/);
+  assert.match(component, /<DiscoverableScrollView nested hintKey="scrollHints\.searchResults" ref=\{resultsScroll\} nestedScrollEnabled/);
   assert.match(component, /maxHeight: Math\.min\(height \* 0\.45, 370\)/);
   assert.match(component, /resultsScroll\.current\?\.scrollTo\(\{ y: 0, animated: false \}\)/);
   assert.match(component, /onRequestClose=\{cancelReview\}/);

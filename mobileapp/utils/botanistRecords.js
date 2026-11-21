@@ -107,6 +107,7 @@ async function fetchRecords(accountId, plantId) {
   if (plantsResult.status === "rejected") delete result.plants;
   if (observationsResult.status === "rejected") delete result.observations;
   if (requestsResult.status === "rejected") delete result.requests;
+  if (editsResult.status === "rejected") delete result.edits;
   if (recordChangesResult.status === "rejected") delete result.recordChanges;
   const previews = (result.plants || []).flatMap((plant) => {
     const asset = plant.status === "Approved"

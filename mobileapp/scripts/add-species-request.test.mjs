@@ -35,7 +35,7 @@ function fixture({ fail = false } = {}) {
     "../utils/plantApi": { plantApi: async (...args) => { calls.push(args); if (fail) throw Object.assign(Error("duplicate"), { status: 409 }); return { species_request: { request_id: 23, request_status: "Pending Review" } }; } },
   };
   const module = { exports: {} };
-  new Function("require", "module", "exports", output)((name) => { assert.ok(name in dependencies, name); return { ...dependencies[name], __esModule: name !== "react" }; }, module, module.exports);
+  new Function("require", "module", "exports", output)((name) => { if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true }; assert.ok(name in dependencies, name); return { ...dependencies[name], __esModule: name !== "react" }; }, module, module.exports);
   const component = module.exports.default;
   const navigation = { goBack() { navigations.push("back"); }, navigate(...args) { navigations.push(args); } };
   const route = { params: { botanist: { id: "botanist-1" }, returnToPlantId: "plant-8", returnPlantDraftKey: "edit-plant-botanist-1-8" } };

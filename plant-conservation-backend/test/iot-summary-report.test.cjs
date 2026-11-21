@@ -41,6 +41,11 @@ test("PostgreSQL aggregation filters, gaps, types, extrema and sample-weighted m
   assert.equal(report.buckets[2].average, 40);
   assert.equal(report.observedSpan.firstReceivedAt, "2026-10-31T16:00:00.000Z");
   assert.equal(report.observedSpan.lastValidAt, "2026-10-31T18:00:00.000Z");
+  assert.deepEqual(report.latestReading, { recordedAt: "2026-10-31T18:00:00.000Z", value: 40 });
+  const exact = await generate(db, { ...base, startAt: "2026-10-31T16:00:00.000Z", endAt: "2026-10-31T16:06:00.000Z" }, now);
+  assert.equal(exact.aggregation.interval, "minute"); assert.equal(exact.buckets.length, 6);
+  assert.equal(exact.summary.validMeasurements, 2); assert.deepEqual(exact.latestReading, { recordedAt: "2026-10-31T16:05:00.000Z", value: -10 });
+  assert.equal(exact.scope.effectiveStartInclusive, "2026-10-31T16:00:00.000Z"); assert.equal(exact.scope.effectiveEndExclusive, "2026-10-31T16:06:00.000Z");
   for (const key of ["receivedRows", "validMeasurements", "missingMeasurements", "absentOrNullMeasurements", "invalidMeasurements"]) assert.equal(report.summary[key], report.buckets.reduce((n, row) => n + row[key], 0));
   for (const row of report.buckets) assert.equal(row.receivedRows, row.validMeasurements + row.missingMeasurements);
   const humidity = await generate(db, { ...base, measurement: "humidity" }, now);

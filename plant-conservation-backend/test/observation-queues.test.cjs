@@ -72,9 +72,9 @@ test("Phase 3: authorized effective-origin queues and bounded pagination", async
     assert.equal((await collect('unknown', 'Flagged')).length, 3);
     assert.equal((await collect('unknown', 'Pending Review')).length, 0);
   });
-  await t.test('origin and cursor never expand Botanist ownership/visibility or expose GPS', async () => {
+  await t.test('origin and cursor never expand Botanist ownership/visibility; own visible GPS remains available', async () => {
     const rows = await collect('subsequent_observation', '', 'bot'); assert.equal(rows.length, 700);
-    assert.ok(rows.every(row => row.content.latitude === undefined));
+    assert.ok(rows.every(row => row.content.latitude === 4));
     assert.equal((await collect('unknown', '', 'other')).length, 0);
   });
   await t.test('invalid query arguments and mismatched cursor filters are rejected', async () => {

@@ -4,7 +4,6 @@ import React, { useEffect, useState, useRef } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
   StyleSheet,
-  ScrollView,
   Text,
   TextInput,
   TouchableOpacity,
@@ -25,6 +24,7 @@ import { fieldFormStyles } from "../components/fieldFormStyles";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
 import RefreshButton from "../components/RefreshButton";
 import GpsLocationPicker from "../components/GpsLocationPicker";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
 const fieldCapture = createFieldCapture({
   imagePicker: ImagePicker,
@@ -425,7 +425,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       setMessage(edit ? "Correction draft saved on this device." : "Draft saved on this device.");
       let submittedItem = null;
       if (online) {
-        const synced = await syncDrafts(user.id, { onSubmitted: (item) => {
+        const synced = await syncDrafts(user.id, { clientKey: draft.client_key, onSubmitted: (item) => {
           if (item.clientKey === draft.client_key) submittedItem = item;
         } });
         setMessage(t("fieldCollection.recordSSynchronizedForOfficerReview", { synced }));
@@ -528,7 +528,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     ]);
   };
   return (
-    <ScrollView scrollEnabled={!mapInteracting} style={styles.screen} contentContainerStyle={styles.scrollContent}
+    <DiscoverableScrollView scrollEnabled={!mapInteracting} style={styles.screen} contentContainerStyle={styles.scrollContent}
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
       <View style={[styles.page, isNewObservation && styles.observationPage]}>
       <View style={styles.pageHeadingRow}>
@@ -751,7 +751,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       {!!qr && <QrDisplay value={qr} />}
       </View>
 
-    </ScrollView>
+    </DiscoverableScrollView>
   );
 }
 function QrDisplay({ value }) {

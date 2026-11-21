@@ -1,5 +1,34 @@
 import * as submissionSearch from '../utils/submissionSearch.js';
 import test from "node:test";
+import { watchStatus } from "../utils/statusRefresh.js";
+
+test("submission timestamps keep version precision and display in device-local time", () => {
+  const previous = process.env.TZ;
+  process.env.TZ = "Asia/Kuala_Lumpur";
+  try {
+    const { formatSubmissionTimestamp: format, versionCardItems } = submissionsUtils();
+    for (const kind of ["plant", "species"]) {
+      const versions = [
+        { id: "original", version_number: 1, status: "Approved", created_at: "2026-11-20T07:42:00Z" },
+        { id: "snapshot", version_number: 2, status: "Superseded", created_at: "2026-11-21T00:00:00+08:00" },
+        { id: "edit", version_number: 3, status: "Pending Review", created_at: "2026-11-22T12:05:00" },
+      ];
+      const rows = versionCardItems(kind, "8", { history_available: true, versions, prior_changes: [] });
+      assert.deepEqual(rows.map((row) => row.status), versions.map((row) => row.status));
+      assert.deepEqual(rows.map((row) => format(row.createdAt)),
+        ["2026/11/20, 03:42 PM", "2026/11/21, 12:00 AM", "2026/11/22, 12:05 PM"]);
+    }
+    for (const language of ["en", "ms", "zh"])
+      assert.equal(translatedSubmissions(language).formatSubmissionTimestamp("2026-11-20T07:42:00Z"), "2026/11/20, 03:42 PM");
+    assert.equal(format("2026-11-20"), "2026/11/20");
+    assert.equal(format("2026/11/20"), "2026/11/20");
+    assert.equal(format("2026-02-30"), "");
+    assert.equal(format(null), "");
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -13,6 +42,7 @@ function moduleFrom(file, deps) {
   new Function("require", "module", "exports", code)((name) => {
     if (name === "../components/BackButton") return { default: (props) => React.createElement("TouchableOpacity", props, props.label || props.accessibilityLabel), __esModule: true };
     if (name === "../components/BotanicalSkeleton") return { CardListSkeleton: "CardListSkeleton", DetailSkeletonContent: "DetailSkeletonContent", __esModule: true };
+    if (name === "../components/DiscoverableScrollView") return { default: "FlatList", __esModule: true };
     if (name === "../utils/submissionSearch") return { ...moduleFrom("utils/submissionSearch.js", {}), __esModule: true };
     assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" };
   }, module, module.exports);
@@ -154,6 +184,54 @@ test("Plant 30 approval-capture response presents one Original and keeps subsequ
   }
 });
 
+test("Plant 35 hides approval captures while preserving every Botanist submission and current edit", () => {
+  for (const language of ["en", "ms", "zh"]) {
+    const dashboard = translatedSubmissions(language);
+    const base = { plant_id: 35, observation_id: "registration-35", scientific_name: "Plant 35", content: { heightCm: 30 } };
+    const capture = (reviewId, sourceId) => ({ ...base, review_provenance: {
+      kind: "plant", submission_id: "registration-35", review_id: reviewId,
+      evidence_type: "approval_capture", source_submitted_history_id: sourceId } });
+    const versions = [
+      { id: "v1", version_number: 1, status: "Superseded", owner_subject: "staff:owner", edited_by: "staff:owner",
+        created_at: "2026-11-14T08:00:00Z", snapshot: base },
+      { id: "v2", version_number: 2, status: "Superseded", owner_subject: "staff:owner", edited_by: "staff:owner",
+        created_at: "2026-11-14T09:00:00Z", snapshot: capture("review-1", "v1") },
+      ...[
+        ["v3", 3, "Superseded", "change-1", "2026-11-15T08:00:00Z"],
+        ["v4", 4, "Cancelled", "change-2", "2026-11-16T08:00:00Z"],
+        ["v5", 5, "Approved", "change-3", "2026-11-17T08:00:00Z"],
+      ].map(([id, version_number, status, change_id, created_at]) => ({ id, version_number, status, change_id,
+        owner_subject: "staff:owner", edited_by: "staff:owner", created_at,
+        previous_snapshot: base, snapshot: { ...base, content: { heightCm: version_number * 10 } } })),
+      { id: "v6", version_number: 6, status: "Approved", owner_subject: "staff:owner", edited_by: "staff:owner",
+        created_at: "2026-11-17T09:00:00Z", snapshot: capture("review-2", "v5") },
+    ];
+    const response = { history_available: true, versions }, before = JSON.stringify(response);
+    const rows = dashboard.versionCardItems("plant", 35, response);
+    const labels = rows.map(dashboard.versionDisplayLabel);
+    const catalogue = JSON.parse(read(`translations/${language}.json`));
+    assert.deepEqual(labels, [catalogue.recordEdits.originalLabel,
+      ...[1, 2, 3].map(number => catalogue.recordEdits.editNumber.replace("{{number}}", String(number)))]);
+    assert.deepEqual(rows.map(row => row.versionId), ["v1", "v3", "v4", "v5"]);
+    assert.deepEqual(rows.map(row => row.versionNumber), [1, 3, 4, 5]);
+    assert.deepEqual(rows.map(row => row.status), ["Superseded", "Superseded", "Cancelled", "Approved"]);
+    assert.deepEqual(rows.map(row => row.createdAt), [versions[0], versions[2], versions[3], versions[4]].map(row => row.created_at));
+    assert.equal(rows[2].current, false, "a cancelled edit cannot be current");
+    assert.equal(rows[3].current, true, "the latest approved edit is the current Plant version");
+    assert.equal(dashboard.versionDetailParams(rows[1], { id: "owner" }).versionId, "v3");
+    assert.equal(dashboard.versionDetailParams(rows[3], { id: "owner" }).versionId, "v5");
+    const group = dashboard.buildSubmissionGroups([{ id: 35, status: "Approved" }], "plant", { "plant:35": rows })[0];
+    assert.equal(group.versionCount, 4);
+    assert.equal(JSON.stringify(response), before, "display classification leaves API history unchanged");
+    const pendingSource = { ...versions[0], status: "Pending Review" };
+    const supersededCapture = dashboard.versionCardItems("plant", 35, {
+      history_available: true, versions: [pendingSource, versions[1]],
+    });
+    assert.equal(supersededCapture.length, 1);
+    assert.equal(supersededCapture[0].status, "Pending Review", "a superseded capture cannot approve its source in the display");
+  }
+});
+
 test("actual Plant edits and correction revisions retain exact identifiers and dense Edit numbering despite approval snapshots", () => {
   const dashboard = translatedSubmissions(), response = plant30History();
   response.versions.push(
@@ -171,6 +249,52 @@ test("actual Plant edits and correction revisions retain exact identifiers and d
   assert.equal(dashboard.submissionVersionRoute(rows[3], { id: "other" })[1].selectedChangeId, undefined);
   const corrected = dashboard.versionDetailParams(rows[2], { id: "owner" });
   assert.equal(corrected.versionId, "edit-a-r2"); assert.equal(corrected.historicalVersionNumber, 5);
+});
+
+test("Species request edits are numbered chronologically without counting approval captures", () => {
+  for (const language of ["en", "ms", "zh"]) {
+    const dashboard = translatedSubmissions(language);
+    const versions = [
+      { id: "species-original", version_number: 1, status: "Superseded", created_at: "2026-11-17T10:00:00Z", snapshot: { scientific_name: "Species A" } },
+      { id: "species-approval", version_number: 2, status: "Approved", created_at: "2026-11-17T11:00:00Z",
+        snapshot: { scientific_name: "Species A", review_provenance: { evidence_type: "approval_capture" } } },
+      { id: "species-edit-1", version_number: 3, change_id: "change-1", status: "Superseded", created_at: "2026-11-18T10:00:00Z", snapshot: { scientific_name: "Species B" } },
+      { id: "species-edit-2", version_number: 4, change_id: "change-2", status: "Cancelled", created_at: "2026-11-19T10:00:00Z", snapshot: { scientific_name: "Species C" } },
+      { id: "species-edit-3", version_number: 5, change_id: "change-3", status: "Approved", created_at: "2026-11-20T10:00:00Z", snapshot: { scientific_name: "Species D" } },
+      { id: "species-edit-4", version_number: 6, change_id: "change-4", status: "Rejected", created_at: "2026-11-21T10:00:00Z", snapshot: { scientific_name: "Species E" } },
+      { id: "species-edit-5", version_number: 7, change_id: "change-5", status: "Pending Review", created_at: "2026-11-22T10:00:00Z", snapshot: { scientific_name: "Species F" } },
+    ];
+    const rows = dashboard.versionCardItems("species", 4, { history_available: true, versions });
+    const catalog = JSON.parse(read(`translations/${language}.json`));
+    assert.deepEqual(rows.map(dashboard.versionDisplayLabel), [catalog.recordEdits.originalLabel,
+      ...[1, 2, 3, 4, 5].map(number => catalog.recordEdits.editNumber.replace("{{number}}", String(number)))]);
+    assert.deepEqual(rows.slice().reverse().map(dashboard.versionDisplayLabel).slice(0, 5),
+      [5, 4, 3, 2, 1].map(number => catalog.recordEdits.editNumber.replace("{{number}}", String(number))),
+      "display order does not change chronological edit numbers");
+    const visibleVersions = versions.filter(row => row.id !== "species-approval");
+    assert.equal(rows[3].current, true, "latest approved edit remains Current Version despite a later rejected and pending edit");
+    assert.deepEqual(rows.map((row) => row.versionId), visibleVersions.map((row) => row.id));
+    assert.deepEqual(rows.map((row) => row.versionNumber), visibleVersions.map((row) => row.version_number));
+    assert.deepEqual(rows.map((row) => row.createdAt), visibleVersions.map((row) => row.created_at));
+    assert.deepEqual(rows.map((row) => row.status), visibleVersions.map((row) => row.status));
+    const group = dashboard.buildSubmissionGroups([{ request_id: 4, status: "Approved" }], "species", { "species:4": rows }, { "species:4": true })[0];
+    assert.equal(group.versionCount, 6, "system captures do not count as Botanist submissions");
+    for (let index = 0; index < rows.length; index++) {
+      const params = dashboard.submissionVersionRoute(rows[index], { id: "owner" })[1];
+      if (rows[index].current && rows[index].status === "Approved") assert.equal(params.requestId, "4");
+      else assert.equal(params.versionId, visibleVersions[index].id);
+    }
+    const approvedCaptureOnly = dashboard.versionCardItems("species", 4, { history_available: true, versions: versions.slice(0, 2) });
+    assert.equal(approvedCaptureOnly.length, 1, "an approval capture is hidden even when it is the latest stored row");
+    assert.equal(approvedCaptureOnly[0].status, "Superseded", "hiding a capture does not rewrite the original status");
+    const linkedApproval = dashboard.versionCardItems("species", 4, { history_available: true, versions: [
+      { ...versions[0], status: "Approved", owner_subject: "staff:owner" },
+      { ...versions[1], owner_subject: "staff:owner", snapshot: { ...versions[1].snapshot,
+        review_provenance: { evidence_type: "approval_capture", source_submitted_history_id: "species-original" } } },
+    ] });
+    assert.equal(linkedApproval.length, 1);
+    assert.equal(linkedApproval[0].current, true, "a verified hidden capture keeps its Approved source current");
+  }
 });
 
 test("direct Plant correction is recognized from its owned same-Observation snapshot chain, not from null change_id", () => {
@@ -194,16 +318,19 @@ test("direct Plant correction is recognized from its owned same-Observation snap
   assert.equal(dashboard.versionDisplayLabel(group.versions.at(-1)), "Edit 1");
 });
 
-test("missing or contradictory provenance remains a neutral snapshot and never fabricates a Plant edit", () => {
+test("approval evidence stays hidden even with contradictory metadata; unknown rows never fabricate edits", () => {
   const dashboard = translatedSubmissions(), response = plant30History();
   const capture = response.versions[2];
   const orphan = dashboard.versionCardItems("plant", 30, { history_available: true, versions: [capture] });
-  assert.equal(dashboard.versionDisplayLabel(orphan[0]), "Approval snapshot");
-  assert.equal(orphan[0].current, false); assert.equal(orphan[0].edited, false);
+  assert.equal(orphan.length, 0, "an unpaired approval capture is still hidden from Botanist cards");
   response.versions[2].snapshot.review_provenance.submission_id = "different-observation";
   const rows = dashboard.versionCardItems("plant", 30, response);
-  assert.equal(dashboard.versionDisplayLabel(rows.at(-1)), "Historical snapshot");
-  assert.equal(rows.at(-1).edited, false);
+  assert.equal(rows.length, 1, "approval_capture evidence is sufficient to hide the system row");
+  const unknown = dashboard.versionCardItems("plant", 30, { history_available: true, versions: [
+    response.versions[0], { ...capture, id: "unknown", snapshot: { observation_id: "unknown" } },
+  ] });
+  assert.equal(dashboard.versionDisplayLabel(unknown.at(-1)), "Historical snapshot");
+  assert.equal(unknown.at(-1).edited, false);
   const partial = dashboard.versionCardItems("plant", 30, { history_available: true, versions: [
     { id: "late-edit", version_number: 55, change_id: "known-edit", status: "Pending Review", snapshot: {} },
   ] });
@@ -1109,11 +1236,11 @@ test("actual focus hook reads once per focus, avoids rerender loops and refreshe
   const hooks = { useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = initial; return [slots[i], (value) => { slots[i] = value; }]; },
     useMemo: (fn, deps) => { const i = index++; if (!slots[i] || deps.some((d, j) => d !== slots[i].deps[j])) slots[i] = { deps, value: fn() }; return slots[i].value; } };
   hooks.useCallback = (fn, deps) => hooks.useMemo(() => fn, deps);
-  const hook = moduleFrom("utils/useBotanistRecords.js", { react: hooks, "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } }, "react-native": { AppState: { addEventListener: () => ({ remove() {} }) } }, "./botanistRecords": { ...api, fetchBotanistRecords: async () => { reads++; return { plants: rows, observations, requests }; } } });
+  const hook = moduleFrom("utils/useBotanistRecords.js", { react: hooks, "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } }, "react-native": { AppState: { addEventListener: () => ({ remove() {} }) } }, "./statusRefresh": { watchStatus }, "./botanistRecords": { ...api, fetchBotanistRecords: async () => { reads++; return { plants: rows, observations, requests }; } } });
   const render = () => { index = 0; return hook.useBotanistRecords("owner"); };
   render(); const firstFocus = focus, cleanup = focus();
   await render().refresh(); assert.equal(reads, 1); render(); assert.equal(focus, firstFocus);
-  cleanup(); focus(); await render().refresh(); assert.equal(reads, 2);
+  cleanup(); const leaveAgain = focus(); await render().refresh(); assert.equal(reads, 2); leaveAgain();
 });
 test("actual plant detail loads the existing owned ID from API and displays its separate species information", async () => {
   let index = 0, slots = [], focus, requested;
@@ -1406,6 +1533,47 @@ test("Correction Requests include creator-owned observations on another plant an
   assert.deepEqual(new Set(tasks.filter((task) => matches(task, "observations")).map((task) => task.kind)), new Set(["observation", "observationEdit"]));
   assert.equal(matches(tasks.find((task) => task.id === "12"), "plants"), true, "initial registration correction remains a Plant correction");
   assert.equal(matches(tasks.find((task) => task.id === "12"), "observations"), false);
+});
+
+test("Correction badges use linked edit history, ignore approval captures, and fall back for uncertain provenance", () => {
+  assert.match(read("screens/BotanistDashboard.js"), /correctionStatusText\}>\{correctionBadgeLabel\(task, history\)\}/);
+  const base = { id: "original", version_number: 1, status: "Superseded", owner_subject: "staff:owner",
+    created_at: "2026-11-01T00:00:00Z", snapshot: { observation_id: "registration", request_id: 8 } };
+  const capture = { id: "capture", version_number: 2, status: "Approved", owner_subject: "staff:owner",
+    created_at: "2026-11-02T00:00:00Z", snapshot: { observation_id: "registration", request_id: 8,
+      review_provenance: { evidence_type: "approval_capture", source_submitted_history_id: "original" } } };
+  const edits = ["first", "second", "third"].map((id, index) => ({ id: `version-${id}`, version_number: index + 3,
+    change_id: id, status: index === 1 ? "Cancelled" : "Correction Required", owner_subject: "staff:owner",
+    created_at: `2026-11-0${index + 3}T00:00:00Z`, snapshot: { observation_id: "registration", request_id: 8 } }));
+  const history = { history_available: true, versions: [base, capture, ...edits, { ...edits[0], id: "first-revision-2",
+    version_number: 6, change_revision: 2, created_at: "2026-11-07T00:00:00Z" }], prior_changes: [] };
+  for (const language of ["en", "ms", "zh"]) {
+    const catalog = JSON.parse(read(`translations/${language}.json`));
+    const badge = translatedSubmissions(language).correctionBadgeLabel;
+    for (const [kind, type] of [["plant", catalog.correctionBadge.plant], ["species", catalog.correctionBadge.species],
+      ["observation", catalog.correctionBadge.observation]]) {
+      const originType = kind === "plant" ? "initial_registration" : "subsequent_observation";
+      assert.equal(badge({ kind, originType, status: "Correction Required" }),
+        catalog.correctionBadge.original.replace("{{type}}", type));
+    }
+    for (const [kind, type, target] of [["plantEdit", catalog.correctionBadge.plant, { plantId: "8" }],
+      ["speciesEdit", catalog.correctionBadge.species, { requestId: "8" }]]) {
+      for (const [index, id] of ["first", "second", "third"].entries())
+        assert.equal(badge({ kind, ...target, proposalId: id, status: "Correction Required" }, history),
+          catalog.correctionBadge.edit.replace("{{type}}", type).replace("{{number}}", String(index + 1)));
+    }
+    for (const number of [1, 2, 3]) assert.equal(badge({ kind: "observationEdit", originType: "subsequent_observation",
+      editNumber: number, status: "Correction Required" }), catalog.correctionBadge.edit
+      .replace("{{type}}", catalog.correctionBadge.observation).replace("{{number}}", String(number)));
+    assert.equal(badge({ kind: "plantEdit", plantId: "8", proposalId: "missing", status: "Correction Required" }, history), "Correction Required");
+    assert.equal(badge({ kind: "speciesEdit", requestId: "8", proposalId: "third", status: "Correction Required" }, null), "Correction Required");
+    assert.equal(badge({ kind: "plantEdit", plantId: "8", proposalId: "third", status: "Correction Required" },
+      { ...history, versions: history.versions.slice(1) }), "Correction Required");
+    assert.equal(badge({ kind: "plantEdit", plantId: "8", proposalId: "third", status: "Correction Required" },
+      { ...history, versions: Array.from({ length: 200 }, (_, index) => ({ ...base, id: `row-${index}` })) }), "Correction Required");
+    assert.equal(badge({ kind: "observationEdit", originType: "initial_registration", editNumber: 1, status: "Correction Required" }), "Correction Required");
+    assert.equal(badge({ kind: "plant", status: "Correction Required" }), "Correction Required");
+  }
 });
 
 for (const language of ["en", "ms", "zh"]) {

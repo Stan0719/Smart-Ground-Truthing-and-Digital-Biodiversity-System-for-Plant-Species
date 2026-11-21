@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, View, Text, ScrollView, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import { AppState, ActivityIndicator, View, Text, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, submissionStatus, canWithdrawOriginalSpecies } from "../utils/botanistRecords";
 import EditAction from "../components/EditAction";
@@ -27,6 +28,10 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
   const withdrawalInFlight = useRef(false);
   useFocusEffect(useCallback(() => {
     let active = true;
+    const subscription = AppState?.addEventListener("change", (state) => {
+      if (state === "active") setRevision((value) => value + 1);
+    });
+    const leave = () => { active = false; subscription?.remove(); };
     setChangeInfo(null);
     setActiveSelectedChangeId(null);
     setChangeError("");
@@ -62,7 +67,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
       }).catch((error) => {
         if (active) setChangeError(error.message);
       });
-      return () => { active = false; };
+      return leave;
     }
     setEditAvailability("checking");
     setState((previous) => ({ key, request: previous.key === key ? previous.request : null, loading: true, error: "" }));
@@ -81,7 +86,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
       setChangeError(error.message);
       setEditAvailability("unavailable");
     });
-    return () => { active = false; };
+    return leave;
   }, [key, accountId, requestId, revision, historicalDetail, route.params?.historicalSnapshot,
     route.params?.selectedChangeId, route.params?.selectedChangeRevision,
     route.params?.historicalVersionStatus, route.params?.historicalVersionDate, route.params?.historicalReviewedAt,
@@ -122,7 +127,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
   ]);
   const field = (label, value) => value || historicalDetail ? <View key={label} style={styles.field}><Text style={styles.label}>{t(`submissions.${label}`)}</Text><Text style={styles.value}>{value == null || value === "" ? t("recordEdits.historicalFieldUnavailable") : value}</Text></View> : null;
   const date = (value) => value ? new Date(value).toLocaleString() : "";
-  return <ScrollView style={styles.page} contentContainerStyle={styles.content}
+  return <DiscoverableScrollView style={styles.page} contentContainerStyle={styles.content}
     refreshControl={!historicalDetail ? <RefreshControl refreshing={current.loading} onRefresh={refresh} tintColor="#468585" /> : undefined}>
     {!!current.error && <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorText}>{translateUIMessage(current.error)}</Text>
       <TouchableOpacity accessibilityRole="button" onPress={refresh} style={styles.retry}><Text style={styles.retryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>}
@@ -210,7 +215,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
         {field("status", translateLabel(request.request_status))}{field("reviewed", date(request.reviewed_at))}
       </View>
     </>}
-  </ScrollView>;
+  </DiscoverableScrollView>;
 }
 
 const styles = StyleSheet.create({

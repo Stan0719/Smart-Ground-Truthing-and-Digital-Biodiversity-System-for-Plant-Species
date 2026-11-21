@@ -131,7 +131,7 @@ function AccountScanHistory({ navigation, accountId }) {
         data={loading ? [] : matchingScans}
         keyExtractor={(scan) => String(scan.scan_id)}
         contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor="#468585" colors={["#468585"]} />}
         onEndReached={mode === "paged" && isCurrentMode ? () => void historyLoader.loadMore() : undefined}
@@ -241,7 +241,7 @@ function AccountScanHistory({ navigation, accountId }) {
               <Text style={styles.sheetTitle}>{t("scanHistory.filters")}</Text>
               <TouchableOpacity accessibilityRole="button" accessibilityLabel={t("scanHistory.closeFilters")} style={styles.closeButton} onPress={() => setFiltersOpen(false)}><Ionicons name="close" size={21} color="#456B58" /></TouchableOpacity>
             </View>
-            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator>
               <Text style={styles.sectionLabel}>{t("scanHistory.date")}</Text>
               <View style={styles.dateChoices}>
                 {[

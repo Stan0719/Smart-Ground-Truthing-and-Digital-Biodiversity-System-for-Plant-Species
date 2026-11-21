@@ -27,7 +27,7 @@ export default function FavouritePlantsScreen({ navigation, user }) {
         data={favourites.loading ? [] : items}
         keyExtractor={(item) => `${tab}:${isSpecies ? item.id : item.plantId}`}
         contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
         refreshControl={<RefreshControl refreshing={favourites.refreshing} onRefresh={() => void favourites.refresh(true)} tintColor="#468585" colors={["#468585"]} />}
         ListHeaderComponent={<>
         <View style={styles.header}>

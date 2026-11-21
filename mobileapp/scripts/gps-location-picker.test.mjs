@@ -23,7 +23,7 @@ function picker(initial = { latitude: "4.5", longitude: "113.7" }, os = "ios") {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
   }).outputText;
   const module = { exports: {} };
-  new Function("require", "module", "exports", "setTimeout", "clearTimeout", code)((name) => { assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" }; }, module, module.exports,
+  new Function("require", "module", "exports", "setTimeout", "clearTimeout", code)((name) => { if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true }; assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" }; }, module, module.exports,
     (fn) => { timers.add(fn); return fn; }, (fn) => timers.delete(fn));
   const render = (next = location, inputActive = false) => {
     location = next; refIndex = 0; effectIndex = 0; stateIndex = 0; pending = [];
@@ -170,7 +170,7 @@ test("active Observation GPS inputs are editable, remain optional, and preserve 
   };
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
-  new Function("require", "module", "exports", compiled)((key) => { assert.ok(key in deps, key); return { ...deps[key], __esModule: key !== "react" }; }, module, module.exports);
+  new Function("require", "module", "exports", compiled)((key) => { if (key === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true }; assert.ok(key in deps, key); return { ...deps[key], __esModule: key !== "react" }; }, module, module.exports);
   const walk = (root) => root && typeof root === "object" ? [root, ...React.Children.toArray(root.props?.children).flatMap(walk)] : [];
   const render = () => { stateIndex = 0; refIndex = 0; return walk(module.exports.default({ route: { name: "AddObservation", params: { plantId: "8" } }, navigation: {} })); };
   let nodes = render();

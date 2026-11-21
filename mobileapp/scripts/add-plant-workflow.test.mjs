@@ -131,6 +131,7 @@ async function fixture(language = "en", initial = {}, api) {
   };
   const module = { exports: {} };
   new Function("require", "module", "exports", code)((name) => {
+    if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" };
   }, module, module.exports);
   const render = () => { stateIndex = 0; refIndex = 0; effects.length = 0; tree = module.exports.AddPlantForm({ onSubmitted() {}, onStartNew() {}, route: { params: { botanist: { id: "bot", name: "Aina" } } }, navigation: { goBack: () => {}, setParams() {}, navigate: (...args) => navigationCalls.push(args) } }); };
@@ -155,6 +156,33 @@ test("Add Plant refreshes the database species list with the signed-in botanist 
   assert.equal(app.state.loadingSpeciesCatalog, false);
   assert.match(app.text(), /Nepenthes mirabilis/);
   assert.ok(app.byLabel("addPlantWorkflow.refreshSpecies"));
+});
+test("Species refresh sits beside Plant Information and leaves the full-width search and form values intact", async () => {
+  for (const language of ["en", "ms", "zh"]) {
+    const app = await fixture(language, { selectedSpecies: species, speciesSearch: "Nepenthes", plantScientificName: "Saved plant",
+      zone: "Niah trail", latitude: "1.5", guidedPhotos: { wholePlant: "file:///plant.jpg" }, selectedQRCode: { qr_id: 4, qr_code: "token" } });
+    const refresh = app.find((node) => node?.props?.testID === "add-plant-species-refresh");
+    assert.ok(refresh);
+    assert.equal(refresh.props.label, app.t("addPlantWorkflow.refreshSpecies"));
+    const heading = app.find((node) => node?.type === "View" && React.Children.toArray(node.props.children)
+      .some((child) => child?.props?.testID === "add-plant-species-refresh"));
+    assert.ok(heading);
+    assert.ok(app.textOf(heading).includes(app.t("addPlant.plantInformation")));
+    const search = app.byLabel("addPlant.searchSpeciesInTheDatabase");
+    assert.ok(search);
+    assert.match(source, /<TextInput\s+style=\{styles\.input\}\s+value=\{speciesSearch\}/);
+    assert.doesNotMatch(source, /speciesSelectionRow/);
+    assert.equal((source.match(/testID="add-plant-species-refresh"/g) || []).length, 1);
+    await refresh.props.onPress(); app.render();
+    assert.deepEqual(app.speciesReads, [{ accountId: "bot" }]);
+    assert.equal(app.state.selectedSpecies.id, species.id);
+    assert.equal(app.state.speciesSearch, "Nepenthes");
+    assert.equal(app.state.plantScientificName, "Saved plant");
+    assert.equal(app.state.zone, "Niah trail");
+    assert.equal(app.state.latitude, "1.5");
+    assert.equal(app.state.guidedPhotos.wholePlant, "file:///plant.jpg");
+    assert.equal(app.state.selectedQRCode.qr_id, 4);
+  }
 });
 test("legacy species adapters preserve separate scientific and common names and reject plant lists as species", async () => {
   const source = readFileSync(new URL("../utils/plantApi.js", import.meta.url), "utf8")
@@ -225,7 +253,7 @@ test("existing species picker scrolls a short or long list and selects the last 
     assert.ok(picker);
     assert.equal(picker.props.nestedScrollEnabled, true);
     assert.equal(picker.props.keyboardShouldPersistTaps, "always");
-    assert.equal(picker.props.style[0].marginRight, 52);
+    assert.equal(picker.props.style[0].marginRight, undefined, "the dropdown aligns with the full-width search field");
     const options = React.Children.toArray(picker.props.children).flatMap((node) =>
       node?.type === React.Fragment ? React.Children.toArray(node.props.children) : [node])
       .filter((node) => node?.type === "TouchableOpacity");

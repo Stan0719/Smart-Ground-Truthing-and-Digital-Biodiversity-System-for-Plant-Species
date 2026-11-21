@@ -151,13 +151,13 @@ test("Phase 2: authoritative observation origin across creation, history and rev
     assert.equal((await stored(f)).origin_type, 'initial_registration');
     assert.equal((await call('/record-changes', 'POST', { kind: 'plant', target_id: f.plant_id, proposed: { species_id: 1, scientific_name: 'New', content, origin_type: 'subsequent_observation' }, client_key: 'spoof-change' })).status, 400);
   });
-  await t.test('list/detail retain content/assets/species, redact Botanist GPS, and expose no receipt secrets', async () => {
+  await t.test('list/detail retain content/assets/species, expose visible author GPS, and hide receipt secrets', async () => {
     const f = await create(), officer = (await detail(f)).data.observation;
     assert.equal(officer.origin_type, 'initial_registration'); assert.equal(officer.content.latitude, 4);
     for (const key of ['id', 'plant_id', 'species_id', 'scientific_name', 'status', 'revision', 'assets', 'owner_subject', 'species_request_id']) assert.ok(Object.hasOwn(officer, key));
     for (const key of ['payload_hash', 'receipt', 'qr_token']) assert.equal(Object.hasOwn(officer, key), false);
     const own = (await call(`/observations/${f.id}`)).data.observation;
-    assert.equal(own.origin_type, 'initial_registration'); assert.equal(own.content.latitude, undefined);
+    assert.equal(own.origin_type, 'initial_registration'); assert.equal(own.content.latitude, 4);
     assert.equal((await call(`/observations/${f.id}`, 'GET', undefined, 'other')).status, 404);
     assert.equal((await call(`/observations/${f.id}/review`, 'POST', { decision: 'Approved', revision: 1 }, 'bot')).status, 403);
   });
