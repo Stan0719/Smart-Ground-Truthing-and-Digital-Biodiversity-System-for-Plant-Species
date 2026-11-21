@@ -11,8 +11,9 @@ const TARGETS = Object.freeze({
 });
 const MAX_ENTRIES = 25;
 const MAX_TEXT_LENGTH = 8000;
+const FAILED_TRANSLATION_COOLDOWN_MS = 10 * 60 * 1000;
 const FIELD_ALLOWLIST = Object.freeze({
-  species: new Set(["description", "habitat", "culturalSignificance"]),
+  species: new Set(["commonName", "description", "habitat", "culturalSignificance"]),
   observation: new Set(["morphology", "notes"]),
   review: new Set(["comment"]),
   "review-comment": new Set(["comment"]),
@@ -42,6 +43,44 @@ function diagnosedError(message) {
   return error;
 }
 
+function isFieldEchoFragment(text, fieldName) {
+  const words = text.trim().replace(/[.!?。！？]+$/u, "").split(/\s+/u);
+  return words.length === 2 && words[1].toLocaleLowerCase("en") === fieldName.toLocaleLowerCase("en") &&
+    /^[A-Z][A-Za-z0-9_-]{0,2}$/u.test(words[0]);
+}
+
+function hasEnoughNarrativeContext(text, fieldName) {
+  if (fieldName === "commonName")
+    return !isFieldEchoFragment(text, fieldName) && (text.match(/[\p{L}\p{N}]/gu) || []).length > 0;
+  // Cache hits are checked before this gate. On misses, very short fragments
+  // do not give a model enough context to distinguish prose from abbreviations,
+  // labels, or test data. Leave them in their original language.
+  const words = text.match(/[\p{L}]+(?:['’][\p{L}]+)?/gu) || [];
+  return !isFieldEchoFragment(text, fieldName) &&
+    (words.length >= 3 || (words.length >= 2 && /[.!?。！？]\s*$/u.test(text.trim())));
+}
+
+function validateTranslation(source, translated, target, protectedValues) {
+  if (typeof translated !== "string" || !translated.trim())
+    return { valid: false, reason: "empty_output" };
+  const value = translated.trim();
+  if (value.length > MAX_TEXT_LENGTH * 2)
+    return { valid: false, reason: "output_too_long" };
+  if (/```|^(?:translation|translated text|here(?: is|'s) (?:the )?translation)\s*[:\-]/iu.test(value) ||
+      /^(?:sure|of course)[,!:]/iu.test(value))
+    return { valid: false, reason: "model_explanation" };
+  const unprotectedSource = protectedValues.reduce((remaining, token) => remaining.replace(token, " "), source);
+  const sourceWordCount = unprotectedSource.match(/[\p{L}]+(?:['’][\p{L}]+)?/gu)?.length || 0;
+  if (target === "zh-CN" && sourceWordCount >= 3 && !/[\u3400-\u9fff]/u.test(value))
+    return { valid: false, reason: "target_script_missing" };
+  // Do not reject unchanged proper nouns, names, codes, or short fragments.
+  // Identical output is a failure only when the unprotected source is clearly
+  // a multiword narrative sentence and the model returned it verbatim.
+  if (sourceWordCount >= 4 && value.localeCompare(source, undefined, { sensitivity: "accent" }) === 0)
+    return { valid: false, reason: "unchanged_narrative" };
+  return { valid: true, text: value };
+}
+
 function protectedMatches(text, knownNames = []) {
   const matches = [];
   const add = (expression) => {
@@ -55,6 +94,9 @@ function protectedMatches(text, knownNames = []) {
   add(/(?<![\p{L}\p{N}])[+-]?(?:\d+(?:,\d{3})*(?:\.\d+)?|\.\d+)(?:\s?(?:cm|mm|km|m|kg|mg|g|ha|%|°C|°F|hours?|minutes?|seconds?|years?))?(?![\p{L}\p{N}])/giu);
   add(/\b(?:[A-Z]{2,}[A-Z0-9_-]*\d+[A-Z0-9_-]*|\d+[A-Z]{2,}[A-Z0-9_-]*)\b/gu);
   add(/\b[A-Z]{2,}\b/gu);
+  // Preserve this precise geological name when species habitat text is translated.
+  // TranslateGemma has previously replaced it with a different rock type.
+  add(/\bnepheline\s+syenite\b/giu);
   const verifiedNames = knownNames.filter((value) => typeof value === "string" && value.trim());
   const knownGenera = new Set(verifiedNames.flatMap((name) => {
     const genus = /^([A-Z][a-z-]+)(?:\s|$)/u.exec(name.trim())?.[1];
@@ -119,9 +161,17 @@ function createTranslationService({
 } = {}) {
   if (!pool) throw Error("Translation service requires PostgreSQL.");
   const inFlight = new Map();
+  const failedUntil = new Map();
   let translationTail = Promise.resolve();
   let namesCache = { expiresAt: 0, values: [] };
   let modelVerified = false;
+
+  function suppressRetry(key) {
+    failedUntil.delete(key);
+    failedUntil.set(key, Date.now() + FAILED_TRANSLATION_COOLDOWN_MS);
+    while (failedUntil.size > 1000)
+      failedUntil.delete(failedUntil.keys().next().value);
+  }
 
   const baseUrl = () => {
     const raw = env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
@@ -213,8 +263,9 @@ function createTranslationService({
       const scientificRead = permitted(user, "plants.scientific.read") || user?.role === "Administrator";
       if (fieldName === "culturalSignificance" && !scientificRead) return null;
       if (fieldName === "habitat" && user && !scientificRead) return null;
-      const expression = fieldName === "description" ? "s.description" : "s.rbac_data ->> $3";
-      const values = fieldName === "description"
+      const expression = fieldName === "description" ? "s.description"
+        : fieldName === "commonName" ? "s.common_name" : "s.rbac_data ->> $3";
+      const values = ["description", "commonName"].includes(fieldName)
         ? [recordId, visibilityFor(user)]
         : [recordId, visibilityFor(user), fieldName];
       const result = await pool.query(`SELECT s.species_id::text AS id,${expression} AS source_text
@@ -264,7 +315,15 @@ function createTranslationService({
       ORDER BY CASE WHEN record_type=$7 THEN 0 ELSE 1 END LIMIT 1`,
     [typeAliases(entry), entry.recordId, entry.fieldName, targetLocale, sourceHash, MODEL, entry.recordType]);
     const value = result.rows[0];
-    if (!value || value.source_locale !== "en" || typeof value.translated_text !== "string" || !value.translated_text.trim()) return null;
+    if (!value) return { text: null, invalid: false };
+    if (isFieldEchoFragment(sourceText, entry.fieldName)) {
+      diagnostic("validation-failure", targetLocale, entry, { reason: "cached_source_field_echo" });
+      return { text: null, invalid: true, reason: "cached_source_field_echo" };
+    }
+    if (value.source_locale !== "en" || typeof value.translated_text !== "string" || !value.translated_text.trim()) {
+      diagnostic("validation-failure", targetLocale, entry, { reason: "invalid_cached_translation" });
+      return { text: null, invalid: true, reason: "invalid_cached_translation" };
+    }
     const names = await knownTaxonomicNames();
     const protectedValues = protectedMatches(sourceText, names).map((part) => part.text);
     let cursor = 0;
@@ -272,11 +331,16 @@ function createTranslationService({
       const position = value.translated_text.indexOf(token, cursor);
       if (sourceText.split(token).length !== value.translated_text.split(token).length || position < 0) {
         diagnostic("validation-failure", targetLocale, entry, { reason: "cached_protected_value_integrity" });
-        return null;
+        return { text: null, invalid: true, reason: "cached_protected_value_integrity" };
       }
       cursor = position + token.length;
     }
-    return value.translated_text;
+    const validation = validateTranslation(sourceText, value.translated_text, targetLocale, protectedValues);
+    if (!validation.valid) {
+      diagnostic("validation-failure", targetLocale, entry, { reason: `cached_${validation.reason}` });
+      return { text: null, invalid: true, reason: `cached_${validation.reason}` };
+    }
+    return { text: validation.text, invalid: false };
   }
 
   async function sourceLocale(entry, sourceHash) {
@@ -306,10 +370,18 @@ function createTranslationService({
       return inFlight.get(key);
     }
     const task = (async () => {
+      const cooldownUntil = failedUntil.get(key) || 0;
+      if (Date.now() < cooldownUntil) {
+        diagnostic("translation-suppressed", targetLocale, entry, { reason: "recent_failure_cooldown" });
+        return null;
+      }
       const cachedValue = await cached(storedEntry, source.source_text, targetLocale, sourceHash);
-      if (cachedValue) {
+      if (cachedValue.text) {
         diagnostic("cache-hit", targetLocale, entry, { model: MODEL });
-        return cachedValue;
+        return cachedValue.text;
+      }
+      if (cachedValue.invalid) {
+        diagnostic("cache-invalidated", targetLocale, entry, { reason: cachedValue.reason || "cache_validation_failed" });
       }
       diagnostic("cache-miss", targetLocale, entry);
       const sourceInfo = await sourceLocale(storedEntry, sourceHash);
@@ -319,6 +391,11 @@ function createTranslationService({
       }
       if (sourceInfo.locale !== "en") {
         diagnostic("metadata-skip", targetLocale, entry, { reason: "unsupported_source_locale", sourceLocale: sourceInfo.locale });
+        return null;
+      }
+      if (!hasEnoughNarrativeContext(source.source_text, entry.fieldName)) {
+        suppressRetry(key);
+        diagnostic("source-skip", targetLocale, entry, { reason: "insufficient_narrative_context" });
         return null;
       }
       const names = await knownTaxonomicNames();
@@ -339,9 +416,17 @@ function createTranslationService({
           diagnostic("validation-failure", targetLocale, entry, { reason: "protected_value_validation" });
         if (/Protected|marker|collision|indexing/i.test(message) && error instanceof Error)
           error.translationDiagnosticLogged = true;
+        suppressRetry(key);
         throw error;
       }
-      if (translatedText.length > MAX_TEXT_LENGTH * 2) throw Error("Translation output exceeded its limit.");
+      const protectedValues = protectedMatches(source.source_text, names).map((part) => part.text);
+      const validation = validateTranslation(source.source_text, translatedText, targetLocale, protectedValues);
+      if (!validation.valid) {
+        suppressRetry(key);
+        diagnostic("validation-failure", targetLocale, entry, { reason: validation.reason });
+        return null;
+      }
+      translatedText = validation.text;
       await pool.query(`INSERT INTO plant_translation_cache
         (record_type,record_id,field_name,source_locale,target_locale,source_hash,translated_text,model_name,prompt_version)
         VALUES($1,$2,$3,'en',$4,$5,$6,$7,$8)
@@ -351,6 +436,7 @@ function createTranslationService({
           prompt_version=EXCLUDED.prompt_version,updated_at=CURRENT_TIMESTAMP`,
       [sourceInfo.recordType, storedEntry.recordId, entry.fieldName, targetLocale, sourceHash, translatedText, MODEL, PROMPT_VERSION]);
       diagnostic("cache-saved", targetLocale, entry, { model: MODEL });
+      failedUntil.delete(key);
       return translatedText;
     })();
     inFlight.set(key, task);
@@ -408,6 +494,37 @@ function mountWebsiteTranslations(app, { pool, allow, origins }) {
       const code = typeof error?.code === "string" && /^[A-Z0-9_]{1,40}$/.test(error.code) ? error.code : undefined;
       diagnostic("request-failure", locale, undefined, code ? { code } : { reason: "processing_failed" });
       return res.json({ locale, translations: [] });
+    }
+  });
+  // Native mobile requests use their existing bearer session and role grants.
+  // Keep this additive path separate: the website route above continues to
+  // reject bearer credentials and requires an approved website Origin.
+  app.post("/api/mobile/translations", allow("plants.catalogue.read"), async (req, res) => {
+    const authorization = req.headers.authorization || "";
+    const anonymousGuest = !authorization && !req.user;
+    const authenticatedMobile = /^Bearer [a-f0-9]{64}$/.test(authorization) &&
+      ["Botanist", "Visitor"].includes(req.user?.role);
+    if (req.headers.origin || req.headers.cookie || !(anonymousGuest || authenticatedMobile)) {
+      diagnostic("mobile-request-rejected", undefined, undefined, { reason: "native_session_required" });
+      return res.status(403).json({ error: "Mobile translation request rejected." });
+    }
+    const requestedLocale = req.body?.locale;
+    const locale = requestedLocale === "zh" ? "zh-CN" : requestedLocale;
+    const { entries } = req.body || {};
+    if (!Object.hasOwn(TARGETS, locale) || !Array.isArray(entries) || entries.length > MAX_ENTRIES)
+      return res.status(400).json({ error: "Invalid translation request." });
+    diagnostic("mobile-request-accepted", locale, undefined, {
+      role: req.user?.role || "Guest",
+      entries: entries.map((entry) => ({ recordType: entry?.recordType, recordId: entry?.recordId, fieldName: entry?.fieldName })),
+    });
+    try {
+      const translations = await service.translateEntries(entries, locale, req.user);
+      diagnostic("mobile-request-complete", locale, undefined, { requested: entries.length, returned: translations.length });
+      return res.json({ locale: requestedLocale, translations });
+    } catch (error) {
+      const code = typeof error?.code === "string" && /^[A-Z0-9_]{1,40}$/.test(error.code) ? error.code : undefined;
+      diagnostic("mobile-request-failure", locale, undefined, code ? { code } : { reason: "processing_failed" });
+      return res.json({ locale: requestedLocale, translations: [] });
     }
   });
   return service;

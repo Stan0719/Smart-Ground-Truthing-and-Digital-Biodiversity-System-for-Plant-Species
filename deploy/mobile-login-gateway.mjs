@@ -15,6 +15,7 @@ export function gatewayRoute(raw, {authPort=3001,plantPort=3000,facePort=8000}={
  if(/(?:^|\/)\.|^\/(?:internal|data)(?:\/|$)|^\/face\/internal(?:\/|$)|^\/auth\.sqlite(?:\/|$)/i.test(path))return null
  if(path==='/auth-health')return {port:authPort,path:'/health'}
  if(path==='/health')return {port:plantPort,path:'/health'}
+ if(path==='/api/mobile/translations')return {port:plantPort,path:url.pathname+url.search}
  if(/^\/api\/(?:auth|admin|mobile)\//.test(path))return {port:authPort,path:url.pathname+url.search}
  if(path.startsWith('/face/'))return {port:facePort,path:url.pathname.slice(5)+url.search}
  if(path.startsWith('/api/'))return {port:plantPort,path:url.pathname+url.search}

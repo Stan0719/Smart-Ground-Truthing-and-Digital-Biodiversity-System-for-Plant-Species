@@ -11,7 +11,7 @@ function plantDiagnosticRoute(path) {
   return part ? `/${resource}/:id` : `/${resource}`;
 }
 
-export async function plantApi(path,{method='GET',body,expectedAccountId,accountId=expectedAccountId}={}){
+export async function plantApi(path,{method='GET',body,expectedAccountId,accountId=expectedAccountId,timeoutMs}={}){
  const API_URL = mobileApiUrl("plant");
  if(!path.startsWith('/')||path.startsWith('//'))throw Error('Invalid plant API path.');
  const endpoint=plantDiagnosticRoute(path);
@@ -21,7 +21,7 @@ export async function plantApi(path,{method='GET',body,expectedAccountId,account
  if(path==='/species'&&['botanist','conservation-officer'].includes(user.role))path+='?scope=scientific';
  logPlantRequest({phase:'request_started',endpoint,method,credentialsIncluded:true,accountIdAvailable:Boolean(user.id),accountMatchesExpected:!accountId||user.id===accountId});
  let response;
- try{response=await fetch(API_URL+'/api'+path,{method,credentials:'omit',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(path==='/plant-submissions'?90000:15000)})}
+ try{response=await fetch(API_URL+'/api'+path,{method,credentials:'omit',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(timeoutMs || (path==='/plant-submissions'?90000:15000))})}
  catch(cause){throw Object.assign(Error('Unable to reach the plant service. Check your connection and the running backend.'),{code:['AbortError','TimeoutError'].includes(cause.name)?'API_TIMEOUT':'API_UNREACHABLE',transient:true})}
  const responseText=await response.text();
  logPlantRequest({phase:'response_received',endpoint,method,status:response.status,durationMs:Date.now()-started,responseChars:responseText.length});
@@ -33,6 +33,27 @@ export async function plantApi(path,{method='GET',body,expectedAccountId,account
  if(Array.isArray(result.plants))logPlantRequest({phase:'records_received',endpoint,status:response.status,recordCount:result.plants.length});
  return result;
  });}catch(error){logPlantRequest({phase:'request_failed',endpoint,method,durationMs:Date.now()-started,code:error.code||'PLANT_API_ERROR',...(error.status?{status:error.status}:{}),...(error.code==='SESSION_REQUIRED'?{credentialsIncluded:false}: {})});throw error;}
+}
+export async function requestMobileDatabaseTranslations(locale, entries, { publicOnly = false } = {}) {
+  const body = { locale, entries };
+  if (!publicOnly) return plantApi("/mobile/translations", { method: "POST", body, timeoutMs: 95000 });
+  const url = mobileApiUrl("plant");
+  let response;
+  try {
+    response = await fetch(`${url}/api/mobile/translations`, {
+      method: "POST",
+      credentials: "omit",
+      redirect: "error",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(95000),
+    });
+  } catch {
+    throw Object.assign(Error("Unable to reach the plant translation service."), { code: "API_UNREACHABLE", transient: true });
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(Error(result.error || `Translation request failed (HTTP ${response.status}).`), { status: response.status });
+  return result;
 }
 async function getJson(path, { accountId, publicOnly = false } = {}) {
   const API_URL = mobileApiUrl("plant");

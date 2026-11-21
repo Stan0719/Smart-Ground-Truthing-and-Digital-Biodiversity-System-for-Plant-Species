@@ -7,6 +7,7 @@ import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import PersistentKnowledgeMap from "./PersistentKnowledgeMap";
 import { plantApi } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
+import useDatabaseTranslations from "../hooks/useDatabaseTranslations";
 import {
   mobileApiUrl,
   createConnectivityGuard,
@@ -22,6 +23,29 @@ export default function PersistentKnowledge({ route, navigation, user }) {
     [search, setSearch] = useState(""),
     [selected, setSelected] = useState(null),
     [images, setImages] = useState([]);
+  const speciesTranslationFields = [
+    ...species
+      .filter((item) => item?.species_id != null && typeof item.common_name === "string" && item.common_name.trim())
+      .map((item) => ({ recordType: "species", recordId: String(item.species_id), fieldName: "commonName", sourceText: item.common_name })),
+    ...(selected?.species_id != null
+      ? ["description", "habitat", "culturalSignificance"]
+        .filter((fieldName) => typeof selected[fieldName] === "string" && selected[fieldName].trim())
+        .map((fieldName) => ({ recordType: "species", recordId: String(selected.species_id), fieldName, sourceText: selected[fieldName] }))
+      : []),
+  ];
+  const translatedSpeciesText = useDatabaseTranslations(speciesTranslationFields, {
+    accountId: user?.id ?? null,
+    publicOnly: !can(user, "plants.scientific.read"),
+  });
+  const speciesText = (fieldName) => {
+    const field = speciesTranslationFields.find((entry) => entry.fieldName === fieldName &&
+      (fieldName !== "commonName" || entry.recordId === String(selected?.species_id)));
+    return field ? translatedSpeciesText(field) : (fieldName === "commonName" ? selected?.common_name : selected?.[fieldName]) || "";
+  };
+  const speciesCommonName = (item) => {
+    const field = speciesTranslationFields.find((entry) => entry.recordId === String(item.species_id) && entry.fieldName === "commonName");
+    return field ? translatedSpeciesText(field) : item.common_name || "";
+  };
   const map = route.name === "KnowledgeMap";
   async function load() {
     setError("");
@@ -100,13 +124,13 @@ export default function PersistentKnowledge({ route, navigation, user }) {
       )}
       {selected ? (
         <>
-          <Text>{selected.common_name}</Text>
+          <Text>{speciesText("commonName")}</Text>
           <Text>
             {selected.genus_name} · {selected.family_name}
           </Text>
-          <Text>{selected.description}</Text>
-          <Text>{selected.habitat}</Text>
-          <Text>{selected.culturalSignificance}</Text>
+          <Text>{speciesText("description")}</Text>
+          <Text>{speciesText("habitat")}</Text>
+          <Text>{speciesText("culturalSignificance")}</Text>
           {!!selected.conservation_status && (
             <Text>{t("persistentKnowledge.conservation")}{translateLabel(selected.conservation_status)}</Text>
           )}
@@ -156,7 +180,7 @@ export default function PersistentKnowledge({ route, navigation, user }) {
                 }
               >
                 <Text>{s.scientific_name}</Text>
-                <Text>{s.common_name}</Text>
+                <Text>{speciesCommonName(s)}</Text>
               </TouchableOpacity>
             ))}
         </>

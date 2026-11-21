@@ -23,6 +23,7 @@ import { getPlantLocationDisplay } from "../utils/plantLocationDisplay";
 import { stepPhotoIndex, uniquePlantPhotos } from "../utils/plantPhotoGallery";
 import { fetchPlantObservationEligibility } from "../utils/fieldSync";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
+import useDatabaseTranslations from "../hooks/useDatabaseTranslations";
 
 
 export default function PlantDetail({
@@ -146,6 +147,28 @@ export default function PlantDetail({
     return () => subscription?.remove();
   }, [isBotanist, loadPlant]));
 
+  const databaseTranslationFields = [];
+  const speciesIdForTranslation = String(plant?.species?.id ?? plant?.species?.speciesId ?? "");
+  const speciesCommonNameForTranslation = plant?.species?.commonName ?? plant?.species?.name ?? "";
+  if (/^[1-9][0-9]*$/.test(speciesIdForTranslation) && typeof speciesCommonNameForTranslation === "string" && speciesCommonNameForTranslation.trim())
+    databaseTranslationFields.push({ recordType: "species", recordId: speciesIdForTranslation, fieldName: "commonName", sourceText: speciesCommonNameForTranslation });
+  for (const observation of plant?.observations || []) {
+    if (observation.status !== "Approved" || !observation.observationId) continue;
+    for (const fieldName of ["morphology", "notes"])
+      if (typeof observation[fieldName] === "string" && observation[fieldName].trim())
+        databaseTranslationFields.push({ recordType: "observation", recordId: String(observation.observationId), fieldName, sourceText: observation[fieldName] });
+  }
+  const latestApprovedObservation = selectLatestApprovedObservation(plant?.observations || []);
+  const latestVerifiedObservationId = String(plant?.latestVerifiedObservation?.id ?? latestApprovedObservation?.observationId ?? "");
+  const displayedObservationForTranslation = getPlantDisplayObservation(plant);
+  if (latestVerifiedObservationId && !databaseTranslationFields.some((field) => field.recordType === "observation" && field.recordId === latestVerifiedObservationId && field.fieldName === "morphology") &&
+      typeof displayedObservationForTranslation?.morphology === "string" && displayedObservationForTranslation.morphology.trim())
+    databaseTranslationFields.push({ recordType: "observation", recordId: latestVerifiedObservationId, fieldName: "morphology", sourceText: displayedObservationForTranslation.morphology });
+  const translatedDatabaseText = useDatabaseTranslations(databaseTranslationFields, {
+    accountId: user?.id ?? null,
+    publicOnly: !user || user?.role?.toLowerCase() === "guest",
+  });
+
   // =====================================================
   // PLANT NOT FOUND
   // =====================================================
@@ -213,6 +236,8 @@ export default function PlantDetail({
     scientificName: plant.scientificName,
     genus: plant.genus,
   };
+  const speciesCommonNameField = databaseTranslationFields.find((field) => field.recordType === "species" && field.fieldName === "commonName");
+  const translatedSpeciesCommonName = speciesCommonNameField ? translatedDatabaseText(speciesCommonNameField) : selectedSpecies.name;
   const displayedObservation = getPlantDisplayObservation(plant);
   const plantPhotos = uniquePlantPhotos(plant.photos);
   const displayablePhotos = plantPhotos.filter((photo) => !failedPhotoUris.includes(photo.uri));
@@ -245,10 +270,14 @@ export default function PlantDetail({
   // LATEST APPROVED OBSERVATION
   // =====================================================
 
-  const latestApprovedObservation = selectLatestApprovedObservation(plant.observations || []);
   const detailsObservation = currentPlantStatus === "approved"
     ? latestApprovedObservation
     : currentPlantStatus === "pending review" ? selectOwnedPendingPlantObservation(plant, user?.id) : null;
+  const observationText = (observation, fieldName, fallbackId = "") => {
+    const recordId = String(observation?.observationId ?? fallbackId);
+    const field = databaseTranslationFields.find((item) => item.recordType === "observation" && item.recordId === recordId && item.fieldName === fieldName);
+    return field ? translatedDatabaseText(field) : observation?.[fieldName] || "";
+  };
 
 
   // =====================================================
@@ -352,7 +381,7 @@ export default function PlantDetail({
       </Text>
 
       <Text style={styles.scientificName}>
-        {selectedSpecies?.name ? `${t("plantDetail.species")}: ${selectedSpecies.name}` : ""}
+        {translatedSpeciesCommonName ? `${t("plantDetail.species")}: ${translatedSpeciesCommonName}` : ""}
       </Text>
 
       <View style={styles.heroBadges}>
@@ -419,7 +448,7 @@ export default function PlantDetail({
             label={t("plantDetail.species")}
             value={
               selectedSpecies
-                ? selectedSpecies.name
+                ? translatedSpeciesCommonName
                 : plant.speciesSlug
             }
           />
@@ -469,12 +498,12 @@ export default function PlantDetail({
           <InfoRow
             label={t("botanistPlantDetail.morphology")}
             value={
-              displayedObservation?.morphology || t("plant.notRecorded")
+              observationText(displayedObservation, "morphology", latestVerifiedObservationId) || t("plant.notRecorded")
             }
           />
 
           {displayedObservation?.notes ? (
-            <InfoRow label={t("plantDetail.notes")} value={displayedObservation.notes} />
+            <InfoRow label={t("plantDetail.notes")} value={observationText(displayedObservation, "notes", latestVerifiedObservationId)} />
           ) : null}
 
         </View>
@@ -646,14 +675,14 @@ export default function PlantDetail({
             <InfoRow
               label={t("botanistPlantDetail.morphology")}
               value={
-                detailsObservation.morphology
+                observationText(detailsObservation, "morphology")
               }
             />
 
             <InfoRow
               label={t("plantDetail.notes")}
               value={
-                detailsObservation.notes
+                observationText(detailsObservation, "notes")
               }
             />
 
@@ -731,6 +760,7 @@ export default function PlantDetail({
                 observation={observation}
                 user={user}
                 navigation={navigation}
+                translateObservationText={observationText}
                 initiallyOpen={String(observation.observationId) === String(focusObservationId)}
               />
             )
@@ -814,7 +844,7 @@ function InfoRow({
 // OBSERVATION CARD
 // =====================================================
 
-export function ObservationCard({ observation, user, navigation, initiallyOpen = false }) {
+export function ObservationCard({ observation, user, navigation, translateObservationText, initiallyOpen = false }) {
   useAppTranslation();
   const [isOpen, setIsOpen] = useState(initiallyOpen);
 
@@ -885,7 +915,7 @@ export function ObservationCard({ observation, user, navigation, initiallyOpen =
           <Text style={styles.historyLabel}>{t("botanistPlantDetail.morphology")}</Text>
 
           <Text style={styles.historyValue}>
-            {observation.morphology || t("plant.notRecorded")}
+            {translateObservationText?.(observation, "morphology") || observation.morphology || t("plant.notRecorded")}
           </Text>
 
           {observation.notes && (
@@ -893,7 +923,7 @@ export function ObservationCard({ observation, user, navigation, initiallyOpen =
               <Text style={styles.historyLabel}>{t("plantDetail.notes")}</Text>
 
               <Text style={styles.notes}>
-                {observation.notes}
+                {translateObservationText?.(observation, "notes") || observation.notes}
               </Text>
             </>
           )}

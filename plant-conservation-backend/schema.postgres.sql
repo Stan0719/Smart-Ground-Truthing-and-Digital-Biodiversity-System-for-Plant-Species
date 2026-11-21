@@ -66,7 +66,6 @@ CREATE TABLE IF NOT EXISTS iot_reading_aggregate(
     bucket_start TIMESTAMPTZ NOT NULL,
     bucket_end TIMESTAMPTZ NOT NULL,
     sample_count INTEGER NOT NULL CHECK(sample_count>0),
-    metrics JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(device_id,bucket_start),
     CHECK(bucket_end>bucket_start)

@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const express = require("express");
 const { createServer } = require("node:http");
+const { browserBoundary } = require("../authorization.cjs");
 const {
   FIELD_ALLOWLIST,
   createTranslationService,
@@ -24,6 +25,7 @@ function fakePool({ metadata = true, cache = null, sourceText = source } = {}) {
       state.queries.push(sql);
       if (sql.includes("SELECT scientific_name AS name")) return { rows: [{ name: "Nepenthes ampullaria" }] };
       if (sql.includes("FROM species s LEFT JOIN")) return { rows: [{ id: "12", source_text: sourceText }] };
+      if (sql.includes("FROM plant_observation o")) return { rows: [{ id: values[0], source_text: sourceText }] };
       if (sql.includes("FROM plant_translation_source_language")) {
         return { rows: metadata && values[3] === hash ? [{ record_type: "species", source_locale: "en" }] : [] };
       }
@@ -43,7 +45,7 @@ function fakePool({ metadata = true, cache = null, sourceText = source } = {}) {
   };
 }
 
-function fakeOllama({ installed = true } = {}) {
+function fakeOllama({ installed = true, output = null } = {}) {
   const prompts = [];
   const fetchImpl = async (url, options = {}) => {
     if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: installed ? [{ name: "translategemma:4b" }] : [] }), { status: 200 });
@@ -53,7 +55,12 @@ function fakeOllama({ installed = true } = {}) {
       prompts.push(prompt);
       const translatedInput = prompt.split("\n\n\n").at(-1) || "";
       const markers = [...translatedInput.matchAll(/ZXQDBV\d+QXZ/g)].map((item) => item[0]);
-      return new Response(JSON.stringify({ message: { content: `Teks diterjemahkan ${markers.join(" ")}` } }), { status: 200 });
+      const content = typeof output === "function"
+        ? output(prompt, markers)
+        : typeof output === "string"
+          ? output
+          : `${prompt.includes("Simplified Chinese") ? "已翻译" : "Teks diterjemahkan"} ${markers.join(" ")}`;
+      return new Response(JSON.stringify({ message: { content } }), { status: 200 });
     }
     throw Error("Unexpected Ollama endpoint");
   };
@@ -61,7 +68,7 @@ function fakeOllama({ installed = true } = {}) {
 }
 
 test("only allowlisted narrative fields are eligible", () => {
-  assert.deepEqual([...FIELD_ALLOWLIST.species], ["description", "habitat", "culturalSignificance"]);
+  assert.deepEqual([...FIELD_ALLOWLIST.species], ["commonName", "description", "habitat", "culturalSignificance"]);
   assert.deepEqual([...FIELD_ALLOWLIST.observation], ["morphology", "notes"]);
   assert.deepEqual([...FIELD_ALLOWLIST.review], ["comment"]);
   assert.equal(FIELD_ALLOWLIST.observation.has("latitude"), false);
@@ -86,6 +93,19 @@ test("scientific names, numbers, IDs, URLs, and paths are excluded from model in
   assert.match(translated, /PL001/);
   assert.ok(sent.length === 1 && !/Nepenthes ampullaria|1\.5|https:|PL001/.test(sent[0]));
   assert.equal((sent[0].match(/ZXQDBV\d+QXZ/g) || []).length, 4);
+});
+
+test("specific geological technical terms are protected and restored exactly", async () => {
+  const text = "It grows on nepheline syenite soils.";
+  const protectedValues = protectedMatches(text);
+  assert.deepEqual(protectedValues.map((item) => item.text), ["nepheline syenite"]);
+  const translated = await translateProtectedText(text, "zh-CN", [], async (chunk) => {
+    const marker = chunk.match(/ZXQDBV\d+QXZ/)?.[0];
+    assert.ok(marker);
+    assert.ok(!chunk.includes("nepheline syenite"));
+    return `土壤中含有 ${marker}。`;
+  });
+  assert.equal(translated, "土壤中含有 nepheline syenite。");
 });
 
 test("known genus names are protected without freezing ordinary sentence openings", () => {
@@ -118,6 +138,23 @@ test("a cached translation with a repeated scientific name is reused", async () 
   assert.equal(result[0]?.text, "Nepenthes ampullaria tumbuh berhampiran Nepenthes ampullaria.");
   assert.equal(ollama.prompts.length, 0);
   assert.equal(pool.state.writes.length, 0);
+});
+
+test("a cached translation that alters a protected technical term is regenerated", async () => {
+  const sourceText = "The soil contains nepheline syenite.";
+  const hash = require("node:crypto").createHash("sha256").update(sourceText, "utf8").digest("hex");
+  const pool = fakePool({ sourceText, cache: {
+    record_type: "species", record_id: "12", field_name: "description", target_locale: "zh-CN",
+    source_locale: "en", source_hash: hash, translated_text: "土壤中含有石英岩。",
+    model_name: "translategemma:4b", prompt_version: "translategemma-prompt-v2",
+  } });
+  const ollama = fakeOllama({ output: (_prompt, markers) => `土壤中含有 ${markers[0]}。` });
+  const service = createTranslationService({ pool, fetchImpl: ollama.fetchImpl, env: { OLLAMA_BASE_URL: "http://127.0.0.1:11434" } });
+  const result = await service.translateEntries([{ recordType: "species", recordId: "12", fieldName: "description" }], "zh-CN", null);
+  assert.equal(result[0]?.text, "土壤中含有 nepheline syenite。");
+  assert.equal(ollama.prompts.length, 1);
+  assert.equal(pool.state.writes.length, 1);
+  assert.equal(pool.state.cache.translated_text, result[0].text);
 });
 
 test("marker loss, duplication, or reordering fails closed", async () => {
@@ -206,6 +243,130 @@ test("an unavailable local model is not downloaded and leaves source text untouc
   assert.deepEqual(result, []);
   assert.equal(ollama.prompts.length, 0);
   assert.equal(pool.state.writes.length, 0);
+});
+
+test("ambiguous short source fragments are not sent to Ollama and are cooldown-suppressed", async () => {
+  const text = "Jn morphology";
+  const hash = require("node:crypto").createHash("sha256").update(text, "utf8").digest("hex");
+  const pool = fakePool({ sourceText: text, cache: { record_type: "observation", record_id: "123e4567-e89b-12d3-a456-426614174000", field_name: "morphology",
+    target_locale: "ms", source_locale: "en", source_hash: hash, translated_text: text,
+    model_name: "translategemma:4b", prompt_version: "translategemma-prompt-v2" } });
+  const ollama = fakeOllama();
+  const diagnostics = [];
+  const originalInfo = console.info;
+  console.info = (message) => diagnostics.push(String(message));
+  const service = createTranslationService({ pool, fetchImpl: ollama.fetchImpl, env: { OLLAMA_BASE_URL: "http://127.0.0.1:11434" } });
+  const entry = { recordType: "observation", recordId: "123e4567-e89b-12d3-a456-426614174000", fieldName: "morphology" };
+  try {
+    assert.deepEqual(await service.translateEntries([entry], "ms", null), []);
+    assert.deepEqual(await service.translateEntries([entry], "ms", null), []);
+  } finally { console.info = originalInfo; }
+  assert.equal(ollama.prompts.length, 0);
+  assert.equal(pool.state.writes.length, 0);
+  assert.equal(pool.state.cache.translated_text, text, "the invalid cache is left untouched for authorized manual review");
+  assert.ok(diagnostics.some((line) => line.includes('"reason":"cached_source_field_echo"')));
+  assert.ok(diagnostics.some((line) => line.includes('"reason":"recent_failure_cooldown"')));
+});
+
+test("verbatim English narrative and model explanations are rejected without cache writes", async () => {
+  const narrative = "This plant has green leaves and grows in shaded forest areas.";
+  const entry = { recordType: "species", recordId: "12", fieldName: "description" };
+  for (const output of [narrative, `Here is the translation: ${narrative}`]) {
+    const pool = fakePool({ sourceText: narrative });
+    const ollama = fakeOllama({ output });
+    const service = createTranslationService({ pool, fetchImpl: ollama.fetchImpl, env: { OLLAMA_BASE_URL: "http://127.0.0.1:11434" } });
+    assert.deepEqual(await service.translateEntries([entry], "ms", null), []);
+    assert.equal(ollama.prompts.length, 1);
+    assert.equal(pool.state.writes.length, 0);
+    assert.equal(pool.state.cache, null);
+    assert.deepEqual(await service.translateEntries([entry], "ms", null), []);
+    assert.equal(ollama.prompts.length, 1, "the same failed source should not cause an inference loop");
+  }
+});
+
+test("unchanged scientific-name content is allowed, while empty responses are never cached", async () => {
+  const name = "Nepenthes rafflesiana.";
+  const pool = fakePool({ sourceText: name });
+  const ollama = fakeOllama({ output: (_prompt, markers) => `${markers[0]}.` });
+  const service = createTranslationService({ pool, fetchImpl: ollama.fetchImpl, env: { OLLAMA_BASE_URL: "http://127.0.0.1:11434" } });
+  const entry = { recordType: "species", recordId: "12", fieldName: "description" };
+  const namedResult = await service.translateEntries([entry], "ms", null);
+  assert.equal(namedResult[0]?.text, name);
+  assert.equal(ollama.prompts.length, 1);
+  assert.equal(pool.state.writes.length, 1);
+
+  const chinesePool = fakePool({ sourceText: name });
+  const chineseOllama = fakeOllama({ output: (_prompt, markers) => `${markers[0]}.` });
+  const chineseService = createTranslationService({ pool: chinesePool, fetchImpl: chineseOllama.fetchImpl, env: { OLLAMA_BASE_URL: "http://127.0.0.1:11434" } });
+  const chineseResult = await chineseService.translateEntries([entry], "zh-CN", null);
+  assert.equal(chineseResult[0]?.text, name, "unchanged scientific names need no forced Chinese script");
+
+  const narrative = "This plant has green leaves and grows in shaded forest areas.";
+  const emptyPool = fakePool({ sourceText: narrative });
+  const emptyOllama = fakeOllama({ output: "   " });
+  const emptyService = createTranslationService({ pool: emptyPool, fetchImpl: emptyOllama.fetchImpl, env: { OLLAMA_BASE_URL: "http://127.0.0.1:11434" } });
+  assert.deepEqual(await emptyService.translateEntries([entry], "ms", null), []);
+  assert.equal(emptyPool.state.writes.length, 0);
+});
+
+test("mobile translation endpoint accepts only native Botanist/Visitor or public Guest access and reuses PostgreSQL cache", async (context) => {
+  const cachedText = "Nepenthes ampullaria tumbuh 1.5 m dekat https://example.test/plant.jpg (PL001).",
+    cache = { record_type: "species", record_id: "12", field_name: "description", target_locale: "ms",
+      source_locale: "en", source_hash: sourceHash, translated_text: cachedText,
+      model_name: "translategemma:4b", prompt_version: "translategemma-prompt-v2" };
+  const pool = fakePool({ cache });
+  const ollama = fakeOllama();
+  const serviceApp = express();
+  serviceApp.use(express.json());
+  serviceApp.use((req, _res, next) => {
+    const role = req.headers["x-test-role"];
+    req.user = role ? { id: "mobile-user", role, status: "Active", mustChangePassword: false } : null;
+    next();
+  });
+  mountWebsiteTranslations(serviceApp, {
+    pool,
+    allow: () => (req, res, next) => {
+      if (req.user && !["Botanist", "Visitor", "Administrator", "Conservation Officer"].includes(req.user.role))
+        return res.status(403).json({ error: "Access denied." });
+      next();
+    },
+    origins: new Set(["http://localhost:5173"]),
+  });
+  const server = createServer(serviceApp);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}/api/mobile/translations`;
+  const body = JSON.stringify({ locale: "ms", entries: [{ recordType: "species", recordId: "12", fieldName: "description" }] });
+  const botanist = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${"a".repeat(64)}`, "X-Test-Role": "Botanist", "Content-Type": "application/json" }, body });
+  assert.equal(botanist.status, 200);
+  assert.deepEqual((await botanist.json()).translations.map((row) => row.text), [cachedText]);
+  const visitor = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${"b".repeat(64)}`, "X-Test-Role": "Visitor", "Content-Type": "application/json" }, body });
+  assert.equal(visitor.status, 200);
+  assert.deepEqual((await visitor.json()).translations.map((row) => row.text), [cachedText]);
+  const guest = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+  assert.equal(guest.status, 200);
+  assert.deepEqual((await guest.json()).translations.map((row) => row.text), [cachedText]);
+  const browser = await fetch(url, { method: "POST", headers: { Origin: "http://localhost:5173", "Content-Type": "application/json" }, body });
+  assert.equal(browser.status, 403);
+  const admin = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${"a".repeat(64)}`, "X-Test-Role": "Administrator", "Content-Type": "application/json" }, body });
+  assert.equal(admin.status, 403);
+  assert.equal(ollama.prompts.length, 0, "valid shared cache hit must not call Ollama");
+  assert.equal(pool.state.writes.length, 0, "existing cache rows are read-only during this test");
+});
+
+test("browser boundary permits only the exact anonymous mobile translation POST path", async (context) => {
+  const app = express();
+  app.use(browserBoundary(new Set(["http://localhost:5173"])));
+  app.post("/api/mobile/translations", (_req, res) => res.sendStatus(204));
+  app.post("/api/mobile/plant-submissions", (_req, res) => res.sendStatus(204));
+  const server = createServer(app);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const translation = await fetch(`${base}/api/mobile/translations`, { method: "POST" });
+  const unrelated = await fetch(`${base}/api/mobile/plant-submissions`, { method: "POST" });
+  assert.equal(translation.status, 204);
+  assert.equal(unrelated.status, 403);
 });
 
 test("website translation endpoint rejects missing origins and bearer-authenticated clients", async (context) => {

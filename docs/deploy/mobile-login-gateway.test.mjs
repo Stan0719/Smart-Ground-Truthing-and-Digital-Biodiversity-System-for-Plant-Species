@@ -24,10 +24,26 @@ test('a legitimate 304 is preserved; only actual redirect status codes are rejec
 test('gateway routes match existing upstreams and reject internal/private paths',()=>{
  for(const path of ['/internal/auth/diagnostics','/internal/face/password','/face/internal/face/issue','/.env','/data/key','/auth.sqlite','//other.invalid','/face/%69nternal/issue','/unknown'])assert.equal(gatewayRoute(path),null)
  assert.deepEqual(gatewayRoute('/api/mobile/password'),{port:3001,path:'/api/mobile/password'})
+ assert.deepEqual(gatewayRoute('/api/mobile/translations'),{port:3000,path:'/api/mobile/translations'})
  assert.deepEqual(gatewayRoute('/auth-health'),{port:3001,path:'/health'})
  assert.deepEqual(gatewayRoute('/face/face-login'),{port:8000,path:'/face-login'})
  assert.deepEqual(gatewayRoute('/face/health'),{port:8000,path:'/health'})
  assert.deepEqual(gatewayRoute('/api/species?x=1'),{port:3000,path:'/api/species?x=1'})
+})
+
+test('mobile translation endpoint reaches the plant API while mobile authentication stays on auth API',async()=>{
+ const makeUpstream=service=>createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify({service,path:req.url}))})
+ const auth=makeUpstream('auth'),plant=makeUpstream('plant')
+ await Promise.all([new Promise(r=>auth.listen(0,'127.0.0.1',r)),new Promise(r=>plant.listen(0,'127.0.0.1',r))])
+ const gateway=createMobileLoginGateway({authPort:auth.address().port,plantPort:plant.address().port},{trace:false})
+ await new Promise(r=>gateway.listen(0,'127.0.0.1',r))
+ const base=`http://127.0.0.1:${gateway.address().port}`
+ try{
+  const translation=await fetch(base+'/api/mobile/translations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:'zh',entries:[]})})
+  assert.deepEqual(await translation.json(),{service:'plant',path:'/api/mobile/translations'})
+  const login=await fetch(base+'/api/mobile/password')
+  assert.deepEqual(await login.json(),{service:'auth',path:'/api/mobile/password'})
+ }finally{await Promise.all([new Promise(r=>gateway.close(r)),new Promise(r=>auth.close(r)),new Promise(r=>plant.close(r))])}
 })
 
 test('Face health strips the prefix, forwards real responses and returns 503 when upstream is missing',async()=>{

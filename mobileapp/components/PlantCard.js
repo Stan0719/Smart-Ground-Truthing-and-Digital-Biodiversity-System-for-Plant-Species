@@ -7,6 +7,7 @@ import Text from "./ScaledText";
 
 import { getPlantDisplayObservation } from "../utils/plantApi";
 import { getPlantCardZoneLabel } from "../utils/plantCardDisplay";
+import useDatabaseTranslations from "../hooks/useDatabaseTranslations";
 
 export default function PlantCard({
   plant,
@@ -29,6 +30,18 @@ export default function PlantCard({
   const isBotanist = user?.role?.toLowerCase() === "botanist";
   const isPublicViewer = !user || ["visitor", "guest"].includes(user?.role?.toLowerCase());
   const observation = getPlantDisplayObservation(plant);
+  const verifiedObservationId = plant.currentStatus === "Approved" ? String(plant.latestVerifiedObservation?.id ?? "") : "";
+  const morphologyTranslationField = !speciesDetailCard && verifiedObservationId &&
+    typeof observation?.morphology === "string" && observation.morphology.trim()
+    ? { recordType: "observation", recordId: verifiedObservationId, fieldName: "morphology", sourceText: observation.morphology }
+    : null;
+  const translatedDatabaseText = useDatabaseTranslations(morphologyTranslationField ? [morphologyTranslationField] : [], {
+    accountId: user?.id ?? null,
+    publicOnly: !user || user?.role?.toLowerCase() === "guest",
+  });
+  const morphologyText = morphologyTranslationField
+    ? translatedDatabaseText(morphologyTranslationField)
+    : observation?.morphology;
   const lastVerified = formatDate(plant.latestApproved?.date);
   const zoneBadge = getPlantCardZoneLabel(plant, user?.role, {
     restricted: t("map.locationRestricted"),
@@ -137,7 +150,7 @@ export default function PlantCard({
               <PublicFact label={t("plant.height")} value={observation?.heightCm != null ? `${observation.heightCm} cm` : t("plant.notRecorded")} />
               <PublicFact label={t("plant.lifeStage2")} value={observation?.lifeStage || t("plant.notRecorded")} />
               <PublicFact label={t("plant.health")} value={observation?.healthStatus || t("plant.notRecorded")} />
-              <PublicFact label={t("plant.morphology")} value={observation?.morphology || t("plant.notRecorded")} />
+              <PublicFact label={t("plant.morphology")} value={morphologyText || t("plant.notRecorded")} />
               <PublicFact label={t("plant.locationZone")} value={zoneBadge} />
               <PublicFact label={t("plant.qrStatus2")} value={plant.qr?.status || t("plant.notRecorded")} />
             </View>
@@ -158,7 +171,7 @@ export default function PlantCard({
             />
             <PublicFact
               label={t("plant.morphology")}
-              value={observation?.morphology || t("plant.notRecorded")}
+              value={morphologyText || t("plant.notRecorded")}
             />
             {!(speciesDetailCard && isPublicViewer) && <PublicFact label={t("plant.locationZone")} value={zoneBadge} />}
             <PublicFact

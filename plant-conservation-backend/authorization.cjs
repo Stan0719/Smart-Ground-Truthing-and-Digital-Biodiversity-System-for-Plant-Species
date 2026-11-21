@@ -71,7 +71,8 @@ function browserBoundary(origins) {
       !["GET", "HEAD"].includes(req.method) &&
       !origin &&
       !/^Bearer [a-f0-9]{64}$/.test(req.headers.authorization || "") &&
-      !req.path.startsWith("/api/device/")
+      !req.path.startsWith("/api/device/") &&
+      !(req.method === "POST" && req.path === "/api/mobile/translations")
     )
       return res.status(403).json({ error: "Request rejected." });
     next();

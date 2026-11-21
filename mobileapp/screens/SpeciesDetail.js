@@ -19,6 +19,7 @@ import useVisitorFavourites from "../hooks/useVisitorFavourites";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { orderSpeciesPlantRecords } from "../utils/speciesPlantOrdering";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
+import useDatabaseTranslations from "../hooks/useDatabaseTranslations";
 
 const hasRecordedValue = (value) => value !== null && value !== undefined &&
   (typeof value !== "string" || (value.trim().length > 0 && value.trim().toLowerCase() !== "not recorded"));
@@ -46,6 +47,21 @@ export default function SpeciesDetail({
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const requestRef = useRef(null);
+  const speciesTranslationFields = selectedSpecies && !selectedSpecies.privateRequest && /^[1-9][0-9]*$/.test(String(selectedSpecies.id))
+    ? ["commonName", "description", "habitat", "culturalSignificance"]
+      .filter((fieldName) => typeof (fieldName === "commonName" ? selectedSpecies.commonName ?? selectedSpecies.name : selectedSpecies[fieldName]) === "string" &&
+        (fieldName === "commonName" ? selectedSpecies.commonName ?? selectedSpecies.name : selectedSpecies[fieldName]).trim())
+      .map((fieldName) => ({ recordType: "species", recordId: String(selectedSpecies.id), fieldName,
+        sourceText: fieldName === "commonName" ? selectedSpecies.commonName ?? selectedSpecies.name : selectedSpecies[fieldName] }))
+    : [];
+  const translatedSpeciesText = useDatabaseTranslations(speciesTranslationFields, {
+    accountId: user?.id ?? null,
+    publicOnly,
+  });
+  const speciesText = (fieldName) => {
+    const field = speciesTranslationFields.find((entry) => entry.fieldName === fieldName);
+    return field ? translatedSpeciesText(field) : selectedSpecies?.[fieldName] || "";
+  };
 
   const loadSpeciesDetails = useCallback((isRefresh = false) => {
     if (requestRef.current) return requestRef.current;
@@ -212,7 +228,7 @@ export default function SpeciesDetail({
         <View style={styles.heroContent}>
 
           <Text style={styles.title}>
-            {selectedSpecies.name}
+            {speciesText("commonName")}
           </Text>
 
           <Text style={styles.scientificName}>
@@ -239,14 +255,14 @@ export default function SpeciesDetail({
         <Text style={styles.aboutTitle}>{t("speciesDetail.aboutThisSpecies")}</Text>
 
         <Text style={styles.aboutFieldLabel}>{t("speciesDetail.description")}</Text>
-        <Text style={styles.paragraph}>{hasRecordedValue(selectedSpecies.description) ? selectedSpecies.description : t("speciesDetail.noDescriptionHasBeenRecorded")}</Text>
+        <Text style={styles.paragraph}>{hasRecordedValue(selectedSpecies.description) ? speciesText("description") : t("speciesDetail.noDescriptionHasBeenRecorded")}</Text>
 
         {hasRecordedValue(selectedSpecies.habitat) && (
           <>
             <Text style={styles.aboutFieldLabel}>{t("speciesDetail.naturalHabitat")}</Text>
 
             <Text style={styles.paragraph}>
-              {selectedSpecies.habitat}
+              {speciesText("habitat")}
             </Text>
           </>
         )}
@@ -256,7 +272,7 @@ export default function SpeciesDetail({
             <Text style={styles.aboutFieldLabel}>{t("speciesDetail.traditionalAndCulturalImportance")}</Text>
 
             <Text style={styles.paragraph}>
-              {selectedSpecies.culturalSignificance}
+              {speciesText("culturalSignificance")}
             </Text>
           </>
         )}
