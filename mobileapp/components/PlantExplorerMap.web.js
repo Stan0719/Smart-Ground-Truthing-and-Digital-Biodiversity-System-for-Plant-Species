@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "./ScaledText";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 
 // The Botanist map uses native markers on iOS and Android. Keep the Expo web

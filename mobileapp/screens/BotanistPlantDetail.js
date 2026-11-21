@@ -10,19 +10,8 @@ import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 import {
-  AppState,
-  View,
-  Text,
-  ActivityIndicator,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  Image,
-  Alert,
-  Modal,
-  RefreshControl,
-} from "react-native";
+  AppState, View, ActivityIndicator, TouchableOpacity, ScrollView, StyleSheet, Image, Alert, Modal, RefreshControl } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { stepPhotoIndex } from "../utils/plantPhotoGallery";
 import { fetchSpeciesDetail, getPlantRegisteredByDisplayName, plantApi } from "../utils/plantApi";
 import {

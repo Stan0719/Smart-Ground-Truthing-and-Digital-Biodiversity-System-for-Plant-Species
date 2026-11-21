@@ -3,16 +3,8 @@ import { t, translateLabel, translateUIMessage, dateLocale, useAppTranslation, t
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import { AppState,
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  RefreshControl,
-  Modal,
-} from "react-native";
+import { AppState, View, StyleSheet, ScrollView, TouchableOpacity, Image, RefreshControl, Modal } from "react-native";
+import Text from "../components/ScaledText";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";

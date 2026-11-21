@@ -74,6 +74,7 @@ function moduleFrom(path, dependencies) {
   const module = { exports: {} };
   new Function("require", "module", "exports", source)((name) => {
     if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
+    if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     assert.ok(name in dependencies, `Unexpected draft utility dependency: ${name}`);
     return { ...dependencies[name], __esModule: true };
   }, module, module.exports);

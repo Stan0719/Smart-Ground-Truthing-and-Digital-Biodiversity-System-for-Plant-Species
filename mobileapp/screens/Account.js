@@ -3,12 +3,8 @@ import { useAppTranslation, t } from "../translations/i18n";
 import React from "react";
 
 import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+  ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";

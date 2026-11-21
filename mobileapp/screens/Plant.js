@@ -1,6 +1,7 @@
 import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/Species.js
 import LanguageSelector from "../components/LanguageSelector";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -8,9 +9,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import {
   AppState,
   View,
-  Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   FlatList,
   Image,

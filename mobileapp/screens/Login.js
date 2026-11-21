@@ -1,4 +1,5 @@
 import LanguageSelector from "../components/LanguageSelector";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { t, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import React, { useEffect, useRef, useState } from "react";
 
@@ -11,8 +12,6 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";

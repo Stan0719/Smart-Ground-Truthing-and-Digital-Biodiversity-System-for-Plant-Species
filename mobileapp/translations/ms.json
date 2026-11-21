@@ -1,4 +1,5 @@
 {
+  "textSize": { "title": "Bahasa & Kebolehcapaian", "size": "Saiz Teks", "normal": "Biasa", "maximum": "Maksimum", "preview": "Pratonton", "saveFailed": "Saiz teks berubah untuk sesi ini tetapi tidak dapat disimpan. Sila cuba lagi." },
   "correctionBadge": { "plant": "Tumbuhan", "species": "Spesies", "observation": "Pemerhatian", "original": "{{type}} Asal", "edit": "Edit {{type}} {{number}}", "editWithoutNumber": "Edit {{type}}" },
   "scrollHints": { "vertical": "Tatal ke bawah untuk melihat lagi", "horizontal": "Leret untuk melihat lagi", "speciesList": "Tatal untuk lebih banyak spesies", "qrList": "Tatal untuk lebih banyak kod QR", "searchResults": "Tatal untuk lebih banyak hasil" },
   "observationEdits": {

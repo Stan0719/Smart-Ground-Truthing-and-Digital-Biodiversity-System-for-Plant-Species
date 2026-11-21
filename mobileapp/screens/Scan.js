@@ -2,13 +2,8 @@ import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 import React, { useEffect, useRef, useState } from "react";
 
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-  Modal,
-} from "react-native";
+  View, StyleSheet, TouchableOpacity, Alert, Modal } from "react-native";
+import Text from "../components/ScaledText";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 import {

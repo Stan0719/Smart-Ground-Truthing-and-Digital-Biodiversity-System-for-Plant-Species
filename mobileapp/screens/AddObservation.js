@@ -2,14 +2,8 @@ import { t, translateLabel, useAppTranslation } from "../translations/i18n";
 import React, { useState } from "react";
 
 import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
+  Alert, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 
 import {
   addPlantObservation,

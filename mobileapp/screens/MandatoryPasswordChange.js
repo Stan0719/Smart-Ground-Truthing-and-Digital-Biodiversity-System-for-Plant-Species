@@ -1,6 +1,7 @@
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 ﻿import React, { useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import PasswordVisibilityButton from "../components/PasswordVisibilityButton";
 

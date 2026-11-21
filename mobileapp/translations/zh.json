@@ -1,4 +1,5 @@
 {
+  "textSize": { "title": "语言与无障碍", "size": "文字大小", "normal": "正常", "maximum": "最大", "preview": "预览", "saveFailed": "本次使用的文字大小已更改，但无法保存。请重试。" },
   "correctionBadge": { "plant": "植物", "species": "物种", "observation": "观察", "original": "{{type}}原始版本", "edit": "{{type}}编辑 {{number}}", "editWithoutNumber": "{{type}}编辑" },
   "scrollHints": { "vertical": "向下滑动查看更多", "horizontal": "左右滑动查看更多", "speciesList": "滑动查看更多物种", "qrList": "滑动查看更多二维码", "searchResults": "滑动查看更多结果" },
   "observationEdits": {
