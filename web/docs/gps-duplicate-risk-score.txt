@@ -1,0 +1,44 @@
+GPS Duplicate Risk Score: frontend review-priority index
+
+This is an engineering score based ONLY on recorded GPS distance. It is not a
+statistically validated probability, a confirmed duplicate, or a review decision.
+No Haversine, backend query, permission, review rule, or database schema changes.
+
+Approved anchors use backend-configured distances, with default metres:
+D = [0, very_close_m (2), close_m (5), nearby_m (10), radius_m (30)]
+S = [100, 80, 50, 20, 0]
+For the interval Di <= d <= Di+1:
+score = Math.round(Si + (Si+1 - Si) * (d - Di) / (Di+1 - Di)).
+For nonnegative values Math.round selects the nearest integer, with halves upward.
+Examples: 0 m=100%, 0.43 m=96%, 2 m=80%, 5 m=50%, 10 m=20%, 30 m=0%.
+The rounded score determines badge colour: >=80 muted red; >=50 amber;
+>=20 sage; <20 neutral. Distance-category labels continue using raw distance
+and unchanged backend thresholds, so rounding can place adjacent values in the
+same score tier while their distance categories differ.
+
+100% means maximum coordinate proximity, NOT certain duplicate identity.
+0% is valid for an actual candidate at the search-radius boundary, NOT proof of
+being a different individual. Invalid/outside distances receive no score.
+The API radius still limits the search; no candidate outside it is scored.
+No nearby candidates or ineligible submissions display a dash, never an invented
+0%. API/validation failures display Unavailable. Incomplete searches display
+Incomplete, with no overall or individual numerical scores until verified complete.
+Loading remains a separate checking indicator.
+
+Accuracy is never converted into a multiplier or statistical confidence. Missing,
+non-finite, non-positive or greater-than-configured-warning accuracy (default 10 m)
+shows uncertainty warnings; it does not change the distance-only score. Even a
+small reported accuracy cannot establish same-Plant identity. Recorded separation
+may be smaller than reported location error. Do not interpret reported accuracy as
+a guaranteed bound, or add two accuracy radii as if they were validated limits.
+The drawer retains both reported accuracy values, provenance warnings, raw-distance
+categories, Plant details and photos. Verify Plant tags, photos and field evidence.
+The Officer makes the final decision. No flags, notifications or decisions are
+created by this score.
+
+The table and shared drawer use the same pure scoring/formatting helper. Existing
+viewport scheduling, concurrency limit (2), 30-second / 100-result cache, cancellation,
+full-dataset API search and strict response validation are unchanged.
+Only authorized main Plant photos are used; existing image fallbacks remain.
+There is one shared native top-layer drawer; no GPS section in the review modal.
+No live/shared database access, deployment or migration is needed for these UI edits.

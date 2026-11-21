@@ -64,3 +64,29 @@ test('shared page currency survives consumer unmount but stops on logout', async
   assert.equal(currency(), true)
   f.change({user:null,pending:false}); assert.equal(currency(), false)
 })
+
+
+test('failed shared attempt aborts unfinished siblings and cannot paginate or publish after a fresh retry', async () => {
+  const f = fixture(), failure = Error('source unavailable'); let release, oldSignal, oldCurrent, continued = 0
+  const first = f.cache.load(async (current, signal) => {
+    oldSignal = signal; oldCurrent = current
+    return Promise.all([
+      (async () => { await new Promise(resolve => { release = resolve }); if (current()) continued++; return 'old' })(),
+      Promise.reject(failure),
+    ])
+  })
+  await assert.rejects(first, error => error === failure)
+  assert.equal(oldSignal.aborted, true); assert.equal(oldCurrent(), false)
+  let reads = 0
+  const a = f.cache.load(async () => { reads++; return { rows: ['fresh'] } }), b = f.cache.load(() => { throw Error('duplicate attempt') })
+  await Promise.all([a,b]); release(); await Promise.resolve(); await Promise.resolve()
+  assert.equal(reads, 1); assert.equal(continued, 0); assert.deepEqual(f.cache.read(), { rows: ['fresh'] })
+})
+
+test('session invalidation aborts pending transport while detail eviction preserves it', async () => {
+  const f = fixture(); let signal, release
+  const work = f.cache.load((_current, value) => { signal = value; return new Promise(resolve => { release = resolve }) })
+  await Promise.resolve(); f.cache.evict(); assert.equal(signal.aborted, false)
+  f.change({ user: officer('one'), pending: true }); assert.equal(signal.aborted, true)
+  release({ rows: ['obsolete'] }); await assert.rejects(work, /superseded/)
+})

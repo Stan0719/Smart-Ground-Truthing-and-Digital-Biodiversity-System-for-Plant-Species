@@ -28,12 +28,13 @@ const flat = root => {
 }
 function harness() {
   const scope = vue.effectScope(), exports = {}, cleanup = [], destinations = []
+  let navigationFails=false
   let listener, session = { user: officer, pending: false }
   const context = { exports, AbortController, Error, require(name) {
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name === 'vue') return { ...vue, onMounted() {}, withDirectives: n => n, onBeforeUnmount: fn => cleanup.push(fn), resolveComponent: name => ({ name }) }
-    if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
-    if (name === 'vue-router') return { useRouter: () => ({ push: target => destinations.push(target) }) }
+    if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key.startsWith('officerFeedback.') ? JSON.parse(readFileSync(new URL('../src/locales/en.json',import.meta.url),'utf8')).officerFeedback[key.split('.').at(-1)] : key }) }
+    if (name === 'vue-router') return { useRouter: () => ({ push: async target => {if(navigationFails)throw Error('Private navigation context');destinations.push(target)} }) }
     if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { listener = fn; return () => { listener = null } } }
     if (name.endsWith('iotMonitoring')) return service
     if (name.endsWith('threatAlerts')) return alertsService
@@ -47,7 +48,7 @@ function harness() {
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
-  return { state, destinations, render: () => flat(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})),
+  return { setNavigationFailure:value=>navigationFails=value, state, destinations, render: () => flat(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})),
     session(user, pending = false) { session = { user, pending }; listener?.(user, pending) },
     stop() { cleanup.forEach(fn => fn()); scope.stop() } }
 }
@@ -124,11 +125,11 @@ test('reading View and Details share the reference layout, single ID, dynamic da
       const actions = body.filter(n => n.type === 'button')
       assert.deepEqual(actions.map(nodeText), ['View Alerts', 'View on Map'])
       assert.ok(actions.every(n => flat(n).some(child => child.type === 'svg')))
-      actions[1].props.onClick()
+      await actions[1].props.onClick()
       assert.equal(h.destinations.at(-1).name, 'conservation-map')
       assert.equal(h.destinations.at(-1).query.plant, 'PL008')
       button.props.onClick()
-      actions[0].props.onClick()
+      await actions[0].props.onClick()
       assert.equal(h.destinations.at(-1).name, 'conservation-alerts')
       assert.equal(h.destinations.at(-1).query.reading, id)
       button.props.onClick(); modal.props.onClose()
@@ -180,7 +181,7 @@ test('shared modal title slot is optional and keeps the existing fallback title,
     const context = { exports, require(name) {
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount() {}, renderSlot: (slots, name, _props, fallback) => slots[name]?.() ?? fallback?.() }
-      if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
+      if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key.startsWith('officerFeedback.') ? JSON.parse(readFileSync(new URL('../src/locales/en.json',import.meta.url),'utf8')).officerFeedback[key.split('.').at(-1)] : key }) }
       throw Error(name)
     } }
     vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
@@ -217,7 +218,7 @@ test('accessible modal locks the root without changing body/sticky layout, traps
     const context = { exports, HTMLElement: Element, document, require(name) {
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => cleanup.push(fn) }
-      if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
+      if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key.startsWith('officerFeedback.') ? JSON.parse(readFileSync(new URL('../src/locales/en.json',import.meta.url),'utf8')).officerFeedback[key.split('.').at(-1)] : key }) }
       throw Error(name)
     } }
     vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
@@ -321,7 +322,7 @@ test('the canonical cap cannot produce a false no-alert conclusion', async () =>
     globalThis.fetch = async () => Response.json({ alerts: capped, responses: [] })
     await h.state.viewDeviceAlerts(h.state.selectedDevice.value)
     assert.equal(h.state.deviceAlertFeedback.value.variant, 'error')
-    assert.match(h.state.deviceAlertFeedback.value.message, /Unable to confirm/)
+    assert.match(h.state.deviceAlertFeedback.value.message, /could not be verified/)
     assert.equal(h.destinations.length, 0)
     capped[0] = alertFixture(h.state.selectedDevice.value.sensor_id)
     await h.state.viewDeviceAlerts(h.state.selectedDevice.value)
@@ -426,11 +427,11 @@ test('device modal has one copy-enabled identifier, device-only details and unch
     assert.equal(identifiers[0].props.labels.get(selected.sensor_id), h.state.deviceLabels.value.get(selected.sensor_id))
     assert.equal(identifiers[0].props['copy-label'], 'Copy full Device ID')
     assert.equal(identifiers[0].props['feedback-duration'], 3000)
-    assert.equal(content.filter(n => n.props?.class === 'reading-field-icon').length, 7)
+    assert.equal(content.filter(n => n.props?.class === 'reading-field-icon').length, 9)
     const title = flat(modal.children.title())
     assert.equal(title.filter(n => n.props?.class === 'reading-header-icon').length, 1)
     assert.deepEqual(content.filter(n => n.type === 'dt').map(nodeText), [
-      'Device Type', 'Serial Number', 'Status', 'Location Description', 'Installed At', 'Related Plant', 'Latest Reading',
+      'Device Type', 'Serial Number', 'Status', 'Location Description', 'Installed At', 'Related Plant', 'Latest Reading', 'DHT11 Health', 'MPU6050 Health',
     ])
     const actions = content.filter(n => n.type === 'button')
     assert.deepEqual(actions.map(nodeText), ['View Reading History', 'View Alerts', 'View on Map'])
@@ -444,11 +445,11 @@ test('device modal has one copy-enabled identifier, device-only details and unch
       const badge = fields.find(n => String(n.props?.class).includes('device-registration-status'))
       assert.equal(badge.children, status)
       assert.ok(badge.props.class.includes(status.toLowerCase()))
-      assert.equal(fields.filter(n => n.type === 'dd').at(-1).children.trim(), 'No reading available')
+      assert.equal(nodeText(fields.filter(n => n.type === 'dd')[6]), 'No reading available')
       assert.equal(fields.filter(n => n.type === 'button').length, 2)
     }
     selected.status = 'Active'; selected.latest_reading = savedReading
-    actions[2].props.onClick()
+    await actions[2].props.onClick()
     assert.equal(h.destinations[0].name, 'conservation-map')
     assert.equal(h.destinations[0].query.plant, 'PL008')
     h.state.selectedDevice.value = selected
@@ -470,6 +471,14 @@ test('IoT table badge overrides change only colors and compile with page scoping
     '.iot-device-table .badge.inactive': ['#E5E7EB', '#374151'],
     '.iot-reading-table .badge.approved': ['#E5E7EB', '#374151'],
     '.iot-reading-table .badge.high': ['#FFEDD5', '#9A3412'],
+    '.iot-reading-table .badge.sensor-ok': ['#DCFCE7', '#166534'],
+    '.reading-details-modal .badge.sensor-ok': ['#DCFCE7', '#166534'],
+    '.iot-reading-table .badge.sensor-warning': ['#FEF3C7', '#92400E'],
+    '.reading-details-modal .badge.sensor-warning': ['#FEF3C7', '#92400E'],
+    '.iot-reading-table .badge.sensor-error': ['#FEE2E2', '#991B1B'],
+    '.reading-details-modal .badge.sensor-error': ['#FEE2E2', '#991B1B'],
+    '.iot-reading-table .badge.sensor-unknown': ['#E5E7EB', '#374151'],
+    '.reading-details-modal .badge.sensor-unknown': ['#E5E7EB', '#374151'],
   }
   const found = []
   sheet.walkRules(rule => {
@@ -572,7 +581,7 @@ test('failed refresh retains readings and exposes retry; retry can return a genu
   try {
     await h.state.loadDevices(); await h.state.refreshReadings()
     assert.equal(h.state.latestReadings.value[0].reading.reading_id, 'old')
-    assert.match(h.state.refreshError.value, /could not be reached/)
+    assert.match(h.state.refreshError.value, /Unable to refresh sensor readings/)
     assert.ok(h.render().some(n => n.props?.role === 'alert'))
     assert.equal(h.state.isRefreshing.value, false)
     fail = false; await h.state.refreshReadings()
@@ -667,7 +676,7 @@ test('a partial refresh failure never replaces any of the previous snapshot', as
     await h.state.loadDevices(); await h.state.refreshReadings()
     assert.equal(h.state.latestReadings.value.length, 2)
     assert.ok(h.state.latestReadings.value.every(item => item.reading.reading_id === 'old'))
-    assert.equal(h.state.refreshError.value, 'Unavailable')
+    assert.equal(h.state.refreshError.value, 'Unable to refresh sensor readings. Please try again.')
   } finally { h.stop(); globalThis.fetch = original }
 })
 
@@ -709,4 +718,18 @@ test('reading details and charts retain Malaysia dates and display raw ADC units
     assert.equal(h.state.cards.value.find(card => card[0] === 'onlineDevices')[1], '—')
     assert.equal(h.state.cards.value.find(card => card[0] === 'offlineDevices')[1], '—')
   } finally { h.stop(); globalThis.fetch = original }
+})
+
+
+test('failed IoT navigation preserves the selected reading and shows sanitized retry feedback',async()=>{
+ const h=harness();try{
+  const reading={reading_id:'fixture-reading'}
+  h.state.selectedReading.value=reading;h.setNavigationFailure(true)
+  await h.state.viewReadingAlerts(reading)
+  assert.equal(h.state.selectedReading.value.reading_id,reading.reading_id)
+  assert.equal(h.state.navigationError.value,true);assert.equal(h.destinations.length,0)
+  assert.ok(h.render().some(node=>node.props?.message==='Unable to open the requested page. Please try again.'))
+  h.setNavigationFailure(false);await h.state.viewReadingAlerts(reading)
+  assert.equal(h.state.selectedReading.value,null);assert.equal(h.destinations.length,1)
+ }finally{h.stop()}
 })

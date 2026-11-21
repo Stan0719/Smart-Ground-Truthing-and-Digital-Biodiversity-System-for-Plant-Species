@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ActionFeedback from '../ActionFeedback.vue'
 import { computed, onBeforeUnmount, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
@@ -10,6 +11,7 @@ import type { ReportFilters } from '../../services/reporting'
 import { iotBucketLabel, iotDate, iotTimestamp } from '../../utils/iotBucketDisplay'
 import { renderReportPdf, reportCsv, reportFilename, type ReportDocument } from '../../utils/reportExport'
 const props = defineProps<{ filters: ReportFilters }>()
+const exportFailed = ref(false), exportSequence = ref(0)
 const emit = defineEmits<{ busy: [value: boolean] }>()
 const { t, te, locale } = useI18n()
 const text = (key: string) => t(`conservationPages.reports.iotSummary.${key}`)
@@ -114,7 +116,7 @@ async function exportPdf() {
   if (!canExport.value) return
   const snapshot = report.value, token = generation, language = locale.value
   const current = () => !disposed && !loading.value && token === generation && snapshot === report.value && language === locale.value && loadedSelection.value === selectionKey()
-  exporting.value = true; feedback.value = ''
+  exporting.value = true; feedback.value = ''; exportFailed.value = false; exportSequence.value++
   try {
     const model = exportDocument()
     await nextTick()
@@ -123,7 +125,7 @@ async function exportPdf() {
     if (hasChart.value && !image) throw Error('Chart unavailable')
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm' })
     if (await renderReportPdf(model, image || null, pdf, current) && current()) { pdf.save(reportFilename(model, 'pdf')); feedback.value = rt('pdfDownloaded') }
-  } catch { if (current()) feedback.value = t('conservationPages.reports.errors.export') }
+  } catch { exportFailed.value = true; if (current()) feedback.value = t('conservationPages.reports.errors.export') }
   finally { exporting.value = false }
 }
 // Keep CSV strictly tabular. Context belongs in the safe filename and unit headers.
@@ -143,7 +145,7 @@ function csvDocument(): ReportDocument {
 }
 function exportCsv() {
   if (!canExport.value || !report.value?.buckets.length) return
-  exporting.value = true; feedback.value = ''
+  exporting.value = true; feedback.value = ''; exportFailed.value = false; exportSequence.value++
   let url: string | undefined
   try {
     const model = csvDocument()
@@ -153,7 +155,7 @@ function exportCsv() {
     document.body.appendChild(anchor)
     try { anchor.click() } finally { anchor.remove() }
     feedback.value = rt('csvDownloaded')
-  } catch { feedback.value = rt('errors.export') }
+  } catch { exportFailed.value = true; feedback.value = rt('errors.export') }
   finally {
     if (url) { const downloadUrl = url; setTimeout(() => URL.revokeObjectURL(downloadUrl), 0) }
     exporting.value = false
@@ -189,7 +191,7 @@ defineExpose({ load, exportPdf, exportCsv, exportDocument })
         </details>
       </aside>
       <div class="iot-exports"><button type="button" class="secondary-button" :disabled="!canExport" @click="exportPdf">{{ rt('exportPdf') }}</button><button type="button" class="secondary-button" :disabled="!canExport || !report.buckets.length" aria-describedby="iot-csv-note" @click="exportCsv">{{ text('downloadCsv') }}</button></div>
-      <p id="iot-csv-note" class="iot-meta">{{ text('csvDescription') }}</p><p v-if="feedback" role="status">{{ feedback }}</p>
+      <p id="iot-csv-note" class="iot-meta">{{ text('csvDescription') }}</p><ActionFeedback v-if="feedback" :key="exportSequence" :feedback-id="exportSequence" :variant="exportFailed ? 'error' : 'success'" :message="feedback" @dismiss="feedback = ''" />
     </article>
   </section>
 </template>

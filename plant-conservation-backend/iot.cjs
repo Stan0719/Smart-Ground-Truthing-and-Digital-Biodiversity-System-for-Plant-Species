@@ -10,7 +10,6 @@ const {
 } = require("./domain.cjs");
 const { projectGps } = require("../shared/rbac.cjs");
 const {
-  CHECKPOINT_INTERVAL_MS,
   addReading,
   bucketStart,
   cloneAccumulator,
@@ -137,7 +136,7 @@ function mountDeviceIngestion(app, { pool }) {
     const acceptedValues = normalizedValues(b.values, capture);
     const acceptedHash = payloadHash(acceptedValues);
     const outcome = await withDeviceLock(runtime, targetDeviceId, async () => {
-      const observedAt = capture ? Date.parse(capture.observed_at) : Date.now();
+      let observedAt = capture ? Date.parse(capture.observed_at) : Date.now();
       const result = await transaction(pool, async c => {
         const device = (await c.query(
           "SELECT * FROM iot_device WHERE id=$1 AND key_hash=$2 AND status='Active' FOR UPDATE",
@@ -146,6 +145,25 @@ function mountDeviceIngestion(app, { pool }) {
         if (!device) fail(401, "Device authentication failed.");
         if (device.device_type !== "Sensor") fail(403, "Camera devices cannot submit sensor readings.");
 
+        // Lock the device before checking identity: different workers must not
+        // accept the same key or overwrite each other's checkpoint counts.
+        const rememberReceipt = async () => {
+          if (b.client_key) await c.query(
+            "INSERT INTO iot_sensor_receipt(device_id,client_key,payload_hash,observed_at) VALUES($1,$2,$3,$4)",
+            [device.id, b.client_key, acceptedHash, new Date(observedAt).toISOString()],
+          );
+        };
+        if (b.client_key) {
+          const receipt = (await c.query(
+            "SELECT payload_hash FROM iot_sensor_receipt WHERE device_id=$1 AND client_key=$2",
+            [device.id, b.client_key],
+          )).rows[0];
+          if (receipt) {
+            if (receipt.payload_hash !== acceptedHash)
+              fail(409, "Reading key already belongs to a different payload.");
+            return { duplicate: true, accumulator: null };
+          }
+        }
         // Retain idempotency for receipts created before the aggregate cutover.
         if (b.client_key) {
           const previous = (await c.query(
@@ -159,7 +177,7 @@ function mountDeviceIngestion(app, { pool }) {
           }
         }
 
-        let accumulator = runtime.accumulators.get(device.id) || null;
+        let accumulator = null; // The locked durable checkpoint is authoritative across workers.
         if (!accumulator) {
           const checkpoint = (await c.query(
             "SELECT bucket_start,last_observed_at,sample_count,metrics,active_thresholds,last_payload_hash,updated_at FROM iot_reading_checkpoint WHERE device_id=$1 FOR UPDATE",
@@ -182,36 +200,38 @@ function mountDeviceIngestion(app, { pool }) {
             }
           }
         }
-        if (accumulator && observedAt < accumulator.lastObservedAt)
+        // A new key-only reading is distinct even within the same millisecond.
+        // Do not move the active window backwards when receipt time catches up.
+        if (!capture && b.client_key && accumulator)
+          observedAt = Math.max(observedAt, accumulator.lastObservedAt);
+        if (capture && accumulator && observedAt < accumulator.lastObservedAt) {
+          await rememberReceipt();
           return { duplicate: true, accumulator };
-        if (accumulator && observedAt === accumulator.lastObservedAt) {
+        }
+        if (capture && accumulator && observedAt === accumulator.lastObservedAt) {
           if (accumulator.lastPayloadHash && acceptedHash !== accumulator.lastPayloadHash)
             fail(409, "Reading timestamp already belongs to a different payload.");
+          await rememberReceipt();
           return { duplicate: true, accumulator };
         }
 
-        const hadAccumulator = Boolean(accumulator);
         let candidate = accumulator ? cloneAccumulator(accumulator) : newAccumulator(observedAt);
         const incomingBucket = bucketStart(observedAt);
-        let crossedWindow = false;
         let completed = null;
         if (incomingBucket > candidate.bucketStart) {
           if (candidate.sampleCount > 0) completed = summarize(candidate);
           candidate = newAccumulator(observedAt, candidate.activeThresholds);
-          crossedWindow = true;
         }
         addReading(candidate, b.values);
         candidate.lastObservedAt = observedAt;
         candidate.lastPayloadHash = acceptedHash;
 
-        let thresholdStateChanged = false;
         for (const metric of metrics) {
           const threshold = device.thresholds[metric];
           const wasActive = candidate.activeThresholds[metric] === true;
           if (threshold === undefined) {
             if (wasActive) {
               candidate.activeThresholds[metric] = false;
-              thresholdStateChanged = true;
             }
             continue;
           }
@@ -220,7 +240,6 @@ function mountDeviceIngestion(app, { pool }) {
           const isActive = value > threshold;
           if (isActive !== wasActive) {
             candidate.activeThresholds[metric] = isActive;
-            thresholdStateChanged = true;
             if (isActive) await c.query(
               "INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value) VALUES($1,$2,NULL,$3,$4)",
               [randomUUID(), device.id, metric, value],
@@ -236,21 +255,20 @@ function mountDeviceIngestion(app, { pool }) {
         );
 
         const now = Date.now();
-        const shouldCheckpoint = !hadAccumulator || !candidate.persistedAt ||
-          now - candidate.persistedAt >= CHECKPOINT_INTERVAL_MS || crossedWindow || thresholdStateChanged;
-        if (shouldCheckpoint) {
-          await c.query(
-            "INSERT INTO iot_reading_checkpoint(device_id,bucket_start,last_observed_at,sample_count,metrics,active_thresholds,last_payload_hash,updated_at) " +
-            "VALUES($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP) ON CONFLICT(device_id) DO UPDATE SET " +
-            "bucket_start=EXCLUDED.bucket_start,last_observed_at=EXCLUDED.last_observed_at," +
-            "sample_count=EXCLUDED.sample_count,metrics=EXCLUDED.metrics," +
-            "active_thresholds=EXCLUDED.active_thresholds,last_payload_hash=EXCLUDED.last_payload_hash,updated_at=CURRENT_TIMESTAMP",
-            [device.id, new Date(candidate.bucketStart).toISOString(), new Date(candidate.lastObservedAt).toISOString(),
-              candidate.sampleCount, candidate.metrics, candidate.activeThresholds, candidate.lastPayloadHash],
-          );
-          candidate.persistedAt = now;
-          await c.query("UPDATE iot_device SET last_seen=CURRENT_TIMESTAMP WHERE id=$1", [device.id]);
-        }
+        // Persist the accepted count and receipt in one transaction. A durable
+        // dedup key must never acknowledge an increment held only in memory.
+        await c.query(
+          "INSERT INTO iot_reading_checkpoint(device_id,bucket_start,last_observed_at,sample_count,metrics,active_thresholds,last_payload_hash,updated_at) " +
+          "VALUES($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP) ON CONFLICT(device_id) DO UPDATE SET " +
+          "bucket_start=EXCLUDED.bucket_start,last_observed_at=EXCLUDED.last_observed_at," +
+          "sample_count=EXCLUDED.sample_count,metrics=EXCLUDED.metrics," +
+          "active_thresholds=EXCLUDED.active_thresholds,last_payload_hash=EXCLUDED.last_payload_hash,updated_at=CURRENT_TIMESTAMP",
+          [device.id, new Date(candidate.bucketStart).toISOString(), new Date(candidate.lastObservedAt).toISOString(),
+            candidate.sampleCount, candidate.metrics, candidate.activeThresholds, candidate.lastPayloadHash],
+        );
+        candidate.persistedAt = now;
+        await c.query("UPDATE iot_device SET last_seen=CURRENT_TIMESTAMP WHERE id=$1", [device.id]);
+        await rememberReceipt();
         return { duplicate: false, accumulator: candidate };
       });
       if (result.accumulator) runtime.accumulators.set(targetDeviceId, result.accumulator);
@@ -266,6 +284,7 @@ function mountDeviceIngestion(app, { pool }) {
 function mountIoT(app, { pool, allow }) {
   const runtime = runtimeFor(pool);
   require("./iot-alert-context.cjs").mountAlertContext(app, { pool, allow });
+  require("./threat-alert-detail.cjs").mountThreatAlertDetail(app, { pool, allow });
   app.get("/api/iot/devices", allow("devices.read"), async (req, res) => {
     const rows = (
       await pool.query(

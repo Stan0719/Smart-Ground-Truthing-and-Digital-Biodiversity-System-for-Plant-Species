@@ -14,9 +14,12 @@
   background: #fff;
   border-bottom: 1px solid #edf0ed;
   border-radius: 16px 16px 0 0;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  column-gap: 32px;
+  align-items: center;
 }
-.observation-dialog .observation-title-layout { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.observation-dialog .observation-title-layout { display: grid; grid-template-columns: 52px minmax(0, 1fr) 36px; align-items: center; gap: 16px; min-width: 0; width: 100%; max-width: none; }
 .observation-dialog .observation-title-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 52px; width: 52px; height: 52px; border-radius: 10px; background: #edf5ee; color: #245443; }
 .observation-dialog .observation-title-icon svg { width: 30px; height: 30px; }
 .observation-dialog .observation-title-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -69,7 +72,7 @@
 @media (max-width: 620px) {
   .officer-layout .observation-dialog .modal-header { padding: 16px; }
   .observation-dialog .observation-dialog-content { padding: 16px; }
-  .observation-dialog .observation-title-layout { gap: 10px; align-items: flex-start; }
+  .observation-dialog .observation-title-layout { grid-template-columns: 40px minmax(0, 1fr) 36px; gap: 10px; align-items: center; }
   .observation-dialog .observation-title-icon { flex-basis: 40px; width: 40px; height: 40px; }
   .observation-dialog .observation-title-icon svg { width: 25px; height: 25px; }
   .officer-layout.officer-layout.officer-layout .observation-dialog .modal-header h2 { font-size: 1.25rem; }
@@ -79,36 +82,39 @@
   .observation-dialog .observation-decision-actions > button { flex: 1 1 110px; }
 }
 
-/* One scroll area keeps the composition together while its footer stays reachable. */
-@media (min-width: 901px) and (min-height: 401px) {
-  .observation-dialog .observation-review-mode {
-    position: sticky;
-    top: calc(var(--observation-header-height, 120px) + 12px);
-    align-self: start;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    height: var(--observation-review-height);
-    max-height: var(--observation-review-height);
-    box-sizing: border-box;
-    min-height: 0;
-    z-index: 1;
-    background: #fff;
-  }
-  .observation-dialog .observation-review-mode .observation-review-content {
-    display: grid;
-    align-content: start;
-    gap: 24px;
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
-    scroll-padding-block: 12px;
-    padding: 4px;
-  }
-  .observation-dialog .observation-decision-actions { position: sticky; bottom: 24px; z-index: 2; }
-}
 
 .observation-dialog .observation-review-feedback.info { color: #315d78; background: #e8f0f5; }
 .observation-data-provenance { color: #536b60; font-size: 13px; line-height: 1.5; }
+
+/* Observation-only controls: the modal card remains the single scroll container. */
+.observation-dialog .observation-refresh-control { position: relative; display: inline-flex; flex: 0 0 auto; }
+.observation-dialog .observation-refresh-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line, #dfe7df); border-radius: 8px; background: #fff; color: var(--green, #33745d); cursor: pointer; }
+.observation-dialog .observation-refresh-button:focus-visible, .observation-dialog .observation-photo-button:focus-visible { outline: 2px solid var(--green, #33745d); outline-offset: 3px; }
+.observation-dialog .observation-refresh-button:disabled { opacity: .55; cursor: default; }
+.observation-dialog .observation-refresh-tooltip { position: absolute; top: calc(100% + 6px); right: 0; z-index: 4; width: max-content; max-width: min(240px, calc(100vw - 64px)); padding: 7px 10px; border-radius: 6px; background: var(--forest, #173f34); color: #fff; font-size: 12px; font-weight: 400; line-height: 1.5; opacity: 0; visibility: hidden; pointer-events: none; }
+.observation-dialog .observation-refresh-control:hover .observation-refresh-tooltip, .observation-dialog .observation-refresh-control:focus-within .observation-refresh-tooltip { opacity: 1; visibility: visible; }
+.observation-dialog .observation-refresh-spinning { animation: observation-refresh-spin 1s linear infinite; }
+@keyframes observation-refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .observation-dialog .observation-refresh-spinning { animation: none; } }
+.observation-dialog .observation-photo-button { width: 100%; padding: 0; border: 0; cursor: zoom-in; }
+
+.observation-dialog .observation-title-subtitle { display: flex; align-items: center; }
+.observation-dialog .observation-refresh-control { align-self: center; justify-self: end; }
+
+.observation-dialog .observation-status-help { display: inline-flex; }
+.observation-dialog .observation-status-help-button { display: inline-grid; place-items: center; width: 24px; height: 24px; min-width: 24px; padding: 0; border: 1px solid #9ab5a9; border-radius: 50%; background: #fff; color: #33745d; font-size: 12px; font-weight: 700; line-height: 1; cursor: help; }
+.observation-dialog .observation-status-help-button:focus-visible { outline: 2px solid #33745d; outline-offset: 3px; }
+/* Body portal + native top layer: never clipped by the modal scroll container. */
+.observation-status-tooltip { position: fixed; z-index: 2147483647; inset: auto; margin: 0; box-sizing: border-box; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; padding: 12px 14px; border: 1px solid #9ab5a9; border-radius: 12px; background: #fff; color: #253e34; font-size: 12px; font-weight: 400; line-height: 1.5; box-shadow: 0 4px 14px #153c2b26; }
+.observation-status-tooltip strong { display: flex; align-items: center; gap: 7px; color: #245a46; font-size: 12px; line-height: 1.4; }
+.observation-status-tooltip strong svg { flex: 0 0 16px; width: 16px; height: 16px; }
+.observation-status-tooltip p { margin: 7px 0 0; }
+.observation-status-tooltip .observation-status-edit-note { color: #536b60; }
+
+.officer-layout .observation-dialog .modal-header h2 { margin: 0; }
+.officer-layout .observation-dialog .modal-header .close-button { display: grid; place-items: center; width: 36px; height: 36px; margin: 0; padding: 0; align-self: center; }
+.observation-dialog .observation-refresh-control::after { content: ''; position: absolute; top: 0; right: -17px; height: 36px; border-right: 1px solid #d5dfd8; }
+.observation-dialog .observation-status-strip { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; margin: 0 0 20px; padding: 10px 12px; border: 1px solid; border-radius: 8px; font-size: 13px; line-height: 1.4; }
+.observation-dialog .observation-status-strip.is-rejected { background: #fff1f2; border-color: #ffe0e3; color: #9f2525; }
+.observation-dialog .observation-status-strip.is-approved { background: #eef7ef; border-color: #d5e9d9; color: #245a46; }
+.observation-dialog .observation-status-strip > svg { flex: 0 0 20px; width: 20px; height: 20px; }

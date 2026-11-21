@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ActionFeedback from '../ActionFeedback.vue'
 import { computed, onBeforeUnmount, ref, shallowRef, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
@@ -12,6 +13,7 @@ import type { ReportFilters } from '../../services/reporting'
 import { reportCsv, reportFilename, renderReportPdf } from '../../utils/reportExport'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
 const props = defineProps<{ filters: ReportFilters }>()
+const exportFailed = ref(false), exportSequence = ref(0)
 const emit = defineEmits<{ busy: [value: boolean] }>()
 const { t, locale } = useI18n(), text = (key: string) => t('threatReport.' + key)
 const report = shallowRef<OperationalReport | null>(null), source = ref<'' | ThreatSource>(''), status = ref<ThreatStatus>('')
@@ -50,7 +52,7 @@ async function exportFile(kind: 'csv' | 'pdf') {
   if (!view.value || loading.value || exporting.value) return
   const snapshot = view.value, language = locale.value, token = generation
   const current = () => !disposed && generation === token && view.value === snapshot && locale.value === language && !loading.value
-  const model = documentModel(kind); exporting.value = true; feedback.value = ''
+  const model = documentModel(kind); exporting.value = true; feedback.value = ''; exportFailed.value = false; exportSequence.value++
   try {
     if (kind === 'csv') {
       const url = URL.createObjectURL(new Blob([reportCsv(model)], { type: 'text/csv;charset=utf-8' }))
@@ -62,7 +64,7 @@ async function exportFile(kind: 'csv' | 'pdf') {
       if (await renderReportPdf(model, image, pdf, current) && current()) pdf.save(reportFilename(model, 'pdf'))
     }
     if (current()) feedback.value = text('downloaded')
-  } catch { if (current()) feedback.value = text('exportFailed') }
+  } catch { exportFailed.value = true; if (current()) feedback.value = text('exportFailed') }
   finally { exporting.value = false }
 }
 defineExpose({ load, view, source, status, exportFile, documentModel })
@@ -83,7 +85,7 @@ defineExpose({ load, view, source, status, exportFile, documentModel })
       <aside class="report-limitations"><h3>{{ text('interpretation') }}</h3><p>{{ text('limitations') }}</p><p>{{ text('triggerLimit') }}</p><p>{{ text('scaleLimit') }}</p></aside>
       <div class="export-actions"><button class="secondary-button" type="button" :disabled="exporting" @click="exportFile('pdf')">{{ text('pdf') }}</button><button class="secondary-button" type="button" :disabled="exporting" @click="exportFile('csv')">{{ text('csv') }}</button></div>
     </template>
-    <p v-if="feedback" role="status">{{ feedback }}</p>
+    <ActionFeedback v-if="feedback" :key="exportSequence" :feedback-id="exportSequence" :variant="exportFailed ? 'error' : 'success'" :message="feedback" @dismiss="feedback = ''" />
   </section>
 </template>
 <style scoped>

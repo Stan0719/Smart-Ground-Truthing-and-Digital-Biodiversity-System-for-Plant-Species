@@ -24,6 +24,7 @@ export interface CanonicalThreatAlert {
   createdAt: string
   videoPath: string | null
   responses: CanonicalAlertResponse[]
+  responseHistoryCapped?: boolean
 }
 
 type RecordValue = Record<string, unknown>
@@ -131,6 +132,21 @@ export async function loadCanonicalAlertQueue(signal?: AbortSignal) {
 
 export async function loadCanonicalAlerts(signal?: AbortSignal): Promise<CanonicalThreatAlert[]> {
   return (await loadCanonicalAlertQueue(signal)).alerts
+}
+
+export async function loadCanonicalAlert(id: string, signal?: AbortSignal): Promise<CanonicalThreatAlert> {
+  if (!/^[A-Za-z0-9_-]{1,200}$/.test(id)) throw new ThreatAlertApiError('Invalid alert identifier.', 400, 'invalid')
+  const result = record(await request(`${CANONICAL_ALERTS_PATH}/${encodeURIComponent(id)}`, signal ? {
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+  } : {}))
+  if (!result || !Array.isArray(result.responses) || result.responses.length > 500 || typeof result.history_capped !== 'boolean')
+    throw new ThreatAlertApiError('The threat alert service returned an invalid response.', 200, 'invalid')
+  const responses = result.responses.map(mapResponse)
+  if (responses.some(row => !row || row.alertId !== id))
+    throw new ThreatAlertApiError('The threat alert service returned invalid response history.', 200, 'invalid')
+  const alert = mapAlert(result.alert, responses as CanonicalAlertResponse[])
+  if (!alert || alert.id !== id) throw new ThreatAlertApiError('The threat alert service returned invalid alert data.', 200, 'invalid')
+  return { ...alert, responseHistoryCapped: result.history_capped }
 }
 
 export const alertResponsePath = (id: string) =>

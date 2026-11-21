@@ -11,7 +11,7 @@ const transpile = source => ts.transpileModule(source, { compilerOptions: { modu
 const user = { id: 'fake-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }
 const deferred = () => { let resolve; const promise = new Promise(yes => resolve = yes); return { resolve, promise } }
 function harness(fetch, path = '/conservation/reviews') {
-  const auth = { exports: {}, fetch }; vm.runInNewContext(transpile(read('services/auth.ts')), auth)
+  const auth = { exports: {}, fetch, AbortSignal }; vm.runInNewContext(transpile(read('services/auth.ts')), auth)
   const route = vue.reactive({ path, fullPath: path }), redirects = []
   let cleanup, guard
   const router = { replace: async value => { redirects.push(value) }, afterEach() {}, beforeEach: fn => guard = fn }

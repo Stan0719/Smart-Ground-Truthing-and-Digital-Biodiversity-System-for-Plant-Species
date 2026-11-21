@@ -14,6 +14,8 @@ test('isolated database: normal login, species and plant registration preserve t
   const { createPlantDatabase } = require('../../plant-conservation-backend/test/postgres-fixture.cjs')
   const { createPlantApp } = require('../../plant-conservation-backend/server.js')
   const pool = await createPlantDatabase()
+  await pool.query("CREATE TABLE plant_app.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,plant_id integer UNIQUE,qr_code text UNIQUE,status text,assigned_at timestamptz,activated_at timestamptz,retired_at timestamptz)")
+  const qr = (await pool.query("INSERT INTO plant_app.qr_code(qr_code,status) VALUES('synthetic-text-qr','generated') RETURNING qr_id")).rows[0]
   const auth = await createTestAuth()
   t.after(async () => { await pool.end(); await auth.db.close() })
   const tokens = {}
@@ -46,7 +48,9 @@ test('isolated database: normal login, species and plant registration preserve t
   const found = await request('/species?q=' + encodeURIComponent(name), 'Conservation Officer')
   assert.equal((await found.json()).species.length, 1)
   assert.equal((await request('/species?q=one&q=two', 'Conservation Officer')).status, 400)
-  const plant = await request('/plants', 'Botanist', { species_id, latitude: 1, longitude: 2, client_key: 'synthetic-text-test', content: { heightCm: 12, healthStatus: ' Healthy ', lifeStage: ' Young ', morphology: ' Green leaves ', notes: ' Notes; -- preserved ' } })
+  const plantBody = { species_id, latitude: 1, longitude: 2, client_key: 'synthetic-text-test', content: { heightCm: 12, healthStatus: ' Healthy ', lifeStage: ' Young ', morphology: ' Green leaves ', notes: ' Notes; -- preserved ' } }
+  assert.equal((await request('/plants', 'Botanist', plantBody)).status, 400, 'missing QR remains invalid')
+  const plant = await request('/plants', 'Botanist', { ...plantBody, qr_id: qr.qr_id })
   assert.equal(plant.status, 201)
   const observation = (await pool.query('SELECT content FROM plant_observation')).rows[0].content
   assert.equal(observation.notes, 'Notes; -- preserved')
@@ -67,7 +71,17 @@ test('ordinary text rejects empty, wrong types and excessive names; preserves Un
 test('species create/update normalize text and bind SQL-looking names as parameters', async () => {
   const handlers = {}, queries = []
   const app = Object.fromEntries(['get', 'post', 'patch', 'delete'].map(method => [method, (path, ...chain) => { handlers[method + path] = chain.at(-1) }]))
-  const pool = { async connect() { return { async query(sql, values) { queries.push({ sql, values }); return { rows: [{ species_id: 1 }] } }, release() {} } } }
+  let duplicate = false
+  const pool = { async connect() { return { async query(sql, values) {
+    queries.push({ sql, values })
+    if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(sql) || sql.startsWith('SELECT pg_advisory_xact_lock')) return { rows: [] }
+    if (sql.startsWith('SELECT species_id FROM species WHERE')) return { rows: duplicate ? [{ species_id: 1 }] : [] }
+    if (sql.startsWith('SELECT to_regclass')) return { rows: [{ available: false }] }
+    if (sql.includes('FROM species s') || /^(INSERT INTO species|UPDATE species)/.test(sql)) return { rows: [{ species_id: 1, rbac_data: {}, visibility: 'public' }] }
+    if (/^INSERT INTO (rbac_species_visibility|business_audit)/.test(sql)) return { rows: [] }
+    assert.fail('Unexpected SQL in text fixture: ' + sql)
+  }, release() {} } } }
+
   mountDomain(app, { pool, allow: () => () => {} })
   const name = "Fern'); DROP TABLE species; --"
   for (const method of ['post', 'patch']) {
@@ -84,6 +98,9 @@ test('species create/update normalize text and bind SQL-looking names as paramet
     assert.ok(!query.sql.includes(name))
     assert.ok(query.sql.includes('$1'))
   }
+  duplicate = true
+  await assert.rejects(handlers['post/api/species']({ body: { scientific_name: name, common_name: 'Fern', description: 'Description', visibility: 'public' }, user: { id: 'test', role: 'Conservation Officer' } }, {}), error => error.status === 409 && error.code === 'SPECIES_DUPLICATE_APPROVED')
+  assert.equal(queries.filter(q => /^(INSERT INTO species|UPDATE species)/.test(q.sql)).length, 2, 'duplicate does not write')
 })
 
 test('HTTP rejects invalid emails/types before calling login or registration', async t => {
@@ -106,7 +123,12 @@ test('Vue interpolation escapes HTML-like text; reviewed species template uses i
   assert.ok(html.includes('&lt;script&gt;'))
   assert.ok(!html.includes('<script>'))
   const source = readFileSync(new URL('../src/views/conservation/PlantSpeciesView.vue', import.meta.url), 'utf8')
-  assert.ok(source.includes('{{ selected.description }}'))
+  const binding = source.match(/<dd>(\{\{ selected\.description[^}]*\}\})<\/dd>/)?.[1]
+  assert.ok(binding, 'current description is still interpolated')
+  const actual = await renderToString(createSSRApp({ template: '<dd>' + binding + '</dd>', data: () => ({ selected: { description: payload } }), methods: { st: () => 'Unavailable' } }))
+  assert.ok(actual.includes('&lt;script&gt;')); assert.ok(!actual.includes('<script>'))
+  const fallback = await renderToString(createSSRApp({ template: '<dd>' + binding + '</dd>', data: () => ({ selected: { description: '' } }), methods: { st: () => 'Unavailable' } }))
+  assert.ok(fallback.includes('Unavailable'))
   assert.ok(!source.includes('v-html'))
 })
 

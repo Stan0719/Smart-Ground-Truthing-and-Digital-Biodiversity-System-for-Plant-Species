@@ -86,10 +86,10 @@ const loadDevices = async () => {
     if (version !== generation || disposed) return
     devices.value = result
     readingDevices.value = result
-  } catch (error) {
+  } catch {
     if (version !== generation || disposed) return
     devices.value = []; readingDevices.value = []
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to retrieve IoT devices.'
+    errorMessage.value = t('officerFeedback.iotLoad')
   } finally {
     if (initialRequest === controller) initialRequest = null
     if (version === generation && !disposed) isLoading.value = false
@@ -121,10 +121,10 @@ const refreshReadings = async () => {
         }
       }
     }
-  } catch (error) {
+  } catch {
     controller.abort()
     if (version !== generation || disposed) return
-    refreshError.value = error instanceof Error ? error.message : 'Unable to refresh sensor readings. Please try again.'
+    refreshError.value = t('officerFeedback.iotRefresh')
   } finally {
     if (refreshRequest === controller) refreshRequest = null
     if (version === generation && !disposed) isRefreshing.value = false
@@ -219,6 +219,18 @@ const sensorHealthClass = (status: string | boolean | null | undefined) => {
   return 'sensor-unknown'
 }
 
+const navigationError = ref(false), navigationSequence = ref(0), navigating = ref(false)
+async function navigateTo(destination: Parameters<typeof router.push>[0], complete: () => void) {
+  if (navigating.value) return
+  const version = generation
+  navigating.value = true; navigationError.value = false; navigationSequence.value++
+  try {
+    const failure = await router.push(destination)
+    if (failure) throw Error('Navigation failed')
+    if (version === generation && !disposed) complete()
+  } catch { if (version === generation && !disposed) navigationError.value = true }
+  finally { navigating.value = false }
+}
 const viewDeviceAlerts = async (device: ApiSensorDevice) => {
   if (!identity || disposed || selectedDevice.value?.sensor_id !== device.sensor_id ||
       isLookingDeviceAlerts.value || deviceAlertFeedback.value?.variant === 'info') return
@@ -232,40 +244,38 @@ const viewDeviceAlerts = async (device: ApiSensorDevice) => {
     const alerts = await loadCanonicalAlerts(controller.signal)
     if (!current()) return
     if (alerts.some(alert => alert.deviceId === String(device.sensor_id))) {
-      selectedDevice.value = null
-      void router.push({ name: 'conservation-alerts', query: { device: String(device.sensor_id) } })
+      await navigateTo({ name: 'conservation-alerts', query: { device: String(device.sensor_id) } }, () => { selectedDevice.value = null })
     } else if (alerts.length >= CANONICAL_ALERT_CAP) {
-      deviceAlertFeedback.value = { id: ++deviceAlertFeedbackId, variant: 'error', title: 'Threat alerts unavailable',
-        message: 'The alert list is limited. Unable to confirm whether this device has recorded alerts.' }
+      deviceAlertFeedback.value = { id: ++deviceAlertFeedbackId, variant: 'error', title: t('officerFeedback.unavailable'),
+        message: t('officerFeedback.alertsLimited') }
     } else {
-      deviceAlertFeedback.value = { id: ++deviceAlertFeedbackId, variant: 'info', title: 'No threat alerts found',
-        message: 'There are currently no recorded threat alerts for this device.' }
+      deviceAlertFeedback.value = { id: ++deviceAlertFeedbackId, variant: 'info', title: t('officerFeedback.noAlerts'),
+        message: t('officerFeedback.noAlertsDescription') }
     }
   } catch {
-    if (current()) deviceAlertFeedback.value = { id: ++deviceAlertFeedbackId, variant: 'error', title: 'Threat alerts unavailable',
-      message: 'Unable to load threat alerts. Please try again.' }
+    if (current()) deviceAlertFeedback.value = { id: ++deviceAlertFeedbackId, variant: 'error', title: t('officerFeedback.unavailable'),
+      message: t('officerFeedback.alertsUnavailable') }
   } finally {
     if (deviceAlertRequest === controller) deviceAlertRequest = null
     if (current()) isLookingDeviceAlerts.value = false
   }
 }
 
-const viewReadingAlerts = (reading: ApiSensorReading) => {
-  selectedReading.value = null
-  void router.push({
+const viewReadingAlerts = async (reading: ApiSensorReading) => {
+  await navigateTo({
     name: 'conservation-alerts',
     query: { reading: String(reading.reading_id) },
-  })
+  }, () => { selectedReading.value = null })
 }
 
-const viewReadingOnMap = (reading: ApiSensorReading, source: 'device' | 'reading') => {
+const viewReadingOnMap = async (reading: ApiSensorReading, source: 'device' | 'reading') => {
   const plantId = reading.plant_id ? formatPlantId(reading.plant_id) : null
   if (!plantId) return
 
-  if (source === 'device') selectedDevice.value = null
-  else selectedReading.value = null
-
-  void router.push({ name: 'conservation-map', query: { plant: plantId } })
+  await navigateTo({ name: 'conservation-map', query: { plant: plantId } }, () => {
+    if (source === 'device') selectedDevice.value = null
+    else selectedReading.value = null
+  })
 }
 
 const loadReadingHistory = async (device: ApiSensorDevice) => {
@@ -281,10 +291,10 @@ const loadReadingHistory = async (device: ApiSensorDevice) => {
     if (version !== generation || disposed || historyDevice.value?.sensor_id !== device.sensor_id) return
     historyReadings.value = result.readings
     historyHasMore.value = result.hasMore
-  } catch (error) {
+  } catch {
     if (version !== generation || disposed) return
     historyErrorMessage.value =
-      error instanceof Error ? error.message : 'Unable to retrieve sensor readings.'
+      t('officerFeedback.iotHistory')
   } finally {
     if (version === generation && !disposed) isHistoryLoading.value = false
   }
@@ -311,6 +321,7 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
 </script>
 
 <template>
+  <ActionFeedback v-if="navigationError" :key="navigationSequence" :feedback-id="navigationSequence" variant="error" :message="t('officerFeedback.navigationFailed')" @dismiss="navigationError = false" />
   <ActionFeedback v-if="deviceAlertFeedback" :key="deviceAlertFeedback.id" :feedback-id="deviceAlertFeedback.id" :variant="deviceAlertFeedback.variant" :title="deviceAlertFeedback.title" :message="deviceAlertFeedback.message" @dismiss="dismissDeviceAlertFeedback" />
   <section class="page-intro">
     <div>

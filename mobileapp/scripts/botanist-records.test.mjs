@@ -31,6 +31,86 @@ function fixture(api) {
     speciesRequestPhotoSources: async (rows) => rows.map((row) => ({ uri: `https://example.invalid/requests/${row.request_id}/photo` })),
     plantAssetSources: async (assets, accountId) => assets.map((asset) => ({ uri: `https://example.invalid/assets/${asset.id}`, owner: accountId })) } });
 }
+test("edit refresh retains only verified same-account snapshots and recovers independently of Plants", async () => {
+  const own = { id: "edit-own", owner_subject: "staff:owner", observation_id: "observation-8", status: "Correction Required" };
+  const other = { ...own, id: "edit-other", owner_subject: "staff:other" };
+  let reply = { edits: [own, other] }, failure, failCapability = false;
+  const calls = [];
+  const api = fixture(async (path, options) => {
+    calls.push([path, options]);
+    if (path === "/plants?scope=mine") return { plants: rows };
+    if (path === "/observations?scope=mine") return { observations };
+    if (path === "/species-requests") return { species_requests: requests };
+    if (path === "/record-changes/capabilities") return { approved_edits_available: false };
+    if (path === "/observation-edits/capabilities") {
+      if (failCapability) throw failure;
+      return { available: true };
+    }
+    assert.equal(path, "/observation-edits");
+    if (failure) throw failure;
+    return reply;
+  });
+  const loader = api.createBotanistRecordsLoader(() => api.fetchBotanistRecords("owner"), () => {});
+  await loader.refresh();
+  assert.deepEqual(loader.getState().edits.map(row => row.id), [own.id]);
+  assert.equal(loader.getState().editsStale, false);
+  assert.equal(loader.getState().editsRefreshError, null);
+  for (const error of [
+    ...[409, 404, 503, 500].map(status => Object.assign(Error("private server details"), { status })),
+    Object.assign(Error("private network details"), { code: "API_TIMEOUT" }),
+    Object.assign(Error("private network details"), { code: "API_UNREACHABLE" }),
+    Object.assign(Error("private response"), { code: "API_NOT_JSON", status: 502 }),
+  ]) {
+    failure = error;
+    await loader.refresh();
+    const state = loader.getState();
+    assert.equal(state.plants[0].id, "8");
+    assert.equal(state.edits[0].id, own.id);
+    assert.equal(state.editsStale, true);
+    assert.match(state.error, /Observation edits could not be refreshed/);
+    assert.ok(!JSON.stringify(state.editsRefreshError).includes("private"));
+    assert.equal(state.editsRefreshError.reason, error.code === "API_TIMEOUT" ? "timeout"
+      : error.code === "API_UNREACHABLE" ? "network" : error.code === "API_NOT_JSON" ? "invalid_response" : "http");
+  }
+  failCapability = true;
+  await loader.refresh();
+  assert.equal(loader.getState().edits[0].id, own.id);
+  failCapability = false; failure = undefined;
+  for (const malformed of [{}, { edits: {} }, { edits: [null] }, { edits: [{ id: "x" }] }]) {
+    reply = malformed;
+    await loader.refresh();
+    assert.equal(loader.getState().editsStale, true);
+    assert.equal(loader.getState().edits[0].id, own.id);
+    assert.equal(loader.getState().editsRefreshError.reason, "invalid_response");
+  }
+  reply = { edits: [] };
+  await loader.refresh();
+  assert.equal(loader.getState().edits.length, 0);
+  assert.equal(loader.getState().editsStale, false);
+  assert.equal(loader.getState().error, "");
+  reply = { edits: [own] };
+  for (const status of [401, 403]) {
+    failure = undefined; await loader.refresh();
+    failure = Object.assign(Error("Sign in again"), { status }); await loader.refresh();
+    assert.equal(loader.getState().edits.length, 0);
+    assert.equal(loader.getState().plants.length, 0);
+    assert.equal(loader.getState().loaded, false);
+    assert.equal(loader.getState().editsRefreshError, null);
+  }
+  assert.ok(calls.every(([, options]) => options.expectedAccountId === "owner"));
+});
+
+test("clearing a records loader discards cached edits and ignores late private responses", async () => {
+  const api = fixture(), late = deferred();
+  const loader = api.createBotanistRecordsLoader(() => late.promise, () => {});
+  const pending = loader.refresh(); await Promise.resolve();
+  loader.clear();
+  late.resolve({ plants: rows, edits: [{ id: "private" }], editsStale: false });
+  await pending;
+  assert.equal(loader.getState().edits.length, 0);
+  assert.equal(loader.getState().plants.length, 0);
+  assert.equal(loader.getState().loaded, false);
+});
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
 test("plant mapping displays the saved QR inventory label without replacing the stored token", () => {
@@ -1105,15 +1185,36 @@ test("expired or changed account credentials clear previously loaded private rec
   assert.equal(loader.getState().loaded, false); assert.match(loader.getState().error, /Session expired/);
 });
 test("actual focus hook reads once per focus, avoids rerender loops and refreshes on return", async () => {
-  const api = fixture(); let reads = 0, focus, slots = [], index = 0;
+  const api = fixture(); let reads = 0, focus, slots = [], index = 0, sessionListener;
   const hooks = { useState: (initial) => { const i = index++; if (!(i in slots)) slots[i] = initial; return [slots[i], (value) => { slots[i] = value; }]; },
     useMemo: (fn, deps) => { const i = index++; if (!slots[i] || deps.some((d, j) => d !== slots[i].deps[j])) slots[i] = { deps, value: fn() }; return slots[i].value; } };
   hooks.useCallback = (fn, deps) => hooks.useMemo(() => fn, deps);
-  const hook = moduleFrom("utils/useBotanistRecords.js", { react: hooks, "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } }, "react-native": { AppState: { addEventListener: () => ({ remove() {} }) } }, "./botanistRecords": { ...api, fetchBotanistRecords: async () => { reads++; return { plants: rows, observations, requests }; } } });
-  const render = () => { index = 0; return hook.useBotanistRecords("owner"); };
+  hooks.useEffect = (fn, deps) => {
+    const i = index++;
+    if (!slots[i] || deps.some((value, j) => value !== slots[i].deps[j])) {
+      slots[i]?.cleanup?.(); slots[i] = { deps, cleanup: fn() };
+    }
+  };
+  let failEdits = false;
+  const hook = moduleFrom("utils/useBotanistRecords.js", { react: hooks, "./faceSession": { faceSession: { subscribe(fn) { sessionListener = fn; return () => { sessionListener = null; }; } } }, "@react-navigation/native": { useFocusEffect: (fn) => { focus = fn; } }, "react-native": { AppState: { addEventListener: () => ({ remove() {} }) } }, "./botanistRecords": { ...api, fetchBotanistRecords: async () => { reads++; return { plants: rows, observations, requests,
+    ...(failEdits ? { editsStale: true, warnings: ["Refresh failed"] } : { edits: [{ id: "edit-own" }], editsStale: false }) }; } } });
+  const render = (account = "owner") => { index = 0; return hook.useBotanistRecords(account); };
   render(); const firstFocus = focus, cleanup = focus();
   await render().refresh(); assert.equal(reads, 1); render(); assert.equal(focus, firstFocus);
-  cleanup(); focus(); await render().refresh(); assert.equal(reads, 2);
+  cleanup(); const secondCleanup = focus(); await render().refresh(); assert.equal(reads, 2);
+  assert.equal(render().edits.length, 1);
+  failEdits = true; await render().refresh();
+  assert.equal(render().editsStale, true);
+  assert.equal(render().edits.length, 0, "stale statuses cannot become current correction tasks");
+  secondCleanup();
+  sessionListener({ authenticated: false });
+  assert.equal(render().plants.length, 0);
+  assert.equal(render().edits.length, 0);
+  failEdits = false; focus(); await render().refresh();
+  assert.equal(render().edits.length, 1);
+  const switched = render("other");
+  assert.equal(switched.plants.length, 0);
+  assert.equal(switched.edits.length, 0);
 });
 test("actual plant detail loads the existing owned ID from API and displays its separate species information", async () => {
   let index = 0, slots = [], focus, requested;

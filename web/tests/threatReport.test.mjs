@@ -100,7 +100,7 @@ test('translation keys match and parent integration isolates the new report from
  const dictionaries=['en','ms','zh-CN'].map(l=>JSON.parse(read('locales/'+l+'.json')).threatReport)
  dictionaries.forEach(d=>{assert.deepEqual(Object.keys(d),Object.keys(dictionaries[0]));assert.ok(Object.values(d).every(v=>v&&!v.includes('???')))})
  for(const lang of ['en','ms','zh-CN']){const h=harness(undefined,lang);try{await flush();assert.equal(h.state.documentModel().title,JSON.parse(read('locales/'+lang+'.json')).threatReport.title)}finally{h.stop()}}
- const parent=read('views/conservation/ReportsView.vue');assert.match(parent,/ThreatIncidentReport v-else-if="reportType === 'threats'"/);assert.match(parent,/IoTEnvironmentalReport v-if="reportType === 'iot-summary'"/)
+ const parent=read('views/conservation/ReportsView.vue');assert.match(parent,/ThreatIncidentReport v-else-if="reportType === 'threats'"/);assert.match(parent,/OperationalReport v-if="reportType === 'iot-summary'" category="iot"/)
 })
 
 test('a capped response cannot be advertised as complete when its authoritative total exceeds returned rows',()=>{

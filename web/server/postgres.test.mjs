@@ -80,6 +80,8 @@ test('read-only SQLite import preserves IDs, password hashes and sessions, and r
       .run('preserved-session', 'original-id', Date.now() + 100000)
     const counts = await importSqlite(source, auth.db)
     assert.equal(counts.users, 1)
+    assert.equal((await auth.byId('original-id')).name, 'Original')
+    assert.ok((await auth.db.prepare('SELECT name AS stored FROM users WHERE id=?').get('original-id')).stored.startsWith('niah:account-name:v2:'))
     assert.equal((await auth.byId('original-id')).password_hash, 'preserved:hash')
     assert.equal(
       (await auth.db.prepare('SELECT user_id FROM sessions').get()).user_id,
@@ -164,4 +166,17 @@ test('private environment precedence selects the correct database without borrow
   assert.equal(env.AUTH_PG_SCHEMA, 'process_override')
   assert.equal(env.FACE_PG_SCHEMA, 'private_faces')
   assert.equal(env.FACE_DATABASE_URL, 'postgresql://fixture@localhost/face')
+})
+
+
+test('account import failure rolls back encrypted user writes and leaves SQLite untouched', async () => {
+  const source = new DatabaseSync(':memory:'), auth = await createTestAuth()
+  try {
+    source.exec("CREATE TABLE users(id TEXT,name TEXT,email TEXT,role TEXT,status TEXT,password_hash TEXT,must_change_password INTEGER); CREATE TABLE visitors(id TEXT,name TEXT,email TEXT,password_hash TEXT,unexpected TEXT)")
+    source.prepare('INSERT INTO users VALUES(?,?,?,?,?,?,?)').run('rollback-user', 'Synthetic', 'rollback@example.invalid', 'Botanist', 'Active', 'preserved', 0)
+    source.prepare('INSERT INTO visitors VALUES(?,?,?,?,?)').run('bad-visitor', 'Synthetic', 'visitor@example.invalid', 'preserved', 'unknown')
+    await assert.rejects(importSqlite(source, auth.db), /Unknown source columns/)
+    assert.equal((await auth.db.prepare('SELECT COUNT(*) AS n FROM users').get()).n, 0)
+    assert.equal(source.prepare('SELECT COUNT(*) AS n FROM users').get().n, 1)
+  } finally { source.close(); await auth.db.close() }
 })

@@ -237,7 +237,7 @@ test('new categories use their own report component and shared applied dates; re
     await h.state.loadReport()
     for (const category of ['observations','threats','iot-summary']) {
       h.state.reportType.value = category; await vue.nextTick()
-      const child = nodes(h.render()).find(node => category === 'iot-summary' ? node.type?.name?.includes('IoTEnvironmentalReport') : category === 'threats' ? node.type?.name?.includes('ThreatIncidentReport') : node.props?.category === category)
+      const child = nodes(h.render()).find(node => category === 'iot-summary' ? node.type?.name?.includes('OperationalReport') && node.props?.category === 'iot' : category === 'threats' ? node.type?.name?.includes('ThreatIncidentReport') : node.props?.category === category)
       assert.ok(child)
       assert.ok(!nodes(h.render()).some(node => node.props?.class === 'report-preview'))
       h.state.pendingPeriod.value = 'custom'; h.state.pendingStart.value = '2026-11-01'; h.state.pendingEnd.value = '2026-11-05'

@@ -180,7 +180,7 @@ test('new display labels have matching complete EN/MS/ZH translations and all ca
 test('real session publication during initial verification reloads once for the verified identity', async () => {
   const hooks = { ...vue, onMounted() {}, onBeforeUnmount() {} }, authExports = {}, helperExports = {}, listeners = []
   let serverUser = officer, fetches = 0, loads = 0
-  vm.runInNewContext(js(read('../src/services/auth.ts')), { exports: authExports, fetch: async () => {
+  vm.runInNewContext(js(read('../src/services/auth.ts')), { exports: authExports, AbortSignal, fetch: async () => {
     fetches++; return Response.json({ user: serverUser })
   } })
   vm.runInNewContext(js(read('../src/composables/useCatalogueRefresh.ts')), {

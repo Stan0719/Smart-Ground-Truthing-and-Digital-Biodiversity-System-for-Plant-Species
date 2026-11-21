@@ -21,7 +21,7 @@ const saveProfile = () => {
       : 'adminProfile.validation.emailInvalid'
 
   profileSuccess.value =
-    profileErrors.fullName || profileErrors.email ? '' : 'adminProfile.messages.profileSaved'
+    profileErrors.fullName || profileErrors.email ? '' : 'officerFeedback.prototypeValidated'
 }
 
 const updatePassword = () => {
@@ -42,10 +42,7 @@ const updatePassword = () => {
     return
   }
 
-  passwordSuccess.value = 'adminProfile.messages.passwordValidated'
-  password.current = ''
-  password.next = ''
-  password.confirm = ''
+  passwordSuccess.value = 'officerFeedback.prototypeValidated'
 }
 </script>
 
@@ -56,6 +53,7 @@ const updatePassword = () => {
     <p>{{ t('conservationProfile.intro') }}</p>
   </section>
 
+  <p role="note">{{ t('officerFeedback.prototype') }}</p>
   <div class="profile-settings">
     <form class="settings-card" novalidate @submit.prevent="saveProfile">
       <header>
@@ -113,7 +111,7 @@ const updatePassword = () => {
 
       <div class="form-footer">
         <p v-if="profileSuccess" class="success-message" role="status">{{ t(profileSuccess) }}</p>
-        <button class="primary-button" type="submit">{{ t('adminProfile.saveChanges') }}</button>
+        <button class="primary-button" type="submit">{{ t('officerFeedback.validateOnly') }}</button>
       </div>
     </form>
 
@@ -167,12 +165,10 @@ const updatePassword = () => {
         </label>
       </div>
 
-      <p class="prototype-note">
-        {{ t('adminProfile.prototypeNote') }}
-      </p>
+
       <div class="form-footer">
         <p v-if="passwordSuccess" class="success-message" role="status">{{ t(passwordSuccess) }}</p>
-        <button class="primary-button" type="submit">{{ t('adminProfile.updatePassword') }}</button>
+        <button class="primary-button" type="submit">{{ t('officerFeedback.validateOnly') }}</button>
       </div>
     </form>
   </div>

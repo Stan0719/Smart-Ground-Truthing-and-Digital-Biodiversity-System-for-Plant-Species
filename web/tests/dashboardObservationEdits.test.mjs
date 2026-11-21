@@ -67,6 +67,14 @@ test('late requests cannot repopulate data after session changes, newer refresh 
 test('all locales render valid labels; canonical Dashboard metrics and other sections stay separate',async()=>{
  for(const language of ['en','ms','zh-CN']){const h=harness([await proposal()],language);try{await flush();assert.ok(text(h.render()).includes(h.messages.dashboardObservationEdits.title));assert.ok(text(h.render()).includes(h.messages.dashboardObservationEdits.scope))}finally{h.stop()}}
  const source=readFileSync(new URL('../src/views/conservation/ConservationDashboardView.vue',import.meta.url),'utf8')
- assert.match(source,/<DashboardObservationEdits \/>/);assert.match(source,/observations.value.filter\(requiresReview\).length/);assert.match(source,/loadObservations\(\), loadPlants\(\), loadSpecies\(\), loadAlerts\(\)/)
+ assert.doesNotMatch(source,/DashboardObservationEdits|loadObservationEditQueue|observationEditRequest|dashboardObservationEdits\./)
+ assert.match(source,/observations.value.filter\(requiresReview\).length/);assert.match(source,/loadObservations\(\), loadPlants\(\), loadSpecies\(\), loadAlerts\(\)/)
+ for(const section of ['pendingPlantRegistrations','pendingObservations','speciesConservation'])assert.ok(source.includes(section),section)
+ const overview=parse(source).descriptor
+ assert.equal(compileTemplate({source:overview.template.content,filename:'ConservationDashboardView.vue',id:'dashboard-overview'}).errors.length,0)
+ assert.equal(compileStyle({source:overview.styles[0].content,filename:'ConservationDashboardView.vue',id:'dashboard-overview'}).errors.length,0)
+ const observationReview=readFileSync(new URL('../src/views/conservation/ObservationsView.vue',import.meta.url),'utf8')
+ assert.match(observationReview,/<ObservationEditQueue/)
+ assert.match(observationReview,/route.query.observationEdit/)
  assert.equal(compileStyle({source:descriptor.styles[0].content,filename:filename.pathname,id:'dashboard-edits-test'}).errors.length,0)
 })

@@ -224,6 +224,7 @@ test('isolated Administrator issuance -> real gateway -> mobile client -> mandat
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
  const plantQueries=[]
  const plant=createPlantApp({auth,origins:new Set(['http://localhost:5173']),pool:{async query(sql,args){
+  if(sql==="SELECT to_regclass(current_schema() || '.species_image_collection') IS NOT NULL AS available")return {rows:[{available:false}]}
   assert.ok(sql.includes('FROM species s'));plantQueries.push(args)
   return {rows:[{species_id:1,scientific_name:'Synthetic species',common_name:'Synthetic',visibility:'internal',rbac_data:{},conservation_status:'Synthetic status'}]}
  }}}).listen(0,'127.0.0.1')

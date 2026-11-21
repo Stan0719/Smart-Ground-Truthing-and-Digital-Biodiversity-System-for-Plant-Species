@@ -63,3 +63,13 @@ test('reload can be relocated to the review header without changing other consum
   assert.doesNotMatch(hidden, /<button/)
   assert.match(await render({ state: 'unchanged' }), /<button/)
 })
+
+
+test('Observation history can hide routine revision and reload controls while preserving truthful history and other consumers',async()=>{
+ for(const locale of ['en','ms','zh-CN']){
+  const messages=JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`,import.meta.url),'utf8'))
+  const hidden=await render({state:'unavailable'},locale,{hideRevision:true,hideReload:true})
+  assert.ok(hidden.includes(messages.submissionChanges.historyUnavailable));assert.ok(!hidden.includes(messages.submissionChanges.loadedRevision.replace('{revision}','2')));assert.doesNotMatch(hidden,/<button/)
+  assert.ok((await render({state:'unavailable'},locale)).includes(messages.submissionChanges.loadedRevision.replace('{revision}','2')))
+ }
+})

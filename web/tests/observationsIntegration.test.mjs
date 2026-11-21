@@ -85,10 +85,8 @@ test('five informational status cards count each loaded observation once in the 
     await h.state.loadObservations()
     assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.status),summaryStates)
     assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[1,1,1,1,1])
-    h.state.queueOrigin.value='all';assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[1,1,1,1,1])
-    h.state.queueOrigin.value='unknown';assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[1,1,1,1,1])
-    h.state.queueOrigin.value='subsequent_observation';h.state.search.value='no matches';h.state.species.value='missing';h.state.owner.value='missing';h.state.date.value='2026-01-01'
-    assert.equal(h.state.filtered.value.length,0);assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[1,1,1,1,1])
+    h.state.search.value='no matches';h.state.species.value='missing';h.state.owner.value='missing';h.state.date.value='2026-01-01'
+    assert.equal(h.state.filtered.value.length,0);assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[0,0,0,0,0])
     const cards=summaryCards(h);assert.equal(cards.length,5);assert.ok(cards.every(card=>nodes(card).filter(node=>node.type==='svg').length===1))
     assert.ok(cards.every(card=>!card.props.onClick&&!nodes(card).some(node=>node.type==='button'||node.type==='a')))
     const tree=nodes(h.render());assert.ok(tree.findIndex(node=>node.props?.class==='observation-summary')<tree.findIndex(node=>node.props?.class==='control-bar'))
@@ -102,7 +100,7 @@ test('summary totals include every loaded page, deduplicate page overlaps and sh
   let release
   const h=harness(async()=>Response.json({}),officer,false,async url=>url.includes('cursor=')?new Promise(resolve=>{release=resolve}):Response.json({observations:first,page:{has_more:true,next_cursor:'next-page'}}))
   try{
-    await h.state.loadObservations();assert.deepEqual(Array.from(h.state.summaryCounts.value,item=>item.count),[20,20,20,20,20])
+    await h.state.loadObservations();assert.ok(h.state.summaryCounts.value.every(item=>item.count===null))
     const pending=h.state.loadObservations(true);await vue.nextTick()
     assert.ok(h.state.summaryCounts.value.every(item=>item.count===null))
     release(Response.json({observations:[first[0],...next],page:{has_more:false,next_cursor:null}}));await pending
@@ -136,13 +134,13 @@ test('summary palette, icons and responsive layout match Review Submissions with
   for(const[width,columns]of [[1150,'repeat(3, minmax(0, 1fr))'],[760,'repeat(2, minmax(0, 1fr))'],[420,'minmax(0, 1fr)']])assert.ok(own.some(rule=>rule.parent.params===`(max-width: ${width}px)`&&declarations(rule)['grid-template-columns']===columns))
 })
 
-test('status labels reuse existing translations and the concise scope note is localized in all supported languages',async()=>{
+test('status labels stay localized without the removed scope note in all supported languages',async()=>{
   for(const language of ['en','ms','zh-CN']){
     const h=harness(async()=>Response.json({observations:[]}),officer,false,null,language)
     try{
       await h.state.loadObservations();const locale=JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`,import.meta.url),'utf8'))
-      assert.ok(locale.conservationPages.observations.summaryTitle);assert.ok(locale.conservationPages.observations.summaryScope)
-      const tree=nodes(h.render());assert.equal(tree.find(node=>node.props?.id==='observation-summary-scope').children,locale.conservationPages.observations.summaryScope)
+      assert.ok(locale.conservationPages.observations.summaryTitle);assert.equal(locale.conservationPages.observations.summaryScope,undefined)
+      const tree=nodes(h.render());assert.ok(!tree.some(node=>node.props?.id==='observation-summary-scope'))
       assert.ok(summaryCards(h).every(card=>!nodes(card).some(node=>typeof node.children==='string'&&node.children.startsWith('conservationPages.'))))
     }finally{h.stop()}
   }
@@ -160,6 +158,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
     return Object.entries(params).reduce((text, [name, replacement]) =>
       text.replaceAll(`{${name}}`, String(replacement)), value)
   }
+  const summaryCalls = []
   const exports = {}
   const context = {
     exports,
@@ -169,16 +168,20 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
     console,
     window: { setTimeout, clearTimeout, ...options.window },
     navigator: { clipboard: options.clipboard },
-    fetch: async (url, options) => {
-      calls.push({ url, options })
+    fetch: async (url, requestOptions) => {
+      if (url.startsWith('/api/observations?') && requestOptions?.cache === 'no-store') {
+        summaryCalls.push({ url, options: requestOptions })
+        return options.summaryHandler ? options.summaryHandler(url, requestOptions) : Response.json({ error: 'No summary fixture' }, { status: 503 })
+      }
+      calls.push({ url, options: requestOptions })
       if (url.startsWith('/api/observations?')) {
-        if (queueHandler) return queueHandler(url, options)
-        const response = await fetchHandler('/api/observations', options)
+        if (queueHandler) return queueHandler(url, requestOptions)
+        const response = await fetchHandler('/api/observations', requestOptions)
         if (!response.ok) return response
         const result = await response.json()
         return Response.json({ ...result, page: { has_more: false, next_cursor: null } })
       }
-      return fetchHandler(url, options)
+      return fetchHandler(url, requestOptions)
     },
     require(name) {
     if (name.endsWith('.css')) return {}
@@ -206,8 +209,10 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
   }
   vm.runInNewContext(`(function () { ${transpile(script.content)} })()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
+  // The child queue is stubbed here; emulate its completed empty state by default.
+  state.receiveProposalState({rows:[],names:{},loading:false,error:''})
   vm.runInNewContext(`(function () { ${transpile(template.code)} })()`, context)
-  return { state, calls, route, changeSession(user, pending = false) { session = { user, pending }; for (const fn of sessionListeners) fn(user, pending) }, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => { unmount.forEach(callback => callback()); scope.stop() } }
+  return { state, calls, summaryCalls, route, changeSession(user, pending = false) { session = { user, pending }; for (const fn of sessionListeners) fn(user, pending) }, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => { unmount.forEach(callback => callback()); scope.stop() } }
 }
 function nodes(root) {
   const result = []
@@ -261,7 +266,7 @@ test('list keeps raw IDs, sorts valid timestamps and opens local review without 
     const links = nodes(h.render()).filter((node) => node.props?.to?.name === 'conservation-reviews')
     const reviewButtons = nodes(h.render()).filter(node => node.type === 'button' && node.props?.class === 'action-button' && node.children === 'Review')
     assert.ok(reviewButtons.length > 0)
-    assert.equal(links.length, 1); assert.equal(links[0].props.to.query.legacy, '1')
+    assert.equal(links.length, 0)
     await reviewButtons[0].props.onClick()
     assert.equal(h.state.reviewMode.value, true)
     assert.equal(h.state.selected.value.id, uuid)
@@ -466,7 +471,7 @@ test('modal-wide bottom-right decision footer follows history and preserves all 
   }
 })
 
-test('missing comments show inline validation and the reference error toast for rejection and correction', async () => {
+test('missing comments focus one inline validation message without a duplicate toast', async () => {
   const { h } = reviewHarness()
   try {
     await h.state.open(h.state.mapObservation(fixture()), true)
@@ -480,13 +485,11 @@ test('missing comments show inline validation and the reference error toast for 
       assert.equal(field.props['aria-describedby'], 'observation-review-comment-error')
       const error = rendered.find(node => node.props?.id === 'observation-review-comment-error')
       assert.equal(error.props.role, 'alert')
-      const toast = rendered.find(node => node.props?.['feedback-id'] === h.state.commentFeedbackId.value)
-      assert.equal(toast.props.variant, 'error')
-      assert.equal(toast.props.message, h.state.rt('feedback.commentRequired'))
+      assert.ok(!rendered.some(node => node.props?.variant === 'error' && node.props?.message === h.state.rt('feedback.commentRequired')))
       assert.ok(!h.calls.some(call => call.options?.method === 'POST'))
     }
     h.state.closeModal()
-    assert.equal(h.state.commentFeedbackId.value, null)
+    assert.equal(h.state.reviewFeedback.value, '')
   } finally { h.stop() }
 })
 
@@ -552,7 +555,7 @@ test('approved species linkage enables review, but a disappearing dependency rem
   } finally { h.stop() }
 })
 
-test('the subsequent queue excludes registration and legacy rows while retaining explicit compatibility access', async () => {
+test('the subsequent queue excludes registration and legacy rows without the removed historical access panel', async () => {
   const field=fixture(), initial=fixture({id:'21',origin_type:'initial_registration'}), legacy=fixture({id:'22',origin_type:'unknown'})
   const h=harness(async()=>Response.json({observation:field}),officer,false,async()=>Response.json({observations:[field,initial,legacy],page:{has_more:false,next_cursor:null}}))
   try {
@@ -560,7 +563,7 @@ test('the subsequent queue excludes registration and legacy rows while retaining
     assert.deepEqual(Array.from(h.state.filtered.value,row=>row.id),[field.id])
     assert.ok(h.calls[0].url.includes('origin_type=subsequent_observation'))
     await h.state.open(h.state.filtered.value[0],true); assert.equal(h.state.reviewAllowed.value,true)
-    assert.ok(nodes(h.render()).some(n=>n.props?.to?.name==='conservation-reviews'&&n.props.to.query.legacy==='1'))
+    assert.ok(!nodes(h.render()).some(n=>n.props?.to?.name==='conservation-reviews'&&n.props.to.query.legacy==='1'))
     assert.ok(!h.calls.some(call=>call.options.method==='POST'))
   } finally {h.stop()}
 })
@@ -599,7 +602,7 @@ test('bounded scanning advances through empty/nonmatching pages and stops on rea
     assert.ok(queueCalls(h)[1].url.includes('cursor=a')); assert.ok(queueCalls(h)[2].url.includes('cursor=b'))
     assert.deepEqual(Array.from(h.state.filtered.value, item => item.id), [uuid, 'rejected'])
     assert.equal(h.state.canReviewField(h.state.filtered.value[0]), true); assert.equal(h.state.canReviewField(h.state.filtered.value[1]), false)
-    assert.deepEqual(Array.from(h.state.summaryCounts.value, item => item.count), [1, 0, 0, 1, 0])
+    assert.ok(h.state.summaryCounts.value.every(item => item.count === null), 'a partial queue cannot supply complete summary totals')
     assert.equal(h.state.hasMore.value, true); assert.equal(h.state.nextCursor.value, 'c'); assert.equal(h.state.autoScanLimited.value, false)
     assert.equal(h.state.search.value, 'PL007'); assert.equal(h.state.species.value, '3'); assert.equal(h.state.owner.value, 'staff:real-botanist-subject')
   } finally { h.stop() }
@@ -653,7 +656,7 @@ test('later-page errors preserve loaded records and the latest successful cursor
   try {
     await h.state.loadObservations(); await h.state.loadObservations(true)
     assert.equal(h.state.filtered.value.length, 1); assert.equal(h.state.nextCursor.value, 'b'); assert.equal(h.state.hasMore.value, true)
-    assert.equal(h.state.loadError.value, 'Temporary queue failure')
+    assert.equal(h.state.loadError.value, messages.conservationPages.observations.errors.requestFailed.replace('{status}','503'))
     nodes(h.render()).find(n => n.type === 'button' && n.children === messages.conservationPages.observations.retry).props.onClick(); await flush()
     assert.ok(queueCalls(h)[3].url.includes('cursor=b')); assert.equal(h.state.filtered.value.length, 2)
     assert.equal(h.state.observations.value.filter(item => item.id === uuid).length, 1); assert.equal(h.state.loadError.value, '')
@@ -728,15 +731,15 @@ test('logout, account switching and unmount abort scans without errors or late p
   }
 })
 
-test('local filters explain hidden loaded rows without triggering scans or changing loaded summary counts', async () => {
+test('local filters preserve table scanning and recalculate summaries only after complete verification', async () => {
   for (const more of [true, false]) {
     const h = harness(async () => Response.json({}), officer, false, async () => queueResponse([fixture()], more ? 'next' : null))
     try {
       h.state.search.value = 'not matching'; await h.state.loadObservations()
       assert.equal(queueCalls(h).length, 1); assert.equal(h.state.filtered.value.length, 0); assert.equal(h.state.filtersHideLoaded.value, true)
-      assert.equal(h.state.summaryCounts.value.find(item => item.status === 'Pending Review').count, 1)
+      assert.equal(h.state.summaryCounts.value.find(item => item.status === 'Pending Review').count, more ? null : 0)
       assert.ok(nodes(h.render()).some(n => n.children === messages.conservationPages.observations[more ? 'filteredMore' : 'filteredLoaded']))
-      h.state.search.value = ''; assert.equal(h.state.filtered.value.length, 1); assert.equal(queueCalls(h).length, 1)
+      h.state.search.value = ''; assert.equal(h.state.filtered.value.length, 1); assert.equal(queueCalls(h).length, 1);assert.equal(h.state.summaryCounts.value.find(item=>item.status==='Pending Review').count,more?null:1)
     } finally { h.stop() }
   }
 })
@@ -801,7 +804,7 @@ test('initial and legacy records cannot acquire normal Observation actions', asy
       h.state.isLoading.value=false; h.state.observations.value=[h.state.mapObservation(fixture({origin_type:origin}))]
       assert.equal(h.state.filtered.value.length,0)
       assert.ok(!nodes(h.render()).some(n=>n.props?.class==='action-group'))
-      assert.ok(nodes(h.render()).some(n=>n.props?.to?.name==='conservation-reviews'&&n.props.to.query.legacy==='1'))
+      assert.ok(!nodes(h.render()).some(n=>n.props?.to?.name==='conservation-reviews'&&n.props.to.query.legacy==='1'))
       assert.ok(!h.calls.some(call=>call.options.method==='POST'))
     } finally {h.stop()}
   }
@@ -1356,7 +1359,7 @@ test('unchanged observation reload preserves drafts and acknowledgement with inf
       const info = nodes(h.render()).find(n => n.type === 'p' && String(n.props?.class).includes('observation-review-feedback'))
       assert.equal(info.props.role, 'status'); assert.ok(info.props.class.includes('info')); assert.ok(!info.props.class.includes('error'))
       assert.ok(!nodes(h.render()).some(n => n.props?.class === 'review-feedback error'))
-      assert.ok(nodes(h.render()).some(n => n.props?.['initial-submission'] === true))
+      assert.ok(!nodes(h.render()).some(n => n.type?.name?.endsWith('SubmissionChanges.vue')), 'the removed History disclosure is not rendered')
       assert.equal(h.calls.filter(c => c.options?.method === 'POST').length, 0)
     } finally { h.stop() }
   }
@@ -1437,7 +1440,7 @@ test('Observation provenance identifies current content and the separate history
       await h.state.open(h.state.mapObservation(row))
       const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'))
       const notices=nodes(h.render()).filter(n=>n.props?.class==='observation-data-provenance')
-      assert.ok(notices.some(n=>n.children===labels.observationModal.currentRecordNotice))
+      assert.ok(!notices.some(n=>n.children===labels.observationModal.currentRecordNotice))
       assert.notEqual(h.state.selected.value.height,'999')
       h.state.openHistory(h.state.selected.value);await flush()
       assert.equal(h.state.reviewAllowed.value,false)
@@ -1475,7 +1478,7 @@ test('one Submission Type filter has exactly the three subsequent-workflow choic
 test('registration and unclassified originals never enter the normal queue, even if an API returns mixed origins',async()=>{
  const rows=['initial_registration','subsequent_observation','unknown'].map((origin_type,i)=>fixture({id:'origin-'+i,origin_type}));const h=harness(identityHandler(rows));
  try{await h.state.loadObservations();assert.deepEqual(Array.from(h.state.filtered.value,r=>r.id),['origin-1']);assert.equal(h.state.summaryCounts.value.find(c=>c.status==='Pending Review').count,1);
-  assert.ok(nodes(h.render()).some(n=>n.type==='RouterLink'&&n.props?.to?.query?.legacy==='1'));
+  assert.ok(!nodes(h.render()).some(n=>n.type==='RouterLink'&&n.props?.to?.query?.legacy==='1'));
  }finally{h.stop()}
 })
 
@@ -1493,7 +1496,7 @@ test('unified Observation table renders both distinct submission identities and 
  try{await h.state.loadObservations();const edit=await unifiedProposal();h.state.receiveProposalState({rows:[edit],names:{'real-botanist-subject':'Botanist Aina'},loading:false,error:''});await flush()
  assert.equal(h.state.displayedRows.value.length,3);assert.equal(new Set(h.state.displayedRows.value.map(row=>row.key)).size,3)
  assert.ok(h.state.displayedRows.value.some(row=>row.key==='observation:'+uuid));assert.ok(h.state.displayedRows.value.some(row=>row.key==='observation-edit:'+uuid))
- assert.equal(h.state.observations.value.length,2);assert.equal(h.state.summaryCounts.value.find(card=>card.status==='Pending Review').count,1)
+ assert.equal(h.state.observations.value.length,2);assert.equal(h.state.summaryCounts.value.find(card=>card.status==='Pending Review').count,2)
  const table=mainObservationTable(h),headers=nodes(table).filter(n=>n.type==='th');assert.equal(headers.length,8);assert.equal(headers[1].children,'Submission Type');assert.equal(headers[3].children,'Species')
  const rows=nodes(table).filter(n=>n.type==='tr'&&observationCells(n).length===8);assert.equal(rows.length,3)
  assert.ok(nodes(table).some(n=>n.children===messages.finalOfficerWorkflow.edit));assert.ok(nodes(table).some(n=>n.children===messages.finalOfficerWorkflow.original))
@@ -1557,10 +1560,243 @@ test('Observation submission types use full localized labels and distinct high-c
  for(const[kind,bg,fg]of pairs){assert.ok(css.includes('.submission-type-'+kind+' { background-color: '+bg+'; color: '+fg+'; }'));assert.ok((luminance(bg)+.05)/(luminance(fg)+.05)>=4.5)}
  assert.match(css,/submission-type-badge[^}]*overflow-wrap: normal/)
 })
-test('historical access is collapsed, explained and retains the exact authorized legacy destination in every locale',()=>{
- for(const language of ['en','ms','zh-CN']){const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'));const h=harness(identityHandler([]),officer,false,null,language)
- try{const details=nodes(h.render()).find(n=>n.type==='details'&&n.props?.class==='historical-access');assert.ok(details);assert.ok(!details.props.open);assert.ok(nodes(details).some(n=>n.type==='summary'&&n.children===labels.unifiedObservations.historicalTitle));assert.ok(nodes(details).some(n=>n.type==='p'&&n.children===labels.unifiedObservations.historicalExplanation));assert.ok(nodes(details).some(n=>n.props?.to?.name==='conservation-reviews'&&n.props.to.query.legacy==='1'));assert.ok(labels.unifiedObservations.filterScope.length<130);assert.doesNotMatch(labels.unifiedObservations.filterScope,/Origin and Species|Observation baseline/)}finally{h.stop()}}
+test('removed historical access and loaded-filter notices stay absent in every locale',()=>{
+ for(const language of ['en','ms','zh-CN']){const h=harness(identityHandler([]),officer,false,null,language)
+ try{const tree=nodes(h.render());assert.ok(!tree.some(n=>n.props?.class==='historical-access'));assert.ok(!tree.some(n=>n.props?.class==='filter-scope-note'));assert.ok(!tree.some(n=>n.props?.id==='observation-summary-scope'));assert.ok(!tree.some(n=>n.props?.['aria-describedby']==='observation-summary-scope'))}finally{h.stop()}}
 })
+
+test('edit submission IDs reuse canonical row markup, copy the full request ID and retain exact detail routing',async()=>{
+ const writes=[],h=harness(identityHandler([fixture()]),officer,false,null,'en',{clipboard:{writeText:async value=>writes.push(value)}})
+ try{await h.state.loadObservations();const edit=await unifiedProposal();edit.id='535b4db9-a9b4-42fc-9739-1d093d1ed957';let opened
+ h.state.proposalQueue.value={view:row=>{opened=row}};h.state.receiveProposalState({rows:[edit],names:{},loading:false,error:''});await flush()
+ const rows=nodes(mainObservationTable(h)).filter(n=>n.type==='tr'&&observationCells(n).length===8)
+ for(const row of rows){const cell=observationCells(row)[0];assert.ok(nodes(cell).some(n=>n.props?.class==='identifier-line'));assert.equal(nodes(cell).filter(n=>n.type==='strong').length,1);assert.equal(nodes(cell).filter(n=>n.type==='small').length,0);assert.ok(nodes(cell).some(n=>n.props?.class==='identifier-copy'))}
+ const row=rows.find(r=>nodes(observationCells(r)[0]).some(n=>n.type==='strong'&&n.props?.title===edit.id));assert.ok(row)
+ const cell=observationCells(row)[0];assert.ok(nodes(cell).some(n=>n.type==='strong'&&n.children===h.state.proposalLabels.value.get(edit.id)))
+ await nodes(cell).find(n=>n.props?.class==='identifier-copy').props.onClick();assert.deepEqual(writes,[edit.id]);assert.notEqual(writes[0],edit.observation_edit.observation_id)
+ nodes(observationCells(row)[7]).find(n=>n.type==='button').props.onClick();assert.equal(opened.id,edit.id);assert.equal(opened.observation_edit.observation_id,edit.observation_edit.observation_id)
+ }finally{h.stop()}
+})
+
 test('unverified photo evidence warning remains visible with no invented proposals and a source-only retry',async()=>{
  const h=harness(identityHandler([fixture()]));try{await h.state.loadObservations();let retries=0;h.state.proposalQueue.value={load:()=>{retries++}};h.state.receiveProposalState({rows:[],names:{},loading:false,error:messages.unifiedObservations.invalidEvidence});const warning=nodes(h.render()).find(n=>n.props?.class==='proposal-warning');assert.equal(warning.props.role,'alert');assert.ok(nodes(warning).some(n=>typeof n.children==='string'&&n.children.includes(messages.unifiedObservations.invalidEvidence)));assert.equal(h.state.displayedRows.value.length,1);assert.equal(h.state.displayedRows.value[0].kind,'original');const calls=h.calls.length;nodes(warning).find(n=>n.type==='button').props.onClick();assert.equal(retries,1);assert.equal(h.calls.length,calls);assert.ok(h.calls.every(c=>!c.options.method||c.options.method==='GET'))}finally{h.stop()}
+})
+
+
+test('Observation media follows Location in the information column and opens the shared private photo viewer without UUID captions',async()=>{
+ const row=fixture({assets:[{id:'private-photo-one',content_type:'image/jpeg'},{id:'private-photo-two',content_type:'image/png'},{id:'attachment',content_type:'application/pdf'}]})
+ const h=harness(async()=>Response.json({observation:row}));try{
+  await h.state.open(h.state.mapObservation(row),true)
+  const tree=nodes(h.render()),left=tree.find(n=>n.props?.class==='observation-information-column'),right=tree.find(n=>String(n.props?.class).includes('observation-review-column'))
+  const sections=nodes(left).filter(n=>n.type==='section'),media=sections.at(-1)
+  assert.ok(media.props.class.includes('observation-media'));assert.ok(nodes(sections.at(-2)).some(n=>n.type==='h3'&&nodes(n).some(c=>c.children===messages.observationModal.location)))
+  assert.ok(!nodes(right).some(n=>String(n.props?.class).includes('observation-media')))
+  const buttons=nodes(media).filter(n=>String(n.props?.class).includes('observation-photo-button'));assert.equal(buttons.length,2)
+  assert.ok(!nodes(media).some(n=>n.type==='strong'&&n.props?.title==='private-photo-one'))
+  assert.ok(!nodes(media).some(n=>n.type==='img'&&n.props.alt.includes('private-photo-')))
+  const viewer=tree.find(n=>n.type?.name?.endsWith('PlantPhotoLightbox.vue'));assert.ok(viewer);assert.equal(viewer.props['root-scroll-lock'],'')
+  let opened,closed=0;h.state.observationPhotoPreview.value={open:(...args)=>{opened=args},reconcile:()=>{},close:()=>{closed++}}
+  const target={isConnected:true};buttons[1].props.onClick({currentTarget:target})
+  assert.deepEqual(Array.from(opened[0],p=>p.id),['private-photo-one','private-photo-two']);assert.equal(opened[1],1);assert.equal(opened[3],target)
+  assert.equal(opened[0][1].url,'/api/data/assets/private-photo-two')
+  h.state.closeModal();assert.ok(closed>0)
+ }finally{h.stop()}
+})
+
+function observationHeaderRefresh(h) {
+ const modal=nodes(h.render()).find(n=>n.props?.class==='observation-dialog')
+ return nodes(modal.children.title()).find(n=>n.props?.class==='observation-refresh-button')
+}
+
+test('Observation header refresh is always accessible, preserves drafts and keeps real stale-data safeguards',async()=>{
+ let row=fixture();const h=harness(async()=>Response.json({observation:row}));try{
+  await h.state.open(h.state.mapObservation(row),true);h.state.reviewComment.value='Preserve this draft'
+  let button=observationHeaderRefresh(h);assert.ok(button)
+  assert.equal(button.props['aria-label'],messages.submissionChanges.reload);assert.equal(button.props.disabled,false)
+  await button.props.onClick();assert.equal(h.state.reviewComment.value,'Preserve this draft');assert.equal(h.state.reviewAcknowledged.value,true)
+  row=fixture({revision:5});await button.props.onClick();assert.equal(h.state.selected.value.revision,5);assert.equal(h.state.reviewAcknowledged.value,false);assert.equal(h.state.reviewAllowed.value,false)
+  assert.ok(nodes(h.render()).some(n=>n.props?.role==='alert'&&String(n.props?.class).includes('review-feedback')))
+  h.state.reviewSaving.value=true;button=observationHeaderRefresh(h);assert.equal(button.props.disabled,true);assert.equal(button.props['aria-busy'],true)
+ }finally{h.stop()}
+})
+
+test('unwanted change-history disclosure is absent while actual review history and true failures remain',async()=>{
+ const row=fixture({revision:2,submission_update:{state:'unavailable'}}),h=harness(async()=>Response.json({observation:row}));try{
+  await h.state.open(h.state.mapObservation(row),true)
+  const tree=nodes(h.render());assert.ok(!tree.some(n=>n.type==='details'&&n.props?.class==='observation-change-history'))
+  assert.ok(!tree.some(n=>n.type?.name?.endsWith('SubmissionChanges.vue')))
+  assert.ok(tree.some(n=>n.type?.name?.endsWith('ObservationReviewHistory.vue')))
+  h.state.reviewNeedsReload.value=true;h.state.detailError.value='Loading failed';await flush()
+  assert.ok(nodes(h.render()).some(n=>n.props?.role==='alert'&&n.children==='Loading failed'));assert.equal(h.state.reviewAllowed.value,false)
+  const css=readFileSync(new URL('../src/styles/observation-dialog.css',import.meta.url),'utf8')
+  assert.doesNotMatch(css,/overflow-y:\s*auto|--observation-review-height/)
+  assert.match(css,/grid-template-columns: minmax\(0, 1fr\)/)
+ }finally{h.stop()}
+})
+
+
+test('Observation summary and title follow search, Plant ID, Species, owner, date, Status and submission-type filters in every locale',async()=>{
+ const rows=[fixture({id:'pending-a',plant_id:12,plant_display_id:'PL012',species_id:3,status:'Pending Review',created_at:'2026-11-02T10:00:00Z'}),fixture({id:'approved-b',plant_id:13,plant_display_id:'PL013',species_id:4,status:'Approved',created_at:'2026-11-03T10:00:00Z'}),fixture({id:'flagged-c',plant_id:12,plant_display_id:'PL012',species_id:3,status:'Flagged',created_at:'2026-11-02T10:00:00Z'})]
+ for(const language of ['en','ms','zh-CN']){
+  const h=harness(identityHandler(rows),officer,false,null,language),counts=()=>Array.from(h.state.summaryCounts.value,c=>c.count)
+  const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8')).unifiedObservations
+  try{
+   await h.state.loadObservations();assert.deepEqual(counts(),[1,0,1,0,1]);assert.equal(h.state.summaryHasFilters.value,false)
+   assert.ok(nodes(h.render()).some(n=>n.type==='h3'&&n.children===labels.summaryTitle))
+   h.state.search.value='pending-a';assert.deepEqual(counts(),[1,0,0,0,0]);assert.equal(h.state.filtered.value.length,1)
+   assert.ok(nodes(h.render()).some(n=>n.type==='h3'&&n.children===labels.filteredSummaryTitle))
+   h.state.search.value='PL012';assert.deepEqual(counts(),[1,0,1,0,0])
+   h.state.search.value='';h.state.species.value='4';assert.deepEqual(counts(),[0,0,0,0,1])
+   h.state.species.value='3';h.state.date.value='2026-11-02';h.state.owner.value='staff:real-botanist-subject';assert.equal(h.state.filtered.value.length,2);assert.deepEqual(counts(),[1,0,1,0,0])
+   h.state.status.value='Flagged';await h.state.loadObservations();assert.deepEqual(counts(),[0,0,1,0,0]);assert.equal(h.state.filtered.value.length,1)
+   h.state.submissionType.value='edit';assert.deepEqual(counts(),[0,0,0,0,0])
+   h.state.submissionType.value='all';h.state.search.value='';h.state.species.value='';h.state.owner.value='';h.state.date.value='';h.state.status.value='';await h.state.loadObservations()
+   assert.equal(h.state.summaryHasFilters.value,false);assert.deepEqual(counts(),[1,0,1,0,1]);assert.equal(h.state.summaryScope.value,labels.summaryScope)
+  }finally{h.stop()}
+ }
+})
+
+test('all-page summary deduplicates and filters unseen rows without advancing table pagination',async()=>{
+ const first=fixture({id:'first',status:'Pending Review'}),later=fixture({id:'later',status:'Approved',plant_id:99,plant_display_id:'PL099'})
+ const pageHandler=async url=>Response.json(url.includes('cursor=')?{observations:[first,later],page:{has_more:false,next_cursor:null}}:{observations:[first],page:{has_more:true,next_cursor:'next'}})
+ const h=harness(identityHandler([]),officer,false,pageHandler,'en',{summaryHandler:pageHandler})
+ try{
+  await h.state.loadObservations();await h.state.summaryTask;await flush()
+  assert.equal(h.state.summaryComplete.value,true);assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[1,0,0,0,1])
+  assert.equal(h.state.observations.value.length,1);assert.equal(h.state.hasMore.value,true);assert.equal(h.state.nextCursor.value,'next');assert.equal(h.summaryCalls.length,1)
+  h.state.search.value='PL099';assert.equal(h.state.displayedRows.value.length,0);assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[0,0,0,0,1])
+  await h.state.loadObservations(true);assert.equal(h.state.displayedRows.value.length,1);assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[0,0,0,0,1])
+ }finally{h.stop()}
+})
+
+test('failed, malformed, looping and over-budget summary pages never expose partial totals or break the main table',async()=>{
+ for(const kind of ['http','malformed','loop','budget']){
+  let page=0
+  const pageHandler=async url=>{
+   if(!url.includes('cursor='))return Response.json({observations:[fixture()],page:{has_more:true,next_cursor:'1'}})
+   if(kind==='http')return Response.json({error:'Unavailable'},{status:503})
+   if(kind==='malformed')return Response.json({observations:[{id:'bad'}],page:{has_more:false,next_cursor:null}})
+   return Response.json({observations:[],page:{has_more:true,next_cursor:kind==='loop'?'1':String(++page+1)}})
+  }
+  const h=harness(identityHandler([]),officer,false,pageHandler,'en',{summaryHandler:pageHandler})
+  try{await h.state.loadObservations();await h.state.summaryTask;assert.equal(h.state.summaryComplete.value,false);assert.ok(h.state.summaryError.value);assert.ok(h.state.summaryCounts.value.every(c=>c.count===null));assert.equal(h.state.observations.value.length,1);assert.equal(h.state.loadError.value,'');assert.equal(h.state.hasMore.value,true);assert.ok(page<=h.state.SUMMARY_PAGE_LIMIT);assert.ok(h.summaryCalls.length<=h.state.SUMMARY_PAGE_LIMIT)}finally{h.stop()}
+ }
+})
+
+test('summary counts separate Observation and Edit Request submissions using their own statuses',async()=>{
+ const h=harness(identityHandler([fixture({status:'Pending Review'})]));try{
+  await h.state.loadObservations();h.state.receiveProposalState({rows:[await unifiedProposal()],names:{},loading:false,error:''})
+  assert.equal(h.state.displayedRows.value.length,2);assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[2,0,0,0,0])
+  h.state.updateObservation(h.state.mapObservation(fixture({status:'Approved',revision:5})));assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[1,0,0,0,1])
+ h.state.submissionType.value='original';assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[0,0,0,0,1])
+ h.state.submissionType.value='edit';assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[1,0,0,0,0])
+ }finally{h.stop()}
+})
+
+
+test('summary ignores stale pages after logout and can retry a failed count without changing table pagination',async()=>{
+ let release,fail=true
+ const first=fixture({id:'summary-first'}),later=fixture({id:'summary-later',status:'Approved'})
+ const main=async()=>Response.json({observations:[first],page:{has_more:true,next_cursor:'summary-next'}})
+ const h=harness(identityHandler([]),officer,false,main,'en',{summaryHandler:async()=>fail?Response.json({error:'Failed'},{status:503}):Response.json({observations:[later],page:{has_more:false,next_cursor:null}})})
+ try{await h.state.loadObservations();await h.state.summaryTask;assert.equal(h.state.summaryError.value,'unavailable');assert.ok(h.state.summaryCounts.value.every(c=>c.count===null))
+  fail=false;await h.state.refreshSummary();assert.equal(h.state.summaryComplete.value,true);assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[1,0,0,0,1]);assert.equal(h.state.observations.value.length,1);assert.equal(h.state.nextCursor.value,'summary-next')
+ }finally{h.stop()}
+ const stale=harness(identityHandler([]),officer,false,main,'en',{summaryHandler:()=>new Promise(resolve=>{release=resolve})})
+ try{await stale.state.loadObservations();const pending=stale.state.summaryTask;assert.equal(stale.state.summaryLoading.value,true);stale.changeSession(null);release(Response.json({observations:[later],page:{has_more:false,next_cursor:null}}));await pending
+  assert.equal(stale.state.summaryRows.value.length,0);assert.equal(stale.state.summaryComplete.value,false);assert.ok(stale.state.summaryCounts.value.every(c=>c.count===null))
+ }finally{stale.stop()}
+})
+
+
+test('edit summaries share table filters and use request status, date and typed identity rather than the baseline',async()=>{
+ const h=harness(identityHandler([fixture({status:'Approved'})]));try{
+  await h.state.loadObservations();const edit=await unifiedProposal('Pending Review');h.state.receiveProposalState({rows:[edit],names:{},loading:false,error:''})
+  assert.equal(edit.id,uuid);assert.equal(edit.observation_edit.observation_id,uuid)
+  assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[1,0,0,0,1])
+  h.state.submissionType.value='edit';h.state.search.value='CHANGE-'+uuid;assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[1,0,0,0,0])
+  h.state.search.value='';h.state.date.value='2026-11-17';assert.equal(h.state.displayedRows.value.length,1);assert.equal(h.state.summaryCounts.value[0].count,1)
+  h.state.date.value='2026-11-02';assert.equal(h.state.displayedRows.value.length,0);assert.equal(h.state.summaryCounts.value[0].count,0)
+  h.state.date.value='';h.state.owner.value='missing';assert.equal(h.state.summaryCounts.value[0].count,0);h.state.owner.value=''
+  h.state.receiveProposalState({rows:[{...edit,status:'Rejected'}],names:{},loading:false,error:''});assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[0,0,0,1,0])
+  h.state.status.value='Approved';assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[0,0,0,0,0]);h.state.status.value='Rejected';assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[0,0,0,1,0])
+ }finally{h.stop()}
+})
+
+test('combined summaries never substitute partial counts when either selected source is loading or failed',async()=>{
+ const h=harness(identityHandler([fixture()]));try{
+  await h.state.loadObservations();h.state.receiveProposalState({rows:[],names:{},loading:true,error:''});assert.ok(h.state.summaryCounts.value.every(c=>c.count===null))
+  h.state.submissionType.value='original';assert.equal(h.state.summaryCounts.value[0].count,1)
+  h.state.receiveProposalState({rows:[],names:{},loading:false,error:'Evidence unavailable'});assert.equal(h.state.summaryCounts.value[0].count,1)
+  h.state.submissionType.value='all';assert.ok(h.state.summaryCounts.value.every(c=>c.count===null))
+  h.state.submissionType.value='edit';assert.ok(h.state.summaryCounts.value.every(c=>c.count===null))
+  h.state.receiveProposalState({rows:[await unifiedProposal()],names:{},loading:false,error:''});h.state.loadError.value='Observation source failed';assert.equal(h.state.summaryCounts.value[0].count,1)
+  h.state.submissionType.value='all';assert.ok(h.state.summaryCounts.value.every(c=>c.count===null))
+ }finally{h.stop()}
+})
+
+
+test('normal summary explanation and media captions are absent without removing genuine count errors or photo zoom',async()=>{
+ const h=harness(identityHandler([fixture()]));try{
+  await h.state.loadObservations();assert.ok(!nodes(h.render()).some(n=>n.props?.id==='observation-summary-definition'))
+  await h.state.open(h.state.observations.value[0]);const tree=nodes(h.render())
+  assert.ok(!tree.some(n=>String(n.props?.class).includes('asset-caption')))
+  assert.ok(tree.some(n=>String(n.props?.class).includes('observation-photo-button')))
+  assert.ok(!tree.some(n=>n.props?.class==='observation-data-provenance'))
+  h.state.receiveProposalState({rows:[],names:{},loading:false,error:'Unavailable'});assert.ok(nodes(h.render()).some(n=>n.props?.id==='observation-summary-definition'))
+ }finally{h.stop()}
+})
+
+test('Approved and Rejected help is localized, compact and never reopens review permissions',async()=>{
+ for(const language of ['en','ms','zh-CN'])for(const status of ['Approved','Rejected','Pending Review']){
+  const row=fixture({status}),h=harness(async()=>Response.json({observation:row}),officer,false,null,language)
+  try{
+   await h.state.open(h.state.mapObservation(row));const tree=nodes(h.render()),button=tree.find(n=>n.props?.class==='observation-status-help-button')
+   assert.equal(!!button,status!=='Pending Review')
+   if(!button)continue
+   const labels=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'))
+   assert.equal(button.props['aria-label'],labels.observationModal[status==='Approved'?'aboutApproved':'aboutRejected'])
+   assert.equal(h.state.reviewAllowed.value,false);assert.equal(h.state.statusHelpOpen.value,false)
+   button.props.onFocus();await flush();assert.equal(h.state.statusHelpOpen.value,true)
+   let tooltip=nodes(h.render()).find(n=>n.props?.id==='observation-status-tooltip');assert.ok(tooltip);assert.equal(tooltip.props.role,'tooltip');assert.equal(tooltip.props.popover,'manual')
+   assert.ok(nodes(tooltip).some(n=>n.type==='p'&&n.children===(status==='Approved'?labels.observationModal.approvedDescription:labels.submissionChanges.finalRejected)))
+   if(status==='Approved')assert.ok(nodes(tooltip).some(n=>n.children===labels.observationModal.approvedEditNote))
+   assert.ok(!nodes(h.render()).some(n=>n.type==='p'&&n.props?.class==='review-feedback error'&&n.children===labels.submissionChanges.finalRejected))
+   button.props.onKeydown({key:'Escape',stopPropagation(){},preventDefault(){}});assert.equal(h.state.statusHelpOpen.value,false)
+   button.props.onClick();assert.equal(h.state.statusHelpOpen.value,true);button.props.onBlur();assert.equal(h.state.statusHelpOpen.value,false)
+   await h.state.decide('Approved');assert.equal(h.calls.filter(c=>c.options?.method==='POST').length,0)
+  }finally{h.stop()}
+ }
+})
+
+test('status help uses an unclipped viewport-clamped popover and title layout keeps refresh beside the title/ID',async()=>{
+ const row=fixture({status:'Approved'}),h=harness(async()=>Response.json({observation:row}),officer,false,null,'en',{window:{innerWidth:360,innerHeight:300}})
+ try{
+  await h.state.open(h.state.mapObservation(row));let opened=0,hidden=0
+  h.state.statusHelpButton.value={getBoundingClientRect:()=>({left:320,top:250,bottom:274}),contains:()=>false}
+  const tooltip={style:{},showPopover:()=>{opened++},hidePopover:()=>{hidden++},getBoundingClientRect:()=>({height:120}),contains:()=>false}
+  h.state.statusHelpTooltip.value=tooltip;h.state.showStatusHelp();await flush()
+  assert.equal(opened,1);assert.equal(tooltip.style.width,'320px');assert.equal(tooltip.style.left,'28px');assert.equal(tooltip.style.top,'122px')
+  h.state.dismissOutsideStatusHelp({target:{}});assert.equal(h.state.statusHelpOpen.value,false);await flush();assert.ok(hidden>0)
+  h.state.showStatusHelp();let stopped=false;h.state.dismissStatusHelpKey({key:'Escape',preventDefault(){},stopPropagation(){stopped=true}});assert.equal(stopped,true);assert.equal(h.state.statusHelpOpen.value,false)
+  const css=readFileSync(new URL('../src/styles/observation-dialog.css',import.meta.url),'utf8')
+  assert.match(css,/grid-template-columns: 52px minmax\(0, 1fr\) 36px/);assert.match(css,/grid-template-columns: 40px minmax\(0, 1fr\) 36px/)
+  assert.match(css,/observation-status-tooltip[^}]*position: fixed[^}]*z-index: 2147483647/)
+  const source=readFileSync(filename,'utf8');assert.match(source,/<Teleport to="body">/)
+ }finally{h.stop()}
+})
+
+
+test('terminal help belongs to a separate full-width status strip above details, while the original status badge stays unchanged',async()=>{
+ for(const status of ['Approved','Rejected']){
+  const row=fixture({status}),h=harness(async()=>Response.json({observation:row}));try{
+   await h.state.open(h.state.mapObservation(row));const tree=nodes(h.render()),strip=tree.find(n=>String(n.props?.class).split(' ').includes('observation-status-strip'))
+   assert.ok(strip);assert.ok(strip.props.class.includes(status==='Rejected'?'is-rejected':'is-approved'))
+   assert.ok(nodes(strip).some(n=>n.props?.class==='observation-status-help-button'));assert.ok(nodes(strip).some(n=>n.type==='strong'&&n.children===status))
+   assert.ok(tree.indexOf(strip)<tree.findIndex(n=>n.props?.class==='observation-dialog-columns'))
+   const details=tree.find(n=>n.type==='dl'&&n.props?.class==='detail-list observation-details');assert.ok(details)
+   assert.ok(nodes(details).some(n=>n.props?.class==='badge'&&n.children===status));assert.ok(!nodes(details).some(n=>n.props?.class==='observation-status-help-button'))
+   const css=readFileSync(new URL('../src/styles/observation-dialog.css',import.meta.url),'utf8');assert.match(css,/observation-title-layout[^}]*max-width: none/);assert.match(css,/grid-template-columns: minmax\(0, 1fr\) 36px/);assert.match(css,/observation-refresh-control::after[^}]*border-right/)
+  }finally{h.stop()}
+ }
 })

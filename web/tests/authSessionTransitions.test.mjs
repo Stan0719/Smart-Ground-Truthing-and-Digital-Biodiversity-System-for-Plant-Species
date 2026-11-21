@@ -10,9 +10,9 @@ const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText
 const user = { id: 'fixture', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }
-function harness(fetch) {
+function harness(fetch, signals = AbortSignal) {
   const exports = {}
-  vm.runInNewContext(compiled, { exports, fetch })
+  vm.runInNewContext(compiled, { exports, fetch, AbortSignal: signals })
   return exports
 }
 const deferred = () => {
@@ -165,4 +165,21 @@ test('unknown identity is never invented during unavailable verification; explic
   mode=200;await auth.verifySession();mode=401
   assert.equal((await auth.verifySession()).status,'unauthenticated')
   assert.equal(auth.sessionSnapshot().user,null);assert.equal(auth.sessionSnapshot().pending,false)
+})
+
+
+test('session verification has a 15-second timeout, retains identity on timeout and permits a fresh coalesced retry', async () => {
+  let controller, hold = false, calls = 0; const durations = []
+  const auth = harness(async (_url, options) => {
+    calls++
+    if (!hold) return Response.json({ user })
+    return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }))
+  }, { timeout(ms) { durations.push(ms); controller = new AbortController(); return controller.signal } })
+  await auth.verifySession(); hold = true
+  const first = auth.verifySession(), shared = auth.verifySession()
+  controller.abort(Object.assign(Error('synthetic timeout'), { name: 'TimeoutError' }))
+  assert.equal((await first).status, 'unavailable'); assert.equal((await shared).status, 'unavailable')
+  assert.equal(calls, 2); assert.equal(auth.sessionSnapshot().user.id, user.id); assert.equal(auth.sessionSnapshot().pending, true)
+  hold = false; assert.equal((await auth.verifySession()).status, 'authenticated'); assert.equal(calls, 3)
+  assert.deepEqual(durations, [15000,15000,15000]); assert.equal(auth.sessionSnapshot().unavailable, false)
 })

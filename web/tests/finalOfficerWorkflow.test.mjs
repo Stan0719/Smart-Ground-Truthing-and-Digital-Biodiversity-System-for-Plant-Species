@@ -38,7 +38,7 @@ const request=(id,overrides={})=>({request_id:id,owner_subject:'staff:bot',reque
 test('standalone Species cells are display-only and retain exact detail identity without a Plant association',async()=>{
  const row=requests.mapLinkedSpeciesRequest({species_request_id:2,species_request:{...request(2),proposed_scientific_name:'Species 2'}},true)
  const h=harness('StandaloneSpeciesRows',{props:{row,submitter:'Botanist Aina',reviewer:'\u2014',authorized:true}})
- try{await flush();assert.equal(h.calls.length,0);const cells=nodes(h.render()).filter(n=>n.type==='td');assert.equal(cells.length,10);assert.equal(cells[1].children,'\u2014');assert.equal(cells[4].children,'Botanist Aina');assert.equal(cells[5].children,'\u2014');nodes(cells[9]).find(n=>n.type==='button').props.onClick();assert.ok(h.emits.some(e=>e[0]==='open'&&e[1]==='2'));h.props.authorized=false;assert.equal(nodes(h.render()).find(n=>n.type==='button').props.disabled,true)}finally{h.stop()}
+ try{await flush();assert.equal(h.calls.length,0);const cells=nodes(h.render()).filter(n=>n.type==='td');assert.equal(cells.length,11);assert.equal(cells[1].children,'\u2014');assert.equal(cells[4].children,'Botanist Aina');assert.equal(cells[5].children,'\u2014');nodes(cells[10]).find(n=>n.type==='button').props.onClick();assert.ok(h.emits.some(e=>e[0]==='open'&&e[1]==='2'));h.props.authorized=false;assert.equal(nodes(h.render()).find(n=>n.type==='button').props.disabled,true)}finally{h.stop()}
 })
 
 test('all new workflow labels have EN/MS/ZH parity and no placeholder text',()=>{

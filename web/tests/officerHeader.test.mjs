@@ -244,3 +244,15 @@ test('language anchoring centers normally, clamps only at viewport edges, adapts
   directive.unmounted(root);assert.equal(h.listeners.size,0);assert.ok(h.observers.every(o=>o.disconnected))
  }finally{h.stop()}
 })
+
+
+test('both Officer logout entry points show a sanitized error and release the pending guard',async()=>{
+ for(const kind of ['layout','actions']){
+  const h=harness(kind,'en');try{
+   await h.state.signOut()
+   assert.equal(h.state.logoutPending.value,false)
+   assert.equal(h.state.logoutError.value,true)
+   assert.ok(nodes(h.render()).some(node=>node.props?.variant==='error'&&node.props?.message===h.t('officerFeedback.logoutFailed')))
+  }finally{h.stop()}
+ }
+})

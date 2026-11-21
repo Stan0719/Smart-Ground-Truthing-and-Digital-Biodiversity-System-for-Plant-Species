@@ -105,12 +105,13 @@ test("live IoT readings stay in memory while completed 10-minute windows are agg
   const report = await generateOperationalReport(pool, "iot", {
     period: "custom", start: "2026-11-18", end: "2026-11-18", device: deviceId, measurement: "temperature",
   });
-  assert.equal(report.rows.length, 2);
-  assert.equal(report.statistics.find(item => item.key === "totalReadings").value, 3);
-  assert.equal(report.statistics.find(item => item.key === "average").value, 52 / 3);
+  // One legacy sample, two completed-window samples and five active saved samples.
+  assert.equal(report.rows.length, 3);
+  assert.equal(report.statistics.find(item => item.key === "totalReadings").value, 8);
+  assert.equal(report.statistics.find(item => item.key === "average").value, 188 / 8);
   assert.equal(report.statistics.find(item => item.key === "minimum").value, 10);
-  assert.equal(report.statistics.find(item => item.key === "maximum").value, 22);
-  assert.equal(report.statistics.find(item => item.key === "latestReading").value, "2026-11-18T00:00:00.000Z");
+  assert.equal(report.statistics.find(item => item.key === "maximum").value, 31);
+  assert.equal(report.statistics.find(item => item.key === "latestReading").value, "2026-11-18T00:15:00.000Z");
 });
 
 test("additive migration keeps old readings and allows alerts without reading snapshots", async t => {

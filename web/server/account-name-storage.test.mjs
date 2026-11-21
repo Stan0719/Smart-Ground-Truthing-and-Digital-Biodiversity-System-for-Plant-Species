@@ -181,3 +181,22 @@ test('missing backend keyring reports account failure, rolls back and never send
   assert.equal((await raw.query('SELECT COUNT(*)::int AS n FROM plant_auth.users')).rows[0].n, 0)
   assert.equal((await raw.query("SELECT COUNT(*)::int AS n FROM plant_auth.auth_events WHERE reason='invitation_created'")).rows[0].n, 0)
 })
+
+
+test('quoted and unquoted supported account identifiers encrypt; malformed writes stay closed', async t => {
+  const { raw, db } = await fixture(t)
+  for (const table of ['users', 'visitors']) for (const quoted of [false, true]) {
+    const id = table + '-' + quoted, identifier = quoted ? '"' + table + '"' : table
+    const role = table === 'users' ? "Botanist" : "Visitor"
+    const columns = table === 'users' ? 'id,name,username,email,role,password_hash' : 'id,name,email,password_hash'
+    const values = table === 'users' ? [id, 'Synthetic Name', id, id + '@example.invalid', role, 'synthetic-hash'] : [id, 'Synthetic Name', id + '@example.invalid', 'synthetic-hash']
+    await db.prepare(`INSERT INTO ${identifier}(${columns}) VALUES(${values.map((_, i) => '$' + (i + 1)).join(',')})`).run(...values)
+    const stored = (await raw.query(`SELECT name FROM plant_auth.${table} WHERE id=$1`, [id])).rows[0].name
+    assert.ok(stored.startsWith('niah:account-name:v2:')); assert.ok(!stored.includes('Synthetic Name'))
+    const saved = await db.prepare(`SELECT *, '${role}' AS role FROM ${identifier} WHERE id=$1`).get(id)
+    assert.equal(saved.name, 'Synthetic Name')
+  }
+  for (const sql of ['INSERT INTO "users" VALUES($1,$2)', 'INSERT INTO "users"(id,name) SELECT $1,$2', 'INSERT INTO "users"(id,name) VALUES($1,$2); DELETE FROM users', 'INSERT INTO public."users"(id,name) VALUES($1,$2)', 'INSERT INTO "users"(id,/*comment*/name) VALUES($1,$2)', 'INSERT INTO "users"(id,name,name) VALUES($1,$2,$3)'])
+    await assert.rejects(db.prepare(sql).run('bad-id', 'Must Not Persist'), /could not be processed/)
+  assert.equal((await raw.query('SELECT COUNT(*)::int AS n FROM plant_auth.users')).rows[0].n, 2)
+})

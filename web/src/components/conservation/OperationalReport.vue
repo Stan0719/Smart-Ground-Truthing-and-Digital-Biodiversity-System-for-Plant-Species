@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ActionFeedback from '../ActionFeedback.vue'
 import { vOfficerDropdown } from './officerDropdown'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -9,9 +10,10 @@ import { reportCsv, reportFilename, renderReportPdf, reportPalette, type ReportD
 import type { ReportFilters } from '../../services/reporting'
 import { monitoringDate } from '../../utils/officerMonitoringDisplay'
 const props = defineProps<{ category: OperationalCategory; filters: ReportFilters }>()
+const exportFailed = ref(false), exportSequence = ref(0)
 const emit = defineEmits<{ busy: [value: boolean] }>()
 const { t, te, locale } = useI18n()
-const text = (key: string) => te(`conservationPages.reports.operational.${key}`) ? t(`conservationPages.reports.operational.${key}`) : key
+const text = (key: string): string => key === 'iot' ? t('conservationPages.reports.iotSummary.title') : te(`conservationPages.reports.operational.${key}`) ? t(`conservationPages.reports.operational.${key}`) : key
 const rt = (key: string) => t(`conservationPages.reports.${key}`)
 const report = ref<OperationalReport | null>(null), loading = ref(false), error = ref(''), feedback = ref('')
 const device = ref(''), measurement = ref('temperature')
@@ -69,6 +71,7 @@ const exportDocument = (): ReportDocument => {
     })), columns: r.columns.map(text),
     rows: r.rows.map(row => row.map((value, index) => ['status', 'measurement', 'unit'].includes(r.columns[index]!) && value !== null ? text(String(value)) : value)),
     displayRows: r.rows.map(row => row.map((value, index) => display(value, r.columns[index]!))),
+    notes: r.category === 'iot' ? [{ label: text('iot'), value: text('iotStorageScope') }] : [],
     chart: r.chart.series.flatMap(series => r.chart.labels.map((point, index) => ({ series: text(series.key), point, value: series.values[index] ?? null, unit: text(r.chart.unit) }))), context,
   }
 }
@@ -76,7 +79,7 @@ async function exportFile(kind: 'csv' | 'pdf') {
   if (loading.value || exporting.value || !report.value?.rows.length) return
   const snapshot = report.value, token = request, language = locale.value
   const current = () => !disposed && !loading.value && request === token && report.value === snapshot && locale.value === language
-  exporting.value = true; feedback.value = ''
+  exporting.value = true; feedback.value = ''; exportFailed.value = false; exportSequence.value++
   try {
     const model = exportDocument()
     if (kind === 'csv') {
@@ -92,7 +95,7 @@ async function exportFile(kind: 'csv' | 'pdf') {
       pdf.save(reportFilename(model, 'pdf'))
     }
     if (current()) feedback.value = rt(kind === 'csv' ? 'csvDownloaded' : 'pdfDownloaded')
-  } catch { if (current()) feedback.value = t('conservationPages.reports.errors.export') }
+  } catch { exportFailed.value = true; if (current()) feedback.value = t('conservationPages.reports.errors.export') }
   finally { exporting.value = false }
 }
 
@@ -105,6 +108,7 @@ defineExpose({ load, exportFile, exportDocument })
     <p v-else-if="error" role="alert">{{ error }}</p>
     <template v-else-if="report">
       <h2>{{ text(category) }}</h2>
+      <p v-if="category === 'iot'" class="scope" role="note">{{ text('iotStorageScope') }}</p>
       <p class="scope">{{ displayScopeLabel }} · {{ monitoringDate(report.generatedAt, locale) }}</p>
       <p v-if="category === 'threats'" class="scope">{{ text(report.basis) }}</p>
       <p v-else-if="category === 'observations'" class="scope">{{ text('observationScopeShort') }}</p>
@@ -130,7 +134,7 @@ defineExpose({ load, exportFile, exportDocument })
       </div>
       <div class="operational-actions"><button class="secondary-button" type="button" :disabled="loading || exporting || !report.rows.length" @click="exportFile('pdf')">{{ rt('exportPdf') }}</button><button class="secondary-button" type="button" :disabled="loading || exporting || !report.rows.length" @click="exportFile('csv')">{{ rt('exportCsv') }}</button></div>
     </template>
-    <p v-if="feedback" role="status">{{ feedback }}</p>
+    <ActionFeedback v-if="feedback" :key="exportSequence" :feedback-id="exportSequence" :variant="exportFailed ? 'error' : 'success'" :message="feedback" @dismiss="feedback = ''" />
   </section>
 </template>
 <style scoped>

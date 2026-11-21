@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
-import DashboardObservationEdits from '../../components/conservation/DashboardObservationEdits.vue'
 import { monitoringLabels, monitoringDate } from '../../utils/officerMonitoringDisplay'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import BiodiversityMapPreview from '../../components/conservation/BiodiversityMapPreview.vue'
@@ -440,8 +439,6 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
         </table>
       </div>
     </section>
-
-  <DashboardObservationEdits />
 
   <div class="two-column overview-medium">
     <section class="panel pending-observations-panel">

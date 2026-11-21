@@ -229,7 +229,7 @@ test('Back retains validated same-app navigation and falls back for public or un
 test('shared session notifications clear before logout and reject stale session verification',async()=>{
  const source=readFileSync(new URL('../src/services/auth.ts',import.meta.url),'utf8')
  let resolveMe;const events=[];let meWaiting=false
- const exports={};const context={exports,console,fetch:async url=>url==='/api/auth/me'?(meWaiting?new Promise(resolve=>{resolveMe=resolve}):Response.json({user:officer})):Response.json({})}
+ const exports={};const context={exports,console,AbortSignal,fetch:async url=>url==='/api/auth/me'?(meWaiting?new Promise(resolve=>{resolveMe=resolve}):Response.json({user:officer})):Response.json({})}
  vm.runInNewContext(js(source),context)
  const auth=exports;auth.subscribeSession((user,pending)=>events.push({user,pending}))
  await auth.currentUser();assert.equal(auth.sessionSnapshot().user.id,'officer')
@@ -244,7 +244,7 @@ test('shared session notifications clear before logout and reject stale session 
 test('session checks coalesce and cannot verify an old cookie while logout is pending',async()=>{
  const source=readFileSync(new URL('../src/services/auth.ts',import.meta.url),'utf8')
  let resolveMe,resolveLogout;const calls=[];const exports={}
- vm.runInNewContext(js(source),{exports,console,fetch:async url=>{calls.push(url);return new Promise(resolve=>{if(url==='/api/auth/me')resolveMe=resolve;else resolveLogout=resolve})}})
+ vm.runInNewContext(js(source),{exports,console,AbortSignal,fetch:async url=>{calls.push(url);return new Promise(resolve=>{if(url==='/api/auth/me')resolveMe=resolve;else resolveLogout=resolve})}})
  const a=exports.currentUser(),b=exports.currentUser();assert.equal(calls.length,1)
  resolveMe(Response.json({user:officer}));await Promise.all([a,b]);
  const out=exports.logout();assert.equal(exports.sessionSnapshot().user,null)

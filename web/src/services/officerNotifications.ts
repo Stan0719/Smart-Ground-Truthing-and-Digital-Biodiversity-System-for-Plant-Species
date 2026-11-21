@@ -4,12 +4,13 @@ import type { AuthUser } from './auth'
 
 export interface OfficerNotice {
   id: string
-  event_type: 'registration_submitted' | 'field_observation_submitted' | 'observation_resubmitted' | 'species_request_submitted' | 'record_change_submitted' | 'observation_edit_submitted' | 'observation_edit_resubmitted'
+  event_type: 'registration_submitted' | 'field_observation_submitted' | 'observation_resubmitted' | 'species_request_submitted' | 'record_change_submitted' | 'observation_edit_submitted' | 'observation_edit_resubmitted' | 'threat_alert_created'
+  threat_context?: { source: 'Sensor' | 'Camera'; metric: string; value: number; device_id: string; reading_id: string | null; camera_id: string | null }
   change_target_type?: 'plant' | 'species'
   created_at: string
   read_at: string | null
   species_review_required: boolean
-  resource: { kind: 'observation' | 'species_request' | 'record_change' | 'observation_edit'; id: string; revision?: number }
+  resource: { kind: 'observation' | 'species_request' | 'record_change' | 'observation_edit' | 'threat_alert'; id: string; revision?: number }
 }
 type Destination = { name: string; query?: Record<string, string> }
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
@@ -21,6 +22,16 @@ class StaleResponseError extends Error {}
 class InboxError extends Error {
   readonly status: number
   constructor(status: number) { super('requestFailed'); this.status = status }
+}
+
+const threatMetrics = { Sensor: ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall', 'sound'], Camera: ['possible_plant_contact', 'human_detected', 'animal_detected', 'suspicious_movement'] }
+function validThreatContext(value: unknown): boolean {
+  const row = object(value)
+  return !!row && (row.source === 'Sensor' || row.source === 'Camera') &&
+    typeof row.metric === 'string' && threatMetrics[row.source].includes(row.metric) &&
+    typeof row.value === 'number' && Number.isFinite(row.value) &&
+    typeof row.device_id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(row.device_id) &&
+    [row.reading_id, row.camera_id].every(id => id === null || typeof id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(id))
 }
 
 export function createOfficerInbox(options: { transport: typeof fetch; navigate: (destination: Destination) => Promise<boolean> }) {
@@ -67,11 +78,11 @@ export function createOfficerInbox(options: { transport: typeof fetch; navigate:
     const row = object(value), resource = object(row?.resource)
     if (!row || typeof row.id !== 'string' || !uuid.test(row.id) || !validDate(row.created_at) ||
       (row.read_at !== null && !validDate(row.read_at)) ||
-      !['registration_submitted', 'field_observation_submitted', 'observation_resubmitted', 'species_request_submitted', 'record_change_submitted', 'observation_edit_submitted', 'observation_edit_resubmitted'].includes(String(row.event_type)) ||
+      !['registration_submitted', 'field_observation_submitted', 'observation_resubmitted', 'species_request_submitted', 'record_change_submitted', 'observation_edit_submitted', 'observation_edit_resubmitted', 'threat_alert_created'].includes(String(row.event_type)) ||
       !resource || typeof resource.id !== 'string' ||
-      (String(row.event_type).startsWith('observation_edit_') ? resource.kind !== 'observation_edit' || !uuid.test(resource.id) || !count(resource.revision) || resource.revision < 1 : row.event_type === 'record_change_submitted' ? resource.kind !== 'record_change' || !uuid.test(resource.id) : row.event_type === 'species_request_submitted' ? resource.kind !== 'species_request' || !/^[1-9][0-9]{0,9}$/.test(resource.id) || BigInt(resource.id)>2147483647n : resource.kind !== 'observation' || !observationId.test(resource.id)) ||
+      (row.event_type === 'threat_alert_created' ? resource.kind !== 'threat_alert' || !/^[A-Za-z0-9_-]{1,200}$/.test(resource.id) || !validThreatContext(row.threat_context) : String(row.event_type).startsWith('observation_edit_') ? resource.kind !== 'observation_edit' || !uuid.test(resource.id) || !count(resource.revision) || resource.revision < 1 : row.event_type === 'record_change_submitted' ? resource.kind !== 'record_change' || !uuid.test(resource.id) : row.event_type === 'species_request_submitted' ? resource.kind !== 'species_request' || !/^[1-9][0-9]{0,9}$/.test(resource.id) || BigInt(resource.id)>2147483647n : resource.kind !== 'observation' || !observationId.test(resource.id)) ||
       (row.species_review_required !== null && row.species_review_required !== undefined && typeof row.species_review_required !== 'boolean')) throw Error('invalidResponse')
-    return { id: row.id, event_type: row.event_type as OfficerNotice['event_type'], created_at: row.created_at,
+    return { ...(row.event_type === 'threat_alert_created' ? { threat_context: row.threat_context as OfficerNotice['threat_context'] } : {}), id: row.id, event_type: row.event_type as OfficerNotice['event_type'], created_at: row.created_at,
       ...(row.change_target_type === 'plant' || row.change_target_type === 'species' ? { change_target_type: row.change_target_type } : {}),
       read_at: row.read_at as string | null, species_review_required: row.species_review_required === true, resource: { kind: resource.kind as OfficerNotice['resource']['kind'], id: resource.id, ...(resource.kind === 'observation_edit' ? { revision: resource.revision as number } : {}) } }
   }
@@ -162,13 +173,14 @@ export function createOfficerInbox(options: { transport: typeof fetch; navigate:
     if (!state.ready || disposed || state.busy) return false
     const token = generation; state.busy = true; state.operationError = ''
     try {
+      const threat = item.resource.kind === 'threat_alert'
       const edit = item.resource.kind === 'observation_edit'
       const change = item.resource.kind === 'record_change'
       const speciesRequest = item.resource.kind === 'species_request'
-      const result = await request((edit ? '/api/data/observation-edits/' : change ? '/api/data/record-changes/' : speciesRequest ? '/api/species-requests/' : '/api/observations/') + encodeURIComponent(item.resource.id))
+      const result = await request((threat ? '/api/data/alerts/' : edit ? '/api/data/observation-edits/' : change ? '/api/data/record-changes/' : speciesRequest ? '/api/species-requests/' : '/api/observations/') + encodeURIComponent(item.resource.id))
       if (!current(token)) return false
-      const row = object(edit ? result.edit : change ? result.change : speciesRequest ? result.species_request : result.observation)
-      if (edit ? !row || row.id !== item.resource.id || !Number.isSafeInteger(item.resource.revision) || Number(item.resource.revision) < 1 || !Number.isSafeInteger(row.revision) || Number(row.revision) < Number(item.resource.revision) || !['Pending Review','Correction Required','Approved','Rejected','Cancelled','Withdrawn','Superseded'].includes(String(row.status)) : change ? !row || row.id !== item.resource.id || !['Pending Review','Approved','Rejected','Cancelled'].includes(String(row.status)) : speciesRequest ? !row || String(row.request_id) !== item.resource.id || !['Pending Review','Approved','Rejected','Correction Required','Withdrawn'].includes(String(row.request_status)) : !row || row.id !== item.resource.id || !Number.isSafeInteger(row.revision) || Number(row.revision) < 1 ||
+      const row = object(threat ? result.alert : edit ? result.edit : change ? result.change : speciesRequest ? result.species_request : result.observation)
+      if (threat ? !row || row.id !== item.resource.id || !['New','Reviewing','Resolved'].includes(String(row.status)) || typeof row.metric !== 'string' || typeof row.value !== 'number' || !Number.isFinite(row.value) : edit ? !row || row.id !== item.resource.id || !Number.isSafeInteger(item.resource.revision) || Number(item.resource.revision) < 1 || !Number.isSafeInteger(row.revision) || Number(row.revision) < Number(item.resource.revision) || !['Pending Review','Correction Required','Approved','Rejected','Cancelled','Withdrawn','Superseded'].includes(String(row.status)) : change ? !row || row.id !== item.resource.id || !['Pending Review','Approved','Rejected','Cancelled'].includes(String(row.status)) : speciesRequest ? !row || String(row.request_id) !== item.resource.id || !['Pending Review','Approved','Rejected','Correction Required','Withdrawn'].includes(String(row.request_status)) : !row || row.id !== item.resource.id || !Number.isSafeInteger(row.revision) || Number(row.revision) < 1 ||
         !['initial_registration', 'subsequent_observation', 'unknown'].includes(String(row.origin_type))) throw Error('invalidResponse')
       let editOrigin: unknown
       if (edit && (!row || typeof row.observation_id !== 'string' || typeof row.owner_subject !== 'string')) throw Error('invalidResponse')
@@ -178,7 +190,7 @@ export function createOfficerInbox(options: { transport: typeof fetch; navigate:
         if (!target || target.id !== row.observation_id || target.owner_subject !== row.owner_subject) throw Error('invalidResponse')
         editOrigin = target.origin_type
       }
-      const destination: Destination = edit ? observationEditDestination(item.resource.id, editOrigin) : change ? { name: 'conservation-reviews', query: { change: item.resource.id } } : speciesRequest ? { name: 'conservation-reviews', query: { speciesRequest: item.resource.id } } : row!.origin_type === 'subsequent_observation' ? { name: 'conservation-observations', query: { observation: item.resource.id } } :
+      const destination: Destination = threat ? { name: 'conservation-alerts', query: { alert: item.resource.id } } : edit ? observationEditDestination(item.resource.id, editOrigin) : change ? { name: 'conservation-reviews', query: { change: item.resource.id } } : speciesRequest ? { name: 'conservation-reviews', query: { speciesRequest: item.resource.id } } : row!.origin_type === 'subsequent_observation' ? { name: 'conservation-observations', query: { observation: item.resource.id } } :
         { name: 'conservation-reviews', query: { review: item.resource.id } }
       if (!await options.navigate(destination)) throw Error('navigationFailed')
       if (!current(token)) return false

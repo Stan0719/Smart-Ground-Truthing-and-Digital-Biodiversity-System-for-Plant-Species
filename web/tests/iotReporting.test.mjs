@@ -131,7 +131,8 @@ test('all locales, six metrics, dual series, null gaps, responsive containment a
   assert.match(source, /overflow-x: auto/); assert.match(source, /@container/)
   assert.doesNotMatch(source, /requestOperationalReport|threshold|Last 7 Days/)
   const parent = read('views/conservation/ReportsView.vue')
-  assert.match(parent, /IoTEnvironmentalReport v-if="reportType === 'iot-summary'"/)
+  assert.match(parent, /OperationalReport v-if="reportType === 'iot-summary'" category="iot"/)
+  assert.doesNotMatch(parent, /import IoTEnvironmentalReport/)
   assert.match(parent, /OperationalReport v-else-if="reportType !== 'species-approved'"/)
 })
 

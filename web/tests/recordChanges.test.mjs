@@ -1,3 +1,4 @@
+import * as officerActionFeedback from '../src/services/officerActionFeedback.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -16,10 +17,10 @@ async function harness(language='en', overrides={}, fetchHandler=async()=>Respon
   const route=vue.reactive({query:{}}),calls=[],updates=[]
   const messages=JSON.parse(readFileSync(new URL('../src/locales/'+language+'.json',import.meta.url),'utf8'))
   const translate=key=>key.split('.').reduce((value,key)=>value?.[key],messages)||key
-  let latest={...proposal,...overrides},fail=false,sessionChanged,readFailure=false,reader=null
+  let latest={...proposal,...overrides},fail=false,failureStatus=409,postGate=null,sessionChanged,readFailure=false,reader=null
   const request=async(path='',body)=>{
     calls.push({path,body})
-    if(body) {if(fail)throw Object.assign(Error('Competing decision'),{status:409});latest={...latest,status:body.decision};return {change:latest}}
+    if(body) {if(postGate)await postGate;if(fail)throw Object.assign(Error('Private server details must never appear'),{status:failureStatus});latest={...latest,status:body.decision};return {change:latest}}
     if(readFailure)throw Error('Read unavailable')
     if(reader)return reader(path)
     return path.startsWith('?')?{changes:[latest,{...latest,id:'species-proposal',plant_id:null,species_id:6}],page:{has_more:false,next_cursor:null}}:{change:latest}
@@ -28,8 +29,10 @@ async function harness(language='en', overrides={}, fetchHandler=async()=>Respon
   const {descriptor}=parse(source),script=compileScript(descriptor,{id:'changes-test'})
   const template=compileTemplate({source:descriptor.template.content,filename:'ApprovedRecordChanges.vue',id:'changes-test',compilerOptions:{bindingMetadata:script.bindings}})
   const exports={},context={exports,AbortSignal,URLSearchParams,fetch:fetchHandler,require(name){
+    if(name.endsWith('officerActionFeedback'))return officerActionFeedback
     if(name==='vue')return {...vue,vModelText:{},vModelSelect:{}}
     if(name==='vue-i18n')return {useI18n:()=>({t:translate,te:key=>translate(key)!==key})}
+    if(name.endsWith('ActionFeedback.vue'))return {props:['message'],setup(props){return ()=>vue.h('div',{role:'status'},props.message)}}
     if(name.endsWith('workflowBadge'))return {workflowBadgeStyle}
     if(name.endsWith('MonitoringIdentifier.vue'))return {props:['value'],setup(props){return ()=>vue.h('span',{},String(props.value))}}
     if(name.endsWith('PlantPhotoLightbox.vue'))return {setup(_props,{expose}){expose({open(){},close(){}});return ()=>null}}
@@ -41,10 +44,10 @@ async function harness(language='en', overrides={}, fetchHandler=async()=>Respon
   }}
   for(const code of [script.content,template.code])vm.runInNewContext('(function(){'+ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText+'})()',context)
   exports.default.render=exports.render
-  const make=tag=>({tag,children:[],props:{},text:'',showModal(){this.open=true},close(){this.open=false}})
+  const make=tag=>({tag,children:[],props:{},text:'',focus(){this.focused=true},showModal(){this.open=true},close(){this.open=false}})
   const renderer=vue.createRenderer({createElement:make,createText:text=>({...make('text'),text}),createComment:()=>make('comment'),setText:(n,t)=>n.text=t,setElementText:(n,t)=>{n.text=t;n.children=[]},parentNode:n=>n.parent,nextSibling:n=>n?.parent?.children[n.parent.children.indexOf(n)+1]||null,patchProp:(n,k,_old,v)=>n.props[k]=v,insert:(n,p,anchor)=>{if(n.parent)n.parent.children=n.parent.children.filter(c=>c!==n);n.parent=p;const i=anchor?p.children.indexOf(anchor):-1;if(i<0)p.children.push(n);else p.children.splice(i,0,n)},remove:n=>{if(n?.parent)n.parent.children=n.parent.children.filter(child=>child!==n)}})
   const root=make('root'),app=renderer.createApp(exports.default,{onUpdated:row=>updates.push(row)});app.mount(root);await flush()
-  return {root,calls,route,app,updates,setLatest:patch=>latest={...latest,...patch},setReadFailure:value=>readFailure=value,setReader:fn=>reader=fn,changeSession:(user,pending=false)=>sessionChanged(user,pending),expire:()=>sessionChanged(null,true),setConflict:()=>fail=true,complete:(status='Approved')=>{fail=false;latest={...latest,status}},button:label=>nodes(root,n=>n.tag==='button'&&text(n).trim()===label).at(-1)}
+  return {root,calls,route,app,updates,setLatest:patch=>latest={...latest,...patch},setReadFailure:value=>readFailure=value,setReader:fn=>reader=fn,changeSession:(user,pending=false)=>sessionChanged(user,pending),expire:()=>sessionChanged(null,true),setFailure:status=>{failureStatus=status;fail=true},setPostGate:value=>postGate=value,setConflict:()=>fail=true,complete:(status='Approved')=>{fail=false;latest={...latest,status}},button:label=>nodes(root,n=>n.tag==='button'&&text(n).trim()===label).at(-1)}
 }
 test('comparisons retain omitted fields, expose true changed values and never fabricate missing baseline',()=>{
   const rows=compareChange({...proposal,proposed_snapshot:{...proposal.proposed_snapshot,new_field:'new'}})
@@ -64,8 +67,8 @@ test('shared proposal dialog preserves comparisons and photos; conflict blocks d
     assert.match(text(h.root),/Enter a review comment/);assert.equal(h.calls.some(c=>c.body),false)
     const textarea=nodes(h.root,n=>n.tag==='textarea')[0];textarea.props['onUpdate:modelValue']('Keep this comment');await flush()
     h.setConflict();await h.button('Approve Change').props.onClick();await flush()
-    assert.equal(h.button('Approve Change').props.disabled,true);assert.match(text(h.root),/Reload Latest Proposal/)
-    h.complete();await h.button('Reload Latest Proposal').props.onClick();await flush()
+    assert.equal(h.button('Approve Change').props.disabled,true);assert.match(text(h.root),/Refresh/)
+    h.complete();await h.button('Refresh').props.onClick();await flush()
     assert.match(text(h.root),/complete and read-only/);assert.equal(h.button('Approve Change'),undefined)
     assert.equal(h.calls.filter(c=>c.body).length,1,'no automatic retry')
     h.expire();await flush();assert.doesNotMatch(text(h.root),/Approved name|Proposed name/)
@@ -194,7 +197,7 @@ test('baseline conflicts keep pending proposals locked for inspection; failed re
     assert.equal(h.button('Approve Change').props.disabled,true)
     assert.equal(h.app._instance.setupState.comment,'Keep draft')
     h.setReadFailure(false)
-    await h.button('Reload Latest Proposal').props.onClick();await flush()
+    await h.button('Refresh').props.onClick();await flush()
     assert.equal(h.button('Approve Change').props.disabled,true,'GET does not silently clear a baseline conflict')
     assert.ok(!text(h.root).includes('already been reviewed by another Officer'))
     const check=nodes(h.root,n=>n.tag==='input'&&n.props.type==='checkbox')[0]
@@ -259,5 +262,60 @@ test('cancelled proposal separates earlier Officer evidence from cancellation an
  assert.match(text(section),/Earlier correction feedback/)
  assert.equal(h.calls.filter(c=>c.body).length,0)
  assert.equal(nodes(h.root,n=>n.tag==='button'&&n.props.disabled===false&&/Approve Change|Reject Change/.test(text(n))).length,0)
+ }finally{h.app.unmount()}
+})
+
+
+test('edit reviews confirm once, preserve the draft on failed readback and never repeat the POST',async()=>{
+ for(const species of [false,true]){
+  const h=await harness('en',species?{plant_id:null,species_id:6}:{})
+  try{
+   h.route.query={change:id};await flush()
+   nodes(h.root,n=>n.tag==='textarea')[0].props['onUpdate:modelValue']('Keep this draft')
+   h.setReadFailure(true)
+   await h.button('Approve Change').props.onClick();await flush()
+   assert.equal(h.calls.filter(c=>c.body).length,1)
+   assert.match(text(h.root),/Decision saved\. Latest information couldn't be loaded/)
+   assert.equal(h.app._instance.setupState.savedPending,true)
+   assert.equal(h.app._instance.setupState.comment,'Keep this draft')
+   assert.equal(h.button('Approve Change').props.disabled,true)
+   assert.equal(nodes(h.root,n=>n.props.role==='status'&&text(n)==='Decision saved.').length,1)
+   await h.button('Approve Change').props.onClick();assert.equal(h.calls.filter(c=>c.body).length,1)
+   h.setReadFailure(false);await h.button('Refresh').props.onClick();await flush()
+   assert.equal(h.app._instance.setupState.selected.status,'Approved')
+   assert.equal(h.calls.filter(c=>c.body).length,1)
+  }finally{h.app.unmount()}
+ }
+})
+
+test('edit reviews distinguish validation, permissions, conflict and uncertain transport/server outcomes',async()=>{
+ for(const status of [400,401,403,409,0,500]){
+  const h=await harness();try{
+   h.route.query={change:id};await flush()
+   nodes(h.root,n=>n.tag==='textarea')[0].props['onUpdate:modelValue']('Draft')
+   h.setFailure(status);await h.button('Approve Change').props.onClick();await flush()
+   const state=h.app._instance.setupState
+   assert.equal(state.conflict,status===409)
+   assert.equal(state.outcomeUncertain,status===0||status===500)
+   assert.equal(state.successNotice,false)
+   assert.equal(state.comment,'Draft')
+   assert.doesNotMatch(text(h.root),/Private server details/)
+   if(status===400){assert.ok(state.commentError);assert.equal(nodes(h.root,n=>n.tag==='textarea')[0].focused,true)}
+   if(status===403)assert.match(text(h.root),/permission/)
+   if(status===0||status===500){assert.match(text(h.root),/outcome is uncertain/);assert.equal(h.button('Approve Change').props.disabled,true)}
+   assert.equal(h.calls.filter(c=>c.body).length,1)
+  }finally{h.app.unmount()}
+ }
+})
+
+test('in-flight edit decisions are guarded against double clicks',async()=>{
+ const h=await harness();try{
+  h.route.query={change:id};await flush()
+  nodes(h.root,n=>n.tag==='textarea')[0].props['onUpdate:modelValue']('Decision reason')
+  let release;h.setPostGate(new Promise(resolve=>release=resolve))
+  const first=h.button('Approve Change').props.onClick();await flush()
+  assert.equal(h.button('Approve Change').props.disabled,true)
+  await h.button('Approve Change').props.onClick();assert.equal(h.calls.filter(c=>c.body).length,1)
+  release();await first;await flush();assert.equal(h.calls.filter(c=>c.body).length,1)
  }finally{h.app.unmount()}
 })

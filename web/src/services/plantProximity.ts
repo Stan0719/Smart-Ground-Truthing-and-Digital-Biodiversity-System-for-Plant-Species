@@ -1,0 +1,66 @@
+import { plantThumbnailImages } from './assetImages.ts'
+export type ProximityCategory = 'very_close' | 'close' | 'nearby' | 'additional'
+export interface ProximityCandidate {
+  plant_id: string; status: 'Approved' | 'Pending Review'; plant_name: string | null; species_name: string | null
+  accuracy_m: number | null; distance_m: number; category: ProximityCategory
+  location_source: 'approved_observation' | 'pending_observation_unverified' | 'recorded_location_unverified'
+}
+export interface ProximityResult {
+  contract_version: 1; observation_id: string; plant_id: string; revision: number; checked_at: string
+  state: 'complete' | 'incomplete' | 'unavailable' | 'not_eligible'; accuracy_m?: number | null
+  config: { very_close_m: number; close_m: number; nearby_m: number; radius_m: number; accuracy_warning_m: number; candidate_limit: number }
+  candidates: ProximityCandidate[]; eligible_count?: number; unlocated_count?: number; total_nearby?: number
+}
+const object = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+const count = (v: unknown): v is number => finite(v) && Number.isSafeInteger(v) && v >= 0
+const validAccuracy = (v: unknown) => v === null || (finite(v) && v >= 0)
+const plantId = (v: unknown): v is string => typeof v === 'string' && /^[1-9][0-9]{0,9}$/.test(v) && Number(v) <= 2147483647
+function invalid(): never { throw Error('Invalid proximity response') }
+export function readProximity(value: unknown, id: string, revision: number): ProximityResult {
+  const r = object(value), c = object(r?.config)
+  if (!r || !c || r.contract_version !== 1 || r.observation_id !== id || r.revision !== revision || !plantId(r.plant_id) ||
+      !['complete','incomplete','unavailable','not_eligible'].includes(String(r.state)) || typeof r.checked_at !== 'string' || !Number.isFinite(Date.parse(r.checked_at)) ||
+      !['very_close_m','close_m','nearby_m','radius_m','accuracy_warning_m'].every(k => finite(c[k]) && (c[k] as number) > 0) ||
+      !((c.very_close_m as number) < (c.close_m as number) && (c.close_m as number) < (c.nearby_m as number) && (c.nearby_m as number) < (c.radius_m as number) && (c.radius_m as number) <= 100) ||
+      !count(c.candidate_limit) || c.candidate_limit < 1 || c.candidate_limit > 50 || !Array.isArray(r.candidates) || r.candidates.length > c.candidate_limit ||
+      (r.state !== 'not_eligible' && !validAccuracy(r.accuracy_m))) invalid()
+  const ids = new Set<string>()
+  for (const value of r.candidates) {
+    const row = object(value)
+    if (!row || !plantId(row.plant_id) || row.plant_id === r.plant_id || ids.has(row.plant_id) ||
+        !['Approved','Pending Review'].includes(String(row.status)) || !['approved_observation','pending_observation_unverified','recorded_location_unverified'].includes(String(row.location_source)) ||
+        ![row.plant_name,row.species_name].every(v => v === null || (typeof v === 'string' && v.length <= 200)) ||
+        !validAccuracy(row.accuracy_m) || !finite(row.distance_m) || row.distance_m < 0 || row.distance_m > (c.radius_m as number)) invalid()
+    const expected = row.distance_m <= (c.very_close_m as number) ? 'very_close' : row.distance_m <= (c.close_m as number) ? 'close' : row.distance_m <= (c.nearby_m as number) ? 'nearby' : 'additional'
+    if (row.category !== expected) invalid()
+    ids.add(row.plant_id)
+  }
+  if (['complete','incomplete'].includes(String(r.state))) {
+    if (!count(r.eligible_count) || !count(r.unlocated_count) || !count(r.total_nearby) || r.total_nearby < r.candidates.length || r.unlocated_count + r.total_nearby > r.eligible_count) invalid()
+    if ((r.state === 'complete') !== (r.unlocated_count === 0 && r.total_nearby === r.candidates.length)) invalid()
+    for (let i = 1; i < r.candidates.length; i++) if (r.candidates[i].distance_m < r.candidates[i - 1].distance_m) invalid()
+  } else if (r.candidates.length) invalid()
+  return r as unknown as ProximityResult
+}
+export async function requestPlantProximity(id: string, revision: number, signal?: AbortSignal) {
+  const response = await fetch(`/api/data/observations/${encodeURIComponent(id)}/proximity?revision=${revision}`, {
+    method: 'GET', credentials: 'same-origin', cache: 'no-store', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
+  })
+  if (!response.ok) throw Object.assign(Error('Proximity check unavailable'), { status: response.status })
+  return readProximity(await response.json(), id, revision)
+}
+
+export interface PlantPreview { image: string; scientificName: string; commonName: string }
+// Resolve only the existing authorized catalogue main photo. It has no whole-plant label.
+export async function requestPlantPreview(id: string, signal: AbortSignal): Promise<PlantPreview> {
+  if (!plantId(id)) throw Error('Invalid Plant ID')
+  const response = await fetch(`/api/data/plants/${encodeURIComponent(id)}`, {
+    method: 'GET', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+  })
+  if (!response.ok) throw Error('Plant preview unavailable')
+  const body = object(await response.json()), row = object(body?.plant)
+  if (!row || String(row.plant_id) !== id) throw Error('Invalid Plant preview')
+  const name = (value: unknown) => typeof value === 'string' ? value.slice(0, 200) : ''
+  return { image: plantThumbnailImages(row)[0]?.path || '', scientificName: name(row.scientific_name), commonName: name(row.common_name) }
+}

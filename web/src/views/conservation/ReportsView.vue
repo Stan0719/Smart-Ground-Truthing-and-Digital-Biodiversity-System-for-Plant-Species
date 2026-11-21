@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import ActionFeedback from '../../components/ActionFeedback.vue'
 import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import OperationalReport from '../../components/conservation/OperationalReport.vue'
-import IoTEnvironmentalReport from '../../components/conservation/IoTEnvironmentalReport.vue'
 import ThreatIncidentReport from '../../components/conservation/ThreatIncidentReport.vue'
 import type { OperationalCategory } from '../../services/operationalReporting'
 import { reportCsv, reportFilename, renderReportPdf, type ReportDocument } from '../../utils/reportExport'
@@ -47,6 +47,7 @@ const chartSort = ref<'high-low' | 'low-high' | 'alphabetical'>('high-low')
 const chartLimit = ref<'5' | '10' | '12' | 'all'>('12')
 const includeZeroCounts = ref(false)
 const selectedChartIndex = ref<number | null>(null)
+const exportSequence = ref(0)
 const toast = ref<{ tone: 'success' | 'error'; message: string } | null>(null)
 const reportChart = ref<{ toDataUrl: () => string | null; toPrintDataUrl: () => Promise<string | null> } | null>(null)
 const exporting = ref(false)
@@ -183,8 +184,10 @@ const downloadBlob = (blob: Blob, name: string) => {
 function exportCsv() {
   if (isLoading.value || exporting.value || reportType.value !== 'species-approved' || !report.value || !filteredRows.value.length) return
   try {
+    exportSequence.value++; toast.value = null
     const model = exportDocument()
     downloadBlob(new Blob([reportCsv(model)], { type: 'text/csv;charset=utf-8' }), reportFilename(model, 'csv'))
+    toast.value = { tone: 'success', message: t('officerFeedback.downloaded') }
   } catch { toast.value = { tone: 'error', message: rt('errors.export') } }
 }
 async function exportPdf() {
@@ -193,6 +196,7 @@ async function exportPdf() {
   const current = () => !isLoading.value && report.value === snapshot && reportType.value === 'species-approved' && search.value === query && sort.value === ordering && sequence === requestSequence && locale.value === language
   exporting.value = true
   try {
+    exportSequence.value++; toast.value = null
     const model = exportDocument()
     await nextTick()
     const chartImage = chartSpec.value.values.some(value => value > 0) ? await reportChart.value?.toPrintDataUrl() : null
@@ -201,6 +205,7 @@ async function exportPdf() {
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm' })
     if (await renderReportPdf(model, chartImage || null, pdf, current) && current()) {
       pdf.save(reportFilename(model, 'pdf'))
+      toast.value = { tone: 'success', message: t('officerFeedback.downloaded') }
     }
   } catch { if (current()) toast.value = { tone: 'error', message: rt('errors.export') } }
   finally { exporting.value = false }
@@ -224,7 +229,7 @@ onMounted(() => loadReport())
       <p v-if="filterError" id="report-filter-error" class="filter-error" role="alert">{{ filterError }}</p>
     </form>
 
-    <IoTEnvironmentalReport v-if="reportType === 'iot-summary'" :filters="operationalFilters" @busy="operationalBusy = $event" />
+    <OperationalReport v-if="reportType === 'iot-summary'" category="iot" :filters="operationalFilters" @busy="operationalBusy = $event" />
     <ThreatIncidentReport v-else-if="reportType === 'threats'" :filters="operationalFilters" @busy="operationalBusy = $event" />
     <OperationalReport v-else-if="reportType !== 'species-approved'" :key="reportType" :category="reportType as OperationalCategory" :filters="operationalFilters" @busy="operationalBusy = $event" />
     <template v-else>
@@ -257,7 +262,7 @@ onMounted(() => loadReport())
     </article>
     </template>
   </section>
-  <div v-if="toast" class="toast" :class="toast.tone" :role="toast.tone === 'error' ? 'alert' : 'status'">{{ toast.message }}</div>
+  <ActionFeedback v-if="toast" :key="exportSequence" :feedback-id="exportSequence" :variant="toast.tone" :message="toast.message" @dismiss="toast = null" />
 </template>
 
 <style scoped>

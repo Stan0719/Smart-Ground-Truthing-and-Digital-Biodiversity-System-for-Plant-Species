@@ -1,3 +1,4 @@
+import * as officerActionFeedback from '../src/services/officerActionFeedback.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {observationEditDestination} from '../src/services/observationEdits.ts'
@@ -25,7 +26,7 @@ function harness({origin,routeName}={}){
  const officer={id:'officer',role:'Conservation Officer',status:'Active',mustChangePassword:false}
  const api=async(path,body)=>{
   calls.push({path,body})
-  if(body){if(mode==='post-fail')throw new ObservationEditError(500);if(mode==='success-readback-fail')mode='readback-failed';if(mode==='conflict'){row={...row,revision:8};throw new ObservationEditError(409)}row={...row,status:body.decision,reviewed_by:'staff:officer',reviewed_at:'2026-11-16T01:00:00Z'};return {reviewed:true}}
+  if(body){if(mode==='post-validation')throw new ObservationEditError(400);if(mode==='post-permission')throw new ObservationEditError(403);if(mode==='post-network')throw Error('Private connection details');if(mode==='post-evidence')throw Object.assign(Error('Private evidence'),{name:'ObservationEditEvidenceError'});if(mode==='post-fail')throw new ObservationEditError(500);if(mode==='success-readback-fail')mode='readback-failed';if(mode==='conflict'){row={...row,revision:8};throw new ObservationEditError(409)}row={...row,status:body.decision,reviewed_by:'staff:officer',reviewed_at:'2026-11-16T01:00:00Z'};return mode==='post-malformed'?{}:{edit:row}}
   if(path.endsWith('/edit-history'))return {events:[{id:'event',request_id:row.id,event_type:'submitted',created_at:row.created_at,actor_subject:'staff:bot'}]}
   if(path.startsWith('/observations/'))return {observation:{...original,...(origin?{origin_type:origin}:{})}}
   if(mode==='readback-failed')throw Error('Isolated readback failure');if(mode==='delay')return new Promise(resolve=>release=resolve)
@@ -33,7 +34,8 @@ function harness({origin,routeName}={}){
  }
  const exports={}
  const context={exports,console,Error,fetch:async()=>Response.json({names:{bot:'Botanist A',officer:'Officer B'}}),require(name){
-  if(name==='vue')return {...vue,onBeforeUnmount:fn=>cleanup.push(fn),withDirectives:node=>node}
+  if(name.endsWith('officerActionFeedback'))return officerActionFeedback
+    if(name==='vue')return {...vue,onBeforeUnmount:fn=>cleanup.push(fn),withDirectives:node=>node}
   if(name==='vue-router')return {useRoute:()=>route,useRouter:()=>({replace:async({query,name})=>{route.query=query;if(name)route.name=name}})}
   if(name==='vue-i18n')return {useI18n:()=>({t:key=>key.split('.').reduce((v,k)=>v?.[k],messages)||key})}
   if(name.endsWith('/auth'))return {sessionSnapshot:()=>({user:officer,pending:false}),subscribeSession:fn=>{sessionCallback=fn;return ()=>{sessionCallback=null}}}
@@ -104,8 +106,8 @@ test('successful POST with failed readback stays unverified, preserves draft and
   assert.equal(h.state.message.value,messages.observationEdits.reloaded);assert.equal(h.calls.filter(c=>c.body).length,1);assert.equal(h.state.comment.value,'Keep review draft')
  }finally{h.stop()}
 })
-test('genuine POST failure remains distinct from saved-but-unverified and conflict recovery',async()=>{
- const h=harness();try{await flush();h.state.comment.value='Preserve';h.setMode('post-fail');await h.state.decide('Rejected');assert.equal(h.state.message.value,messages.observationEdits.failed);assert.equal(h.state.readbackUnverified.value,false);assert.equal(h.state.blocked.value,true);assert.equal(h.state.inspectable.value,false);assert.equal(h.state.comment.value,'Preserve');assert.equal(h.calls.filter(c=>c.body).length,1)}finally{h.stop()}
+test('server POST failure stays uncertain, distinct from confirmed-save and conflict recovery',async()=>{
+ const h=harness();try{await flush();h.state.comment.value='Preserve';h.setMode('post-fail');await h.state.decide('Rejected');assert.equal(h.state.message.value,messages.officerFeedback.uncertain);assert.equal(h.state.outcomeUncertain.value,true);assert.equal(h.state.successNotice.value,false);assert.equal(h.state.readbackUnverified.value,false);assert.equal(h.state.blocked.value,true);assert.equal(h.state.inspectable.value,false);assert.equal(h.state.comment.value,'Preserve');assert.equal(h.calls.filter(c=>c.body).length,1)}finally{h.stop()}
 })
 test('499-row queue is accepted; 500 and 501 produce a typed safety-limit failure before mapping',async()=>{
  for(const size of [499,500,501]){
@@ -166,4 +168,36 @@ test('old proposal bookmarks are dispatched by authoritative origin, with no dec
  for(const [origin,routeName,destination] of [['initial_registration','conservation-observations','conservation-reviews'],['subsequent_observation','conservation-reviews','conservation-observations'],['unknown','conservation-observations','conservation-reviews']]){
   const h=harness({origin,routeName});try{await flush();assert.equal(h.route.name,destination);assert.equal(h.state.selected.value,null);assert.ok(!h.calls.some(c=>c.body));}finally{h.stop()}
  }
+})
+
+
+test('Observation edit action failures keep evidence/access/validation distinct and never retry decisions',async()=>{
+ for(const [mode,key] of [['post-validation','validation'],['post-permission','permission'],['post-network','uncertain'],['post-evidence','evidence']]){
+  const h=harness();try{
+   await flush();h.state.comment.value='Preserved draft';h.setMode(mode)
+   let focused=false;h.state.commentInput.value={focus(){focused=true}}
+   await h.state.decide('Approved')
+   assert.equal(h.state.successNotice.value,false);assert.equal(h.state.conflictNotice.value,false)
+   assert.equal(h.state.comment.value,'Preserved draft');assert.equal(h.calls.filter(c=>c.body).length,1)
+   if(key==='validation'){assert.equal(h.state.commentError.value,messages.officerFeedback.validation);assert.equal(focused,true)}
+   else if(key==='evidence')assert.equal(h.state.message.value,messages.unifiedObservations.invalidEvidence)
+   else assert.equal(h.state.message.value,messages.officerFeedback[key])
+   assert.doesNotMatch(h.state.message.value,/Private/)
+   if(key!=='validation'){assert.equal(h.state.eligible.value,false);await h.state.decide('Approved');assert.equal(h.calls.filter(c=>c.body).length,1)}
+  }finally{h.stop()}
+ }
+})
+
+
+test('a malformed successful acknowledgement stays uncertain until GET readback, never a success toast',async()=>{
+ const h=harness();try{
+  await flush();h.state.comment.value='Keep my draft';h.setMode('post-malformed');await h.state.decide('Approved')
+  assert.equal(h.state.outcomeUncertain.value,true);assert.equal(h.state.successNotice.value,false)
+  assert.equal(h.state.readbackUnverified.value,false);assert.equal(h.state.eligible.value,false)
+  assert.equal(h.state.message.value,messages.officerFeedback.uncertain)
+  await h.state.decide('Approved');assert.equal(h.calls.filter(c=>c.body).length,1)
+  h.setMode('success');await h.state.open('edit-1',true)
+  assert.equal(h.state.selected.value.status,'Approved');assert.equal(h.state.outcomeUncertain.value,false)
+  assert.equal(h.state.comment.value,'Keep my draft');assert.equal(h.calls.filter(c=>c.body).length,1)
+ }finally{h.stop()}
 })

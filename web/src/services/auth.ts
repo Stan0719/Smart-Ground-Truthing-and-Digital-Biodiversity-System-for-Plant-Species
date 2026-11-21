@@ -39,6 +39,7 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
       response = await fetch(`/api${path}`, {
         method,
         credentials: 'same-origin',
+        ...(path === '/auth/me' ? { signal: AbortSignal.timeout(15000) } : {}),
         headers: { 'Content-Type': 'application/json' },
         ...(body === undefined || method === 'GET' || method === 'HEAD' ? {} : { body: JSON.stringify(body) }),
       })

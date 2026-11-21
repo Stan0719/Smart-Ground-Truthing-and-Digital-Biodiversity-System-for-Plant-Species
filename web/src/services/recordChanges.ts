@@ -10,8 +10,9 @@ export const changeApi = '/api/data/record-changes'
 export async function changeRequest(path = '', body?: object) {
   const response = await fetch(changeApi + path, { credentials: 'same-origin', signal: AbortSignal.timeout(15000),
     ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) })
-  const data = await response.json()
+  const data = await response.json().catch(() => null)
   if (!response.ok) throw Object.assign(Error(response.status === 409 ? 'This proposal was already reviewed or its approved base changed. Reload the latest proposal before continuing.' : 'Unable to load or save the proposal.'), { status: response.status })
+  if (!data || typeof data !== 'object') throw Error('Invalid proposal response')
   return data
 }
 // Comparison only: canonical payloads and review requests are never normalized.
