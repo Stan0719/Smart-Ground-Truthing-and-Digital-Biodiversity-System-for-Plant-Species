@@ -515,6 +515,7 @@ for (const approved of [false, true]) {
   test(`${approved ? "approved" : "pending"} species editor prefills and submits to the correct endpoint`, async () => {
     const h = harness("screens/EditSpeciesRequest.js", { record: request(approved ? "Approved" : "Pending Review"), species: true });
     h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+    if (approved) h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "Original").props.onChangeText("Updated description");
     const tree = h.render();
     assert.ok(h.walk(tree, (node) => node.type === "Image" && node.props.source.uri.includes("species")));
     const button = h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges");
@@ -576,6 +577,7 @@ test("approved plant edit with a pending reviewed change blocks before reading s
 test("approved species edit with a pending reviewed change blocks before photo reuse download", async () => {
   const h = harness("screens/EditSpeciesRequest.js", { record: request("Approved"), species: true, pendingEdit: true });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "Original").props.onChangeText("Updated description");
   const reuse = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityRole === "checkbox" && node.props.accessibilityLabel === "recordEdits.originalPhoto");
   reuse.props.onPress();
   const submit = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges");
@@ -606,6 +608,7 @@ test("backend 409 pending-edit conflict is localized and keeps entered form valu
 test("species backend 409 pending-edit conflict preserves the proposal values", async () => {
   const h = harness("screens/EditSpeciesRequest.js", { record: request("Approved"), species: true, conflictOnChange: true });
   h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  h.walk(h.render(), (node) => node.type === "TextInput" && node.props.value === "Original").props.onChangeText("Updated description");
   const submit = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges");
   submit.props.onPress(); await h.alert[2][1].onPress();
   assert.equal(h.alert[1], "recordEdits.pendingEditExplanation");
@@ -698,6 +701,40 @@ test("species editor reuses the authenticated original through the existing sing
   submit.props.onPress(); await h.alert[2][1].onPress();
   const sent = h.calls.find(([path]) => path === "/my-species-requests/1");
   assert.deepEqual(sent[1].body.photo, { content_type: "image/jpeg", base64: "cmV1c2Vk" });
+});
+
+test("approved Species edit previews the retained photo without treating it as a change", async () => {
+  const h = harness("screens/EditSpeciesRequest.js", { record: request("Approved"), species: true });
+  h.render(); h.focus(); await new Promise((resolve) => setImmediate(resolve));
+  let tree = h.render();
+  const images = h.collect(tree, (node) => node.type === "Image");
+  assert.equal(images.length, 2, "Original and Updated Information each show the existing photo");
+  assert.deepEqual(images[0].props.source, images[1].props.source);
+  assert.ok(!h.text(tree).includes("recordEdits.speciesPhotoSingleLimit"));
+  const submit = h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges");
+  assert.equal(submit.props.disabled, true);
+  const remove = h.walk(tree, (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto");
+  remove.props.onPress();
+  assert.equal(h.alert[1], "recordEdits.speciesPhotoRemovalUnsupported");
+  assert.equal(h.collect(h.render(), (node) => node.type === "Image").length, 2);
+  const gallery = h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.addGallery");
+  await gallery.props.onPress();
+  tree = h.render();
+  assert.equal(h.collect(tree, (node) => node.type === "Image")[1].props.source.uri, "file://gallery.jpg");
+  assert.equal(h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.disabled, false);
+  const saveDraft = h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "botanistDrafts.saveDraft");
+  await saveDraft.props.onPress();
+  assert.equal(h.draftSaves.at(-1).draft.photos[0].uri, "file://gallery.jpg");
+  h.walk(h.render(), (node) => node.type === "TouchableOpacity" && node.props.accessibilityLabel === "recordEdits.removePhoto").props.onPress();
+  tree = h.render();
+  assert.deepEqual(h.collect(tree, (node) => node.type === "Image")[0].props.source,
+    h.collect(tree, (node) => node.type === "Image")[1].props.source);
+  assert.equal(h.walk(tree, (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.disabled, true);
+  await gallery.props.onPress();
+  h.walk(h.render(), (node) => node.type === "TouchableOpacity" && h.text(node) === "recordEdits.submitChanges").props.onPress();
+  await h.alert[2][1].onPress();
+  const sent = h.calls.find(([path]) => path === "/record-changes");
+  assert.deepEqual(sent[1].body.proposed.photo, { content_type: "image/jpeg", base64: "aGVsbG8=" });
 });
 
 test("species photo download failure keeps the selection and a retry submits once", async () => {
@@ -1034,6 +1071,7 @@ for (const species of [false,true]) for (const acknowledgement of [{}, {change:{
   test(`malformed approved ${species?'species':'plant'} receipt preserves form and never reports submitted: ${JSON.stringify(acknowledgement)}`,async()=>{
     const h=harness(species?'screens/EditSpeciesRequest.js':'screens/EditPlantRecord.js',{record:species?request('Approved'):plant('Approved'),species,acknowledgement});
     h.render();h.focus();await new Promise(resolve=>setImmediate(resolve));
+    if (species) h.walk(h.render(),node=>node.type==='TextInput'&&node.props.value==='Original').props.onChangeText('Updated');
     const tree=h.render(),button=h.walk(tree,node=>node.type==='TouchableOpacity'&&h.text(node)==='recordEdits.submitChanges');
     button.props.onPress();await h.alert[2][1].onPress();
     assert.notEqual(h.alert[0],'recordEdits.savedTitle');assert.equal(h.navigations.length,0);

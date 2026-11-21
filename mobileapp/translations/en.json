@@ -3,6 +3,7 @@
   "correctionBadge": { "plant": "Plant", "species": "Species", "observation": "Observation", "original": "{{type}} Original", "edit": "{{type}} Edit {{number}}", "editWithoutNumber": "{{type}} Edit" },
   "scrollHints": { "vertical": "Scroll down for more", "horizontal": "Swipe to see more", "speciesList": "Scroll for more species", "qrList": "Scroll for more QR codes", "searchResults": "Scroll for more results" },
   "observationEdits": {
+    "legacyPhotoRemovalUnavailable": "This older correction must keep its existing photos. You can add a photo if the three-photo limit allows it.",
     "editObservation": "Edit Observation",
     "editProposal": "Observation edit",
     "versionHistory": "Approved Version History",
@@ -1736,6 +1737,7 @@
     "photoReuseUnsupportedFormat": "This original photo is not JPEG or PNG and cannot be reused here.",
     "photoReuseTooLarge": "The original photo is missing or exceeds the 4 MB limit. It remains unchanged.",
     "speciesPhotoSingleLimit": "This species request supports one photo. Choose the original or one new photo; reuse needs internet at submission.",
+    "speciesPhotoRemovalUnsupported": "A Species edit must keep a photo. Choose a replacement photo, or keep the original.",
     "photoPermission": "Allow photo library access to choose a replacement.",
     "selectSpecies": "Select an accessible species.",
     "plantNameRequired": "Enter a plant scientific name (up to 200 characters).",

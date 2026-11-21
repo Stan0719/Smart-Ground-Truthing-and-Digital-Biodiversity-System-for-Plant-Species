@@ -108,6 +108,9 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           ? `${t("recordEdits.altitudeM")}: ${plantRecord?.altitude_m ?? plantRecord?.altitudeM ?? registeredLocation.altitudeM}` : null,
       ].filter(Boolean).join(" · ") || notAvailable;
   const originalAssets = originalObservation?.assets;
+  const [retainedPhotoIds, setRetainedPhotoIds] = useState(() => route.params?.draft?.body?.photo_ids ||
+    editRequest?.retained_photo_ids || (originalAssets || []).map((asset) => asset.id));
+  const baselinePhotoIds = editRequest?.retained_photo_ids || (originalAssets || []).map((asset) => asset.id);
   const originalAssetKey = (originalAssets || []).map((asset) => asset.id).join(",");
   const originalPhotoStateKey = `${user?.id || ""}:${originalAssetKey}`;
   const [originalPhotoState, setOriginalPhotoState] = useState({ key: "", sources: [] });
@@ -213,6 +216,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       setForm({ ...blankForm(observation.plant_id), ...values });
       setInitialForm({ ...blankForm(observation.plant_id), ...values });
       setPhotos([]);
+      setRetainedPhotoIds(editRequest?.retained_photo_ids || (observation.assets || []).map((asset) => asset.id));
       setInvalidField("");
     }
     if (!route.params?.observation && !route.params?.draft) {
@@ -220,6 +224,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       setForm(blankForm(route.params?.plantId));
       setInitialForm(blankForm(route.params?.plantId));
       setPhotos([]);
+      setRetainedPhotoIds([]);
       setInvalidField("");
     }
     if (route.params?.draft && routeDraftMatchesCorrection) {
@@ -242,6 +247,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           uri: `data:${a.content_type};base64,${a.base64}`,
         })),
       );
+      setRetainedPhotoIds(draft.body?.photo_ids || (draft.observation_snapshot?.assets || []).map((asset) => asset.id));
       setInvalidField("");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when the selected observation, draft, or plant changes.
@@ -284,7 +290,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
   }
   async function capture(camera) {
     if (capturing.current) return;
-    if (observationEditMode && photos.length + (originalObservation?.assets?.length || 0) + (editRequest?.added_photo_count || 0) >= 3) {
+    if (observationEditMode && photos.length + retainedPhotoIds.length + (editRequest?.added_photo_count || 0) >= 3) {
       setError(t("observationEdits.photoLimit")); return;
     }
     capturing.current = true;
@@ -324,7 +330,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
         plant_id: String(observation.plant_id),
         body: { content: data, observation_id: String(observation.id),
           ...(request?.id ? { revision: request.revision } : { client_key: draftKey.current }),
-          photo_ids: request?.retained_photo_ids || (observation.assets || []).map((asset) => asset.id) }, assets };
+          photo_ids: retainedPhotoIds }, assets };
     }
     if (edit) {
       const recovered = route.params?.draft;
@@ -370,8 +376,9 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       assets,
     };
   }
-  const autoSaveMeaningful = Boolean(form && initialForm && JSON.stringify(form) !== JSON.stringify(initialForm)) || photos.length > 0;
-  const autoSaveSignature = JSON.stringify({ form, photos: photos.map(({ client_key, uri }) => ({ client_key, uri })) });
+  const autoSaveMeaningful = Boolean(form && initialForm && JSON.stringify(form) !== JSON.stringify(initialForm)) || photos.length > 0 ||
+    (observationEditMode && JSON.stringify(retainedPhotoIds) !== JSON.stringify(baselinePhotoIds));
+  const autoSaveSignature = JSON.stringify({ form, retainedPhotoIds, photos: photos.map(({ client_key, uri }) => ({ client_key, uri })) });
   const autosave = useBotanistDraftAutosave({ enabled: Boolean(user?.id && (observationForm || newPlant)) && recoveryResolved && autoSaveMeaningful && !completed,
     signature: autoSaveSignature, navigation, accountId: user?.id, errorKey: user?.id && route.key ? `${user.id}:${route.key}` : undefined,
     onSaving: () => setAutoSaveState("saving"),
@@ -658,23 +665,49 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           {observationForm && ["taxonomy", "notes"].map(renderObservationField)}
           {edit && <>
             <Text style={styles.originalInformationLabel}>{t("recordEdits.originalInformation")}</Text>
-            {originalPhotos.length ? <View style={styles.photoList}>{originalPhotos.map((source, index) => <Image key={`${originalAssetKey}-${index}`} source={source} style={styles.photoPreview} resizeMode="cover" />)}</View>
+            {originalPhotos.length ? <View style={styles.photoList}>{originalPhotos.map((source, index) => <Image key={`${originalAssetKey}-${index}`} source={source} style={[styles.photoPreview, observationEditMode && styles.editPhotoPreview]} resizeMode="cover" />)}</View>
               : <Text style={styles.originalInformationValue}>{t("recordEdits.informationNotAvailable")}</Text>}
             {!observationEditMode && <Text style={styles.originalInformationValue}>{t("fieldCollection.photoReuseUnavailable")}</Text>}
             <Text style={styles.originalInformationLabel}>{t("recordEdits.updatedInformation")}</Text>
+            {!observationEditMode && originalPhotos.length > 0 && <View style={styles.photoList}>{originalPhotos.map((source, index) =>
+              <View key={`retained-${originalAssetKey}-${index}`} style={styles.editPhotoTile}>
+                <Image source={source} style={styles.editPhotoPreview} resizeMode="cover" />
+                <TouchableOpacity style={styles.removePhotoButton} accessibilityRole="button" accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
+                  onPress={() => setError(t("observationEdits.legacyPhotoRemovalUnavailable"))}>
+                  <Ionicons name="trash-outline" size={21} color="#B42318" />
+                </TouchableOpacity>
+              </View>)}</View>}
+            {observationEditMode && <View style={styles.photoList}>{(originalAssets || []).map((asset, index) => !retainedPhotoIds.includes(asset.id) ? null :
+              <View key={asset.id} style={styles.editPhotoTile}>
+                {originalPhotos[index] && <Image source={originalPhotos[index]} style={styles.editPhotoPreview} resizeMode="cover" />}
+                <TouchableOpacity style={styles.removePhotoButton} accessibilityRole="button" accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
+                  onPress={() => originalObservation?.origin_type === "subsequent_observation"
+                    ? setRetainedPhotoIds((current) => current.filter((id) => id !== asset.id))
+                    : setError(t("observationEdits.legacyPhotoRemovalUnavailable"))}>
+                  <Ionicons name="trash-outline" size={21} color="#B42318" />
+                </TouchableOpacity>
+              </View>)}</View>}
+            {observationEditMode && (originalAssets || []).some((asset) => !retainedPhotoIds.includes(asset.id)) &&
+              <View style={styles.photoList}>{(originalAssets || []).map((asset, index) => retainedPhotoIds.includes(asset.id) ? null :
+                <TouchableOpacity key={`restore-${asset.id}`} style={styles.editPhotoTile} accessibilityRole="button"
+                  accessibilityLabel={`${t("recordEdits.originalPhoto")} ${index + 1}`} onPress={() => setRetainedPhotoIds((current) =>
+                    (originalAssets || []).map((original) => original.id).filter((id) => current.includes(id) || id === asset.id))}>
+                  {originalPhotos[index] && <Image source={originalPhotos[index]} style={styles.editPhotoPreview} resizeMode="cover" />}
+                  <View style={styles.restorePhotoOverlay}><Ionicons name="add-circle" size={25} color="#FFFFFF" /></View>
+                </TouchableOpacity>)}</View>}
           </>}
           <View style={styles.actionRow}>
           <TouchableOpacity style={styles.photoButton} onPress={() => capture(true)} activeOpacity={0.8} accessibilityRole="button">
-            <Text style={styles.photoButtonText}>{t("addPlant.camera")}</Text>
+            <Text style={styles.photoButtonText}>{t(observationEditMode ? "recordEdits.takePhoto" : "addPlant.camera")}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.photoButton} onPress={() => capture(false)} activeOpacity={0.8} accessibilityRole="button">
-            <Text style={styles.photoButtonText}>{t("addPlant.gallery")}</Text>
+            <Text style={styles.photoButtonText}>{t(observationEditMode ? "recordEdits.addGallery" : "addPlant.gallery")}</Text>
           </TouchableOpacity>
           </View>
           <View style={styles.photoList}>
           {photos.map((p) => (
-            <View key={p.client_key} style={styles.photoItem}>
-              <Image source={{ uri: p.uri }} style={styles.photoPreview} resizeMode="cover" />
+            <View key={p.client_key} style={observationEditMode ? styles.editPhotoTile : styles.photoItem}>
+              <Image source={{ uri: p.uri }} style={[styles.photoPreview, observationEditMode && styles.editPhotoPreview]} resizeMode="cover" />
               <TouchableOpacity style={styles.removePhotoButton}
                 accessibilityRole="button" accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
                 onPress={() => setPhotos((old) => old.filter((photo) => photo.client_key !== p.client_key))}>
@@ -690,7 +723,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             <TouchableOpacity style={[styles.secondaryAction, isNewObservation && styles.observationHalfButton, (busy || completed) && styles.disabledButton]} disabled={busy || completed} onPress={() => save(false)} accessibilityRole="button" accessibilityState={{ disabled: busy || completed }}>
               {busy ? <ActivityIndicator color="#2F6B4F" /> : <Text style={styles.secondaryActionText}>{t(isNewObservation ? "botanistDrafts.saveDraft" : "fieldCollection.saveOfflineDraft")}</Text>}
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.primaryButton, isNewObservation && styles.observationHalfButton, (busy || completed || (isNewObservation && plantEligibility !== "approved")) && styles.disabledButton]} disabled={busy || completed || (isNewObservation && plantEligibility !== "approved")} onPress={() => save(true)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ disabled: busy || completed || (isNewObservation && plantEligibility !== "approved") }}>
+            <TouchableOpacity style={[styles.primaryButton, isNewObservation && styles.observationHalfButton, (busy || completed || (isNewObservation && plantEligibility !== "approved") || (observationEditMode && !autoSaveMeaningful)) && styles.disabledButton]} disabled={busy || completed || (isNewObservation && plantEligibility !== "approved") || (observationEditMode && !autoSaveMeaningful)} onPress={() => save(true)} activeOpacity={0.8} accessibilityRole="button" accessibilityState={{ disabled: busy || completed || (isNewObservation && plantEligibility !== "approved") || (observationEditMode && !autoSaveMeaningful) }}>
               {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{t(isNewObservation ? "fieldCollection.addObservation" : observationEditMode ? "observationEdits.submitChanges" : "fieldCollection.submitAndSynchronize")}</Text>}
             </TouchableOpacity>
           </View>
@@ -815,6 +848,9 @@ const styles = StyleSheet.create({
   photoButtonText: fieldFormStyles.photoButtonText,
   actionRow: fieldFormStyles.photoButtonRow,
   photoList: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 14 },
+  editPhotoTile: { width: 90, height: 90, position: "relative", borderRadius: 12 },
+  editPhotoPreview: { width: 90, height: 90, borderRadius: 12 },
+  restorePhotoOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "#234B3A35", alignItems: "flex-end", padding: 4, borderRadius: 12 },
   photoItem: { width: 112, position: "relative" },
   photoPreview: fieldFormStyles.photoPreview,
   removePhotoButton: fieldFormStyles.removePhotoButton,

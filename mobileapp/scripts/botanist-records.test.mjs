@@ -1943,6 +1943,22 @@ test("read-only request detail renders actual fields, review metadata and authen
   assert.equal(find((node) => node?.props?.testID === "withdraw-original-species", approvedTree), undefined,
     "approved Species cannot be withdrawn");
   approvedCleanup();
+  pendingChange = { status: "Cancelled", review_comment: "Cancelled edit feedback" };
+  for (let opening = 0; opening < 2; opening++) {
+    render(); const cancelledCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+    const reopenedApprovedTree = render();
+    const approvedMeta = find((node) => node?.props?.testID === "species-request-record-meta", reopenedApprovedTree);
+    assert.ok(text(approvedMeta).includes("Approved"), "the original request keeps its Approved badge");
+    assert.ok(text(reopenedApprovedTree).includes("Actual reviewer comment"), "Officer feedback remains visible");
+    assert.ok(!text(reopenedApprovedTree).includes("recordEdits.cancelledStatus"), "a cancelled edit is not an Approved request banner");
+    cancelledCleanup();
+  }
+  record.request_status = "Cancelled";
+  render(); const cancelledRequestCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(text(find((node) => node?.props?.testID === "species-request-record-meta", render())).includes("Cancelled"),
+    "a genuinely Cancelled request still shows its own status");
+  cancelledRequestCleanup();
+  record.request_status = "Approved";
   pendingChange = { status: "Pending Review", review_comment: "Awaiting review" };
   render(); const pendingCleanup = focus(); await new Promise((resolve) => setImmediate(resolve));
   const pendingTree = render();

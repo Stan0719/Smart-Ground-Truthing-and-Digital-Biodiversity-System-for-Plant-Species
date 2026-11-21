@@ -36,8 +36,9 @@ export default function EditSpeciesRequest({ route, navigation }) {
     ...Object.fromEntries(fields.map((field) => [field, request[field] ?? ""])) });
   const restoreDraft = (draft) => {
     restoredDraftRef.current = draft; clientKey.current = draft.submission_client_key || clientKey.current;
-    setForm(draft.form); setReuseOriginalPhoto(Boolean(draft.form.reuseOriginalPhoto));
-    setPhoto(draft.photo_refs?.find((item) => item.slot === "new:photo")?.uri || null);
+    const savedPhoto = draft.photo_refs?.find((item) => item.slot === "new:photo")?.uri || null;
+    setForm(draft.form); setReuseOriginalPhoto(typeof draft.form.reuseOriginalPhoto === "boolean" ? draft.form.reuseOriginalPhoto : !savedPhoto);
+    setPhoto(savedPhoto);
   };
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -57,7 +58,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
         const sameDraft = Boolean(route.params?.formDraftKey && restoredDraftRef.current?.client_key === route.params.formDraftKey);
         if (!sameDraft) {
           setForm(originalForm);
-          setPhoto(null); setReuseOriginalPhoto(false); setOriginalPhotoUnavailable(false);
+          setPhoto(null); setReuseOriginalPhoto(Boolean(request.photo) && !correctionPhoto && request.request_status !== "Correction Required"); setOriginalPhotoUnavailable(false);
         }
         if (route.params?.formDraftKey) {
           const restored = await getBotanistFormDraft(accountId, route.params.formDraftKey, "edit-species", requestId);
@@ -74,7 +75,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
             setDraftConflict(false);
           }
         } else {
-          setForm(originalForm); setPhoto(null); setReuseOriginalPhoto(false); setOriginalPhotoUnavailable(false); setDraftConflict(false);
+          setForm(originalForm); setPhoto(null); setReuseOriginalPhoto(Boolean(request.photo) && !correctionPhoto && request.request_status !== "Correction Required"); setOriginalPhotoUnavailable(false); setDraftConflict(false);
           if (correctionWorkflow) {
             recoveryPromptedRef.current = true;
             let candidate = null;
@@ -111,7 +112,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
                 setRecoveryResolved(true);
               } },
               { text: t("botanistDrafts.startNewDraft"), style: "cancel", onPress: () => {
-                formDraftKey.current = makeKey(); setForm(originalForm); setPhoto(null); setReuseOriginalPhoto(false); setRecoveryResolved(true);
+                formDraftKey.current = makeKey(); setForm(originalForm); setPhoto(null); setReuseOriginalPhoto(Boolean(request.photo) && !correctionPhoto && request.request_status !== "Correction Required"); setRecoveryResolved(true);
               } },
             ]);
             else setRecoveryResolved(true);
@@ -182,7 +183,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
       auto_saved: autoSaved, form: { ...form, reuseOriginalPhoto },
       photos: photo ? [{ slot: "new:photo", uri: photo, content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg" }] : [] };
   };
-  const hasMeaningfulChanges = Boolean(form && initialFormRef.current && JSON.stringify(form) !== JSON.stringify(initialFormRef.current)) || Boolean(photo) || reuseOriginalPhoto;
+  const hasMeaningfulChanges = Boolean(form && initialFormRef.current && JSON.stringify(form) !== JSON.stringify(initialFormRef.current)) || Boolean(photo) || Boolean((state.correctionPhoto || state.request?.request_status === "Correction Required") && reuseOriginalPhoto);
   const autosave = useBotanistDraftAutosave({ enabled: Boolean(accountId && form && state.request && recoveryResolved && !submitted && hasMeaningfulChanges),
     signature: JSON.stringify({ form, photo, reuseOriginalPhoto }), navigation, accountId, errorKey: accountId && route.key ? `${accountId}:${route.key}` : undefined,
     onSaving: () => setAutoSaveState("saving"),
@@ -205,7 +206,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
       formDraftKey.current = makeKey();
       navigation.setParams({ formDraftKey: undefined });
       initialFormRef.current = Object.fromEntries(fields.map(field => [field, String(request[field] ?? "")]));
-      setForm(initialFormRef.current); setPhoto(null); setReuseOriginalPhoto(false); setOriginalPhotoUnavailable(false);
+      setForm(initialFormRef.current); setPhoto(null); setReuseOriginalPhoto(Boolean(request.photo) && request.request_status !== "Correction Required"); setOriginalPhotoUnavailable(false);
       setState(old => ({ ...old, request }));
       setDraftConflict(false); setOfflineDraft(false); setVersionConflict(false); setInspectionRequired(true);
     } catch { Alert.alert(t("common.error"), t("recordEdits.latestLoadFailed")); }
@@ -220,6 +221,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
   function submit() {
     if (state.request.request_status === "Rejected") return Alert.alert(t("common.error"), t("recordEdits.finalRejected"));
     if (busy.current || submitted || editBlocked.current) return;
+    if (state.request.request_status === "Approved" && !state.correctionChange && !hasMeaningfulChanges) return;
     if (offlineDraft || draftConflict) return Alert.alert(t("common.error"), t("botanistDrafts.editConflict"));
     if (fields.some((field) => !form[field].trim() || form[field].length > (["description", "habitat"].includes(field) ? 4000 : 200)))
       return Alert.alert(t("common.error"), t("recordEdits.speciesFieldsRequired"));
@@ -267,10 +269,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
       const proposed = Object.fromEntries(fields.map((field) => [field, form[field].trim()]));
       if (photo) proposed.photo = { content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg",
         base64: await FileSystem.readAsStringAsync(photo, { encoding: FileSystem.EncodingType.Base64 }) };
-      else if (reuseOriginalPhoto && state.correctionPhoto) {
-        reusedFile = await downloadPhotoForReuse(FileSystem, state.correctionPhoto);
-        proposed.photo = reusedFile.photo;
-      } else if (reuseOriginalPhoto) {
+      else if (reuseOriginalPhoto && (state.correctionPhoto || state.request.request_status === "Correction Required")) {
         reusedFile = await downloadPhotoForReuse(FileSystem, state.request.photo);
         proposed.photo = reusedFile.photo;
       }
@@ -355,10 +354,12 @@ export default function EditSpeciesRequest({ route, navigation }) {
           </TouchableOpacity>
           {originalPhotoUnavailable && <Text style={styles.error}>{t("recordEdits.originalPhotoUnavailable")}</Text>}
         </View> : <Text style={styles.secondaryText}>{t("recordEdits.informationNotAvailable")}</Text>}>
-        <Text style={styles.photoNote}>{t("recordEdits.speciesPhotoSingleLimit")}</Text>
-        {(photo || reuseOriginalPhoto || state.correctionPhoto) && <View style={styles.photoCard}><View style={[styles.photoFrame, reuseOriginalPhoto && !photo && styles.photoFrameSelected]}>
-          <Image source={photo ? { uri: photo } : state.correctionPhoto || state.request.photo} style={styles.photo} resizeMode="cover" /></View>
-          <TouchableOpacity style={styles.removeSelection} onPress={() => { setPhoto(null); setReuseOriginalPhoto(false); }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
+        {(photo || state.correctionPhoto || state.request.photo) && <View style={styles.photoCard}><View style={[styles.photoFrame, reuseOriginalPhoto && !photo && styles.photoFrameSelected]}>
+          <Image source={photo ? { uri: photo } : reuseOriginalPhoto ? state.request.photo : state.correctionPhoto || state.request.photo} style={styles.photo} resizeMode="cover" /></View>
+          <TouchableOpacity style={styles.removeSelection} onPress={() => {
+            if (photo) { setPhoto(null); setReuseOriginalPhoto(Boolean(state.request.photo) && !state.correctionPhoto && state.request.request_status !== "Correction Required"); }
+            else Alert.alert(t("common.error"), t("recordEdits.speciesPhotoRemovalUnsupported"));
+          }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
         </View>}
         <View style={styles.photoActions}>
           <TouchableOpacity style={styles.photoActionButton} onPress={() => pickPhoto(true)} accessibilityRole="button" accessibilityLabel={t("recordEdits.takePhoto")}><Text style={styles.secondaryText}>{t("recordEdits.takePhoto")}</Text></TouchableOpacity>
@@ -368,7 +369,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
     </View>
     <View style={styles.formActionRow}>
       <TouchableOpacity style={[styles.secondary, (draftSaving || saving || submitted) && styles.disabled]} onPress={saveLocalDraft} disabled={draftSaving || saving || submitted} accessibilityRole="button" accessibilityState={{ disabled: draftSaving || saving || submitted }}><Text style={styles.secondaryText}>{draftSaving ? t("botanistDrafts.saving") : t("botanistDrafts.saveDraft")}</Text></TouchableOpacity>
-      <TouchableOpacity style={[styles.primary, (saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired) && styles.disabled]} onPress={submit} disabled={saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired} accessibilityRole="button" accessibilityState={{ disabled: saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired }}><Text style={styles.primaryText}>{saving ? t("recordEdits.saving") : t("recordEdits.submitChanges")}</Text></TouchableOpacity>
+      <TouchableOpacity style={[styles.primary, (saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired || (state.request.request_status === "Approved" && !state.correctionChange && !hasMeaningfulChanges)) && styles.disabled]} onPress={submit} disabled={saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired || (state.request.request_status === "Approved" && !state.correctionChange && !hasMeaningfulChanges)} accessibilityRole="button" accessibilityState={{ disabled: saving || submitted || offlineDraft || draftConflict || versionConflict || inspectionRequired || (state.request.request_status === "Approved" && !state.correctionChange && !hasMeaningfulChanges) }}><Text style={styles.primaryText}>{saving ? t("recordEdits.saving") : t("recordEdits.submitChanges")}</Text></TouchableOpacity>
     </View>
     <TouchableOpacity style={styles.secondary} onPress={confirmLeave} disabled={saving}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity>
   </ScrollView>;
@@ -385,7 +386,7 @@ const styles = StyleSheet.create({
   label: { color: "#52665A", fontSize: 13, fontWeight: "600", marginTop: 6 },
   input: { borderWidth: 1, borderColor: "#CDE3DC", backgroundColor: "#FFFFFF", borderRadius: 11, padding: 12, color: "#234B3A", minHeight: 44 },
   multiline: { minHeight: 90, textAlignVertical: "top" }, photo: { width: "100%", height: "100%", borderRadius: 12 },
-  photoCard: { position: "relative", width: 140 }, photoFrame: { width: 140, height: 126, borderRadius: 14, borderWidth: 2, borderColor: "#E2EDE0", overflow: "hidden", position: "relative" }, photoFrameSelected: { borderColor: "#468585" }, photoSelectionMark: { ...StyleSheet.absoluteFillObject, backgroundColor: "#234B3A35", alignItems: "flex-end", padding: 8 }, photoSelectionCheck: { color: "#FFFFFF", fontSize: 22, fontWeight: "800" }, removeSelection: { position: "absolute", right: -7, top: -7, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4", width: 44, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center" }, photoActions: { flexDirection: "row", gap: 9 }, photoActionButton: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: "#F3F8F2", borderWidth: 1, borderColor: "#CDE3DC", borderRadius: 11, paddingHorizontal: 10 },
+  photoCard: { position: "relative", width: 94 }, photoFrame: { width: 90, height: 90, borderRadius: 14, borderWidth: 2, borderColor: "#E2EDE0", overflow: "hidden", position: "relative" }, photoFrameSelected: { borderColor: "#468585" }, photoSelectionMark: { ...StyleSheet.absoluteFillObject, backgroundColor: "#234B3A35", alignItems: "flex-end", padding: 4 }, photoSelectionCheck: { color: "#FFFFFF", fontSize: 22, fontWeight: "800" }, removeSelection: { position: "absolute", right: -4, top: -4, backgroundColor: "#FDE9E7", borderWidth: 1, borderColor: "#F2B9B4", width: 44, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center" }, photoActions: { flexDirection: "row", gap: 9 }, photoActionButton: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", backgroundColor: "#F3F8F2", borderWidth: 1, borderColor: "#CDE3DC", borderRadius: 11, paddingHorizontal: 10 },
   formActionRow: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
   primary: { flexGrow: 1, flexBasis: "45%", minWidth: 145, backgroundColor: "#2F6B4F", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, minHeight: 48, alignItems: "center", justifyContent: "center" }, primaryText: { color: "#FFFFFF", fontWeight: "700", textAlign: "center" },
   secondary: { flexGrow: 1, flexBasis: "45%", minWidth: 145, borderWidth: 1, borderColor: "#AFCBB7", backgroundColor: "#E8EDDA", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, minHeight: 48, alignItems: "center", justifyContent: "center" }, secondaryText: { color: "#2F6B4F", fontWeight: "700", textAlign: "center" },
