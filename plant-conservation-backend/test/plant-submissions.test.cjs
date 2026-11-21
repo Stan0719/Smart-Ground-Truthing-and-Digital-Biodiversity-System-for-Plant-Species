@@ -73,7 +73,16 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(p.scientific_name, plant.scientific_name); assert.equal(Number(p.species_id), Number(s.species_id)); assert.equal(p.rbac_status, "Pending Review");
     assert.equal((await call("/species?scope=scientific")).data.species.length, 1);
     assert.equal((await call(`/species/${combined.species_id}`)).status, 404);
-    assert.equal((await call(`/qr/${combined.qr_token}`, "guest")).status, 404);
+    for (const role of ["guest", "visitor"]) {
+      const scan = await call(`/qr/${combined.qr_token}`, role);
+      assert.equal(scan.status, 200);
+      assert.deepEqual(scan.data, { assigned: false, status: "unavailable_yet" });
+    }
+    for (const role of ["bot", "other"]) {
+      const scan = await call(`/qr/${combined.qr_token}`, role);
+      assert.equal(scan.status, 200);
+      assert.deepEqual(scan.data, { assigned: false, status: "pending_review" });
+    }
   });
   await t.test("submitter can read their pending plant, observation, request and photos; other users cannot", async () => {
     const own = await call(`/plants/${combined.plant_id}`);

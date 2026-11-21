@@ -56,7 +56,7 @@ test("Original Plant withdrawal keeps audit, QR and linked records while closing
     genus_name,family_name,conservation_status,description,habitat,photo,proposed_species_id)
     VALUES('staff:bot',$1,'hash','Proposed Species','Proposed','Genus','Family','Least Concern','Description','Forest',$2,$3)`,
     [withSpeciesRequest.key, Buffer.from([1]), proposedSpecies]);
-  const roles = { bot: "Botanist", other: "Botanist", officer: "Conservation Officer" };
+  const roles = { bot: "Botanist", other: "Botanist", officer: "Conservation Officer", visitor: "Visitor" };
   const tokens = Object.fromEntries(Object.keys(roles).map((key, index) => [key, String(index + 1).repeat(64)]));
   const auth = { session: async (token) => {
     const account = Object.keys(tokens).find((key) => tokens[key] === token);
@@ -73,7 +73,7 @@ test("Original Plant withdrawal keeps audit, QR and linked records while closing
   }
   async function read(path, user) {
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api${path}`, {
-      headers: { Authorization: `Bearer ${tokens[user]}` },
+      headers: user ? { Authorization: `Bearer ${tokens[user]}` } : {},
     });
     return { status: response.status, data: await response.json() };
   }
@@ -111,6 +111,10 @@ test("Original Plant withdrawal keeps audit, QR and linked records while closing
   assert.ok(state.withdrawn_at);
   assert.equal(state.qr_status, "assigned");
   assert.equal(String(state.qr_plant_id), String(pending.id));
+  for (const role of [null, "visitor"])
+    assert.deepEqual(await read(`/qr/${pending.key}`, role), { status: 200, data: { assigned: false, status: "record_unavailable" } });
+  for (const role of ["bot", "other"])
+    assert.deepEqual(await read(`/qr/${pending.key}`, role), { status: 200, data: { assigned: false, status: "invalid_record" } });
   await migrate("025-original-plant-withdrawal");
   assert.equal((await pool.query("SELECT rbac_status FROM plant_record WHERE plant_id=$1", [pending.id])).rows[0].rbac_status, "Withdrawn");
   assert.equal((await pool.query("SELECT count(*)::integer AS count FROM business_audit WHERE action='plant_submission_withdrawn'")).rows[0].count, 3);

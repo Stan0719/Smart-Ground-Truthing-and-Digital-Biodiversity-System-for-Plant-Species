@@ -186,8 +186,8 @@ async function loadSpecies(background = false) {
             const observationId = registrationRow?.observation_id
             if (typeof observationId !== 'string' || !observationId) return []
             return [
-              { recordType: 'observation' as const, recordId: observationId, fieldName: 'morphology' as const, target: plant.latestApproved, targetField: 'morphology' },
-              { recordType: 'observation' as const, recordId: observationId, fieldName: 'notes' as const, target: plant.latestApproved, targetField: 'notes' },
+              { recordType: 'observation' as const, recordId: observationId, fieldName: 'morphology' as const, historical: true, target: plant.latestApproved, targetField: 'morphology' },
+              { recordType: 'observation' as const, recordId: observationId, fieldName: 'notes' as const, historical: true, target: plant.latestApproved, targetField: 'notes' },
             ]
           }))
           if (JSON.stringify(linkedPlants.value) !== JSON.stringify(nextPlants)) linkedPlants.value = nextPlants

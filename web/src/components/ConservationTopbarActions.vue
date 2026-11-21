@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ActionFeedback from './ActionFeedback.vue'
 import { onBeforeUnmount, onMounted, nextTick, ref, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -62,12 +63,13 @@ const inbox = createOfficerInbox({ transport: (...args) => fetch(...args), navig
 } })
 const notificationState = inbox.state
 const nt = (key: string) => t('dashboardNotifications.officerLive.' + key)
-const noticeTitle = (notice: OfficerNotice) => notice.event_type === 'observation_edit_submitted' ? t('observationEditNotices.submitted') : notice.event_type === 'observation_edit_resubmitted' ? t('observationEditNotices.resubmitted') : notice.event_type === 'record_change_submitted' ? (notice.change_target_type === 'plant' ? 'Approved Plant Change Submitted' : notice.change_target_type === 'species' ? 'Approved Species Change Submitted' : 'Approved-record Change Submitted') : nt(notice.event_type === 'species_request_submitted' ? 'speciesTitle' : notice.event_type === 'observation_resubmitted' ? 'correctionTitle' : notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
+const noticeTitle = (notice: OfficerNotice) => notice.event_type === 'threat_alert_created' ? t('threatAlertNotices.' + (notice.threat_context?.source === 'Camera' ? 'camera' : 'sensor')) : notice.event_type === 'observation_edit_submitted' ? t('observationEditNotices.submitted') : notice.event_type === 'observation_edit_resubmitted' ? t('observationEditNotices.resubmitted') : notice.event_type === 'record_change_submitted' ? (notice.change_target_type === 'plant' ? 'Approved Plant Change Submitted' : notice.change_target_type === 'species' ? 'Approved Species Change Submitted' : 'Approved-record Change Submitted') : nt(notice.event_type === 'species_request_submitted' ? 'speciesTitle' : notice.event_type === 'observation_resubmitted' ? 'correctionTitle' : notice.event_type === 'registration_submitted' ? 'registrationTitle' : 'fieldTitle')
 // Labels are display-only. Navigation and acknowledgement retain the raw resource.
 const observationLabels = computed(() => monitoringLabels(notificationState.items
   .filter(item => item.resource.kind === 'observation').map(item => item.resource.id)))
 const noticeReference = (notice: OfficerNotice) => {
   const id = notice.resource.id
+  if (notice.resource.kind === 'threat_alert') return 'ALERT-' + id.slice(0, 8).toUpperCase()
   if (notice.resource.kind === 'observation_edit') return 'CHANGE-' + id.slice(0, 8).toUpperCase()
   if (notice.resource.kind === 'record_change') return 'CHANGE-' + id.slice(0, 8).toUpperCase()
   if (notice.resource.kind === 'species_request') return formatSpeciesRequestId(id)
@@ -79,6 +81,14 @@ const noticeReference = (notice: OfficerNotice) => {
   const prefix = id.replaceAll('-', '').slice(0, 8).toUpperCase()
   const group = [...observationLabels.value.keys()].filter(value => value.replaceAll('-', '').slice(0, 8).toUpperCase() === prefix).sort()
   return `OBS-${prefix} ? ${group.indexOf(id) + 1}`
+}
+const threatNoticeDetails = (notice: OfficerNotice) => {
+  const context = notice.threat_context
+  if (!context) return ''
+  const category = t('threatAlertNotices.metrics.' + context.metric)
+  const reading = context.reading_id ? ' · ' + t('threatAlertNotices.reading', { id: context.reading_id }) : ''
+  const camera = context.source === 'Camera' ? ' · ' + t('threatAlertNotices.cameraReference', { id: context.camera_id || context.device_id }) : ''
+  return `${category}: ${context.value}${reading}${camera}`
 }
 const noticeTime = (notice: OfficerNotice) => new Intl.DateTimeFormat(locale.value.startsWith('en') ? 'en-GB' : locale.value, {
   day: 'numeric', month: 'long', year: 'numeric',
@@ -146,10 +156,13 @@ const openProfileSettings = async () => {
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
 }
 
+const logoutPending = ref(false), logoutError = ref(false), logoutSequence = ref(0)
 const signOut = async () => {
-  closeMenus()
-  await logout()
-  await router.replace('/')
+  if (logoutPending.value) return
+  logoutPending.value = true; logoutError.value = false; logoutSequence.value++
+  try { await logout(); await router.replace('/') }
+  catch { logoutError.value = true }
+  finally { logoutPending.value = false }
 }
 
 const handleOutsideClick = (event: MouseEvent) => {
@@ -177,6 +190,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <ActionFeedback v-if="logoutError" :key="logoutSequence" :feedback-id="logoutSequence" variant="error" :message="t('officerFeedback.logoutFailed')" @dismiss="logoutError = false" />
   <div ref="actionsWrap" class="conservation-topbar-actions">
     <div v-language-anchor class="dashboard-language"><LanguageSwitcher /></div>
     <div class="notification-wrap">
@@ -231,7 +245,9 @@ onBeforeUnmount(() => {
           >
             <span class="notification-type review" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">
-                <path v-if="notification.event_type === 'observation_resubmitted'" d="M20 7v5h-5M4 17v-5h5M5.3 8a7 7 0 0 1 11.6-2L20 9M4 15l3.1 3A7 7 0 0 0 18.7 16" />
+                <path v-if="notification.threat_context?.source === 'Camera'" d="M3 6h12v12H3zM15 10l6-4v12l-6-4" />
+                <path v-else-if="notification.threat_context?.source === 'Sensor'" d="M3 12h4l3-7 4 14 3-7h4" />
+                <path v-else-if="notification.event_type === 'observation_resubmitted'" d="M20 7v5h-5M4 17v-5h5M5.3 8a7 7 0 0 1 11.6-2L20 9M4 15l3.1 3A7 7 0 0 0 18.7 16" />
                 <path v-else-if="notification.event_type === 'species_request_submitted'" d="M5 20 19 6M5 16C2 6 10 3 21 3c0 11-3 19-13 16" />
                 <path v-else-if="notification.event_type === 'registration_submitted'" d="M12 21V11M12 15C4 15 3 10 3 5c6 0 9 3 9 10Zm0-4c0-6 3-9 9-9 0 6-3 9-9 9Z" />
                 <path v-else d="M9 4H5v17h14V4h-4M9 2h6v5H9zM8 12h8M8 16h6" />
@@ -240,6 +256,7 @@ onBeforeUnmount(() => {
             <span class="notification-copy">
               <strong>{{ noticeTitle(notification) }}</strong>
               <span class="notification-reference">{{ noticeReference(notification) }}</span>
+              <span v-if="notification.threat_context" class="notification-reference">{{ threatNoticeDetails(notification) }}</span>
               <time :datetime="notification.created_at">{{ noticeTime(notification) }}</time>
               <span v-if="notification.read_at === null" class="notification-unread-label">{{ nt('unread') }}</span>
             </span>
@@ -276,7 +293,7 @@ onBeforeUnmount(() => {
         <button type="button" role="menuitem" @click="openProfileSettings">
           {{ t('dashboardNav.profileSettings') }}
         </button>
-        <button type="button" role="menuitem" @click="signOut">
+        <button type="button" role="menuitem" :disabled="logoutPending" :aria-busy="logoutPending" @click="signOut">
           {{ t('dashboardNav.signOut') }}
         </button>
       </div>

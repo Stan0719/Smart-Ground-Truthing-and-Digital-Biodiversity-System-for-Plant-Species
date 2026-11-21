@@ -876,6 +876,7 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
   };
   const renderCorrection = (task) => {
     const label = ["plant", "plantEdit"].includes(task.kind) ? t("recordEdits.correctPlantRegistration") : ["species", "speciesEdit"].includes(task.kind) ? t("recordEdits.correctSpeciesRequest") : t("fieldCollection.correctObservation");
+    const observationCorrection = ["observation", "observationEdit"].includes(task.kind);
     const historyKey = `${task.kind === "plantEdit" ? "plant" : "species"}:${task.kind === "plantEdit" ? task.plantId : task.requestId}`;
     const history = correctionHistories.accountId === botanist?.id && correctionHistories.targetKey === historyTargets
       ? correctionHistories.rows[historyKey] : null;
@@ -885,7 +886,7 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
         <View style={styles.correctionStatus}><Text style={styles.correctionStatusText}>{correctionBadgeLabel(task, history)}</Text></View>
       </View>
       <Text style={styles.recordType}>{t(["plant", "plantEdit"].includes(task.kind) ? "botanistDashboard.myPlantRecords" : ["species", "speciesEdit"].includes(task.kind) ? "botanistRecords.speciesRequests" : "myObservations.title")}</Text>
-      <Text style={styles.correctionPlantName}>{task.name || t("submissions.notRecorded")}</Text>
+      {(task.name || !observationCorrection) && <Text style={styles.correctionPlantName}>{task.name || t("submissions.notRecorded")}</Text>}
       {["observation", "observationEdit"].includes(task.kind) && <Text style={styles.correctionPlantId}>{t("myObservations.observationId")} {task.observationId || task.id}</Text>}
       <View style={styles.correctionFeedbackSection}><Text style={styles.correctionFeedbackLabel}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.correctionFeedback}>{task.feedback || t("botanistDashboard.noOfficerNoteProvided")}</Text></View>
       <TouchableOpacity style={styles.correctionEditButton} onPress={() => openCorrection(task)} accessibilityRole="button" accessibilityLabel={label}><Text style={styles.correctionEditButtonText}>{label}</Text></TouchableOpacity>

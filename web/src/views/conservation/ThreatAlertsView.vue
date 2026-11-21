@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ActionFeedback from '../../components/ActionFeedback.vue'
+import { useI18n } from 'vue-i18n'
 import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -16,12 +18,15 @@ import { SENSOR_METRICS, loadAlertContext, loadCurrentAssignments, assignedPlant
 import { alertSource, alertTypeLabel, alertStatusLabel, sensorUnit, sensorMetricLabel, threatAlertDate, threatAlertDay } from '../../utils/threatAlertDisplay'
 import {
   loadCanonicalAlertQueue,
+  loadCanonicalAlert,
   saveAlertResponse,
   ThreatAlertApiError,
   type AlertResponseStatus,
   type CanonicalThreatAlert,
 } from '../../services/threatAlerts'
 
+const { t } = useI18n()
+const successNotice = ref(false), successSequence = ref(0)
 const { ct, locale } = useConservationText()
 const dt = (value?: string | null) => threatAlertDate(value, locale.value)
 const route = useRoute()
@@ -63,6 +68,9 @@ let assignmentController: AbortController | null = null, evidenceController: Abo
 let responseNameRequest = 0
 const assignmentFor = (alert: CanonicalThreatAlert) => assignmentRows.value[alert.id]?.device_id === alert.deviceId ? assignmentRows.value[alert.id]! : unavailableAssignment(alert.deviceId)
 const selectedAssignment = computed(() => evidence.value && evidence.value.alert.id === selectedAlert.value?.id ? evidence.value.current_assignment : selectedAlert.value ? assignmentFor(selectedAlert.value) : undefined)
+const savedThreshold = computed(() => evidence.value?.historical_threshold)
+const savedPlant = computed(() => evidence.value?.plant_at_detection)
+const savedPlantLabel = computed(() => savedPlant.value?.plant_id ? `PL${savedPlant.value.plant_id.padStart(3, '0')}` : null)
 const eventReadings = computed(() => SENSOR_METRICS.filter(metric => metric !== 'sound' && evidence.value?.reading.state === 'verified' && Object.hasOwn(evidence.value.reading.values || {}, metric))
   .map(metric => ({ metric, value: evidence.value!.reading.values![metric]! })))
 const uncertainAlerts = new Set<string>()
@@ -78,6 +86,7 @@ const typeText = (alert: CanonicalThreatAlert) => ct(alertTypeLabel(alert.metric
 const reviewBlocked = computed(() => isSavingResponse.value || isVerifying.value || isRefreshing.value || verificationRequired.value || inspectionRequired.value || selectedUnavailable.value || !eligible() || !['New','Reviewing'].includes(selectedAlert.value?.status || ''))
 const primaryLabel = computed(() => responseStatus.value === 'Resolved' ? 'Resolve Alert' : selectedAlert.value?.status === 'New' ? 'Start Review' : 'Save Response')
 function closeAlert() {
+  successNotice.value = false
   resetEvidence()
   resetCameraEvidence()
   selectionGeneration++; isVerifying.value = false; selectedAlert.value = null; responseNote.value = ''; responseError.value = ''; responseFeedback.value = ''
@@ -191,8 +200,8 @@ async function loadCameraEvidence(alert: CanonicalThreatAlert) {
       event.eventType === alert.metric && Date.parse(event.detectedAt) === Date.parse(alert.detectedAt)) ?? null
     if (match?.videoUrl !== cameraEvent.value?.videoUrl) playbackError.value = false
     cameraEvent.value = match; cameraHasMore.value = result.hasMore
-  } catch (error) {
-    if (current()) cameraError.value = error instanceof Error ? error.message : ct('Unable to retrieve camera events.')
+  } catch {
+    if (current()) cameraError.value = ct('Unable to retrieve camera events.')
   } finally { if (current()) { cameraLoading.value = false; cameraController = null } }
 }
 async function loadEvidence(alert: CanonicalThreatAlert) {
@@ -235,6 +244,20 @@ const selectedAlertId = () => {
   if (alert) openAlert(alert)
 }
 
+// An exact canonical bookmark remains reachable outside the newest-500 queue.
+async function withLinkedAlert(result: Awaited<ReturnType<typeof loadCanonicalAlertQueue>>, signal?: AbortSignal) {
+  const id = selectedAlert.value?.id || (typeof route.query.alert === 'string' ? route.query.alert : '')
+  if (id && !result.alerts.some(row => row.id === id)) {
+    try {
+      const alert = await loadCanonicalAlert(id, signal)
+      return { ...result, alerts: [...result.alerts, alert] }
+    } catch (error) {
+      if (!(error instanceof ThreatAlertApiError && error.status === 404 && selectedAlert.value?.id === id)) throw error
+    }
+  }
+  return result
+}
+
 function applyQueue(result: Awaited<ReturnType<typeof loadCanonicalAlertQueue>>, inspectChanges = true) {
   alerts.value = result.alerts
   queueMeta.value = { alertsCapped: result.alertsCapped, historyCapped: result.historyCapped }
@@ -261,7 +284,7 @@ function loadAlerts(background = false): Promise<void> {
   errorMessage.value = ''; refreshError.value = ''
   const work = (async () => {
     try {
-      const result = await loadCanonicalAlertQueue(controller.signal)
+      const result = await withLinkedAlert(await loadCanonicalAlertQueue(controller.signal), controller.signal)
       if (!current()) return
       applyQueue(result); hasLoaded.value = true
       if (!background) selectedAlertId()
@@ -282,7 +305,10 @@ onMounted(() => {
   if (eligible()) poll.start()
   else { isLoading.value = false; errorMessage.value = ct('Verify your session before viewing alerts.') }
 })
-watch(() => [route.query.alert, route.query.device, route.query.reading], () => { closeAlert(); selectedAlertId() })
+watch(() => [route.query.alert, route.query.device, route.query.reading], () => {
+  closeAlert(); selectedAlertId()
+  if (route.query.alert && !selectedAlert.value) void loadAlerts(false)
+})
 
 const statusOptions = ['New', 'Reviewing', 'Resolved']
 const filteredAlerts = computed(() => displayedAlerts.value.filter(alert => {
@@ -312,7 +338,9 @@ async function verifyResponse() {
   const current = () => !disposed && eligible() && token === generation && selection === selectionGeneration && selectedAlert.value?.id === id && account === accountKey()
   isVerifying.value = true
   try {
-    const result = await loadCanonicalAlertQueue()
+    const queue = await loadCanonicalAlertQueue()
+    if (!current()) return
+    const result = await withLinkedAlert(queue)
     if (!current()) return
     applyQueue(result, false)
     if (selectedUnavailable.value) throw Error('Unavailable')
@@ -345,13 +373,15 @@ const submitResponse = async () => {
   try {
     await saveAlertResponse(id, responseNote.value, responseStatus.value)
     if (!current()) return
-    committed = true
-    const result = await loadCanonicalAlertQueue()
+    committed = true; successSequence.value++; successNotice.value = true
+    const queue = await loadCanonicalAlertQueue()
+    if (!current()) return
+    const result = await withLinkedAlert(queue)
     if (!current()) return
     applyQueue(result, false)
     if (selectedUnavailable.value) throw Error('Unavailable')
     uncertainAlerts.delete(id); verificationRequired.value = false; inspectionRequired.value = false
-    responseNote.value = ''; responseFeedback.value = ct('Response saved and verified.')
+    responseNote.value = ''; responseFeedback.value = ''
   } catch (error) {
     if (!current()) return
     verificationRequired.value = true
@@ -362,7 +392,7 @@ const submitResponse = async () => {
     } else if (error instanceof ThreatAlertApiError && [401,403].includes(error.status)) {
       clearPrivate(); poll?.stop(); errorMessage.value = ct('Verify your session before viewing alerts.')
     } else if (!committed && error instanceof ThreatAlertApiError && error.status === 400) {
-      uncertainAlerts.delete(id); verificationRequired.value = false; responseError.value = error.message
+      uncertainAlerts.delete(id); verificationRequired.value = false; responseError.value = t('officerFeedback.validation')
     } else {
       responseError.value = ct(committed ? 'Response saved, but latest data could not be verified. Retry reload before responding again.' : 'The save outcome is uncertain. Retry reload before responding again; your note is preserved.')
     }
@@ -422,10 +452,24 @@ const submitResponse = async () => {
           <dl class="evidence-fields"><div><dt>{{ ct('Alert ID') }}</dt><dd><MonitoringIdentifier :value="selectedAlert.id" :labels="alertLabels" /></dd></div><div><dt>{{ ct('Alert Type') }}</dt><dd>{{ typeText(selectedAlert) }}</dd></div><div><dt>{{ ct('Detected At') }}</dt><dd>{{ dt(selectedAlert.detectedAt) }}</dd></div><div><dt>{{ ct('Created At') }}</dt><dd>{{ dt(selectedAlert.createdAt) }}</dd></div><div><dt>{{ ct('Device') }}</dt><dd><MonitoringIdentifier :value="selectedAlert.deviceId" :labels="deviceLabels" /></dd></div><div v-if="selectedAlert.readingId"><dt>{{ ct('Reading Reference') }}</dt><dd><MonitoringIdentifier :value="selectedAlert.readingId" :labels="readingLabels" /></dd></div><div v-if="alertSource(selectedAlert) === 'Camera'"><dt>{{ ct('Camera Reference') }}</dt><dd><MonitoringIdentifier :value="selectedAlert.cameraId" :labels="cameraLabels" /></dd></div></dl>
           <p class="evidence-note">{{ ct('Detection time is the recorded alert time and may represent ingestion, not sensor capture.') }}</p>
         </section>
-        <section class="investigation-section"><h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19C1 7 11 3 21 3c0 10-4 20-16 16Zm-2 2L17 7" /></svg>{{ ct('Plant & Location') }}</h3><dl class="evidence-fields"><div><dt>{{ ct('Current Assigned Plant') }}</dt><dd><RouterLink v-if="assignedPlantLabel(selectedAssignment)" :to="`/plant/${selectedAssignment?.plant_id}`" class="assigned-plant-chip" :aria-label="`${ct('Current Assigned Plant')}: ${assignedPlantLabel(selectedAssignment)}`"><svg class="plant-chip-leaf" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19C1 7 11 3 21 3c0 10-4 20-16 16Zm-2 2L17 7" /></svg><span>{{ assignedPlantLabel(selectedAssignment) }}</span><svg class="plant-chip-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h11v11M19 5 5 19" /></svg></RouterLink><span v-else>{{ ct(selectedAssignment?.state === 'not_linked' ? 'Not linked' : 'Unavailable') }}</span></dd></div><div><dt>{{ ct('Device') }}</dt><dd><MonitoringIdentifier :value="selectedAlert.deviceId" :labels="deviceLabels" /></dd></div></dl><p class="evidence-note">{{ ct('This is the current device assignment, not necessarily the Plant assigned when the alert occurred. Event-time location is unavailable.') }}</p></section>
+        <section class="investigation-section"><h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19C1 7 11 3 21 3c0 10-4 20-16 16Zm-2 2L17 7" /></svg>{{ ct('Plant & Location') }}</h3><dl class="evidence-fields"><div><dt>{{ ct('Current Assigned Plant') }}</dt><dd><RouterLink v-if="assignedPlantLabel(selectedAssignment)" :to="`/plant/${selectedAssignment?.plant_id}`" class="assigned-plant-chip" :aria-label="`${ct('Current Assigned Plant')}: ${assignedPlantLabel(selectedAssignment)}`"><svg class="plant-chip-leaf" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19C1 7 11 3 21 3c0 10-4 20-16 16Zm-2 2L17 7" /></svg><span>{{ assignedPlantLabel(selectedAssignment) }}</span><svg class="plant-chip-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h11v11M19 5 5 19" /></svg></RouterLink><span v-else>{{ ct(selectedAssignment?.state === 'not_linked' ? 'Not linked' : 'Unavailable') }}</span></dd></div><div><dt>{{ ct('Device') }}</dt><dd><MonitoringIdentifier :value="selectedAlert.deviceId" :labels="deviceLabels" /></dd></div></dl><p v-if="!savedPlant" class="evidence-note">{{ ct('This is the current device assignment, not necessarily the Plant assigned when the alert occurred. Event-time location is unavailable.') }}</p></section>
         <section v-if="alertSource(selectedAlert) === 'Sensor'" class="investigation-section"><h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>{{ ct('Sensor Evidence') }}</h3>
-          <dl class="evidence-fields"><div><dt>{{ ct('Triggering Sensor') }}</dt><dd>{{ ct(sensorMetricLabel(selectedAlert.metric)) }}</dd></div><div><dt>{{ ct('Sensor reading') }}</dt><dd class="reading-value">{{ selectedAlert.value }} <span>{{ ct(sensorUnit(selectedAlert.metric) || 'Unit unavailable') }}</span></dd></div><div><dt>{{ ct('Configured triggering threshold') }}</dt><dd>{{ ct('Threshold unavailable') }}</dd></div><div><dt>{{ ct('Reading unit') }}</dt><dd>{{ ct(sensorUnit(selectedAlert.metric) || 'Unit unavailable') }}</dd></div><div><dt>{{ ct('Amount exceeding threshold') }}</dt><dd>{{ ct('Unavailable') }}</dd></div></dl>
-          <p class="evidence-note">{{ ct('The threshold at detection was not supplied. Current device settings are not historical evidence.') }}</p>
+          <dl class="evidence-fields">
+            <div><dt>{{ ct('Triggering Sensor') }}</dt><dd>{{ ct(sensorMetricLabel(selectedAlert.metric)) }}</dd></div>
+            <div><dt>{{ ct('Sensor reading') }}</dt><dd class="reading-value">{{ selectedAlert.value }} <span>{{ ct(sensorUnit(selectedAlert.metric) || 'Unit unavailable') }}</span></dd></div>
+            <div><dt>{{ ct('Configured triggering threshold') }}</dt><dd v-if="savedThreshold">{{ ct(savedThreshold.direction === 'low' ? 'Minimum' : 'Maximum') }}: {{ savedThreshold.limit }} {{ ct(sensorUnit(selectedAlert.metric) || 'Unit unavailable') }}</dd><dd v-else>{{ ct('Threshold unavailable') }}</dd></div>
+            <div><dt>{{ ct('Reading unit') }}</dt><dd>{{ ct(sensorUnit(selectedAlert.metric) || 'Unit unavailable') }}</dd></div>
+            <div><dt>{{ ct('Amount exceeding threshold') }}</dt><dd>{{ savedThreshold ? Math.abs(selectedAlert.value - savedThreshold.limit) : ct('Unavailable') }}</dd></div>
+            <template v-if="savedThreshold">
+              <div><dt>{{ ct('Violation') }}</dt><dd>{{ ct(savedThreshold.direction === 'low' ? 'Below minimum' : 'Above maximum') }}</dd></div>
+              <div><dt>{{ ct('Minimum') }}</dt><dd>{{ savedThreshold.min ?? ct('Not configured') }}</dd></div>
+              <div><dt>{{ ct('Maximum') }}</dt><dd>{{ savedThreshold.max ?? ct('Not configured') }}</dd></div>
+              <div><dt>{{ ct('Plant at detection') }}</dt><dd><RouterLink v-if="savedPlantLabel" :to="`/plant/${savedPlant?.plant_id}`">{{ savedPlantLabel }}</RouterLink><span v-else>{{ ct(savedPlant?.state === 'not_linked' ? 'Not linked' : 'Unavailable') }}</span></dd></div>
+              <div><dt>{{ ct('Captured at') }}</dt><dd>{{ dt(evidence?.reading.captured_at) }}</dd></div>
+            </template>
+          </dl>
+          <p v-if="savedThreshold" class="evidence-note">{{ ct('Saved at detection. Later threshold or Plant assignment changes do not alter this evidence.') }}</p>
+          <p v-else class="evidence-note">{{ ct('The threshold at detection was not supplied. Current device settings are not historical evidence.') }}</p>
           <h4 class="frame-heading">{{ ct('Same-event sensor readings') }}</h4>
           <p class="evidence-note">{{ ct('Values belong to one stored frame. Sensors may have been sampled at different instants.') }}</p>
           <p v-if="evidenceLoading" class="evidence-note" role="status">{{ ct('Loading exact reading evidence...') }}</p>
@@ -454,7 +498,7 @@ const submitResponse = async () => {
         </section>
         <section v-else class="investigation-section"><h3>{{ ct('Alert Evidence') }}</h3><p class="evidence-note">{{ ct('Source-specific evidence is unavailable.') }}</p><dl class="evidence-fields"><div><dt>{{ ct('Metric Value') }}</dt><dd>{{ selectedAlert.value }}</dd></div></dl></section>
         <section class="investigation-section response-history"><h3><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v13H8l-4 4V4Z" /><path d="M8 8h8M8 12h5" /></svg>{{ ct('Response History') }}</h3>
-          <p class="evidence-note">{{ ct('Newest first. History covers responses returned by the service.') }}</p><p v-if="queueMeta.historyCapped" class="alert-notice" role="status">{{ ct('Response history may be incomplete because the service limit was reached.') }}</p>
+          <p class="evidence-note">{{ ct('Newest first. History covers responses returned by the service.') }}</p><p v-if="queueMeta.historyCapped || selectedAlert.responseHistoryCapped" class="alert-notice" role="status">{{ ct('Response history may be incomplete because the service limit was reached.') }}</p>
           <div v-if="!selectedAlert.responses.length" class="evidence-unavailable"><strong>{{ ct('No response history recorded.') }}</strong><span>{{ ct('No responses are present in the loaded history.') }}</span></div>
           <ol v-else class="response-timeline"><li v-for="response in [...selectedAlert.responses].sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))" :key="response.id"><div class="response-meta"><strong>{{ statusText(response.status) }}</strong><time :datetime="response.createdAt">{{ dt(response.createdAt) }}</time></div><p>{{ response.note }}</p><span v-if="responseActorName(response.officerSubject)" class="response-actor">{{ responseActorName(response.officerSubject) }}</span><MonitoringIdentifier v-else :value="response.officerSubject" :labels="subjectLabels" /></li></ol>
         </section>
@@ -465,6 +509,7 @@ const submitResponse = async () => {
         <div v-if="verificationRequired" class="alert-notice" role="status"><p>{{ ct('Verify the latest alert before another response.') }}</p><button type="button" class="action-button" :disabled="isSavingResponse || isVerifying || isRefreshing" @click="verifyResponse">{{ ct(isVerifying ? 'Verifying...' : 'Retry reload') }}</button></div>
         <div v-if="inspectionRequired && !verificationRequired" class="alert-notice" role="status"><p>{{ ct('Inspect the latest alert and history before another response.') }}</p><button type="button" class="action-button" :disabled="isVerifying || selectedUnavailable" @click="inspectionRequired = false">{{ ct('I have inspected the latest alert') }}</button></div>
         <label class="field"><span>{{ ct('Response Status') }}</span><select v-officer-dropdown v-model="responseStatus" :disabled="reviewBlocked"><option value="Reviewing">{{ ct('Under Review') }}</option><option value="Resolved">{{ ct('Resolved') }}</option></select></label>
+        <ActionFeedback v-if="successNotice" :key="successSequence" :feedback-id="successSequence" variant="success" :message="t('officerFeedback.responseSaved')" @dismiss="successNotice = false" />
         <label class="field response-note"><span>{{ ct('Response Note') }} <span aria-hidden="true">*</span></span><textarea v-model="responseNote" maxlength="4000" :disabled="isSavingResponse || isVerifying || selectedAlert.status === 'Resolved' || selectedUnavailable" :placeholder="ct('Describe your observation and follow-up action.')" :aria-label="ct('Response Note')" aria-required="true"></textarea><small>{{ responseNote.length }} / 4,000</small></label>
         <p v-if="responseError" class="state-message error-state" role="alert">{{ responseError }}</p><p v-if="responseFeedback" class="review-feedback" role="status" aria-live="polite">{{ responseFeedback }}</p>
         <div class="review-actions"><button class="action-button" type="button" @click="closeAlert">{{ ct('Close') }}</button><button class="primary-button" type="button" :disabled="reviewBlocked || !responseNote.trim()" @click="submitResponse">{{ ct(isSavingResponse ? 'Saving...' : primaryLabel) }}</button></div>

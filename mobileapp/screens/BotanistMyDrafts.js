@@ -34,6 +34,23 @@ export function filterBotanistDrafts(drafts, category = "all", query = "") {
   return drafts.filter((draft) => (category === "all" || draftCategory(draft) === category) &&
     (!needle || `${draftLabel(draft)} ${draftDescription(draft)} ${draft.target_id ?? ""} ${draft.client_key ?? ""}`.toLocaleLowerCase().includes(needle)));
 }
+export function draftSavedTime(draft) {
+  for (const value of [draft?.saved_at, draft?.updated_at, draft?.created_at]) {
+    if (typeof value !== "number" && !(typeof value === "string" && value.trim())) continue;
+    const time = new Date(value).getTime();
+    if (Number.isFinite(time)) return time;
+  }
+  return null;
+}
+export function sortBotanistDraftsBySavedTime(drafts) {
+  return [...drafts].sort((a, b) => {
+    const timeA = draftSavedTime(a), timeB = draftSavedTime(b);
+    if (timeA === null || timeB === null) {
+      if (timeA !== timeB) return timeA === null ? 1 : -1;
+    } else if (timeA !== timeB) return timeB - timeA;
+    return String(a.client_key ?? "").localeCompare(String(b.client_key ?? ""));
+  });
+}
 function draftLabel(draft) {
   const keys = { "add-plant": "botanistDrafts.addPlant", "add-species": "botanistDrafts.addSpecies", "edit-plant": "botanistDrafts.editPlant",
     "edit-species": "botanistDrafts.editSpecies", "correct-observation": "botanistDrafts.correctObservation",
@@ -146,19 +163,13 @@ export default function BotanistMyDrafts({ route, navigation }) {
       } catch (error) { setState((old) => ({ ...old, error: error.message || t("botanistDrafts.deleteFailed") })); }
     })(); } },
   ]);
-  const savedTime = (draft) => {
-    const value = draft.saved_at ?? draft.updated_at;
-    const time = typeof value === "number" || typeof value === "string" && value.trim() ? new Date(value).getTime() : NaN;
-    return Number.isFinite(time) ? time : null;
-  };
   const formatSaved = (draft) => {
-    const time = savedTime(draft);
+    const time = draftSavedTime(draft);
     if (time === null) return t("botanistDrafts.notAvailable");
     const date = new Date(time), two = (value) => String(value).padStart(2, "0");
     return `${date.getFullYear()}/${two(date.getMonth() + 1)}/${two(date.getDate())}, ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
   };
-  const visibleDrafts = filterBotanistDrafts(state.drafts, category, query).slice()
-    .sort((a, b) => (savedTime(b) ?? -Infinity) - (savedTime(a) ?? -Infinity) || String(a.client_key).localeCompare(String(b.client_key)));
+  const visibleDrafts = sortBotanistDraftsBySavedTime(filterBotanistDrafts(state.drafts, category, query));
   const categories = ["all", "plant-records", "species-requests", "observations", "corrections"];
   const badgeLabel = (draft) => {
     const target = draftBadgeTarget(draft);

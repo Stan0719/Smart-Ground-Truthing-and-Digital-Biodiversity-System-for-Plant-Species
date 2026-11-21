@@ -1,3 +1,4 @@
+import * as officerActionFeedback from '../src/services/officerActionFeedback.ts'
 import { conservationBadgeStyle, conservationBadgePalette } from '../src/utils/conservationBadge.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -91,6 +92,7 @@ function harness(fetchHandler, query = {}, authUser = { id: 'officer', role: 'Co
     },
     require(name) {
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
+      if (name.endsWith('officerActionFeedback')) return officerActionFeedback
       if (name === 'vue') return {
         ...vue,
         onMounted() {},
@@ -122,7 +124,7 @@ function harness(fetchHandler, query = {}, authUser = { id: 'officer', role: 'Co
           if (!response.ok) {
             const message = result?.message || result?.error ||
               (response.status === 403 ? 'You do not have permission to manage species.' : `Species request failed (${response.status}).`)
-            throw Error(message)
+            throw new integration.SpeciesApiError(message,response.status)
           }
           return result
         },
@@ -236,7 +238,7 @@ test('taxonomy failure disables only Genus; retry restores it without changing s
   try {
     await Promise.all([h.state.loadSpecies(), h.state.loadTaxonomy()])
     await h.state.openEdit(h.state.species.value[0]); await flush()
-    assert.equal(h.state.taxonomyError.value, 'Access denied.')
+    assert.equal(h.state.taxonomyError.value, 'You do not have permission to perform this action.')
     assert.equal(formSelect('Genus').props.disabled, true)
     assert.equal(formSelect('Conservation Status').props.disabled, false)
     assert.ok(nodes(formSelect('Conservation Status')).some(node => node.type === 'option' && node.props?.value === 'Vulnerable'))
@@ -344,7 +346,7 @@ test('delete requires confirmation, uses exact endpoint, and preserves row on co
       rows = []
       return Response.json({ deleted: true })
     }
-    return Response.json({ species: rows })
+    return Response.json({ species: url === '/api/species/3' ? rows[0] : rows })
   })
   try {
     await h.state.loadSpecies()
@@ -352,10 +354,11 @@ test('delete requires confirmation, uses exact endpoint, and preserves row on co
     assert.equal(h.state.modal.value, 'delete')
     assert.equal(h.calls.filter((call) => call.options.method === 'DELETE').length, 0)
     await h.state.remove()
-    assert.match(h.state.mutationError.value, /referenced by plant records/)
+    assert.equal(h.state.mutationError.value, 'This species is used by Plant records and cannot be deleted.')
     assert.equal(h.state.species.value.length, 1)
     assert.equal(h.state.modal.value, 'delete')
     conflict = false
+    await h.state.refreshConflict()
     await h.state.remove()
     assert.equal(h.state.modal.value, null)
     assert.equal(h.state.species.value.length, 0)
@@ -610,7 +613,7 @@ test('unavailable taxonomy retains its meaningful error and focuses recovery wit
     const dom = validationDom(h, { genusDisabled: true })
     await h.state.save()
     assert.equal(h.state.invalidFields.value.length, 1)
-    assert.match(h.state.formErrors.value.genusId, /Taxonomy selection is unavailable: Access denied/)
+    assert.match(h.state.formErrors.value.genusId, /Taxonomy selection is unavailable: You do not have permission/)
     assert.equal(h.state.formErrors.value.conservationStatus, undefined)
     assert.equal(dom.focused[0].name, 'genusId-recovery')
     assert.ok(h.calls.every(call => call.options.method === 'GET'))

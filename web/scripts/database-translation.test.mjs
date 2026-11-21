@@ -3,6 +3,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
 
+const translationHash = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(b=>b.toString(16).padStart(2,'0')).join('')
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 async function waitFor(predicate, message) {
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -33,6 +34,7 @@ test('same-locale field registration does not cancel an active translation reque
   const server = await createServer({
     root: fileURLToPath(new URL('..', import.meta.url)),
     configFile: false,
+    envDir: false,
     plugins: [],
     logLevel: 'silent',
     server: { middlewareMode: true },
@@ -51,17 +53,18 @@ test('same-locale field registration does not cancel an active translation reque
 
   const { i18n } = await server.ssrLoadModule('/src/i18n.ts')
   const translation = await server.ssrLoadModule('/src/services/databaseTranslation.ts')
+  translation.configureDatabaseTranslation(i18n.global.locale)
   const requests = []
   let releaseFirst
   globalThis.fetch = (url, options) => new Promise((resolve) => {
     requests.push({ url, options, resolve })
     if (requests.length === 1) releaseFirst = () => resolve(new Response(JSON.stringify({
       locale: 'ms',
-      translations: [{ recordType: 'species', recordId: '19', fieldName: 'description', text: 'Huraian diterjemahkan.' }],
+      translations: [{ recordType: 'species', recordId: '19', fieldName: 'description', sourceHash: JSON.parse(options.body).entries[0].sourceHash, text: 'Huraian diterjemahkan.' }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     else resolve(new Response(JSON.stringify({
       locale: 'ms',
-      translations: [{ recordType: 'species', recordId: '20', fieldName: 'description', text: 'Huraian kedua.' }],
+      translations: [{ recordType: 'species', recordId: '20', fieldName: 'description', sourceHash: JSON.parse(options.body).entries[0].sourceHash, text: 'Huraian kedua.' }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
   })
   console.info = () => {}
@@ -81,7 +84,7 @@ test('same-locale field registration does not cancel an active translation reque
 
   await waitFor(() => requests.length === 2, 'newly registered field was not requested after the active batch')
   assert.equal(requests[1].options.signal.aborted, false)
-  assert.deepEqual(JSON.parse(requests[1].options.body).entries, [{ recordType: 'species', recordId: '20', fieldName: 'description' }])
+  assert.deepEqual(JSON.parse(requests[1].options.body).entries, [{ recordType: 'species', recordId: '20', fieldName: 'description', sourceHash: await translationHash('Original second.') }])
   await waitFor(() => first.description === 'Huraian diterjemahkan.' && second.description === 'Huraian kedua.', 'returned translations did not update their reactive targets')
   translation.clearDatabaseTranslationTargets()
   i18n.global.locale.value = 'en'

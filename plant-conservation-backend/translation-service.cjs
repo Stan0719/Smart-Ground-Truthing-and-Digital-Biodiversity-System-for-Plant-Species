@@ -268,7 +268,7 @@ function createTranslationService({
       const values = ["description", "commonName"].includes(fieldName)
         ? [recordId, visibilityFor(user)]
         : [recordId, visibilityFor(user), fieldName];
-      const result = await pool.query(`SELECT s.species_id::text AS id,${expression} AS source_text
+      const result = await pool.query(`SELECT s.species_id::text AS id,to_jsonb(s)->>'revision' AS source_version,${expression} AS source_text
         FROM species s LEFT JOIN rbac_species_visibility v ON v.species_id=s.species_id
         WHERE s.species_id=$1 AND COALESCE(s.rbac_data->>'approvalStatus','Approved')='Approved'
           AND COALESCE(v.visibility,'protected')=ANY($2::text[])`, values);
@@ -278,7 +278,7 @@ function createTranslationService({
       if (!/^(?:[1-9][0-9]{0,18}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(recordId)) return null;
       const staff = permitted(user, "plants.scientific.read") || permitted(user, "plants.protected.read") || user?.role === "Administrator";
       if (fieldName === "notes" && !staff) return null;
-      const result = await pool.query(`SELECT o.id, o.content->>$2 AS source_text
+      const result = await pool.query(`SELECT o.id, o.revision::text AS source_version, o.content->>$2 AS source_text
         FROM plant_observation o
         JOIN plant_record p ON p.plant_id=o.plant_id
         LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
@@ -289,14 +289,14 @@ function createTranslationService({
     if (recordType === "review") {
       if (!permitted(user, "observations.review")) return null;
       if (!/^[A-Za-z0-9_-]{1,200}$/.test(recordId)) return null;
-      const result = await pool.query(`SELECT r.id, r.comment AS source_text
+      const result = await pool.query(`SELECT r.id, r.id::text AS source_version, r.comment AS source_text
         FROM observation_review r WHERE r.id=$1 AND NULLIF(btrim(r.comment),'') IS NOT NULL`, [recordId]);
       return result.rows[0] || null;
     }
     if (recordType === "review-comment") {
       if (!permitted(user, "observations.review")) return null;
       if (!/^(?:[1-9][0-9]{0,18}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(recordId)) return null;
-      const result = await pool.query(`SELECT r.id, r.comment AS source_text
+      const result = await pool.query(`SELECT r.id, r.id::text AS source_version, r.comment AS source_text
         FROM observation_review r JOIN plant_observation o ON o.id=r.observation_id
         WHERE r.observation_id=$1 AND NULLIF(btrim(r.comment),'') IS NOT NULL
         ORDER BY r.created_at DESC,r.id DESC LIMIT 1`, [recordId]);
@@ -361,6 +361,8 @@ function createTranslationService({
       return null;
     }
     const sourceHash = digest(source.source_text);
+    if ((entry.sourceHash !== undefined && entry.sourceHash !== sourceHash) ||
+        (entry.sourceVersion !== undefined && entry.sourceVersion !== source.source_version)) return null;
     const storedEntry = entry.recordType === "review-comment"
       ? { recordType: "review", recordId: String(source.id), fieldName: entry.fieldName }
       : { ...entry, recordId: String(source.id ?? entry.recordId) };
@@ -449,11 +451,13 @@ function createTranslationService({
     if (!Array.isArray(entries) || entries.length > MAX_ENTRIES) throw Error("Invalid translation request.");
     const unique = new Map();
     for (const entry of entries) {
-      if (!entry || !Object.keys(entry).every((key) => ["recordType", "recordId", "fieldName"].includes(key)) ||
+      if (!entry || !Object.keys(entry).every((key) => ["recordType", "recordId", "fieldName", "sourceHash", "sourceVersion"].includes(key)) ||
           typeof entry.recordType !== "string" || typeof entry.recordId !== "string" ||
           typeof entry.fieldName !== "string" || !FIELD_ALLOWLIST[entry.recordType]?.has(entry.fieldName))
         throw Error("Unsupported translation field.");
-      const key = [entry.recordType, entry.recordId, entry.fieldName].join("\u0000");
+      if ((entry.sourceHash !== undefined && (typeof entry.sourceHash !== "string" || !/^[a-f0-9]{64}$/.test(entry.sourceHash))) ||
+          (entry.sourceVersion !== undefined && (typeof entry.sourceVersion !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(entry.sourceVersion)))) throw Error("Invalid translation source binding.");
+      const key = [entry.recordType, entry.recordId, entry.fieldName, entry.sourceHash || "", entry.sourceVersion || ""].join("\u0000");
       unique.set(key, entry);
     }
     const results = [];

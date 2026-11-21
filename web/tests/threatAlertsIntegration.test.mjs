@@ -109,7 +109,7 @@ test('malformed list, malformed save and network failures are rejected distinctl
 
 test('save flow refetches canonical state and source preserves note after failures', () => {
   assert.match(page, /await saveAlertResponse\(id, responseNote\.value, responseStatus\.value\)/)
-  assert.match(page, /const result = await loadCanonicalAlertQueue\(\)/)
+  assert.match(page, /const result = await withLinkedAlert\(queue\)/)
   assert.match(page, /responseNote\.value = ''/)
   assert.match(page, /committed[\s\S]*Response saved, but latest data could not be verified/)
 })
@@ -177,6 +177,7 @@ function pageHarness({ dev = false, hostname = 'localhost', withEvidence = false
   const browserWindow = { ...browserEvents, location: { hostname }, navigator: { onLine: true }, setTimeout: (fn, delay) => { timers.set(++timerSequence, { fn, delay }); return timerSequence }, clearTimeout: id => timers.delete(id) }
   const browserDocument = { ...browserEvents, visibilityState: 'visible' }
   const context = { exports, Error, URL, AbortController, window: browserWindow, document: browserDocument, __previewModule: previewModule, require(name) {
+      if (name === 'vue-i18n') return {useI18n:()=>({t:key=>key.split('.').reduce((v,k)=>v?.[k],JSON.parse(readFileSync(new URL('../src/locales/en.json',import.meta.url),'utf8')))||key})}
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
     if (name === 'vue') return { ...vue, onMounted(fn) { mounted.push(fn) }, onBeforeUnmount(fn) { cleanup.push(fn) }, withDirectives: n => n, resolveComponent: name => ({ name }) }
     if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { listeners.add(fn); return () => listeners.delete(fn) } }
@@ -272,7 +273,7 @@ test('camera recording states refresh without losing investigation notes or inve
     nodes(h.render()).find(n => n.type === 'video').props.onError()
     assert.equal(h.state.playbackError.value, true)
     fail = true; await h.state.loadCameraEvidence(h.state.selectedAlert.value)
-    assert.match(h.state.cameraError.value, /Unable to reach/)
+    assert.equal(h.state.cameraError.value, 'Unable to retrieve camera events.')
     assert.equal(h.state.cameraEvent.value.eventId, cameraRow().id)
     assert.ok(nodes(h.render()).some(n => n.type === 'video'))
     assert.equal(h.state.responseNote.value, 'Investigation in progress')
@@ -346,6 +347,30 @@ for (const boundary of ['selection', 'logout', 'pending', 'account', 'unmount'])
     assert.equal(h.state.cameraEvent.value, null)
     assert.equal(h.state.cameraLoading.value, false)
     assert.ok(!nodes(h.render()).some(n => n.type === 'video'))
+  } finally { h.stop(); globalThis.fetch = original }
+})
+
+test('saved Sensor evidence renders original Plant, threshold, direction and capture time', async () => {
+  const h = pageHarness({ withEvidence: true }), original = globalThis.fetch
+  const fixture = sensorAlertFixture()
+  fixture.alert.reading_id = null; fixture.context.alert.reading_id = null; fixture.context.reading.id = null
+  fixture.context.reading.basis = 'alert_snapshot'; fixture.context.reading.captured_at = '2026-11-18T06:28:59Z'
+  fixture.context.historical_threshold = { min: 20, max: 35, direction: 'high', limit: 35 }
+  fixture.context.plant_at_detection = { state: 'verified', plant_id: '1' }
+  globalThis.fetch = async url => url.includes('current-assignments') ? Response.json({ contract_version: 1, assignments: [{ alert_id: fixture.alert.id, ...fixture.assignment }] })
+    : url.endsWith('/context') ? Response.json(fixture.context) : Response.json({ alerts: [fixture.alert], responses: [] })
+  try {
+    await h.state.loadAlerts(); await new Promise(setImmediate)
+    h.state.openAlert(h.state.alerts.value[0]); await new Promise(setImmediate)
+    const tree = nodes(h.render())
+    assert.ok(tree.some(n => n.props?.to === '/plant/1'))
+    assert.ok(tree.some(n => n.props?.to === '/plant/32'))
+    assert.ok(tree.some(n => n.children === 'Above maximum'))
+    assert.ok(tree.some(n => n.children === 'Plant at detection'))
+    assert.ok(tree.some(n => n.children === 'Captured at'))
+    assert.ok(!tree.some(n => n.children === 'Threshold unavailable'))
+    assert.equal(h.state.savedThreshold.value.limit, 35)
+    assert.equal(h.state.eventReadings.value[0].value, 38)
   } finally { h.stop(); globalThis.fetch = original }
 })
 
@@ -906,4 +931,36 @@ test('mounted page polling discovers alerts and updates summaries without losing
     h.browserDocument.visibilityState = 'visible'; h.events.get('visibilitychange')(); await settle(); assert.equal(calls, before + 1)
     h.changeSession({ user: null, pending: false }); assert.equal(h.timers.size, 0); assert.equal(h.state.alerts.value.length, 0); assert.equal(h.state.responseNote.value, '')
   } finally { h.stop(); globalThis.fetch = original }
+})
+
+
+test('exact older-alert bookmark loads outside the queue, retains notes/filters during polling and supports readback',async()=>{
+ const original=globalThis.fetch;const calls=[];let current=alert({id:'older-alert',status:'New'})
+ globalThis.fetch=async(url,options)=>{
+  calls.push({url,options})
+  if(url==='/api/data/alerts')return Response.json({alerts:[alert()],responses:[]})
+  if(url==='/api/data/alerts/older-alert')return Response.json({alert:current,responses:[],history_capped:false})
+  throw Error('Unexpected transport '+url)
+ }
+ const h=pageHarness()
+ try{
+  h.route.query.alert='older-alert';await vue.nextTick();await h.state.loadAlerts();await new Promise(setImmediate)
+  assert.equal(h.state.selectedAlert.value.id,'older-alert');assert.equal(h.state.alerts.value.length,2)
+  h.state.responseNote.value='Unsaved field note';h.state.status.value='New';h.state.search.value='sensor';
+  current={...current,status:'Reviewing'};await h.state.loadAlerts(true);await new Promise(setImmediate)
+  assert.equal(h.state.selectedAlert.value.status,'Reviewing');assert.equal(h.state.responseNote.value,'Unsaved field note');assert.equal(h.state.status.value,'New');assert.equal(h.state.search.value,'sensor');assert.equal(h.state.inspectionRequired.value,true)
+  assert.ok(calls.some(c=>c.url==='/api/data/alerts/older-alert'));assert.ok(calls.every(c=>!c.options?.method||c.options.method==='GET'))
+ }finally{h.stop();globalThis.fetch=original}
+})
+test('exact detail validates identity, bounds history and rejects foreign response rows',async()=>{
+ const old=globalThis.fetch
+ try{
+  for(const result of [
+   {alert:alert({id:'wrong'}),responses:[],history_capped:false},
+   {alert:alert(),responses:[{...response,alert_id:'other'}],history_capped:false},
+   {alert:alert(),responses:[],history_capped:'yes'}
+  ]){globalThis.fetch=async()=>Response.json(result);await assert.rejects(alertService.loadCanonicalAlert(alert().id),{kind:'invalid'})}
+  globalThis.fetch=async()=>Response.json({alert:alert(),responses:[response],history_capped:true});const detail=await alertService.loadCanonicalAlert(alert().id);assert.equal(detail.responseHistoryCapped,true);assert.equal(detail.responses.length,1)
+  await assert.rejects(alertService.loadCanonicalAlert('../public/1'),{status:400})
+ }finally{globalThis.fetch=old}
 })

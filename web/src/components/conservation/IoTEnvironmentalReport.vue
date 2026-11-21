@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import { vOfficerDropdown } from './officerDropdown'
 import IoTSummaryChart from './IoTSummaryChart.vue'
-import { loadCanonicalDevices, loadCanonicalHistoryPage, type IoTDevice, type IoTReading } from '../../services/iotMonitoring'
+import { loadCanonicalDevices, loadCanonicalHistoryPage, loadLatestReadings, type IoTDevice, type IoTReading } from '../../services/iotMonitoring'
 import { IoTReportError, measurementUnits, requestIoTSummary, type IoTExactRange, type IoTSummary, type Measurement } from '../../services/iotReporting'
 import type { ReportFilters } from '../../services/reporting'
 import { iotBucketLabel, iotDate, iotTimestamp } from '../../utils/iotBucketDisplay'
@@ -20,6 +20,12 @@ const reportView = ref<'graph' | 'table'>('graph')
 type TemperatureRange = 'report-period' | 'last-hour' | 'last-24-hours' | 'last-7-days' | 'last-30-days' | 'custom'
 const temperatureRange = ref<TemperatureRange>('report-period'), customStart = ref(''), customEnd = ref('')
 const liveEnabled = ref(true), liveRefreshing = ref(false), liveError = ref('')
+const liveTemperatureReading = ref<IoTReading | null>(null), temperatureRefreshing = ref(false), temperatureError = ref(false), liveNow = ref(Date.now())
+let temperatureGeneration = 0, temperatureController: AbortController | null = null
+const temperatureStale = computed(() => {
+  const timestamp = Date.parse(liveTemperatureReading.value?.recorded_at || '')
+  return !!liveTemperatureReading.value && (!Number.isFinite(timestamp) || liveNow.value - timestamp > 120000 || timestamp > liveNow.value + 1000)
+})
 const rawReadings = ref<IoTReading[]>([]), rawPage = ref(0), rawHasMore = ref(false), rawLoading = ref(false), rawError = ref('')
 const report = ref<IoTSummary | null>(null), loading = ref(false), error = ref(''), feedback = ref(''), exporting = ref(false)
 const chart = ref<InstanceType<typeof IoTSummaryChart> | null>(null)
@@ -31,7 +37,7 @@ const loadedSelection = ref('')
 const canExport = computed(() => !!report.value && measurements.includes(measurement.value) && report.value.measurement.key === measurement.value && !loading.value && !liveRefreshing.value && !exporting.value && !error.value && loadedSelection.value === selectionKey())
 const relativeRanges: TemperatureRange[] = ['last-hour', 'last-24-hours', 'last-7-days', 'last-30-days']
 const canLive = computed(() => measurement.value === 'temperature' && relativeRanges.includes(temperatureRange.value))
-const liveActive = computed(() => canLive.value && liveEnabled.value)
+const liveActive = computed(() => measurement.value === 'temperature' && liveEnabled.value)
 function klDate(instant: string) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(instant)).map(part => [part.type, part.value]))
   return `${parts.year}-${parts.month}-${parts.day}`
@@ -74,6 +80,7 @@ async function load() {
   const signal = controller.signal
   report.value = null; error.value = ''; liveError.value = ''; feedback.value = ''; loading.value = true; emit('busy', true)
   rawController?.abort(); rawGeneration++; rawLoading.value = false; rawReadings.value = []; rawPage.value = 0; rawHasMore.value = false; rawError.value = ''
+  temperatureController?.abort(); temperatureGeneration++; temperatureRefreshing.value = false; liveTemperatureReading.value = null; temperatureError.value = false
   try {
     const options = await loadCanonicalDevices(signal)
     if (disposed || token !== generation) return
@@ -83,6 +90,7 @@ async function load() {
       device.value = preferred?.sensor_id || options[0]?.sensor_id || ''
     }
     if (!device.value) return
+    void refreshLiveTemperature()
     const requestKey = selectionKey(), selected = requestSelection()
     if (!selected) { error.value = 'invalidRange'; return }
     const result = await requestIoTSummary(selected.filters, device.value, measurement.value, signal, selected.range)
@@ -116,8 +124,28 @@ async function loadRawPage(reset = false) {
     if (!disposed && token === rawGeneration && !(cause instanceof Error && cause.name === 'AbortError')) rawError.value = 'unavailable'
   } finally { if (!disposed && token === rawGeneration) rawLoading.value = false }
 }
+async function refreshLiveTemperature() {
+  liveNow.value = Date.now()
+  if (disposed || !liveActive.value || temperatureRefreshing.value || !device.value || typeof document === 'undefined' || document.visibilityState !== 'visible') return
+  const selectedDevice = devices.value.find(item => item.sensor_id === device.value)
+  if (!selectedDevice) return
+  const token = ++temperatureGeneration, selectedId = device.value
+  temperatureController = new AbortController()
+  temperatureRefreshing.value = true
+  try {
+    // limit=1 returns only the transient live reading; it never falls back to stored history.
+    const result = await loadLatestReadings([selectedDevice], temperatureController.signal)
+    if (disposed || token !== temperatureGeneration || device.value !== selectedId || measurement.value !== 'temperature') return
+    liveTemperatureReading.value = result[0]?.latest_reading ?? null
+    temperatureError.value = false
+  } catch {
+    if (!disposed && token === temperatureGeneration && device.value === selectedId && measurement.value === 'temperature') temperatureError.value = true
+  } finally {
+    if (!disposed && token === temperatureGeneration) { temperatureRefreshing.value = false; liveNow.value = Date.now() }
+  }
+}
 async function refreshLive() {
-  if (!liveActive.value || loading.value || liveRefreshing.value || !device.value || typeof document === 'undefined' || document.visibilityState !== 'visible') return
+  if (!canLive.value || !liveActive.value || loading.value || liveRefreshing.value || !device.value || typeof document === 'undefined' || document.visibilityState !== 'visible') return
   const selected = requestSelection()
   if (!selected) return
   const token = ++generation, requestKey = selectionKey()
@@ -134,9 +162,10 @@ async function refreshLive() {
   } finally { if (!disposed && token === generation) liveRefreshing.value = false }
 }
 function toggleLive() {
-  if (!canLive.value) return
+  if (measurement.value !== 'temperature') return
   liveEnabled.value = !liveEnabled.value
-  if (liveEnabled.value) { liveError.value = ''; void refreshLive() }
+  if (liveEnabled.value) { liveError.value = ''; void refreshLive(); void refreshLiveTemperature() }
+  else { temperatureController?.abort(); temperatureGeneration++; temperatureRefreshing.value = false }
 }
 function changeTemperatureRange() {
   liveError.value = ''
@@ -146,14 +175,15 @@ function changeReportView(view: 'graph' | 'table') {
   reportView.value = view
   if (view === 'table' && measurement.value === 'temperature') void loadRawPage(true)
 }
-function onVisibilityChange() { if (document.visibilityState === 'visible') void refreshLive() }
+function onVisibilityChange() { if (document.visibilityState === 'visible') { void refreshLive(); void refreshLiveTemperature() } }
 watch(() => props.filters, () => { temperatureRange.value = 'report-period'; void load() }, { deep: true, immediate: true, flush: 'sync' })
 onMounted(() => {
   document.addEventListener('visibilitychange', onVisibilityChange)
-  liveTimer = setInterval(() => { void refreshLive() }, 30000)
+  liveTimer = setInterval(() => { void refreshLive(); void refreshLiveTemperature() }, 30000)
 })
 onBeforeUnmount(() => {
   disposed = true; generation++; rawGeneration++; controller?.abort(); rawController?.abort(); if (liveTimer) clearInterval(liveTimer)
+  temperatureGeneration++; temperatureController?.abort()
   document.removeEventListener('visibilitychange', onVisibilityChange); emit('busy', false)
 })
 const format = (value: number | null) => value === null ? '—' : new Intl.NumberFormat(locale.value, { maximumFractionDigits: 4 }).format(value)
@@ -183,16 +213,27 @@ const cards = computed(() => report.value ? isMovement.value ? [
   { key: 'detectionRate', value: report.value.summary.validMeasurements ? report.value.summary.detectedSampleCount! / report.value.summary.validMeasurements * 100 : null, unit: '%' },
 ] : measurement.value === 'temperature' ? [
   { key: 'validReadings', value: report.value.summary.validMeasurements, unit: '' },
-  { key: 'latestTemperature', value: report.value.latestReading?.value ?? null, unit: unit.value },
+  { key: 'liveTemperature', value: liveTemperatureReading.value?.temperature_c ?? null, unit: unit.value },
   ...(['average', 'minimum', 'maximum'] as const).map(key => ({ key, value: report.value!.summary[key], unit: unit.value })),
 ] : [
   { key: 'validReadings', value: report.value.summary.validMeasurements, unit: '' },
   ...(['average', 'minimum', 'maximum'] as const).map(key => ({ key, value: report.value!.summary[key], unit: unit.value })),
 ] : [])
 const hasChart = computed(() => report.value?.buckets.some(b => b.validMeasurements > 0))
+const coverageNotes = computed(() => {
+  const c = report.value?.coverage
+  if (!c?.nativeResolutionMinutes) return ''
+  return [text('aggregateCoverage'), ...(c.omittedPartialSamples ? [text('partialCoverage')] : []), ...(c.omittedMovementSamples ? [text('movementUnavailable')] : [])].join(' ')
+})
+function cardDisplay(card: { key: string; value: number | null }) {
+  if (card.key === 'liveTemperature') return card.value === null ? text(temperatureError.value ? 'liveTemperatureUnavailable' : 'waitingForLiveTemperature') : format(card.value)
+  const r = report.value, c = r?.coverage
+  if (r && !r.summary.receivedRows && c && (c.omittedPartialSamples > 0 || c.omittedMovementSamples > 0)) return text('dataUnavailable')
+  return format(card.value)
+}
 const qualitySummary = computed(() => {
   const r = report.value
-  if (!r || !r.summary.receivedRows) return text('qualityNoRecords')
+  if (!r || !r.summary.receivedRows) return coverageNotes.value ? text('dataUnavailable') : text('qualityNoRecords')
   const s = r.summary
   const key = s.validMeasurements === 0 ? 'qualityNoneValid' : s.missingMeasurements === 0 ? 'qualityAllValid' : 'qualitySomeMissing'
   const sentence = t(`conservationPages.reports.iotSummary.${key}`, {
@@ -204,7 +245,7 @@ const qualitySummary = computed(() => {
 })
 const qualityDescription = computed(() => {
   const r = report.value
-  if (!r || !r.summary.receivedRows) return text('qualityNoRecords')
+  if (!r || !r.summary.receivedRows) return coverageNotes.value ? text('dataUnavailable') : text('qualityNoRecords')
   const key = !r.summary.validMeasurements ? 'descriptionNoneValid' : r.summary.missingMeasurements ? 'descriptionPartial' : 'descriptionAllValid'
   const sentence = t(`conservationPages.reports.iotSummary.${key}`, { measurement: metricLabel(r.measurement.key) })
   const { firstReceivedAt, lastReceivedAt } = r.observedSpan
@@ -213,7 +254,7 @@ const qualityDescription = computed(() => {
 })
 const technicalRows = computed(() => [
   { label: text('aggregation'), value: interval.value },
-  { label: text('timestampLabel'), value: `${text('receiptTime')} · ${date(report.value?.observedSpan.firstReceivedAt || null)} – ${date(report.value?.observedSpan.lastReceivedAt || null)}` },
+  { label: text('timestampLabel'), value: `${report.value?.coverage?.nativeResolutionMinutes ? text('aggregateTimestamp') : text('receiptTime')} · ${date(report.value?.observedSpan.firstReceivedAt || null)} – ${date(report.value?.observedSpan.lastReceivedAt || null)}` },
   { label: text('missingLabel'), value: text('limitations.missing_counts_apply_to_received_rows') },
   { label: text('availabilityLabel'), value: text('limitations.availability_not_calculated') },
   { label: text('average'), value: text('limitations.sample_weighted_average') },
@@ -226,11 +267,11 @@ const rows = computed(() => report.value?.buckets.map(b => [iotBucketLabel(b, re
 function exportDocument(): ReportDocument {
   const r = report.value!
   return { category: 'iot-summary', title: text('title'), period: displayPeriod.value, timezone: 'Asia/Kuala_Lumpur', generatedAt: r.generatedAt, generatedLabel: `${text('reportGenerated')}: ${date(r.generatedAt)}`,
-    statistics: cards.value.map(c => ({ label: c.key === 'validReadings' || isMovement.value ? text(c.key) : `${text(c.key)} · ${metricLabel(r.measurement.key)}`, value: c.value, display: format(c.value), unit: c.value === null ? '' : c.unit })),
+    statistics: cards.value.filter(c => c.key !== 'liveTemperature').map(c => ({ label: c.key === 'validReadings' || isMovement.value ? text(c.key) : `${text(c.key)} · ${metricLabel(r.measurement.key)}`, value: c.value, display: cardDisplay(c), unit: c.value === null ? '' : c.unit })),
     columns: headers.value, rows: rows.value, displayRows: rows.value,
     chart: isMovement.value ? r.buckets.map(b => ({ series: text('movementDetectedReadings'), point: b.startInclusive, value: b.validMeasurements ? b.detectedSampleCount! : null, unit: '' })) : r.buckets.flatMap(b => (['average', 'minimum', 'maximum'] as const).map(key => ({ series: text(key), point: b.startInclusive, value: b[key], unit: r.measurement.unit }))),
     context: [{ label: text('device'), value: `${r.device.name} (${r.device.id})` }, { label: text('metric'), value: `${metricLabel(r.measurement.key)} (${r.measurement.unit})` }, { label: text('aggregation'), value: interval.value }],
-    notes: [{ label: text('qualityTitle'), value: `${qualitySummary.value}\n${text('qualityEssential')}${isMovement.value ? `\n${text('movementCaveat')}\n${text('detectionRateNote')}` : ''}` }], statisticsColumns: 4,
+    notes: [{ label: text('qualityTitle'), value: `${qualitySummary.value}${coverageNotes.value ? `\n${coverageNotes.value}` : ''}\n${text('qualityEssential')}${isMovement.value ? `\n${text('movementCaveat')}\n${text('detectionRateNote')}` : ''}` }], statisticsColumns: 4,
   }
 }
 async function exportPdf() {
@@ -255,6 +296,7 @@ function csvDocument(): ReportDocument {
   const model = exportDocument()
   return { ...model,
     category: `iot-environmental-report-${r.measurement.key}-${r.measurement.unit}-${r.device.id.slice(0, 24)}-${r.aggregation.step}-${r.aggregation.interval}`,
+    columns: model.columns.map((heading, index) => index === 0 && coverageNotes.value ? `${heading}: ${coverageNotes.value}` : heading),
     rows: r.buckets.map(b => [
       `${iotTimestamp(b.startInclusive, locale.value, r.scope.timezone)} – ${iotTimestamp(b.endExclusive, locale.value, r.scope.timezone)} [Asia/Kuala_Lumpur; ${text('csvEndExclusive')}]`,
       r.device.name,
@@ -296,7 +338,17 @@ defineExpose({ load, exportPdf, exportCsv, exportDocument })
     <p v-else-if="!device" role="status">{{ text('noDevice') }}</p>
     <article v-else-if="report" class="iot-content">
       <header><h2>{{ text('title') }}</h2><p>{{ text('subtitle') }}</p><p>{{ text('device') }}: <strong>{{ report.device.name }}</strong> · {{ displayPeriod }} · {{ metricLabel(report.measurement.key) }} ({{ unit }})</p><p class="iot-meta">{{ text('reportGenerated') }}: {{ date(report.generatedAt) }} · {{ interval }}</p></header>
-      <div class="iot-cards"><div v-for="card in cards" :key="card.key" class="iot-card"><span>{{ text(card.key) }}<template v-if="card.key !== 'validReadings' && card.key !== 'latestTemperature' && !isMovement"> · {{ metricLabel(report.measurement.key) }}</template></span><strong>{{ format(card.value) }}<small v-if="card.unit && card.value !== null"> {{ card.unit }}</small></strong><small v-if="card.key === 'latestTemperature' && report.latestReading">{{ date(report.latestReading.recordedAt) }}</small></div></div>
+      <div class="iot-cards">
+        <div v-for="card in cards" :key="card.key" class="iot-card">
+          <span>{{ text(card.key) }}<template v-if="card.key !== 'validReadings' && card.key !== 'liveTemperature' && !isMovement"> · {{ metricLabel(report.measurement.key) }}</template></span>
+          <strong>{{ cardDisplay(card) }}<small v-if="card.unit && card.value !== null"> {{ card.unit }}</small></strong>
+          <template v-if="card.key === 'liveTemperature'">
+            <small v-if="liveTemperatureReading && Number.isFinite(Date.parse(liveTemperatureReading.recorded_at))">{{ text('lastUpdated') }}: {{ date(liveTemperatureReading.recorded_at) }}</small>
+            <small class="live-temperature-note">{{ text('liveTemperatureScope') }}</small>
+            <small v-if="temperatureError || temperatureStale || !liveEnabled" class="live-temperature-warning" role="status">{{ text(temperatureError ? 'liveTemperatureUnavailable' : !liveEnabled ? 'livePaused' : 'liveTemperatureStale') }}</small>
+          </template>
+        </div>
+      </div>
       <div class="report-view-switch" role="group" :aria-label="rt('reportView')">
         <button type="button" class="report-view-button" :class="{ active: reportView === 'graph' }" :aria-pressed="reportView === 'graph'" @click="changeReportView('graph')">{{ rt('graphView') }}</button>
         <button type="button" class="report-view-button" :class="{ active: reportView === 'table' }" :aria-pressed="reportView === 'table'" @click="changeReportView('table')">{{ rt('tableView') }}</button>
@@ -304,15 +356,15 @@ defineExpose({ load, exportPdf, exportCsv, exportDocument })
       <section v-if="measurement === 'temperature'" class="temperature-controls" :aria-label="text('temperatureControls')">
         <label><span>{{ text('rangeLabel') }}</span><select v-model="temperatureRange" @change="changeTemperatureRange"><option v-for="key in ['report-period','last-hour','last-24-hours','last-7-days','last-30-days','custom']" :key="key" :value="key">{{ text(`range.${key}`) }}</option></select></label>
         <template v-if="temperatureRange === 'custom'"><label><span>{{ text('from') }} ({{ text('malaysiaTime') }})</span><input v-model="customStart" type="datetime-local" step="60"></label><label><span>{{ text('to') }} ({{ text('malaysiaTime') }})</span><input v-model="customEnd" type="datetime-local" step="60"></label><button type="button" class="secondary-button" :disabled="!customRangeValid || loading" @click="load">{{ text('applyRange') }}</button><p v-if="!customRangeValid && (customStart || customEnd)" class="range-error" role="alert">{{ text('invalidRange') }}</p></template>
-        <div v-if="canLive" class="live-controls"><span class="live-indicator" :class="{ active: liveActive }"><i aria-hidden="true"></i>{{ liveActive ? text('liveActive') : text('livePaused') }}</span><button type="button" class="secondary-button" @click="toggleLive">{{ liveEnabled ? text('pauseUpdates') : text('resumeUpdates') }}</button><span class="iot-meta">{{ text('lastUpdated') }}: {{ date(report.generatedAt) }}<template v-if="liveRefreshing"> · {{ rt('loading') }}</template></span><p v-if="liveError" role="status">{{ text(`errors.${liveError}`) }}</p></div>
+        <div class="live-controls"><span class="live-indicator" :class="{ active: liveActive }"><i aria-hidden="true"></i>{{ liveActive ? text('liveActive') : text('livePaused') }}</span><button type="button" class="secondary-button" @click="toggleLive">{{ liveEnabled ? text('pauseUpdates') : text('resumeUpdates') }}</button><span v-if="canLive" class="iot-meta">{{ text('lastUpdated') }}: {{ date(report.generatedAt) }}<template v-if="liveRefreshing"> · {{ rt('loading') }}</template></span><p v-if="liveError" role="status">{{ text(`errors.${liveError}`) }}</p></div>
       </section>
       <section v-if="reportView === 'graph'" class="report-data-view graph-view" :aria-label="rt('graphView')">
-        <section class="iot-chart-panel"><h3>{{ isMovement ? text('movementTrend') : `${metricLabel(report.measurement.key)} · ${text('trend')}` }}</h3><IoTSummaryChart v-if="hasChart" ref="chart" :report="report" /><p v-else role="status">{{ text(report.summary.receivedRows ? 'noValid' : 'noReadings') }}</p></section>
+        <section class="iot-chart-panel"><h3>{{ isMovement ? text('movementTrend') : `${metricLabel(report.measurement.key)} · ${text('trend')}` }}</h3><IoTSummaryChart v-if="hasChart" ref="chart" :report="report" /><p v-else role="status">{{ text(!report.summary.receivedRows && coverageNotes ? 'dataUnavailable' : report.summary.receivedRows ? 'noValid' : 'noReadings') }}</p></section>
       </section>
       <section v-if="reportView === 'table'" class="report-data-view table-view" :aria-label="rt('tableView')">
-        <div v-if="measurement === 'temperature'" class="raw-readings"><h3>{{ text('rawReadings') }}</h3><div v-if="rawReadings.length" class="iot-table-scroll" role="region" tabindex="0" :aria-label="text('rawReadings')"><table><thead><tr><th scope="col">{{ text('timestampLabel') }}</th><th scope="col">{{ text('device') }}</th><th scope="col">{{ metricLabel('temperature') }} ({{ unit }})</th></tr></thead><tbody><tr v-for="reading in rawReadings" :key="reading.reading_id"><td>{{ date(reading.recorded_at) }}</td><td>{{ report.device.name }}</td><td>{{ format(reading.temperature_c) }}</td></tr></tbody></table></div><p v-else-if="rawLoading" role="status">{{ text('loadingRaw') }}</p><p v-else>{{ text('noRawReadings') }}</p><p v-if="rawError" role="status">{{ text(`errors.${rawError}`) }}</p><button v-if="rawHasMore" type="button" class="secondary-button" :disabled="rawLoading" @click="loadRawPage()">{{ rawLoading ? text('loadingRaw') : text('loadOlder') }}</button></div>
+        <div v-if="measurement === 'temperature'" class="raw-readings"><h3>{{ text('rawReadings') }}</h3><div v-if="rawReadings.length" class="iot-table-scroll" role="region" tabindex="0" :aria-label="text('rawReadings')"><table><thead><tr><th scope="col">{{ text('timestampLabel') }}</th><th scope="col">{{ text('device') }}</th><th scope="col">{{ metricLabel('temperature') }} ({{ unit }})</th></tr></thead><tbody><tr v-for="reading in rawReadings" :key="reading.reading_id"><td>{{ date(reading.recorded_at) }}</td><td>{{ report.device.name }}</td><td>{{ format(reading.temperature_c) }}</td></tr></tbody></table></div><p v-else-if="rawLoading" role="status">{{ text('loadingRaw') }}</p><p v-else>{{ text(report.coverage?.nativeResolutionMinutes ? 'individualUnavailable' : 'noRawReadings') }}</p><p v-if="rawError" role="status">{{ text(`errors.${rawError}`) }}</p><button v-if="rawHasMore" type="button" class="secondary-button" :disabled="rawLoading" @click="loadRawPage()">{{ rawLoading ? text('loadingRaw') : text('loadOlder') }}</button></div>
         <div v-if="rows.length" class="iot-table-scroll" role="region" tabindex="0" :aria-label="text('tableTitle')"><table><thead><tr><th v-for="heading in headers" :key="heading" scope="col">{{ heading }}</th></tr></thead><tbody><tr v-for="(row, index) in rows" :key="report.buckets[index]!.startInclusive"><td v-for="(cell, col) in row" :key="col" :title="col === 0 ? `${date(report.buckets[index]!.startInclusive)} – ${date(report.buckets[index]!.endExclusive)}` : undefined">{{ cell }}</td></tr></tbody></table></div>
-        <p v-else role="status">{{ text(report.summary.receivedRows ? 'noValid' : 'noReadings') }}</p>
+        <p v-else role="status">{{ text(!report.summary.receivedRows && coverageNotes ? 'dataUnavailable' : report.summary.receivedRows ? 'noValid' : 'noReadings') }}</p>
       </section>
       <aside class="iot-quality">
         <h3><span class="quality-info" aria-hidden="true">ⓘ</span>{{ text('qualityTitle') }}</h3>
@@ -320,7 +372,7 @@ defineExpose({ load, exportPdf, exportCsv, exportDocument })
           <span class="quality-badge" :class="{ 'quality-badge-valid': report.summary.validMeasurements > 0 }">{{ t('conservationPages.reports.iotSummary.validBadge', { count: format(report.summary.validMeasurements) }) }}</span>
           <span class="quality-badge">{{ t('conservationPages.reports.iotSummary.missingBadge', { count: format(report.summary.missingMeasurements) }) }}</span>
         </div>
-        <p>{{ qualityDescription }}</p><p class="quality-essential">{{ text('qualityEssential') }}</p><p v-if="isMovement" class="quality-essential">{{ text('movementCaveat') }} {{ text('detectionRateNote') }}</p>
+        <p>{{ qualityDescription }}</p><p v-if="coverageNotes" class="quality-essential" role="status">{{ coverageNotes }}</p><p class="quality-essential">{{ text('qualityEssential') }}</p><p v-if="isMovement" class="quality-essential">{{ text('movementCaveat') }} {{ text('detectionRateNote') }}</p>
         <details class="quality-details"><summary>{{ text('technicalDetails') }}<svg class="quality-chevron" aria-hidden="true" viewBox="0 0 16 16"><path d="m3 6 5 5 5-5" /></svg></summary>
           <dl><div v-for="row in technicalRows" :key="row.label"><dt>{{ row.label }}:</dt><dd>{{ row.value }}</dd></div></dl>
           <p v-for="note in extraLimitations" :key="note" class="quality-extra">{{ note }}</p><p v-if="measurement === 'movement'" class="quality-extra">{{ text('movementNote') }}</p>
@@ -358,6 +410,8 @@ header { text-align: center; margin-bottom: 24px; } h2 { margin: 0 0 8px; font-s
 .iot-cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; margin-bottom: 20px; }
 .iot-card { padding: 18px; border-radius: 10px; background: #eef5ef; min-width: 0; overflow-wrap: anywhere; }
 .iot-card span { display: block; line-height: 1.5; } .iot-card strong { display: block; margin-top: 9px; font-size: 1.65rem; line-height: 1.3; color: #123e2b; } .iot-card small { font-size: 1rem; }
+.iot-card .live-temperature-note, .iot-card .live-temperature-warning { display: block; margin-top: 6px; font-size: .8rem; line-height: 1.5; color: #61756b; }
+.iot-card .live-temperature-warning { color: #8a5b16; }
 .iot-chart-panel { border: 1px solid #dce6df; border-radius: 12px; padding: 18px; margin-bottom: 20px; min-width: 0; }
 .iot-table-scroll { overflow-x: auto; margin-block: 20px; max-width: 100%; } table { border-collapse: collapse; width: 100%; min-width: 850px; } th { background: #23553f; color: white; text-align: left; padding: 12px; font-weight: 600; } td { border-bottom: 1px solid #e2e9e4; padding: 12px; line-height: 1.5; } tbody tr:nth-child(even) { background: #f8faf8; }
 .iot-quality { background: #fff; border: 1px solid #dce2de; border-radius: 11px; padding: 16px; line-height: 1.6; margin-top: 20px; color: #252b27; }

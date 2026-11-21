@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS iot_reading_checkpoint(
     last_payload_hash TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS iot_sensor_receipt(
+  device_id TEXT NOT NULL REFERENCES plant_app.iot_device(id),
+  client_key TEXT NOT NULL CHECK(length(client_key) BETWEEN 1 AND 100),
+  payload_hash TEXT NOT NULL CHECK(payload_hash ~ '^[a-f0-9]{64}$'),
+  observed_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(device_id,client_key)
+);
+ALTER TABLE iot_sensor_receipt ENABLE ROW LEVEL SECURITY;
+
 CREATE TABLE IF NOT EXISTS iot_reading_aggregate(
     device_id TEXT NOT NULL REFERENCES iot_device(id),
     bucket_start TIMESTAMPTZ NOT NULL,

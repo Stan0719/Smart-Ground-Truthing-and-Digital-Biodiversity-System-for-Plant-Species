@@ -14,11 +14,12 @@ const officer = { id: 'fixture-officer', name: 'Fixture', role: 'Conservation Of
 function authHarness() {
   let response = () => Response.json({ user: officer })
   const auth = {}, prototype = {}, calls = []
-  vm.runInNewContext(js(read('services/auth.ts')), { exports: auth, fetch: async url => { calls.push(url); return response(url) } })
+  vm.runInNewContext(js(read('services/auth.ts')), { exports: auth, AbortSignal, fetch: async url => { calls.push(url); return response(url) } })
   vm.runInNewContext(js(read('composables/usePrototypeSession.ts')), { exports: prototype, require: name => name === 'vue' ? vue : auth })
   const { descriptor } = parse(read('components/NavigationBar.vue')), script = compileScript(descriptor, { id: 'session-navbar' })
   const scope = vue.effectScope(), exports = {}, route = vue.reactive({ path: '/species' })
   vm.runInNewContext(js(script.content), { exports, window: { removeEventListener() {} }, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount() {} }
     if (name === 'vue-router') return { useRoute: () => route, useRouter: () => ({ push() {} }) }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x }) }
@@ -73,6 +74,7 @@ function knowledgeHarness() {
   const species = [{ species_id: 6, scientific_name: 'Canonical species', family_name: 'Family A' }]
   handler = async path => path.startsWith('/species?') ? { species } : path.startsWith('/plants') ? { plants: [] } : { assets: [] }
   vm.runInNewContext(js(read('services/knowledge.ts')), { exports, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return vue
     if (name.endsWith('/auth')) return auth
     if (name.endsWith('/plants')) return { plants }
@@ -124,7 +126,7 @@ test('late catalogue results cannot restore another account and guest reads reta
 
 test('a verified catalogue refresh passes its current identity to the loader without a second session request', async () => {
   const auth = {}, helper = {}, calls = [], cleanups = []
-  vm.runInNewContext(js(read('services/auth.ts')), { exports: auth, fetch: async url => { calls.push(url); return Response.json({ user: officer }) } })
+  vm.runInNewContext(js(read('services/auth.ts')), { exports: auth, AbortSignal, fetch: async url => { calls.push(url); return Response.json({ user: officer }) } })
   vm.runInNewContext(js(read('composables/useCatalogueRefresh.ts')), { exports: helper, queueMicrotask, window: { removeEventListener() {} }, document: { removeEventListener() {} }, require: name => name === 'vue' ? { ...vue, onMounted() {}, onBeforeUnmount: fn => cleanups.push(fn) } : auth })
   let supplied = null
   const loader = helper.useCatalogueRefresh(async (current, user) => { assert.equal(current(), true); supplied = user }, () => {}, () => {})

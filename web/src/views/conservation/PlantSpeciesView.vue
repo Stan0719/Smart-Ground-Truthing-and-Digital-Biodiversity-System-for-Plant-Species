@@ -4,6 +4,7 @@ import VisibilitySelector from '../../components/conservation/VisibilitySelector
 import { computed, nextTick, onMounted, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { officerActionError } from '../../services/officerActionFeedback'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import SpeciesPhotoManager from '../../components/conservation/SpeciesPhotoManager.vue'
@@ -53,7 +54,7 @@ onScopeDispose(unsubscribePhotos)
 const editing = ref(false)
 const detailLoading = ref(false)
 const mutation = ref<'create' | 'update' | 'delete' | null>(null)
-const mutationError = ref('')
+const mutationError = ref(''), speciesConflict = ref(false)
 const deleteCancelButton = ref<HTMLButtonElement | null>(null)
 const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
 let feedbackId = 0
@@ -140,11 +141,11 @@ const visibilityLabel = (value: string) => {
   if (value === 'protected') return st('visibilityProtected')
   return st('unavailable')
 }
-const errorMessage = (error: unknown, fallback: string) =>
-  typeof error === 'object' && error !== null && 'message' in error &&
-  typeof error.message === 'string' && error.message.trim()
-    ? error.message
-    : fallback
+const errorMessage = (error: unknown, fallback: string) => {
+  const kind = officerActionError(error)
+  if (kind === 'conflict') return t('officerFeedback.' + (/referenced by plant records/i.test((error as Error)?.message || '') ? 'speciesReferenced' : 'speciesConflict'))
+  return t('officerFeedback.' + kind) || fallback
+}
 const showFeedback = (variant: 'success' | 'error', message: string) => {
   feedback.value = { id: ++feedbackId, variant, message }
 }
@@ -219,7 +220,7 @@ function assignForm(item?: ManagedSpecies) {
     habitat: item.habitat,
   } : blankForm())
   resetValidation()
-  mutationError.value = ''
+  mutationError.value = ''; speciesConflict.value = false
 }
 function openCreate() {
   detailRequest++
@@ -253,8 +254,21 @@ async function loadForModal(item: ManagedSpecies, mode: 'view' | 'form') {
 const view = (item: ManagedSpecies) => loadForModal(item, 'view')
 const openEdit = (item: ManagedSpecies) => loadForModal(item, 'form')
 
+async function refreshConflict() {
+  if (!selected.value || detailLoading.value || mutation.value) return
+  const id = selected.value.id, token = detailRequest
+  detailLoading.value = true
+  try {
+    const latest = await fetchSpeciesDetail(id)
+    await fetchSpeciesList()
+    if (token !== detailRequest || selected.value?.id !== id) return
+    selected.value = latest; speciesConflict.value = false; mutationError.value = ''
+    // Intentionally keep the Officer's form/photo draft; no mutation is repeated.
+  } catch (error) { if (token === detailRequest) mutationError.value = errorMessage(error, '') }
+  finally { if (token === detailRequest) detailLoading.value = false }
+}
 async function save() {
-  if (mutation.value || detailLoading.value) return
+  if (mutation.value || detailLoading.value || speciesConflict.value) return
   validationAttempted.value = true
   formErrors.value = currentFormErrors()
   if (invalidFields.value.length) { await focusFirstInvalid(); return }
@@ -283,6 +297,7 @@ async function save() {
     await router.replace({ query: {} })
     showFeedback('success', editing.value ? st('feedback.edited') : st('feedback.added'))
   } catch (error) {
+    speciesConflict.value = !committed && officerActionError(error) === 'conflict'
     const message = errorMessage(error, st('errors.save'))
     mutationError.value = committed ? st('errors.savedRefresh', { message }) : message
   } finally { mutation.value = null }
@@ -292,11 +307,12 @@ function confirmDelete(item: ManagedSpecies) {
   detailRequest++
   selected.value = item
   mutationError.value = ''
+  speciesConflict.value = false
   modal.value = 'delete'
   void nextTick(() => deleteCancelButton.value?.focus())
 }
 async function remove() {
-  if (!selected.value || mutation.value) return
+  if (!selected.value || mutation.value || speciesConflict.value) return
   mutation.value = 'delete'
   mutationError.value = ''
   let committed = false
@@ -308,6 +324,7 @@ async function remove() {
     modal.value = null
     showFeedback('success', st('feedback.deleted'))
   } catch (error) {
+    speciesConflict.value = !committed && officerActionError(error) === 'conflict'
     const message = errorMessage(error, st('errors.delete'))
     mutationError.value = committed ? st('errors.deletedRefresh', { message }) : message
   } finally { mutation.value = null }
@@ -364,7 +381,7 @@ onMounted(async () => {
   <AppModal v-if="modal === 'form'" :title="editing ? st('editSpecies') : st('createSpecies')" :subtitle="st('formSubtitle')" wide accessible @close="!mutation && (modal = null)">
     <p v-if="detailLoading" class="state-note">{{ st('loadingDetail') }}</p>
     <p v-if="taxonomyError" class="state-note warning">{{ st('taxonomyUnavailable') }} {{ taxonomyError }}</p>
-    <p v-if="mutationError" class="state-note error">{{ mutationError }}</p>
+    <div v-if="speciesConflict" class="state-note error" role="alert"><p>{{ mutationError || t('officerFeedback.speciesConflict') }}</p><button type="button" :disabled="detailLoading || Boolean(mutation)" @click="refreshConflict">{{ t('officerFeedback.refresh') }}</button></div><p v-if="mutationError && !speciesConflict" class="state-note error" role="alert">{{ mutationError }}</p>
     <form ref="speciesForm" class="form-grid" novalidate @submit.prevent="save">
       <label class="form-field"><span>{{ st('scientificName') }} *</span><input v-model="form.scientificName" :placeholder="st('placeholders.scientificName')" data-validation-field="scientificName" aria-required="true" :aria-invalid="Boolean(formErrors.scientificName)" :aria-describedby="formErrors.scientificName ? 'species-scientificName-error' : undefined" :disabled="detailLoading || Boolean(mutation)" /><small id="species-scientificName-error" v-if="formErrors.scientificName" class="field-error">{{ formErrors.scientificName }}</small></label>
       <label class="form-field"><span>{{ st('commonName') }} *</span><input v-model="form.commonName" :placeholder="st('placeholders.commonName')" data-validation-field="commonName" aria-required="true" :aria-invalid="Boolean(formErrors.commonName)" :aria-describedby="formErrors.commonName ? 'species-commonName-error' : undefined" :disabled="detailLoading || Boolean(mutation)" /><small id="species-commonName-error" v-if="formErrors.commonName" class="field-error">{{ formErrors.commonName }}</small></label>
@@ -382,12 +399,12 @@ onMounted(async () => {
   </AppModal>
 
   <AppModal v-if="modal === 'view' && selected" :title="selected.scientificName" :subtitle="selected.commonName" @close="modal = null">
-    <p v-if="detailLoading" class="state-note">{{ st('loadingDetail') }}</p><p v-if="mutationError" class="state-note error">{{ mutationError }}</p>
+    <p v-if="detailLoading" class="state-note">{{ st('loadingDetail') }}</p><div v-if="speciesConflict" class="state-note error" role="alert"><p>{{ mutationError || t('officerFeedback.speciesConflict') }}</p><button type="button" :disabled="detailLoading || Boolean(mutation)" @click="refreshConflict">{{ t('officerFeedback.refresh') }}</button></div><p v-if="mutationError && !speciesConflict" class="state-note error" role="alert">{{ mutationError }}</p>
     <dl class="detail-list"><div><dt>{{ st('speciesId') }}</dt><dd>{{ selected.id }}</dd></div><div><dt>{{ st('genus') }}</dt><dd>{{ selected.genus || st('unavailable') }}</dd></div><div><dt>{{ st('family') }}</dt><dd>{{ selected.family || st('unavailable') }}</dd></div><div><dt>{{ st('conservationStatus') }}</dt><dd><span class="badge conservation-status" :style="conservationBadgeStyle(selected.conservationStatus)">{{ selected.conservationStatus || st('unavailable') }}</span></dd></div><div><dt>{{ st('visibility') }}</dt><dd>{{ visibilityLabel(selected.visibility) }}</dd></div><div><dt>{{ st('habitat') }}</dt><dd>{{ selected.habitat || st('unavailable') }}</dd></div><div><dt>{{ st('culturalSignificance') }}</dt><dd>{{ selected.culturalSignificance || st('unavailable') }}</dd></div><div><dt>{{ st('description') }}</dt><dd>{{ selected.description || st('unavailable') }}</dd></div></dl>
   </AppModal>
 
   <AppModal v-if="modal === 'delete' && selected" :title="st('deleteConfirmTitle')" :subtitle="`${selected.id} — ${selected.scientificName}`" :close-on-backdrop="false" danger-backdrop hide-close compact @close="!mutation && (modal = null)">
-    <div class="delete-confirmation"><p>{{ st('deleteConfirmation') }}</p><p class="warning">{{ st('deleteReferenceWarning') }}</p><p v-if="mutationError" class="state-note error">{{ mutationError }}</p><div class="modal-actions"><button ref="deleteCancelButton" class="secondary-button" :disabled="Boolean(mutation)" @click="modal = null">{{ st('cancel') }}</button><button class="danger-button" :disabled="Boolean(mutation)" @click="remove">{{ mutation === 'delete' ? st('deleting') : st('deleteSpecies') }}</button></div></div>
+    <div class="delete-confirmation"><p>{{ st('deleteConfirmation') }}</p><p class="warning">{{ st('deleteReferenceWarning') }}</p><div v-if="speciesConflict" class="state-note error" role="alert"><p>{{ mutationError || t('officerFeedback.speciesConflict') }}</p><button type="button" :disabled="detailLoading || Boolean(mutation)" @click="refreshConflict">{{ t('officerFeedback.refresh') }}</button></div><p v-if="mutationError && !speciesConflict" class="state-note error" role="alert">{{ mutationError }}</p><div class="modal-actions"><button ref="deleteCancelButton" class="secondary-button" :disabled="Boolean(mutation)" @click="modal = null">{{ st('cancel') }}</button><button class="danger-button" :disabled="Boolean(mutation) || detailLoading || speciesConflict" @click="remove">{{ mutation === 'delete' ? st('deleting') : st('deleteSpecies') }}</button></div></div>
   </AppModal>
 </template>
 

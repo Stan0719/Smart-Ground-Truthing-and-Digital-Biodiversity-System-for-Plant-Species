@@ -119,7 +119,9 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
           { method: "POST", expectedAccountId: accountId, body: {} });
         setState((previous) => previous.key === key && previous.request
           ? { ...previous, request: { ...previous.request, request_status: "Withdrawn" } } : previous);
-        Alert.alert(t("speciesWithdrawal.successTitle"), t("speciesWithdrawal.successMessage"));
+        Alert.alert(t("speciesWithdrawal.successTitle"), t("speciesWithdrawal.successMessage"), [
+          { text: t("common.ok"), onPress: () => navigation.goBack() },
+        ]);
         setRevision((value) => value + 1);
       } catch (error) {
         setWithdrawError(translateUIMessage(error.message || t("speciesWithdrawal.failed")));
@@ -137,7 +139,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
     {!!changeError && current.request?.request_status !== "Approved" && <View style={styles.error}><Text accessibilityRole="alert" style={styles.errorText}>{translateUIMessage(changeError)}</Text></View>}
     {current.loading && !request && <DetailSkeletonContent label={t("submissions.loadingRequestDetails")} sections={2} />}
     {request && <>
-      {!historicalDetail && changeInfo && !(request.request_status === "Approved" && editAvailability === "pending") && <View style={[styles.feedbackNotice, changeInfo.status === "Approved" ? styles.approvedFeedback : changeInfo.status === "Rejected" ? styles.rejectedFeedback : styles.pendingFeedback]}><Text style={styles.value}>
+      {!historicalDetail && changeInfo && !(request.request_status === "Approved" && (editAvailability === "pending" || changeInfo.status === "Cancelled")) && <View style={[styles.feedbackNotice, changeInfo.status === "Approved" ? styles.approvedFeedback : changeInfo.status === "Rejected" ? styles.rejectedFeedback : styles.pendingFeedback]}><Text style={styles.value}>
         {changeInfo.status === "Pending Review" ? t("recordEdits.changesPending") : changeInfo.status === "Rejected" ? t("recordEdits.changesRejected") : changeInfo.status === "Cancelled" ? t("recordEdits.cancelledStatus") : changeInfo.status === "Correction Required" ? translateLabel(changeInfo.status) : t("recordEdits.changesApproved")}
       </Text>{!!changeInfo.review_comment && <><Text style={styles.feedbackLabel}>{t("notificationObservation.officerFeedback")}</Text><Text style={styles.value}>{changeInfo.review_comment}</Text></>}</View>}
       {!!cancelEditError && <Text accessibilityRole="alert" style={styles.errorText}>{cancelEditError}</Text>}

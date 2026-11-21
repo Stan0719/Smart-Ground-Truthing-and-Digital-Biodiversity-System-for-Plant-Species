@@ -34,6 +34,7 @@ function createPlantApp({
   pool,
   origins = configuredOrigins(),
   officerNotifications = null,
+  proximityConfig = {},
   qrPlantSchema = process.env.PLANT_QR_PLANT_SCHEMA || "plant_app",
   speciesPhotoWritesEnabled = false,
   recordingsRoot,
@@ -77,6 +78,7 @@ function createPlantApp({
   mountPlantSubmissions(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountRecordChanges(app, { pool, allow, officerNotifications, qrPlantSchema });
   mountObservationReviewHistory(app, { pool, allow });
+  require("./plant-proximity.cjs").mountPlantProximity(app, { pool, allow, config: proximityConfig });
   require("./iot-summary-report.cjs").mountIoTSummaryReport(app, { pool, allow });
   require("./operational-reports.cjs").mountOperationalReports(app, { pool, allow });
   mountObservationEdits(app, { pool, allow, officerNotifications });

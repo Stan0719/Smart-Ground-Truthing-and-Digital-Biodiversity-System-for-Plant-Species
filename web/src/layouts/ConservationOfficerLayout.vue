@@ -1,10 +1,18 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
+import ActionFeedback from '../components/ActionFeedback.vue'
 import { logout } from '../services/auth'
 import { useRouter } from 'vue-router'
 const router = useRouter()
-const signOut = async () => { await logout(); await router.replace('/') }
+const logoutPending = ref(false), logoutError = ref(false), logoutSequence = ref(0)
+const signOut = async () => {
+  if (logoutPending.value) return
+  logoutPending.value = true; logoutError.value = false; logoutSequence.value++
+  try { await logout(); await router.replace('/') }
+  catch { logoutError.value = true }
+  finally { logoutPending.value = false }
+}
 
-import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import ConservationTopbarActions from '../components/ConservationTopbarActions.vue'
@@ -45,6 +53,7 @@ const closeControl = () =>
 </script>
 
 <template>
+  <ActionFeedback v-if="logoutError" :key="logoutSequence" :feedback-id="logoutSequence" variant="error" :message="t('officerFeedback.logoutFailed')" @dismiss="logoutError = false" />
   <div class="officer-layout" :class="{ 'sidebar-collapsed': collapsed }">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <button
@@ -211,7 +220,7 @@ const closeControl = () =>
       </nav>
 
       <div class="sidebar-footer">
-        <button type="button" @click="signOut"><svg class="logout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg><span>{{ t('nav.logout') }}</span></button>
+        <button type="button" :disabled="logoutPending" :aria-busy="logoutPending" @click="signOut"><svg class="logout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg><span>{{ t('nav.logout') }}</span></button>
       </div>
     </aside>
     <button

@@ -1,0 +1,84 @@
+NIAH GPS proximity: Officer review aid (contract version 1)
+
+Routes
+GET /api/observations/:id/proximity?revision=<current positive revision>
+Browser: GET /api/data/observations/:id/proximity?revision=<revision>
+The existing Vite /api/data proxy rewrites to /api; it needs no change. Production
+must already forward that prefix/subpath to the backend; live routing was not tested.
+No database migration is required.
+Requires observations.review and plants.gps.exact.read on an active Officer session.
+Parent and candidate species visibility use the existing visibilityFor policy.
+Only verified initial registrations whose parent Plant remains Pending Review,
+and whose Observation is Pending Review, Correction Required or Flagged
+are eligible. Linked new-species registrations do not need species approval for this
+advisory read; the existing approval dependency remains unchanged.
+
+Calculation and defaults
+Haversine uses latitude/longitude radians and Earth radius 6,371,000 metres:
+a=sin(deltaLatitude/2)^2+cos(latitude1)*cos(latitude2)*sin(deltaLongitude/2)^2
+d=2R*atan2(sqrt(clamp(a,0,1)),sqrt(1-clamp(a,0,1))).
+The SQL equivalent uses 2R*asin(sqrt(clamp(a,0,1))).
+Categories use unrounded distances: [0,2] very_close; (2,5] close;
+(5,10] nearby; (10,30] additional. Outside the radius is not returned.
+These are configurable review-priority categories, NOT duplicate probabilities.
+Configure through createPlantApp({..., proximityConfig: {very_close_m:2, close_m:5,
+nearby_m:10, radius_m:30, accuracy_warning_m:10, candidate_limit:20}}).
+Configuration must be finite, positive, ordered; radius cannot exceed 100 m and
+candidate_limit cannot exceed 50. There is no new environment-file loader.
+
+Location provenance and completeness
+Each other Plant is considered once; the submitted Plant ID is always excluded.
+Approved Plants and pending Plants with active owner-submitted Observations visible
+to the Officer are considered. Draft-only or withdrawn-only pending records are excluded.
+Prefer the latest valid Approved Observation GPS, then a current pending owner's
+Observation for a pending Plant, then its latest recorded plant_location.
+Fallback sources are explicitly labelled unverified, never treated as surveyed.
+Names and GPS accuracy belong to the selected candidate source; unknown accuracy
+remains null, not zero. Valid zero latitude/longitude are preserved.
+No LIMIT 500 catalogue data is used. PostgreSQL computes distances and counts over
+all eligible visible Plants, then returns at most candidate_limit nearest results.
+Missing existing coordinates or truncated nearby results yield incomplete, including
+when the candidate list is empty. Missing/invalid submitted GPS yields unavailable.
+Complete with zero candidates means none found within this radius among the checked
+records, not proof of a unique Plant. Retain repeated checks for changed data;
+there is no persisted duplicate flag, notification, mutation or decision to deduplicate.
+The API uses a repeatable-read READ ONLY transaction, parameterized SQL, no-store,
+a 5-second per-statement timeout and expected submission revision. Stale revisions
+return HTTP 409. Errors never become a no-match result. Review permissions,
+revision checks, audit/history and species dependencies remain in their existing routes.
+
+Research and lecturer explanation
+GPS.gov reports smartphone positioning typically around a 4.9 m radius in open sky,
+with degradation near trees. This is not a guarantee under NIAH forest conditions.
+https://archive.gps.gov/systems/gps/performance/accuracy/
+Lee et al. (2023) tested nearby-tree effects and reported smartphone mean RMSE
+across control points of 3.04-5.64 m. That measures positioning error, not tree identity.
+https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0283090
+Strunk et al. (journal volume 2025; online December 2024) studied dense conifer canopy.
+Their survey-grade/long-occupation results cannot be assumed for smartphone fixes;
+reported internal precision is not necessarily actual positioning accuracy.
+https://doi.org/10.1016/j.rsase.2024.101428
+Android describes horizontal accuracy as an estimated radius at 68% confidence;
+platforms, hardware and collection conditions vary. It is not a guaranteed bound.
+https://developer.android.com/reference/android/location/Location#getAccuracy()
+The 2/5/10/30 metre bands and >10 m quality caution are engineering starting values,
+not validated probabilities or calibrated NIAH thresholds. Unknown, zero or poor
+reported accuracy triggers caution; even a small estimate cannot prove identity.
+Two distinct close plants can share recorded coordinates, and the same Plant may
+be recorded far apart because of GNSS error or recorder-to-stem offsets.
+Confirm tags, photographs, names and field evidence. The Officer makes the decision.
+No BioCLIP or automatic Flag/Approve/Reject action is restored or introduced.
+
+Limitations and rollout
+No shared database has been queried or migrated for this feature. Tests use PGlite,
+synthetic local HTTP and injected frontend transport; they do not establish deployed
+Supabase role/RLS compatibility or real forest accuracy. Existing SQL privileges must
+permit SELECT on the already-used tables. No index/schema addition is required for
+correctness. The current query considers all authorized Plants and reads location
+history: assess large-dataset plans/latency in an approved isolated environment.
+An elapsed statement timeout produces unavailable, never a false no-nearby result.
+Deploy routing code and Web client together; an older backend's 404 is unavailable.
+Do not deploy, run a general migration command, or change existing decisions merely
+to enable this feature. Live schema, performance and actual field calibration remain
+operator-reviewed checks. Server requests can finish their bounded read after browser
+cancellation; stale frontend responses are discarded and no records are written.

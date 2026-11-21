@@ -172,8 +172,8 @@ const fetchPlants = async (current: () => boolean, user: AuthUser | null) => {
         const card = nextPlants.find((plant) => plant.plantId === formatPlantId(row.plant_id))
         if (!registration?.observation_id || !card) return []
         return [
-          { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'morphology' as const, target: card.latestApproved, targetField: 'morphology' },
-          { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'notes' as const, target: card.latestApproved, targetField: 'notes' },
+          { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'morphology' as const, historical: true, target: card.latestApproved, targetField: 'morphology' },
+          { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'notes' as const, historical: true, target: card.latestApproved, targetField: 'notes' },
         ]
       }),
     ])

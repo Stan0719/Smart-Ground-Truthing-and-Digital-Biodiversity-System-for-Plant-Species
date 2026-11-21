@@ -461,3 +461,41 @@ test('initial and unclassified Observation edit notices preserve authorized comp
   assert.equal(await h.client.open(n),true);assert.equal(h.destinations[0].name,'conservation-reviews');assert.equal(h.destinations[0].query.observationEdit,n.resource.id);assert.ok(!h.calls.some(c=>c.url.endsWith('/review')));h.client.dispose()
  }
 })
+
+
+test('canonical Threat notices validate all metrics, open the exact alert then acknowledge without reviewing it', async () => {
+ const metrics={Sensor:['temperature','humidity','soilMoisture','movement','rainfall','sound'],Camera:['human_detected','animal_detected','suspicious_movement','possible_plant_contact']}
+ for(const [source,keys] of Object.entries(metrics))for(const metric of keys){
+  const item=notice(98,{event_type:'threat_alert_created',resource:{kind:'threat_alert',id:'older-alert'},threat_context:{source,metric,value:0,device_id:'sensor',reading_id:source==='Sensor'?'reading':null,camera_id:source==='Camera'?'camera':null}})
+  const h=setup(async(url,options)=>{
+   if(url==='/api/data/alerts/older-alert')return Response.json({alert:{id:'older-alert',metric,value:0,status:'Resolved'}})
+   if(options.method==='POST')return Response.json({notification:{id:item.id,read_at:'2026-11-02T00:00:00Z'}})
+   if(url.endsWith('unread-count'))return Response.json({unread_count:0})
+   return page([item])
+  })
+  await h.client.load();assert.equal(h.client.state.items.length,1);assert.equal(h.client.state.items[0].threat_context.value,0)
+  assert.equal(await h.client.open(h.client.state.items[0]),true)
+  assert.deepEqual(h.destinations,[{name:'conservation-alerts',query:{alert:'older-alert'}}])
+  assert.equal(h.calls.filter(c=>c.options.method==='POST').length,1)
+  assert.ok(h.calls.find(c=>c.options.method==='POST').url.endsWith('/read'));h.client.dispose()
+ }
+})
+test('Threat notices reject forged source/metric context; unavailable exact alerts never acknowledge',async()=>{
+ const base=notice(99,{event_type:'threat_alert_created',resource:{kind:'threat_alert',id:'older-alert'},threat_context:{source:'Sensor',metric:'movement',value:1,device_id:'sensor',reading_id:'reading',camera_id:null}})
+ for(const change of [{source:'Transient'},{source:'Camera'},{value:null},{device_id:''}]){
+  const h=setup(async()=>page([{...base,threat_context:{...base.threat_context,...change}}]));await h.client.load();assert.equal(h.client.state.error,'loadFailed');assert.equal(h.client.state.items.length,0);h.client.dispose()
+ }
+ for(const status of [403,404,503]){
+  const h=setup(async(url)=>url.includes('/alerts/')?Response.json({}, {status}):page([base]));await h.client.load();assert.equal(await h.client.open(h.client.state.items[0]),false);assert.equal(h.calls.filter(c=>c.options.method==='POST').length,0);h.client.dispose()
+ }
+})
+test('Sensor and Camera bell titles, metric context and icons render in EN/MS/ZH',()=>{
+ for(const locale of ['en','ms','zh-CN']){
+  const labels=JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`,import.meta.url),'utf8')).threatAlertNotices
+  const h=dropdownHarness(locale)
+  try{
+   h.state.notificationState.items=['Sensor','Camera'].map((source,i)=>notice(i+1,{event_type:'threat_alert_created',resource:{kind:'threat_alert',id:'alert-'+i},threat_context:{source,metric:source==='Sensor'?'temperature':'human_detected',value:source==='Sensor'?40:1,device_id:'device',reading_id:null,camera_id:null}}))
+   const rendered=visibleDropdownText(h.render());assert.ok(rendered.includes(labels.sensor));assert.ok(rendered.includes(labels.camera));assert.ok(rendered.includes(labels.metrics.temperature));assert.ok(rendered.includes(labels.metrics.human_detected));assert.ok(!rendered.includes('threatAlertNotices.'))
+  }finally{h.stop()}
+ }
+})

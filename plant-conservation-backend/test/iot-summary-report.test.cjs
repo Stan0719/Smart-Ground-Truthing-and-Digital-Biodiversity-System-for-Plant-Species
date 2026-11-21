@@ -177,3 +177,53 @@ test("authorized HTTP summary uses a read-only transaction and returns bounded c
   assert.ok(statements.includes("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"));
   assert.ok(statements.includes("SET LOCAL statement_timeout = '15s'")); assert.ok(statements.includes("COMMIT"));
 });
+
+
+test("summary compatibility preserves raw history and native weighted windows without fabricating readings", async t => {
+  const db = await createPlantDatabase(); t.after(() => db.end());
+  await db.query("INSERT INTO iot_device(id,name,key_hash) VALUES('compat','Compatible sensor','synthetic')");
+  await db.query(`INSERT INTO sensor_reading(id,device_id,"values",created_at) VALUES
+    ('raw-compat','compat','{"temperature":0,"movement":1}','2026-11-01T00:04Z')`);
+  await db.query(`INSERT INTO iot_reading_aggregate(device_id,bucket_start,bucket_end,sample_count,metrics) VALUES
+    ('compat','2026-11-01T00:10Z','2026-11-01T00:20Z',4,
+      '{"temperature":{"count":3,"sum":90,"min":10,"max":50},"movement":{"count":4,"sum":2,"min":0,"max":1}}')`);
+  await db.query(`INSERT INTO iot_reading_checkpoint(device_id,bucket_start,last_observed_at,sample_count,metrics) VALUES
+    ('compat','2026-11-01T00:20Z','2026-11-01T00:27Z',2,
+      '{"temperature":{"count":2,"sum":80,"min":35,"max":45}}')`);
+  const q = { contractVersion:'1',device:'compat',measurement:'temperature',period:'custom',start:'2026-11-01',end:'2026-11-01',interval:'auto',startAt:'2026-11-01T00:03:00.000Z',endAt:'2026-11-01T00:30:00.000Z' };
+  let r = await generate(db,q);
+  assert.equal(r.summary.receivedRows,7); assert.equal(r.summary.validMeasurements,6);
+  assert.equal(r.summary.average,170/6); assert.equal(r.summary.minimum,0); assert.equal(r.summary.maximum,50);
+  assert.equal(r.latestReading,null); assert.equal(r.observedSpan.firstReceivedAt,null);
+  assert.equal(r.scope.timestampBasis,'mixed_raw_and_aggregate_windows');
+  assert.equal(r.aggregation.interval,'minute'); assert.equal(r.aggregation.step,10);
+  assert.deepEqual(r.buckets.map(b=>b.validMeasurements),[1,3,2]);
+  assert.equal(r.buckets[0].startInclusive,q.startAt);assert.equal(r.buckets.at(-1).endExclusive,q.endAt);
+  assert.equal(r.coverage.aggregateSamples,6);assert.equal(r.coverage.omittedPartialSamples,0);
+  assert.ok(r.limitations.includes('aggregate_windows_not_individual_readings'));
+  // Never allocate a fraction of a completed window into a selected minute range.
+  r = await generate(db,{...q,startAt:'2026-11-01T00:15:00.000Z',endAt:'2026-11-01T00:25:00.000Z'});
+  assert.equal(r.summary.receivedRows,0);assert.equal(r.summary.average,null);
+  assert.equal(r.coverage.omittedPartialSamples,6);assert.equal(r.latestReading,null);
+  assert.ok(r.limitations.includes('partial_aggregate_windows_excluded'));
+  // Sum/count does not prove binary Movement counts: keep real raw evidence only.
+  r = await generate(db,{...q,measurement:'movement'});
+  assert.equal(r.summary.detectedSampleCount,1);assert.equal(r.summary.receivedRows,1);
+  assert.equal(r.coverage.omittedMovementSamples,6);
+  assert.ok(r.limitations.includes('aggregate_movement_counts_unavailable'));
+  // Ignore a stale checkpoint already represented by a completed window.
+  await db.query("UPDATE iot_reading_checkpoint SET bucket_start='2026-11-01T00:10Z' WHERE device_id='compat'");
+  r = await generate(db,q);assert.equal(r.summary.receivedRows,5);assert.equal(r.coverage.aggregateSamples,4);
+  const history = await db.query("SELECT count(*)::int AS n FROM sensor_reading WHERE device_id='compat'");
+  assert.equal(history.rows[0].n,1,'reporting never creates raw readings');
+  await db.query("INSERT INTO iot_device(id,name,key_hash) VALUES('only-summary','Checkpoint only','synthetic')");
+  await db.query(`INSERT INTO iot_reading_checkpoint(device_id,bucket_start,last_observed_at,sample_count,metrics)
+    VALUES('only-summary','2026-11-01T01:00Z','2026-11-01T01:07Z',2,'{"temperature":{"count":2,"sum":6,"min":0,"max":6}}')`);
+  r = await generate(db,{contractVersion:'1',device:'only-summary',period:'all-time'});
+  assert.equal(r.summary.receivedRows,2);assert.equal(r.summary.average,3);
+  assert.equal(r.summary.minimum,0);assert.equal(r.summary.maximum,6);
+  assert.equal(r.latestReading,null);assert.ok(r.buckets.some(b=>b.validMeasurements===2));
+  const latest = await db.query("SELECT count(*)::int AS n FROM sensor_reading WHERE device_id='only-summary'");
+  assert.equal(latest.rows[0].n,0);
+
+});

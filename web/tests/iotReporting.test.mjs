@@ -61,24 +61,25 @@ test('exact range requests validate and transmit both ISO boundaries', async () 
   } finally { globalThis.fetch = original }
 })
 const transpile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-function harness(responder = async (_filters, _device, metric) => fixture(metric), language = 'en', deviceOptions = [{ sensor_id: 'sensor', device_name: 'Sensor One' }, { sensor_id: 'second', device_name: 'Second' }]) {
+function harness(responder = async (_filters, _device, metric) => fixture(metric), language = 'en', deviceOptions = [{ sensor_id: 'sensor', device_name: 'Sensor One' }, { sensor_id: 'second', device_name: 'Second' }], liveResponder = async devices => devices.map(device => ({ ...device, latest_reading: null }))) {
   const filename = 'components/conservation/IoTEnvironmentalReport.vue', { descriptor } = parse(read(filename))
   const script = compileScript(descriptor, { id: 'iot-summary' })
   const template = compileTemplate({ source: descriptor.template.content, filename, id: 'iot-summary', compilerOptions: { bindingMetadata: script.bindings } })
   assert.deepEqual(template.errors, [])
   const messages = JSON.parse(read(`locales/${language}.json`)), locale = vue.ref(language), calls = [], models = [], saves = []
   const resolve = key => key.split('.').reduce((v, k) => v?.[k], messages)
-  let cleanup
+  let cleanup, mount, tick
+  const liveCalls = []
   const downloads = [], revoked = []
   let blob, downloadName
-  const context = { exports: {}, Intl, AbortController, Error, Blob, setTimeout: fn => fn(),
+  const context = { exports: {}, Intl, AbortController, Error, Blob, setTimeout: fn => fn(), setInterval: fn => { tick = fn; return 1 }, clearInterval: () => { tick = null },
     URL: { createObjectURL: value => { blob = value; return 'blob:summary' }, revokeObjectURL: value => revoked.push(value) },
     document: { visibilityState: 'visible', addEventListener() {}, removeEventListener() {}, body: { appendChild() {} }, createElement: () => ({ set href(value) {}, set download(value) { downloadName = value }, click() { downloads.push({ blob, filename: downloadName }) }, remove() {} }) },
     require(name) {
-    if (name === 'vue') return { ...vue, onMounted: () => {}, onBeforeUnmount: fn => cleanup = fn, resolveComponent: name => name, withDirectives: node => node }
+    if (name === 'vue') return { ...vue, onMounted: fn => mount = fn, onBeforeUnmount: fn => cleanup = fn, resolveComponent: name => name, withDirectives: node => node }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: (key, params = {}) => (resolve(key) || key).replace(/\{(\w+)\}/g, (_, name) => params[name] ?? `{${name}}`), te: key => !!resolve(key), locale }) }
     if (name === 'jspdf') return { jsPDF: class { save(name) { saves.push(name) } } }
-    if (name.includes('iotMonitoring')) return { loadCanonicalDevices: async () => deviceOptions, loadCanonicalHistoryPage: async () => ({ readings: [], page: 1, limit: 100, hasMore: false }) }
+    if (name.includes('iotMonitoring')) return { loadCanonicalDevices: async () => deviceOptions, loadCanonicalHistoryPage: async () => ({ readings: [], page: 1, limit: 100, hasMore: false }), loadLatestReadings: async (...args) => { liveCalls.push(args); return liveResponder(...args) } }
     if (name.includes('iotReporting')) return { measurementUnits, IoTReportError: class extends Error {}, requestIoTSummary: async (...args) => { calls.push(args); return responder(...args) } }
     if (name.includes('officerMonitoringDisplay')) return { monitoringDate: (date, lang) => new Intl.DateTimeFormat(lang, { timeZone: 'Asia/Kuala_Lumpur', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(date)) }
     if (name.includes('iotBucketDisplay')) return { iotBucketLabel, iotAxisLabel, iotDate, iotTimestamp, iotVisibleTickIndexes }
@@ -92,7 +93,7 @@ function harness(responder = async (_filters, _device, metric) => fixture(metric
   const state = scope.run(() => context.exports.default.setup(props, { expose() {}, emit() {} }))
   state.chart.value = { toPrintDataUrl: async () => 'data:image/png;base64,mock' }
   vm.runInNewContext(`(function(){${transpile(template.code)}})()`, context)
-  return { state, props, locale, calls, models, saves, downloads, revoked, render: () => context.exports.render({}, [], props, vue.proxyRefs(state), {}, {}), stop() { cleanup(); scope.stop() } }
+  return { state, props, locale, calls, liveCalls, models, saves, downloads, revoked, mount: () => mount(), tick: () => tick?.(), document: context.document, render: () => context.exports.render({}, [], props, vue.proxyRefs(state), {}, {}), stop() { cleanup(); scope.stop() } }
 }
 const flush = async () => { await vue.nextTick(); await new Promise(resolve => setImmediate(resolve)); await vue.nextTick() }
 function nodes(root) { const result = []; function walk(v) { if (Array.isArray(v)) return v.forEach(walk); if (!v || typeof v !== 'object') return; result.push(v); if (Array.isArray(v.children)) walk(v.children) } walk(root); return result }
@@ -105,7 +106,7 @@ test('rendered report has four cards, seven columns, honest CSV, quality explana
   assert.equal(h.state.report.value.summary.average, 0)
   assert.ok(h.state.technicalRows.value.some(s => s.value.includes('never arrived')))
   await h.state.exportPdf()
-  assert.equal(h.models.length, 1); assert.equal(h.models[0].statistics.length, 5); assert.equal(h.models[0].rows.length, 1)
+  assert.equal(h.models.length, 1); assert.equal(h.models[0].statistics.length, 4); assert.equal(h.models[0].rows.length, 1)
   assert.equal(h.models[0].columns.length, 7); assert.equal(h.models[0].chart.length, 3)
   assert.ok(h.models[0].notes.some(c => c.value.includes('Sensor availability has not been verified.')))
   assert.ok(!h.models[0].notes.some(c => c.value.includes('never arrived')))
@@ -154,7 +155,7 @@ test('all locales, six metrics, dual series, null gaps, responsive containment a
     assert.ok(!h.state.text('title').includes('?')); h.stop()
   }
   const chart = read('components/conservation/IoTSummaryChart.vue')
-  assert.match(chart, /\['average', 'minimum', 'maximum'\]/); assert.match(chart, /spanGaps: false/); assert.match(chart, /tension: 0/); assert.match(chart, /position: 'bottom'/)
+  assert.match(chart, /\['average', 'minimum', 'maximum'\]/); assert.match(chart, /spanGaps: true/); assert.match(chart, /tension: 0/); assert.match(chart, /position: 'bottom'/)
   for (const file of ['IoTSummaryChart.vue', 'IoTEnvironmentalReport.vue']) {
     const { descriptor } = parse(read('components/conservation/' + file))
     assert.deepEqual(compileStyle({ source: descriptor.styles[0].content, filename: file, id: 'summary' }).errors, [])
@@ -283,7 +284,7 @@ test('chart categories are equally spaced ordered buckets with compact labels an
   assert.match(source, /type: 'category'/); assert.match(source, /autoSkip: false/)
   assert.match(source, /align: movement \? 'center' : 'inner'/); assert.match(source, /x: bucketIndex/)
   assert.doesNotMatch(source, /x: Date.parse/)
-  assert.match(source, /y: b\[key\]/); assert.match(source, /spanGaps: false/)
+  assert.match(source, /y: b\[key\]/); assert.match(source, /spanGaps: true/)
   assert.match(source, /return printChart\(config\)/)
   const h = harness(); await flush()
   assert.equal(h.state.rows.value[0][0], iotBucketLabel(fixture().buckets[0], 'day', 'en', 'Asia/Kuala_Lumpur', true))
@@ -334,6 +335,7 @@ function chartHarness(report) {
   return { state, exposed, printed: () => printConfig, render: () => context.exports.render({}, [], { report }, vue.proxyRefs(state), {}, {}), stop: () => scope.stop() }
 }
 
+// Incoming Reports intentionally connects null gaps visually; source null points remain unchanged.
 test('actual chart configurations preserve every bucket, null and spike across website and print', async () => {
   for (const count of [0, 1, 2, 7, 12, 30, 90, 365, 520]) {
     const report = fixture()
@@ -343,7 +345,7 @@ test('actual chart configurations preserve every bucket, null and spike across w
     for (const [series, key] of ['average', 'minimum', 'maximum'].entries()) {
       assert.deepEqual(Array.from(config.data.datasets[series].data, p => p.y), report.buckets.map(b => b[key]))
       assert.deepEqual(Array.from(config.data.datasets[series].data, p => p.x), Array.from({ length: count }, (_, i) => i))
-      assert.equal(config.data.datasets[series].spanGaps, false)
+      assert.equal(config.data.datasets[series].spanGaps, true)
     }
     const tickValues = (width, fontSize) => {
       let font = ''
@@ -577,7 +579,7 @@ test('Movement hover has no bottom details; keyboard uses floating tooltip and h
     assert.equal(config.data.datasets[0].borderColor, '#2c9148')
     assert.equal(config.data.datasets[1].borderColor, '#3779a8')
     assert.equal(config.data.datasets[2].borderColor, '#f18418')
-    assert.equal(config.data.datasets[0].spanGaps, false)
+    assert.equal(config.data.datasets[0].spanGaps, true)
     assert.ok(config.options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }]).includes('2026'))
     assert.ok(config.options.plugins.tooltip.callbacks.afterBody([{ dataIndex: 0 }]).some(line => line.includes('validMeasurements')))
     assert.equal(config.options.events, undefined)
@@ -690,3 +692,105 @@ test('Officer report offers exactly five ordered metrics; old Sound selections c
   assert.equal(english.categorySpacing, 'Each point represents a reporting period. See the table for exact dates.')
   assert.equal(english.movementPeriodNote, 'Each bar represents a reporting period. See the table for exact dates.')
 })
+
+
+test('live temperature uses current transient data outside the report period and stays out of exports', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    let temperature = 0
+    const h = harness(undefined, language, undefined, async devices => devices.map(device => ({ ...device, latest_reading: { reading_id: 'live', temperature_c: temperature, recorded_at: new Date().toISOString() } })))
+    await flush()
+    const card = () => h.state.cards.value.find(card => card.key === 'liveTemperature')
+    assert.equal(card().value, 0, 'zero live temperature is preserved')
+    assert.equal(h.state.cardDisplay(card()), '0')
+    assert.equal(h.state.report.value.latestReading.value, 2, 'historical latest is not used')
+    assert.equal(h.state.report.value.summary.average, 0)
+    assert.deepEqual(Array.from(h.liveCalls[0][0], device => device.sensor_id), ['sensor'])
+    for (const key of ['liveTemperature', 'liveTemperatureScope', 'waitingForLiveTemperature', 'liveTemperatureUnavailable', 'liveTemperatureStale']) assert.ok(!h.state.text(key).includes('iotSummary.'))
+    assert.ok(nodes(h.render()).some(node => typeof node.children === 'string' && node.children.includes(h.state.text('liveTemperatureScope'))))
+    temperature = -5
+    await h.state.refreshLiveTemperature()
+    assert.equal(card().value, -5)
+    assert.equal(h.state.exportDocument().statistics.length, 4)
+    assert.ok(!JSON.stringify(h.state.exportDocument()).includes(h.state.text('liveTemperature')))
+    assert.ok(!reportCsv(h.state.csvDocument()).includes(h.state.text('liveTemperature')))
+    h.stop()
+  }
+})
+
+test('live temperature polls for historical reports, marks stale values, and handles pause, missing data and errors', async () => {
+  let reading = { reading_id: 'live', temperature_c: 29, recorded_at: new Date().toISOString() }, fail = false
+  const h = harness(undefined, 'en', undefined, async devices => {
+    if (fail) throw Error('offline')
+    return devices.map(device => ({ ...device, latest_reading: reading }))
+  })
+  await flush(); h.mount()
+  assert.equal(h.state.canLive.value, false, 'historical summary does not auto-refresh')
+  const summaryCalls = h.calls.length, liveCalls = h.liveCalls.length
+  h.tick(); await flush()
+  assert.equal(h.liveCalls.length, liveCalls + 1)
+  assert.equal(h.calls.length, summaryCalls)
+  h.state.liveNow.value = Date.parse(reading.recorded_at) + 120001
+  assert.equal(h.state.temperatureStale.value, true)
+  assert.ok(nodes(h.render()).some(node => node.children === h.state.text('liveTemperatureStale')))
+  h.state.toggleLive(); h.tick(); await flush()
+  assert.equal(h.liveCalls.length, liveCalls + 1)
+  assert.ok(nodes(h.render()).some(node => node.children === h.state.text('livePaused')))
+  h.state.toggleLive(); await flush()
+  h.document.visibilityState = 'hidden'; h.tick(); await flush()
+  assert.equal(h.liveCalls.length, liveCalls + 2)
+  h.document.visibilityState = 'visible'
+  fail = true; await h.state.refreshLiveTemperature()
+  assert.equal(h.state.liveTemperatureReading.value.temperature_c, 29, 'failed refresh keeps last reading with warning')
+  assert.equal(h.state.temperatureError.value, true)
+  assert.ok(nodes(h.render()).some(node => node.children === h.state.text('liveTemperatureUnavailable')))
+  fail = false; reading = null; await h.state.refreshLiveTemperature()
+  assert.equal(h.state.liveTemperatureReading.value, null, 'empty live response never falls back to historical latest')
+  assert.equal(h.state.cardDisplay(h.state.cards.value[1]), h.state.text('waitingForLiveTemperature'))
+  h.state.measurement.value = 'humidity'; await h.state.load()
+  const count = h.liveCalls.length; h.tick(); await flush()
+  assert.equal(h.liveCalls.length, count)
+  h.stop(); h.tick(); assert.equal(h.liveCalls.length, count)
+})
+
+test('live temperature discards late responses after changing device or unmounting', async () => {
+  const pending = []
+  const h = harness(undefined, 'en', undefined, (devices, signal) => new Promise(resolve => pending.push({ devices, signal, resolve })))
+  await flush()
+  h.state.device.value = 'second'; await h.state.load(); await flush()
+  assert.equal(pending[0].signal.aborted, true)
+  pending[0].resolve([{ ...pending[0].devices[0], latest_reading: { temperature_c: 99, recorded_at: new Date().toISOString() } }]); await flush()
+  assert.equal(h.state.liveTemperatureReading.value, null)
+  pending[1].resolve([{ ...pending[1].devices[0], latest_reading: { temperature_c: 23, recorded_at: new Date().toISOString() } }]); await flush()
+  assert.equal(h.state.liveTemperatureReading.value.temperature_c, 23)
+  const request = h.state.refreshLiveTemperature(); await flush(); h.stop()
+  assert.equal(pending[2].signal.aborted, true)
+  pending[2].resolve([{ ...pending[2].devices[0], latest_reading: { temperature_c: 100, recorded_at: new Date().toISOString() } }]); await request
+  assert.equal(h.state.liveTemperatureReading.value.temperature_c, 23)
+})
+
+test('aggregate coverage validates native precision and explains unavailable readings in UI and PDF in all languages', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const r = fixture(); r.scope.timestampBasis = 'mixed_raw_and_aggregate_windows';
+    r.coverage = { aggregateSamples: 2, omittedPartialSamples: 4, omittedMovementSamples: 0, nativeResolutionMinutes: 10 };
+    r.latestReading = null;
+    for (const key of Object.keys(r.observedSpan)) r.observedSpan[key] = null;
+    assert.ok(validIoTSummary(r, filters, 'sensor', 'temperature'));
+    const invalid = structuredClone(r); invalid.aggregation.interval = 'minute'; invalid.aggregation.step = 1;
+    assert.equal(validIoTSummary(invalid, filters, 'sensor', 'temperature'), false);
+    const h = harness(async () => r, language); await flush();
+    assert.ok(h.state.coverageNotes.value.includes(h.state.text('aggregateCoverage')));
+    assert.ok(h.state.coverageNotes.value.includes(h.state.text('partialCoverage')));
+    const rendered = nodes(h.render());
+    assert.ok(rendered.some(n => typeof n.children === 'string' && n.children.includes(h.state.text('waitingForLiveTemperature'))));
+    assert.ok(h.state.technicalRows.value.some(row => row.value.includes(h.state.text('aggregateTimestamp'))));
+    const doc = h.state.exportDocument();
+    assert.ok(doc.notes[0].value.includes(h.state.text('partialCoverage')));
+    assert.ok(reportCsv(h.state.csvDocument()).includes(h.state.text('partialCoverage')));
+    assert.equal(doc.statistics.length, 4);
+    assert.ok(!doc.statistics.some(c => c.label.includes(h.state.text('liveTemperature'))));
+    assert.equal(h.state.report.value.summary.average, 0);
+    for (const s of [h.state.report.value.summary, ...h.state.report.value.buckets]) Object.assign(s, {receivedRows:0,validMeasurements:0,missingMeasurements:0,absentOrNullMeasurements:0,invalidMeasurements:0,average:null,minimum:null,maximum:null});
+    assert.equal(h.state.cardDisplay(h.state.cards.value[0]), h.state.text('dataUnavailable'));
+    h.stop();
+  }
+});

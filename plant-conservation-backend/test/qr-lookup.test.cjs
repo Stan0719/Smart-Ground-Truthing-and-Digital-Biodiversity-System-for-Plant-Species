@@ -24,13 +24,15 @@ test("QR lookup resolves only approved, visible plant assignments", async (t) =>
     VALUES(1,1,'staff:bot','Approved','payload-approved','Public plant'),
           (2,1,'staff:bot','Pending Review','payload-pending','Pending plant'),
           (3,2,'staff:bot','Approved','payload-protected','Protected plant')`);
+  await pool.query(`INSERT INTO plant_record(plant_id,species_id,registered_subject,rbac_status,qr_token,scientific_name)
+    VALUES(4,1,'staff:bot','Rejected','payload-rejected','Rejected plant')`);
   await pool.query(`INSERT INTO plant_app.qr_code(qr_id,plant_id,qr_code,status)
     OVERRIDING SYSTEM VALUE
     VALUES(8,1,'payload-approved','active'),(9,2,'payload-pending','assigned'),
           (10,3,'payload-protected','active'),(11,NULL,'payload-unused','generated'),
-          (12,NULL,'payload-retired','retired')`);
+          (12,NULL,'payload-retired','retired'),(13,4,'payload-rejected','assigned')`);
 
-  const roles = { botanist: "Botanist", visitor: "Visitor" };
+  const roles = { botanist: "Botanist", other: "Botanist", visitor: "Visitor" };
   const tokens = Object.fromEntries(Object.keys(roles).map((key, index) => [key, String(index + 1).repeat(64)]));
   const auth = {
     session: async (token) => {
@@ -84,10 +86,16 @@ test("QR lookup resolves only approved, visible plant assignments", async (t) =>
     await pool.query("UPDATE plant_app.qr_code SET status='active' WHERE qr_code='payload-approved'");
   });
   await t.test("pending and protected plant information is not disclosed", async () => {
-    assert.equal((await call("botanist", "payload-pending")).status, 404);
-    assert.equal((await call("visitor", "payload-pending")).status, 404);
+    assert.deepEqual(await call("botanist", "payload-pending"), { status: 200, data: { assigned: false, status: "pending_review" } });
+    assert.deepEqual(await call("visitor", "payload-pending"), { status: 200, data: { assigned: false, status: "unavailable_yet" } });
     assert.equal((await call("visitor", "payload-protected")).status, 404);
     assert.equal((await call("botanist", "payload-protected")).status, 404);
+  });
+  await t.test("rejected plant QR gives only role-specific status markers", async () => {
+    for (const role of [null, "visitor"])
+      assert.deepEqual(await call(role, "payload-rejected"), { status: 200, data: { assigned: false, status: "record_unavailable" } });
+    for (const role of ["botanist", "other"])
+      assert.deepEqual(await call(role, "payload-rejected"), { status: 200, data: { assigned: false, status: "invalid_record" } });
   });
   await t.test("invalid tokens and anonymous public lookup obey visibility", async () => {
     assert.equal((await call("botanist", "does-not-exist")).status, 404);

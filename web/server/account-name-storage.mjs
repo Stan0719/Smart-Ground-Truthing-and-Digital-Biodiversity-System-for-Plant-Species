@@ -29,14 +29,17 @@ export function createAccountNameStorage(encryptionProvider) {
     // single-row, parameterized account write forms are supported. Unknown forms
     // that write names fail closed instead of silently persisting plaintext.
     write(sql, values) {
-      const insert = /^\s*INSERT\s+INTO\s+(users|visitors)\s*\(([^)]+)\)\s+VALUES\s*\(([^)]+)\)/i.exec(sql)
+      const insert = /^\s*INSERT\s+INTO\s+((?:users|visitors)|"(?:users|visitors)")\s*\(([^)]+)\)\s+VALUES\s*\(([^)]+)\)/i.exec(sql)
       const update = /^\s*UPDATE\s+(users|visitors)\s+SET\s+([\s\S]+?)\s+WHERE\s+([\s\S]+)$/i.exec(sql)
       let table, nameBind, idBind
       if (insert) {
-        const columns = insert[2].split(',').map(value => value.trim().replace(/^"([a-z_]+)"$/i, '$1').toLowerCase())
+        const identifiers = insert[2].split(',').map(value => value.trim())
+        if (identifiers.some(value => !/^(?:[a-z_][a-z0-9_]*|"[a-z_][a-z0-9_]*")$/i.test(value))) throw failure()
+        const columns = identifiers.map(value => value.replace(/^"([a-z_][a-z0-9_]*)"$/i, '$1').toLowerCase())
+        if (new Set(columns).size !== columns.length) throw failure()
         if (!columns.includes('name')) return values
         const terms = insert[3].split(',').map(value => value.trim())
-        table = insert[1].toLowerCase()
+        table = insert[1].replaceAll('"', '').toLowerCase()
         nameBind = /^\$(\d+)$/.exec(terms[columns.indexOf('name')])
         idBind = /^\$(\d+)$/.exec(terms[columns.indexOf('id')])
         if (!/^\s*(?:RETURNING\b[\s\S]*)?$/i.test(sql.slice(insert[0].length))) throw failure()

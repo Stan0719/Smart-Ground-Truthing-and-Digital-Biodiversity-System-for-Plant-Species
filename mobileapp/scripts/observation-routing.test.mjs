@@ -15,7 +15,7 @@ test("Add New Observation uses the backend collection form and carries the selec
   assert.match(form, /const mode = route\.name/);
   assert.match(form, /const blankForm = \(plantId = ""\) => \(\{[\s\S]*plant_id: String\(plantId \|\| ""\)/);
   assert.match(form, /await verifyApprovedPlantForObservation\(user\.id, plantId\)/);
-  assert.match(form, /disabled=\{busy \|\| completed \|\| \(isNewObservation && plantEligibility !== "approved"\)\}/);
+  assert.match(form, /disabled=\{busy \|\| completed \|\| \(isNewObservation && plantEligibility !== "approved"\) \|\| \(observationEditMode && !autoSaveMeaningful\)\}/);
   assert.doesNotMatch(form, /getPlantById\(/);
   assert.match(form, /const plantId = String\(form\.plant_id \|\| selectedPlantId \|\| ""\)\.trim\(\);[\s\S]*path: `\/plants\/\$\{plantId\}\/observations`/);
 });

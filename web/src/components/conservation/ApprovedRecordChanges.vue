@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import ActionFeedback from '../ActionFeedback.vue'
+import { officerActionError, officerSaveUncertain } from '../../services/officerActionFeedback'
 import AppModal from './AppModal.vue'
 import MonitoringIdentifier from './MonitoringIdentifier.vue'
 import PlantPhotoLightbox from '../PlantPhotoLightbox.vue'
@@ -19,6 +21,11 @@ const session = ref(sessionSnapshot())
 const officerReady = computed(() => !session.value.pending && session.value.user?.role === 'Conservation Officer' && session.value.user.status === 'Active' && !session.value.user.mustChangePassword)
 const selected = ref<RecordChange | null>(null)
 const loading = ref(false), busy = ref(false), error = ref(''), conflict = ref(false), comment = ref('')
+const savingDecision = ref(false)
+const refreshRequired = ref(false), inspectionNeeded = ref(false), savedPending = ref(false), outcomeUncertain = ref(false)
+const commentError = ref(''), commentInput = ref<HTMLTextAreaElement | null>(null)
+const successNotice = ref(false), successSequence = ref(0)
+const actionText = (key: string) => t('officerFeedback.' + key)
 const photos = ref<string[]>([]), originalPhotos = ref<string[]>([])
 let detailGeneration = 0
 const recoveredMessage = ref('')
@@ -39,19 +46,19 @@ function enlarge(items: string[], index: number, event: Event, title: string) {
   void preview.value?.open(items.map((url,index) => ({id: String(index),url})),index,title,event.currentTarget as HTMLElement)
 }
 function photoFailed(url: string) { failedPhotos.value = new Set([...failedPhotos.value,url]) }
-const eligible = computed(() => selected.value?.status === 'Pending Review' && !conflict.value && !busy.value && !loading.value &&
+const eligible = computed(() => selected.value?.status === 'Pending Review' && !conflict.value && !refreshRequired.value && !inspectionNeeded.value && !busy.value && !loading.value &&
   Number.isSafeInteger(selected.value.revision) && selected.value.revision > 0 && officerReady.value && selected.value.owner_subject !== `staff:${session.value.user?.id}`)
 const display = (value: unknown) => value === undefined ? label('unavailable') : value === null ? label('nullValue') : value === '' ? label('emptyValue') : typeof value === 'object' ? JSON.stringify(value) : String(value)
 const date = (value: string | null) => value ? reviewDateTime(value) : label('unavailable')
 async function open(id: string, preserveComment = false) {
-  if (!officerReady.value) return
-  const inspect = preserveComment && conflict.value
+  if (!officerReady.value) return false
+  const inspect = preserveComment && (conflict.value || refreshRequired.value || inspectionNeeded.value)
   const generation = ++detailGeneration
   const actor = session.value.user?.id, routeId = route.query.change
   const current = () => generation === detailGeneration && officerReady.value && session.value.user?.id === actor && route.query.change === routeId
   recoveredMessage.value = ''; recoveredInfo.value = false
-  conflict.value = true; busy.value = true; error.value = ''; photos.value = []; originalPhotos.value = []; failedPhotos.value = new Set(); preview.value?.close()
-  if (!preserveComment) { comment.value = ''; selected.value = null }
+  refreshRequired.value = true; busy.value = true; error.value = ''; photos.value = []; originalPhotos.value = []; failedPhotos.value = new Set(); preview.value?.close()
+  if (!preserveComment) { comment.value = ''; commentError.value = ''; selected.value = null; conflict.value = false; inspectionNeeded.value = false; savedPending.value = false; outcomeUncertain.value = false; successNotice.value = false }
   try {
     const data = await changeRequest('/' + encodeURIComponent(id))
     if (!current()) return
@@ -72,50 +79,66 @@ async function open(id: string, preserveComment = false) {
       }
     }
     if (!current()) return
-    conflict.value = inspect && selected.value?.status === 'Pending Review'
+    refreshRequired.value = false; savedPending.value = false; outcomeUncertain.value = false
+    inspectionNeeded.value = inspect && selected.value?.status === 'Pending Review'
+    conflict.value = conflict.value && inspectionNeeded.value
     if (inspect) {
       const row = selected.value!
       const confirmed = ['Approved','Rejected'].includes(row.status) && Boolean(row.reviewed_at && Number.isFinite(Date.parse(row.reviewed_at)) && row.reviewed_by?.startsWith('staff:') && row.reviewed_by.length > 6 && row.reviewed_by !== `staff:${actor}`)
       recoveredInfo.value = row.status !== 'Pending Review'
-      recoveredMessage.value = confirmed ? t('conservationPages.reviews.feedback.reviewedElsewhere') : recoveredInfo.value ? t('conservationPages.reviews.feedback.conflictRefreshed') : label('conflict')
+      recoveredMessage.value = confirmed ? t('conservationPages.reviews.feedback.reviewedElsewhere') : recoveredInfo.value ? t('conservationPages.reviews.feedback.conflictRefreshed') : actionText(conflict.value ? 'conflict' : 'refreshed')
     }
-
-  } catch (failure) { if (current()) error.value = (failure as { status?: number }).status === 409 ? label('conflict') : label('requestFailed') }
+    return true
+  } catch (failure) { if (current()) { refreshRequired.value = true; error.value = savedPending.value ? actionText('savedReloadFailed') : outcomeUncertain.value ? actionText('uncertain') : actionText(officerActionError(failure)) }; return false }
   finally { if (current()) busy.value = false }
 }
 function close() {
   if (busy.value) return
   detailGeneration++; preview.value?.close(); selected.value = null
+  successNotice.value = false
   if (route.query.change) void router.replace({ query: { ...route.query, change: undefined } })
 }
 async function decide(decision: 'Approved' | 'Rejected') {
   if (!eligible.value || !selected.value) return
-  if (!comment.value.trim()) { error.value = label('commentRequired'); return }
-  busy.value = true; error.value = ''
-  const generation = detailGeneration
+  commentError.value = ''
+  if (!comment.value.trim() || comment.value.length > 4000) {
+    commentError.value = actionText('commentRequired'); await nextTick(); commentInput.value?.focus(); return
+  }
+  busy.value = true; savingDecision.value = true; error.value = ''; successNotice.value = false
+  const generation = detailGeneration, id = selected.value.id, actor = session.value.user?.id
+  const current = () => generation === detailGeneration && selected.value?.id === id && officerReady.value && session.value.user?.id === actor
   try {
-    const id = selected.value.id
     emit('reviewing')
-    await changeRequest('/' + encodeURIComponent(id) + '/review', { decision, comment: comment.value.trim(), revision: selected.value.revision })
-    if (generation !== detailGeneration) return
+    const result = await changeRequest('/' + encodeURIComponent(id) + '/review', { decision, comment: comment.value.trim(), revision: selected.value.revision })
+    if (!current()) return
+    if (result.change?.id !== id || result.change?.status !== decision) throw Error('Invalid review response')
+    savedPending.value = true; successSequence.value++; successNotice.value = true
     await open(id,true)
   } catch (failure) {
-    if (generation !== detailGeneration) return
-    error.value = (failure as { status?: number }).status === 409 ? label('conflict') : label('requestFailed')
-    conflict.value = true
-    if ((failure as { status?: number }).status === 409) await open(selected.value!.id, true)
-  } finally { if (generation === detailGeneration) busy.value = false }
+    if (!current()) return
+    const kind = officerActionError(failure)
+    if (kind === 'validation') { commentError.value = actionText('validation'); await nextTick(); commentInput.value?.focus() }
+    else if (kind === 'conflict') {
+      conflict.value = true; refreshRequired.value = true; error.value = actionText('conflict')
+      await open(id,true)
+    } else {
+      outcomeUncertain.value = officerSaveUncertain(failure)
+      refreshRequired.value = outcomeUncertain.value || ['permission','session','evidence','unavailable'].includes(kind)
+      error.value = actionText(outcomeUncertain.value ? 'uncertain' : kind)
+    }
+  } finally { savingDecision.value = false; if (current()) busy.value = false }
 }
 watch(() => route.query.change, id => {
   if (typeof id === 'string') void open(id)
-  else { recoveredMessage.value = ''; detailGeneration++; selected.value = null; comment.value = ''; error.value = ''; busy.value = false; photos.value = []; originalPhotos.value = [] }
+  else { recoveredMessage.value = ''; detailGeneration++; selected.value = null; comment.value = ''; error.value = ''; successNotice.value = false; busy.value = false; photos.value = []; originalPhotos.value = [] }
 }, { immediate: true })
 const unsubscribe = subscribeSession((user,pending) => {
+  successNotice.value = false
   if (!pending && session.value.pending && user && user.id === session.value.user?.id && user.role === 'Conservation Officer' && user.status === 'Active' && !user.mustChangePassword) {
     session.value = { user, pending }; return
   }
   if (pending && user && user.id === session.value.user?.id) {
-    detailGeneration++; conflict.value = conflict.value || busy.value; busy.value = false
+    detailGeneration++; refreshRequired.value = refreshRequired.value || busy.value; outcomeUncertain.value = outcomeUncertain.value || savingDecision.value; busy.value = false
     session.value = { user, pending }; return
   }
   recoveredMessage.value = ''; detailGeneration++; selected.value = null; comment.value = ''; photos.value = []; originalPhotos.value = []
@@ -129,6 +152,7 @@ onBeforeUnmount(() => { unsubscribe(); detailGeneration++; preview.value?.close(
 <template>
   <p v-if="error && !selected" role="alert">{{ error }}</p>
   <AppModal v-if="selected" class="change-review-modal" :title="label(selected.plant_id ? 'plantTitle' : 'speciesTitle')" wide accessible @close="close()">
+    <ActionFeedback v-if="successNotice" :key="successSequence" :feedback-id="successSequence" variant="success" :message="actionText('saved')" @dismiss="successNotice = false" />
     <template #title><span class="proposal-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 4C9 3 3 8 4 15c1 7 12 7 16-11ZM4 21 16 9" /></svg>{{ label(selected.plant_id ? 'plantTitle' : 'speciesTitle') }}</span></template>
     <div class="proposal-metadata">
       <span><span class="meta-label">{{ label('proposal') }}</span><MonitoringIdentifier :value="selected.id" :labels="identifiers" :copy-label="label('copyProposal')" :feedback-duration="2500" /></span>
@@ -144,9 +168,9 @@ onBeforeUnmount(() => { unsubscribe(); detailGeneration++; preview.value?.close(
       <div><span class="summary-label">{{ label('proposedName') }}</span><strong>{{ display(selected.proposed_snapshot.scientific_name) }}</strong></div>
       <div><span class="summary-label">{{ label('changedFields') }}: {{ changedFields.length }}</span><span v-if="!changedFields.length">{{ label('noChanges') }}</span><span v-for="field in changedFields" :key="field.key" class="changed-field">{{ fieldLabel(field.key) }}</span></div>
     </section>
-    <p v-if="error" class="review-alert" role="alert">{{ error }}</p>
-    <p v-if="recoveredMessage" :class="recoveredInfo ? 'read-only-message' : 'review-alert'" :role="recoveredInfo ? 'status' : 'alert'">{{ recoveredMessage }}</p>
-    <div v-if="conflict" class="review-alert" role="alert"><strong>{{ label('conflict') }}</strong><button class="action-button" :disabled="busy" @click="open(selected.id,true)">{{ label('reload') }}</button></div>
+    <p v-if="error && !conflict && !refreshRequired" class="review-alert" role="alert">{{ error }}</p>
+    <p v-if="recoveredMessage && !conflict" :class="recoveredInfo ? 'read-only-message' : 'review-alert'" :role="recoveredInfo ? 'status' : 'alert'">{{ recoveredMessage }}</p>
+    <div v-if="conflict || refreshRequired" class="review-alert" role="alert"><strong>{{ savedPending ? actionText('savedReloadFailed') : outcomeUncertain ? actionText('uncertain') : conflict ? actionText('conflict') : error || actionText('unavailable') }}</strong><button class="action-button" :disabled="busy" @click="open(selected.id,true)">{{ actionText('refresh') }}</button></div>
     <section class="comparison-section"><h3>{{ label('fieldComparison') }}</h3>
       <table class="comparison-table"><caption class="sr-only">{{ label('comparison') }}</caption><colgroup><col class="field-column" /><col /><col /></colgroup><thead><tr><th scope="col">{{ label('field') }}</th><th scope="col">{{ label('baseline') }}</th><th scope="col">{{ label('proposedValue') }}</th></tr></thead><tbody><tr v-for="field in comparisons" :key="field.key" :class="{ changed: field.changed }"><th scope="row">{{ fieldLabel(field.key) }}<span v-if="field.changed" class="changed-badge">{{ label('changed') }}</span></th><td>{{ display(field.before) }}</td><td :class="{ 'proposed-changed': field.changed }">{{ display(field.after) }}</td></tr></tbody></table>
     </section>
@@ -156,8 +180,8 @@ onBeforeUnmount(() => { unsubscribe(); detailGeneration++; preview.value?.close(
       <section class="photo-panel"><header><h4>{{ label('proposedPhotos') }}</h4><span class="photo-count">{{ photos.length }} {{ label('photoUnit') }}</span></header><div v-if="!photos.length" class="photo-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m4 17 5-5 4 4 3-3 5 5"/></svg><p>{{ label('retainedPhotos') }}</p></div><div class="photo-grid"><template v-for="(src,index) in photos" :key="src"><button v-if="!failedPhotos.has(src)" type="button" class="photo-thumbnail" :aria-label="label('proposedPhotos') + ' ' + (index + 1)" @click="enlarge(photos,index,$event,label('proposedPhotos'))"><img :src="src" :alt="label('proposedPhotos') + ' ' + (index + 1)" @error="photoFailed(src)" /></button><span v-else role="status">{{ label('photosUnavailable') }}</span></template></div><p v-if="selected.plant_id" class="retention-summary"><span>{{ retainedIds.length }} {{ label('retainedPhotoCount') }}</span><span v-if="removedCount" class="removed-count">{{ removedCount }} {{ label('removedPhotoCount') }}</span></p></section>
     </div></section>
     <section v-if="selected.reviewed_at" class="recorded-decision"><h3>{{ label(selected.status === 'Cancelled' ? 'previousReview' : 'decision') }}</h3><p><template v-if="selected.status !== 'Cancelled'">{{ statusLabel(selected.status) }} | </template><MonitoringIdentifier :value="selected.reviewed_by" :labels="identifiers" /> | {{ date(selected.reviewed_at) }}</p><p>{{ selected.review_comment }}</p></section>
-    <label v-if="conflict && !busy && !error && recoveredMessage && selected.status === 'Pending Review'"><input type="checkbox" :checked="false" @change="conflict = !($event.target as HTMLInputElement).checked" /> {{ t('conservationPages.reviews.speciesRequest.inspectLatest') }}</label>
-    <section v-if="selected.status === 'Pending Review'" class="review-decision"><h3>{{ label('reviewDecision') }}</h3><label for="proposal-review-comment">{{ label('comment') }}</label><textarea id="proposal-review-comment" v-model="comment" maxlength="4000" rows="4" :placeholder="label('commentPlaceholder')" :aria-invalid="Boolean(error)" /><p class="character-count">{{ comment.length }} / 4,000</p><div class="review-actions"><button class="reject-change" :disabled="!eligible" @click="decide('Rejected')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 8 8 8m0-8-8 8"/></svg>{{ label('reject') }}</button><button class="approve-change" :disabled="!eligible" @click="decide('Approved')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg>{{ label('approve') }}</button></div></section>
+    <label v-if="inspectionNeeded && !busy && !error && selected.status === 'Pending Review'"><input type="checkbox" :checked="false" @change="inspectionNeeded = !($event.target as HTMLInputElement).checked; conflict = inspectionNeeded" /> {{ t('conservationPages.reviews.speciesRequest.inspectLatest') }}</label>
+    <section v-if="selected.status === 'Pending Review'" class="review-decision"><h3>{{ label('reviewDecision') }}</h3><label for="proposal-review-comment">{{ label('comment') }}</label><textarea id="proposal-review-comment" ref="commentInput" v-model="comment" maxlength="4000" rows="4" :placeholder="label('commentPlaceholder')" :aria-invalid="Boolean(commentError)" :aria-describedby="commentError ? 'proposal-comment-error' : undefined" /><p v-if="commentError" id="proposal-comment-error" role="alert" class="review-alert">{{ commentError }}</p><p class="character-count">{{ comment.length }} / 4,000</p><div class="review-actions"><button class="reject-change" :disabled="!eligible" @click="decide('Rejected')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 8 8 8m0-8-8 8"/></svg>{{ label('reject') }}</button><button class="approve-change" :disabled="!eligible" @click="decide('Approved')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m4 12 5 5L20 6"/></svg>{{ label('approve') }}</button></div></section>
     <p v-else class="read-only-message">{{ label('readOnly') }}</p>
     <PlantPhotoLightbox ref="preview" root-scroll-lock />
   </AppModal>

@@ -1,5 +1,6 @@
 "use strict";
 const { reportPeriod } = require("./report-period.cjs");
+const { range: thresholdRange } = require('./sensor-thresholds.cjs');
 const units = Object.freeze({ temperature: "°C", humidity: "%", soilMoisture: "raw", rainfall: "raw", sound: "raw", movement: "0/1" });
 const MAX_BUCKETS = 520, MAX_BYTES = 1048576;
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, reportCode: code }); };
@@ -23,7 +24,7 @@ function options(query, now = new Date()) {
 const iso = value => value == null ? null : new Date(value).toISOString();
 // PostgreSQL classifies JSON types before converting numeric values. Numeric
 // aggregation avoids intermediate float overflow; only finite API numbers leave SQL.
-const classified = `SELECT id,created_at,
+const rawClassified = `SELECT id,created_at,
   CASE WHEN $4 = 'movement' THEN
     CASE WHEN "values" -> $4 IN ('0'::jsonb, '1'::jsonb)
       THEN ("values" ->> $4)::numeric END
@@ -34,12 +35,31 @@ const classified = `SELECT id,created_at,
   FROM sensor_reading WHERE device_id=$1
     AND ($2::timestamptz IS NULL OR created_at >= $2::timestamptz)
     AND ($3::timestamptz IS NULL OR created_at < $3::timestamptz)`;
-const counts = `count(*) AS received, count(value) AS valid,
-  count(*) FILTER (WHERE absent) AS absent,
-  count(*) FILTER (WHERE value IS NULL AND NOT absent) AS invalid,
-  avg(value) AS average, min(value) AS minimum, max(value) AS maximum,
-  count(*) FILTER (WHERE $4 = 'movement' AND value = 1) AS detected,
-  count(*) FILTER (WHERE $4 = 'movement' AND value = 0) AS no_movement`;
+// Aggregate statistics are evidence at their native window resolution, not readings.
+// Completed windows take precedence over an already-flushed checkpoint.
+const windows = `SELECT bucket_start,bucket_end AS window_end,sample_count,metrics,false AS checkpoint
+  FROM iot_reading_aggregate WHERE device_id=$1
+  UNION ALL SELECT c.bucket_start,c.last_observed_at,c.sample_count,c.metrics,true
+  FROM iot_reading_checkpoint c WHERE c.device_id=$1 AND c.sample_count>0
+    AND NOT EXISTS (SELECT 1 FROM iot_reading_aggregate a WHERE a.device_id=c.device_id AND a.bucket_start=c.bucket_start)`;
+const covered = `($2::timestamptz IS NULL OR bucket_start >= $2::timestamptz)
+  AND ($3::timestamptz IS NULL OR CASE WHEN checkpoint THEN window_end < $3::timestamptz ELSE window_end <= $3::timestamptz END)`;
+const classified = `WITH raw AS (${rawClassified}), windows AS (${windows})
+  SELECT id,created_at,created_at AS observed_end,value,absent,false AS aggregate,
+    1::bigint AS received_count,(value IS NOT NULL)::integer AS valid_count,
+    absent::integer AS absent_count,(value IS NULL AND NOT absent)::integer AS invalid_count,
+    value AS total_value,value AS min_value,value AS max_value,
+    ($4='movement' AND value=1)::integer AS detected_count,
+    ($4='movement' AND value=0)::integer AS no_movement_count FROM raw
+  UNION ALL SELECT 'window:'||bucket_start::text,bucket_start,window_end,NULL::numeric,false,true,
+    sample_count,coalesce((metrics->$4->>'count')::bigint,0),
+    sample_count-coalesce((metrics->$4->>'count')::bigint,0),0,
+    (metrics->$4->>'sum')::numeric,(metrics->$4->>'min')::numeric,(metrics->$4->>'max')::numeric,0,0
+  FROM windows WHERE ${covered} AND $4<>'movement'`;
+const counts = `coalesce(sum(received_count),0) AS received,coalesce(sum(valid_count),0) AS valid,
+  coalesce(sum(absent_count),0) AS absent,coalesce(sum(invalid_count),0) AS invalid,
+  sum(total_value)/nullif(sum(valid_count),0) AS average,min(min_value) AS minimum,max(max_value) AS maximum,
+  coalesce(sum(detected_count),0) AS detected,coalesce(sum(no_movement_count),0) AS no_movement`;
 function stats(row, measurement) {
   const result = {};
   for (const [key, column] of Object.entries({ receivedRows: "received", validMeasurements: "valid", absentOrNullMeasurements: "absent", invalidMeasurements: "invalid" })) {
@@ -68,10 +88,20 @@ async function generateIoTSummary(client, query, now = new Date()) {
   if (!identity) fail(404, "IOT_REPORT_DEVICE_NOT_FOUND", "Device not found.");
   const queryStart = range?.startAt ?? scope.startInclusive, queryEnd = range?.endAt ?? scope.endExclusive;
   const args = [device, queryStart, queryEnd, measurement];
+  const coverage = (await client.query(`WITH windows AS (${windows}) SELECT
+    coalesce(sum(sample_count) FILTER (WHERE ${covered} AND $4<>'movement'),0) AS aggregate_samples,
+    coalesce(sum(sample_count) FILTER (WHERE NOT (${covered})),0) AS partial_samples,
+    coalesce(sum(sample_count) FILTER (WHERE ${covered} AND $4='movement'),0) AS movement_samples,
+    max(window_end) AS last_window FROM windows
+    WHERE ($2::timestamptz IS NULL OR CASE WHEN checkpoint THEN window_end >= $2::timestamptz ELSE window_end > $2::timestamptz END)
+      AND ($3::timestamptz IS NULL OR bucket_start < $3::timestamptz)`,args)).rows[0];
+  const aggregateSamples = Number(coverage.aggregate_samples), partialSamples = Number(coverage.partial_samples), movementSamples = Number(coverage.movement_samples);
+  if (![aggregateSamples,partialSamples,movementSamples].every(n=>Number.isSafeInteger(n)&&n>=0)) fail(503,"IOT_REPORT_COUNT_MISMATCH","Report coverage is inconsistent.");
+  const hasWindows = !!coverage.last_window;
   const total = (await client.query(`WITH source AS (${classified}) SELECT ${counts},
-    min(created_at) AS first_received, max(created_at) AS last_received,
-    min(created_at) FILTER (WHERE value IS NOT NULL) AS first_valid,
-    max(created_at) FILTER (WHERE value IS NOT NULL) AS last_valid,
+    min(created_at) AS first_received, max(observed_end) AS last_received,
+    min(created_at) FILTER (WHERE valid_count>0) AS first_valid,
+    max(observed_end) FILTER (WHERE valid_count>0) AS last_valid,
     ((array_agg(created_at ORDER BY created_at DESC,id DESC) FILTER (WHERE value IS NOT NULL)))[1] AS latest_recorded_at,
     ((array_agg(value ORDER BY created_at DESC,id DESC) FILTER (WHERE value IS NOT NULL)))[1] AS latest_value FROM source`, args)).rows[0];
   let start = range?.startAt ?? scope.startInclusive, end = range?.endAt ?? scope.endExclusive;
@@ -88,11 +118,12 @@ async function generateIoTSummary(client, query, now = new Date()) {
   if (start && end) {
     // Count bucket boundaries before generating them. No unbounded series is built.
     const bounds = (await client.query(`SELECT
-      (date_trunc($2::text,$1::timestamptz AT TIME ZONE 'Asia/Kuala_Lumpur') AT TIME ZONE 'Asia/Kuala_Lumpur') AS anchor`, [start, interval])).rows[0];
+      (date_trunc($2::text,$1::timestamptz AT TIME ZONE 'Asia/Kuala_Lumpur') AT TIME ZONE 'Asia/Kuala_Lumpur') AS anchor`, [start, hasWindows && interval === "minute" ? "hour" : interval])).rows[0];
     const anchor = iso(bounds.anchor), width = { minute: 60000, hour: 3600000, day: 86400000, week: 604800000 }[interval];
     const count = Math.ceil((Date.parse(end) - Date.parse(anchor)) / width);
     if (count > MAX_BUCKETS && config.interval !== "auto") fail(422, "IOT_REPORT_BUCKET_LIMIT", "Requested interval exceeds 520 buckets; use auto or a coarser interval.");
     step = Math.max(1, Math.ceil(count / MAX_BUCKETS));
+    if (hasWindows && interval === "minute") step = Math.max(10,Math.ceil(step/10)*10);
     const result = await client.query(`WITH source AS (${classified}), grouped AS (
       SELECT floor(extract(epoch FROM (created_at-$5::timestamptz)) / $6)::integer AS bucket, ${counts}
       FROM source GROUP BY 1
@@ -107,13 +138,14 @@ async function generateIoTSummary(client, query, now = new Date()) {
   }
   return {
     contractVersion: 1, category: "iot", generatedAt: now.toISOString(), device: { id: identity.id, name: identity.name },
-    temperatureThreshold: measurement === "temperature" && Number.isFinite(identity.thresholds?.temperature) ? identity.thresholds.temperature : null,
-    latestReading: total.latest_recorded_at && Number.isFinite(Number(total.latest_value)) ? { recordedAt: iso(total.latest_recorded_at), value: Number(total.latest_value) } : null,
+    temperatureThreshold: measurement === "temperature" ? thresholdRange(identity.thresholds?.temperature)?.max ?? null : null,
+    latestReading: total.latest_recorded_at && (!coverage.last_window || Date.parse(coverage.last_window)<Date.parse(total.latest_recorded_at)) && Number.isFinite(Number(total.latest_value)) ? { recordedAt: iso(total.latest_recorded_at), value: Number(total.latest_value) } : null,
     measurement: { key: measurement, unit: units[measurement] },
-    scope: { ...scope, timestampBasis: "sensor_reading.created_at", asOf: now.toISOString(), effectiveStartInclusive: start, effectiveEndExclusive: end },
+    scope: { ...scope, timestampBasis: hasWindows ? "mixed_raw_and_aggregate_windows" : "sensor_reading.created_at", asOf: now.toISOString(), effectiveStartInclusive: start, effectiveEndExclusive: end },
     aggregation: { interval, step, maximumBuckets: MAX_BUCKETS, bucketCount: buckets.length, emptyBucketsIncluded: true },
-    summary: stats(total, measurement), observedSpan: { firstReceivedAt: iso(total.first_received), lastReceivedAt: iso(total.last_received), firstValidAt: iso(total.first_valid), lastValidAt: iso(total.last_valid) },
-    buckets, limitations: ["receipt_time_not_capture_time", "missing_counts_apply_to_received_rows", "expected_sampling_schedule_unavailable", "availability_not_calculated", "sample_weighted_average", ...(units[measurement] === "raw" ? ["uncalibrated_raw_units"] : [])], complete: true,
+    summary: stats(total, measurement), observedSpan: { firstReceivedAt: hasWindows ? null : iso(total.first_received), lastReceivedAt: hasWindows ? null : iso(total.last_received), firstValidAt: hasWindows ? null : iso(total.first_valid), lastValidAt: hasWindows ? null : iso(total.last_valid) },
+    coverage: { aggregateSamples, omittedPartialSamples: partialSamples, omittedMovementSamples: movementSamples, nativeResolutionMinutes: hasWindows ? 10 : null },
+    buckets, limitations: [...(hasWindows ? ["aggregate_windows_not_individual_readings", "aggregate_observed_span_unavailable"] : []), ...(partialSamples ? ["partial_aggregate_windows_excluded"] : []), ...(movementSamples ? ["aggregate_movement_counts_unavailable"] : []),"receipt_time_not_capture_time", "missing_counts_apply_to_received_rows", "expected_sampling_schedule_unavailable", "availability_not_calculated", "sample_weighted_average", ...(units[measurement] === "raw" ? ["uncalibrated_raw_units"] : [])], complete: true,
   };
 }
 function mountIoTSummaryReport(app, { pool, allow }) {

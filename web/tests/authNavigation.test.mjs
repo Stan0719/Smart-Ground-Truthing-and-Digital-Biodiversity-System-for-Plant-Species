@@ -11,13 +11,14 @@ const transpile = source => ts.transpileModule(source, { compilerOptions: { modu
 const user = { id: 'fake-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }
 const deferred = () => { let resolve; const promise = new Promise(yes => resolve = yes); return { resolve, promise } }
 function harness(fetch, path = '/conservation/reviews') {
-  const auth = { exports: {}, fetch }; vm.runInNewContext(transpile(read('services/auth.ts')), auth)
+  const auth = { exports: {}, fetch, AbortSignal }; vm.runInNewContext(transpile(read('services/auth.ts')), auth)
   const route = vue.reactive({ path, fullPath: path }), redirects = []
   let cleanup, guard
   const router = { replace: async value => { redirects.push(value) }, afterEach() {}, beforeEach: fn => guard = fn }
   const { descriptor } = parse(read('App.vue')), script = compileScript(descriptor, { id: 'auth-navigation' })
   const scope = vue.effectScope()
   const context = { exports: {}, window: { removeEventListener() {} }, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return { ...vue, resolveComponent: name => name, onMounted() {}, onUnmounted: fn => cleanup = fn }
     if (name === 'vue-router') return { useRoute: () => route, useRouter: () => router }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key }) }
@@ -31,6 +32,7 @@ function harness(fetch, path = '/conservation/reviews') {
   assert.deepEqual(template.errors, [])
   vm.runInNewContext('(function(){'+transpile(template.code)+'})()', context)
   const routerContext = { exports: {}, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue-router') return { createRouter: () => router, createWebHistory() {} }
     if (name.includes('services/auth')) return auth.exports
     return {}

@@ -5,9 +5,8 @@ const copyConfirmation = useOfficerCopyConfirmation({ schedule: (fn, ms) => wind
 const controlCopied = copyConfirmation.copied, controlToastKey = copyConfirmation.toastKey
 
 import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
-import SubmissionChanges from '../../components/conservation/SubmissionChanges.vue'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Directive } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Directive } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { currentUser, sessionSnapshot, subscribeSession } from '../../services/auth'
@@ -17,6 +16,7 @@ import type { ObservationEdit, ObservationEditQueueState } from '../../services/
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
 import ObservationEditQueue from '../../components/conservation/ObservationEditQueue.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
+import PlantPhotoLightbox from '../../components/PlantPhotoLightbox.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import ObservationReviewHistory from '../../components/conservation/ObservationReviewHistory.vue'
 import { formatPlantId } from '../../utils/plantId'
@@ -66,7 +66,7 @@ let navigationRequest = 0
 const { t, te, locale } = useI18n()
 const observations = ref<ObservationView[]>([])
 const proposalQueue = ref<InstanceType<typeof ObservationEditQueue> | null>(null)
-const proposalState = ref<ObservationEditQueueState>({ rows: [], names: {}, loading: false, error: '' })
+const proposalState = ref<ObservationEditQueueState>({ rows: [], names: {}, loading: true, error: '' })
 const submissionType = ref<'all' | 'original' | 'edit'>('all')
 function receiveProposalState(value: ObservationEditQueueState) {
   proposalState.value = authorizedOfficer.value ? value : { rows: [], names: {}, loading: false, error: '' }
@@ -91,7 +91,26 @@ const scannedPages = ref(0)
 const isLoading = ref(true)
 const loadError = ref('')
 const skippedRecords = ref(0)
+const summaryRows = ref<ObservationView[]>([])
+const summaryComplete = ref(false), summaryLoading = ref(false)
+const summaryError = ref<'unavailable' | 'incomplete' | ''>('')
+let summaryRequest = 0
+let summaryAbort: AbortController | null = null
+let summaryTask: Promise<void> | null = null
+const SUMMARY_PAGE_LIMIT = 20
+function invalidateSummary() {
+  summaryRequest++; summaryAbort?.abort(); summaryAbort = null
+  summaryComplete.value = false; summaryLoading.value = false; summaryError.value = ''; summaryRows.value = []
+}
 const selected = ref<ObservationView | null>(null)
+const statusHelpOpen = ref(false)
+const statusHelpButton = ref<HTMLElement | null>(null), statusHelpTooltip = ref<HTMLElement | null>(null)
+let statusHelpTimer: number | undefined
+function closeStatusHelp() { window.clearTimeout(statusHelpTimer); statusHelpOpen.value = false }
+function showStatusHelp() { window.clearTimeout(statusHelpTimer); statusHelpOpen.value = true }
+function deferCloseStatusHelp() { window.clearTimeout(statusHelpTimer); statusHelpTimer = window.setTimeout(closeStatusHelp, 150) }
+
+const observationPhotoPreview = ref<InstanceType<typeof PlantPhotoLightbox> | null>(null)
 const detailLoading = ref(false)
 const detailError = ref('')
 const historyModal = ref(false)
@@ -121,8 +140,6 @@ const vObservationDialog: Directive<HTMLElement, string> = {
     if (!header || !card) return
     const measure = () => {
       card.style.setProperty('--observation-header-height', `${header.offsetHeight}px`)
-      const actionsHeight = root.querySelector<HTMLElement>('.observation-decision-actions')?.offsetHeight || 0
-      card.style.setProperty('--observation-review-height', `${Math.max(0, card.clientHeight - header.offsetHeight - actionsHeight - 56)}px`)
     }
     const observer = new ResizeObserver(measure)
     observer.observe(header)
@@ -153,14 +170,11 @@ const reviewNeedsReload = ref(false)
 const reviewAcknowledged = ref(true)
 const reviewFeedback = ref('')
 const reviewSuccess = ref(false)
+const successNotice = ref(false), successSequence = ref(0)
 const reviewInfo = ref(false)
 const reviewFeedbackVariant = computed(() => reviewInfo.value ? 'info' : reviewSuccess.value ? 'success' : 'error')
-const commentFeedbackId = ref<number | null>(null)
-let commentFeedbackSequence = 0
+const reviewCommentInput = ref<HTMLTextAreaElement | null>(null)
 const reviewCommentError = computed(() => !reviewSuccess.value && reviewFeedback.value === rt('feedback.commentRequired'))
-function dismissCommentFeedback(id: number) {
-  if (commentFeedbackId.value === id) commentFeedbackId.value = null
-}
 const rt = (key: string, params?: Record<string, string | number>) => t('conservationPages.reviews.' + key, params || {})
 const reviewRequest = createReviewRequest(rt, (...args) => fetch(...args))
 let detailRequest = 0
@@ -203,14 +217,26 @@ const canonicalStatus = (value: unknown) => {
   return supportedStatuses.find((item) => item.toLowerCase() === normalized) || raw
 }
 const summaryStatuses = ['Pending Review', 'Correction Required', 'Flagged', 'Rejected', 'Approved']
+const summaryHasFilters = computed(() => !!(search.value.trim() || status.value || species.value || owner.value || date.value || submissionType.value !== 'all'))
+const summaryBusy = computed(() => (submissionType.value !== 'edit' && (isLoading.value || summaryLoading.value)) || (submissionType.value !== 'original' && proposalState.value.loading))
+const summaryUnavailable = computed(() => !authorizedOfficer.value || (submissionType.value !== 'edit' && (!!loadError.value || summaryError.value === 'unavailable')) || (submissionType.value !== 'original' && !!proposalState.value.error))
+const summaryIncomplete = computed(() => submissionType.value !== 'edit' && (!summaryComplete.value || summaryError.value === 'incomplete'))
 const summaryCounts = computed(() => {
-  const available = authorizedOfficer.value && !isLoading.value && !loadError.value
-  // Match list deduplication and origin semantics, without narrowing counts to
-  // client-side table search/species/owner/date filters or a visible preview.
-  const loaded = [...new Map(observations.value.map(item => [item.id, item])).values()]
-    .filter(item => item.origin === 'subsequent_observation')
-  return summaryStatuses.map(status => ({ status, count: available ? loaded.filter(item => canonicalStatus(item.status) === status).length : null }))
+  const available = !summaryBusy.value && !summaryUnavailable.value && !summaryIncomplete.value
+  // Count submissions, not parent Observations: an edit uses its own ID/status.
+  // Separate typed identities retain a genuine Observation and its edit request.
+  const matches = new Map<string, string>()
+  if (submissionType.value !== 'edit') {
+    const originals = [...new Map([...summaryRows.value, ...observations.value].map(item => [item.id, item])).values()].filter(matchesObservation)
+    for (const row of originals) matches.set(`observation:${row.id}`, row.status)
+  }
+  if (submissionType.value !== 'original') {
+    for (const row of proposalItems.value.filter(matchesProposal)) matches.set(`observation-edit:${row.proposal.id}`, row.proposal.status)
+  }
+  return summaryStatuses.map(status => ({ status, count: available ? [...matches.values()].filter(value => canonicalStatus(value) === status).length : null }))
 })
+const summaryScope = computed(() => t('unifiedObservations.' + (summaryBusy.value ? 'summaryLoading' : summaryUnavailable.value ? 'summaryUnavailable' : summaryIncomplete.value ? 'summaryIncomplete' : 'summaryScope')))
+
 const keyFor = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '')
 const label = (value: string | undefined) => {
   if (!value) return '—'
@@ -297,8 +323,8 @@ const mapObservation = (value: unknown): ObservationView | null => {
     hasSpeciesRequest: Boolean(stringValue(item.species_request_id) || record(item.species_request)),
   }
   trackDatabaseTranslationFields([
-    { recordType: 'observation', recordId: id, fieldName: 'morphology', target: mapped, targetField: 'morphology' },
-    { recordType: 'observation', recordId: id, fieldName: 'notes', target: mapped, targetField: 'notes' },
+    { recordType: 'observation', recordId: id, fieldName: 'morphology', sourceVersion: String(item.revision), target: mapped, targetField: 'morphology' },
+    { recordType: 'observation', recordId: id, fieldName: 'notes', sourceVersion: String(item.revision), target: mapped, targetField: 'notes' },
     { recordType: 'review-comment', recordId: id, fieldName: 'comment', target: mapped, targetField: 'reviewComment' },
   ])
   return mapped
@@ -307,11 +333,11 @@ const mapObservation = (value: unknown): ObservationView | null => {
 class ObservationApiError extends Error {
   constructor(message: string, readonly status = 0) { super(message) }
 }
-async function request(url: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+async function request(url: string, signal?: AbortSignal, fresh = false): Promise<Record<string, unknown>> {
   let response: Response
   try {
     const timeout = AbortSignal.timeout(15000)
-    response = await fetch(url, { credentials: 'same-origin', signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
+    response = await fetch(url, { credentials: 'same-origin', signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(fresh ? { cache: 'no-store' as const } : {}) })
   } catch {
     throw new ObservationApiError(t('conservationPages.observations.errors.network'))
   }
@@ -319,9 +345,6 @@ async function request(url: string, signal?: AbortSignal): Promise<Record<string
   try { result = record(await response.json()) }
   catch { throw new ObservationApiError(t('conservationPages.observations.errors.invalidResponse'), response.status) }
   if (!response.ok) {
-    const backendMessage = [result?.message, result?.error].find(
-      (value): value is string => typeof value === 'string' && Boolean(value.trim()),
-    )
     const fallback = response.status === 401
       ? t('conservationPages.observations.errors.unauthorized')
       : response.status === 403
@@ -329,13 +352,14 @@ async function request(url: string, signal?: AbortSignal): Promise<Record<string
         : response.status === 404
           ? t('conservationPages.observations.errors.notFound')
           : t('conservationPages.observations.errors.requestFailed', { status: response.status })
-    throw new ObservationApiError(backendMessage || fallback, response.status)
+    throw new ObservationApiError(fallback, response.status)
   }
   if (!result) throw new ObservationApiError(t('conservationPages.observations.errors.invalidResponse'))
   return result
 }
 
 function invalidateList() {
+  invalidateSummary()
   listRequest++; listAbort?.abort(); listAbort = null
   hasMore.value = false; nextCursor.value = null; seenCursors.clear()
   isLoading.value = false; autoScanLimited.value = false; scannedPages.value = 0
@@ -345,6 +369,7 @@ watch([queueOrigin, status], invalidateList, { flush: 'sync' })
 async function loadObservations(append = false) {
   if (disposed || !authorizedOfficer.value) return
   if (append && (isLoading.value || !hasMore.value)) return
+  invalidateSummary()
   listAbort?.abort()
   const token = ++listRequest
   const controller = new AbortController(); listAbort = controller
@@ -390,7 +415,52 @@ async function loadObservations(append = false) {
     if (!current()) return
     // Keep successful pages and their continuation when a later request fails.
     loadError.value = error instanceof Error ? error.message : t('conservationPages.observations.errors.invalidResponse')
-  } finally { if (current()) { isLoading.value = false; listAbort = null } }
+  } finally { if (current()) { isLoading.value = false; listAbort = null; summaryTask = refreshSummary() } }
+}
+
+async function refreshSummary() {
+  const token = ++summaryRequest
+  summaryAbort?.abort(); summaryAbort = null
+  summaryComplete.value = false; summaryLoading.value = false; summaryError.value = ''
+  if (disposed || !authorizedOfficer.value || isLoading.value || loadError.value) return
+  summaryRows.value = [...observations.value]
+  if (skippedRecords.value) { summaryError.value = 'unavailable'; return }
+  if (!hasMore.value) { summaryComplete.value = true; return }
+  const controller = new AbortController(); summaryAbort = controller
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60000)])
+  const current = () => !disposed && token === summaryRequest && authorizedOfficer.value && !controller.signal.aborted
+  const selectedStatus = canonicalStatuses.includes(status.value) ? status.value : ''
+  let cursor = nextCursor.value
+  const visited = new Set<string>()
+  summaryLoading.value = true
+  try {
+    for (let pageNumber = 0; pageNumber < SUMMARY_PAGE_LIMIT; pageNumber++) {
+      if (!cursor || visited.has(cursor)) throw new Error('Invalid summary continuation')
+      visited.add(cursor)
+      const result = await request(observationQueueUrl('subsequent_observation', selectedStatus, cursor), signal, true)
+      if (!current()) return
+      const page = readQueuePage(result.page)
+      if (!Array.isArray(result.observations) || !page) throw new Error('Invalid summary page')
+      const rows = result.observations.map(mapObservation)
+      if (rows.some(row => !row)) throw new Error('Unverified summary record')
+      summaryRows.value = [...new Map([...summaryRows.value, ...(rows as ObservationView[])].map(row => [row.id, row])).values()]
+      const staffIds = [...new Set(summaryRows.value.map(row => row.ownerSubject).filter(subject => subject.startsWith('staff:')).map(subject => subject.slice(6)))].filter(id => !submitterNames.value[id])
+      for (let i = 0; i < staffIds.length; i += 100) {
+        try {
+          const directory = await request(`/api/conservation/submitter-names?ids=${encodeURIComponent(staffIds.slice(i, i + 100).join(','))}`, signal)
+          if (!current()) return
+          if (directory.names && typeof directory.names === 'object') submitterNames.value = { ...submitterNames.value, ...directory.names as Record<string, string> }
+        } catch { if (!current()) return /* Match the table's identifier fallback. */ }
+      }
+      if (!page.hasMore) { summaryComplete.value = true; return }
+      cursor = page.cursor
+    }
+    summaryError.value = 'incomplete'
+  } catch {
+    if (current()) summaryError.value = 'unavailable'
+  } finally {
+    if (token === summaryRequest) { summaryLoading.value = false; summaryAbort = null }
+  }
 }
 
 async function open(item: ObservationView, reviewing = false, expectedOrigin?: ObservationOrigin) {
@@ -402,8 +472,7 @@ async function open(item: ObservationView, reviewing = false, expectedOrigin?: O
   reviewAcknowledged.value = true
   reviewFeedback.value = ''
   reviewInfo.value = false
-  commentFeedbackId.value = null
-  reviewSuccess.value = false
+  reviewSuccess.value = false; successNotice.value = false
   const requestId = ++detailRequest
   selected.value = item
   historyModal.value = false
@@ -442,11 +511,13 @@ function openHistory(item: ObservationView) {
 }
 function closeModal(force = false) {
   if (reviewSaving.value && !force) return
+  successNotice.value = false
+  closeStatusHelp()
+  observationPhotoPreview.value?.close()
   reviewMode.value = false
   reviewComment.value = ''
   reviewFeedback.value = ''
   reviewInfo.value = false
-  commentFeedbackId.value = null
   reviewNeedsReload.value = false
   detailRequest++
   selected.value = null
@@ -459,6 +530,7 @@ function updateObservation(row: ObservationView) {
   if (previous && !row.speciesRequest) row = { ...row, speciesRequest: { ...previous, state: 'error' } }
   selected.value = row
   observations.value = observations.value.map(item => item.id === row.id ? row : item)
+  summaryRows.value = summaryRows.value.map(item => item.id === row.id ? row : item)
   if (reviewMode.value && row.origin !== 'subsequent_observation') {
     reviewFeedback.value = rt('queues.originMoved')
     void loadObservations()
@@ -475,7 +547,7 @@ async function reloadReview() {
   const id = selected.value.id, token = detailRequest
   reviewSaving.value = true
   reviewInfo.value = false
-  reviewSuccess.value = false
+  reviewSuccess.value = false; successNotice.value = false
   reviewFeedback.value = ''
   try {
     const row = await readReviewObservation(id)
@@ -487,13 +559,13 @@ async function reloadReview() {
     reviewComment.value = draftComment
     reviewNeedsReload.value = false
     reviewAcknowledged.value = !changed && !mustInspect
-    reviewSuccess.value = false
+    reviewSuccess.value = false; successNotice.value = false
     reviewInfo.value = !changed && !mustInspect
     reviewFeedback.value = reviewInfo.value ? modalText('upToDate') : rt('feedback.reloaded')
   } catch (error) {
     if (!disposed && token === detailRequest && selected.value?.id === id) {
       reviewNeedsReload.value = true
-      reviewSuccess.value = false
+      reviewSuccess.value = false; successNotice.value = false
       reviewInfo.value = false
       reviewFeedback.value = error instanceof Error ? error.message : rt('feedback.loadFailed')
     }
@@ -503,13 +575,12 @@ async function reloadReview() {
 async function decide(decision: ReviewDecision) {
   if (!reviewAllowed.value || !selected.value || !reviewDecisions.value.includes(decision) || !positiveRevision(selected.value.revision)) return
   if (!reviewCommentValid(decision, reviewComment.value)) {
-    reviewSuccess.value = false
+    reviewSuccess.value = false; successNotice.value = false
     reviewInfo.value = false
     reviewFeedback.value = rt('feedback.commentRequired')
-    commentFeedbackId.value = ++commentFeedbackSequence
+    await nextTick(); reviewCommentInput.value?.focus()
     return
   }
-  commentFeedbackId.value = null
   const { id, revision } = selected.value
   const typedComment = reviewComment.value, token = detailRequest
   reviewSaving.value = true; reviewFeedback.value = ''; reviewSuccess.value = false; reviewInfo.value = false
@@ -525,7 +596,7 @@ async function decide(decision: ReviewDecision) {
     const result = await performObservationReview({ id, revision, decision, comment: typedComment, request: reviewRequest, read: readReviewObservation,
       current: () => !disposed && token === detailRequest && selected.value?.id === id && authorizedOfficer.value, invalidResponse: rt('feedback.invalidResponse') })
     if (!result) return
-    if (result.committed) reviewHistoryRefresh.value++
+    if (result.committed) { reviewHistoryRefresh.value++; successSequence.value++; successNotice.value = true }
     if (result.observation) updateObservation(result.observation)
     reviewNeedsReload.value = result.needsReload || (result.error instanceof ReviewApiError && [401, 403].includes(result.error.status))
     if (result.kind === 'saved') { reviewSuccess.value = true; reviewComment.value = selected.value?.reviewComment || ''; reviewFeedback.value = rt('feedback.saved') }
@@ -581,11 +652,11 @@ const submitterLabel = (subject: string) => {
   const key = subject.startsWith('staff:') ? 'staffIdentifier' : subject.startsWith('visitor:') ? 'visitorIdentifier' : 'submitterIdentifier'
   return t('conservationPages.observations.' + key, { id: subjectTokens.value.get(subject) || compactIdentifierTokens([subject], subjectPart).get(subject) || subjectPart(subject) })
 }
-async function copyIdentifier(value: string, kind: 'observation' | 'subject', reviewSubject = false, controlKey = `${kind}:${value}`) {
+async function copyIdentifier(value: string, kind: 'observation' | 'subject' | 'submission', reviewSubject = false, controlKey = `${kind}:${value}`) {
   if (!authorizedOfficer.value || copyPending.value || !value) return
-  const listed = observations.value.some(item => (kind === 'observation' ? item.id : item.ownerSubject) === value)
+  const listed = kind === 'submission' ? proposalItems.value.some(item => item.proposal.id === value) : observations.value.some(item => (kind === 'observation' ? item.id : item.ownerSubject) === value)
   const detail = selected.value
-  const displayedInModal = detail && (kind === 'observation' ? detail.id === value : detail.ownerSubject === value || reviewSubject)
+  const displayedInModal = detail && kind !== 'submission' && (kind === 'observation' ? detail.id === value : detail.ownerSubject === value || reviewSubject)
   if (!listed && !displayedInModal) return
   const attempt = ++copyAttempt, actor = session.value.user?.id
   const current = () => !disposed && attempt === copyAttempt && authorizedOfficer.value && actor === session.value.user?.id
@@ -602,35 +673,35 @@ async function copyIdentifier(value: string, kind: 'observation' | 'subject', re
   } finally { if (current()) copyPending.value = false }
 }
 
-const filtered = computed(() => {
+function matchesObservation(item: ObservationView) {
+  if (item.origin !== 'subsequent_observation') return false
   const query = search.value.trim().toLowerCase()
-  return observations.value.filter((item) => {
-    if (item.origin !== 'subsequent_observation') return false
-    const searchable = `${item.id} ${item.plantRawId} ${item.plantDisplayId} ${item.scientificName} ${item.commonName} ${item.ownerSubject} ${item.status} ${observationLabel(item.id)} ${submitterLabel(item.ownerSubject)}`
-    return (!query || searchable.toLowerCase().includes(query)) &&
-      (!status.value || item.status === status.value) &&
-      (!species.value || item.speciesId === species.value) &&
-      (!owner.value || item.ownerSubject === owner.value) &&
-      (!date.value || dateKey(item.createdAt) === date.value)
-  })
-})
+  const searchable = `${item.id} ${item.plantRawId} ${item.plantDisplayId} ${item.scientificName} ${item.commonName} ${item.ownerSubject} ${item.status} ${observationLabel(item.id)} ${submitterLabel(item.ownerSubject)}`
+  return (!query || searchable.toLowerCase().includes(query)) &&
+    (!status.value || item.status === status.value) &&
+    (!species.value || item.speciesId === species.value) &&
+    (!owner.value || item.ownerSubject === owner.value) &&
+    (!date.value || dateKey(item.createdAt) === date.value)
+}
+const filtered = computed(() => observations.value.filter(matchesObservation))
 // Display-only union: proposal identity/revision never becomes a canonical Observation.
 const proposalItems = computed(() => proposalState.value.rows.flatMap(proposal => {
   const baseline = mapObservation(proposal.observation_edit.current)
   return baseline?.origin === 'subsequent_observation' ? [{ kind: 'edit' as const, key: `observation-edit:${proposal.id}`, proposal, baseline }] : []
 }))
 const proposalLabels = computed(() => { const tokens=compactIdentifierTokens(proposalState.value.rows.map(row=>row.id)); return new Map(proposalItems.value.map(row => [row.proposal.id, `CHANGE-${tokens.get(row.proposal.id) || row.proposal.id}`])) })
+function matchesProposal({ proposal, baseline }: (typeof proposalItems.value)[number]) {
+  const query = search.value.trim().toLowerCase()
+  // Origin/species belong to the verified baseline. Status, owner and date belong to the proposal.
+  const searchable = `${proposal.id} CHANGE-${proposal.id} ${baseline.id} ${observationLabel(baseline.id)} ${baseline.plantRawId} ${baseline.plantDisplayId} ${baseline.scientificName} ${baseline.commonName} ${proposal.owner_subject} ${submitterLabel(proposal.owner_subject)} ${proposal.status}`
+  return (queueOrigin.value === 'all' || baseline.origin === queueOrigin.value) &&
+    (!query || searchable.toLowerCase().includes(query)) && (!status.value || proposal.status === status.value) &&
+    (!species.value || baseline.speciesId === species.value) && (!owner.value || proposal.owner_subject === owner.value) &&
+    (!date.value || dateKey(proposal.created_at) === date.value)
+}
 const displayedRows = computed(() => {
   const originals = submissionType.value === 'edit' ? [] : filtered.value.map(observation => ({ kind: 'original' as const, key: `observation:${observation.id}`, observation }))
-  const query = search.value.trim().toLowerCase()
-  const proposals = submissionType.value === 'original' ? [] : proposalItems.value.filter(({proposal,baseline}) => {
-    // Origin/species belong to the verified baseline. Status, owner and date belong to the proposal.
-    const searchable = `${proposal.id} CHANGE-${proposal.id} ${baseline.id} ${observationLabel(baseline.id)} ${baseline.plantRawId} ${baseline.plantDisplayId} ${baseline.scientificName} ${baseline.commonName} ${proposal.owner_subject} ${submitterLabel(proposal.owner_subject)} ${proposal.status}`
-    return (queueOrigin.value === 'all' || baseline.origin === queueOrigin.value) &&
-      (!query || searchable.toLowerCase().includes(query)) && (!status.value || proposal.status === status.value) &&
-      (!species.value || baseline.speciesId === species.value) && (!owner.value || proposal.owner_subject === owner.value) &&
-      (!date.value || dateKey(proposal.created_at) === date.value)
-  })
+  const proposals = submissionType.value === 'original' ? [] : proposalItems.value.filter(matchesProposal)
   return [...originals, ...proposals].sort((a,b) => timestamp(b.kind === 'original' ? b.observation.createdAt : b.proposal.created_at) - timestamp(a.kind === 'original' ? a.observation.createdAt : a.proposal.created_at))
 })
 const proposalReviewable = (row: ObservationEdit) => authorizedOfficer.value && !reviewSaving.value && row.status === 'Pending Review' &&
@@ -686,6 +757,66 @@ watch(() => [route.query.observation, authorizedOfficer.value, session.value.use
 }, { immediate: true })
 
 onMounted(loadObservations)
+const observationPhotos = computed(() => authorizedOfficer.value && !reviewNeedsReload.value ? (selected.value?.assets || [])
+  .filter(asset => asset.contentType.startsWith('image/') && !failedAssets.value.has(asset.id))
+  .map(asset => ({ id: asset.id, url: assetUrl(asset.id) })) : [])
+function openObservationPhoto(id: string, event: Event) {
+  const index = observationPhotos.value.findIndex(photo => photo.id === id)
+  if (index < 0 || !event.currentTarget) return
+  void observationPhotoPreview.value?.open(observationPhotos.value, index, modalText('media'), event.currentTarget as HTMLElement)
+}
+watch(() => session.value.pending, pending => {
+  if (pending) invalidateSummary()
+  else if (authorizedOfficer.value && !isLoading.value && !loadError.value) summaryTask = refreshSummary()
+}, { flush: 'sync' })
+const statusHelpContent = computed(() => {
+  if (selected.value?.status === 'Rejected') return { title: modalText('aboutRejected'), description: t('submissionChanges.finalRejected'), note: '' }
+  if (selected.value?.status === 'Approved') return { title: modalText('aboutApproved'), description: modalText('approvedDescription'), note: modalText('approvedEditNote') }
+  return null
+})
+watch(() => [selected.value?.id, selected.value?.status], closeStatusHelp, { flush: 'sync' })
+watch(statusHelpOpen, async open => {
+  if (!open) { statusHelpTooltip.value?.hidePopover?.(); return }
+  await nextTick()
+  if (!statusHelpOpen.value || !statusHelpTooltip.value || !statusHelpButton.value || !statusHelpContent.value) return
+  const bounds = statusHelpButton.value.getBoundingClientRect(), tooltip = statusHelpTooltip.value
+  const width = Math.min(320, window.innerWidth - 24)
+  tooltip.style.width = `${width}px`
+  tooltip.style.left = `${Math.max(12, Math.min(bounds.left, window.innerWidth - width - 12))}px`
+  tooltip.style.top = `${bounds.bottom + 8}px`
+  // Reuse the history-help native top-layer popover pattern, plus a body portal
+  // so browsers without Popover support also escape modal overflow clipping.
+  tooltip.showPopover?.()
+  const height = tooltip.getBoundingClientRect().height
+  if (bounds.bottom + 8 + height > window.innerHeight - 12) tooltip.style.top = `${Math.max(12, bounds.top - height - 8)}px`
+})
+function dismissStatusHelpKey(event: KeyboardEvent) {
+  if (statusHelpOpen.value && event.key === 'Escape') {
+    event.preventDefault(); event.stopPropagation(); closeStatusHelp()
+  }
+}
+function dismissOutsideStatusHelp(event: Event) {
+  const target = event.target as Node | null
+  if (!statusHelpButton.value?.contains(target) && !statusHelpTooltip.value?.contains(target)) closeStatusHelp()
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', dismissOutsideStatusHelp)
+  document.addEventListener('keydown', dismissStatusHelpKey, true)
+  document.addEventListener('scroll', closeStatusHelp, true)
+  window.addEventListener('resize', closeStatusHelp)
+})
+onBeforeUnmount(() => {
+  closeStatusHelp()
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('pointerdown', dismissOutsideStatusHelp)
+    document.removeEventListener('keydown', dismissStatusHelpKey, true)
+    document.removeEventListener('scroll', closeStatusHelp, true)
+  }
+  window.removeEventListener?.('resize', closeStatusHelp)
+})
+watch(observationPhotos, photos => observationPhotoPreview.value?.reconcile(photos))
+watch(() => selected.value?.id, () => observationPhotoPreview.value?.close(), { flush: 'sync' })
+
 onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); detailRequest++; invalidateList(); unsubscribeSession() })
 </script>
 
@@ -701,8 +832,8 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
 
   <p v-if="navigationError" role="alert">{{ navigationError }}</p>
 
-  <section class="observation-summary" :aria-label="t('conservationPages.observations.summaryTitle')" :aria-busy="isLoading" aria-describedby="observation-summary-scope">
-    <h3>{{ t('unifiedObservations.originalCounts') }}</h3>
+  <section class="observation-summary" :aria-label="t('conservationPages.observations.summaryTitle')" :aria-busy="summaryBusy" :aria-describedby="summaryBusy || summaryUnavailable || summaryIncomplete ? 'observation-summary-definition' : undefined">
+    <h3>{{ t(summaryHasFilters ? 'unifiedObservations.filteredSummaryTitle' : 'unifiedObservations.summaryTitle') }}</h3>
     <div class="summary-grid observation-summary-grid">
       <article v-for="card in summaryCounts" :key="card.status" class="summary-card observation-summary-card" :data-status="card.status">
         <div class="observation-summary-title">
@@ -718,14 +849,10 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
         <strong>{{ card.count === null ? '—' : card.count }}</strong>
       </article>
     </div>
-    <p id="observation-summary-scope" class="observation-summary-scope">{{ t('conservationPages.observations.summaryScope') }}</p>
+    <p v-if="summaryBusy || summaryUnavailable || summaryIncomplete" id="observation-summary-definition" class="observation-summary-definition" role="status">{{ summaryScope }}</p>
+    <button v-if="summaryError && !isLoading && !loadError" type="button" class="action-button" :disabled="summaryLoading || !authorizedOfficer" @click="summaryTask = refreshSummary()">{{ t('conservationPages.observations.retry') }}</button>
   </section>
 
-  <details class="historical-access">
-    <summary>{{ t('unifiedObservations.historicalTitle') }}</summary>
-    <p>{{ t('unifiedObservations.historicalExplanation') }}</p>
-    <RouterLink :to="{ name: 'conservation-reviews', query: { legacy: '1' } }">{{ t('finalOfficerWorkflow.legacy') }}</RouterLink>
-  </details>
   <div class="control-bar">
     <label class="field"><span>{{ t('unifiedObservations.submissionType') }}</span><select v-officer-dropdown v-model="submissionType"><option value="all">{{ t('finalOfficerWorkflow.all') }}</option><option value="original">{{ t('finalOfficerWorkflow.original') }}</option><option value="edit">{{ t('finalOfficerWorkflow.edit') }}</option></select></label>
     <label class="field search-field"><span>{{ t('conservationPages.observations.search') }}</span><input v-model="search" :placeholder="t('conservationPages.observations.searchPlaceholder')" /></label>
@@ -736,7 +863,6 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
   </div>
 
   <section class="panel">
-    <p class="filter-scope-note">{{ t('unifiedObservations.filterScope') }}</p>
     <p v-if="proposalState.error" class="proposal-warning" role="alert">{{ proposalState.error }} <button type="button" class="action-button" :disabled="!authorizedOfficer || proposalState.loading" @click="proposalQueue?.load()">{{ t('unifiedObservations.retry') }}</button></p>
     <p v-else-if="proposalState.loading" class="proposal-loading-note" role="status">{{ t('dashboardObservationEdits.loading') }}</p>
     <p v-if="!isLoading && filtersHideLoaded" class="dataset-note" role="status">{{ t(hasMore ? 'conservationPages.observations.filteredMore' : 'conservationPages.observations.filteredLoaded') }}</p>
@@ -762,7 +888,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
           </div></td>
         </template></template>
           <template v-else>
-            <td class="identity-cell"><MonitoringIdentifier :value="row.proposal.id" :labels="proposalLabels" /><small>{{ observationLabel(row.baseline.id) }}</small></td>
+            <td class="identity-cell"><div class="identifier-line"><strong :title="row.proposal.id">{{ proposalLabels.get(row.proposal.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" :title="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" @click="copyIdentifier(row.proposal.id, 'submission', false, `submission-icon:${row.proposal.id}`)"><svg v-if="!controlCopied[`submission-icon:${row.proposal.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `submission-icon:${row.proposal.id}`" :key="`submission-icon:${row.proposal.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div></td>
             <td><span class="submission-type-badge submission-type-edit">{{ t('finalOfficerWorkflow.edit') }}</span></td><td class="plant-id-cell">{{ row.baseline.plantDisplayId }}</td>
 
             <td><em>{{ speciesName(row.baseline) }}</em></td><td class="identity-cell"><MonitoringIdentifier :value="row.proposal.owner_subject" :labels="new Map([[row.proposal.owner_subject,submitterLabel(row.proposal.owner_subject)]])" /></td>
@@ -783,17 +909,26 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
       <span class="observation-title-layout">
         <span class="observation-title-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 2 21 2c0 4-1 11-5 15-2 2-4 3-5 3ZM2 22l12-12" /></svg></span>
         <span class="observation-title-copy"><span>{{ modalText('title') }}</span><span class="observation-title-subtitle"><span class="identifier-line"><strong :title="selected.id">{{ observationLabel(selected.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(selected.id) })" @click="copyIdentifier(selected.id, 'observation', false, `observation-icon-2:${selected.id}`)"><svg v-if="!controlCopied[`observation-icon-2:${selected.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-2:${selected.id}`" :key="`observation-icon-2:${selected.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></span></span></span>
+        <span class="observation-refresh-control">
+          <button class="observation-refresh-button" type="button" :aria-label="t('submissionChanges.reload')" aria-describedby="observation-refresh-tooltip" :disabled="!authorizedOfficer || reviewSaving || detailLoading" :aria-busy="reviewSaving || detailLoading" @click="reloadReview">
+            <svg class="lucide lucide-refresh-cw" :class="{ 'observation-refresh-spinning': reviewSaving || detailLoading }" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.4L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-15.5 6.4L3 16 M8 16H3v5" /></svg>
+          </button>
+          <span id="observation-refresh-tooltip" class="observation-refresh-tooltip" role="tooltip">{{ t('submissionChanges.reload') }}</span>
+        </span>
       </span>
     </template>
-    <ActionFeedback v-if="commentFeedbackId !== null" :key="commentFeedbackId" :feedback-id="commentFeedbackId" variant="error" :message="rt('feedback.commentRequired')" @dismiss="dismissCommentFeedback" />
+    <ActionFeedback v-if="successNotice" :key="successSequence" :feedback-id="successSequence" variant="success" :message="rt('feedback.saved')" @dismiss="successNotice = false" />
     <div class="observation-dialog-content"><p class="copy-feedback" :class="{ warning: copyFailed }" role="status" aria-live="polite" aria-atomic="true">{{ copyFeedback }}</p>
       <p v-if="selected.origin === 'unknown'" role="status">{{ rt('queues.originUnverified') }}</p>
       <p v-if="detailLoading" class="detail-state" role="status">{{ t('conservationPages.observations.loadingDetails') }}</p>
       <p v-if="detailError" class="detail-state error-state" role="alert">{{ detailError }}</p>
-      <p v-if="selected.status === 'Rejected'" class="review-feedback error" role="status">{{ t('submissionChanges.finalRejected') }}</p>
-      <SubmissionChanges v-if="selected.status === 'Pending Review'" :update="selected.submissionUpdate" :revision="selected.revision" :initial-submission="selected.origin === 'subsequent_observation' && selected.revision === 1" :busy="reviewSaving || detailLoading" @reload="reloadReview" />
-      <div v-if="!reviewAcknowledged || reviewNeedsReload" class="review-feedback error" role="alert"><p>{{ t(!reviewAcknowledged ? 'submissionChanges.conflict' : 'submissionChanges.reloadRequired') }}</p><button type="button" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ t('submissionChanges.reload') }}</button></div>
-      <p class="observation-data-provenance" role="note">{{ modalText('currentRecordNotice') }}</p>
+      <div v-if="!reviewAcknowledged || reviewNeedsReload" class="review-feedback error" role="alert"><p>{{ t(!reviewAcknowledged ? 'submissionChanges.conflict' : 'submissionChanges.reloadRequired') }}</p></div>
+      <div v-if="statusHelpContent" class="observation-status-strip" :class="selected.status === 'Rejected' ? 'is-rejected' : 'is-approved'" role="status">
+        <svg v-if="selected.status === 'Rejected'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m8 8 8 8M16 8l-8 8" /></svg>
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="m7 12 3 3 7-7" /></svg>
+        <strong>{{ label(selected.status) }}</strong>
+        <span class="observation-status-help" @mouseenter="showStatusHelp" @mouseleave="deferCloseStatusHelp"><button ref="statusHelpButton" type="button" class="observation-status-help-button" :aria-label="statusHelpContent.title" :aria-expanded="statusHelpOpen" :aria-describedby="statusHelpOpen ? 'observation-status-tooltip' : undefined" @focus="showStatusHelp" @blur="closeStatusHelp" @click="showStatusHelp" @keydown.esc.stop.prevent="closeStatusHelp">?</button></span>
+      </div>
       <div class="observation-dialog-columns">
         <div class="observation-information-column">
           <template v-if="!reviewNeedsReload">
@@ -836,24 +971,24 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
                 <div><dt>{{ t('conservationPages.observations.gpsAccuracy') }}</dt><dd>{{ selected.gpsAccuracy !== '' ? `${selected.gpsAccuracy} m` : '—' }}</dd></div>
               </dl>
             </section>
-          </template>
-        </div>
-        <div class="observation-review-column" :class="{ 'observation-review-mode': reviewMode }">
-          <div class="observation-review-content" :tabindex="reviewMode ? 0 : undefined" :role="reviewMode ? 'region' : undefined" :aria-label="reviewMode ? modalText('officerReview') : undefined">
-          <section v-if="!reviewNeedsReload" class="observation-side-section observation-media">
+          <section class="observation-information-section observation-media">
             <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8" cy="8" r="1" /><path d="m21 15-5-5L5 21" /></svg>{{ modalText('media') }}</h3>
             <div class="observation-section-content">
               <p v-if="!selected.assets.length">{{ t('conservationPages.observations.noAssets') }}</p>
-              <div v-else class="submission-image-grid"><article v-for="asset in selected.assets" :key="asset.id" class="submitted-image-item"><div class="submitted-image-preview"><img v-if="asset.contentType.startsWith('image/') && !failedAssets.has(asset.id)" :src="assetUrl(asset.id)" :alt="t('conservationPages.observations.imageAlt', { observation: selected.id, asset: asset.id })" loading="lazy" @error="imageFailed(asset.id)" /><span v-else>{{ t(asset.contentType.startsWith('image/') ? 'conservationPages.observations.imageUnavailable' : 'conservationPages.observations.attachment') }}</span></div><div class="asset-caption"><strong :title="asset.id">{{ asset.id }}</strong><small>{{ asset.contentType }}</small></div></article></div>
+              <div v-else class="submission-image-grid"><article v-for="(asset, index) in selected.assets" :key="asset.id" class="submitted-image-item"><button v-if="asset.contentType.startsWith('image/') && !failedAssets.has(asset.id)" type="button" class="submitted-image-preview observation-photo-button" :aria-label="`${t('common.viewDetails')}: ${modalText('media')} ${index + 1}`" @click="openObservationPhoto(asset.id, $event)"><img :src="assetUrl(asset.id)" :alt="`${modalText('media')} ${index + 1}`" loading="lazy" @error="imageFailed(asset.id)" /></button><div v-else class="submitted-image-preview"><span>{{ t(asset.contentType.startsWith('image/') ? 'conservationPages.observations.imageUnavailable' : 'conservationPages.observations.attachment') }}</span></div></article></div>
             </div>
           </section>
+          </template>
+        </div>
+        <div class="observation-review-column" :class="{ 'observation-review-mode': reviewMode }">
+          <div class="observation-review-content">
+
           <section v-if="reviewMode" class="officer-review" :aria-busy="reviewSaving || detailLoading">
             <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="17" rx="2" /><rect x="9" y="2" width="6" height="5" rx="1" /><path d="m9 14 2 2 4-4" /></svg>{{ modalText('officerReview') }}</h3>
             <div class="observation-section-content">
       <p v-if="!reviewAllowed && !detailLoading && !reviewSaving && !reviewNeedsReload" role="status">{{ rt('reviewUnavailable') }}</p>
-      <label class="field" for="observation-review-comment"><span>{{ rt('reviewComment') }}</span><textarea id="observation-review-comment" v-model="reviewComment" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :aria-invalid="reviewCommentError || undefined" :aria-describedby="reviewCommentError ? 'observation-review-comment-error' : undefined" maxlength="4000" rows="5" :disabled="reviewSaving || detailLoading" /></label>
-      <p v-if="reviewFeedback" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewInfo || reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="[reviewFeedbackVariant, { 'observation-comment-validation': reviewCommentError }]"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
-      <button v-if="reviewNeedsReload" class="secondary-button" :disabled="reviewSaving" @click="reloadReview">{{ rt('reloadLatest') }}</button>
+      <label class="field" for="observation-review-comment"><span>{{ rt('reviewComment') }}</span><textarea id="observation-review-comment" ref="reviewCommentInput" v-model="reviewComment" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :aria-invalid="reviewCommentError || undefined" :aria-describedby="reviewCommentError ? 'observation-review-comment-error' : undefined" maxlength="4000" rows="5" :disabled="reviewSaving || detailLoading" /></label>
+      <p v-if="reviewFeedback && !reviewSuccess" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewInfo || reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="[reviewFeedbackVariant, { 'observation-comment-validation': reviewCommentError }]"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
       <label v-if="!reviewAcknowledged && !reviewNeedsReload"><input v-model="reviewAcknowledged" type="checkbox" :disabled="reviewSaving" /> {{ rt('acknowledgeLatest') }}</label>
       <p v-if="reviewSaving" role="status">{{ rt('saving') }}</p>
 
@@ -871,6 +1006,13 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
         <button v-for="decision in reviewDecisions" :key="decision" :class="decision === 'Approved' ? 'primary-button' : decision === 'Rejected' ? 'danger-button' : 'secondary-button'" :disabled="!reviewAllowed" @click="decide(decision)">{{ rt('decisions.' + (decision === 'Correction Required' ? 'correction' : decision.toLowerCase())) }}</button>
       </div>
     </div>
+    <Teleport to="body">
+      <div v-if="statusHelpOpen && statusHelpContent" id="observation-status-tooltip" ref="statusHelpTooltip" popover="manual" class="observation-status-tooltip" role="tooltip" @mouseenter="showStatusHelp" @mouseleave="deferCloseStatusHelp">
+        <strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg>{{ statusHelpContent.title }}</strong>
+        <p>{{ statusHelpContent.description }}</p><p v-if="statusHelpContent.note" class="observation-status-edit-note">{{ statusHelpContent.note }}</p>
+      </div>
+    </Teleport>
+    <PlantPhotoLightbox ref="observationPhotoPreview" root-scroll-lock />
   </AppModal>
 
   <AppModal v-if="selected && historyModal" :title="t('conservationPages.observations.historyTitle', { id: selected.plantDisplayId })" :subtitle="t('conservationPages.observations.historyLimit')" wide @close="closeModal">
@@ -883,7 +1025,8 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
 </template>
 
 <style scoped>
-.filter-scope-note, .proposal-loading-note { color:#52685d; font-size:13px; line-height:1.5; }
+.observation-summary-definition { margin: 10px 0 0; color: #536b60; font-size: 13px; line-height: 1.5; }
+.proposal-loading-note { color:#52685d; font-size:13px; line-height:1.5; }
 .proposal-warning { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:10px 14px; background:#fff7ed; color:#7c2d12; border-radius:8px; }
 .superseded > td { background:#f3f4f6; color:#4b5563; }
 .observations-table .submission-column { width: 14rem; }
@@ -905,7 +1048,6 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
 .observation-summary-card[data-status="Flagged"] { --observation-summary-background: #f0eaf8; --observation-summary-ink: #69459a; }
 .observation-summary-card[data-status="Rejected"] { --observation-summary-background: #fbe8e5; --observation-summary-ink: #a33f35; }
 .observation-summary-card[data-status="Approved"] { --observation-summary-background: #e7f3e9; --observation-summary-ink: #287347; }
-.officer-layout.officer-layout.officer-layout .observation-summary-scope { margin: 0; color: #5b7065; font-size: .8125rem; line-height: 1.5; }
 @container (max-width: 1150px) { .observation-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @container (max-width: 760px) { .observation-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container (max-width: 420px) { .observation-summary-grid { grid-template-columns: minmax(0, 1fr); } }
@@ -916,7 +1058,7 @@ a.action-button { text-decoration: none; }
 .modal-review-link { max-width: 100%; white-space: normal; overflow-wrap: normal; }
 .dataset-note, .detail-state { margin: 0; padding: 14px 18px; color: #63776d; font-size: 12px; }
 .state-cell { padding: 30px; text-align: center; }
-.state-cell span, td small, .asset-caption small { display: block; margin-top: 4px; }
+.state-cell span, td small { display: block; margin-top: 4px; }
 .error-state { color: #9b3d35; }
 .error-state .action-button { margin-top: 12px; }
 .observations-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
@@ -969,22 +1111,13 @@ a.action-button { text-decoration: none; }
 .submitted-image-item { overflow: hidden; border: 1px solid rgba(58, 96, 70, 0.15); border-radius: 14px; background: #fff; }
 .submitted-image-preview { min-height: 150px; display: grid; place-items: center; background: #edf1e9; color: #63776d; }
 .submitted-image-preview img { width: 100%; height: 190px; object-fit: cover; }
-.asset-caption { padding: 12px; overflow-wrap: anywhere; }
 
-.historical-access { margin: 12px 0; color: #52665d; font-size: 12px; line-height: 1.5; }
-.historical-access summary { cursor: pointer; width: fit-content; }
-.historical-access summary:focus-visible { outline: 2px solid #33745d; outline-offset: 3px; }
-.historical-access p { margin: 6px 0; }
 .submission-type-badge { display: inline-flex; align-items: center; box-sizing: border-box; max-width: 100%; padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 700; line-height: 1.4; white-space: normal; overflow-wrap: normal; word-break: normal; }
 .submission-type-original { background-color: #e0f2fe; color: #075985; }
 .submission-type-edit { background-color: #f3e8ff; color: #6b21a8; }
 </style>
 
 <style src="../../styles/observation-dialog.css">
-.historical-access { margin: 12px 0; color: #52665d; font-size: 12px; line-height: 1.5; }
-.historical-access summary { cursor: pointer; width: fit-content; }
-.historical-access summary:focus-visible { outline: 2px solid #33745d; outline-offset: 3px; }
-.historical-access p { margin: 6px 0; }
 .submission-type-badge { display: inline-flex; align-items: center; box-sizing: border-box; max-width: 100%; padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 700; line-height: 1.4; white-space: normal; overflow-wrap: normal; word-break: normal; }
 .submission-type-original { background-color: #e0f2fe; color: #075985; }
 .submission-type-edit { background-color: #f3e8ff; color: #6b21a8; }

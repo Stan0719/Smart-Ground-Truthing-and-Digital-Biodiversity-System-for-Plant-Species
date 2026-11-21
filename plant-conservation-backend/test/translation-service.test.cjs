@@ -390,3 +390,14 @@ test("website translation endpoint rejects missing origins and bearer-authentica
   assert.equal(bearer.status, 403);
   assert.equal(pool.state.queries.length, 0);
 });
+
+
+test("displayed source commitments reject stale values before cache lookup or translation writes", async () => {
+  const pool = fakePool(); const ollama = fakeOllama();
+  const service = createTranslationService({ pool, fetchImpl: ollama.fetchImpl, env: {} });
+  const officer = { id: 'synthetic-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false };
+  const result = await service.translateEntries([{ recordType: 'species', recordId: '12', fieldName: 'description', sourceHash: '0'.repeat(64) }], 'ms', officer);
+  assert.deepEqual(result, []); assert.equal(pool.state.writes.length, 0);
+  assert.ok(!pool.state.queries.some(sql => sql.includes('FROM plant_translation_cache')));
+  await assert.rejects(service.translateEntries([{ recordType: 'species', recordId: '12', fieldName: 'description', sourceHash: 'invalid' }], 'ms', officer), /source binding/);
+});

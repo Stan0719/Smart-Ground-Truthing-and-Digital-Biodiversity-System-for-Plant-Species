@@ -1,6 +1,7 @@
 "use strict";
 const { randomBytes, createHmac, timingSafeEqual } = require("node:crypto");
 const { permitted, visibilityFor } = require("../shared/rbac.cjs");
+const {threatNotificationReady}=require('./threat-notifications.cjs');
 const {notificationReady}=require('./observation-edit-notifications.cjs');
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const sequence = value => typeof value === "string" && /^(0|[1-9][0-9]{0,18})$/.test(value) && BigInt(value)<=9223372036854775807n;
@@ -9,7 +10,7 @@ function keys(value, allowed) {
   if (!value || typeof value!=="object" || Array.isArray(value) || Object.keys(value).some(key=>!allowed.includes(key))) fail(400);
 }
 // One predicate is used for lists, counts and BOTH acknowledgement operations.
-// Staff role permissions are checked anew on every request; metadata is never projected.
+// Permissions are checked anew on every request; only the explicit threat-context whitelist is projected.
 const baseVisible = `n.recipient_subject=$1 AND n.intended_role=$2 AND e.audience_role=$2 AND (
   ($3::boolean AND e.resource_kind='system' AND e.event_type IN ('system_failure','account_administration','security_event'))
   OR ($4::boolean AND e.resource_kind='observation' AND EXISTS (
@@ -64,8 +65,10 @@ function mountStaffNotifications(app, { pool }) {
       const ready=(await pool.query("SELECT current_schema()='plant_app' AND to_regclass('plant_app.staff_notification') IS NOT NULL AND to_regclass('plant_app.staff_notification_event') IS NOT NULL AS ready")).rows[0]?.ready;
       if(!ready) fail(503);
       const editReady=await notificationReady(pool);
-      const visibility=editReady ? baseVisible.slice(0,-1)+editVisibility+')' : baseVisible;
-      await handler(req,res,user,args,visibility,editReady);
+      const threatReady=await threatNotificationReady(pool);
+      let visibility=editReady ? baseVisible.slice(0,-1)+editVisibility+')' : baseVisible;
+      if(threatReady) visibility=visibility.slice(0,-1)+` OR (${permitted(user,'alerts.read') ? 'TRUE' : 'FALSE'} AND e.resource_kind='threat_alert' AND EXISTS(SELECT 1 FROM plant_app.threat_alert_history a WHERE a.id=e.threat_alert_id)))`;
+      await handler(req,res,user,args,visibility,editReady,threatReady);
     } catch(error) {
       const status=[400,401,403,404].includes(error.status)?error.status:503;
       res.status(status).json({error:status===503?'Staff notifications unavailable.':status===401?'Please sign in.':status===403?'Access denied.':status===404?'Notification unavailable.':'Invalid notification request. Reload the inbox.'});
@@ -80,7 +83,7 @@ function mountStaffNotifications(app, { pool }) {
     keys(req.query,[]);
     res.json({unread_count:await count(pool,args,visibility)});
   }));
-  app.get('/api/staff-notifications',route(async(req,res,user,args,visibility,editReady)=>{
+  app.get('/api/staff-notifications',route(async(req,res,user,args,visibility,editReady,threatReady)=>{
     keys(req.query,['limit','cursor']);
     const limit=req.query.limit===undefined?20:Number(req.query.limit);
     if((req.query.limit!==undefined && (typeof req.query.limit!=='string' || !/^[1-9][0-9]*$/.test(req.query.limit))) || !Number.isInteger(limit)||limit<1||limit>100) fail(400);
@@ -96,12 +99,13 @@ function mountStaffNotifications(app, { pool }) {
           THEN e.metadata->'species_review_required' ELSE NULL END AS species_review_required,
         CASE WHEN e.resource_kind='record_change' THEN (SELECT CASE WHEN r.plant_id IS NOT NULL THEN 'plant' ELSE 'species' END FROM plant_app.record_change_submission r WHERE r.id=e.record_change_id) ELSE NULL END AS change_target_type,
         ${editReady ? 'e.observation_edit_revision' : 'NULL::integer'} AS proposal_revision,
-        e.resource_kind,COALESCE(e.observation_id,e.species_request_id::text,e.record_change_id${editReady ? ',e.observation_edit_request_id' : ''}) AS resource_id
+        ${threatReady ? `CASE WHEN e.resource_kind='threat_alert' THEN jsonb_build_object('source',e.metadata->'source','metric',e.metadata->'metric','value',e.metadata->'value','device_id',e.metadata->'device_id','reading_id',e.metadata->'reading_id','camera_id',e.metadata->'camera_id') ELSE NULL END` : 'NULL::jsonb'} AS threat_context,
+        e.resource_kind,COALESCE(e.observation_id,e.species_request_id::text,e.record_change_id${editReady ? ',e.observation_edit_request_id' : ''}${threatReady ? ',e.threat_alert_id' : ''}) AS resource_id
         FROM ${joined} WHERE ${visibility} AND n.delivery_seq<=$7::bigint AND ($8::bigint IS NULL OR n.delivery_seq<$8::bigint)
         ORDER BY n.delivery_seq DESC LIMIT $9`,[...args,cap,cursor?.before??null,limit+1])).rows;
       const unread=await count(db,args,visibility), hasMore=rows.length>limit, page=rows.slice(0,limit);
       await db.query('COMMIT');
-      res.json({notifications:page.map(({seq,resource_kind,resource_id,proposal_revision,species_review_required,...row})=>({...row,resource:{kind:resource_kind,id:resource_id,...(resource_kind==='observation_edit'?{revision:proposal_revision}:{})},
+      res.json({notifications:page.map(({seq,resource_kind,resource_id,proposal_revision,species_review_required,threat_context,...row})=>({...row,...(resource_kind==='threat_alert'?{threat_context}:{}),resource:{kind:resource_kind,id:resource_id,...(resource_kind==='observation_edit'?{revision:proposal_revision}:{})},
         ...(user.role==='Conservation Officer'&&row.event_type==='registration_submitted'?{species_review_required:species_review_required===true}:{})})),
         unread_count:unread,page:{limit,has_more:hasMore,next_cursor:hasMore?encode({cap,before:page.at(-1).seq},user,'cursor'):null},
         read_through:encode({cap},user,'boundary')});

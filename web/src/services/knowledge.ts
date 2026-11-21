@@ -122,8 +122,8 @@ async function loadKnowledge(verifiedUser?: AuthUser | null) {
         : null
       if (!registration?.observation_id) return []
       const fields = [
-        { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'morphology' as const, target: item.latestApproved, targetField: 'morphology' },
-        { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'notes' as const, target: item.latestApproved, targetField: 'notes' },
+        { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'morphology' as const, historical: true, target: item.latestApproved, targetField: 'morphology' },
+        { recordType: 'observation' as const, recordId: registration.observation_id, fieldName: 'notes' as const, historical: true, target: item.latestApproved, targetField: 'notes' },
       ]
       return fields
     }))

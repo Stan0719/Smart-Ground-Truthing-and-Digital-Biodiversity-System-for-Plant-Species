@@ -35,6 +35,22 @@ function list(payload, key) {
   if (!Array.isArray(payload?.[key])) throw Error("The backend returned an invalid plant records response.");
   return payload[key];
 }
+function editList(payload) {
+  const edits = payload?.edits;
+  if (!Array.isArray(edits) || edits.some((row) => !row || typeof row !== "object" ||
+      typeof row.id !== "string" || !row.id || typeof row.owner_subject !== "string" ||
+      !["Pending Review", "Correction Required", "Approved", "Rejected", "Cancelled"].includes(row.status)))
+    throw Object.assign(Error("The backend returned an invalid observation edits response."), { code: "INVALID_EDIT_RESPONSE" });
+  return edits;
+}
+function editRefreshDiagnostic(error) {
+  // Never include server messages, URLs, account identifiers or photo evidence.
+  const reason = error?.code === "API_TIMEOUT" ? "timeout"
+    : error?.code === "API_UNREACHABLE" ? "network"
+    : error?.code === "API_NOT_JSON" || error?.code === "INVALID_EDIT_RESPONSE" ? "invalid_response"
+    : Number.isInteger(error?.status) ? "http" : "unavailable";
+  return { reason, ...(Number.isInteger(error?.status) ? { status: error.status } : {}) };
+}
 export function projectBotanistRecords(accountId, rows, observations, requests) {
   const owner = `staff:${accountId}`;
   const ownedObservations = observations.filter((row) => row.owner_subject === owner);
@@ -80,7 +96,7 @@ async function fetchRecords(accountId, plantId) {
     plantApi("/observations?scope=mine", options).then((payload) => { list(payload, "observations"); return payload; }),
     plantApi("/species-requests", options).then((payload) => { list(payload, "species_requests"); return payload; }),
     plantApi("/observation-edits/capabilities", options).then((capability) => capability?.available
-      ? plantApi("/observation-edits", options).then((payload) => { list(payload, "edits"); return payload; }) : { edits: [] }),
+      ? plantApi("/observation-edits", options).then((payload) => { editList(payload); return payload; }) : { edits: [] }),
     plantApi("/record-changes/capabilities", options).then((capability) => capability?.approved_edits_available
       ? plantApi("/record-changes", options).then((payload) => { list(payload, "changes"); return payload; }) : { changes: [] }),
   ]);
@@ -93,7 +109,7 @@ async function fetchRecords(accountId, plantId) {
   if (plantsResult.status === "rejected") warnings.push(plantsResult.reason.message || "Unable to load plant records.");
   if (observationsResult.status === "rejected") warnings.push("Plant records loaded, but observation updates could not be refreshed. Pull to refresh and retry.");
   if (requestsResult.status === "rejected") warnings.push("Plant records loaded, but species requests could not be refreshed. Pull to refresh and retry.");
-  if (editsResult.status === "rejected" && editsResult.reason?.status !== 404 && editsResult.reason?.status !== 503)
+  if (editsResult.status === "rejected")
     warnings.push("Observation edits could not be refreshed. Pull to refresh and retry.");
   if (recordChangesResult.status === "rejected" && recordChangesResult.reason?.status !== 404 && recordChangesResult.reason?.status !== 503)
     warnings.push("Plant and species edits could not be refreshed. Pull to refresh and retry.");
@@ -101,6 +117,10 @@ async function fetchRecords(accountId, plantId) {
     observationsResult.status === "fulfilled" ? list(observationsResult.value, "observations") : [],
     requestsResult.status === "fulfilled" ? list(requestsResult.value, "species_requests") : []);
   result.warnings = warnings;
+  result.editsStale = editsResult.status === "rejected";
+  result.editsRefreshError = result.editsStale ? editRefreshDiagnostic(editsResult.reason) : null;
+  if (result.editsStale && typeof __DEV__ === "boolean" && __DEV__)
+    console.info("[botanist-records]", { phase: "observation_edits_refresh_failed", ...result.editsRefreshError });
   result.edits = editsResult.status === "fulfilled" ? editsResult.value.edits.filter((row) => row.owner_subject === `staff:${accountId}`) : [];
   result.recordChanges = recordChangesResult.status === "fulfilled" ? recordChangesResult.value.changes.filter((row) => row.owner_subject === `staff:${accountId}`) : [];
   // Omit failed sections so the same-account loader retains their last successful read.
@@ -201,22 +221,24 @@ export async function fetchBotanistRecordChangeStatus(accountId, kind, targetId)
 }
 
 export function createBotanistRecordsLoader(load, changed) {
-  let state = { plants: [], observations: [], requests: [], edits: [], recordChanges: [], loaded: false, loading: false, error: "" };
+  const empty = () => ({ plants: [], observations: [], requests: [], edits: [], editsStale: true, editsRefreshError: null, recordChanges: [], loaded: false, loading: false, error: "" });
+  let state = empty();
   let pending = null, visit = 0;
   const publish = (next) => { state = next; changed(state); };
   return {
     getState: () => state,
     cancel() { visit += 1; pending = null; },
+    clear() { visit += 1; pending = null; publish(empty()); },
     refresh() {
       if (pending) return pending;
       const current = visit;
-      publish({ ...state, loading: true, error: "" });
+      publish({ ...state, editsStale: true, loading: true, error: "" });
       const task = Promise.resolve().then(load).then((result) => {
         if (visit === current) publish({ ...state, ...result, loaded: true, loading: false, error: (result.warnings || []).join("\n") });
       }).catch((error) => {
         if (visit === current) publish({ ...state,
           ...(authenticationError(error)
-            ? { plants: [], observations: [], requests: [], edits: [], recordChanges: [], loaded: false } : {}),
+            ? empty() : { editsStale: true }),
           loading: false, error: error.message || "Unable to load plant records." });
       }).finally(() => { if (pending === task) pending = null; });
       pending = task;

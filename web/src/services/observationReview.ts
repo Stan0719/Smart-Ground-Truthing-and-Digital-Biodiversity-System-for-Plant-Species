@@ -45,27 +45,82 @@ export function observationReviewSnapshot(observation: Record<string, unknown>) 
 export class ReviewApiError extends Error {
   readonly status: number
   readonly code?: string
-  constructor(message: string, status = 0, code?: string) {
+  readonly failureKind?: 'timeout' | 'cancelled' | 'network' | 'body_read' | 'invalid_response'
+  constructor(message: string, status = 0, code?: string, failureKind?: ReviewApiError['failureKind']) {
     super(message)
     this.status = status
     this.code = code
+    this.failureKind = failureKind
   }
 }
-export type ReviewRequest = (url: string, body?: { decision: ReviewDecision; comment: string; revision?: number; expected_revision?: number; expected_review_cycle?: number }) => Promise<Record<string, unknown>>
+export type ReviewQueueSource = 'observations' | 'changes' | 'species'
+export async function readReviewQueueSource<T>(source: ReviewQueueSource, read: () => Promise<T>): Promise<T> {
+  try { return await read() }
+  catch (failure) {
+    throw Object.assign(failure instanceof Error ? failure : Error('Review queue verification failed.'), { queueSource: source })
+  }
+}
+export function reviewQueueFailureDiagnostic(failure: unknown) {
+  const error = failure as { queueSource?: unknown; status?: unknown; code?: unknown } | null
+  const source = error?.queueSource === 'observations' || error?.queueSource === 'changes' || error?.queueSource === 'species' ? error.queueSource : 'unknown'
+  const status = typeof error?.status === 'number' && Number.isInteger(error.status) && error.status >= 100 && error.status <= 599 ? error.status : null
+  // Fixed categories only: never log the server body, request URL/query,
+  // submission identifiers, review comments, session credentials or evidence.
+  const category = failure instanceof ReviewApiError && failure.failureKind ? failure.failureKind
+    : error?.code === 'REVIEW_TRANSPORT_ERROR' && status === null ? 'transport'
+    : error?.code === 'REVIEW_INVALID_RESPONSE' ? 'invalid_response' : status ? 'http' : 'verification'
+  return { source, status, category }
+}
+export interface ReviewRequestOptions { signal?: AbortSignal; retry?: boolean }
+export type ReviewRequest = (url: string, body?: { decision: ReviewDecision; comment: string; revision?: number; expected_revision?: number; expected_review_cycle?: number }, options?: ReviewRequestOptions) => Promise<Record<string, unknown>>
+function transportFailureKind(cause: unknown, signal: AbortSignal): 'timeout' | 'cancelled' | 'network' {
+  const name = (signal.aborted ? signal.reason : cause) as { name?: unknown } | null
+  return name?.name === 'TimeoutError' ? 'timeout' : name?.name === 'AbortError' ? 'cancelled' : 'network'
+}
 export function createReviewRequest(message: (key: string, params?: Record<string, string | number>) => string, transport: typeof fetch): ReviewRequest {
-  return async (url, body) => {
+  const once: ReviewRequest = async (url, body, options) => {
+    const timeout = AbortSignal.timeout(15000)
+    const signal = options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout
     let response: Response
-    try { response = await transport(url, { method: body ? 'POST' : 'GET', credentials: 'same-origin', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) }) }
-    catch { throw new ReviewApiError(message('feedback.network')) }
+    try { signal.throwIfAborted(); response = await transport(url, { method: body ? 'POST' : 'GET', credentials: 'same-origin', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}), signal }); signal.throwIfAborted() }
+    catch (cause) { throw new ReviewApiError(message('feedback.network'), 0, 'REVIEW_TRANSPORT_ERROR', transportFailureKind(cause, signal)) }
     let result: Record<string, unknown> | null
-    try { const value: unknown = await response.json(); result = value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
-    catch { throw new ReviewApiError(message('feedback.invalidResponse'), response.status) }
-    if (!response.ok) {
-      const detail = [result?.message, result?.error].find((v): v is string => typeof v === 'string' && Boolean(v.trim()))
-      throw new ReviewApiError(detail || message(response.status === 401 ? 'feedback.session' : response.status === 403 ? 'feedback.forbidden' : 'feedback.requestFailed', { status: response.status }), response.status, typeof result?.code === 'string' ? result.code : undefined)
+    try { const value: unknown = await response.json(); signal.throwIfAborted(); result = value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null }
+    catch (cause) {
+      const name = (cause as { name?: unknown } | null)?.name
+      if (signal.aborted || name === 'TimeoutError' || name === 'AbortError' || name === 'TypeError') {
+        const kind = transportFailureKind(cause, signal)
+        throw new ReviewApiError(message('feedback.network'), response.status, 'REVIEW_TRANSPORT_ERROR', kind === 'network' ? 'body_read' : kind)
+      }
+      throw new ReviewApiError(message('feedback.invalidResponse'), response.status, 'REVIEW_INVALID_RESPONSE', 'invalid_response')
     }
-    if (!result) throw new ReviewApiError(message('feedback.invalidResponse'), response.status)
+    if (!response.ok) {
+      throw new ReviewApiError(message(response.status === 401 ? 'feedback.session' : response.status === 403 ? 'feedback.forbidden' : 'feedback.requestFailed', { status: response.status }), response.status, typeof result?.code === 'string' ? result.code : undefined)
+    }
+    if (!result) throw new ReviewApiError(message('feedback.invalidResponse'), response.status, 'REVIEW_INVALID_RESPONSE')
     return result
+  }
+  return async (url, body, options) => {
+    // Only explicitly opted-in queue GETs retry; mutations and detail reads do not.
+    for (let attempt = 0; ; attempt++) {
+      try { return await once(url, body, options) }
+      catch (error) {
+        const temporary = error instanceof ReviewApiError &&
+          ([502, 503, 504].includes(error.status) ||
+            ((error.status === 0 || (error.status >= 200 && error.status < 300)) && ['timeout', 'network', 'body_read'].includes(error.failureKind || '')))
+        if (body || !options?.retry || attempt >= 1 || !temporary || options.signal?.aborted) throw error
+        await new Promise<void>((resolve, reject) => {
+          const signal = options.signal
+          const cancelled = () => {
+            clearTimeout(timer); signal?.removeEventListener('abort', cancelled)
+            reject(new ReviewApiError(message('feedback.network'), 0, 'REVIEW_TRANSPORT_ERROR', 'cancelled'))
+          }
+          const timer = setTimeout(() => { signal?.removeEventListener('abort', cancelled); resolve() }, 250)
+          signal?.addEventListener('abort', cancelled, { once: true })
+          if (signal?.aborted) cancelled()
+        })
+      }
+    }
   }
 }
 // Shared transaction/readback outcome handling. Callers own presentation and invalidate stale selections.

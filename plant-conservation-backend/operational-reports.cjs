@@ -50,7 +50,8 @@ async function generateOperationalReport(pool, category, query) {
       statistics: [{ key: "totalIncidents", value: source.length }, { key: "unresolved", value: source.filter(row => row.status !== "Resolved").length }, { key: "Resolved", value: source.filter(row => row.status === "Resolved").length }],
       chart: { kind: "horizontal", labels: distribution.map(row => row[0]), unit: "count", series: [{ key: "totalIncidents", values: distribution.map(row => row[1]) }] } };
   }
-  // Keep all old raw rows and add one point for each completed aggregate window.
+  // Incoming report contract: preserve legacy rows, completed windows and the active durable checkpoint.
+  // A checkpoint already represented by a completed window is never counted twice.
   const devices = (await pool.query(`SELECT DISTINCT d.id,d.name FROM iot_device d
     WHERE EXISTS (SELECT 1 FROM sensor_reading r WHERE r.device_id=d.id
       AND ($1::timestamptz IS NULL OR r.created_at >= $1::timestamptz)
@@ -58,6 +59,9 @@ async function generateOperationalReport(pool, category, query) {
     OR EXISTS (SELECT 1 FROM iot_reading_aggregate a WHERE a.device_id=d.id
       AND ($1::timestamptz IS NULL OR a.bucket_start >= $1::timestamptz)
       AND ($2::timestamptz IS NULL OR a.bucket_start < $2::timestamptz))
+    OR EXISTS (SELECT 1 FROM iot_reading_checkpoint c WHERE c.device_id=d.id AND c.sample_count>0
+      AND ($1::timestamptz IS NULL OR c.bucket_start >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR c.bucket_start < $2::timestamptz))
     ORDER BY d.name,d.id`, args)).rows;
   if (device && !devices.some(item => item.id === device)) throw Object.assign(Error("Device has no readings in this reporting period."), { status: 400 });
   const selectedDevice = device || devices[0]?.id || null;
@@ -74,7 +78,17 @@ async function generateOperationalReport(pool, category, query) {
     FROM iot_reading_aggregate a JOIN iot_device d ON d.id=a.device_id
     WHERE ($1::timestamptz IS NULL OR a.bucket_start >= $1::timestamptz)
       AND ($2::timestamptz IS NULL OR a.bucket_start < $2::timestamptz) AND a.device_id=$3
-    ORDER BY a.bucket_start,a.bucket_end`, [...args, selectedDevice, measurement])).rows;
+    UNION ALL
+    SELECT c.bucket_start AS recorded_at,c.last_observed_at AS order_at,
+      c.last_observed_at AS bucket_end,c.sample_count,c.metrics -> $4::text AS metric_stats,
+      d.name,d.id,NULL::jsonb AS value,'checkpoint'::text AS point_type
+    FROM iot_reading_checkpoint c JOIN iot_device d ON d.id=c.device_id
+    WHERE c.sample_count>0 AND c.device_id=$3
+      AND ($1::timestamptz IS NULL OR c.bucket_start >= $1::timestamptz)
+      AND ($2::timestamptz IS NULL OR c.bucket_start < $2::timestamptz)
+      AND NOT EXISTS (SELECT 1 FROM iot_reading_aggregate done
+        WHERE done.device_id=c.device_id AND done.bucket_start=c.bucket_start)
+    ORDER BY recorded_at,bucket_end`, [...args, selectedDevice, measurement])).rows;
   const source = [
     ...raw,
     ...summaries.map(row => {
@@ -98,7 +112,8 @@ async function generateOperationalReport(pool, category, query) {
     minimum = Math.min(minimum, Number(stats.min)); maximum = Math.max(maximum, Number(stats.max));
   }
   const latest = source.reduce((value, row) =>
-    !value || new Date(row.recorded_at) > new Date(value) ? row.recorded_at : value, null);
+    !value || new Date(row.point_type === 'checkpoint' ? row.order_at : row.recorded_at) > new Date(value)
+      ? (row.point_type === 'checkpoint' ? row.order_at : row.recorded_at) : value, null);
   const unit = measurements[measurement];
   return { ...base, basis: "iotScope", devices, device: selectedDevice, measurement, measurements: Object.keys(measurements),
     columns: ["recordedAt", "device", "measurement", "value", "unit"], rows: source.map((row, index) => [instant(row.recorded_at), row.name, measurement, values[index], unit]),

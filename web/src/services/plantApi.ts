@@ -1,5 +1,6 @@
 import { readApiResponse } from './apiResponse'
 import { trackDatabaseTranslationResponse } from './databaseTranslation'
+import type { SensorThresholds } from './sensorThresholds'
 
 export interface Species {
   image_url?: string
@@ -39,7 +40,7 @@ export interface Device {
   name: string
   status: string
   last_seen: string | null
-  thresholds: Record<string, number>
+  thresholds: SensorThresholds
   device_type?: string | null
   plant_id?: string | number | null
 }

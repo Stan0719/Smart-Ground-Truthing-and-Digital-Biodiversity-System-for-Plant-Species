@@ -98,6 +98,7 @@ function speciesPlantsHarness(rows) {
     if (failure && url.startsWith('/api/plants')) throw Error('Unavailable')
     return Response.json(url.startsWith('/api/species') ? { species: [canonical] } : { plants: rows })
   }, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return { ...lifecycleState.hooks, resolveComponent: name => name, withDirectives: value => value }
     if (name === 'vue-router') return { useRoute: () => route }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key, te: () => false }) }
@@ -180,7 +181,7 @@ test('new display labels have matching complete EN/MS/ZH translations and all ca
 test('real session publication during initial verification reloads once for the verified identity', async () => {
   const hooks = { ...vue, onMounted() {}, onBeforeUnmount() {} }, authExports = {}, helperExports = {}, listeners = []
   let serverUser = officer, fetches = 0, loads = 0
-  vm.runInNewContext(js(read('../src/services/auth.ts')), { exports: authExports, fetch: async () => {
+  vm.runInNewContext(js(read('../src/services/auth.ts')), { exports: authExports, AbortSignal, fetch: async () => {
     fetches++; return Response.json({ user: serverUser })
   } })
   vm.runInNewContext(js(read('../src/composables/useCatalogueRefresh.ts')), {
@@ -199,6 +200,7 @@ test('shared knowledge accepts its own initial verified identity, then clears gl
   const exports = {}, plants = [], records = [], listeners = [], account = { user: null, pending: true }
   const auth = { sessionSnapshot: () => account, subscribeSession: fn => { listeners.push(fn); return () => {} } }
   vm.runInNewContext(js(read('../src/services/knowledge.ts')), { exports, require(name) {
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return vue
     if (name.endsWith('/auth')) return auth
     if (name.endsWith('/plants')) return { plants }
