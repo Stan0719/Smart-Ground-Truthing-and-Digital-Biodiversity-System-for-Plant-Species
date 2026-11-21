@@ -157,7 +157,7 @@ export default function VisitorRegisterScreen({ navigation }) {
       <KeyboardAvoidingView style={styles.keyboardView} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View pointerEvents="none" style={styles.topGlow} />
         <View pointerEvents="none" style={styles.bottomGlow} />
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator>
           <Animated.View style={[styles.content, { opacity: screenFade, transform: [{ translateY: screenSlide }] }]}>
             <View style={styles.iconCircle}>
               <Ionicons name={registeredEmail ? "checkmark" : "person-add"} size={23} color="#FFFFFF" />

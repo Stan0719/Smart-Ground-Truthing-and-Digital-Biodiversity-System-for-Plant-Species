@@ -12,7 +12,6 @@ import {
   Alert,
   ActivityIndicator,
   AppState,
-  ScrollView,
   TextInput,
   RefreshControl,
   Platform,
@@ -20,6 +19,7 @@ import {
 
 import QRCode from "react-native-qrcode-svg";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 import * as Print from "expo-print";
 
@@ -191,8 +191,8 @@ export default function PlantQRCodeScreen({ route }) {
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
+      <DiscoverableScrollView
+        showsVerticalScrollIndicator
         contentContainerStyle={styles.scrollContent}
         scrollEventThrottle={32}
         onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
@@ -403,7 +403,7 @@ export default function PlantQRCodeScreen({ route }) {
             </View>
           )}
         </View>
-      </ScrollView>
+      </DiscoverableScrollView>
     </View>
   );
 }

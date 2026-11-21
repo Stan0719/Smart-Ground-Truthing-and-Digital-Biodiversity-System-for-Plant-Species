@@ -621,7 +621,7 @@ export default function LoginScreen({
 
       {showAccountBenefits && <Modal visible transparent animationType="fade" onRequestClose={() => setShowAccountBenefits(false)}>
         <SafeAreaView style={[styles.modalBackdrop, styles.benefitsBackdrop]}>
-          <ScrollView style={styles.benefitsScrollView} contentContainerStyle={styles.benefitsScrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.benefitsScrollView} contentContainerStyle={styles.benefitsScrollContent} showsVerticalScrollIndicator>
           <View style={styles.benefitsCard}>
             <View style={styles.modalHeader}>
               <Text accessibilityRole="header" style={styles.modalTitle}>{t("login.exploreAsGuest")}</Text>
@@ -685,7 +685,7 @@ export default function LoginScreen({
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
+          showsVerticalScrollIndicator
         >
 
           <Animated.View

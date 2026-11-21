@@ -9,6 +9,9 @@ import { readDrafts, removeDraft } from "../utils/fieldStorage";
 import { deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { retryBotanistDraftAutosave, stopBotanistDraftAutosave, subscribeBotanistDraftAutosaveFailures } from "../utils/botanistDraftAutosave";
 import { CardListSkeleton } from "../components/BotanicalSkeleton";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
+import { plantApi } from "../utils/plantApi";
+import { draftBadgeTarget, draftEditNumber } from "../utils/draftVersionBadge";
 
 function draftType(draft) {
   if (draft.kind === "botanist-form") return draft.form_type;
@@ -58,6 +61,7 @@ export default function BotanistMyDrafts({ route, navigation }) {
   const [retryingAutosave, setRetryingAutosave] = useState("");
   const [category, setCategory] = useState("all");
   const [query, setQuery] = useState("");
+  const [editNumbers, setEditNumbers] = useState({});
   const autoResumedDraftRef = useRef(null);
   const load = useCallback(async () => {
     setState((old) => ({ ...old, loading: true, error: "" }));
@@ -69,6 +73,33 @@ export default function BotanistMyDrafts({ route, navigation }) {
     } catch (error) { setState((old) => ({ ...old, loading: false, error: error.message || t("botanistDrafts.loadFailed") })); }
   }, [accountId]);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useEffect(() => {
+    let active = true;
+    setEditNumbers({});
+    if (!accountId || state.loading || state.error) return () => { active = false; };
+    const targets = new Map();
+    for (const draft of state.drafts) {
+      const target = draftBadgeTarget(draft);
+      if (target.targetId) targets.set(`${target.kind}:${target.targetId}`, target);
+    }
+    void Promise.all([...targets].map(async ([key, target]) => {
+      const path = target.kind === "observation"
+        ? `/observations/${encodeURIComponent(target.targetId)}/edit-history`
+        : `/record-versions?kind=${target.kind}&id=${encodeURIComponent(target.targetId)}`;
+      try { return [key, await plantApi(path, { expectedAccountId: accountId })]; }
+      catch { return [key, null]; }
+    })).then((histories) => {
+      if (!active) return;
+      const byTarget = new Map(histories);
+      const next = {};
+      for (const draft of state.drafts) {
+        const target = draftBadgeTarget(draft);
+        if (target.targetId) next[draft.client_key] = draftEditNumber(target, byTarget.get(`${target.kind}:${target.targetId}`));
+      }
+      setEditNumbers(next);
+    });
+    return () => { active = false; };
+  }, [accountId, state.drafts, state.loading, state.error]);
   useEffect(() => subscribeBotanistDraftAutosaveFailures((failures) => {
     setAutosaveFailures(failures.filter((failure) => failure.key.startsWith(`${accountId}:`)));
   }), [accountId]);
@@ -128,6 +159,14 @@ export default function BotanistMyDrafts({ route, navigation }) {
   const visibleDrafts = filterBotanistDrafts(state.drafts, category, query).slice()
     .sort((a, b) => (savedTime(b) ?? -Infinity) - (savedTime(a) ?? -Infinity) || String(a.client_key).localeCompare(String(b.client_key)));
   const categories = ["all", "plant-records", "species-requests", "observations", "corrections"];
+  const badgeLabel = (draft) => {
+    const target = draftBadgeTarget(draft);
+    const type = t(`correctionBadge.${target.kind}`);
+    if (target.original) return t("correctionBadge.original", { type });
+    const number = editNumbers[draft.client_key];
+    return Number.isInteger(number) && number > 0 ? t("correctionBadge.edit", { type, number })
+      : t("correctionBadge.editWithoutNumber", { type });
+  };
 
   return <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
     <ScrollView contentContainerStyle={[styles.content, tablet && styles.tabletContent]}
@@ -137,12 +176,12 @@ export default function BotanistMyDrafts({ route, navigation }) {
       </View>
       <TextInput style={styles.search} value={query} onChangeText={setQuery} placeholder={t("botanistDrafts.searchPlaceholder")}
         placeholderTextColor="#7B8A80" accessibilityLabel={t("botanistDrafts.searchPlaceholder")} returnKeyType="search" />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters} accessibilityRole="tablist">
+      <DiscoverableScrollView horizontal showHint={false} contentContainerStyle={styles.filters} accessibilityRole="tablist">
         {categories.map((value) => <TouchableOpacity key={value} testID={`draft-filter-${value}`} accessibilityRole="button"
           accessibilityState={{ selected: category === value }} onPress={() => setCategory(value)} style={[styles.filterChip, category === value && styles.filterChipSelected]}>
           <Text style={[styles.filterLabel, category === value && styles.filterLabelSelected]}>{t(`botanistDrafts.filter.${value}`)}</Text>
         </TouchableOpacity>)}
-      </ScrollView>
+      </DiscoverableScrollView>
       {state.drafts.length > 0 && <Text style={styles.resultCount}>{t("botanistDrafts.matchingDrafts", { count: visibleDrafts.length })}</Text>}
       {!!state.error && <View style={styles.errorBox}><Text style={styles.errorText} accessibilityRole="alert">{translateUIMessage(state.error)}</Text>
         <TouchableOpacity style={styles.retry} onPress={() => { void load(); }}><Text style={styles.retryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>}
@@ -160,7 +199,7 @@ export default function BotanistMyDrafts({ route, navigation }) {
           : visibleDrafts.map((draft) => <View key={draft.client_key} testID={`my-draft-${draft.client_key}`} style={styles.card}>
             <View style={styles.cardTop}><View style={styles.icon}><Ionicons name="document-text-outline" size={21} color="#2F6B4F" /></View>
               <View style={styles.cardHeading}><Text style={styles.formType}>{draftLabel(draft)}</Text><Text style={styles.identifier}>{draftDescription(draft)}</Text></View>
-              <View style={styles.status}><Text style={styles.statusText}>{t("botanistDrafts.savedStatus")}</Text></View>
+              <View style={styles.status}><Text style={styles.statusText}>{badgeLabel(draft)}</Text></View>
             </View>
             <Text style={styles.date}>{t("botanistDrafts.lastSaved")}: {formatSaved(draft)}</Text>
             {(draft.photo_refs?.length || draft.assets?.length) > 0 && <Text style={styles.photoCount}>{t("botanistDrafts.photoCount", { count: draft.photo_refs?.length || draft.assets?.length })}</Text>}
@@ -181,7 +220,7 @@ const styles = StyleSheet.create({
   filters: { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 2 }, filterChip: { minHeight: 38, justifyContent: "center", borderRadius: 20, borderWidth: 1, borderColor: "#DCEBDD", backgroundColor: "#FFFFFF", paddingHorizontal: 12 },
   filterChipSelected: { backgroundColor: "#D6E9D9", borderColor: "#2F6B4F" }, filterLabel: { color: "#64766B", fontSize: 12 }, filterLabelSelected: { color: "#2F6B4F", fontWeight: "700" },
   resultCount: { color: "#64766B", fontSize: 12, marginTop: -5 },
-  card: { padding: 15, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCEBDD", borderRadius: 17, marginBottom: 2 }, cardTop: { flexDirection: "row", alignItems: "center", gap: 10 }, icon: { width: 42, height: 42, borderRadius: 13, backgroundColor: "#E8EDDA", alignItems: "center", justifyContent: "center" }, cardHeading: { flex: 1, minWidth: 0 }, formType: { color: "#2F6B4F", fontSize: 15, fontWeight: "750" }, identifier: { color: "#66776C", fontSize: 13, marginTop: 3 }, status: { backgroundColor: "#F5EBD6", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10 }, statusText: { color: "#77501D", fontSize: 11, fontWeight: "700" },
+  card: { padding: 15, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCEBDD", borderRadius: 17, marginBottom: 2 }, cardTop: { flexDirection: "row", alignItems: "center", gap: 10 }, icon: { width: 42, height: 42, borderRadius: 13, backgroundColor: "#E8EDDA", alignItems: "center", justifyContent: "center" }, cardHeading: { flex: 1, minWidth: 0 }, formType: { color: "#2F6B4F", fontSize: 15, fontWeight: "750" }, identifier: { color: "#66776C", fontSize: 13, marginTop: 3 }, status: { backgroundColor: "#F5EBD6", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, flexShrink: 1, maxWidth: "48%" }, statusText: { color: "#77501D", fontSize: 11, fontWeight: "700", textAlign: "center", flexShrink: 1 },
   date: { color: "#718078", fontSize: 12, marginTop: 11 }, photoCount: { color: "#718078", fontSize: 12, marginTop: 5 }, actions: { flexDirection: "row", gap: 9, marginTop: 13 }, resume: { flex: 1, minHeight: 44, borderRadius: 11, backgroundColor: "#2F6B4F", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 }, resumeText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" }, delete: { width: 44, height: 44, borderRadius: 11, borderWidth: 1, borderColor: "#F2B9B4", backgroundColor: "#FDE9E7", alignItems: "center", justifyContent: "center" },
   empty: { padding: 28, minHeight: 150, alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 16, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#DCEBDD" }, emptyTitle: { color: "#2F6B4F", fontSize: 16, fontWeight: "700", textAlign: "center" }, muted: { color: "#718078", textAlign: "center", lineHeight: 20 }, errorBox: { padding: 13, backgroundColor: "#FFF2EB", borderRadius: 12 }, errorText: { color: "#A34436", lineHeight: 20 }, retry: { minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 3 }, retryText: { color: "#2F6B4F", fontWeight: "700" },
 });

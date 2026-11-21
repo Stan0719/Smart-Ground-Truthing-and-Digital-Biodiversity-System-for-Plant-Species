@@ -17,6 +17,7 @@ function load(path, dependencies) {
   } }).outputText);
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled.get(path))((name) => {
+    if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     assert.ok(name in dependencies, `Unexpected dependency ${name}`);
     return { ...dependencies[name], __esModule: name !== "react" };
   }, module, module.exports);

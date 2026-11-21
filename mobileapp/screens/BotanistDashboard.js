@@ -1,7 +1,7 @@
 import LanguageSelector from "../components/LanguageSelector";
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, FlatList, ScrollView, StyleSheet, Image, ActivityIndicator, Alert, useWindowDimensions, RefreshControl } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Image, ActivityIndicator, Alert, useWindowDimensions, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { submissionStatus, fetchBotanistRecordChange } from "../utils/botanistRecords";
@@ -15,6 +15,7 @@ import { CardListSkeleton } from "../components/BotanicalSkeleton";
 import { ownedNotificationObservation } from "../utils/botanistNotifications";
 import { fieldFormStyles } from "../components/fieldFormStyles";
 import { submissionGroupMatchesSearch } from "../utils/submissionSearch";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 export function correctionTasks(plants, observations, requests, botanistId, edits = [], recordChanges = []) {
   if (!botanistId) return [];
@@ -24,7 +25,7 @@ export function correctionTasks(plants, observations, requests, botanistId, edit
     const plant = plantById.get(String(row.plant_id));
     const initial = row.origin_type === "initial_registration" || (plant?.status !== "Approved" && row.origin_type !== "subsequent_observation" && !!plant);
     return { key: `observation:${row.id}`, kind: initial ? "plant" : "observation", id: String(row.id), plantId: String(row.plant_id), plant,
-      name: plant?.commonName || plant?.scientificName || "", feedback: row.review_comment || "", status: row.status, at: row.updated_at || row.created_at };
+      originType: row.origin_type, name: plant?.commonName || plant?.scientificName || "", feedback: row.review_comment || "", status: row.status, at: row.updated_at || row.created_at };
   });
   const speciesTasks = requests.filter((row) => (row.requested_by ?? row.owner_subject) === owner && row.request_status === "Correction Required")
     .map((row) => ({ key: `species:${row.request_id}`, kind: "species", id: String(row.request_id), name: row.scientific_name || "",
@@ -32,7 +33,8 @@ export function correctionTasks(plants, observations, requests, botanistId, edit
   const editTasks = edits.filter((row) => row.owner_subject === owner && row.status === "Correction Required")
     .map((row) => ({ key: `observation-edit:${row.id}`, kind: "observationEdit", id: String(row.id),
       observationId: String(row.observation_id), plantId: String(observations.find((item) => String(item.id) === String(row.observation_id))?.plant_id || ""),
-      feedback: row.review_comment || "", status: row.status, at: row.updated_at || row.created_at }));
+      originType: observations.find((item) => String(item.id) === String(row.observation_id))?.origin_type,
+      editNumber: row.version_number, feedback: row.review_comment || "", status: row.status, at: row.updated_at || row.created_at }));
   const recordChangeTasks = recordChanges.filter((row) => row.owner_subject === owner && row.status === "Correction Required")
     .map((row) => row.plant_id != null
       ? { key: `plant-edit:${row.id}`, kind: "plantEdit", id: String(row.id), proposalId: String(row.id), plantId: String(row.plant_id),
@@ -48,6 +50,43 @@ export function correctionTaskMatchesCategory(task, category) {
   if (category === "species") return ["species", "speciesEdit"].includes(task.kind);
   if (category === "observations") return ["observation", "observationEdit"].includes(task.kind);
   return false;
+}
+
+export function correctionBadgeLabel(task, history) {
+  const type = task.kind === "plant" || task.kind === "plantEdit" ? "plant"
+    : task.kind === "species" || task.kind === "speciesEdit" ? "species" : "observation";
+  const typeLabel = t(`correctionBadge.${type}`);
+  if (task.kind === "plant" && task.originType === "initial_registration" || task.kind === "species" ||
+      task.kind === "observation" && task.originType === "subsequent_observation")
+    return t("correctionBadge.original", { type: typeLabel });
+  if (task.kind === "observationEdit") {
+    if (task.originType !== "subsequent_observation") return translateLabel(task.status);
+    const number = Number(task.editNumber);
+    return Number.isSafeInteger(number) && number > 0 ? t("correctionBadge.edit", { type: typeLabel, number }) : translateLabel(task.status);
+  }
+  if (!["plantEdit", "speciesEdit"].includes(task.kind) || !history?.history_available ||
+      !Array.isArray(history.versions) || history.versions.length >= 200) return translateLabel(task.status);
+  const targetId = task.kind === "plantEdit" ? task.plantId : task.requestId;
+  const rows = versionCardItems(type, targetId, history);
+  if (!rows.some((row) => row.original)) return translateLabel(task.status);
+  // Corrections can create several version rows for one edit request. Count
+  // each linked change ID once, and never count approval captures.
+  const edits = new Map();
+  for (const row of rows) {
+    if (row.historyType === "approvalSnapshot" || row.original) continue;
+    // An unlinked historical row could be a legacy edit or an original
+    // correction. Its place in the edit sequence cannot be proven here.
+    if (row.versionNumber > 1 && !row.priorChangeId) return translateLabel(task.status);
+    if (!row.priorChangeId) continue;
+    if (!row.createdAt || !Number.isFinite(Date.parse(row.createdAt))) return translateLabel(task.status);
+    const key = String(row.priorChangeId);
+    const prior = edits.get(key);
+    if (!prior || Date.parse(row.createdAt) < Date.parse(prior.createdAt)) edits.set(key, row);
+  }
+  const ordered = [...edits.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
+    String(a.priorChangeId).localeCompare(String(b.priorChangeId)));
+  const index = ordered.findIndex((row) => String(row.priorChangeId) === String(task.proposalId));
+  return index < 0 ? translateLabel(task.status) : t("correctionBadge.edit", { type: typeLabel, number: index + 1 });
 }
 
 function statusBadge(status, correctionResolved = false) {
@@ -474,7 +513,7 @@ export default function BotanistDashboardScreen({ route, navigation, onLogout })
     ? <View style={styles.statValueLoading}><ActivityIndicator size="small" color="#2F6B4F" /></View>
     : <Text style={styles.statNumber}>{!loaded && error ? "\u2014" : value}</Text>;
   return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}>
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent]} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void refresh(); }} tintColor="#2F6B4F" />}>
+    <ScrollView showsVerticalScrollIndicator contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent]} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void refresh(); }} tintColor="#2F6B4F" />}>
       <View style={styles.headerContent}>
         <View style={styles.hero}>
           <View style={styles.heroCopy}>
@@ -753,7 +792,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
   const plantCount = buildSubmissionGroups(plants, "plant").length;
   const requestCount = buildSubmissionGroups(requests, "species").length;
 
-  return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><FlatList
+  return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><DiscoverableScrollView asList
     data={searchedData} keyExtractor={(item) => item.key} renderItem={record} refreshing={loading} onRefresh={() => { void refresh(); }}
     contentContainerStyle={[styles.listContent, tablet && styles.tabletListContent, !searchedData.length && styles.emptyList]}
     ListHeaderComponent={<View style={[styles.pageHeaderContent, styles.submissionsHeaderContent]}>
@@ -772,7 +811,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
     ListEmptyComponent={loading && !loaded && !error
       ? <CardListSkeleton label={t("botanistRecords.loading")} count={3} />
       : <View style={styles.emptyContainer}><Text style={styles.emptyTitle}>{empty}</Text>{error && <TouchableOpacity style={styles.emptyButton} onPress={() => { void refresh(); }}><Text style={styles.emptyButtonText}>{t("common.tryAgain")}</Text></TouchableOpacity>}{!loading && !error && <Text style={styles.emptyText}>{searchQuery.trim() ? t("submissions.searchEmptyHint") : t("submissions.emptyHint")}</Text>}</View>}
-    showsVerticalScrollIndicator={false}
+    showsVerticalScrollIndicator
   /></SafeAreaView>;
 }
 
@@ -783,6 +822,26 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
   const botanist = route.params?.botanist;
   const { plants, observations, requests, edits, recordChanges, loading, loaded, error, refresh } = useBotanistRecords(botanist?.id);
   const corrections = correctionTasks(plants, observations, requests, botanist?.id, edits, recordChanges);
+  const [correctionHistories, setCorrectionHistories] = useState({ accountId: null, targetKey: "", rows: {} });
+  const historyTargets = [...new Set(corrections.filter((task) => ["plantEdit", "speciesEdit"].includes(task.kind))
+    .map((task) => `${task.kind === "plantEdit" ? "plant" : "species"}:${task.kind === "plantEdit" ? task.plantId : task.requestId}`))]
+    .filter((key) => /^[a-z]+:[1-9]\d*$/.test(key)).sort().join("|");
+  useEffect(() => {
+    let active = true;
+    const accountId = botanist?.id;
+    if (accountId && historyTargets) {
+      void Promise.all(historyTargets.split("|").map(async (key) => {
+        const [kind, id] = key.split(":");
+        try {
+          const history = await plantApi(`/record-versions?kind=${kind}&id=${encodeURIComponent(id)}`, { expectedAccountId: accountId });
+          return [key, history];
+        } catch { return [key, null]; }
+      })).then((entries) => {
+        if (active) setCorrectionHistories({ accountId, targetKey: historyTargets, rows: Object.fromEntries(entries) });
+      });
+    }
+    return () => { active = false; };
+  }, [botanist?.id, historyTargets]);
   const [correctionQuery, setCorrectionQuery] = useState("");
   const [correctionCategory, setCorrectionCategory] = useState("all");
   const visibleCorrections = corrections.filter((task) => {
@@ -816,10 +875,13 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
   };
   const renderCorrection = (task) => {
     const label = ["plant", "plantEdit"].includes(task.kind) ? t("recordEdits.correctPlantRegistration") : ["species", "speciesEdit"].includes(task.kind) ? t("recordEdits.correctSpeciesRequest") : t("fieldCollection.correctObservation");
+    const historyKey = `${task.kind === "plantEdit" ? "plant" : "species"}:${task.kind === "plantEdit" ? task.plantId : task.requestId}`;
+    const history = correctionHistories.accountId === botanist?.id && correctionHistories.targetKey === historyTargets
+      ? correctionHistories.rows[historyKey] : null;
     return <View key={task.key} testID={`correction-task-${task.key}`} style={styles.correctionCard}>
       <View style={styles.correctionTopRow}>
         <Text style={styles.correctionPlantId}>{["species", "speciesEdit"].includes(task.kind) ? `${t("submissions.requestId")} ${task.kind === "speciesEdit" ? task.requestId : task.id}` : task.plantId ? `${t("submissions.plantId")} ${task.plantId}` : t("myObservations.title")}</Text>
-        <View style={styles.correctionStatus}><Text style={styles.correctionStatusText}>{translateLabel(task.status)}</Text></View>
+        <View style={styles.correctionStatus}><Text style={styles.correctionStatusText}>{correctionBadgeLabel(task, history)}</Text></View>
       </View>
       <Text style={styles.recordType}>{t(["plant", "plantEdit"].includes(task.kind) ? "botanistDashboard.myPlantRecords" : ["species", "speciesEdit"].includes(task.kind) ? "botanistRecords.speciesRequests" : "myObservations.title")}</Text>
       <Text style={styles.correctionPlantName}>{task.name || t("submissions.notRecorded")}</Text>
@@ -828,7 +890,7 @@ export function BotanistCorrectionRequestsScreen({ route, navigation }) {
       <TouchableOpacity style={styles.correctionEditButton} onPress={() => openCorrection(task)} accessibilityRole="button" accessibilityLabel={label}><Text style={styles.correctionEditButtonText}>{label}</Text></TouchableOpacity>
     </View>;
   };
-  return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><FlatList
+  return <SafeAreaView style={styles.screen} edges={["top", "left", "right"]}><DiscoverableScrollView asList
     testID="correction-requests-list"
     data={!loaded && (loading || error) ? [] : visibleCorrections}
     keyExtractor={(task) => task.key}
@@ -919,8 +981,8 @@ const styles = StyleSheet.create({
   correctionPlantName: { color: "#2F6B4F", fontSize: 16, fontWeight: "700", flexShrink: 1 },
   correctionScientificName: { color: "#52665A", fontSize: 13, fontStyle: "italic", marginTop: 3 },
   correctionPlantId: { color: "#52665A", fontSize: 13, fontWeight: "600", flexShrink: 1 },
-  correctionStatus: { alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 15, backgroundColor: "#F8E9D2" },
-  correctionStatusText: { color: "#77501D", fontSize: 12, fontWeight: "700" },
+  correctionStatus: { alignSelf: "flex-start", maxWidth: "62%", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 15, backgroundColor: "#F8E9D2" },
+  correctionStatusText: { color: "#77501D", fontSize: 12, lineHeight: 17, fontWeight: "700", textAlign: "center", flexShrink: 1 },
   correctionFeedbackSection: { borderTopWidth: 1, borderTopColor: "#E0EADF", paddingTop: 10, marginTop: 2 },
   correctionFeedbackLabel: { color: "#2F6B4F", fontSize: 13, fontWeight: "700", marginBottom: 4 },
   correctionFeedback: { color: "#52665A", fontSize: 14, lineHeight: 21 },

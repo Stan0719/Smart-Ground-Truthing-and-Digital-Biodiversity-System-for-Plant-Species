@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppTranslation } from "../translations/i18n";
 import { applySpeciesFieldUpdates, commitSpeciesReview, planSpeciesFieldUpdates, searchSpeciesDictionary, speciesReviewRows } from "../utils/speciesDictionary";
+import DiscoverableScrollView from "./DiscoverableScrollView";
 
 export default function SpeciesDictionary({ fields, reviewPresentation = "alert" }) {
   const { t } = useAppTranslation();
@@ -54,9 +55,9 @@ export default function SpeciesDictionary({ fields, reviewPresentation = "alert"
     {busy && <View style={styles.status}><ActivityIndicator color="#2F6B4F" /><Text style={styles.helper}>{t("speciesDictionary.loading")}</Text></View>}
     {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
     {!busy && !error && searched && !results.length && <Text style={styles.helper}>{t("speciesDictionary.empty")}</Text>}
-    {!!results.length && <ScrollView ref={resultsScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={results.length > 2} scrollEnabled={results.length > 2} style={results.length > 2 ? { maxHeight: Math.min(height * 0.45, 370) } : undefined} contentContainerStyle={styles.resultsContent} accessibilityLabel={t("speciesDictionary.title")}>
+    {!!results.length && <DiscoverableScrollView nested hintKey="scrollHints.searchResults" ref={resultsScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled" scrollEnabled={results.length > 2} style={results.length > 2 ? { maxHeight: Math.min(height * 0.45, 370) } : undefined} contentContainerStyle={styles.resultsContent} accessibilityLabel={t("speciesDictionary.title")}>
       {results.map((item) => <View key={item.id} style={styles.result}>{!!item.commonName && <Text style={styles.common}>{item.commonName}</Text>}<Text style={styles.scientific}>{item.scientificName}</Text>{!!(item.family || item.rank) && <Text style={styles.helper}>{[item.family && `${t("speciesDictionary.family")}: ${item.family}`, item.rank && `${t("speciesDictionary.rank")}: ${item.rank}`].filter(Boolean).join(" · ")}</Text>}{!!item.description && <Text style={styles.helper}>{t("speciesDictionary.description")}: {item.description}</Text>}<TouchableOpacity onPress={() => Linking.openURL(item.sourceUrl)} accessibilityRole="link" style={styles.link}><Text style={styles.linkText}>{t("speciesDictionary.source")}: {item.sourceName}</Text></TouchableOpacity><TouchableOpacity style={styles.button} onPress={() => choose(item)} accessibilityRole="button"><Text style={styles.buttonText}>{t("speciesDictionary.use")}</Text></TouchableOpacity></View>)}
-    </ScrollView>}
+    </DiscoverableScrollView>}
     <Text style={styles.attribution}>{t("speciesDictionary.attribution")}</Text>
   </View>
   {reviewPresentation === "modal" && <Modal visible={Boolean(review)} transparent animationType="fade" statusBarTranslucent onRequestClose={cancelReview}>

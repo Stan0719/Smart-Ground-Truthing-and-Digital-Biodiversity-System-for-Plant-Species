@@ -60,7 +60,7 @@ export default function PlantExplorerMap({ plants, onViewDetails, focusRequest, 
       </MapView>
       {!!distantPlants.length && <View style={styles.distantBar}>
         <Text style={styles.distantLabel}>{t("map.otherMappedLocations")}</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.distantChoices}
+        <ScrollView horizontal showsHorizontalScrollIndicator style={styles.distantChoices}
           contentContainerStyle={styles.distantChoiceContent}>
           {distantPlants.map((plant) => <TouchableOpacity key={plant.plantId} onPress={() => { onSelectPlant(plant.plantId); focusPlant(plant); }}
             accessibilityRole="button" accessibilityLabel={`${t("map.showPlantOnMap")} ${plant.plantId}`} style={styles.distantChoice}>

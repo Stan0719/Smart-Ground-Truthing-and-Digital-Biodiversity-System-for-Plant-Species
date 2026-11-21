@@ -45,9 +45,9 @@ test('Map cards, count and markers share search and status results', () => {
   assert.match(source, /\{filteredPlants\.length\}/)
   assert.match(source, /<FlatList data=\{filteredPlants\}/)
   assert.match(source, /onPress=\{\(\) => openPlant\(item\)\}/)
-  assert.match(source, /isBotanist && <ScrollView horizontal/)
+  assert.match(source, /isBotanist && <DiscoverableScrollView horizontal/)
   assert.match(source, /statusFilterChip: \{ minHeight: 44/)
-  const chipSection = source.slice(source.indexOf('contentContainerStyle={styles.statusFilters}'), source.indexOf('</ScrollView>}', source.indexOf('contentContainerStyle={styles.statusFilters}')))
+  const chipSection = source.slice(source.indexOf('contentContainerStyle={styles.statusFilters}'), source.indexOf('</DiscoverableScrollView>}', source.indexOf('contentContainerStyle={styles.statusFilters}')))
   assert.deepEqual(Array.from(chipSection.matchAll(/\["(allVisible|approved|myPending|myRejected)",/g), (item) => item[1]),
     ['allVisible', 'approved', 'myPending'])
   assert.doesNotMatch(chipSection, /myRejected/)

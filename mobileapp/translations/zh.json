@@ -1,4 +1,6 @@
 {
+  "correctionBadge": { "plant": "植物", "species": "物种", "observation": "观察", "original": "{{type}}原始版本", "edit": "{{type}}编辑 {{number}}", "editWithoutNumber": "{{type}}编辑" },
+  "scrollHints": { "vertical": "向下滑动查看更多", "horizontal": "左右滑动查看更多", "speciesList": "滑动查看更多物种", "qrList": "滑动查看更多二维码", "searchResults": "滑动查看更多结果" },
   "observationEdits": {
     "editObservation": "编辑观察记录",
     "editProposal": "观察记录修改",

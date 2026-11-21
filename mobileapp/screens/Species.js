@@ -171,7 +171,7 @@ export default function Species({ navigation, user }) {
   // MAIN SCREEN
   // =====================================================
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
       <View style={styles.fixedHeader}>
             {/* LIBRARY HEADER */}
 
@@ -245,7 +245,7 @@ export default function Species({ navigation, user }) {
               </TouchableOpacity>}
             </View>
 
-            {isBotanist && <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            {isBotanist && <ScrollView horizontal showsHorizontalScrollIndicator
               contentContainerStyle={styles.statusFilters} accessibilityLabel={t("species.approvalStatusFilter")}>
               {[["all", t("plant.allVisible")], ["Approved", t("plant.approvedOnly")],
                 ["Pending Review", t("plant.myPending")], ["Rejected", t("species.myRejected")]].map(([value, label]) => {
@@ -303,7 +303,7 @@ export default function Species({ navigation, user }) {
               horizontal
               data={[null, ...familyOptions]}
               keyExtractor={(item) => item ?? "all-families"}
-              showsHorizontalScrollIndicator={false}
+              showsHorizontalScrollIndicator
               contentContainerStyle={styles.categoryList}
               renderItem={({ item }) => (
                 <TouchableOpacity
@@ -338,7 +338,7 @@ export default function Species({ navigation, user }) {
         numColumns={2}
         columnWrapperStyle={styles.columnWrapper}
         contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
         ListEmptyComponent={
           !loading && !errorMessage ? (
             <View style={styles.emptyState}>
@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
   resultsList: { flex: 1 },
 
   listContent: {
-    paddingBottom: 24,
+    paddingBottom: 8,
   },
 
   columnWrapper: {

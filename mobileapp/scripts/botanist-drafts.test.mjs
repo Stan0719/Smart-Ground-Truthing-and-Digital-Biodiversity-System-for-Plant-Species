@@ -7,12 +7,73 @@ const require = createRequire(import.meta.url), ts = require("typescript");
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const load = async (path) => import("data:text/javascript;base64," + Buffer.from(read(path)).toString("base64"));
 const { createDraftStore } = await load("utils/offlineDraftStore.js");
+const badges = await load("utils/draftVersionBadge.js");
+
+test("draft badges use original form provenance and verified edit history without changing drafts", () => {
+  for (const [draft, kind] of [
+    [{ kind: "botanist-form", form_type: "add-plant" }, "plant"],
+    [{ kind: "botanist-form", form_type: "add-species" }, "species"],
+    [{ path: "/observations" }, "observation"],
+  ]) assert.deepEqual(badges.draftBadgeTarget(draft), { kind, original: true });
+  const rows = [
+    { id: "original", version_number: 1, created_at: "2026-01-01T00:00:00Z" },
+    { id: "a", version_number: 2, change_id: "edit-a", created_at: "2026-01-02T00:00:00Z" },
+    { id: "capture", version_number: 3, snapshot: { review_provenance: { evidence_type: "approval_capture" } }, created_at: "2026-01-03T00:00:00Z" },
+    { id: "a-correction", version_number: 4, change_id: "edit-a", created_at: "2026-01-04T00:00:00Z" },
+    { id: "b", version_number: 5, change_id: "edit-b", status: "Cancelled", created_at: "2026-01-05T00:00:00Z" },
+    { id: "c", version_number: 6, change_id: "edit-c", status: "Rejected", created_at: "2026-01-06T00:00:00Z" },
+  ];
+  const history = { history_available: true, versions: rows, prior_changes: [] };
+  const draft = { kind: "botanist-form", form_type: "edit-species", target_id: "7", client_key: "one", saved_at: "2026-02-01" };
+  const target = badges.draftBadgeTarget(draft);
+  assert.equal(badges.draftEditNumber(target, history), 4);
+  assert.equal(badges.draftEditNumber(badges.draftBadgeTarget({ ...draft, saved_at: "2026-03-01" }), history), 4);
+  assert.equal(badges.draftEditNumber(badges.draftBadgeTarget({ ...draft, correction_change_id: "edit-b" }), history), 2);
+  assert.equal(badges.draftEditNumber(badges.draftBadgeTarget({ ...draft, correction_change_id: "edit-c" }), history), 3);
+  assert.equal(badges.draftEditNumber(badges.draftBadgeTarget({ ...draft, target_id: "8" }),
+    { history_available: true, versions: rows.slice(0, 2), prior_changes: [] }), 2);
+  assert.equal(badges.draftEditNumber(target, { ...history, versions: [...rows, { id: "unlinked", version_number: 7 }] }), null);
+  assert.equal(badges.draftEditNumber(target, { ...history, versions: rows.slice(1) }), null);
+  assert.deepEqual(draft, { kind: "botanist-form", form_type: "edit-species", target_id: "7", client_key: "one", saved_at: "2026-02-01" });
+});
+
+test("Observation edit badges use the selected Observation's submitted edit requests", () => {
+  const draft = { method: "OBSERVATION_EDIT", observation_id: "obs-a", path: "/observation-edits", client_key: "draft" };
+  const target = badges.draftBadgeTarget(draft);
+  const history = { versions: [{ id: "original", version_number: 0 }], edits: [
+    { id: "first", version_number: 1 }, { id: "second", version_number: 2 },
+  ] };
+  assert.equal(badges.draftEditNumber(target, history), 3);
+  assert.equal(badges.draftEditNumber(badges.draftBadgeTarget({ ...draft, edit_request: { id: "first" } }), history), 1);
+  assert.equal(badges.draftEditNumber(badges.draftBadgeTarget({ ...draft, edit_request: { id: "missing" } }), history), null);
+  assert.equal(badges.draftEditNumber(target, { edits: history.edits }), null);
+  assert.equal(badges.draftEditNumber(badges.draftBadgeTarget({ ...draft, observation_id: "obs-b" }),
+    { versions: history.versions, edits: [] }), 1);
+});
+
+test("draft badge templates localize original, numbered edit, and unknown edit", () => {
+  const expected = {
+    en: ["Plant Original", "Species Edit 3", "Observation Edit"],
+    ms: ["Tumbuhan Asal", "Edit Spesies 3", "Edit Pemerhatian"],
+    zh: ["植物原始版本", "物种编辑 3", "观察编辑"],
+  };
+  for (const [language, labels] of Object.entries(expected)) {
+    const badge = JSON.parse(read(`translations/${language}.json`)).correctionBadge;
+    const fill = (template, type, number) => template.replace("{{type}}", type).replace("{{number}}", number);
+    assert.deepEqual([
+      fill(badge.original, badge.plant),
+      fill(badge.edit, badge.species, 3),
+      fill(badge.editWithoutNumber, badge.observation),
+    ], labels);
+  }
+});
 function moduleFrom(path, dependencies) {
   const source = ts.transpileModule(read(path), { fileName: path.replace(/\.js$/, ".jsx"), compilerOptions: {
     jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true, target: ts.ScriptTarget.ES2022,
   } }).outputText;
   const module = { exports: {} };
   new Function("require", "module", "exports", source)((name) => {
+    if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     assert.ok(name in dependencies, `Unexpected draft utility dependency: ${name}`);
     return { ...dependencies[name], __esModule: true };
   }, module, module.exports);
@@ -106,6 +167,8 @@ test("My Draft classifies supported form types and combines category and text se
     "../utils/fieldStorage": { readDrafts: async () => { reads++; return storedDrafts; }, removeDraft: async () => { removals++; return true; } },
     "../utils/botanistFormDrafts": { deleteBotanistFormDraft: async () => { removals++; return true; } },
     "../utils/botanistDraftAutosave": { subscribeBotanistDraftAutosaveFailures: () => () => {}, retryBotanistDraftAutosave: async () => true, stopBotanistDraftAutosave: async () => {} },
+    "../utils/plantApi": { plantApi: async () => ({ history_available: false, versions: [], prior_changes: [] }) },
+    "../utils/draftVersionBadge": badges,
   });
   assert.deepEqual(storedDrafts.map(draftCategory), ["plant-records", "species-requests", "species-requests", "plant-records", "corrections", "observations", "plant-records"]);
   assert.deepEqual(filterBotanistDrafts(storedDrafts, "plant-records", "field fern").map((draft) => draft.client_key), ["field-plant-1"]);
@@ -126,6 +189,9 @@ test("My Draft classifies supported form types and combines category and text se
   assert.ok(!text(tree).includes("botanistDrafts.title"), "navigation header owns the page title");
   assert.ok(text(tree).includes("botanistDrafts.subtitle"));
   assert.ok(find((node) => node?.props?.testID === "draft-filter-all"));
+  assert.equal(find((node) => node?.props?.accessibilityRole === "tablist")?.props.showHint, false);
+  assert.ok(text(tree).includes("correctionBadge.original"));
+  assert.ok(text(tree).includes("correctionBadge.editWithoutNumber"));
   find((node) => node?.props?.testID === "draft-filter-plant-records").props.onPress();
   tree = render(); assert.ok(find((node) => node?.props?.testID === "my-draft-plant-1")); assert.ok(!find((node) => node?.props?.testID === "my-draft-species-1"));
   find((node) => node?.type === "TextInput").props.onChangeText("field fern");

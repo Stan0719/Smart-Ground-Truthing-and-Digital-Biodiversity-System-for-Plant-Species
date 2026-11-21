@@ -26,6 +26,7 @@ import FavouriteHeart from "../components/FavouriteHeart";
 import useVisitorFavourites from "../hooks/useVisitorFavourites";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { orderSpeciesPlantRecords } from "../utils/speciesPlantOrdering";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 const hasRecordedValue = (value) => value !== null && value !== undefined &&
   (typeof value !== "string" || (value.trim().length > 0 && value.trim().toLowerCase() !== "not recorded"));
@@ -175,9 +176,9 @@ export default function SpeciesDetail({
   return (
     <SafeAreaView style={styles.page} edges={["top", "left", "right"]}>
     {header}
-    <ScrollView
+    <DiscoverableScrollView
       style={styles.page}
-      showsVerticalScrollIndicator={false}
+      showsVerticalScrollIndicator
       refreshControl={
         <RefreshControl
           refreshing={refreshing || favourites.refreshing}
@@ -326,12 +327,11 @@ export default function SpeciesDetail({
               speciesDetailCard
             />
           )) : <>
-            <ScrollView
+            <DiscoverableScrollView nested hintKey="speciesDetail.scrollToSeeMorePlants"
               style={[styles.registeredPlantsScroll, { height: registeredPlantsViewportHeight }]}
               contentContainerStyle={styles.registeredPlantsContent}
               nestedScrollEnabled
               directionalLockEnabled
-              showsVerticalScrollIndicator
             >
               {orderedSpeciesPlants.map((plant) => (
                 <View key={plant.plantId} style={styles.registeredPlantRow}
@@ -344,8 +344,7 @@ export default function SpeciesDetail({
                   <PlantCard plant={plant} navigation={navigation} user={user} speciesDetailCard />
                 </View>
               ))}
-            </ScrollView>
-            <Text style={styles.registeredPlantsScrollHint}>{t("speciesDetail.scrollToSeeMorePlants")}</Text>
+            </DiscoverableScrollView>
           </>
         )}
 
@@ -386,7 +385,7 @@ export default function SpeciesDetail({
 
 
 
-    </ScrollView>
+    </DiscoverableScrollView>
     </SafeAreaView>
   );
 }
@@ -672,7 +671,6 @@ const styles = StyleSheet.create({
   registeredPlantsScroll: { width: "100%" },
   registeredPlantsContent: { paddingBottom: 1 },
   registeredPlantRow: { width: "100%" },
-  registeredPlantsScrollHint: { marginTop: -4, marginBottom: 10, color: "#63776D", fontSize: 11, textAlign: "center" },
 
   sectionDescription: {
     marginBottom: 18,

@@ -181,7 +181,7 @@ export default function BotanistMyObservations({ navigation, user }) {
     ListEmptyComponent={loading && !loaded ? <CardListSkeleton label={t("myObservations.loading")} count={3} />
       : error ? <View style={styles.state}><Ionicons name="cloud-offline-outline" size={30} color="#B84F43" /><Text style={styles.errorText}>{translateUIMessage(error)}</Text><TouchableOpacity style={styles.retry} onPress={() => { void load(true); }} accessibilityRole="button"><Text style={styles.retryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>
         : loaded ? <View style={styles.state}><Ionicons name="leaf-outline" size={32} color="#86A88E" /><Text style={styles.emptyTitle}>{hasNoMatchingObservations ? t("myObservations.noMatchingObservations") : t("myObservations.noObservations")}</Text><Text style={styles.muted}>{hasNoMatchingObservations ? t("submissions.searchEmptyHint") : t("myObservations.noObservationsHint")}</Text></View> : null}
-    showsVerticalScrollIndicator={false}
+    showsVerticalScrollIndicator
   /></SafeAreaView>;
 }
 

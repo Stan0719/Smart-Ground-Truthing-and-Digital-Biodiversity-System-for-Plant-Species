@@ -7,6 +7,7 @@ import { canWithdrawOriginalPlant, fetchBotanistPlant, fetchBotanistRecordChange
 import EditAction from "../components/EditAction";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
+import DiscoverableScrollView from "../components/DiscoverableScrollView";
 
 import {
   AppState,
@@ -855,10 +856,10 @@ const rawPhotos = Array.isArray(plant.photos)
 
   return (
     <View style={styles.container}>
-      <ScrollView
+      <DiscoverableScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
         refreshControl={!historicalDetail ? <RefreshControl refreshing={loading} onRefresh={() => setRetry((value) => value + 1)} tintColor={COLORS.primary} /> : undefined}
       >
         {/* PAGE HEADER */}
@@ -1143,7 +1144,7 @@ const rawPhotos = Array.isArray(plant.photos)
           </TouchableOpacity>
         )}
 
-      </ScrollView>
+      </DiscoverableScrollView>
       <Modal visible={photoViewerVisible && Boolean(selectedPhoto)} animationType="fade" onRequestClose={() => setPhotoViewerVisible(false)}>
         <View style={styles.photoViewer}>
           <View style={styles.photoViewerTopBar}>

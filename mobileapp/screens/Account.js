@@ -28,7 +28,7 @@ export default function AccountScreen({
 
   if (!isVisitor) return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.legacyContent} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.legacyContent} showsVerticalScrollIndicator>
         <View style={styles.legacyHeader}>
           <Text style={styles.legacyTitle}>{t("account.account")}</Text>
           <LanguageSelector />
@@ -69,7 +69,7 @@ export default function AccountScreen({
     <SafeAreaView style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
       >
         <View style={styles.page}>
           {/* Header */}
