@@ -98,7 +98,11 @@ export default function ScanScreen({ navigation, user }) {
       const result = await fetchPlantByQRCode(token);
       if (result?.assigned === false) {
         const botanist = user?.role?.toLowerCase() === "botanist";
-        setPrompt({ kind: result.status === "retired" ? "retired" : result.status === "generated" ? "unassigned" : "unavailable",
+        setPrompt({ kind: result.status === "pending_review" && botanist ? "pendingBotanist" :
+          result.status === "unavailable_yet" ? "pendingPublic" :
+          result.status === "invalid_record" && botanist ? "invalidRecordBotanist" :
+          result.status === "record_unavailable" ? "invalidRecordPublic" :
+          result.status === "retired" ? "retired" : result.status === "generated" ? "unassigned" : "unavailable",
           qrId: botanist && result.status === "generated" && /^[1-9]\d*$/.test(String(result.qr_id)) ? String(result.qr_id) : null,
           token: botanist && result.status === "generated" ? token : null });
         prompted = true;
@@ -197,8 +201,8 @@ export default function ScanScreen({ navigation, user }) {
       <Modal visible={Boolean(prompt)} transparent animationType="fade" onRequestClose={dismissPrompt}>
         <View style={styles.promptBackdrop}><View style={styles.promptCard}>
           <Ionicons name="qr-code-outline" size={28} color="#2F6B4F" />
-          <Text style={styles.promptTitle}>{t(prompt?.kind === "unassigned" ? "scan.noPlantRecordFound" : "scan.plantQrUnavailable")}</Text>
-          <Text style={styles.promptMessage}>{t(prompt?.kind === "retired" ? "scan.qrRetired" : prompt?.kind === "unassigned" && prompt.qrId ? "scan.botanistUnassigned" : prompt?.kind === "unassigned" ? "scan.visitorUnassigned" : "scan.plantQrUnavailable")}</Text>
+          <Text style={styles.promptTitle}>{t(prompt?.kind === "invalidRecordBotanist" ? "scan.qrNoLongerValid" : prompt?.kind === "invalidRecordPublic" ? "scan.noRecordFound" : prompt?.kind === "pendingBotanist" ? "scan.qrAlreadySubmitted" : prompt?.kind === "pendingPublic" ? "scan.noRecordFound" : prompt?.kind === "unassigned" ? "scan.noPlantRecordFound" : "scan.plantQrUnavailable")}</Text>
+          <Text style={styles.promptMessage}>{t(prompt?.kind === "invalidRecordBotanist" ? "scan.invalidRecordQr" : prompt?.kind === "invalidRecordPublic" ? "scan.plantNotAvailable" : prompt?.kind === "pendingBotanist" ? "scan.pendingReviewQr" : prompt?.kind === "pendingPublic" ? "scan.plantNotAvailableYet" : prompt?.kind === "retired" ? "scan.qrRetired" : prompt?.kind === "unassigned" && prompt.qrId ? "scan.botanistUnassigned" : prompt?.kind === "unassigned" ? "scan.visitorUnassigned" : "scan.plantQrUnavailable")}</Text>
           <View style={styles.promptActions}>
             {prompt?.qrId && <TouchableOpacity style={styles.promptSecondary} onPress={dismissPrompt} accessibilityRole="button"><Text style={styles.promptSecondaryText}>{t("common.cancel")}</Text></TouchableOpacity>}
             <TouchableOpacity style={styles.promptPrimary} accessibilityRole="button" onPress={() => {

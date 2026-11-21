@@ -39,6 +39,74 @@ test("an assigned Visitor scan opens Plant Details before the history write comp
   assert.equal(events.at(-1), "history-saved");
 });
 
+test("Pending Review scan prompts by role without navigation or a second request", async () => {
+  const source = scan.match(/async function handleBarcodeScanned\([\s\S]*?\n  }(?=\s*\/\/)/)[0];
+  for (const [role, accountId, status, expected] of [
+    [undefined, null, "unavailable_yet", "pendingPublic"],
+    ["Visitor", "visitor", "unavailable_yet", "pendingPublic"],
+    ["Botanist", "owner", "pending_review", "pendingBotanist"],
+    ["Botanist", "other", "pending_review", "pendingBotanist"],
+  ]) {
+    let calls = 0, prompt, navigations = 0;
+    const dependencies = {
+      scanInProgress: { current: false }, parsePlantQrPayload: () => "synthetic-qr",
+      fetchPlantByQRCode: async () => { calls++; return { assigned: false, status }; },
+      user: role ? { id: accountId, role } : null,
+      setPrompt: (value) => { prompt = value; }, navigation: { navigate: () => { navigations++; } },
+    };
+    const handle = new Function(...Object.keys(dependencies), source + "\nreturn handleBarcodeScanned;")(...Object.values(dependencies));
+    await handle({ data: "synthetic-qr" });
+    await handle({ data: "synthetic-qr" });
+    assert.equal(calls, 1);
+    assert.equal(prompt.kind, expected);
+    assert.equal(prompt.qrId, null);
+    assert.equal(navigations, 0);
+  }
+  assert.match(scan, /else dismissPrompt\(\)/);
+  const dismissSource = scan.match(/const dismissPrompt = \(\) => \{[^\n]+/)[0];
+  let prompt = { kind: "pendingPublic" }, cameraKey = 0;
+  const scanInProgress = { current: true };
+  const dismiss = new Function("setPrompt", "setCameraKey", "scanInProgress", `${dismissSource}\nreturn dismissPrompt;`)(
+    (value) => { prompt = value; }, (update) => { cameraKey = update(cameraKey); }, scanInProgress);
+  dismiss();
+  assert.equal(prompt, null);
+  assert.equal(cameraKey, 1);
+  assert.equal(scanInProgress.current, false);
+  const english = JSON.parse(read("../translations/en.json")).scan;
+  assert.equal(english.noRecordFound, "No Record Found");
+  assert.equal(english.plantNotAvailableYet, "Plant information is not available yet.");
+  assert.equal(english.qrAlreadySubmitted, "QR Already Submitted");
+  assert.equal(english.pendingReviewQr, "This QR code has already been assigned to a plant record and is currently pending review.");
+});
+
+test("Rejected and Withdrawn QR markers show role-specific prompts without navigation", async () => {
+  const source = scan.match(/async function handleBarcodeScanned\([\s\S]*?\n  }(?=\s*\/\/)/)[0];
+  for (const [role, status, kind] of [
+    [null, "record_unavailable", "invalidRecordPublic"],
+    ["Visitor", "record_unavailable", "invalidRecordPublic"],
+    ["Botanist", "invalid_record", "invalidRecordBotanist"],
+  ]) {
+    let prompt, requests = 0, navigations = 0;
+    const dependencies = {
+      scanInProgress: { current: false }, parsePlantQrPayload: () => "qr",
+      fetchPlantByQRCode: async () => { requests++; return { assigned: false, status }; },
+      user: role ? { role, id: "account" } : null,
+      setPrompt: (value) => { prompt = value; }, navigation: { navigate: () => { navigations++; } },
+    };
+    const handle = new Function(...Object.keys(dependencies), source + "\nreturn handleBarcodeScanned;")(...Object.values(dependencies));
+    await handle({ data: "qr" }); await handle({ data: "qr" });
+    assert.equal(prompt.kind, kind);
+    assert.equal(prompt.qrId, null);
+    assert.equal(requests, 1);
+    assert.equal(navigations, 0);
+  }
+  const english = JSON.parse(read("../translations/en.json")).scan;
+  assert.equal(english.noRecordFound, "No Record Found");
+  assert.equal(english.plantNotAvailable, "Plant information is not available.");
+  assert.equal(english.qrNoLongerValid, "QR Code No Longer Valid");
+  assert.equal(english.invalidRecordQr, "This QR code is linked to a rejected or withdrawn plant record and can no longer be used for plant registration.");
+});
+
 test("Add Plant matches backend inventory ID and token, keeps QR picker editable, and rechecks before submission", () => {
   assert.match(addPlant, /String\(code\.qr_id\) === String\(scannedId\) &&\s*code\.qr_code === route\.params\?\.scannedQrToken/);
   assert.match(addPlant, /if \(match\) setSelectedQRCode\(match\)/);
@@ -51,7 +119,7 @@ test("Add Plant matches backend inventory ID and token, keeps QR picker editable
 test("scanner and unavailable QR labels exist in all languages", () => {
   for (const language of ["en", "ms", "zh"]) {
     const strings = JSON.parse(read(`../translations/${language}.json`));
-    for (const key of ["noPlantRecordFound", "visitorUnassigned", "botanistUnassigned", "addNewPlant", "qrRetired"])
+    for (const key of ["noPlantRecordFound", "visitorUnassigned", "botanistUnassigned", "addNewPlant", "qrRetired", "noRecordFound", "plantNotAvailableYet", "qrAlreadySubmitted", "pendingReviewQr", "qrNoLongerValid", "invalidRecordQr", "plantNotAvailable"])
       assert.ok(strings.scan[key] && !strings.scan[key].includes("???"), `${language}:scan.${key}`);
     assert.ok(strings.addPlant.scannedQrUnavailable, `${language}:addPlant.scannedQrUnavailable`);
   }

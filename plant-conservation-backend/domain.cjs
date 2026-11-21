@@ -1422,6 +1422,13 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     if (row.plant_id == null || row.status === "generated" || row.status === "retired")
       return res.json({ assigned: false, status: row.status,
         ...(row.status === "generated" && row.plant_id == null && req.user?.role === "Botanist" ? { qr_id: row.qr_id } : {}) });
+    if (row.status === "assigned" && row.rbac_status === "Pending Review")
+      return res.json({ assigned: false,
+        status: req.user?.role === "Botanist" ? "pending_review" : "unavailable_yet" });
+    if ((row.rbac_status === "Rejected" || row.rbac_status === "Withdrawn") &&
+        (row.status === "assigned" || row.status === "active"))
+      return res.json({ assigned: false,
+        status: req.user?.role === "Botanist" ? "invalid_record" : "record_unavailable" });
     if (row.status !== "active") fail(404, "Plant information is not available.");
     if (row.rbac_status !== "Approved") fail(404, "Plant information is not available.");
     const species = await speciesRow(pool, row.species_id, req.user);
