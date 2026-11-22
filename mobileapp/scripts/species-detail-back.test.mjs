@@ -20,7 +20,7 @@ new Function("require", "module", "exports", compile("../utils/speciesPlantOrder
 );
 
 function makeScreen({ language = "en", species = null, fetchSpeciesDetail = async () => null, user = null,
-  records = [], imageSource = () => null } = {}) {
+  records = [], imageSource = () => null, translateField = (field) => field.sourceText } = {}) {
   const state = [];
   const refs = [];
   let stateIndex = 0;
@@ -28,6 +28,7 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
   let focus;
   const navigations = [];
   const favouriteCalls = [];
+  const translationRequests = [];
   const hooks = {
     ...React,
     useState(initialValue) {
@@ -65,6 +66,10 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
     "../components/FavouriteHeart": { default: "FavouriteHeart" },
     "../hooks/useVisitorFavourites": { default: () => ({ isFavourite: () => false, isPending: () => false, loading: false, refreshing: false, mutationError: "", refresh: async (...args) => { favouriteCalls.push(["refresh", ...args]); }, toggle: async (...args) => { favouriteCalls.push(["toggle", ...args]); } }) },
     "../components/BotanicalSkeleton": { DetailSkeletonContent: "DetailSkeletonContent" },
+    "../hooks/useDatabaseTranslations": { default: (fields, options) => {
+      translationRequests.push({ fields, options });
+      return translateField;
+    } },
     "../utils/speciesPlantOrdering": orderingModule.exports,
   };
   const module = { exports: {} };
@@ -84,7 +89,7 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
   };
   const children = (node) => node && typeof node === "object" ? React.Children.toArray(node.props?.children) : [];
   const allNodes = (root) => [root, ...children(root).flatMap(allNodes)];
-  return { render, get focus() { return focus; }, navigations, favouriteCalls, allNodes };
+  return { render, get focus() { return focus; }, navigations, favouriteCalls, translationRequests, allNodes };
 }
 
 function assertOneWorkingBackButton(fixture, tree, expectedLabel) {
@@ -146,6 +151,24 @@ test("public Species Detail does not trust a protected Species passed through na
     await new Promise((resolve) => setImmediate(resolve));
     tree = fixture.render();
     assert.equal(fixture.allNodes(tree).some((node) => node?.props?.children === "Private species"), false);
+  }
+});
+
+test("Species Detail translates only authorized fetched fields with the viewer's public scope", async () => {
+  const species = { id: "6", name: "Common", scientificName: "Scientific", description: "Description", habitat: "Habitat" };
+  for (const user of [null, { id: "guest", role: "Guest" }, { id: "visitor", role: "Visitor" }, { id: "botanist", role: "Botanist" }]) {
+    const fixture = makeScreen({ user, fetchSpeciesDetail: async () => species,
+      translateField: (field) => `Translated ${field.sourceText}` });
+    fixture.render();
+    fixture.focus();
+    await new Promise((resolve) => setImmediate(resolve));
+    const nodes = fixture.allNodes(fixture.render());
+    const request = fixture.translationRequests.at(-1);
+    assert.equal(request.options.accountId, user?.id ?? null);
+    assert.equal(request.options.publicOnly, !user || user.role !== "Botanist");
+    assert.deepEqual(request.fields.map((field) => field.fieldName), ["commonName", "description", "habitat"]);
+    assert.ok(nodes.some((node) => node?.props?.children === "Translated Description"));
+    assert.ok(nodes.some((node) => node?.props?.children === "Translated Habitat"));
   }
 });
 

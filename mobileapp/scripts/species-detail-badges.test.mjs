@@ -45,6 +45,7 @@ function renderCard({ user, language, tablet, speciesDetailCard = true, status =
     "../translations/i18n": { t, translateLabel: (value) => value, translateFieldValue: (_label, value) => value, useAppTranslation() {}, dateLocale: () => language },
     "../utils/plantApi": { getPlantDisplayObservation: (plant) => plant.latestApproved },
     "../utils/plantCardDisplay": { getPlantCardZoneLabel: () => t("map.locationRestricted") },
+    "../hooks/useDatabaseTranslations": { default: () => (field) => field.sourceText },
   };
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled)((name) => {

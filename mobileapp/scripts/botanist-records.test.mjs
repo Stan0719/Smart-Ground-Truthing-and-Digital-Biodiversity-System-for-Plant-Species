@@ -1127,7 +1127,7 @@ test("Field Record Timeline resolves the signed-in profile name only for its con
   assert.match(detailSource, /key=\{observation\.observationId\}/);
   assert.match(detailSource, /getObservationRecorderDisplayName\(observation, user/);
   assert.match(detailSource, /getObservationRecorderDisplayName\(detailsObservation, user/);
-  assert.match(detailSource, /selectLatestApprovedObservation\(plant\.observations \|\| \[\]\)/);
+  assert.match(detailSource, /selectLatestApprovedObservation\(plant\?\.observations \|\| \[\]\)/);
   assert.match(detailSource, /selectOwnedPendingPlantObservation\(plant, user\?\.id\)/);
   assert.match(detailSource, /<ObservationPhotos photos=\{detailsObservation\.photos\}/);
   assert.match(detailSource, /<ObservationPhotos photos=\{observation\.photos\}/);

@@ -154,6 +154,7 @@ test('Plant Detail thumbnail taps select a distinct image and the viewer navigat
     '../components/BotanicalSkeleton': { DetailSkeletonContent: 'DetailSkeletonContent' },
     '@react-navigation/native': { useFocusEffect: () => {} },
     '../utils/plantPhotoGallery': galleryFunctions,
+    '../hooks/useDatabaseTranslations': { default: () => (field) => field.sourceText },
   }
   const module = { exports: {} }
   new Function('require', 'module', 'exports', compiled)((name) => {
@@ -283,7 +284,7 @@ test('Plant Detail title uses scientific name then localized Plant ID for Botani
   const title = source.slice(start, source.indexOf('<View style={styles.heroBadges}>', start))
   const roleLogic = source.match(/const useScientificHeading = .*;/)[0]
   const styleSource = source.slice(source.indexOf('const styles = StyleSheet.create('))
-  const compiled = ts.transpileModule(`${styleSource}\nmodule.exports = (user, plant, selectedSpecies) => { ${roleLogic} return <>${title}</>; };`, {
+  const compiled = ts.transpileModule(`${styleSource}\nmodule.exports = (user, plant, selectedSpecies) => { const translatedSpeciesCommonName = selectedSpecies.name; ${roleLogic} return <>${title}</>; };`, {
     compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
   }).outputText
   for (const language of ['en', 'ms', 'zh']) {
