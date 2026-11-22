@@ -17,6 +17,7 @@ function load(path, dependencies) {
   } }).outputText);
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled.get(path))((name) => {
+    if (name === "../utils/imageSelection") return { inspectPickedImages: async (assets) => ({ accepted: assets, rejected: [] }), imageSizeAlert: () => ({}), base64Bytes: () => 5, MAX_IMAGE_BYTES: 4194304, __esModule: true };
     if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     assert.ok(name in dependencies, `Unexpected dependency ${name}`);

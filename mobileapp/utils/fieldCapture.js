@@ -26,7 +26,11 @@ export function createFieldCapture({ imagePicker, location }) {
       const bytes =
         (asset.base64.length * 3) / 4 -
         (asset.base64.match(/=*$/)?.[0].length || 0);
-      if (bytes > 4194304) throw Error("Choose a photo smaller than 4 MB.");
+      if (bytes > 4194304) {
+        const error = Error("Choose a photo smaller than 4 MB.");
+        error.oversizedPhoto = { bytes, filename: asset.fileName || "", position: count + 1 };
+        throw error;
+      }
       const content_type = asset.base64.startsWith("/9j/")
         ? "image/jpeg"
         : asset.base64.startsWith("iVBOR")

@@ -19,6 +19,7 @@ import RefreshButton from "../components/RefreshButton";
 import GpsLocationPicker from "../components/GpsLocationPicker";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
+import { imageSizeAlert } from "../utils/imageSelection";
 const fieldCapture = createFieldCapture({
   imagePicker: ImagePicker,
   location: Location,
@@ -306,7 +307,10 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           },
         ]);
     } catch (e) {
-      setError(e.message);
+      if (e.oversizedPhoto) {
+        const alert = imageSizeAlert(t, [{ ...e.oversizedPhoto, label: `${t("imageSizeAlert.observationPhoto")} ${e.oversizedPhoto.position}` }]);
+        Alert.alert(alert.title, alert.message);
+      } else setError(e.message);
     } finally {
       capturing.current = false;
     }

@@ -11,6 +11,7 @@ import { deleteBotanistFormDraft, findBotanistFormDraft, getBotanistFormDraft, s
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import SpeciesDictionary from "../components/SpeciesDictionary";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
+import { inspectPickedImages, imageSizeAlert, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 
 const conservationStatuses = ["Not Assessed", "Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered"];
 const makeKey = () => `species-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -74,7 +75,11 @@ export default function AddSpeciesRequest({ route, navigation }) {
       if (!permission.granted) return Alert.alert(t("addPlant.permissionRequired"), camera ? t("addPlant.cameraPermissionIsRequiredToTakeASpeciesPhoto") : t("addPlant.galleryPermissionIsRequiredToSelectSpeciesPhotos"));
       const result = camera ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8 })
         : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
-      if (!result.canceled && result.assets?.[0]?.uri) setPhoto(result.assets[0].uri);
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        const checked = await inspectPickedImages(result.assets, [t("imageSizeAlert.speciesPhoto")], FileSystem.getInfoAsync);
+        if (checked.rejected.length) { const alert = imageSizeAlert(t, checked.rejected); Alert.alert(alert.title, alert.message); }
+        if (checked.accepted[0]) setPhoto(checked.accepted[0].uri);
+      }
     } catch { Alert.alert(t("common.error"), camera ? t("addPlant.unableToOpenTheCamera") : t("addPlant.unableToOpenTheGallery")); }
   }
 
@@ -86,7 +91,11 @@ export default function AddSpeciesRequest({ route, navigation }) {
     busy.current = true; setSaving(true); setError("");
     try {
       const base64 = await FileSystem.readAsStringAsync(photo, { encoding: FileSystem.EncodingType.Base64 });
-      if (base64.length > 5592408) throw Error(t("addPlantWorkflow.speciesPhotoTooLarge"));
+      if (base64Bytes(base64) > MAX_IMAGE_BYTES) {
+        const alert = imageSizeAlert(t, [{ label: t("imageSizeAlert.speciesPhoto"), bytes: base64Bytes(base64) }]);
+        Alert.alert(alert.title, alert.message);
+        return;
+      }
       const body = {
         ...Object.fromEntries(Object.entries(form).map(([key, value]) => [key, value.trim()])),
         photo: { base64, content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg" },

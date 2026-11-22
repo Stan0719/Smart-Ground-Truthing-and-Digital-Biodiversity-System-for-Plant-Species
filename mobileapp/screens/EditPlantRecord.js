@@ -18,6 +18,7 @@ import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import { fieldFormStyles } from "../components/fieldFormStyles";
+import { inspectPickedImages, imageSizeAlert } from "../utils/imageSelection";
 
 const fields = ["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "notes", "zone", "latitude", "longitude", "accuracy_m", "altitudeM"];
 const requiredFields = new Set(["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "latitude", "longitude"]);
@@ -450,7 +451,11 @@ export default function EditPlantRecord({ route, navigation }) {
       if (!permission.granted) return Alert.alert(t("addPlant.permissionRequired"), camera ? t("addPlant.cameraPermissionIsRequired") : t("addPlant.galleryPermissionIsRequired"));
       const result = camera ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8 })
         : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, selectionLimit: 8, quality: 0.8 });
-      if (!result.canceled) addPicked(result.assets);
+      if (!result.canceled) {
+        const checked = await inspectPickedImages(result.assets, result.assets.map((_, index) => `${t("imageSizeAlert.plantPhoto")} ${newPhotos.length + index + 1}`), FileSystem.getInfoAsync);
+        if (checked.rejected.length) { const alert = imageSizeAlert(t, checked.rejected); Alert.alert(alert.title, alert.message); }
+        if (checked.accepted.length) addPicked(checked.accepted);
+      }
     } catch { Alert.alert(t("common.error"), camera ? t("addPlant.unableToOpenTheCamera") : t("addPlant.unableToOpenTheGallery")); }
   }
   function validate() {
