@@ -28,6 +28,7 @@ const {
 const { mountSpeciesPhotoLibrary } = require("./species-photo-library.cjs");
 const { mountSpeciesDictionary } = require("./species-dictionary.cjs");
 const { mountWebsiteTranslations } = require("./translation-service.cjs");
+const { mountGlobalSearch } = require("./global-search.cjs");
 const { speciesPhotoWritesRequested } = require("./species-photo-activation.cjs");
 function createPlantApp({
   auth,
@@ -72,6 +73,7 @@ function createPlantApp({
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
   mountStaffNotifications(app, { pool });
+  mountGlobalSearch(app, { pool, allow });
   mountDomain(app, { auth, pool, allow, officerNotifications, qrPlantSchema });
   mountWebsiteTranslations(app, { pool, allow, origins });
   mountSpeciesDictionary(app, { allow });

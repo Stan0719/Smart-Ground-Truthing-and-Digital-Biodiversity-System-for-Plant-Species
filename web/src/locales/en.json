@@ -440,6 +440,26 @@
     "login": "Login",
     "logout": "Logout"
   },
+  "globalSearch": {
+    "eyebrow": "Website search",
+    "title": "Search the website",
+    "queryLabel": "Results for",
+    "inputLabel": "Search the website",
+    "placeholder": "Search species, plants, observations...",
+    "submit": "Search all website content",
+    "suggestions": "Global search suggestions",
+    "loading": "Searching...",
+    "empty": "No matching results found.",
+    "error": "Search is temporarily unavailable.",
+    "minimumLength": "Enter at least two characters to search.",
+    "viewAll": "View all results",
+    "resultCount": "{count} results",
+    "pagination": "Search result pages",
+    "previous": "Previous",
+    "next": "Next",
+    "batch": "Results {start}–{end}",
+    "categories": { "species": "Species", "plants": "Plant records", "observations": "Observations", "alerts": "Threat alerts", "pages": "Website pages" }
+  },
   "common": {
     "learnMore": "Learn More",
     "viewDetails": "View Details",

@@ -440,6 +440,26 @@
     "login": "Log Masuk",
     "logout": "Log Keluar"
   },
+  "globalSearch": {
+    "eyebrow": "Carian laman web",
+    "title": "Cari di laman web",
+    "queryLabel": "Hasil untuk",
+    "inputLabel": "Cari di laman web",
+    "placeholder": "Cari spesies, tumbuhan, pemerhatian...",
+    "submit": "Cari semua kandungan laman web",
+    "suggestions": "Cadangan carian global",
+    "loading": "Sedang mencari...",
+    "empty": "Tiada hasil yang sepadan.",
+    "error": "Carian tidak tersedia buat sementara waktu.",
+    "minimumLength": "Masukkan sekurang-kurangnya dua aksara untuk mencari.",
+    "viewAll": "Lihat semua hasil",
+    "resultCount": "{count} hasil",
+    "pagination": "Halaman hasil carian",
+    "previous": "Sebelumnya",
+    "next": "Seterusnya",
+    "batch": "Hasil {start}–{end}",
+    "categories": { "species": "Spesies", "plants": "Rekod tumbuhan", "observations": "Pemerhatian", "alerts": "Amaran ancaman", "pages": "Halaman laman web" }
+  },
   "common": {
     "learnMore": "Ketahui Lebih Lanjut",
     "viewDetails": "Lihat Butiran",

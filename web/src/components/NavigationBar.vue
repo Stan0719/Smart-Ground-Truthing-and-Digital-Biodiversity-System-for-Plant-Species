@@ -6,13 +6,79 @@ import { useI18n } from 'vue-i18n'
 import LoginModal from './LoginModal.vue'
 import LanguageSwitcher from './LanguageSwitcher.vue'
 import { verifySession, logout as serverLogout } from '../services/auth'
+import { searchGlobalWebsite, type GlobalSearchCategory, type GlobalSearchResponse, type GlobalSearchResult } from '../services/globalSearch'
 
 import { usePrototypeSession } from '../composables/usePrototypeSession'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const navSearch = ref('')
+const searchOpen = ref(false)
+const searchLoading = ref(false)
+const searchError = ref(false)
+const searchActiveIndex = ref(-1)
+const searchResponse = ref<GlobalSearchResponse | null>(null)
+const searchCategories: GlobalSearchCategory[] = ['species', 'plants', 'observations', 'alerts', 'pages']
+const isSearchableQuery = computed(() => navSearch.value.trim().length >= 2 || /^\d$/.test(navSearch.value.trim()))
+let searchTimer: number | undefined
+let searchController: AbortController | null = null
+let searchRequest = 0
+const flatSearchResults = computed(() => searchCategories.flatMap((category) => searchResponse.value?.results?.[category] || []))
+const searchOptionId = (variant: string, result: GlobalSearchResult) => `${variant}-global-search-${flatSearchResults.value.indexOf(result)}`
+
+watch([navSearch, locale], ([rawQuery, selectedLocale]) => {
+  window.clearTimeout(searchTimer)
+  searchController?.abort()
+  const request = ++searchRequest
+  searchResponse.value = null
+  searchError.value = false
+  searchActiveIndex.value = -1
+  const query = rawQuery.trim()
+  if (query.length < 2 && !/^\d$/.test(query)) { searchLoading.value = false; return }
+  searchTimer = window.setTimeout(async () => {
+    const controller = new AbortController()
+    searchController = controller
+    searchLoading.value = true
+    try {
+      const result = await searchGlobalWebsite(query, selectedLocale, { limit: 4, signal: controller.signal })
+      if (request === searchRequest && !controller.signal.aborted) searchResponse.value = result
+    } catch (error) {
+      if (request === searchRequest && !(error instanceof DOMException && error.name === 'AbortError')) searchError.value = true
+    } finally {
+      if (request === searchRequest) searchLoading.value = false
+    }
+  }, 300)
+}, { flush: 'post' })
+
+const openSearchResult = (result: GlobalSearchResult) => {
+  searchOpen.value = false
+  searchActiveIndex.value = -1
+  closeMobileMenu()
+  void router.push(result.path)
+}
+
+const submitNavSearch = () => {
+  const query = navSearch.value.trim()
+  if (!query) return
+  const selected = flatSearchResults.value[searchActiveIndex.value]
+  if (selected) { openSearchResult(selected); return }
+  searchOpen.value = false
+  void router.push({ name: 'global-search', query: { q: query } })
+}
+
+const handleSearchKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape') { searchOpen.value = false; searchActiveIndex.value = -1; return }
+  if (event.key === 'ArrowDown' && flatSearchResults.value.length) {
+    event.preventDefault(); searchOpen.value = true
+    searchActiveIndex.value = (searchActiveIndex.value + 1) % flatSearchResults.value.length
+  } else if (event.key === 'ArrowUp' && flatSearchResults.value.length) {
+    event.preventDefault(); searchOpen.value = true
+    searchActiveIndex.value = searchActiveIndex.value <= 0 ? flatSearchResults.value.length - 1 : searchActiveIndex.value - 1
+  }
+}
+
+const resultTypeLabel = (type: GlobalSearchCategory) => t(`globalSearch.categories.${type}`)
 
 type UserRole = 'admin' | 'conservation-officer' | null
 
@@ -46,15 +112,6 @@ const navItems = computed(() => {
 
   return items
 })
-
-const submitNavSearch = () => {
-  const query = navSearch.value.trim()
-
-  router.push({
-    path: '/species',
-    query: query ? { search: query } : {},
-  })
-}
 
 const navTrack = ref<HTMLElement | null>(null)
 
@@ -121,11 +178,14 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  window.clearTimeout(searchTimer)
+  searchController?.abort()
 })
 
 watch([() => route.path, isLoggedIn, userRole, canUseProtectedSession], () => {
   updateNavThumb()
 })
+watch(() => route.fullPath, () => { searchOpen.value = false })
 
 const mobileMenuOpen = ref(false)
 const mobileSearchOpen = ref(false)
@@ -239,22 +299,60 @@ const logout = async () => {
 
           <form class="nav-search" role="search" @submit.prevent="submitNavSearch">
             <label>
-              <span class="sr-only">{{ t('nav.searchPlants') }}</span>
+              <span class="sr-only">{{ t('globalSearch.inputLabel') }}</span>
               <input
                 v-model="navSearch"
                 autocomplete="off"
-                :placeholder="t('nav.searchHere')"
+                :placeholder="t('globalSearch.placeholder')"
                 type="search"
                 maxlength="100"
+                role="combobox"
+                aria-autocomplete="list"
+                :aria-expanded="searchOpen && isSearchableQuery"
+                aria-controls="desktop-global-search-results"
+                :aria-activedescendant="searchOpen && searchActiveIndex >= 0 ? `desktop-global-search-${searchActiveIndex}` : undefined"
+                @focus="searchOpen = true"
+                @keydown="handleSearchKeydown"
               />
             </label>
 
-            <button type="submit" :aria-label="t('nav.searchPlants')">
+            <button type="submit" :aria-label="t('globalSearch.submit')">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="10.8" cy="10.8" r="6.8" />
                 <path d="m16 16 4.5 4.5" />
               </svg>
             </button>
+            <div
+              v-if="searchOpen && isSearchableQuery"
+              id="desktop-global-search-results"
+              class="global-search-suggestions"
+              role="listbox"
+              :aria-label="t('globalSearch.suggestions')"
+            >
+              <p v-if="searchLoading" class="suggestion-state" role="status">{{ t('globalSearch.loading') }}</p>
+              <p v-else-if="searchError" class="suggestion-state">{{ t('globalSearch.error') }}</p>
+              <p v-else-if="!flatSearchResults.length" class="suggestion-state">{{ t('globalSearch.empty') }}</p>
+              <template v-else>
+                <template v-for="category in searchCategories" :key="category">
+                  <p v-if="searchResponse?.results[category]?.length" class="suggestion-category">{{ resultTypeLabel(category) }}</p>
+                  <button
+                    v-for="item in searchResponse?.results[category] || []"
+                    :id="`desktop-global-search-${flatSearchResults.indexOf(item)}`"
+                    :key="`${category}-${item.id}`"
+                    type="button"
+                    class="suggestion-option"
+                    role="option"
+                    :aria-selected="flatSearchResults.indexOf(item) === searchActiveIndex"
+                    @mousedown.prevent
+                    @click="openSearchResult(item)"
+                  >
+                    <strong>{{ item.title }}</strong>
+                    <small v-if="item.snippet">{{ item.snippet }}</small>
+                  </button>
+                </template>
+                <button type="button" class="suggestion-view-all" @mousedown.prevent @click="submitNavSearch">{{ t('globalSearch.viewAll') }} →</button>
+              </template>
+            </div>
           </form>
         </div>
       </nav>
@@ -415,15 +513,53 @@ const logout = async () => {
               type="search"
                 maxlength="100"
               autocomplete="off"
-              :placeholder="t('nav.searchSpecies')"
-              :aria-label="t('nav.searchSpecies')"
+              :placeholder="t('globalSearch.placeholder')"
+              :aria-label="t('globalSearch.inputLabel')"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="searchOpen && isSearchableQuery"
+              aria-controls="mobile-global-search-results"
+              :aria-activedescendant="searchOpen && searchActiveIndex >= 0 ? `mobile-global-search-${searchActiveIndex}` : undefined"
+              @focus="searchOpen = true"
+              @keydown="handleSearchKeydown"
             />
-            <button type="submit" :aria-label="t('nav.searchSpecies')">
+            <button type="submit" :aria-label="t('globalSearch.submit')">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle cx="10.5" cy="10.5" r="6.5" />
                 <path d="m15.5 15.5 5 5" />
               </svg>
             </button>
+            <div
+              v-if="searchOpen && isSearchableQuery"
+              id="mobile-global-search-results"
+              class="global-search-suggestions mobile-global-search-suggestions"
+              role="listbox"
+              :aria-label="t('globalSearch.suggestions')"
+            >
+              <p v-if="searchLoading" class="suggestion-state" role="status">{{ t('globalSearch.loading') }}</p>
+              <p v-else-if="searchError" class="suggestion-state">{{ t('globalSearch.error') }}</p>
+              <p v-else-if="!flatSearchResults.length" class="suggestion-state">{{ t('globalSearch.empty') }}</p>
+              <template v-else>
+                <template v-for="category in searchCategories" :key="category">
+                  <p v-if="searchResponse?.results[category]?.length" class="suggestion-category">{{ resultTypeLabel(category) }}</p>
+                  <button
+                    v-for="item in searchResponse?.results[category] || []"
+                    :id="`mobile-global-search-${flatSearchResults.indexOf(item)}`"
+                    :key="`${category}-${item.id}`"
+                    type="button"
+                    class="suggestion-option"
+                    role="option"
+                    :aria-selected="flatSearchResults.indexOf(item) === searchActiveIndex"
+                    @mousedown.prevent
+                    @click="openSearchResult(item)"
+                  >
+                    <strong>{{ item.title }}</strong>
+                    <small v-if="item.snippet">{{ item.snippet }}</small>
+                  </button>
+                </template>
+                <button type="button" class="suggestion-view-all" @mousedown.prevent @click="submitMobileSearch">{{ t('globalSearch.viewAll') }} →</button>
+              </template>
+            </div>
           </form>
         </div>
 
@@ -727,7 +863,56 @@ const logout = async () => {
   display: flex;
   align-items: center;
   gap: 7px;
+  position: relative;
 }
+
+.global-search-suggestions {
+  position: absolute;
+  z-index: 120;
+  top: calc(100% + 10px);
+  left: 0;
+  width: min(430px, calc(100vw - 32px));
+  max-height: min(62vh, 480px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid #d8e5d8;
+  border-radius: 16px;
+  background: #fffdf7;
+  color: #174538;
+  box-shadow: 0 18px 45px rgba(13, 53, 40, .2);
+}
+
+.suggestion-category {
+  margin: 8px 10px 4px;
+  color: #438c75;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.suggestion-option {
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.suggestion-option:hover,
+.suggestion-option:focus-visible,
+.suggestion-option[aria-selected='true'] { outline: none; background: #eaf3e9; }
+.suggestion-option strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.suggestion-option small { display: -webkit-box; overflow: hidden; color: #698079; font-size: 11px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.suggestion-state { margin: 8px 10px; color: #617a72; font-size: 13px; }
+.suggestion-view-all { width: 100%; margin-top: 4px; padding: 11px 10px; border: 0; border-top: 1px solid #e6eee5; background: transparent; color: #347760; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; text-align: left; }
+.suggestion-view-all:hover, .suggestion-view-all:focus-visible { color: #174538; outline: 2px solid #77b8a4; outline-offset: -2px; }
 
 .nav-search label {
   display: flex;
@@ -760,7 +945,7 @@ const logout = async () => {
     0 0 0 2px rgba(80, 180, 152, 0.14);
 }
 
-.nav-search button {
+.nav-search > button {
   width: 36px;
   height: 36px;
   padding: 7px;
@@ -776,8 +961,8 @@ const logout = async () => {
   transition: 0.3s ease;
 }
 
-.nav-search button:hover,
-.nav-search button:focus-visible {
+.nav-search > button:hover,
+.nav-search > button:focus-visible {
   border-color: #50b498;
   background: #d5e8d7;
   color: #32756a;
@@ -785,7 +970,7 @@ const logout = async () => {
   transform: translateY(-2px);
 }
 
-.nav-search button svg {
+.nav-search > button svg {
   width: 21px;
   fill: none;
   stroke: currentColor;
@@ -950,7 +1135,7 @@ const logout = async () => {
 
     overflow-y: auto;
 
-    background: #356f70;
+    background: #173f34;
     box-shadow: -18px 0 45px rgba(25, 55, 50, 0.24);
 
     transform: translateX(105%);
@@ -986,7 +1171,7 @@ const logout = async () => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   }
 
   .mobile-drawer-brand {
@@ -1017,7 +1202,7 @@ const logout = async () => {
 
   .mobile-drawer-brand small {
     margin-top: 3px;
-    color: #c5ead1;
+    color: #9dd5ba;
     font-size: 7px;
     font-weight: 700;
     letter-spacing: 1.8px;
@@ -1040,7 +1225,7 @@ const logout = async () => {
 
   .mobile-menu-label {
     margin: 8px 12px 9px;
-    color: #a9d8c0;
+    color: #75a392;
     font-size: 9px;
     font-weight: 800;
     letter-spacing: 2px;
@@ -1053,14 +1238,14 @@ const logout = async () => {
     align-items: center;
     gap: 13px;
 
-    color: #e5f1eb;
+    color: #bfd7cd;
 
     text-decoration: none;
 
     font-size: 13px;
     font-weight: 600;
 
-    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
 
     transition:
@@ -1069,8 +1254,10 @@ const logout = async () => {
   }
 
   .mobile-nav-link:hover,
-  .mobile-nav-link.router-link-active {
-    background: rgba(255, 255, 255, 0.13);
+  .mobile-nav-link.router-link-active,
+  .mobile-nav-link:focus-visible,
+  .mobile-search-toggle[aria-expanded='true'] {
+    background: #2b6754;
     color: #fff;
   }
 
@@ -1102,6 +1289,7 @@ const logout = async () => {
 
   .mobile-search-form {
     min-width: 0;
+    position: relative;
     display: flex;
     align-items: center;
     gap: 7px;
@@ -1135,7 +1323,7 @@ const logout = async () => {
     box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
   }
 
-  .mobile-search-form button {
+  .mobile-search-form > button {
     width: 34px;
     height: 34px;
     flex: 0 0 34px;
@@ -1143,17 +1331,17 @@ const logout = async () => {
     place-items: center;
     border: 0;
     border-radius: 50%;
-    background: #fff6dc;
-    color: #356f70;
+    background: #2b6754;
+    color: #fff;
     cursor: pointer;
   }
 
-  .mobile-search-form button:focus-visible {
+  .mobile-search-form > button:focus-visible {
     outline: 3px solid rgba(255, 255, 255, 0.35);
     outline-offset: 2px;
   }
 
-  .mobile-search-form button svg {
+  .mobile-search-form > button svg {
     width: 15px;
     height: 15px;
     fill: none;
@@ -1163,6 +1351,8 @@ const logout = async () => {
     stroke-linejoin: round;
   }
 
+  .mobile-global-search-suggestions { left: 0; right: 0; width: auto; top: calc(100% + 8px); max-height: min(55vh, 420px); }
+
   .mobile-link-icon {
     width: 25px;
     height: 25px;
@@ -1170,7 +1360,7 @@ const logout = async () => {
     display: grid;
     place-items: center;
     border-radius: 7px;
-    background: rgba(255, 255, 255, 0.09);
+    background: transparent;
   }
 
   .mobile-link-icon svg {
@@ -1187,7 +1377,35 @@ const logout = async () => {
     width: 100%;
     height: 1px;
     margin: 10px 0 8px;
-    background: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  :deep(.mobile-nav .language-trigger) {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.08);
+    color: #bfd7cd;
+  }
+
+  :deep(.mobile-nav .language-trigger:hover),
+  :deep(.mobile-nav .language-trigger:focus-visible) {
+    border-color: rgba(255, 255, 255, 0.38);
+    background: rgba(255, 255, 255, 0.13);
+  }
+
+  :deep(.mobile-nav .language-menu) {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: #173f34;
+  }
+
+  :deep(.mobile-nav .language-menu button) {
+    color: #bfd7cd;
+  }
+
+  :deep(.mobile-nav .language-menu button:hover),
+  :deep(.mobile-nav .language-menu button:focus-visible),
+  :deep(.mobile-nav .language-menu button.active) {
+    background: #2b6754;
+    color: #fff;
   }
 
   .mobile-login-button,
@@ -1207,11 +1425,11 @@ const logout = async () => {
 
     border: none;
 
-    border-radius: 24px;
+    border-radius: 9px;
 
-    background: #fff6dc;
+    background: #2b6754;
 
-    color: #356f70;
+    color: #fff;
 
     font-family: inherit;
 
@@ -1225,10 +1443,25 @@ const logout = async () => {
       transform 0.2s ease;
   }
 
-  .mobile-login-button:hover,
-  .mobile-logout-button:hover {
-    background: #def9c4;
+  .mobile-login-button {
+    border-radius: 24px;
+  }
+
+  .mobile-login-button:hover {
+    background: #37795f;
     transform: translateY(-1px);
+  }
+
+  .mobile-logout-button {
+    background: #fce8e6;
+    color: #b84d42;
+  }
+
+  .mobile-logout-button:hover,
+  .mobile-logout-button:focus-visible {
+    background: #b84d42;
+    color: #fff;
+    transform: none;
   }
 
   .mobile-authenticated {

@@ -307,8 +307,8 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="page-intro map-page-intro">
-    <svg class="map-title-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M39 5C19 5 8 14 8 27a11 11 0 0 0 11 11C32 38 42 27 39 5ZM7 43 26 22" /></svg>
-    <div><h2>{{ ct('Biodiversity Map') }}</h2><p>{{ ct('Visualise up to 500 authorised plant records using current plant locations.') }}</p></div>
+    <h2>{{ ct('Biodiversity Map') }}</h2>
+    <p>{{ ct('Visualise up to 500 authorised plant records using current plant locations.') }}</p>
   </section>
   <div class="control-bar map-filter-toolbar">
     <label class="field search-field"><span>{{ ct('Search loaded plants') }}</span><span class="map-search-input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><input v-model="search" :placeholder="ct('Plant ID, species ID, species name or status')" /></span></label>
@@ -400,11 +400,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.map-page-intro { align-items: center; justify-content: flex-start; gap: 16px; margin-bottom: 18px; }
-.map-page-intro > div { min-width: 0; }
+.map-page-intro { display: block; margin-bottom: 18px; text-align: left; }
 .map-page-intro h2 { margin: 0 0 3px; color: #123a2c; font-size: clamp(1.75rem, 2.4vw, 2.25rem); font-weight: 800; letter-spacing: -.035em; line-height: 1.12; }
 .map-page-intro p { margin: 0; color: #183a2d; font-size: 1rem; }
-.map-title-icon { flex: 0 0 48px; width: 48px; height: 48px; fill: #087442; stroke: #087442; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
 .map-filter-toolbar { display: grid; grid-template-columns: minmax(280px, 1.7fr) 1px minmax(150px, .82fr) minmax(190px, 1fr) minmax(170px, .9fr); align-items: center; gap: 24px; margin-bottom: 14px; padding: 12px 20px; border-color: #cad9ce; border-radius: 13px; background: rgba(255,255,255,.68); }
 .map-filter-toolbar .field { min-width: 0; gap: 7px; }
 .map-filter-toolbar .field > span:first-child { color: #132a20; font-size: 14px; font-weight: 750; letter-spacing: -.01em; text-transform: none; }
@@ -420,10 +418,10 @@ onBeforeUnmount(() => {
 .biodiversity-map { width: 100%; height: 100%; min-height: inherit; z-index: 0; }
 .officer-layout .map-card .map-shell .map-summary { position: absolute; top: 14px; right: 14px; z-index: 500; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; width: min(34rem, calc(100% - 28px)); max-width: calc(100% - 28px); gap: 9px; pointer-events: none; }
 .officer-layout .map-card .map-shell .map-summary article { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); grid-template-rows: auto auto; align-content: center; align-items: center; column-gap: 9px; row-gap: 0; min-width: 0; min-height: 74px; padding: 10px 14px; border: 1px solid #dfe7df; border-radius: 15px; background: rgba(255,255,255,.96); box-shadow: 0 8px 22px rgba(24,61,47,.14); }
-.map-summary-icon { grid-row: 1 / 3; width: 1.5rem; height: 1.5rem; color: #087442; }
+.map-summary-icon { grid-column: 1; grid-row: 1; align-self: center; width: 1.5rem; height: 1.5rem; color: #087442; }
 .map-summary small, .map-summary strong, td small { display: block; }
-.officer-layout .map-card .map-shell .map-summary small { font-size: .8125rem; line-height: 1.35; color: #1c2d24; overflow-wrap: anywhere; }
-.officer-layout .map-card .map-shell .map-summary strong { grid-column: 2; margin: 1px 0 0; color: #123a2c; font-size: 1.7rem; line-height: 1.12; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.officer-layout .map-card .map-shell .map-summary small { grid-column: 2; grid-row: 1; font-size: .8125rem; line-height: 1.35; color: #1c2d24; white-space: nowrap; }
+.officer-layout .map-card .map-shell .map-summary strong { grid-column: 2; grid-row: 2; margin: 1px 0 0; color: #123a2c; font-size: 1.7rem; line-height: 1.12; font-weight: 800; font-variant-numeric: tabular-nums; }
 .fit-map-button { position: absolute; right: 12px; bottom: 34px; z-index: 500; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; max-width: calc(100% - 24px); padding: 8px 14px; border: 1px solid #b9cec1; border-radius: 12px; background: #fff; color: #123a2c; box-shadow: 0 4px 14px rgba(14,53,35,.16); cursor: pointer; font-size: 13px; font-weight: 750; }
 .fit-map-button:hover { background: #f3f8f4; border-color: #80a78f; }
 .fit-map-button svg { flex: 0 0 18px; width: 18px; height: 18px; }
@@ -454,7 +452,7 @@ onBeforeUnmount(() => {
 .coordinate-info { display: flex; align-items: center; gap: 9px; min-height: 38px; margin: 5px 0 16px; padding: 8px 18px; border: 0; border-radius: 12px; background: #e5f0e7; color: #1d3026; font-size: 13px; font-weight: 500; }
 .coordinate-info svg { flex: 0 0 20px; width: 20px; height: 20px; }
 .coordinate-info + .coordinate-note, .coordinate-note + .coordinate-note { margin-top: 6px; }
-.map-selected-card { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 38fr) minmax(0, 23fr) minmax(0, 20fr) minmax(0, 19fr); align-items: stretch; gap: 18px; min-height: 194px; margin: 0 0 18px; padding: 22px 28px; border: 0; border-radius: 15px; background: #034b30; color: #f7fbf7; }
+.map-selected-card { box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 38fr) minmax(0, 23fr) minmax(0, 20fr) minmax(0, 19fr); align-items: stretch; gap: 18px; min-height: 194px; margin: 20px 0 18px; padding: 22px 28px; border: 0; border-radius: 15px; background: #034b30; color: #f7fbf7; }
 .officer-layout.officer-layout .map-selected-card { background: #034b30; color: #f7fbf7; }
 .map-selected-card > * { min-width: 0; }
 .selected-identity { display: flex; align-items: center; gap: 20px; padding-right: 18px; border-right: 1px solid rgba(255,255,255,.43); }
@@ -530,8 +528,7 @@ onBeforeUnmount(() => {
   .selected-actions-section { grid-column: 2; display: grid; grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 760px) {
-  .map-page-intro { align-items: flex-start; gap: 12px; margin-bottom: 15px; }
-  .map-title-icon { flex-basis: 38px; width: 38px; height: 38px; }
+  .map-page-intro { margin-bottom: 15px; }
   .map-page-intro h2 { font-size: 1.65rem; }
   .map-page-intro p { font-size: .85rem; }
   .map-filter-toolbar { grid-template-columns: 1fr; gap: 12px; padding: 14px; }
@@ -539,10 +536,10 @@ onBeforeUnmount(() => {
   .map-filter-toolbar .field > span:first-child { font-size: 13px; }
   .map-shell { height: 440px; min-height: 440px; }
   .officer-layout .map-card .map-shell .map-summary { left: 10px; right: 10px; top: 10px; width: auto; max-width: none; gap: 6px; }
-  .officer-layout .map-card .map-shell .map-summary article { grid-template-columns: 1fr; grid-template-rows: auto auto auto; justify-items: center; gap: 2px; min-height: 74px; padding: 7px 4px; text-align: center; }
-  .map-summary-icon { grid-row: auto; width: 19px; height: 19px; }
-  .officer-layout .map-card .map-shell .map-summary small { font-size: 9px; line-height: 1.15; }
-  .officer-layout .map-card .map-shell .map-summary strong { grid-column: auto; margin: 0; font-size: 16px; }
+  .officer-layout .map-card .map-shell .map-summary article { grid-template-columns: 18px minmax(0, 1fr); grid-template-rows: auto auto; justify-items: stretch; column-gap: 5px; row-gap: 1px; min-height: 74px; padding: 7px 6px; text-align: left; }
+  .map-summary-icon { grid-column: 1; grid-row: 1; width: 18px; height: 18px; }
+  .officer-layout .map-card .map-shell .map-summary small { grid-column: 2; grid-row: 1; font-size: 8px; line-height: 1.15; white-space: normal; overflow-wrap: anywhere; }
+  .officer-layout .map-card .map-shell .map-summary strong { grid-column: 2; grid-row: 2; margin: 0; font-size: 16px; }
   .fit-map-button { right: 9px; bottom: 25px; min-height: 39px; padding: 7px 10px; font-size: 11px; }
   .coordinate-info { margin: 5px 0 12px; padding: 8px 11px; font-size: 11px; }
   .map-selected-card { grid-template-columns: minmax(0, 1fr); gap: 10px; min-height: 0; margin-bottom: 14px; padding: 15px; }

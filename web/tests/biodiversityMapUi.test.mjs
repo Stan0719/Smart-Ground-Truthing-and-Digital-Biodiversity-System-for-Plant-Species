@@ -91,6 +91,12 @@ test('summary has three decorative icons, Plant records label and unchanged load
       assert.deepEqual(cards.map(card => nodes(card).find(node => node.type === 'small').children), [h.ct('Plant records'), h.ct('Mapped records'), h.ct('Species recorded')])
       assert.deepEqual(cards.map(card => nodes(card).find(node => node.type === 'strong').children), ['3', '2', '2'])
       assert.ok(cards.every(card => nodes(card).some(node => node.type === 'svg' && node.props['aria-hidden'] === 'true' && node.props.focusable === 'false')))
+      assert.ok(cards.every(card => {
+        const icon = nodes(card).find(node => node.type === 'svg')
+        const label = nodes(card).find(node => node.type === 'small')
+        const count = nodes(card).find(node => node.type === 'strong')
+        return icon && label && count && icon.props.class === 'map-summary-icon'
+      }))
       h.state.search.value = 'PL018'
       assert.equal(h.state.filtered.value.length, 1); assert.equal(h.state.mappedPlants.value.length, 1)
       assert.equal(h.state.plants.value.length, 3); assert.equal(h.state.speciesRecorded.value, 2)
@@ -186,11 +192,19 @@ test('loading, empty and error states stay truthful and no writes are introduced
 
 test('map cards/table preserve their palette and layout independently of shared Review Submissions badges', () => {
   const css = descriptor.styles[0].content
+  const template = descriptor.template.content
+  assert.doesNotMatch(template, /map-title-icon/)
+  assert.match(template, /class="page-intro map-page-intro">\s*<h2>/)
+  assert.match(css, /\.map-page-intro\s*\{ display: block;[^}]*text-align: left/)
   assert.match(css, /\.map-summary\s*\{[^}]*display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); align-items: stretch/)
   assert.match(css, /\.map-summary article\s*\{ display: grid; grid-template-columns: 1\.5rem minmax\(0, 1fr\); grid-template-rows: auto auto; align-content: center/)
-  assert.match(css, /\.map-summary strong\s*\{ grid-column: 2/)
+  assert.match(css, /\.map-summary-icon\s*\{ grid-column: 1; grid-row: 1; align-self: center/)
+  assert.match(css, /\.map-summary small\s*\{ grid-column: 2; grid-row: 1/)
+  assert.match(css, /\.map-summary strong\s*\{ grid-column: 2; grid-row: 2/)
   assert.match(css, /\.map-summary strong\s*\{[^}]*font-size: 1\.7rem/)
   assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.map-summary\s*\{[^}]*width: auto; max-width: none/)
+  assert.match(css, /\.map-summary article\s*\{ grid-template-columns: 18px minmax\(0, 1fr\); grid-template-rows: auto auto; justify-items: stretch/)
+  assert.match(css, /\.map-selected-card\s*\{[^}]*margin: 20px 0 18px/)
   assert.match(css, /\.mapped-records-table\s*\{[^}]*min-width: 90rem; table-layout: auto; border-collapse: separate; border-spacing: 0/)
   assert.match(css, /\.mapped-records-table th\s*\{ background: #245443; color: #fff/)
   assert.match(css, /\.mapped-records-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)
@@ -213,6 +227,12 @@ test('map cards/table preserve their palette and layout independently of shared 
     for (const key of ['visualiseupto500authorisedplantrecordsusingcurrentplantlocations', 'searchloadedplants', 'plantidspeciesidspeciesnameorstatus', 'mappedrecords', 'registeredat', 'latestapprovedobservation', 'gpsaccuracy', 'historyavailability']) {
       assert.ok(dictionary[key], `${language} map text is missing: ${key}`)
     }
+  }
+  const chinese = JSON.parse(read('locales/zh-CN.json')).conservationText
+  assert.equal(chinese.visualiseupto500authorisedplantrecordsusingcurrentplantlocations, '使用植物的最新位置信息，在地图上展示最多 500 条已授权的植物记录。')
+  for (const key of ['visualiseupto500authorisedplantrecordsusingcurrentplantlocations', 'searchloadedplants', 'plantidspeciesidspeciesnameorstatus', 'mappedrecords', 'registeredat', 'latestapprovedobservation', 'gpsaccuracy', 'historyavailability', 'selectedplantinformation']) {
+    assert.ok(!chinese[key].includes('?'), `Chinese map translation contains question marks: ${key}`)
+    assert.match(chinese[key], /[\u3400-\u9fff]/, `Chinese map translation is not readable Chinese: ${key}`)
   }
   assert.equal(compileStyle({ source: css, id: 'data-v-map-ui', scoped: true }).errors.length, 0)
 })
