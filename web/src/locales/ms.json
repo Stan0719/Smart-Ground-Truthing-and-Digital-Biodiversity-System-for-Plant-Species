@@ -1571,6 +1571,15 @@
     }
   },
   "conservationText": {
+    "visualiseupto500authorisedplantrecordsusingcurrentplantlocations": "Paparkan sehingga 500 rekod tumbuhan yang dibenarkan menggunakan lokasi tumbuhan semasa.",
+    "searchloadedplants": "Cari Tumbuhan yang Dimuatkan",
+    "plantidspeciesidspeciesnameorstatus": "ID tumbuhan, ID spesies, nama spesies atau status",
+    "mappedrecords": "Rekod Dipetakan",
+    "registeredat": "Didaftarkan Pada",
+    "latestapprovedobservation": "Pemerhatian Terakhir yang Diluluskan",
+    "gpsaccuracy": "Ketepatan GPS",
+    "historyavailability": "Ketersediaan Sejarah",
+    "selectedplantinformation": "Maklumat tumbuhan yang dipilih",
     "available": "Tersedia",
     "eventrecording": "Rakaman Peristiwa",
     "interrupted": "Terganggu",

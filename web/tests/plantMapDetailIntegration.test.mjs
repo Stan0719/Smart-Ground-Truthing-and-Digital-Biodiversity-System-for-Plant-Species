@@ -65,6 +65,16 @@ test('map contract uses raw IDs, rbac_status, real GPS and species enrichment', 
   assert.equal(enriched.species.family, 'Dipterocarpaceae')
 })
 
+test('map thumbnails reuse the approved plant-photo allowlist and reject unapproved or malformed asset IDs', () => {
+  assert.equal(mapPlantContract(plantFixture({ plant_image_asset_id: 'pending-photo' }))?.imageUrl, '')
+  assert.equal(mapPlantContract(plantFixture({
+    rbac_status: 'Approved', plant_image_asset_id: 'approved-photo_12',
+  }))?.imageUrl, '/api/data/assets/approved-photo_12')
+  assert.equal(mapPlantContract(plantFixture({
+    rbac_status: 'Approved', plant_image_asset_id: '../private/photo',
+  }))?.imageUrl, '')
+})
+
 test('invalid GPS is retained as an unmapped record and never becomes a marker coordinate', () => {
   for (const coordinates of [
     { latitude: 91, longitude: 10 },

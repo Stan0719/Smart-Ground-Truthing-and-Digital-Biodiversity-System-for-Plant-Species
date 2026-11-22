@@ -1437,6 +1437,15 @@
     }
   },
   "conservationText": {
+    "visualiseupto500authorisedplantrecordsusingcurrentplantlocations": "Visualise up to 500 authorised plant records using current plant locations.",
+    "searchloadedplants": "Search Loaded Plants",
+    "plantidspeciesidspeciesnameorstatus": "Plant ID, species ID, species name or status",
+    "mappedrecords": "Mapped Records",
+    "registeredat": "Registered At",
+    "latestapprovedobservation": "Latest Approved Observation",
+    "gpsaccuracy": "GPS Accuracy",
+    "historyavailability": "History Availability",
+    "selectedplantinformation": "Selected plant information",
     "available": "Available",
     "eventrecording": "Event Recording",
     "interrupted": "Interrupted",

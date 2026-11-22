@@ -43,14 +43,14 @@ function harness(language = 'en', options = {}) {
   }
   const calls = [], fits = [], centers = [], destinations = [], mounted = [], cleanup = [], mapOptions = [], mapOperations = []
   const scope = vue.effectScope()
-  const element = () => ({ children: [], className: '', textContent: '', appendChild(child) { this.children.push(child) }, addEventListener() {}, scrollIntoView() {}, classList: { toggle() {} } })
+  const element = () => ({ children: [], className: '', textContent: '', attributes: {}, hidden: false, appendChild(child) { this.children.push(child) }, addEventListener() {}, setAttribute(name, value) { this.attributes[name] = value }, scrollIntoView() {}, classList: { add() {}, toggle() {} } })
   const map = { closePopup() { mapOperations.push('closePopup') }, fitBounds: (...args) => { mapOperations.push('fitBounds'); fits.push(args) }, setView: (...args) => centers.push(args), whenReady: fn => fn(), invalidateSize() { mapOperations.push('invalidateSize') }, off() {}, remove() {} }
   const group = { addTo() { return this }, clearLayers() {} }
   const marker = () => ({ bindPopup() { return this }, on() { return this }, addTo() { return this }, openPopup() {}, getElement: element })
   const leaflet = { map: (_element, options) => { mapOptions.push(options); return map }, tileLayer: () => ({ addTo() {} }), layerGroup: () => group, marker, divIcon: value => value, latLngBounds: value => value }
   const route = vue.reactive({ query: {} }), exports = {}
   const context = {
-    exports, console, Error, document: { createElement: element },
+    exports, console, Error, document: { createElement: element, createElementNS: element },
     ResizeObserver: class { observe() {} disconnect() {} },
     requestAnimationFrame: fn => { fn(); return 1 }, cancelAnimationFrame() {}, setTimeout: () => 1, clearTimeout() {},
     require(name) {
@@ -187,10 +187,10 @@ test('loading, empty and error states stay truthful and no writes are introduced
 test('map cards/table preserve their palette and layout independently of shared Review Submissions badges', () => {
   const css = descriptor.styles[0].content
   assert.match(css, /\.map-summary\s*\{[^}]*display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\); align-items: stretch/)
-  assert.match(css, /\.map-summary article\s*\{ display: grid; grid-template-columns: 1.25rem minmax\(0, 1fr\); grid-template-rows: 1fr auto; align-items: center; gap: 6px/)
-  assert.match(css, /\.map-summary strong\s*\{ grid-column: 1 \/ -1/)
-  assert.match(css, /\.map-summary strong\s*\{[^}]*font-size: var\(--officer-number, 1.875rem\)/)
-  assert.match(css, /@media \(max-width: 760px\)[^\n]*width: auto; max-width: none/)
+  assert.match(css, /\.map-summary article\s*\{ display: grid; grid-template-columns: 1\.5rem minmax\(0, 1fr\); grid-template-rows: auto auto; align-content: center/)
+  assert.match(css, /\.map-summary strong\s*\{ grid-column: 2/)
+  assert.match(css, /\.map-summary strong\s*\{[^}]*font-size: 1\.7rem/)
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.map-summary\s*\{[^}]*width: auto; max-width: none/)
   assert.match(css, /\.mapped-records-table\s*\{[^}]*min-width: 90rem; table-layout: auto; border-collapse: separate; border-spacing: 0/)
   assert.match(css, /\.mapped-records-table th\s*\{ background: #245443; color: #fff/)
   assert.match(css, /\.mapped-records-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)
@@ -205,6 +205,15 @@ test('map cards/table preserve their palette and layout independently of shared 
   assert.match(review, /import\s*\{\s*workflowBadgeStyle\s*\}\s*from ['"]\.\.\/\.\.\/utils\/workflowBadge['"]/)
   assert.ok(review.includes(':style="workflowBadgeStyle(observation.status)"'))
   assert.match(css, /\.fit-map-button:focus-visible/)
+  assert.match(css, /\.map-selected-card\s*\{[^}]*grid-template-columns: minmax\(0, 38fr\) minmax\(0, 23fr\) minmax\(0, 20fr\) minmax\(0, 19fr\)/)
+  assert.match(css, /\.selected-plant-image\s*\{[^}]*width: 140px; height: 140px/)
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*?\.map-selected-card\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/)
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const dictionary = JSON.parse(read(`locales/${language}.json`)).conservationText
+    for (const key of ['visualiseupto500authorisedplantrecordsusingcurrentplantlocations', 'searchloadedplants', 'plantidspeciesidspeciesnameorstatus', 'mappedrecords', 'registeredat', 'latestapprovedobservation', 'gpsaccuracy', 'historyavailability']) {
+      assert.ok(dictionary[key], `${language} map text is missing: ${key}`)
+    }
+  }
   assert.equal(compileStyle({ source: css, id: 'data-v-map-ui', scoped: true }).errors.length, 0)
 })
 
@@ -218,15 +227,23 @@ test('popup and selected panel show the Plant name and consistent Malaysia times
     const popup = h.state.popupContent(plant)
     const text = node => [node.textContent, ...(node.children || []).map(text)].join(' ')
     const content = text(popup)
+    assert.equal(popup.className, 'plant-popup-card')
+    assert.equal(popup.children[1].children.length, 6)
+    assert.equal(popup.children[2].children.length, 2)
     assert.ok(content.includes('Plant-specific name'))
     assert.ok(content.includes('Shorea actualis'))
     assert.ok(content.includes('3 November 2026, 17:58'))
     assert.ok(content.includes('5 November 2026, 11:44'))
     assert.ok(!content.includes('T09:58'))
     h.state.selected.value = plant
-    const selected = nodes(h.render()).find(node => node.props?.class === 'selected-card')
-    assert.ok(nodes(selected).some(node => node.type === 'dd' && node.children === 'Plant-specific name'))
-    assert.ok(nodes(selected).some(node => node.type === 'dd' && node.children === '3 November 2026, 17:58'))
+    const rendered = nodes(h.render())
+    const selected = rendered.find(node => String(node.props?.class).includes('selected-card'))
+    assert.ok(nodes(selected).some(node => String(node.props?.class).includes('selected-identity')))
+    assert.ok(nodes(selected).some(node => String(node.props?.class).includes('selected-info-section')))
+    assert.ok(nodes(selected).some(node => String(node.props?.class).includes('selected-location-section')))
+    assert.ok(nodes(selected).some(node => String(node.props?.class).includes('selected-actions-section')))
+    assert.ok(nodes(selected).some(node => node.type === 'span' && node.children === 'Plant-specific name'))
+    assert.ok(nodes(selected).some(node => node.type === 'span' && node.children === '3 November 2026, 17:58'))
     const note = nodes(h.render()).find(node => node.props?.class === 'coordinate-note coordinate-info')
     assert.ok(nodes(note).some(node => node.type === 'svg' && node.props['aria-hidden'] === 'true'))
   } finally { h.stop() }
