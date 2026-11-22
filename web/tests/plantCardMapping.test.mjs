@@ -73,3 +73,10 @@ test('registration provenance is mandatory and pending registration never become
     assert.ok(Number.isNaN(mapped.location.latitude))
   }
 })
+
+test('current Plant name stays distinct from the Species catalogue and historical observations',()=>{
+ const mapped=mapPlantCardMetadata({...approved,scientific_name:'Officer corrected name',latest_submission:{scientific_name:'Draft name'}})
+ assert.equal(mapped.plantScientificName,'Officer corrected name')
+ assert.equal(mapped.latestApproved.heightCm,42)
+ assert.equal(mapPlantCardMetadata({...approved,scientific_name:null}).plantScientificName,'')
+})

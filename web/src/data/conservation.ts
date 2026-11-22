@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 
 export type ObservationStatus =
-  'Draft' | 'Pending Review' | 'Approved' | 'Rejected' | 'Correction Required' | 'Flagged'
+  'Draft' | 'Pending Review' | 'Approved' | 'Rejected' | 'Correction Required' | 'Flagged' | 'Withdrawn'
 export type ConservationStatus =
   | 'Not Assessed'
   | 'Least Concern'

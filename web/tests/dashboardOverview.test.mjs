@@ -1,16 +1,17 @@
+import selectorParser from 'postcss-selector-parser'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
-import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
+import { parse, compileScript, compileTemplate, compileStyle } from '@vue/compiler-sfc'
 import postcss from 'postcss'
 import { monitoringDate, monitoringLabels } from '../src/utils/officerMonitoringDisplay.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
 import * as reviewRules from '../src/services/observationReview.ts'
 import * as speciesRequestRules from '../src/services/reviewSpeciesRequest.ts'
-import { observationOrigin } from '../src/services/observationQueue.ts'
+import { observationOrigin, readQueuePage } from '../src/services/observationQueue.ts'
 import { formatObservationId } from '../src/utils/observationId.ts'
 const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'utf8')
 const source = read('views/conservation/ConservationDashboardView.vue')
@@ -20,7 +21,7 @@ const template = compileTemplate({ source: descriptor.template.content, filename
 const transpile = value => ts.transpileModule(value, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const owner = '2ace382f-1111-4111-8111-111111111111'
 const seed = () => ({
-  observations: ['Pending Review','Pending Review','Flagged','Correction Required','Pending Review','Approved','Rejected','Draft'].map((status,index)=>({id:`4451e4cb-${String(index).padStart(4,'0')}-4000-8000-000000000001`,plant_id:18,revision:3,species_id:1,owner_subject:`staff:${index ? '2ace382f-2222-4222-8222-222222222222' : owner}`,status,origin_type:['initial_registration','subsequent_observation','initial_registration','subsequent_observation','unknown','initial_registration','subsequent_observation','subsequent_observation'][index],scientific_name:'Shorea macrophylla'})),
+  observations: ['Pending Review','Pending Review','Pending Review','Correction Required','Pending Review','Approved','Rejected','Draft'].map((status,index)=>({id:`4451e4cb-${String(index).padStart(4,'0')}-4000-8000-000000000001`,plant_id:18,revision:3,species_id:1,owner_subject:`staff:${index ? '2ace382f-2222-4222-8222-222222222222' : owner}`,status,origin_type:['initial_registration','subsequent_observation','initial_registration','subsequent_observation','unknown','initial_registration','subsequent_observation','subsequent_observation'][index],scientific_name:'Shorea macrophylla',created_at:`2026-11-${String(20-index).padStart(2,'0')}T00:00:00Z`})),
   species: ['Not Assessed','Least Concern','Near Threatened','Vulnerable','Endangered','Critically Endangered'].map((conservation_status,index)=>({species_id:index+1,scientific_name:'Shorea '+index,conservation_status})),
   plants: [
     {plant_id:18,species_id:1,registered_subject:`staff:${owner}`,rbac_status:'Approved',registered_at:'2026-11-05T03:44:00Z',latitude:0,longitude:0,observed_at:null},
@@ -33,18 +34,18 @@ const seed = () => ({
 })
 function nodes(root) { const all=[];const walk=node=>{if(Array.isArray(node))return node.forEach(walk);if(!node||typeof node!=='object')return;all.push(node);if(Array.isArray(node.children))walk(node.children);else if(node.children?.default)walk(node.children.default())};walk(root);return all }
 const text = root => nodes(root).filter(node=>node.type!==vue.Comment).map(node=>typeof node.children==='string'?node.children:'').join(' ')
-function harness(language='en',data=seed()) {
+function harness(language='en',data=seed(),transport=null) {
   const messages=JSON.parse(read(`locales/${language}.json`)),locale=vue.ref(language),calls=[],routes=[],cleanups=[]
   const resolve=key=>key.split('.').reduce((value,part)=>value?.[part],messages)
   let listener,unsubscribed=false,session={pending:false,user:{id:owner,name:'Authorized Officer',role:'Conservation Officer',status:'Active',mustChangePassword:false}}
-  const context={exports:{},Error,AbortSignal,console,fetch:async(url,options)=>{calls.push({url,options});const key=url.includes('/iot/')?'alerts':url.includes('/observations')?'observations':url.includes('/plants')?'plants':'species';return Response.json({[key]:data[key]})},require(name){
+  const context={exports:{},Error,AbortSignal,AbortController,URLSearchParams,console,fetch:async(url,options)=>{calls.push({url,options});if(transport){const supplied=await transport(url,options);if(supplied)return supplied}const key=url.includes('/iot/')?'alerts':url.includes('/observations')?'observations':url.includes('/plants')?'plants':'species';if(url.includes('view=dashboard-counts'))return Response.json({totals:{total:data.observations.length,pending:data.observations.filter(row=>['Pending Review','Flagged','Correction Required'].includes(row.status)).length}});if(url.includes('view=dashboard')){const q=new URL(url,'http://localhost').searchParams;return Response.json({observations:data.observations.filter(row=>row.origin_type===q.get('origin_type')&&row.status==='Pending Review'),page:{has_more:false,next_cursor:null}})}return Response.json({[key]:data[key]})},require(name){
     if(name==='vue')return{...vue,onMounted(){},onBeforeUnmount:fn=>cleanups.push(fn),resolveComponent:name=>name}
     if(name==='vue-router')return{useRouter:()=>({push:value=>routes.push(value)})}
     if(name==='vue-i18n')return{useI18n:()=>({locale,te:key=>typeof resolve(key)==='string',t:(key,params={})=>Object.entries(params).reduce((value,[key,item])=>value.replaceAll('{'+key+'}',String(item)),resolve(key)||key)})}
     if(name.endsWith('/observationReview'))return reviewRules
     if(name.endsWith('/reviewSpeciesRequest'))return speciesRequestRules
     if(name.endsWith('/auth'))return{sessionSnapshot:()=>session,subscribeSession:fn=>{listener=fn;return()=>{unsubscribed=true}}}
-    if(name.endsWith('observationQueue'))return{observationOrigin}
+    if(name.endsWith('observationQueue'))return{observationOrigin,readQueuePage}
     if(name.endsWith('officerMonitoringDisplay'))return{monitoringDate,monitoringLabels}
     if(name.endsWith('plantId'))return{formatPlantId}
     if(name.endsWith('observationId'))return{formatObservationId}
@@ -54,20 +55,20 @@ function harness(language='en',data=seed()) {
   vm.runInNewContext(`(function(){${transpile(script.content)}})()`,context)
   const scope=vue.effectScope(),state=scope.run(()=>context.exports.default.setup({}, {expose(){}}))
   vm.runInNewContext(`(function(){${transpile(template.code)}})()`,context)
-  return{state,calls,routes,render:()=>context.exports.render({},[],{},vue.proxyRefs(state),{},{}),async load(){await Promise.all([state.loadObservations(),state.loadPlants(),state.loadSpecies(),state.loadAlerts()]);await vue.nextTick()},session(user,pending=false){session={user,pending};listener(user,pending)},stop(){cleanups.forEach(fn=>fn());scope.stop();assert.ok(unsubscribed)}}
+  return{state,calls,routes,render:()=>context.exports.render({},[],{},vue.proxyRefs(state),{},{}),async load(){await Promise.all([state.loadObservations(),state.loadRegistrations(),state.loadFieldObservations(),state.loadPlants(),state.loadSpecies(),state.loadAlerts()]);await vue.nextTick()},session(user,pending=false){session={user,pending};listener(user,pending)},stop(){cleanups.forEach(fn=>fn());scope.stop();assert.ok(unsubscribed)}}
 }
 
 test('Overview keeps all six loaded count sources, removes per-card explanations and the two requested visible scope notes',async()=>{
   assert.deepEqual(template.errors,[])
   const h=harness();try{
     await h.load();assert.deepEqual(Array.from(h.state.summaries.value,card=>card[1]),[6,5,5,2,1,8])
-    assert.equal(h.state.observations.value.filter(h.state.requiresReview).slice(0,4).length,4);assert.equal(h.state.plants.value.length,5)
+    assert.equal(h.state.observationTotals.value.pending,5);assert.equal(h.state.plants.value.length,5)
     const tree=nodes(h.render()),cards=tree.filter(node=>node.type==='article'&&node.props?.class==='summary-card')
     assert.equal(cards.length,6);assert.ok(cards.every(card=>!nodes(card).some(node=>node.type==='small')))
     assert.ok(cards.some(card=>text(card).includes('Observations')));assert.ok(!text(h.render()).includes('Loaded Observations'))
     assert.equal(tree.filter(node=>node.props?.class==='summary-scope').length,0)
-    assert.equal(text(h.render()).split('Counts reflect loaded records.').length-1,1);assert.ok(!text(h.render()).includes('Approved plants with valid coordinates'))
-    assert.deepEqual(h.calls.filter(call=>!call.url.startsWith('/api/conservation/submitter-names?')).map(call=>call.url).sort(),['/api/iot/alerts','/api/observations','/api/plants','/api/species?scope=scientific'].sort())
+    assert.equal(text(h.render()).split('Observation counts cover all accessible records; other counts reflect loaded records.').length-1,1);assert.ok(!text(h.render()).includes('Approved plants with valid coordinates'))
+    assert.deepEqual(h.calls.filter(call=>!call.url.startsWith('/api/conservation/submitter-names?')).map(call=>call.url).sort(),['/api/iot/alerts','/api/observations?view=dashboard-counts','/api/observations?view=dashboard&origin_type=initial_registration&status=Pending+Review&limit=10','/api/observations?view=dashboard&origin_type=subsequent_observation&status=Pending+Review&limit=10','/api/plants','/api/species?scope=scientific'].sort())
     assert.ok(h.calls.every(call=>!call.options.method||call.options.method==='GET'))
   }finally{h.stop()}
 })
@@ -75,7 +76,7 @@ test('Overview keeps all six loaded count sources, removes per-card explanations
 test('compact Observation IDs are collision-safe across the loaded collection and review navigation retains original UUIDs',async()=>{
   const h=harness();try{
     await h.load();const labels=h.state.observationDisplayLabels.value
-    assert.equal(new Set(labels.values()).size,8);assert.equal(labels.get(seed().observations[0].id),'OBS-4451E4CB0000')
+    assert.equal(new Set(labels.values()).size,2);assert.equal(labels.get(seed().observations[2].id),'OBS-4451E4CB0002')
     const table=nodes(h.render()).find(node=>node.type==='table'&&node.props.class.includes('pending-review-table'))
     const fieldTable=nodes(h.render()).find(node=>node.type==='table'&&node.props.class.includes('field-observations-table'))
     const identifiers=nodes(fieldTable).filter(node=>node.type?.name==='MonitoringIdentifier')
@@ -87,25 +88,20 @@ test('compact Observation IDs are collision-safe across the loaded collection an
   }finally{h.stop()}
 })
 
-test('submitter and registered-by display uses only this authorized session name, with compact fallback and raw copy props',async()=>{
-  const h=harness();try{
-    await h.load();const raw=`staff:${owner}`,other=seed().observations[1].owner_subject
-    assert.equal(h.state.subjectLabels.value.get(raw),'Authorized Officer')
-    assert.match(h.state.subjectLabels.value.get(other),/^Staff .*2ACE382F2222$/)
-    const components=nodes(h.render()).filter(node=>node.type?.name==='MonitoringIdentifier')
-    assert.ok(!components.some(node=>node.props.value===raw),'self-owned observations are not actionable previews');assert.ok(components.some(node=>node.props.value===other))
-    h.session({id:owner,name:'Do not expose',role:'Botanist',status:'Active',mustChangePassword:false})
-    assert.ok(!h.state.subjectLabels.value.get(raw).includes('Do not expose'))
-    h.session(null);assert.match(h.state.subjectLabels.value.get(raw),/^Staff /)
-    assert.equal(h.calls.filter(call=>call.url.startsWith('/api/conservation/submitter-names?')).length,1,'only the bounded authorized name projection is used');assert.equal(h.calls.length,5)
-  }finally{h.stop()}
+test('compact previews show submission dates without a separate submitter directory request',async()=>{
+ const h=harness();try{
+  await h.load();const tables=nodes(h.render()).filter(n=>n.type==='table');
+  assert.ok(tables.every(table=>nodes(table).some(n=>n.type==='time'&&text(n).includes('2026'))));
+  assert.equal(h.calls.filter(c=>c.url.includes('submitter-names')).length,0);
+  assert.ok(tables.every(table=>!text(table).includes('Staff')));
+ }finally{h.stop()}
 })
 
 test('Pending Observations uses only the subsequent-observation preview and remains independent of plant-list errors',async()=>{
   const h=harness();try{
     await h.load()
     const table=nodes(h.render()).find(node=>node.type==='table'&&node.props.class.includes('field-observations-table'))
-    assert.deepEqual(nodes(table).filter(node=>node.type==='th').map(text),['Observation ID','Plant ID','Species','Submitted By','Status','Action'])
+    assert.deepEqual(nodes(table).filter(node=>node.type==='th').map(text),['Observation ID','Plant ID','Species','Submitted','Status','Action'])
     assert.ok(text(table).includes('PL018'));assert.ok(nodes(table).some(node=>node.type==='em'&&text(node).includes('Shorea')))
     assert.deepEqual(Array.from(h.state.pendingFieldObservations.value,item=>item.id),[seed().observations[1].id])
     assert.equal(nodes(table).filter(node=>node.type==='tr'&&node.key).length,1)
@@ -133,7 +129,7 @@ test('loading, successful empty data and errors remain distinct without invented
   const h=harness('en',{observations:[],plants:[],species:[],alerts:[]});try{
     assert.equal(h.state.summaries.value[0][1],'\u2014')
     await h.load();assert.ok(h.state.summaries.value.every(card=>card[1]===0));assert.ok(text(h.render()).includes('No pending plant registrations in loaded records.')&&text(h.render()).includes('No pending field observations in loaded records.'))
-    h.state.observationsError.value='Unavailable';assert.equal(h.state.summaries.value[2][1],'\u2014');assert.ok(text(h.render()).includes('Unavailable'))
+    h.state.observationsError.value='Unavailable';assert.equal(h.state.summaries.value[2][1],'\u2014');assert.ok(!text(h.render()).includes('Unavailable'),'count failure does not hide independent previews')
   }finally{h.stop()}
 })
 
@@ -153,7 +149,7 @@ test('Overview opts into established table styling with middle alignment, status
   const declarations=rule=>Object.fromEntries(rule.nodes.filter(node=>node.type==='decl').map(node=>[node.prop,node.value]))
   assert.match(source, /styles\/officer-data-tables.css/)
   const shared=read('styles/officer-data-tables.css');assert.match(shared,/background: #245443/);assert.match(shared,/vertical-align: middle/);assert.match(shared,/color: #fff/)
-  assert.equal((source.match(/<th scope="col">/g)||[]).length,11)
+  assert.equal((source.match(/<th scope="col"/g)||[]).length,11)
   const scrolling=rules.find(rule=>rule.selector.endsWith('.overview-table-scroll'));assert.equal(declarations(scrolling)['overflow-x'],'auto');assert.equal(declarations(scrolling)['min-width'],'0')
   assert.ok(rules.some(rule=>rule.selector.includes('.field-observations-table) .badge.pending-review')&&declarations(rule).background==='#FEF9C3'))
   assert.ok(rules.some(rule=>rule.selector.includes('.field-observations-table) .badge.flagged')&&declarations(rule).background==='#f0eaf8'))
@@ -190,11 +186,11 @@ test('full-width registrations precede paired field observations/status while ma
     const medium=nodes(root).find(node=>node.type==='div'&&node.props?.class==='two-column overview-medium')
     assert.ok(nodes(medium).includes(sections[1]));assert.ok(nodes(medium).includes(sections[2]));assert.ok(!nodes(medium).includes(sections[0]))
     const table=nodes(sections[0]).find(node=>node.type==='table')
-    assert.deepEqual(nodes(table).filter(node=>node.type==='th').map(text),['Plant ID','Species','Submitted By','Status','Action'])
+    assert.deepEqual(nodes(table).filter(node=>node.type==='th').map(text),['Plant ID','Species','Submitted','Status','Action'])
     assert.deepEqual(nodes(table).filter(node=>node.type==='col').slice(0,2).map(node=>node.props.class),['overview-plant','overview-species'])
     const row=nodes(table).find(node=>node.type==='tr'&&node.key===seed().observations[2].id)
-    assert.equal(nodes(row).filter(node=>node.type==='td')[0].children,'PL018')
-    assert.equal(h.state.observations.value.filter(h.state.requiresReview).slice(0,4).length,4);assert.ok(h.state.observations.value.filter(h.state.requiresReview).slice(0,4).some(item=>item.status==='Flagged'));assert.ok(h.state.observations.value.filter(h.state.requiresReview).slice(0,4).some(item=>item.status==='Correction Required'))
+    assert.ok(text(nodes(row).filter(node=>node.type==='td')[0]).includes('PL018'))
+    assert.equal(h.state.observationTotals.value.pending,5);assert.ok(h.state.observations.value.every(item=>item.status==='Pending Review'))
   }finally{h.stop()}
 })
 
@@ -211,43 +207,36 @@ test('six accessible conservation bars use loaded species as denominator without
   }finally{h.stop()}
 })
 
-test('initial and subsequent previews use actionable review statuses, cap independently and keep the broader KPI unchanged',async()=>{
-  const h=harness();try{
-    await h.load()
-    const statuses=['Pending Review','Correction Required','Flagged','Pending Review','Flagged','Approved','Rejected','Draft']
-    const rows=['initial_registration','subsequent_observation'].flatMap(origin_type=>statuses.map((status,index)=>({id:String((origin_type==='initial_registration'?100:200)+index),plant_id:18,revision:3,species_id:1,owner_subject:'staff:actor',origin_type,status,scientific_name:'Test species'})))
-    for(const origin_type of [undefined,'unknown','initial','INITIAL_REGISTRATION'])rows.push({id:'legacy-'+String(origin_type),plant_id:18,status:'Pending Review',origin_type})
-    h.state.observations.value=rows
-    assert.equal(h.state.pendingRegistrations.value.length,4);assert.equal(h.state.pendingFieldObservations.value.length,4)
-    for(const[queue,origin]of [[h.state.pendingRegistrations.value,'initial_registration'],[h.state.pendingFieldObservations.value,'subsequent_observation']]){
-      assert.ok(queue.every(item=>item.origin_type===origin))
-      assert.ok(queue.some(item=>item.status==='Pending Review'));assert.ok(!queue.some(item=>item.status==='Correction Required'));assert.ok(queue.some(item=>item.status==='Flagged'))
-      assert.ok(!queue.some(item=>['Approved','Rejected','Draft'].includes(item.status)))
-    }
-    const registrationIds=new Set(h.state.pendingRegistrations.value.map(item=>item.id))
-    assert.ok(h.state.pendingFieldObservations.value.every(item=>!registrationIds.has(item.id)))
-    assert.ok([...h.state.pendingRegistrations.value,...h.state.pendingFieldObservations.value].every(item=>!item.id.startsWith('legacy-')))
-    assert.equal(h.state.summaries.value.find(card=>card[0]==='pendingReviews')[1],14,'global KPI keeps all loaded review-required origins, independent of preview caps')
-    const tables=nodes(h.render()).filter(node=>node.type==='table')
-    assert.equal(tables.length,2);assert.ok(tables.every(table=>nodes(table).filter(node=>node.type==='tr'&&node.key).length===4))
-  }finally{h.stop()}
+test('five newest pending eligible previews scan past ineligible rows without truncating the KPI',async()=>{
+ const data=seed();const base={plant_id:18,revision:3,species_id:1,owner_subject:'staff:actor',status:'Pending Review',scientific_name:'Species'};
+ const h=harness('en',data,async url=>{
+  if(!url.includes('view=dashboard&'))return;
+  const q=new URL(url,'http://localhost').searchParams, origin=q.get('origin_type'), next=q.has('cursor');
+  const rows=Array.from({length:10},(_,i)=>({...base,id:String((origin==='initial_registration'?0:1000)+(next?200:100)+i),origin_type:origin,owner_subject:next?'staff:actor':`staff:${owner}`,created_at:`2026-11-${20-i}T00:00:00Z`}));
+  return Response.json({observations:rows,page:{has_more:!next,next_cursor:next?null:'page-two'}});
+ });try{
+  await h.load();assert.equal(h.state.pendingRegistrations.value.length,5);assert.equal(h.state.pendingFieldObservations.value.length,5);
+  assert.deepEqual(Array.from(h.state.pendingRegistrations.value,row=>row.id),['200','201','202','203','204']);
+  assert.equal(h.state.observationTotals.value.total,8);assert.equal(h.state.observationTotals.value.pending,5);
+  assert.equal(h.calls.filter(c=>c.url.includes('view=dashboard&')).length,4);
+ }finally{h.stop()}
 })
 
 test('conflicting duplicate origin classifications are excluded from both queues rather than guessed',async()=>{
   const h=harness();try{
     await h.load()
-    h.state.observations.value=[
+    h.state.fieldRows.value=[];h.state.registrationRows.value=[
       {id:'conflict',plant_id:18,status:'Pending Review',origin_type:'initial_registration'},
       {id:'conflict',plant_id:18,status:'Pending Review',origin_type:'subsequent_observation'},
-      {id:'321',plant_id:18,revision:3,species_id:1,owner_subject:'staff:actor',scientific_name:'Test species',status:'Flagged',origin_type:'subsequent_observation'},
-      {id:'321',plant_id:18,revision:3,species_id:1,owner_subject:'staff:actor',scientific_name:'Test species',status:'Flagged',origin_type:'subsequent_observation'},
+      {id:'321',plant_id:18,revision:3,species_id:1,owner_subject:'staff:actor',scientific_name:'Test species',status:'Pending Review',origin_type:'subsequent_observation'},
+      {id:'321',plant_id:18,revision:3,species_id:1,owner_subject:'staff:actor',scientific_name:'Test species',status:'Pending Review',origin_type:'subsequent_observation'},
     ]
     assert.equal(h.state.pendingRegistrations.value.length,0)
     assert.deepEqual(Array.from(h.state.pendingFieldObservations.value,item=>item.id),['321'])
   }finally{h.stop()}
 })
 
-test('both review sections use observation loading/error states and keep their existing safe navigation destinations',async()=>{
+test('review sections use independent loading/error states and keep their existing safe navigation destinations',async()=>{
   const h=harness();try{
     assert.equal(text(h.render()).split('Loading observations...').length-1,2)
     await h.load()
@@ -257,9 +246,9 @@ test('both review sections use observation loading/error states and keep their e
     nodes(panels[0]).find(node=>node.type==='button'&&text(node).includes('View All Submissions')).props.onClick()
     nodes(panels[1]).find(node=>node.type==='button'&&text(node).includes('View All Observations')).props.onClick()
     assert.equal(h.routes[0].name,'conservation-reviews');assert.equal(h.routes[1].name,'conservation-observations')
-    h.state.observationsError.value='Observation source unavailable'
-    assert.equal(nodes(h.render()).filter(node=>node.type==='table').length,0)
-    assert.equal(text(h.render()).split('Observation source unavailable').length-1,2)
+    h.state.registrationError.value='Observation source unavailable'
+    assert.equal(nodes(h.render()).filter(node=>node.type==='table').length,1)
+    assert.equal(text(h.render()).split('Observation source unavailable').length-1,1)
   }finally{h.stop()}
 })
 
@@ -293,13 +282,13 @@ test('preview eligibility rejects self-review, missing evidence, unresolved depe
  const h=harness();try{
   await h.load()
   const base={id:'123',plant_id:18,species_id:1,scientific_name:'Species',owner_subject:'staff:actor',revision:3,status:'Pending Review',origin_type:'initial_registration'}
-  const pendingRequest={request_id:9,request_status:'Pending Review',requested_by:'staff:request-owner',proposed_scientific_name:'New species'}
+  const pendingRequest={request_id:9,request_status:'Pending Review',requested_by:'staff:request-owner',proposed_scientific_name:'New species',review_cycle:1,content_revision:1}
   for(const changes of [{},{status:'Flagged'},{status:'Correction Required'},{status:'Draft'},{status:'Rejected'},{status:'Approved'},{revision:0},{revision:undefined},{owner_subject:`staff:${owner}`},{owner_subject:''},{species_id:undefined},{scientific_name:''},{species_request_id:9},{species_request_id:9,species_request:pendingRequest},{species_request_id:9,species_request:{...pendingRequest,requested_by:`staff:${owner}`}},{species_request_id:9,species_request:{...pendingRequest,requested_by:''}},{origin_type:'subsequent_observation',species_request_id:9,species_request:pendingRequest}]){
-   const row={...base,...changes};h.state.observations.value=[row]
-   const eligible=['Pending Review','Flagged'].includes(row.status)&&row.revision===3&&row.owner_subject==='staff:actor'&&Boolean(row.species_id&&row.scientific_name)&&(!row.species_request_id||row.species_request?.requested_by==='staff:request-owner'&&row.origin_type==='initial_registration')
+   const row={...base,...changes};h.state.registrationRows.value=[row];h.state.fieldRows.value=[]
+   const eligible=row.status==='Pending Review'&&row.revision===3&&row.owner_subject==='staff:actor'&&Boolean(row.species_id&&row.scientific_name)&&(!row.species_request_id||row.species_request?.requested_by==='staff:request-owner'&&row.origin_type==='initial_registration')
    assert.equal(h.state.pendingRegistrations.value.length+h.state.pendingFieldObservations.value.length,eligible?1:0,JSON.stringify(changes))
   }
-  h.state.observations.value=[base]
+  h.state.registrationRows.value=[base]
   for(const user of [null,{id:owner,role:'Botanist',status:'Active',mustChangePassword:false},{id:owner,role:'Conservation Officer',status:'Inactive',mustChangePassword:false},{id:owner,role:'Conservation Officer',status:'Active',mustChangePassword:true}]){h.session(user);assert.equal(h.state.pendingRegistrations.value.length,0)}
  }finally{h.stop()}
 })
@@ -313,6 +302,108 @@ test('every eligible row action preserves its full authoritative ID and the scop
   assert.equal(tree.filter(n=>n.props?.class==='statistics-scope').length,1)
   const cards=tree.filter(n=>n.type==='article'&&n.props?.class==='summary-card');assert.equal(cards.length,6)
   assert.ok(cards.every(card=>!text(card).includes('loaded records')&&!nodes(card).some(n=>n.type==='small')))
-  assert.equal(h.calls.length,5)
+  assert.equal(h.calls.length,6)
+ }finally{h.stop()}
+})
+
+
+test('Overview kickers and loading/empty states meet normal-text contrast on their actual surfaces',()=>{
+ const rules=[];postcss.parse(descriptor.styles[0].content).walkRules(r=>rules.push(r));
+ const declarations=r=>Object.fromEntries(r.nodes.filter(n=>n.type==='decl').map(n=>[n.prop,n.value]));
+ const luminance=hex=>{const c=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return c[0]*.2126+c[1]*.7152+c[2]*.0722;};
+ const contrast=(a,b)=>{const [x,y]=[luminance(a),luminance(b)].sort((a,b)=>a-b);return(y+.05)/(x+.05);};
+ const kicker=declarations(rules.find(r=>r.selector.includes(':is(.page-kicker, .section-kicker)'))).color;
+ const state=declarations(rules.find(r=>r.selector==='.dashboard-state')).color;
+ const empty=declarations(rules.find(r=>r.selector.includes(':deep(.dashboard-map-empty)'))).color;
+ assert.ok(contrast(kicker,'#ffffff')>=4.5);assert.ok(contrast(kicker,'#f3f6f2')>=4.5);
+ assert.ok(contrast(state,'#ffffff')>=4.5);assert.ok(contrast(empty,'#dce8dc')>=4.5);
+ assert.equal(declarations(rules.find(r=>r.selector==='.error-state')).color,'#a04d3f');
+});
+
+test('Pending Observations retains six accessible columns and translated compact labels without duplicate actions',async()=>{
+ for(const language of ['en','ms','zh-CN']){
+  const h=harness(language);try{
+   await h.load();const table=nodes(h.render()).find(n=>n.type==='table'&&n.props.class.includes('field-observations-table'));
+   assert.equal(table.props.role,'table');const heads=nodes(table).filter(n=>n.type==='th');assert.equal(heads.length,6);
+   assert.ok(heads.every(n=>n.props.scope==='col'&&n.props.role==='columnheader'));
+   for(const row of nodes(table).filter(n=>n.type==='tr'&&n.key)){
+    assert.equal(row.props.role,'row');const cells=nodes(row).filter(n=>n.type==='td');assert.equal(cells.length,6);
+    assert.ok(cells.every(n=>n.props.role==='cell'));
+    const labels=nodes(row).filter(n=>n.props?.class==='overview-cell-label');assert.equal(labels.length,6);
+    assert.ok(labels.every((n,i)=>n.props['aria-hidden']==='true'&&text(n)===text(heads[i])));
+    assert.equal(nodes(row).filter(n=>n.type==='button').length,1);
+   }
+  }finally{h.stop()}
+ }
+});
+
+test('Overview table touch target overrides the shared compact rule without changing shared controls',()=>{
+ const compare=(a,b)=>a[0]-b[0]||a[1]-b[1]||a[2]-b[2],add=(a,b)=>a.map((v,i)=>v+b[i]);
+ const score=n=>{if(n.type==='id')return[1,0,0];if(['class','attribute'].includes(n.type))return[0,1,0];if(n.type==='tag')return[0,0,1];if(n.type==='pseudo'){if(n.value===':where')return[0,0,0];if([':is',':not',':has'].includes(n.value))return n.nodes.map(score).sort(compare).at(-1)||[0,0,0];return n.value.startsWith('::')?[0,0,1]:[0,1,0];}return(n.nodes||[]).reduce((a,b)=>add(a,score(b)),[0,0,0]);};
+ const specificity=s=>selectorParser().astSync(s).nodes.map(score).sort(compare).at(-1);
+ const compiled=compileStyle({source:descriptor.styles[0].content,id:'data-v-overview-touch',scoped:true});assert.deepEqual(compiled.errors,[]);
+ const local=[];postcss.parse(compiled.code).walkRules(r=>{if(r.selector.includes('.overview-table-scroll')&&r.selector.includes('table')&&r.nodes.some(d=>d.prop==='min-height'&&d.value==='44px'))local.push(r)});
+ const shared=[];postcss.parse(read('styles/dashboard-buttons.css')).walkRules(r=>{if(r.selector.includes('table')&&r.nodes.some(d=>d.prop==='min-height'&&d.value==='var(--dashboard-button-compact)'))shared.push(r)});
+ assert.equal(local.length,1);assert.equal(shared.length,1);assert.ok(compare(specificity(local[0].selector),specificity(shared[0].selector))>0);
+ assert.ok(local[0].nodes.some(d=>d.prop==='min-height'&&d.value==='44px'));assert.ok(local[0].nodes.some(d=>d.prop==='height'&&d.value==='auto'));
+});
+
+test('Overview adapts the field table locally and keeps compact KPI spacing',()=>{
+ const rules=[];postcss.parse(descriptor.styles[0].content).walkRules(r=>rules.push(r));
+ const values=r=>Object.fromEntries(r.nodes.filter(n=>n.type==='decl').map(n=>[n.prop,n.value]));
+ const medium=rules.find(r=>r.selector==='.dashboard-overview .two-column.overview-medium'&&r.parent.type==='root');
+ assert.equal(values(medium)['margin-top'],'24px');assert.equal(values(medium).gap,'24px');assert.match(values(medium)['grid-template-columns'],/18rem/);
+ assert.ok(rules.some(r=>r.selector===medium.selector&&r.parent.params==='(max-width: 1250px)'&&values(r)['grid-template-columns']==='minmax(0, 1fr)'));
+ const field=rules.find(r=>r.selector.endsWith('.field-observations-table')&&r.parent.type==='root');assert.equal(values(field)['min-width'],'0');assert.equal(values(field)['table-layout'],'fixed');
+ assert.ok(rules.some(r=>r.selector.includes('.field-observations-table')&&r.selector.endsWith(' tbody tr')&&r.parent.params==='(max-width: 800px)'&&values(r).display==='grid'));
+ assert.equal(values(rules.find(r=>r.selector==='.dashboard-overview .summary-grid')).gap,'12px');
+ assert.equal(values(rules.find(r=>r.selector==='.dashboard-overview .summary-card')).padding,'16px');
+ assert.equal(values(rules.find(r=>r.selector==='.dashboard-overview .two-column > .panel'))['margin-top'],'0');
+ assert.equal(values(medium)['align-items'],'start');
+ assert.equal(values(rules.find(r=>r.selector==='.dashboard-overview .panel-header'))['flex-direction'],'row');
+});
+
+
+test('failed registration preview keeps field records and counts visible; its Retry reloads only registrations',async()=>{
+ let failed=true;
+ const h=harness('en',seed(),async url=>{
+  if(failed&&url.includes('view=dashboard&origin_type=initial_registration'))return Response.json({error:'unavailable'},{status:503});
+ });try{
+  await h.load();assert.ok(h.state.registrationError.value);assert.equal(h.state.fieldError.value,'');assert.equal(h.state.pendingFieldObservations.value.length,1);assert.equal(h.state.observationTotals.value.total,8);
+  const panel=nodes(h.render()).find(n=>n.props?.class==='panel pending-review-panel');const retry=nodes(panel).find(n=>n.type==='button'&&text(n)==='Retry');assert.ok(retry);
+  const before=h.calls.length;failed=false;await retry.props.onClick();assert.equal(h.calls.length,before+1);assert.equal(h.state.registrationError.value,'');assert.equal(h.state.pendingRegistrations.value.length,1);
+ }finally{h.stop()}
+})
+
+test('replaced preview requests are cancelled and stale responses cannot overwrite the latest records',async()=>{
+ let resolveOld,oldSignal,delayed=true;
+ const row={id:'501',plant_id:18,revision:2,species_id:1,scientific_name:'Species',owner_subject:'staff:actor',origin_type:'initial_registration',status:'Pending Review'};
+ const h=harness('en',seed(),async(url,options)=>{
+  if(!url.includes('view=dashboard&origin_type=initial_registration'))return;
+  if(delayed){oldSignal=options.signal;return new Promise(resolve=>{resolveOld=resolve})}
+  return Response.json({observations:[row],page:{has_more:false,next_cursor:null}});
+ });try{
+  const old=h.state.loadRegistrations();delayed=false;await h.state.loadRegistrations();assert.equal(oldSignal.aborted,true);
+  resolveOld(Response.json({observations:[{...row,id:'502'}],page:{has_more:false,next_cursor:null}}));await old;
+  assert.deepEqual(Array.from(h.state.pendingRegistrations.value,r=>r.id),['501']);
+ }finally{h.stop()}
+})
+
+test('incomplete or malformed preview never appears as an empty success; session recovery reloads read-only sources',async()=>{
+ const h=harness('en',seed(),async url=>url.includes('view=dashboard&origin_type=initial_registration')?Response.json({observations:[],page:{has_more:true,next_cursor:null}}):undefined);
+ try{
+  await h.load();assert.ok(h.state.registrationError.value);assert.equal(h.state.pendingFieldObservations.value.length,1);
+  h.session({id:owner,name:'Officer',role:'Conservation Officer',status:'Active',mustChangePassword:false},true);await vue.nextTick();
+  const before=h.calls.length;h.session({id:owner,name:'Officer',role:'Conservation Officer',status:'Active',mustChangePassword:false},false);await vue.nextTick();await new Promise(resolve=>setTimeout(resolve,0));
+  assert.ok(h.calls.length>before);assert.ok(h.calls.every(c=>!c.options.method||c.options.method==='GET'));
+  const after=h.calls.length;await vue.nextTick();assert.equal(h.calls.length,after);
+ }finally{h.stop()}
+})
+
+
+test('new-species registrations retain their linked Species Request review path before species approval',async()=>{
+ const data=seed();data.observations=[{...data.observations[2],scientific_name:null,species_id:null,species_request_id:9,species_request:{request_id:9,request_status:'Pending Review',requested_by:'staff:request-owner',proposed_scientific_name:'New species',review_cycle:1,content_revision:1}}];
+ const h=harness('en',data);try{await h.load();assert.equal(h.state.pendingRegistrations.value.length,1);
+ const panel=nodes(h.render()).find(n=>n.props?.class==='panel pending-review-panel');const row=nodes(panel).find(n=>n.type==='tr'&&n.key);nodes(row).find(n=>n.type==='button').props.onClick();assert.equal(h.routes.at(-1).query.review,data.observations[0].id);
  }finally{h.stop()}
 })

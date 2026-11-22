@@ -145,6 +145,12 @@ const router = createRouter({
           },
         },
         {
+          path: 'plants',
+          name: 'conservation-plants',
+          component: () => import('../views/conservation/PlantsView.vue'),
+          meta: { titleKey: 'officerPlants.title' },
+        },
+        {
           path: 'observations',
           name: 'conservation-observations',
           component: () => import('../views/conservation/ObservationsView.vue'),

@@ -12,7 +12,7 @@ import {
 
 const props = defineProps<{ species: ManagedSpecies | null; embedded?: boolean; busy?: boolean }>()
 const emit = defineEmits<{ close: []; retry: [] }>()
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const pt = (key: string, params: Record<string, string | number> = {}) =>
   t(`conservationPages.species.photos.${key}`, params)
 const uid = useId()
@@ -59,14 +59,6 @@ const authorized = () => {
   const session = sessionSnapshot()
   return !closed && !disposed && session.user?.id === owner && canManageSpeciesPhotos(session.user, session.pending)
 }
-const mainImage = computed(() => {
-  const queued = queue.value.find(item => item.id === queuePrimary.value)
-  if (queued && !failedImages.value.has(queued.url)) return queued.url
-  const proposed = draft.value?.primaryAssetId
-  const eligiblePrimary = canonical.value?.images.find(image => image.assetId === proposed && image.eligible)
-  const path = proposed && eligiblePrimary ? images.value.find(image => image.assetId === proposed)?.url || assetUrlFromId(eligiblePrimary.assetId) : portrait.value
-  return path && !failedImages.value.has(path) ? path : ''
-})
 const visibleImages = computed(() => draft.value
   ? [...draft.value.orderedAssetIds.flatMap(id => images.value.filter(image => image.assetId === id)), ...images.value.filter(image => image.source === 'plant')]
   : images.value)
@@ -87,13 +79,17 @@ const photoCards = computed(() => photoOrder.value.flatMap<PhotoCard>(key => {
   const image = canonical.value?.images.find(image => `saved:${image.assetId}` === key && draft.value?.orderedAssetIds.includes(image.assetId))
   return image && !queue.value.some(file => file.assetId === image.assetId) ? [{ key, id: image.assetId, url: image.url, name: image.assetId, queued: false, eligible: image.eligible, item: undefined }] : []
 }))
-const firstEligible = computed(() => photoCards.value.find(card => card.eligible)?.key || null)
+const firstEligible = computed(() => {
+  const primaryKey = queuePrimary.value ? `queued:${queuePrimary.value}`
+    : draft.value?.primaryAssetId ? `saved:${draft.value.primaryAssetId}` : null
+  return photoCards.value.find(card => card.eligible && card.key === primaryKey)?.key || null
+})
 const editableCards = computed(() => photoCards.value.filter(card => card.eligible))
-const canReorder = (key: string) => authorized() && !props.busy && !saving.value && editableCards.value.some(card => card.key === key)
+const canReorder = (key: string) => writesAvailable.value && authorized() && !props.busy && !saving.value && editableCards.value.some(card => card.key === key)
 function syncPrimary() {
   const first = photoCards.value.find(card => card.eligible)
   queuePrimary.value = first?.queued ? first.id : null
-  if (draft.value) draft.value = { ...draft.value, primaryAssetId: first && !first.queued ? first.id : null,
+  if (draft.value) draft.value = { ...draft.value, primaryAssetId: first && !first.queued ? first.id : draft.value.primaryAssetId,
     orderedAssetIds: photoOrder.value.filter(key => key.startsWith('saved:')).map(key => key.slice(6)).filter(id => draft.value!.orderedAssetIds.includes(id)) }
 }
 function reorderPhoto(key: string, target: string) {
@@ -108,8 +104,8 @@ function keyboardMove(event: KeyboardEvent, key: string) {
   if (!event.altKey || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
   event.preventDefault()
   const cards = editableCards.value, index = cards.findIndex(card => card.key === key)
-  const target = cards[index + (['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1)]
-  if (target) reorderPhoto(key, target.key)
+  const direction = ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1
+  if (cards[index + direction]) moveCard(key, direction)
 }
 function endDrag() { dragging.value = null; dropTarget.value = null; pointerId.value = null }
 function pointerStart(event: PointerEvent, key: string) {
@@ -132,8 +128,6 @@ function pointerCancel(event: PointerEvent) {
   // Native mouse drag emits pointercancel too; only cancel our captured touch/pen drag.
   if (pointerId.value === event.pointerId) endDrag()
 }
-const sizeLabel = (size: number) => `${new Intl.NumberFormat(locale.value, { maximumFractionDigits: 1 }).format(size / 1024)} KiB`
-
 function clearQueue() {
   for (const item of queue.value) URL.revokeObjectURL(item.url)
   queue.value = []
@@ -174,7 +168,7 @@ function failImage(path: string) {
 }
 function removeQueued(id: string) {
   const item = queue.value.find(entry => entry.id === id)
-  if (!authorized() || props.busy || saving.value) return
+  if (!writesAvailable.value || !authorized() || props.busy || saving.value) return
   if (item?.assetId) {
     item.removed = true
     photoOrder.value = photoOrder.value.filter(key => key !== `queued:${id}`)
@@ -195,7 +189,7 @@ async function selectFiles(event: Event) {
   const field = event.target as HTMLInputElement
   const files = Array.from(field.files || [])
   field.value = '' // Allow selecting the same file again, including after an error.
-  if (!authorized() || selecting.value || props.busy || saving.value) return
+  if (!writesAvailable.value || !authorized() || selecting.value || props.busy || saving.value) return
   const attempt = generation
   selecting.value = true
   fileErrors.value = []
@@ -272,19 +266,19 @@ function initializeDraft(snapshot: SpeciesGallerySnapshot) {
   canonical.value = snapshot
   draft.value = createSpeciesGalleryDraft(snapshot)
   photoOrder.value = [...draft.value.orderedAssetIds.filter(id => !queue.value.some(file => file.assetId === id)).map(id => `saved:${id}`), ...queue.value.filter(file => !file.removed).map(file => `queued:${file.id}`)]
-  syncPrimary()
+  // Hydration reflects persisted state; it must not infer a new primary image
+  // from visual ordering or mark a previously missing/different primary dirty.
 }
 // Compatibility helpers share the grid's one order; there is no independent main choice.
-function setMain(id: string) { const first = editableCards.value[0]; if (first) reorderPhoto(`saved:${id}`, first.key) }
-function setQueuedMain(id: string) { const first = editableCards.value[0]; if (first) reorderPhoto(`queued:${id}`, first.key) }
-function move(id: string, direction: -1 | 1) { moveCard(`saved:${id}`, direction) }
-function moveQueued(id: string, direction: -1 | 1) { moveCard(`queued:${id}`, direction) }
+function setMain(id: string) { if (!writesAvailable.value) return; const first = editableCards.value[0]; if (first) reorderPhoto(`saved:${id}`, first.key) }
+function setQueuedMain(id: string) { if (!writesAvailable.value) return; const first = editableCards.value[0]; if (first) reorderPhoto(`queued:${id}`, first.key) }
 function moveCard(key: string, direction: -1 | 1) {
+  if (!writesAvailable.value) return
   const cards = editableCards.value, index = cards.findIndex(card => card.key === key), target = cards[index + direction]
   if (index >= 0 && target) reorderPhoto(key, target.key)
 }
 function stageRemoval(id: string) {
-  if (props.busy || saving.value || !authorized() || !draft.value) return
+  if (!writesAvailable.value || props.busy || saving.value || !authorized() || !draft.value) return
   draft.value = removeSpeciesPhoto(draft.value, id)
   photoOrder.value = photoOrder.value.filter(key => key !== `saved:${id}`)
   syncPrimary()
@@ -337,13 +331,12 @@ function reconcileConflict(keepDraft: boolean) {
   canonical.value = latest; saveBaseline = latest
   const allowed = [...draft.value.orderedAssetIds.map(id => `saved:${id}`), ...queue.value.filter(file => !file.removed).map(file => `queued:${file.id}`)]
   photoOrder.value = keepDraft ? [...photoOrder.value.filter(key => allowed.includes(key)), ...allowed.filter(key => !photoOrder.value.includes(key))] : allowed
-  syncPrimary()
   conflictSnapshot.value = null; conflictReadFailed.value = false; saveError.value = null
   announcement.value = pt('reconciled')
 }
 const unavailableReferences = computed(() => canonical.value?.images.filter(image => !image.eligible && draft.value?.orderedAssetIds.includes(image.assetId)) || [])
 function stageUnavailableRemoval() {
-  if (saving.value || !authorized()) return
+  if (!writesAvailable.value || saving.value || !authorized()) return
   for (const image of unavailableReferences.value) stageRemoval(image.assetId)
 }
 async function commitPhotos(speciesId: string) {
@@ -365,7 +358,6 @@ async function commitPhotos(speciesId: string) {
     clearQueue(); saveBaseline = result.snapshot; canonical.value = result.snapshot
     draft.value = createSpeciesGalleryDraft(result.snapshot)
     photoOrder.value = draft.value.orderedAssetIds.map(id => `saved:${id}`)
-    syncPrimary()
     await loadImages()
     return { complete: true, deferred: false }
   } catch (error) {
@@ -412,7 +404,7 @@ onScopeDispose(() => {
     </header>
     <div class="photo-body">
       <div v-if="species" class="species-identity"><h3>{{ species?.commonName || species?.scientificName || '' }}</h3><p v-if="species?.commonName && species?.scientificName"><em>{{ species.scientificName }}</em></p></div>
-      <p v-if="!writesAvailable" :id="`${uid}-unavailable`" class="availability-note" role="status">{{ pt('formUnavailable') }}</p>
+  <p v-if="species && !writesAvailable" :id="`${uid}-unavailable`" class="availability-note" role="status">{{ pt('formUnavailable') }}</p>
       <section v-if="saveError === 'conflict'" class="availability-note" role="alert" :aria-label="pt('conflictTitle')">
         <h3>{{ pt('conflictTitle') }}</h3><p>{{ pt('conflict') }}</p>
         <p v-if="conflictSnapshot">{{ pt('canonicalLoaded', { count: conflictSnapshot.images.length }) }}</p>
@@ -421,37 +413,36 @@ onScopeDispose(() => {
         <button v-if="!conflictSnapshot" class="photo-button" type="button" :disabled="saving" @click="refreshConflict">{{ pt('refreshCanonical') }}</button>
         <template v-else><button class="photo-button" type="button" :disabled="saving" @click="reconcileConflict(true)">{{ pt('reapplyDraft') }}</button> <button class="photo-button" type="button" :disabled="saving" @click="reconcileConflict(false)">{{ pt('useCanonical') }}</button></template>
       </section>
-      <div v-if="unavailableReferences.length" class="availability-note"><p>{{ pt('unavailableReferences', { count: unavailableReferences.length }) }}</p><button class="photo-button" type="button" :disabled="saving || busy" @click="stageUnavailableRemoval">{{ pt('stageUnavailableRemoval') }}</button></div>
+      <div v-if="writesAvailable && unavailableReferences.length" class="availability-note"><p>{{ pt('unavailableReferences', { count: unavailableReferences.length }) }}</p><button class="photo-button" type="button" :disabled="!writesAvailable || saving || busy" @click="stageUnavailableRemoval">{{ pt('stageUnavailableRemoval') }}</button></div>
       <div v-if="saveError === 'partial'" class="read-error" role="alert"><p>{{ pt('partialFailure') }}</p><button type="button" class="photo-button" :disabled="saving || busy || !writesAvailable" @click="emit('retry')">{{ pt('retryPhotos') }}</button></div>
       <div v-if="readErrors.length" class="read-error" role="alert"><p v-for="key in readErrors" :key="key">{{ pt(key) }}</p><button type="button" class="photo-button" @click="loadImages">{{ pt('retry') }}</button></div>
       <section class="photo-workspace" :aria-labelledby="`${uid}-grid`" :aria-busy="loading || selecting">
-        <div class="grid-heading"><h3 :id="`${uid}-grid`">{{ pt('gallery') }}</h3><span v-if="queue.filter(item => !item.removed).length" class="section-guidance">{{ pt('queuedCount', { count: queue.filter(item => !item.removed).length }) }}</span></div>
-        <p :id="`${uid}-ordering`" class="section-guidance">{{ pt('mainDefault') }} {{ pt('reorderHint') }}</p>
-        <p v-if="species && !loading && !arrangementAvailable" class="section-guidance">{{ pt('readOnlyGallery') }}</p>
+        <div class="grid-heading"><h3 :id="`${uid}-grid`">{{ pt('gallery') }}</h3></div>
+        <p :id="`${uid}-ordering`" class="visually-hidden">{{ pt('gallery') }}</p>
         <p v-if="loading" role="status">{{ pt('loading') }}</p>
-        <ul class="photo-grid" :aria-describedby="`${uid}-ordering`">
-          <li v-for="(card, index) in photoCards" :key="card.key" class="photo-card" :class="{ 'is-main': firstEligible === card.key, 'is-dragging': dragging === card.key, 'drop-target': dropTarget === card.key, draggable: canReorder(card.key) }" :data-photo-key="card.key" :draggable="canReorder(card.key)" :tabindex="canReorder(card.key) ? 0 : undefined" :aria-label="pt('photoControls', { number: index + 1 })" :aria-describedby="`${uid}-ordering`" @keydown.self="keyboardMove($event, card.key)" @dragstart="startDrag($event, card.id, card.queued)" @dragover.prevent="dropTarget = canReorder(card.key) ? card.key : null" @drop.prevent="dropImage(card.id, card.queued)" @dragend="endDrag">
+        <ul class="photo-grid" :aria-describedby="writesAvailable ? `${uid}-ordering` : undefined">
+          <li v-for="(card, index) in photoCards" :key="card.key" class="photo-card" :class="{ 'is-main': firstEligible === card.key, 'is-dragging': dragging === card.key, 'drop-target': dropTarget === card.key, draggable: canReorder(card.key) }" :data-photo-key="card.key" :draggable="canReorder(card.key)" :tabindex="canReorder(card.key) ? 0 : undefined" :aria-label="pt('photoControls', { number: index + 1 })" :aria-describedby="writesAvailable ? `${uid}-ordering` : undefined" @keydown.self="keyboardMove($event, card.key)" @dragstart="startDrag($event, card.id, card.queued)" @dragover.prevent="dropTarget = canReorder(card.key) ? card.key : null" @drop.prevent="dropImage(card.id, card.queued)" @dragend="endDrag">
             <div class="thumbnail" @pointerdown="pointerStart($event, card.key)" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerCancel">
-              <img v-if="!failedImages.has(card.url)" :src="card.url" :alt="card.queued ? pt('previewAlt', { name: card.name }) : pt('photoAlt', { number: index + 1 })" draggable="false" @error="failImage(card.url)" />
+              <img v-if="!failedImages.has(card.url)" :src="card.url" :alt="pt('photoAlt', { number: index + 1 })" draggable="false" @error="failImage(card.url)" />
               <div v-else class="image-placeholder">{{ pt('noImage') }}</div>
               <span v-if="firstEligible === card.key" class="main-badge">{{ pt('mainBadge') }}</span>
-              <button v-if="card.queued || card.eligible" type="button" class="thumbnail-remove" :disabled="busy || saving" :aria-label="card.queued ? pt('removeQueuedName', { name: card.name }) : pt('removePhoto', { number: index + 1 })" :title="pt('removeGallery')" @pointerdown.stop @mousedown.stop @dragstart.stop.prevent @click.stop="card.queued ? removeQueued(card.id) : stageRemoval(card.id)"><span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" focusable="false"><path d="M4 4l16 16M20 4L4 20" /></svg></span></button>
+              <button v-if="card.queued || card.eligible" type="button" class="thumbnail-remove" :disabled="!writesAvailable || busy || saving" :aria-label="pt('removePhoto', { number: index + 1 })" :title="pt('removeGallery')" @pointerdown.stop @mousedown.stop @dragstart.stop.prevent @click.stop="card.queued ? removeQueued(card.id) : stageRemoval(card.id)"><span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" focusable="false"><path d="M4 4l16 16M20 4L4 20" /></svg></span></button>
             </div>
-            <div class="card-caption"><strong :title="card.name">{{ card.name }}</strong><span>{{ pt(card.queued ? 'newPhotos' : 'referenceSource') }}</span>
-              <template v-if="card.item"><span>{{ sizeLabel(card.item.file.size) }} &middot; {{ pt(card.item.status) }}</span><span v-if="card.item.error" class="file-errors" role="status">{{ pt('uploadFailed') }}</span></template>
+            <div v-if="(card.eligible && firstEligible !== card.key) || card.item?.error || failedImages.has(card.url)" class="card-caption">
+              <button v-if="card.eligible && firstEligible !== card.key" type="button" class="photo-button set-main" :disabled="!writesAvailable || busy || saving" @click="card.queued ? setQueuedMain(card.id) : setMain(card.id)">{{ pt('setMain') }}</button>
+              <span v-if="card.item?.error" class="file-errors" role="status">{{ pt('uploadFailed') }}</span>
               <span v-if="failedImages.has(card.url)" class="file-errors">{{ pt('previewFailed') }}</span>
             </div>
           </li>
-          <li class="add-photo-tile" data-validation-group :aria-label="pt('addPhotos')" :aria-describedby="fileErrors.length ? `${uid}-selection-error` : `${uid}-guidance`">
-            <input :id="`${uid}-files`" ref="input" class="visually-hidden" data-validation-field="photos" :aria-invalid="fileErrors.length > 0" type="file" accept="image/jpeg,image/png" multiple :disabled="selecting || busy || saving" :aria-describedby="`${uid}-guidance ${uid}-upload-notice ${uid}-errors ${uid}-selection-error`" @change="selectFiles" />
-            <label class="add-photos" :for="`${uid}-files`"><span class="add-symbol" aria-hidden="true">+</span><strong>{{ selecting ? pt('validating') : pt('addPhotos') }}</strong><span :id="`${uid}-guidance`">{{ pt('guidance') }}</span></label>
+          <li class="add-photo-tile" :class="{ disabled: !writesAvailable }" data-validation-group :aria-label="pt('addPhotos')" :aria-describedby="fileErrors.length ? `${uid}-selection-error` : undefined">
+            <input :id="`${uid}-files`" ref="input" class="visually-hidden" data-validation-field="photos" :aria-invalid="fileErrors.length > 0" type="file" accept="image/jpeg,image/png" multiple :disabled="!writesAvailable || selecting || busy || saving" :aria-describedby="`${uid}-errors ${uid}-selection-error`" @change="selectFiles" />
+            <label class="add-photos" :class="{ disabled: !writesAvailable }" :for="`${uid}-files`" :aria-disabled="!writesAvailable" @click="!writesAvailable && $event.preventDefault()"><span class="add-symbol" aria-hidden="true">+</span><strong>{{ selecting ? pt('validating') : pt('addPhotos') }}</strong><span v-if="writesAvailable">{{ pt('guidance') }}</span></label>
             <small v-if="fileErrors.length" :id="`${uid}-selection-error`" class="file-errors selection-error">{{ pt('invalidSelection') }}</small>
           </li>
         </ul>
         <div :id="`${uid}-errors`" class="file-errors" aria-live="polite" aria-atomic="true"><p v-for="error in fileErrors" :key="error.id">{{ error.name }}: {{ pt(error.key) }}</p><button v-if="fileErrors.length" type="button" class="photo-button" :disabled="selecting || busy || saving" @click="discardRejectedFiles">{{ pt('discardRejected') }}</button></div>
-        <p v-if="!writesAvailable" :id="`${uid}-upload-notice`" class="section-guidance">{{ pt('uploadUnavailable') }}</p>
         <p v-if="dirty" class="section-guidance" role="status">{{ pt('unsaved') }}</p>
-        <button v-if="!embedded" class="photo-button" type="button" @click="species && commitPhotos(species.id)" :disabled="!writesAvailable || saving" :aria-describedby="`${uid}-upload-notice`">{{ pt('uploadPhotos') }}</button>
+        <button v-if="!embedded" class="photo-button" type="button" @click="species && commitPhotos(species.id)" :disabled="!writesAvailable || saving">{{ pt('uploadPhotos') }}</button>
       </section>
       <section v-if="species" class="gallery-section" :aria-label="pt('libraryTitle')">
         <template v-if="!expanded && !arrangementAvailable">
@@ -527,6 +518,7 @@ onScopeDispose(() => {
 .thumbnail-remove:hover:not(:disabled) > span { background: #216b45; }
 .thumbnail-remove:disabled { opacity: .5; cursor: not-allowed; }
 .card-caption { display: flex; flex-direction: column; gap: 4px; padding: 9px 10px; font-size: 11px; color: #53665b; }
+.set-main { align-self: flex-start; min-height: 36px; padding: 6px 9px; }
 .card-caption strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #29483e; font-size: 12px; }
 .add-photo-tile { position: relative; min-width: 0; }
 .add-photo-tile:has(.selection-error) .add-photos { height: auto; border-color: #a13f35; }
@@ -534,7 +526,8 @@ onScopeDispose(() => {
 .add-photos { min-height: 170px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 14px; border: 1px dashed #86ad92; border-radius: 12px; background: #f7faf7; color: #174a33; cursor: pointer; text-align: center; font-size: 12px; }
 .add-photos > span:last-child { font-size: 11px; line-height: 1.5; color: #53665b; }
 .add-symbol { font-size: 28px; font-weight: 300; }
-.add-photos:hover { border-color: #216b45; background: #eff8f1; }
+.add-photos:hover:not(.disabled) { border-color: #216b45; background: #eff8f1; }
+.add-photos.disabled { color: #68756e; background: #f4f6f4; cursor: not-allowed; }
 .add-photo-tile:focus-within .add-photos, .photo-card:focus-visible, .thumbnail-remove:focus-visible, select:focus-visible { outline: 3px solid #216b45; outline-offset: 3px; }
 .add-photo-tile:has(input:disabled) { opacity: .6; }
 .gallery-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid #dfe7df; }

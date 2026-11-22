@@ -222,6 +222,8 @@ const filteredPlants = computed(() => {
     const matchesSearch =
       !query ||
       plant.plantId.toLowerCase().includes(query) ||
+      (plant.plantScientificName || '').toLowerCase().includes(query) ||
+      plant.speciesName.toLowerCase().includes(query) ||
       (canViewStaffPlantData.value &&
         (plant.location.zone.toLowerCase().includes(query) ||
           plant.latestApproved.healthStatus.toLowerCase().includes(query) ||

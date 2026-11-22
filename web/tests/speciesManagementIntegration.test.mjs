@@ -62,6 +62,7 @@ const flush = async () => {
   }
 }
 function harness(fetchHandler, query = {}, authUser = { id: 'officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }, options = {}) {
+  const dictionary = options.messages || messages
   const scope = vue.effectScope()
   const route = vue.reactive({ query })
   const calls = []
@@ -70,7 +71,7 @@ function harness(fetchHandler, query = {}, authUser = { id: 'officer', role: 'Co
   let session = { user: authUser, pending: false }
   const sessionListeners = new Set()
   const t = (key, params = {}) => {
-    const found = key.split('.').reduce((entry, part) => entry?.[part], messages)
+    const found = key.split('.').reduce((entry, part) => entry?.[part], dictionary)
     const value = typeof found === 'string' ? found : key
     return Object.entries(params).reduce((text, [name, replacement]) =>
       text.replaceAll(`{${name}}`, String(replacement)), value)
@@ -124,7 +125,7 @@ function harness(fetchHandler, query = {}, authUser = { id: 'officer', role: 'Co
           if (!response.ok) {
             const message = result?.message || result?.error ||
               (response.status === 403 ? 'You do not have permission to manage species.' : `Species request failed (${response.status}).`)
-            throw new integration.SpeciesApiError(message,response.status)
+            throw new integration.SpeciesApiError(message,response.status,'http',result?.code)
           }
           return result
         },
@@ -342,7 +343,7 @@ test('delete requires confirmation, uses exact endpoint, and preserves row on co
   let rows = [speciesFixture()]
   const h = harness(async (url, options) => {
     if (url === '/api/species/3' && options.method === 'DELETE') {
-      if (conflict) return Response.json({ error: 'Species is referenced by plant records.' }, { status: 409 })
+      if (conflict) return Response.json({ code: 'SPECIES_DELETE_REFERENCED', error: 'This Species is referenced by existing records and cannot be deleted.' }, { status: 409 })
       rows = []
       return Response.json({ deleted: true })
     }
@@ -354,7 +355,7 @@ test('delete requires confirmation, uses exact endpoint, and preserves row on co
     assert.equal(h.state.modal.value, 'delete')
     assert.equal(h.calls.filter((call) => call.options.method === 'DELETE').length, 0)
     await h.state.remove()
-    assert.equal(h.state.mutationError.value, 'This species is used by Plant records and cannot be deleted.')
+    assert.equal(h.state.mutationError.value, 'This Species is referenced by existing records and cannot be deleted.')
     assert.equal(h.state.species.value.length, 1)
     assert.equal(h.state.modal.value, 'delete')
     conflict = false
@@ -365,6 +366,55 @@ test('delete requires confirmation, uses exact endpoint, and preserves row on co
     assert.equal(h.calls.filter((call) => call.url === '/api/species/3' && call.options.method === 'DELETE').length, 2)
   } finally { h.stop() }
 })
+
+test('uncertain deletions require safe readback and never retry DELETE automatically', async () => {
+ for(const outcome of ['network','server','invalid']) {
+  let readback='unavailable';
+  const h=harness(async(url,options)=>{
+   if(options.method==='DELETE') {
+    if(outcome==='network')throw Error('Lost response');
+    return outcome==='server'?Response.json({error:'Unavailable'},{status:503}):Response.json({});
+   }
+   if(url==='/api/species/3')return readback==='present'?Response.json({species:speciesFixture()}):Response.json({error:'Species unavailable.'},{status:404});
+   return Response.json({species:[speciesFixture()]});
+  });
+  try {
+   await h.state.loadSpecies();h.state.confirmDelete(h.state.species.value[0]);
+   await h.state.remove();
+   assert.equal(h.state.deletionNeedsReadback.value,true);
+   assert.equal(h.state.mutationError.value,messages.conservationPages.species.errors.deleteUncertain);
+   await h.state.remove();assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+   // Catalogue 404 may hide an unavailable record, so it cannot establish deletion.
+   await h.state.verifyDeletion();assert.equal(h.state.deletionNeedsReadback.value,true);
+   assert.equal(h.state.modal.value,'delete');
+   h.state.modal.value=null;h.state.confirmDelete(h.state.species.value[0]);
+   await h.state.remove();assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+   readback='present';await h.state.verifyDeletion();
+   assert.equal(h.state.deletionNeedsReadback.value,false);
+   assert.equal(h.state.selected.value.id,'3');
+   assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+  }finally{h.stop()}
+ }
+});
+
+test('confirmed deletion with a failed list refresh stays confirmed and cannot repeat DELETE', async () => {
+ let deleted=false,failRefresh=true;
+ const h=harness(async(url,options)=>{
+  if(options.method==='DELETE'){deleted=true;return Response.json({deleted:true})}
+  if(deleted&&failRefresh)return Response.json({error:'Unavailable'},{status:503});
+  return Response.json({species:deleted?[]:[speciesFixture()]});
+ });
+ try {
+  await h.state.loadSpecies();h.state.confirmDelete(h.state.species.value[0]);await h.state.remove();
+  assert.ok(h.state.mutationError.value.startsWith('The species was deleted'));
+  assert.equal(h.state.deletionNeedsReadback.value,true);
+  await h.state.remove();assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+  failRefresh=false;await h.state.verifyDeletion();
+  assert.equal(h.state.modal.value,null);assert.equal(h.state.species.value.length,0);
+  assert.equal(h.calls.filter(c=>c.options.method==='DELETE').length,1);
+  assert.equal(h.state.feedback.value.variant,'success');
+ }finally{h.stop()}
+});
 
 test('fresh component instances refetch persisted backend state instead of sharing local species', async () => {
   let stored = speciesFixture()
@@ -392,6 +442,13 @@ test('production page has no local store or fake image persistence dependency', 
 test('species API preserves structured errors and distinguishes malformed and network failures', async () => {
   const originalFetch = globalThis.fetch
   try {
+    globalThis.fetch = async (url, options) => {
+      assert.equal(options.method,'DELETE');
+      assert.equal(options.headers['Content-Type'],'application/json');
+      assert.equal(options.body,'{}');
+      return Response.json({ code:'SPECIES_DELETE_REFERENCED',error:'This Species is referenced by existing records and cannot be deleted.' },{status:409});
+    }
+    await assert.rejects(integration.requestSpeciesApi('/api/species/3',{method:'DELETE'}),{status:409,code:'SPECIES_DELETE_REFERENCED'});
     globalThis.fetch = async () => Response.json({ message: 'Duplicate scientific name.' }, { status: 400 })
     await assert.rejects(integration.requestSpeciesApi('/api/species'), {
       message: 'Duplicate scientific name.', status: 400,
@@ -406,6 +463,15 @@ test('species API preserves structured errors and distinguishes malformed and ne
     globalThis.fetch = originalFetch
   }
 })
+
+test('deletion recovery and reference messages exist in all supported languages', () => {
+ for(const locale of ['en','ms','zh-CN']) {
+  const dictionary=JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`,import.meta.url),'utf8'));
+  const values=[dictionary.officerFeedback.speciesReferenced,...['deleteUncertain','deletedRefreshPending','deleteStillPresent','deleteVerificationFailed'].map(key=>dictionary.conservationPages.species.errors[key])];
+  assert.ok(values.every(value=>typeof value==='string'&&value.trim()&&!/^\?+$/.test(value)));
+  if(locale==='zh-CN')assert.ok(values.every(value=>/\p{Script=Han}/u.test(value)));
+ }
+});
 
 
 test('teammate text limits and trimmed bounded search survive the merge', () => {
@@ -427,7 +493,7 @@ test('active routed Officer page embeds photos in Create and Edit without changi
   try {
     await h.state.loadSpecies()
     const buttons = nodes(h.render()).filter(node => node.type === 'button')
-    for (const label of ['View', 'Edit Species', 'Delete Species']) assert.ok(buttons.some(node => node.children === label))
+    for (const label of ['View', 'Edit Species', 'Delete Species']) assert.ok(buttons.some(node => node.props?.['aria-label'] === label))
     assert.ok(!buttons.some(node => node.props?.class?.includes('manage-photos-action')))
     h.state.openCreate()
     let manager = nodes(h.render()).find(node => node.type?.name?.endsWith('SpeciesPhotoManager.vue'))
@@ -770,26 +836,34 @@ test('Create/Edit omit Cultural Significance controls and payloads while keeping
 
 const speciesTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'species-table')
 
-test('Plant Species keeps eight aligned columns, intact names and all existing row actions in the scoped table', async () => {
+test('Plant Species keeps six aligned columns, intact names and accessible icon actions', async () => {
   const row = speciesFixture({ scientific_name: 'Shorea exceptionally long scientific name', common_name: 'Meranti with a long documented common name' })
-  const h = harness(async url => Response.json(url === '/api/taxonomy' ? { genera: taxonomyFixture } : { species: [row] }))
+  const h = harness(async url => Response.json(url === '/api/taxonomy' ? { genera: taxonomyFixture } : { species: url.startsWith('/api/species/') ? row : [row] }))
   try {
     await Promise.all([h.state.loadSpecies(), h.state.loadTaxonomy()])
     const table = speciesTable(h)
     const labels = messages.conservationPages.species
-    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), ['speciesId', 'scientificName', 'commonName', 'genus', 'family', 'conservationStatus', 'visibility', 'actions'].map(key => labels[key]))
+    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), ['speciesId', 'scientificName', 'commonName', 'conservationStatus', 'visibility', 'actions'].map(key => labels[key]))
     assert.ok(nodes(table).filter(node => node.type === 'th').every(node => node.props.scope === 'col'))
-    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['species-id-column', 'scientific-column', 'common-column', 'genus-column', 'family-column', 'status-column', 'visibility-column', 'actions-column'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['species-id-column', 'scientific-column', 'common-column', 'status-column', 'visibility-column', 'actions-column'])
     const renderedRow = nodes(table).find(node => node.type === 'tr' && node.key === '3')
     const cells = nodes(renderedRow).filter(node => node.type === 'td')
-    assert.equal(cells.length, 8)
+    assert.equal(cells.length, 6)
     assert.equal(nodes(cells[1]).find(node => node.type === 'em').children, row.scientific_name)
-    assert.equal(cells[2].children, row.common_name)
-    assert.equal(cells[3].children, row.genus_name)
-    assert.equal(cells[4].children, row.family_name)
-    assert.ok(cells.slice(1, 5).every(node => node.props.class === 'name-cell'))
-    assert.equal(cells[5].props.class, 'status-cell')
-    assert.deepEqual(nodes(cells[7]).filter(node => node.type === 'button').map(node => node.children), [labels.view, labels.editSpecies, labels.deleteSpecies])
+    assert.ok(nodes(cells[2]).some(node => node === row.common_name || node.children === row.common_name) || cells[2].children.includes(row.common_name))
+    assert.ok(cells.slice(1, 3).every(node => node.props.class === 'name-cell'))
+    assert.equal(cells[3].props.class, 'status-cell')
+    const actions=nodes(cells[5]).filter(node=>node.type==='button')
+    assert.deepEqual(actions.map(node=>node.props['aria-label']),[labels.view,labels.editSpecies,labels.deleteSpecies])
+    assert.ok(actions.every(node=>!node.props.disabled&&nodes(node).some(child=>child.type==='svg')))
+    assert.ok(nodes(renderedRow).some(node=>node.props?.class==='species-card-leaf'))
+    assert.deepEqual(actions.map(node=>nodes(node).find(child=>child.props?.class==='species-action-name').children),[labels.view,labels.editSpecies,labels.deleteSpecies])
+    assert.equal(nodes(cells[5]).filter(node=>node.props?.role==='tooltip').length,3)
+    await actions[0].props.onClick(); assert.equal(h.state.modal.value,'view')
+    await actions[1].props.onClick(); assert.equal(h.state.modal.value,'form')
+    actions[2].props.onClick(); assert.equal(h.state.modal.value,'delete')
+    h.state.search.value=row.genus_name; assert.equal(h.state.filtered.value.length,1)
+    h.state.search.value=row.family_name; assert.equal(h.state.filtered.value.length,1)
     assert.ok(h.calls.every(call => call.options.method === 'GET'))
   } finally { h.stop() }
 })
@@ -797,7 +871,7 @@ test('Plant Species keeps eight aligned columns, intact names and all existing r
 test('loaded-limit paragraph is removed visually while accessible scope, skipped records and loading states remain', async () => {
   const h = harness(async () => Response.json({ species: [speciesFixture(), {}] }))
   try {
-    const loading = nodes(speciesTable(h)).find(node => node.type === 'td' && node.props.colspan === '8')
+    const loading = nodes(speciesTable(h)).find(node => node.type === 'td' && node.props.colspan === '6')
     assert.ok(loading)
     await h.state.loadSpecies()
     const all = nodes(h.render())
@@ -816,9 +890,32 @@ test('loaded-limit paragraph is removed visually while accessible scope, skipped
   } finally { h.stop() }
 })
 
+test('Species icon labels and tooltips are localized, with unauthorized actions disabled', async () => {
+ for(const locale of ['en','ms','zh-CN']) {
+  const dictionary=JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`,import.meta.url),'utf8'));
+  const h=harness(async()=>Response.json({species:[speciesFixture()]}),{},null,{messages:dictionary});
+  try {
+   await h.state.loadSpecies();
+   const row=nodes(speciesTable(h)).find(node=>node.type==='tr'&&node.key==='3');
+   const buttons=nodes(row).filter(node=>node.type==='button');
+   assert.deepEqual(buttons.map(node=>node.props['aria-label']),['view','editSpecies','deleteSpecies'].map(key=>dictionary.conservationPages.species[key]));
+   assert.ok(buttons.every(node=>node.props.disabled));
+   for(const button of buttons)assert.ok(nodes(row).some(node=>node.props?.role==='tooltip'&&node.props.id===button.props['aria-describedby']));
+  }finally{h.stop()}
+ }
+ const css=descriptor.styles[0].content;
+ assert.match(css, /@container \(max-width: 767px\)/);
+ assert.match(css, /\.species-table tbody tr \{ display: grid/);
+ assert.match(css, /\.species-action-control:focus-within \.species-action-tooltip/);
+ assert.match(css, /@media \(hover: none\)/);
+ assert.match(css, /\.species-table \.species-action-control \+ \.species-action-control \{ border-left:/);
+ assert.match(css, /\.species-card-leaf \{ position: absolute/);
+ assert.match(css, /width: 44px; height: 44px; min-height: 44px/);
+});
+
 test('Plant Species styles preserve the Officer header, natural taxonomy wrapping and internally scrollable action rows', () => {
   const css = descriptor.styles[0].content
-  assert.match(css, /\.officer-layout \.species-scroll \.species-table\s*\{[^}]*min-width: 88rem; table-layout: auto; border-collapse: separate; border-spacing: 0/)
+  assert.match(css, /\.officer-layout \.species-scroll \.species-table\s*\{[^}]*min-width: 48rem; table-layout: auto; border-collapse: separate; border-spacing: 0/)
   assert.match(css, /\.species-table th\s*\{ background: #245443; color: #fff;[^}]*font-size: var\(--officer-small, .75rem\); font-weight: 700; text-transform: uppercase/)
   assert.match(css, /\.species-table td\s*\{ font-size: var\(--officer-text, .875rem\); line-height: 1.5/)
   assert.match(css, /\.species-table th, \.officer-layout \.species-scroll \.species-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
@@ -8,7 +8,7 @@ import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import BiodiversityMapPreview from '../../components/conservation/BiodiversityMapPreview.vue'
 import { reviewEligible, reviewTransitions, positiveRevision } from '../../services/observationReview'
 import { mapLinkedSpeciesRequest, speciesRequestCanDecide } from '../../services/reviewSpeciesRequest'
-import { observationOrigin } from '../../services/observationQueue'
+import { observationOrigin, readQueuePage } from '../../services/observationQueue'
 import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
 
@@ -71,27 +71,19 @@ const unsubscribeSession = subscribeSession((user, pending) => { session.value =
 onBeforeUnmount(unsubscribeSession)
 const authorizedOfficer = computed(() => !session.value.pending && session.value.user?.role === 'Conservation Officer' && session.value.user.status === 'Active' && session.value.user.mustChangePassword === false)
 const observations = ref<ApiObservation[]>([])
+const registrationRows = ref<ApiObservation[]>([])
+const fieldRows = ref<ApiObservation[]>([])
+const registrationLoading = ref(true), fieldLoading = ref(true)
+const registrationError = ref(''), fieldError = ref('')
+const observationTotals = ref<{ total: number; pending: number } | null>(null)
+const previewControllers = new Map<string, AbortController>()
+let disposed = false
+onBeforeUnmount(() => { disposed = true; for (const controller of previewControllers.values()) controller.abort() })
 const plants = ref<ApiPlant[]>([])
 const species = ref<ApiSpecies[]>([])
 const alerts = ref<ApiAlert[]>([])
-const submitterNames = ref<Record<string, string>>({})
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i
 const observationDisplayLabels = computed(() => new Map([...monitoringLabels(observations.value.map(item => item.id))].map(([raw, label]) => [raw, formatObservationId(raw) || (uuid.test(raw) ? `OBS-${label.replace(/\u2026$/, '')}` : label)])))
-const subjectLabels = computed(() => {
-  const subjects = [...new Set([...observations.value.map(item => item.owner_subject), ...plants.value.map(item => item.registered_subject)].filter((value): value is string => typeof value === 'string' && !!value))]
-  const part = (value: string) => /^(staff|visitor):/.test(value) ? value.slice(value.indexOf(':') + 1) : value
-  const tokens = monitoringLabels(subjects.map(part))
-  return new Map(subjects.map(subject => {
-    const staffId = subject.startsWith('staff:') ? subject.slice(6) : ''
-    if (staffId && submitterNames.value[staffId]) return [subject, submitterNames.value[staffId]]
-    const account = session.value.user
-    if (authorizedOfficer.value && account && subject === `staff:${account.id}` && account.name?.trim()) return [subject, account.name.trim()]
-    const raw = part(subject), token = tokens.get(raw) || raw
-    const id = uuid.test(raw) ? token.replace(/\u2026$/, '') : token
-    const key = subject.startsWith('staff:') ? 'staffIdentifier' : subject.startsWith('visitor:') ? 'visitorIdentifier' : 'submitterIdentifier'
-    return [subject, t('conservationPages.observations.' + key, { id })]
-  }))
-})
 const observationsLoading = ref(true)
 const plantsLoading = ref(true)
 const speciesLoading = ref(true)
@@ -131,27 +123,65 @@ const loadJson = async <T,>(url: string, collection: string): Promise<T[]> => {
 }
 
 const loadObservations = async () => {
-  observationsLoading.value = true
-  observationsError.value = ''
+  const controller = new AbortController()
+  previewControllers.get('counts')?.abort(); previewControllers.set('counts', controller)
+  observationsLoading.value = true; observationsError.value = ''; observationTotals.value = null
   try {
-    observations.value = await loadJson<ApiObservation>('/api/observations', 'observations')
-    const ids = [...new Set(observations.value.map(row => row.owner_subject).filter((subject): subject is string => typeof subject === 'string' && subject.startsWith('staff:')).map(subject => subject.slice(6)))].slice(0, 100)
-    if (ids.length) {
-      try {
-        const response = await fetch(`/api/conservation/submitter-names?ids=${encodeURIComponent(ids.join(','))}`, { signal: AbortSignal.timeout(15000) })
-        if (response.ok) {
-          const body = await response.json() as { names?: Record<string, string> }
-          if (body.names && typeof body.names === 'object') submitterNames.value = body.names
-        }
-      } catch { /* Keep the abbreviated identifier if the directory is unavailable. */ }
+    const response = await fetch('/api/observations?view=dashboard-counts', { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) })
+    const body = await response.json()
+    if (!response.ok || !Number.isSafeInteger(body.totals?.total) || body.totals.total < 0 ||
+        !Number.isSafeInteger(body.totals?.pending) || body.totals.pending < 0 || body.totals.pending > body.totals.total) throw Error()
+    if (!controller.signal.aborted && !disposed) observationTotals.value = body.totals
+  } catch {
+    if (!controller.signal.aborted && !disposed) observationsError.value = t('conservationDashboard.previewError')
+  } finally { if (!controller.signal.aborted && !disposed) observationsLoading.value = false }
+}
+const loadPreview = async (origin: 'initial_registration' | 'subsequent_observation') => {
+  if (!authorizedOfficer.value || disposed) return
+  const rows = origin === 'initial_registration' ? registrationRows : fieldRows
+  const loading = origin === 'initial_registration' ? registrationLoading : fieldLoading
+  const error = origin === 'initial_registration' ? registrationError : fieldError
+  const controller = new AbortController()
+  previewControllers.get(origin)?.abort(); previewControllers.set(origin, controller)
+  loading.value = true; error.value = ''; rows.value = []
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15000)])
+  const found = new Map<string, ApiObservation>(), cursors = new Set<string>()
+  let cursor: string | null = null
+  try {
+    // Scan only pending candidates in small pages; never call the full-history list.
+    // A bounded incomplete scan is an error, never a false empty/success state.
+    for (let page = 0; page < 20; page++) {
+      const query = new URLSearchParams({ view: 'dashboard', origin_type: origin, status: 'Pending Review', limit: '10' })
+      if (cursor) query.set('cursor', cursor)
+      const response = await fetch('/api/observations?' + query, { signal })
+      const body = await response.json()
+      signal.throwIfAborted()
+      const pagination = readQueuePage(body.page)
+      if (!response.ok || !pagination || !Array.isArray(body.observations) || body.observations.length > 10 ||
+          body.observations.some((row: ApiObservation) => !row || row.origin_type !== origin || row.status !== 'Pending Review')) throw Error()
+      if (controller.signal.aborted || disposed) return
+      for (const row of body.observations as ApiObservation[]) {
+        if (previewReviewEligible(row)) found.set(String(row.id), row)
+        if (found.size === 5) break
+      }
+      if (found.size === 5 || !pagination.hasMore) {
+        rows.value = [...found.values()]; return
+      }
+      if (!pagination.cursor || cursors.has(pagination.cursor)) throw Error()
+      cursor = pagination.cursor; cursors.add(cursor)
     }
-  } catch (error) {
-    observations.value = []
-    observationsError.value = error instanceof Error ? error.message : 'Observations unavailable.'
+    throw Error()
+  } catch {
+    if (!controller.signal.aborted && !disposed) error.value = t('conservationDashboard.previewError')
   } finally {
-    observationsLoading.value = false
+    if (!controller.signal.aborted && !disposed) {
+      loading.value = false
+      observations.value = [...registrationRows.value, ...fieldRows.value]
+    }
   }
 }
+const loadRegistrations = () => loadPreview('initial_registration')
+const loadFieldObservations = () => loadPreview('subsequent_observation')
 const loadPlants = async () => {
   plantsLoading.value = true
   plantsError.value = ''
@@ -190,48 +220,51 @@ const loadAlerts = async () => {
 }
 
 onMounted(() => {
-  void Promise.allSettled([loadObservations(), loadPlants(), loadSpecies(), loadAlerts()])
+  if (authorizedOfficer.value) void Promise.allSettled([loadObservations(), loadRegistrations(), loadFieldObservations(), loadPlants(), loadSpecies(), loadAlerts()])
+})
+
+watch(() => [authorizedOfficer.value, session.value.user?.id] as const, ([ready, id], previous) => {
+  if (!ready || id !== previous?.[1]) {
+    for (const controller of previewControllers.values()) controller.abort()
+    registrationRows.value = []; fieldRows.value = []; observations.value = []; observationTotals.value = null
+    registrationLoading.value = true; fieldLoading.value = true; observationsLoading.value = true
+    registrationError.value = ''; fieldError.value = ''; observationsError.value = ''
+  }
+  if (ready) void Promise.allSettled([loadObservations(), loadRegistrations(), loadFieldObservations(), loadPlants(), loadSpecies(), loadAlerts()])
 })
 
 const effectiveObservationStatus = (observation: ApiObservation) =>
   typeof observation.status === 'string' ? observation.status.trim() : ''
-// Preserve the existing review-required grouping, including correction/flagged records.
-const requiresReview = (observation: ApiObservation) => {
-  const status = effectiveObservationStatus(observation).toLowerCase().replace(/[_-]+/g, ' ')
-  return ['pending', 'pending review', 'correction required', 'flagged'].includes(status)
-}
 // Reuse the server's provenance classification; never infer origin from plant/status.
 // Conflicting duplicate identities cannot safely belong to either preview.
 const previewReviewEligible = (row: ApiObservation) => {
-  if (!authorizedOfficer.value || observationsLoading.value || observationsError.value) return false
+  if (!authorizedOfficer.value || row.status !== 'Pending Review') return false
   const status = effectiveObservationStatus(row)
   if (!reviewTransitions[status]?.length || !positiveRevision(row.revision)) return false
   const id = String(row.id)
   if (!/^(?:[1-9][0-9]{0,18}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(id) || !formatPlantId(row.plant_id)) return false
   if (typeof row.owner_subject !== 'string' || !row.owner_subject.trim()) return false
-  if (row.species_id == null || !row.scientific_name?.trim()) return false
   const request = mapLinkedSpeciesRequest(row)
-  const plantReview = reviewEligible(session.value.user, session.value.pending, {
+  const plantReview = row.species_id != null && Boolean(row.scientific_name?.trim()) && reviewEligible(session.value.user, session.value.pending, {
     revision: row.revision, owner: row.owner_subject, status,
     speciesId: row.species_id == null ? '' : String(row.species_id),
     scientificName: row.scientific_name || '', speciesRequest: request,
   })
   // The existing registration review also permits resolving its linked species
   // request first. Do not hide that actionable path behind the plant's gate.
-  const speciesReview = observationOrigin(row.origin_type) === 'initial_registration' && speciesRequestCanDecide(request) && Boolean(request?.requestedBy) &&
+  const speciesReview = observationOrigin(row.origin_type) === 'initial_registration' && positiveRevision(request?.reviewCycle) && positiveRevision(request?.contentRevision) && speciesRequestCanDecide(request) && Boolean(request?.requestedBy) &&
     request?.requestedBy !== `staff:${session.value.user?.id}`
   return plantReview || speciesReview
 }
 const classifiedPending = computed(() => {
   const byId = new Map<string, ApiObservation[]>()
-  for (const row of observations.value) {
-    const id = String(row.id)
-    byId.set(id, [...(byId.get(id) || []), row])
+  for (const row of [...registrationRows.value, ...fieldRows.value]) {
+    const id = String(row.id); byId.set(id, [...(byId.get(id) || []), row])
   }
   return [...byId.values()].flatMap(rows => new Set(rows.map(row => observationOrigin(row.origin_type))).size === 1 ? [rows[0]!] : []).filter(previewReviewEligible)
 })
-const pendingRegistrations = computed(() => classifiedPending.value.filter(row => observationOrigin(row.origin_type) === 'initial_registration').slice(0, 4))
-const pendingFieldObservations = computed(() => classifiedPending.value.filter(row => observationOrigin(row.origin_type) === 'subsequent_observation').slice(0, 4))
+const pendingRegistrations = computed(() => classifiedPending.value.filter(row => observationOrigin(row.origin_type) === 'initial_registration').slice(0, 5))
+const pendingFieldObservations = computed(() => classifiedPending.value.filter(row => observationOrigin(row.origin_type) === 'subsequent_observation').slice(0, 5))
 
 const speciesById = computed(
   () => new Map(species.value.map((item) => [String(item.species_id), item])),
@@ -311,7 +344,7 @@ const summaries = computed(() => [
       ? '—'
       : observationsError.value
         ? '—'
-        : observations.value.filter(requiresReview).length,
+        : observationTotals.value?.pending ?? '?',
     'requiresVerification',
   ],
   [
@@ -326,7 +359,7 @@ const summaries = computed(() => [
   ],
   [
     'recentObservations',
-    observationsLoading.value ? '—' : observationsError.value ? '—' : observations.value.length,
+    observationsLoading.value ? '—' : observationsError.value ? '—' : observationTotals.value?.total ?? '?',
     'currentDataset',
   ],
 ])
@@ -364,6 +397,7 @@ const alertId = (value: string | number) => {
     ? `ALT${String(numeric).padStart(3, '0')}`
     : String(value)
 }
+const previewSpeciesName = (item: ApiObservation) => item.scientific_name || mapLinkedSpeciesRequest(item)?.scientificName || speciesName(item)
 const speciesName = (item?: { scientific_name?: string | null; common_name?: string | null }) =>
   item?.scientific_name || item?.common_name || t('conservationDashboard.speciesUnavailable')
 </script>
@@ -396,37 +430,37 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
           {{ t('conservationDashboard.viewAllSubmissions') }} →
         </button>
       </header>
-      <p v-if="observationsLoading" class="dashboard-state">{{ t('conservationDashboard.loadingObservations') }}</p>
-      <p v-else-if="observationsError" class="dashboard-state error-state">
-        {{ observationsError }}
+      <p v-if="registrationLoading" class="dashboard-state">{{ t('conservationDashboard.loadingObservations') }}</p>
+      <p v-else-if="registrationError" role="alert" class="dashboard-state error-state">
+        {{ registrationError }} <button type="button" class="secondary-button" :disabled="!authorizedOfficer || registrationLoading" @click="loadRegistrations">{{ t('conservationText.retry') }}</button>
       </p>
       <p v-else-if="!pendingRegistrations.length" class="dashboard-state">
         {{ t('conservationDashboard.noPendingRegistrations') }}
       </p>
       <div v-else class="table-scroll officer-table-scroll overview-table-scroll" role="region" :aria-label="t('conservationDashboard.pendingPlantRegistrations')" tabindex="0">
-        <table class="officer-data-table pending-review-table"><colgroup><col class="overview-plant"/><col class="overview-species"/><col class="overview-subject"/><col class="overview-status"/><col class="overview-actions"/></colgroup>
-          <thead>
-            <tr>
-              <th scope="col">{{ t('conservationDashboard.table.plantId') }}</th>
-              <th scope="col">{{ t('conservationDashboard.table.species') }}</th>
-              <th scope="col">{{ t('conservationDashboard.table.submittedBy') }}</th>
-              <th scope="col">{{ t('conservationDashboard.table.status') }}</th>
-              <th scope="col">{{ t('conservationDashboard.table.action') }}</th>
+        <table class="officer-data-table pending-review-table" role="table"><colgroup><col class="overview-plant"/><col class="overview-species"/><col class="overview-subject"/><col class="overview-status"/><col class="overview-actions"/></colgroup>
+          <thead role="rowgroup">
+            <tr role="row">
+              <th scope="col" role="columnheader">{{ t('conservationDashboard.table.plantId') }}</th>
+              <th scope="col" role="columnheader">{{ t('conservationDashboard.table.species') }}</th>
+              <th scope="col" role="columnheader">{{ t('conservationDashboard.table.submittedAt') }}</th>
+              <th scope="col" role="columnheader">{{ t('conservationDashboard.table.status') }}</th>
+              <th scope="col" role="columnheader">{{ t('conservationDashboard.table.action') }}</th>
             </tr>
           </thead>
-          <tbody>
-            <tr v-for="item in pendingRegistrations" :key="String(item.id)">
-              <td>{{ plantId(item.plant_id) }}</td>
-              <td>
-                <em>{{ speciesName(item) }}</em>
+          <tbody role="rowgroup">
+            <tr role="row" v-for="item in pendingRegistrations" :key="String(item.id)">
+              <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.plantId') }}</span>{{ plantId(item.plant_id) }}</td>
+              <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.species') }}</span>
+                <em>{{ previewSpeciesName(item) }}</em>
               </td>
-              <td><MonitoringIdentifier :value="item.owner_subject" :labels="subjectLabels" /></td>
-              <td>
+              <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.submittedAt') }}</span><time>{{ dt(typeof item.created_at === 'string' ? item.created_at : null) }}</time></td>
+              <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.status') }}</span>
                 <span class="badge" :class="statusClass(effectiveObservationStatus(item))">{{
                   dataLabel(effectiveObservationStatus(item))
                 }}</span>
               </td>
-              <td>
+              <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.action') }}</span>
                 <button
                   class="action-button"
                   @click="go('conservation-reviews', { review: observationId(item) })"
@@ -449,26 +483,26 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
         </div>
         <button class="secondary-button" @click="go('conservation-observations')">{{ t('conservationDashboard.viewAllObservations') }}</button>
       </header>
-      <p v-if="observationsLoading" class="dashboard-state">{{ t('conservationDashboard.loadingObservations') }}</p>
-      <p v-else-if="observationsError" class="dashboard-state error-state">{{ observationsError }}</p>
+      <p v-if="fieldLoading" class="dashboard-state">{{ t('conservationDashboard.loadingObservations') }}</p>
+      <p v-else-if="fieldError" role="alert" class="dashboard-state error-state">{{ fieldError }} <button type="button" class="secondary-button" :disabled="!authorizedOfficer || fieldLoading" @click="loadFieldObservations">{{ t('conservationText.retry') }}</button></p>
       <p v-else-if="!pendingFieldObservations.length" class="dashboard-state">{{ t('conservationDashboard.noPendingObservations') }}</p>
       <div v-else class="table-scroll officer-table-scroll overview-table-scroll" role="region" :aria-label="t('conservationDashboard.pendingObservations')" tabindex="0">
-        <table class="officer-data-table field-observations-table"><colgroup><col class="overview-observation"/><col class="overview-plant"/><col class="overview-species"/><col class="overview-subject"/><col class="overview-status"/><col class="overview-actions"/></colgroup>
-          <thead><tr>
-            <th scope="col">{{ t('conservationDashboard.table.observationId') }}</th>
-            <th scope="col">{{ t('conservationDashboard.table.plantId') }}</th>
-            <th scope="col">{{ t('conservationDashboard.table.species') }}</th>
-            <th scope="col">{{ t('conservationDashboard.table.submittedBy') }}</th>
-            <th scope="col">{{ t('conservationDashboard.table.status') }}</th>
-            <th scope="col">{{ t('conservationDashboard.table.action') }}</th>
+        <table class="officer-data-table field-observations-table" role="table"><colgroup><col class="overview-observation"/><col class="overview-plant"/><col class="overview-species"/><col class="overview-subject"/><col class="overview-status"/><col class="overview-actions"/></colgroup>
+          <thead role="rowgroup"><tr role="row">
+            <th scope="col" role="columnheader">{{ t('conservationDashboard.table.observationId') }}</th>
+            <th scope="col" role="columnheader">{{ t('conservationDashboard.table.plantId') }}</th>
+            <th scope="col" role="columnheader">{{ t('conservationDashboard.table.species') }}</th>
+            <th scope="col" role="columnheader">{{ t('conservationDashboard.table.submittedAt') }}</th>
+            <th scope="col" role="columnheader">{{ t('conservationDashboard.table.status') }}</th>
+            <th scope="col" role="columnheader">{{ t('conservationDashboard.table.action') }}</th>
           </tr></thead>
-          <tbody><tr v-for="item in pendingFieldObservations" :key="String(item.id)">
-            <td><strong><MonitoringIdentifier :value="String(item.id)" :labels="observationDisplayLabels" /></strong></td>
-            <td>{{ plantId(item.plant_id) }}</td>
-            <td><em>{{ speciesName(item) }}</em></td>
-            <td><MonitoringIdentifier :value="item.owner_subject" :labels="subjectLabels" /></td>
-            <td><span class="badge" :class="statusClass(effectiveObservationStatus(item))">{{ dataLabel(effectiveObservationStatus(item)) }}</span></td>
-            <td><button class="action-button" @click="go('conservation-observations', { observation: observationId(item) })">{{ t('conservationDashboard.viewObservations') }}</button></td>
+          <tbody role="rowgroup"><tr v-for="item in pendingFieldObservations" :key="String(item.id)" role="row">
+            <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.observationId') }}</span><strong><MonitoringIdentifier :value="String(item.id)" :labels="observationDisplayLabels" /></strong></td>
+            <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.plantId') }}</span>{{ plantId(item.plant_id) }}</td>
+            <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.species') }}</span><em>{{ previewSpeciesName(item) }}</em></td>
+            <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.submittedAt') }}</span><time>{{ dt(typeof item.created_at === 'string' ? item.created_at : null) }}</time></td>
+            <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.status') }}</span><span class="badge" :class="statusClass(effectiveObservationStatus(item))">{{ dataLabel(effectiveObservationStatus(item)) }}</span></td>
+            <td role="cell"><span class="overview-cell-label" aria-hidden="true">{{ t('conservationDashboard.table.action') }}</span><button class="action-button" @click="go('conservation-observations', { observation: observationId(item) })">{{ t('conservationDashboard.viewObservations') }}</button></td>
           </tr></tbody>
         </table>
       </div>
@@ -603,7 +637,7 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
 <style scoped>
 .dashboard-overview { min-width: 0; max-width: 100%; container-type: inline-size; }
 .dashboard-overview > *, .dashboard-overview .panel, .dashboard-overview .two-column > * { min-width: 0; max-width: 100%; box-sizing: border-box; }
-.dashboard-overview .page-intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 6px 24px; }
+.dashboard-overview .page-intro { margin-bottom: 24px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 6px 24px; }
 .dashboard-overview .page-intro > div { display: contents; }
 .dashboard-overview .page-intro .page-kicker { grid-column: 1 / -1; grid-row: 1; }
 .dashboard-overview .page-intro h2 { min-width: 0; grid-column: 1; grid-row: 2; margin: 0; }
@@ -619,9 +653,11 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
 .dashboard-overview .summary-card[data-metric="endangeredSpecies"] { --summary-background: #fff1db; --summary-ink: #926119; }
 .officer-layout.officer-layout.officer-layout .dashboard-overview .summary-card p { margin: 0; color: inherit; font-size: .875rem; line-height: 1.4; }
 .officer-layout.officer-layout.officer-layout .dashboard-overview .summary-card strong { color: inherit; font-size: 1.875rem; line-height: 1.2; }
-.dashboard-overview .two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.overview-medium { margin-top: 18px; }
-.statistics-scope { margin: 0 0 16px; color: #5b7065; font-size: .8125rem; line-height: 1.5; }
+.dashboard-overview .two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.dashboard-overview .two-column > .panel { margin-top: 0; }
+.dashboard-overview .two-column.overview-medium { grid-template-columns: minmax(0, 1fr) 18rem; align-items: start; gap: 24px; margin-top: 24px; }
+@container (min-width: 1251px) { .dashboard-overview .two-column.overview-medium { align-items: stretch; } }
+.statistics-scope { margin: 0 0 24px; color: #5b7065; font-size: .8125rem; line-height: 1.5; }
 .status-scope { margin: 0 0 12px; color: #5b7065; font-size: .8125rem; }
 .conservation-row { padding-block: 9px; border-bottom: 1px solid #edf0ed; }
 .conservation-row:last-child { border-bottom: 0; }
@@ -632,12 +668,41 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
 .conservation-row[data-status="near-threatened"] .status-fill { background: #71845b; }
 .conservation-row[data-status="vulnerable"] .status-fill { background: #9a6814; }
 .conservation-row[data-status="endangered"] .status-fill, .conservation-row[data-status="critically-endangered"] .status-fill { background: #b84938; }
-.dashboard-overview .panel-header { flex-wrap: wrap; gap: 12px; align-items: center; }
+.dashboard-overview .panel-header { flex-direction: row; flex-wrap: wrap; gap: 12px; align-items: center; }
 .dashboard-overview .panel-header > div { min-width: 0; flex: 1 1 14rem; }
 .dashboard-overview .panel-header > button { max-width: 100%; flex: 0 0 auto; }
 .officer-layout.officer-layout.officer-layout .dashboard-overview .overview-table-scroll { min-width: 0; max-width: 100%; width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
-.officer-layout.officer-layout.officer-layout .dashboard-overview .pending-review-table { min-width: 50rem; }
-.officer-layout.officer-layout.officer-layout .dashboard-overview .field-observations-table { min-width: 50rem; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview .pending-review-table { min-width: 0; width: 100%; table-layout: fixed; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview .field-observations-table { min-width: 0; width: 100%; table-layout: fixed; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview :is(.page-kicker, .section-kicker) { color: #426b56; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview .overview-table-scroll table :is(.action-button, .secondary-button) { height: auto; min-height: 44px; min-width: 44px; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview :is(button, a):focus-visible { outline: 3px solid #33745d; outline-offset: 2px; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview .overview-table-scroll:focus-visible { outline: 3px solid #33745d; outline-offset: -3px; }
+.dashboard-overview .field-observations-table col.overview-observation { width: 20%; }
+.dashboard-overview .field-observations-table col.overview-plant { width: 10%; }
+.dashboard-overview .field-observations-table col.overview-species { width: 19%; }
+.dashboard-overview .field-observations-table col.overview-subject { width: 18%; }
+.dashboard-overview .field-observations-table col.overview-status { width: 17%; }
+.dashboard-overview .field-observations-table col.overview-actions { width: 16%; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview :is(.pending-review-table, .field-observations-table) :is(th, td) { white-space: normal; overflow-wrap: anywhere; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview :is(.pending-review-table, .field-observations-table) :is(.badge, .action-button) { min-width: 0; max-width: 100%; width: fit-content; white-space: normal; overflow-wrap: anywhere; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview :is(.pending-review-table, .field-observations-table) .badge { white-space: nowrap; overflow-wrap: normal; max-width: none; flex-shrink: 0; }
+.dashboard-overview :is(.pending-review-table, .field-observations-table) :deep(.monitoring-id-line) { min-width: 0; max-width: 100%; white-space: normal; }
+.dashboard-overview :is(.pending-review-table, .field-observations-table) :deep(.monitoring-id-line > span:first-child) { min-width: 0; overflow-wrap: anywhere; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview :deep(.dashboard-map-empty) { color: #426b56; }
+.officer-layout.officer-layout.officer-layout .dashboard-overview .pending-review-table col { width: 20%; }
+.overview-cell-label { display: none; }
+@container (max-width: 1250px) { .dashboard-overview .two-column.overview-medium { grid-template-columns: minmax(0, 1fr); } }
+@container (max-width: 800px) {
+  .officer-layout.officer-layout.officer-layout .dashboard-overview :is(.pending-review-table, .field-observations-table) { display: block; }
+  .dashboard-overview :is(.pending-review-table, .field-observations-table) colgroup { display: none; }
+  .dashboard-overview :is(.pending-review-table, .field-observations-table) thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .dashboard-overview :is(.pending-review-table, .field-observations-table) tbody { display: grid; gap: 12px; }
+  .dashboard-overview :is(.pending-review-table, .field-observations-table) tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 16px; padding: 14px; border: 1px solid #dfe7df; border-radius: 10px; background: #fff; }
+  .officer-layout.officer-layout.officer-layout .dashboard-overview :is(.pending-review-table, .field-observations-table) td { display: block; min-width: 0; padding: 0; border: 0; }
+  .dashboard-overview :is(.pending-review-table, .field-observations-table) td:nth-child(1), .dashboard-overview :is(.pending-review-table, .field-observations-table) td:nth-child(4) { grid-column: 1 / -1; }
+  .dashboard-overview :is(.pending-review-table, .field-observations-table) .overview-cell-label { display: block; margin-bottom: 4px; color: #426b56; font-size: var(--officer-small, .75rem); font-weight: 700; line-height: 1.5; }
+}
 .overview-observation, .overview-subject { width: 14rem; }
 .overview-plant { width: 7rem; }
 .overview-species { width: 24%; }
@@ -675,15 +740,15 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
 .overview-row > strong { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .overview-row:last-child { border-bottom: 0; }
 .dashboard-lower {
-  margin-top: 18px;
+  margin-top: 24px;
 }
 .two-column + .panel {
-  margin-top: 18px;
+  margin-top: 24px;
 }
 .dashboard-state {
   margin: 0;
   padding: 28px 18px;
-  color: #7b8a83;
+  color: #5b7065;
   font-size: 11px;
   text-align: center;
 }

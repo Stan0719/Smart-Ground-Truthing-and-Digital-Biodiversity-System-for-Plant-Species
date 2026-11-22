@@ -240,13 +240,13 @@ test("metadata checkout failure stays UNKNOWN without leaking details or blockin
   assert.ok(!JSON.stringify(logs).includes("private-metadata-connection-detail"));
 });
 
-test("production startup opts in before listening and closes existing resources on diagnostic failure", async () => {
+test("normal production startup requests writes and closes resources on diagnostic failure", async () => {
   const source = readFileSync(join(__dirname, "../server.js"), "utf8");
   const start = source.indexOf("  const speciesPhotoWritesEnabled = speciesPhotoWritesRequested();", source.indexOf("async function start()"));
   assert.ok(start >= 0);
   const code = source.slice(start, source.indexOf("  const officerNotifications =", start));
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  for (const enabled of [false, true]) {
+  for (const enabled of [true]) {
     const events = [];
     const pool = { query: async () => events.push("preflight"), end: async () => events.push("pool-closed") };
     const auth = { db: { close: async () => events.push("auth-closed") } };
@@ -254,11 +254,11 @@ test("production startup opts in before listening and closes existing resources 
     const result = run(auth, pool, { argv: enabled ? ["--verify-species-photo-startup"] : [] }, () => ({
       verifySpeciesPhotoStartup: async (options) => {
         assert.equal(options.pool, pool);
-        assert.equal(options.writesEnabled, false);
+        assert.equal(options.writesEnabled, true);
         events.push("diagnostic");
         throw Object.assign(Error("Expected offline failure"), { code: "PHOTO_STARTUP_CHECK_FAILED" });
       },
-    }), () => false, "plant_app.plant_record");
+    }), () => true, "plant_app.plant_record");
     if (enabled) {
       await assert.rejects(result, { code: "PHOTO_STARTUP_CHECK_FAILED" });
       assert.deepEqual(events, ["diagnostic", "auth-closed", "pool-closed"]);
@@ -268,3 +268,6 @@ test("production startup opts in before listening and closes existing resources 
     }
   }
 });
+
+
+

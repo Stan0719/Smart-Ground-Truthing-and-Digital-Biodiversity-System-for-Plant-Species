@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '../styles/officer-page-polish.css'
 import { computed, ref } from 'vue'
 import ActionFeedback from '../components/ActionFeedback.vue'
 import { logout } from '../services/auth'
@@ -27,6 +28,7 @@ useAuthenticatedPageTranslation('.officer-layout')
 const items = [
   { labelKey: 'dashboardNav.dashboard', icon: 'dashboard', name: 'conservation-dashboard' },
   { labelKey: 'dashboardNav.plantSpecies', icon: 'species', name: 'conservation-species' },
+  { labelKey: 'officerPlants.title', icon: 'species', name: 'conservation-plants' },
   { labelKey: 'dashboardNav.observations', icon: 'observation', name: 'conservation-observations' },
   { labelKey: 'dashboardNav.reviewSubmissions', icon: '✓', name: 'conservation-reviews' },
   { labelKey: 'dashboardNav.biodiversityMap', icon: 'map', name: 'conservation-map' },
@@ -54,7 +56,7 @@ const closeControl = () =>
 
 <template>
   <ActionFeedback v-if="logoutError" :key="logoutSequence" :feedback-id="logoutSequence" variant="error" :message="t('officerFeedback.logoutFailed')" @dismiss="logoutError = false" />
-  <div class="officer-layout" :class="{ 'sidebar-collapsed': collapsed }">
+  <div class="officer-layout" :class="{ 'sidebar-collapsed': collapsed }" :data-officer-standard="['conservation-plants', 'conservation-profile', 'conservation-species', 'conservation-observations', 'conservation-reviews', 'conservation-map', 'conservation-iot', 'conservation-alerts', 'conservation-reports'].includes(String(route.name)) ? '' : undefined">
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <button
         class="sidebar-close-button"
@@ -260,3 +262,4 @@ const closeControl = () =>
 <style src="../styles/conservation.css"></style>
 <style src="../styles/officer-typography.css"></style>
 <style src="../styles/officer-header.css"></style>
+

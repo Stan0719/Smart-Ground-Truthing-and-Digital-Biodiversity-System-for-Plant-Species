@@ -36,7 +36,7 @@ function createPlantApp({
   officerNotifications = null,
   proximityConfig = {},
   qrPlantSchema = process.env.PLANT_QR_PLANT_SCHEMA || "plant_app",
-  speciesPhotoWritesEnabled = false,
+  speciesPhotoWritesEnabled = true,
   recordingsRoot,
 }) {
   qrPlantSchema = normalizeQrPlantSchema(qrPlantSchema);
@@ -72,6 +72,8 @@ function createPlantApp({
   app.use(identity(auth));
   const allow = (permission) => requirePermission(auth, permission);
   mountStaffNotifications(app, { pool });
+  require('./officer-plants.cjs').mountOfficerPlants(app, { pool, allow });
+  require('./officer-plant-edit.cjs').mountOfficerPlantEdit(app, { pool, allow });
   mountDomain(app, { auth, pool, allow, officerNotifications, qrPlantSchema });
   mountWebsiteTranslations(app, { pool, allow, origins });
   mountSpeciesDictionary(app, { allow });
@@ -130,7 +132,7 @@ function createPlantApp({
     if (status >= 500)
       console.error("Plant API request failed:", error.code ?? error.name);
     res.status(status).json({
-      ...(["SUBMISSION_REJECTED", "SPECIES_REQUEST_LINK_CONFLICT", "SPECIES_REQUEST_REVIEW_BUSY",
+      ...(["PLANT_DELETE_REFERENCED", "PLANT_DELETE_UNAVAILABLE", "PLANT_DELETE_CONFLICT", "PLANT_EDIT_INVALID", "PLANT_EDIT_HISTORY_REQUIRED", "PLANT_EDIT_UNAVAILABLE", "PLANT_EDIT_APPROVED_ONLY", "PLANT_EDIT_ACTIVE_PROPOSAL", "PLANT_EDIT_BASELINE_UNAVAILABLE", "PLANT_EDIT_CONFLICT", "SPECIES_DELETE_REFERENCED", "SUBMISSION_REJECTED", "SPECIES_REQUEST_LINK_CONFLICT", "SPECIES_REQUEST_REVIEW_BUSY",
         "SPECIES_DUPLICATE_APPROVED", "SPECIES_DUPLICATE_PENDING", "SPECIES_DUPLICATE_CORRECTION"].includes(error.code)
         ? { code: error.code } : {}),
       ...(typeof error.duplicate_type === "string" ? { duplicate_type: error.duplicate_type } : {}),

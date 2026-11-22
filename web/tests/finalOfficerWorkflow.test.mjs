@@ -37,8 +37,8 @@ function harness(name,{rows=[],proposals=[],fail=false,props={},language='en',ca
 const request=(id,overrides={})=>({request_id:id,owner_subject:'staff:bot',requested_by:'staff:bot',request_status:'Pending Review',scientific_name:'Species '+id,common_name:'Common',content_revision:1,review_cycle:1,submitted_at:'2026-11-18T00:00:00Z',...overrides})
 test('standalone Species cells are display-only and retain exact detail identity without a Plant association',async()=>{
  const row=requests.mapLinkedSpeciesRequest({species_request_id:2,species_request:{...request(2),proposed_scientific_name:'Species 2'}},true)
- const h=harness('StandaloneSpeciesRows',{props:{row,submitter:'Botanist Aina',reviewer:'\u2014',authorized:true}})
- try{await flush();assert.equal(h.calls.length,0);const cells=nodes(h.render()).filter(n=>n.type==='td');assert.equal(cells.length,11);assert.equal(cells[1].children,'\u2014');assert.equal(cells[4].children,'Botanist Aina');assert.equal(cells[5].children,'\u2014');nodes(cells[10]).find(n=>n.type==='button').props.onClick();assert.ok(h.emits.some(e=>e[0]==='open'&&e[1]==='2'));h.props.authorized=false;assert.equal(nodes(h.render()).find(n=>n.type==='button').props.disabled,true)}finally{h.stop()}
+ const h=harness('StandaloneSpeciesRows',{props:{row,submitter:'Botanist Aina',reviewer:'\u2014',zoneLabel:'Location Zone',authorized:true}})
+ try{await flush();assert.equal(h.calls.length,0);const cells=nodes(h.render()).filter(n=>n.type==='td');assert.equal(cells.length,11);assert.equal(cells[1].children.at(-1).children,'\u2014');assert.equal(cells[4].children.at(-1).children,'Botanist Aina');assert.equal(cells[5].children.at(-1).children,'\u2014');assert.equal(cells[6].children.at(-1).children,'\u2014');nodes(cells[10]).find(n=>n.type==='button').props.onClick();assert.ok(h.emits.some(e=>e[0]==='open'&&e[1]==='2'));h.props.authorized=false;assert.equal(nodes(h.render()).find(n=>n.type==='button').props.disabled,true)}finally{h.stop()}
 })
 
 test('all new workflow labels have EN/MS/ZH parity and no placeholder text',()=>{

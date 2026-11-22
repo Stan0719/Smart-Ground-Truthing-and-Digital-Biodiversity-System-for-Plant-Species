@@ -34,7 +34,7 @@ async function harness(language='en', overrides={}, fetchHandler=async()=>Respon
     if(name==='vue-i18n')return {useI18n:()=>({t:translate,te:key=>translate(key)!==key})}
     if(name.endsWith('ActionFeedback.vue'))return {props:['message'],setup(props){return ()=>vue.h('div',{role:'status'},props.message)}}
     if(name.endsWith('workflowBadge'))return {workflowBadgeStyle}
-    if(name.endsWith('MonitoringIdentifier.vue'))return {props:['value'],setup(props){return ()=>vue.h('span',{},String(props.value))}}
+    if(name.endsWith('MonitoringIdentifier.vue'))return {props:['value','labels'],setup(props){return ()=>vue.h('span',{},props.labels?.get(props.value)||String(props.value))}}
     if(name.endsWith('PlantPhotoLightbox.vue'))return {setup(_props,{expose}){expose({open(){},close(){}});return ()=>null}}
     if(name.endsWith('officerMonitoringDisplay'))return {reviewDateTime:value=>value}
     if(name.endsWith('AppModal.vue'))return {setup(_props,{slots}){return ()=>vue.h('section',{},slots.default?.())}}
@@ -46,7 +46,7 @@ async function harness(language='en', overrides={}, fetchHandler=async()=>Respon
   exports.default.render=exports.render
   const make=tag=>({tag,children:[],props:{},text:'',focus(){this.focused=true},showModal(){this.open=true},close(){this.open=false}})
   const renderer=vue.createRenderer({createElement:make,createText:text=>({...make('text'),text}),createComment:()=>make('comment'),setText:(n,t)=>n.text=t,setElementText:(n,t)=>{n.text=t;n.children=[]},parentNode:n=>n.parent,nextSibling:n=>n?.parent?.children[n.parent.children.indexOf(n)+1]||null,patchProp:(n,k,_old,v)=>n.props[k]=v,insert:(n,p,anchor)=>{if(n.parent)n.parent.children=n.parent.children.filter(c=>c!==n);n.parent=p;const i=anchor?p.children.indexOf(anchor):-1;if(i<0)p.children.push(n);else p.children.splice(i,0,n)},remove:n=>{if(n?.parent)n.parent.children=n.parent.children.filter(child=>child!==n)}})
-  const root=make('root'),app=renderer.createApp(exports.default,{onUpdated:row=>updates.push(row)});app.mount(root);await flush()
+  const root=make('root'),app=renderer.createApp(exports.default,{staffNames:{bot:'Botanist Name'},onUpdated:row=>updates.push(row)});app.mount(root);await flush()
   return {root,calls,route,app,updates,setLatest:patch=>latest={...latest,...patch},setReadFailure:value=>readFailure=value,setReader:fn=>reader=fn,changeSession:(user,pending=false)=>sessionChanged(user,pending),expire:()=>sessionChanged(null,true),setFailure:status=>{failureStatus=status;fail=true},setPostGate:value=>postGate=value,setConflict:()=>fail=true,complete:(status='Approved')=>{fail=false;latest={...latest,status}},button:label=>nodes(root,n=>n.tag==='button'&&text(n).trim()===label).at(-1)}
 }
 test('comparisons retain omitted fields, expose true changed values and never fabricate missing baseline',()=>{
@@ -118,6 +118,15 @@ test('polished modal renders derived summary, changed rows, photo retention and 
     assert.ok(nodes(h.root,n=>n.tag==='button'&&n.props.class==='reject-change').length)
     assert.ok(nodes(h.root,n=>n.tag==='button'&&n.props.class==='approve-change').length)
     assert.ok(!text(h.root).includes('fixture-asset'),'raw retained-photo identifiers are absent from the normal form')
+  } finally {h.app.unmount()}
+})
+test('species change proposal displays the submitter name from the authorized staff-name map',async()=>{
+  const h=await harness()
+  try {
+    h.route.query={change:id};await flush()
+    assert.match(text(h.root),/Submitted by Botanist Name/)
+    assert.doesNotMatch(text(h.root),/Submitted by staff:bot/)
+    assert.ok(text(h.root).includes('Botanist Name'))
   } finally {h.app.unmount()}
 })
 

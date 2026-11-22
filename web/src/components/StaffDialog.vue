@@ -5,20 +5,20 @@ const emit = defineEmits<{ close: [] }>()
 const card = ref<HTMLElement | null>(null)
 let previous: HTMLElement | null = null
 let overflow = ''
+const inertNodes = new Map<HTMLElement, boolean>()
 const close = () => {
   if (!props.busy) emit('close')
 }
+const focusables = () => [...(card.value?.querySelectorAll<HTMLElement>(
+  'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
+) || [])].filter((element) => element.getAttribute('aria-disabled') !== 'true' && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden' && !element.closest('[inert],[aria-hidden="true"]'))
 function keys(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault()
     close()
   }
   if (event.key !== 'Tab') return
-  const controls = [
-    ...(card.value?.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]',
-    ) || []),
-  ].filter((element) => element.offsetParent !== null)
+  const controls = focusables()
   const first = controls[0],
     last = controls.at(-1)
   if (!first) {
@@ -42,10 +42,20 @@ onMounted(async () => {
   overflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   document.addEventListener('keydown', keys)
+  let current = card.value?.parentElement
+  while (current?.parentElement) {
+    for (const sibling of current.parentElement.children) if (sibling !== current && sibling instanceof HTMLElement) {
+      inertNodes.set(sibling, sibling.inert)
+      sibling.inert = true
+    }
+    current = current.parentElement
+    if (current === document.body) break
+  }
   await nextTick()
-  card.value?.querySelector<HTMLElement>('input, select, textarea')?.focus()
+  ;(focusables()[0] || card.value)?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
+  for (const [node, inert] of inertNodes) node.inert = inert
   document.body.style.overflow = overflow
   document.removeEventListener('keydown', keys)
   if (previous?.isConnected) previous.focus()

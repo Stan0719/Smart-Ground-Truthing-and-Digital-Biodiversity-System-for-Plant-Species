@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import '../styles/admin-typography.css'
 import '../styles/admin-tables.css'
+import '../styles/admin-page-polish.css'
 import { logout as serverLogout } from '../services/auth'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'

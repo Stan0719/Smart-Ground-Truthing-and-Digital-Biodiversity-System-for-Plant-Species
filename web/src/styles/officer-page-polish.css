@@ -1,0 +1,168 @@
+/* Presentation only. The layout opts in eight Officer routes; Overview and
+   other roles retain their existing styles. Tables keep their own structure. */
+.officer-layout.officer-layout.officer-layout[data-officer-standard] {
+  --officer-card: 1.125rem;
+  --officer-page-gap: 24px;
+  --officer-panel-padding: 24px;
+  --officer-support-ink: #5b7065;
+  --officer-kicker-ink: #426b56;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .conservation-page {
+  min-width: 0;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .conservation-page > :is(.page-intro, .profile-intro) {
+  margin-bottom: var(--officer-page-gap);
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.page-kicker, .section-kicker, .camera-kicker) {
+  color: var(--officer-kicker-ink);
+}
+
+/* Supporting copy only: semantic error/warning/status colors remain owned by
+   their components, including review conflicts and evidence safeguards. */
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.dataset-note, .state-note, .detail-state, .state-message, .empty-row, .evidence-unavailable span, .recording-unavailable span, .coordinate-note, .persistence-note, .chart-note, .report-meta, .map-empty, .prototype-note, .settings-field input[readonly]):not(.error):not(.warning):not(.error-state):not(.warning-state):not([role="alert"]) {
+  color: var(--officer-support-ink);
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.dataset-note, .state-note, .detail-state, .state-message, .state-cell, .empty-row, .empty-state, .loading-state, .map-empty, .filter-error, .field-error, .success-message) {
+  font-size: var(--officer-support, .8125rem);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .conservation-page > :is(.control-bar, .panel, .table-panel) {
+  margin-top: 0;
+  margin-bottom: var(--officer-page-gap);
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.panel, .table-panel, .settings-card, .control-bar, .form-grid, .detail-list, .modal-card, .reports-panel, .investigation-grid, .reading-measurements) {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Keep edge-to-edge maps and table surfaces, report metrics and compact KPI
+   cards at their component-defined padding. */
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.panel:not(.table-panel):not(.map-card), .settings-card) {
+  padding: var(--officer-panel-padding);
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .profile-settings {
+  gap: var(--officer-page-gap);
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .settings-card header {
+  margin-bottom: var(--officer-page-gap);
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.panel-header, .grid-heading) {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .panel-header {
+  flex-direction: row;
+  align-items: center;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .panel-header > div {
+  min-width: 0;
+  flex: 1 1 14rem;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.panel-header h2, .panel-header h3, .grid-heading h3, .settings-card h2) {
+  margin-top: 0;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.settings-card h2, .detection-summary h4, .report-chart h3, .chart-card h3, .source-summary h3) {
+  font-size: var(--officer-card);
+  line-height: 1.4;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.form-footer, .filter-actions, .modal-actions, .review-actions, .report-actions, .pagination) {
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .conservation-page :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.primary-button, .secondary-button, .danger-button, .primary-link, .close-button) {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.close-button, .modal-close, .photo-close, .drawer-close) {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] .queue-help-button {
+  min-width: 28px;
+  min-height: 28px;
+}
+
+/* Solid outlines remain visible at zoom and in keyboard navigation, including
+   profile inputs whose component removes the default outline. */
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(button, a, input, select, textarea, .table-scroll, .table-wrap):focus-visible {
+  outline: 3px solid #33745d;
+  outline-offset: 2px;
+}
+
+/* Confine wide operational tables to their existing scroll region. Do not
+   change their columns, sticky positioning, font sizes or action layouts. */
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.table-scroll, .table-wrap, .table-wrapper) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.modal-header, .review-section-heading, .reading-id-row, .investigation-title) {
+  min-width: 0;
+  gap: 12px;
+}
+
+.officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.modal-header > div, .modal-header h2, .review-section-heading > span, .investigation-title) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 899px) {
+  .officer-layout.officer-layout.officer-layout[data-officer-standard] {
+    --officer-panel-padding: 20px;
+  }
+}
+
+@media (max-width: 599px) {
+  .officer-layout.officer-layout.officer-layout[data-officer-standard] {
+    --officer-panel-padding: 18px;
+  }
+
+  .officer-layout.officer-layout.officer-layout[data-officer-standard] :is(.modal-actions, .form-footer, .filter-actions, .review-actions, .report-actions) > :is(button, a) {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .officer-layout.officer-layout.officer-layout[data-officer-standard] .queue-help-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+  .officer-layout.officer-layout.officer-layout[data-officer-standard] table :is(.action-button, .secondary-button, .table-action, .view-button, .delete-action, .row-actions button, .sensor-actions button, .actions button) {
+    height: auto;
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

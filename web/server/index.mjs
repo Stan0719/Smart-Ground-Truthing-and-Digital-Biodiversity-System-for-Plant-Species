@@ -10,6 +10,7 @@ import { createAuthLifecycle } from './auth-lifecycle.mjs'
 import { emailSettings } from './activation-configuration.mjs'
 import { createStaffInvitations, temporaryPasswordDelivery } from './activation.mjs'
 import { emailRuntimeConfiguration } from './email-diagnostics.mjs'
+import { createAdminNotificationProducer } from './admin-notifications.mjs'
 const inheritedEmailEnvironment = { ...process.env }
 loadServerEnvironment()
 const staffEmailSettings = emailSettings(process.env)
@@ -21,6 +22,7 @@ const diagnostics = createAuthDiagnostics({
 })
 const lifecycle = createAuthLifecycle({ diagnostics })
 const auth = await createAuth(database, { diagnostic: diagnostics.record })
+const adminNotifications = createAdminNotificationProducer({ auth, diagnostic: diagnostics.record })
 const resetConfiguration = recoveryConfig(fileURLToPath(new URL('./data/auth', import.meta.url)))
 const staff = createStaffInvitations({
   auth,
@@ -38,6 +40,7 @@ const server = createAuthServer({
   diagnostics,
   recovery,
   staff,
+  adminNotifications,
   key: process.env.FACE_ACCOUNT_SERVICE_KEY_FILE
     ? readFileSync(process.env.FACE_ACCOUNT_SERVICE_KEY_FILE)
     : null,

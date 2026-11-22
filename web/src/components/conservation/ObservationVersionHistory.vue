@@ -164,15 +164,15 @@ dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .history-technical { margin: 12px 0; font-size: 12px; }
 .history-technical summary { cursor: pointer; color: #245a46; }
 .history-technical dl { display: grid; gap: 6px; }
-.historical-photos { display: flex; flex-wrap: wrap; gap: 10px; }
+.historical-photos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); min-width: 0; gap: 10px; }
 .historical-photos img { width: 160px; max-width: 100%; height: 120px; object-fit: contain; }
 .history-dialog-host { display: contents; }
 .history-dialog-host .registration-snapshot-dialog { background: rgb(0 0 0 / 55%); }
 .history-dialog-host :deep(.photo-lightbox::backdrop) { background: rgb(0 0 0 / 85%); }
-.registration-snapshot-dialog :deep(.modal-card.wide) { width: min(960px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 0; }
+.registration-snapshot-dialog :deep(.modal-card.wide) { width: min(960px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 0; }
 .registration-snapshot-dialog :deep(.modal-header) { position: sticky; top: 0; z-index: 2; background: #fbfcf8; padding: 18px 24px; border-bottom: 1px solid #dfe7df; }
 .registration-snapshot-dialog .historical-detail { margin: 0; padding: 24px; border: 0; border-radius: 0; }
-.registration-snapshot-dialog .historical-fields { grid-template-columns: minmax(0,1fr) minmax(0,2fr); }
+.registration-snapshot-dialog .historical-fields { grid-template-columns: minmax(0,1fr) minmax(0,2fr); min-width: 0; }
 .registration-snapshot-dialog .historical-photos { width: 100%; margin-block: 20px; }
 .snapshot-title { display: flex; align-items: center; gap: 14px; color: #113e2a; font-weight: 700; }
 .snapshot-title-icon { display: grid; place-items: center; width: 52px; height: 52px; flex-shrink: 0; border-radius: 12px; background: #e6efe4; color: #24603f; font-size: 32px; }
@@ -190,7 +190,7 @@ dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 .snapshot-section dt, .snapshot-section dd { padding: 12px 0; border-bottom: 1px solid #e6ebe5; line-height: 1.5; font-size: 13px; }
 .snapshot-section > p { padding: 0 18px; }
 .registration-snapshot-dialog .historical-photos { margin: 0; padding: 18px; box-sizing: border-box; gap: 12px; }
-.snapshot-photo-button { padding: 0; border: 1px solid #d4dfd4; background: #f4f7f2; border-radius: 10px; overflow: hidden; cursor: zoom-in; width: calc(50% - 6px); }
+.snapshot-photo-button { width: 100%; min-width: 0; padding: 0; border: 1px solid #d4dfd4; background: #f4f7f2; border-radius: 10px; overflow: hidden; cursor: zoom-in; width: 100%; }
 .historical-photos .snapshot-photo-button img { display: block; width: 100%; height: 150px; object-fit: contain; }
 .history-technical { border: 1px solid #dbe5dc; border-radius: 12px; margin-block: 24px; overflow: hidden; }
 .history-technical summary { padding: 16px 18px; background: #e9f2e4; font-size: 15px; font-weight: 700; }
@@ -199,3 +199,6 @@ dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 @media (max-width: 600px) { .registration-snapshot-dialog :deep(.modal-card.wide) { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .registration-snapshot-dialog .historical-detail { padding: 16px; } .registration-snapshot-dialog .historical-fields { grid-template-columns: minmax(0,1fr); } }
 @media (max-width: 480px) { th, td { padding: 8px 5px; } .historical-fields { grid-template-columns: minmax(0, 1fr); gap: 4px; } .historical-fields dd { margin-bottom: 8px; } button { min-height: 44px; } }
 </style>
+
+
+

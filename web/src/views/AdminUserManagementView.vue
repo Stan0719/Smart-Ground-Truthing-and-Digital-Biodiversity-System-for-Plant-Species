@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, nextTick, watch } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ActionFeedback from '../components/ActionFeedback.vue'
 import AdminPageShell from '../components/AdminPageShell.vue'
@@ -220,18 +220,51 @@ function hideRoleInfo() { roleInfo.value?.hidePopover() }
 function leaveRoleInfo() { if (document.activeElement !== roleInfoButton.value) hideRoleInfo() }
 const actionModal = ref<HTMLElement | null>(null)
 const deleteUserName = computed(() => selectedUser.value?.name?.trim() || selectedUser.value?.email || selectedUser.value?.id || 'this user')
-let deleteReturnFocus: HTMLElement | null = null
+let actionReturnFocus: HTMLElement | null = null
+let actionPreviousOverflow = ''
+const actionInertNodes = new Map<HTMLElement, boolean>()
 watch(actionMode, async (mode, previous) => {
-  if (mode === 'delete') {
-    deleteReturnFocus = document.activeElement as HTMLElement | null
+  if (mode && !previous) {
+    actionReturnFocus = document.activeElement as HTMLElement | null
     await nextTick()
-    if (actionMode.value === 'delete') actionModal.value?.querySelector<HTMLElement>('[data-delete-cancel]')?.focus()
-  } else if (previous === 'delete') {
+    if (actionMode.value !== mode) return
+    actionPreviousOverflow = document.documentElement?.style?.overflow || ''
+    if (document.documentElement?.style) document.documentElement.style.overflow = 'hidden'
+    let current: HTMLElement | null = actionModal.value?.closest?.('.modal-backdrop') || null
+    while (current?.parentElement) {
+      for (const sibling of current.parentElement.children) if (sibling !== current && sibling instanceof HTMLElement) {
+        actionInertNodes.set(sibling, sibling.inert)
+        sibling.inert = true
+      }
+      current = current.parentElement
+      if (current === document.body) break
+    }
+    if (actionMode.value === mode) {
+      const initial = mode === 'delete'
+        ? actionModal.value?.querySelector<HTMLElement>('[data-delete-cancel]')
+        : actionModal.value?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')
+      ;(initial || actionModal.value)?.focus({ preventScroll: true })
+    }
+  } else if (!mode && previous) {
+    for (const [node, inert] of actionInertNodes) node.inert = inert
+    actionInertNodes.clear()
+    if (document.documentElement?.style) document.documentElement.style.overflow = actionPreviousOverflow
     await nextTick()
-    if (deleteReturnFocus?.isConnected) deleteReturnFocus.focus()
+    if (actionReturnFocus?.isConnected) actionReturnFocus.focus({ preventScroll: true })
     else document.querySelector<HTMLElement>('.admin-users .table-scroll')?.focus()
-    deleteReturnFocus = null
+    actionReturnFocus = null
+  } else if (mode && previous && mode !== previous) {
+    await nextTick()
+    const initial = mode === 'delete'
+      ? actionModal.value?.querySelector<HTMLElement>('[data-delete-cancel]')
+      : actionModal.value?.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')
+    ;(initial || actionModal.value)?.focus({ preventScroll: true })
   }
+})
+onBeforeUnmount(() => {
+  for (const [node, inert] of actionInertNodes) node.inert = inert
+  actionInertNodes.clear()
+  if (document.documentElement?.style) document.documentElement.style.overflow = actionPreviousOverflow
 })
 function handleActionBackdrop() {
   if (actionMode.value !== 'delete') { closeUserAction(); return }
@@ -246,15 +279,15 @@ function finishDeleteShake(event: AnimationEvent) {
   if (event.target === actionModal.value) actionModal.value?.classList.remove('user-delete-shake')
 }
 function onDeleteKeydown(event: KeyboardEvent) {
-  if (actionMode.value !== 'delete') return
-  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); return }
+  if (!actionMode.value) return
+  if (event.key === 'Escape' && actionMode.value === 'delete') { event.preventDefault(); event.stopPropagation(); return }
   if (event.key !== 'Tab') return
-  const buttons = actionModal.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
-  if (!buttons?.length) return
-  const first = buttons[0]!, last = buttons[buttons.length - 1]!
-  if (event.shiftKey && (document.activeElement === first || document.activeElement === actionModal.value)) {
-    event.preventDefault(); last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
+  const controls = [...(actionModal.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])') || [])].filter(element => element.getAttribute?.('aria-disabled') !== 'true' && (typeof element.getClientRects !== 'function' || element.getClientRects().length > 0) && (typeof getComputedStyle !== 'function' || getComputedStyle(element).visibility !== 'hidden'))
+  const first = controls[0], last = controls.at(-1)
+  if (!first) { event.preventDefault(); actionModal.value?.focus({ preventScroll: true }); return }
+  if (event.shiftKey && (document.activeElement === first || !actionModal.value?.contains(document.activeElement))) {
+    event.preventDefault(); last?.focus()
+  } else if (!event.shiftKey && (document.activeElement === last || !actionModal.value?.contains(document.activeElement))) {
     event.preventDefault(); first.focus()
   }
 }
@@ -447,7 +480,7 @@ function onDeleteKeydown(event: KeyboardEvent) {
         ref="actionModal"
         class="modal"
         :class="{ 'user-view-modal': actionMode === 'view', 'user-edit-modal': actionMode === 'edit', 'user-delete-modal': actionMode === 'delete' }"
-        :tabindex="actionMode === 'delete' ? -1 : undefined"
+        tabindex="-1"
         :aria-describedby="actionMode === 'delete' ? 'delete-user-question' : undefined"
         @keydown="onDeleteKeydown"
         @animationend="finishDeleteShake"

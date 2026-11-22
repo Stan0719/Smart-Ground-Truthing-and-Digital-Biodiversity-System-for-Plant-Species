@@ -32,10 +32,10 @@ test('N2 staff notification foundation uses isolated PostgreSQL only',async t=>{
     INSERT INTO rbac_species_visibility VALUES(1,'protected');
     INSERT INTO plant_record(plant_id,species_id,registered_subject,qr_token) VALUES(1,1,'staff:bot','fixture');
     INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES('1',1,'staff:bot','Pending Review','{}','fixture')`);
-  async function deliver({recipient='staff:one',role='Conservation Officer',kind='observation',type='registration_submitted',resource='1',eventId}={}){
+  async function deliver({recipient='staff:one',role='Conservation Officer',kind='observation',type='registration_submitted',resource='1',eventId,metadata={private:'do-not-project'}}={}){
     const event=eventId??randomUUID(),id=randomUUID();
     if(!eventId) await pool.query(`INSERT INTO staff_notification_event(id,source_key,event_type,audience_role,resource_kind,observation_id,metadata)
-      VALUES($1,$2,$3,$4,$5,$6,'{"private":"do-not-project"}')`,[event,'test:'+event,type,role,kind,kind==='observation'?resource:null]);
+      VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,[event,'test:'+event,type,role,kind,kind==='observation'?resource:null,JSON.stringify(metadata)]);
     await pool.query('INSERT INTO staff_notification(id,event_id,recipient_subject,intended_role) VALUES($1,$2,$3,$4)',[id,event,recipient,role]);
     return {id,event};
   }
@@ -59,10 +59,12 @@ test('N2 staff notification foundation uses isolated PostgreSQL only',async t=>{
   await t.test('recipient/role isolation, protected Officer access and safe projection',async()=>{
     first=await deliver();second=await deliver();
     await deliver({recipient:'staff:two'});
-    admin=await deliver({recipient:'staff:admin',role:'Administrator',kind:'system',type:'security_event'});
+    admin=await deliver({recipient:'staff:admin',role:'Administrator',kind:'system',type:'account_administration',metadata:{action:'staff_created',account_name:'Fixture Officer',password:'never-project'}});
     const list=await call();assert.equal(list.status,200);assert.equal(list.data.notifications.length,2);assert.equal(list.data.unread_count,2);
     assert.equal((await call('/unread-count')).data.unread_count,2);
     const a=await call('','GET',undefined,'admin');assert.equal(a.data.notifications.length,1);assert.equal(a.data.notifications[0].id,admin.id);
+    assert.deepEqual(a.data.notifications[0].admin_details,{action:'staff_created',account_name:'Fixture Officer'});
+    assert.ok(!JSON.stringify(a.data).includes('never-project'));
     assert.ok(!JSON.stringify(list.data).includes('do-not-project'));assert.ok(!JSON.stringify(list.data).includes('staff:'));
     assert.equal((await call('/'+admin.id+'/read','POST',{})).status,404);
     assert.equal((await call('/'+first.id+'/read','POST',{},'other')).status,404);

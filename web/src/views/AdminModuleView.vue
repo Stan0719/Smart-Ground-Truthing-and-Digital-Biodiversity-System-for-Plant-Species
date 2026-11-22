@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, onMounted, watch } from 'vue'
+import { computed, nextTick, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -133,12 +133,14 @@ type SensorForm = Pick<
 >
 
 const sensorModal = ref<'register' | 'view' | 'edit' | 'delete' | null>(null)
+let sensorDetailsOpener: HTMLElement | null = null
 const sensorFormError = ref('')
 const feedback = ref<{ id: number; variant: 'success' | 'error'; message: string } | null>(null)
 let feedbackId = 0
 const exportButton = ref<HTMLButtonElement | null>(null)
 const exportDialog = ref<HTMLElement | null>(null)
 const exportModalOpen = ref(false)
+const liveAlertDetailOpen = ref(false)
 const exportFromDate = ref('')
 const exportToDate = ref('')
 const exportType = ref<'All' | ActivityType>('All')
@@ -146,6 +148,52 @@ const exportModule = ref('All Modules')
 const exportScope = ref<'filtered' | 'all'>('filtered')
 const exportFormat = ref<'csv' | 'pdf'>('csv')
 const exportValidationMessage = ref('')
+function trapModalFocus(event: KeyboardEvent) {
+  if (event.key !== 'Tab') return
+  const dialog = event.currentTarget as HTMLElement
+  const controls = [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])')].filter(element => element.getAttribute('aria-disabled') !== 'true' && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden' && !element.closest('[inert],[aria-hidden="true"]'))
+  const first = controls[0], last = controls.at(-1)
+  if (!first) { event.preventDefault(); dialog.focus({ preventScroll: true }) }
+  else if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last?.focus() }
+  else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) { event.preventDefault(); first.focus() }
+}
+let adminModalOpener: HTMLElement | null = null
+let adminModalPreviousOverflow = ''
+const adminModalInertNodes = new Map<HTMLElement, boolean>()
+watch(() => Boolean(exportModalOpen.value || alertModal.value || liveAlertDetailOpen.value || sensorModal.value), async (active, wasActive) => {
+  if (active && !wasActive) {
+    adminModalOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    await nextTick()
+    if (!exportModalOpen.value && !alertModal.value && !liveAlertDetailOpen.value && !sensorModal.value) return
+    const backdrop = document.querySelector<HTMLElement>('.sensor-modal-backdrop')
+    if (!backdrop) return
+    adminModalPreviousOverflow = document.documentElement.style.overflow
+    document.documentElement.style.overflow = 'hidden'
+    let current: HTMLElement | null = backdrop
+    while (current?.parentElement) {
+      for (const sibling of current.parentElement.children) if (sibling !== current && sibling instanceof HTMLElement) {
+        adminModalInertNodes.set(sibling, sibling.inert)
+        sibling.inert = true
+      }
+      current = current.parentElement
+      if (current === document.body) break
+    }
+    const dialog = backdrop.querySelector<HTMLElement>('[role="dialog"]')
+    const firstControl = [...(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])') || [])].find(element => element.getAttribute('aria-disabled') !== 'true' && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden')
+    ;(firstControl || dialog)?.focus({ preventScroll: true })
+  } else if (!active && wasActive) {
+    for (const [node, inert] of adminModalInertNodes) node.inert = inert
+    adminModalInertNodes.clear()
+    document.documentElement.style.overflow = adminModalPreviousOverflow
+    if (adminModalOpener?.isConnected) adminModalOpener.focus({ preventScroll: true })
+    adminModalOpener = null
+  }
+})
+onBeforeUnmount(() => {
+  for (const [node, inert] of adminModalInertNodes) node.inert = inert
+  adminModalInertNodes.clear()
+  document.documentElement.style.overflow = adminModalPreviousOverflow
+})
 const sensorForm = ref<SensorForm>({
   id: '',
   deviceName: '',
@@ -310,6 +358,7 @@ const sensors = ref<IoTSensor[]>([
 interface PlantDevice {
   id: string
   name: string
+  device_type?: string | null
   plant_id: string | number | null
   status: string
   thresholds: Record<string, number>
@@ -333,10 +382,21 @@ interface PlantAlert {
 interface DevicesResponse { devices: PlantDevice[] }
 interface ReadingsResponse { readings: PlantReading[] }
 interface AlertsResponse { alerts: PlantAlert[]; responses: unknown[] }
+interface ThreatAlertDetail {
+  id: string
+  [key: string]: unknown
+}
+interface ThreatAlertDetailResponse { alert: ThreatAlertDetail; responses?: unknown[] }
 
 const liveDevices = ref<PlantDevice[]>([])
 const liveReadings = ref<PlantReading[]>([])
 const liveAlerts = ref<PlantAlert[]>([])
+const selectedLiveAlert = ref<PlantAlert | null>(null)
+const liveAlertDetail = ref<ThreatAlertDetail | null>(null)
+const liveAlertDetailLoading = ref(false)
+const liveAlertDetailError = ref('')
+let liveAlertDetailRequestVersion = 0
+let liveAlertDetailOpener: HTMLElement | null = null
 const iotLoading = ref(false)
 const devicesLoaded = ref(false)
 const readingsLoaded = ref(false)
@@ -348,6 +408,8 @@ let iotRequestVersion = 0
 
 const scalarText = (value: string | number | null | undefined, fallback = '—') =>
   value === null || value === undefined || value === '' ? fallback : String(value)
+const alertDetailText = (value: unknown) =>
+  typeof value === 'string' || typeof value === 'number' ? String(value) : '—'
 const formattedTimestamp = (value: string | null | undefined) => {
   if (value === null || value === undefined || value === '') return '—'
   const date = new Date(value)
@@ -370,7 +432,7 @@ const sensorRows = computed<IoTSensor[]>(() => liveDevices.value.map((device) =>
   return {
     id: device.id,
     deviceName: device.name,
-    deviceType: '—',
+    deviceType: scalarText(device.device_type),
     serialNumber: '—',
     locationDescription: '—',
     plant: scalarText(device.plant_id),
@@ -648,6 +710,53 @@ const filteredIoTSensors = computed(() => {
 })
 const iotStatusOptions = computed(() => [...new Set(sensorRows.value.map((sensor) => sensor.status))])
 const recentAlerts = computed(() => liveAlerts.value.slice(0, 3))
+const selectedLiveAlertDevice = computed(() =>
+  selectedLiveAlert.value
+    ? liveDevices.value.find((device) => device.id === selectedLiveAlert.value?.device_id)
+    : undefined,
+)
+const liveAlertDetailFields = computed(() => {
+  const alert = liveAlertDetail.value
+  if (!alert) return [] as { label: string; value: string }[]
+  const evidence = alert.sensor_evidence && typeof alert.sensor_evidence === 'object'
+    ? alert.sensor_evidence as Record<string, unknown>
+    : undefined
+  const plant = alert.plant_id ?? evidence?.plant_id ?? selectedLiveAlertDevice.value?.plant_id
+  const timestamp = alert.detected_at ?? alert.created_at
+  const fields: Array<[string, unknown]> = [
+    ['Alert ID', alert.id],
+    ['Alert Type', alert.alert_type ?? alert.metric ?? selectedLiveAlert.value?.metric],
+    ['Severity', alert.severity],
+    ['Device', selectedLiveAlertDevice.value?.name
+      ? `${selectedLiveAlertDevice.value.name} (${alert.device_id ?? selectedLiveAlert.value?.device_id ?? '—'})`
+      : alert.device_id ?? selectedLiveAlert.value?.device_id],
+    ['Associated Plant', plant],
+    ['Timestamp', timestamp ? formattedTimestamp(String(timestamp)) : undefined],
+    ['Status', alert.status ?? selectedLiveAlert.value?.status],
+  ]
+  return fields.map(([label, value]) => ({ label, value: alertDetailText(value) }))
+})
+const liveAlertRecordedFields = computed(() => {
+  const alert = liveAlertDetail.value
+  if (!alert) return [] as { label: string; value: string }[]
+  const fields: Array<[string, unknown]> = [
+    ['Reading ID', alert.reading_id],
+    ['Metric', alert.metric],
+    ['Recorded Value', alert.value],
+    ['Camera ID', alert.camera_id],
+    ['Description', alert.description],
+    ['Sensor Evidence', alert.sensor_evidence],
+    ['Video Reference', alert.video_path],
+  ]
+  return fields.flatMap(([label, value]) => {
+    if (value === null || value === undefined || value === '') return []
+    let rendered: string
+    if (typeof value === 'object') {
+      try { rendered = JSON.stringify(value) } catch { return [] }
+    } else rendered = String(value)
+    return [{ label, value: rendered }]
+  })
+})
 const filteredAlerts = computed(() => {
   const query = search.value.trim().toLowerCase()
   return alerts.value.filter((alert) => {
@@ -860,6 +969,59 @@ const exportActivity = async () => {
 const openAlertDetails = (alert: ThreatAlert) => {
   selectedAlert.value = alert
   alertModal.value = 'view'
+  void nextTick(() => document.querySelector<HTMLElement>('.alert-detail-modal')?.focus({ preventScroll: true }))
+}
+
+async function loadLiveAlertDetail() {
+  const selected = selectedLiveAlert.value
+  if (!selected) return
+  const requestVersion = ++liveAlertDetailRequestVersion
+  liveAlertDetailLoading.value = true
+  liveAlertDetailError.value = ''
+  liveAlertDetail.value = null
+  try {
+    const result = await plantApi<ThreatAlertDetailResponse>(`/alerts/${encodeURIComponent(selected.id)}`)
+    if (requestVersion !== liveAlertDetailRequestVersion || !liveAlertDetailOpen.value) return
+    if (!result?.alert || result.alert.id !== selected.id) {
+      liveAlertDetailError.value = 'The alert details are unavailable.'
+      return
+    }
+    liveAlertDetail.value = result.alert
+  } catch (error) {
+    if (requestVersion !== liveAlertDetailRequestVersion || !liveAlertDetailOpen.value) return
+    liveAlertDetailError.value = error instanceof Error ? error.message : 'Unable to load alert details.'
+  } finally {
+    if (requestVersion === liveAlertDetailRequestVersion) {
+      liveAlertDetailLoading.value = false
+      await nextTick()
+      const dialog = document.querySelector<HTMLElement>('.live-alert-detail-modal')
+      if (dialog && !dialog.contains(document.activeElement))
+        dialog.querySelector<HTMLElement>('[aria-label="Close alert details"]')?.focus({ preventScroll: true })
+    }
+  }
+}
+
+function openLiveAlertDetails(alert: PlantAlert) {
+  liveAlertDetailOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  selectedLiveAlert.value = alert
+  liveAlertDetail.value = null
+  liveAlertDetailError.value = ''
+  liveAlertDetailOpen.value = true
+  void loadLiveAlertDetail()
+}
+
+function closeLiveAlertDetails() {
+  const opener = liveAlertDetailOpener
+  liveAlertDetailRequestVersion += 1
+  liveAlertDetailOpen.value = false
+  selectedLiveAlert.value = null
+  liveAlertDetail.value = null
+  liveAlertDetailError.value = ''
+  liveAlertDetailLoading.value = false
+  void nextTick(() => {
+    if (!liveAlertDetailOpen.value && opener?.isConnected) opener.focus({ preventScroll: true })
+    if (liveAlertDetailOpener === opener) liveAlertDetailOpener = null
+  })
 }
 
 const closeAlertModal = () => {
@@ -880,6 +1042,7 @@ const markAlertReviewing = () => {
 const openResolveConfirmation = () => {
   if (!selectedAlert.value || selectedAlert.value.status === 'Resolved') return
   alertModal.value = 'resolve'
+  void nextTick(() => document.querySelector<HTMLElement>('.alert-modal-actions button')?.focus({ preventScroll: true }))
 }
 
 const cancelResolveAlert = () => {
@@ -928,14 +1091,19 @@ const openRegisterSensor = () => {
 }
 
 const openSensorDetails = (sensor: IoTSensor) => {
+  sensorDetailsOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   selectedSensor.value = sensor
   sensorModal.value = 'view'
+  void nextTick(() => document.querySelector<HTMLElement>('.sensor-modal[aria-labelledby="sensor-details-title"]')?.focus({ preventScroll: true }))
 }
 
 const closeSensorDetails = () => {
+  const opener = sensorDetailsOpener
+  sensorDetailsOpener = null
   selectedSensor.value = null
   sensorModal.value = null
   sensorFormError.value = ''
+  void nextTick(() => opener?.isConnected && opener.focus({ preventScroll: true }))
 }
 
 const openEditSensor = (sensor: IoTSensor) => {
@@ -951,11 +1119,13 @@ const openEditSensor = (sensor: IoTSensor) => {
   }
   sensorFormError.value = ''
   sensorModal.value = 'edit'
+  void nextTick(() => document.querySelector<HTMLElement>('.sensor-form-modal input:not(:disabled), .sensor-form-modal select:not(:disabled)')?.focus({ preventScroll: true }))
 }
 
 const openDeleteSensor = (sensor: IoTSensor) => {
   selectedSensor.value = sensor
   sensorModal.value = 'delete'
+  void nextTick(() => document.querySelector<HTMLElement>('.delete-modal button:not(:disabled)')?.focus({ preventScroll: true }))
 }
 
 const validateSensorForm = (editing = false) => {
@@ -1426,7 +1596,9 @@ const confirmDeleteSensor = () => {
                 </td>
                 <td>{{ formattedTimestamp(alert.created_at) }}</td>
                 <td>
-                  <RouterLink class="table-action action-link" to="/admin/iot">View</RouterLink>
+                  <button class="table-action" type="button" @click="openLiveAlertDetails(alert)">
+                    View
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -1734,6 +1906,7 @@ const confirmDeleteSensor = () => {
         aria-modal="true"
         aria-labelledby="export-activity-title"
         tabindex="-1"
+        @keydown="trapModalFocus"
       >
         <header class="sensor-modal-head">
           <div>
@@ -1843,6 +2016,63 @@ const confirmDeleteSensor = () => {
     </div>
 
     <div
+      v-if="liveAlertDetailOpen"
+      class="sensor-modal-backdrop"
+      @click.self="closeLiveAlertDetails"
+    >
+      <section
+        class="sensor-modal alert-detail-modal live-alert-detail-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="live-alert-details-title"
+        tabindex="-1"
+        @keydown="trapModalFocus"
+        @keydown.esc="closeLiveAlertDetails"
+      >
+        <header class="sensor-modal-head">
+          <div>
+            <p>THREAT ALERT</p>
+            <h2 id="live-alert-details-title">Alert Details</h2>
+          </div>
+          <button type="button" aria-label="Close alert details" @click="closeLiveAlertDetails">×</button>
+        </header>
+
+        <p v-if="liveAlertDetailLoading" role="status">Loading alert details…</p>
+        <div v-else-if="liveAlertDetailError" class="detail-section" role="alert">
+          <p>{{ liveAlertDetailError }}</p>
+          <div class="sensor-modal-actions alert-modal-actions">
+            <button class="secondary" type="button" @click="loadLiveAlertDetail">Retry</button>
+            <button class="primary" type="button" @click="closeLiveAlertDetails">Close</button>
+          </div>
+        </div>
+        <template v-else-if="liveAlertDetail">
+          <div class="detail-section">
+            <h3>ALERT DETAILS</h3>
+            <dl>
+              <div v-for="field in liveAlertDetailFields" :key="field.label">
+                <dt>{{ field.label }}</dt>
+                <dd>{{ field.value }}</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="detail-section">
+            <h3>RECORDED DETAILS</h3>
+            <dl v-if="liveAlertRecordedFields.length">
+              <div v-for="field in liveAlertRecordedFields" :key="field.label" class="detail-wide">
+                <dt>{{ field.label }}</dt>
+                <dd>{{ field.value }}</dd>
+              </div>
+            </dl>
+            <p v-else class="empty-evidence">No additional recorded details are available.</p>
+          </div>
+          <div class="sensor-modal-actions">
+            <button class="primary" type="button" @click="closeLiveAlertDetails">Close</button>
+          </div>
+        </template>
+      </section>
+    </div>
+
+    <div
       v-if="alertModal === 'view' && selectedAlert"
       class="sensor-modal-backdrop"
       @click.self="closeAlertModal"
@@ -1852,6 +2082,8 @@ const confirmDeleteSensor = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="alert-details-title"
+        tabindex="-1"
+        @keydown="trapModalFocus"
       >
         <header class="sensor-modal-head">
           <div>
@@ -2051,6 +2283,8 @@ const confirmDeleteSensor = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="resolve-alert-title"
+        tabindex="-1"
+        @keydown="trapModalFocus"
       >
         <header class="sensor-modal-head">
           <div>
@@ -2097,6 +2331,8 @@ const confirmDeleteSensor = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="sensor-details-title"
+        tabindex="-1"
+        @keydown="trapModalFocus"
       >
         <header class="sensor-modal-head">
           <div>
@@ -2214,6 +2450,8 @@ const confirmDeleteSensor = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="sensor-form-title"
+        tabindex="-1"
+        @keydown="trapModalFocus"
       >
         <header class="sensor-modal-head">
           <div>
@@ -2278,6 +2516,8 @@ const confirmDeleteSensor = () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-sensor-title"
+        tabindex="-1"
+        @keydown="trapModalFocus"
       >
         <header class="sensor-modal-head">
           <div>
@@ -2925,16 +3165,18 @@ td i {
   z-index: 1000;
   padding: 20px;
   display: grid;
-  place-items: center;
+  align-content: start;
+  justify-items: center;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: rgba(14, 39, 30, 0.56);
   backdrop-filter: blur(3px);
 }
 .sensor-modal {
   width: min(680px, 100%);
-  max-height: calc(100vh - 40px);
+  max-height: none;
   padding: 24px;
-  overflow-y: auto;
+  overflow: visible;
   border-radius: 16px;
   background: #fff;
   box-shadow: 0 25px 70px rgba(16, 49, 37, 0.24);
@@ -3247,9 +3489,7 @@ td i {
   }
   .sensor-modal-backdrop {
     padding: 12px;
-  }
-  .export-modal {
-    max-height: calc(100dvh - 24px);
+    align-items: start;
   }
   .export-form {
     gap: 13px;

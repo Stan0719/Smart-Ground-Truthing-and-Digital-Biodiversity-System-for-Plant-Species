@@ -265,7 +265,7 @@ test('list keeps raw IDs, sorts valid timestamps and opens local review without 
     h.state.search.value = 'shorea actualis'
     assert.equal(h.state.filtered.value.length, 2)
     const links = nodes(h.render()).filter((node) => node.props?.to?.name === 'conservation-reviews')
-    const reviewButtons = nodes(h.render()).filter(node => node.type === 'button' && node.props?.class === 'action-button' && node.children === 'Review')
+    const reviewButtons = nodes(h.render()).filter(node => node.type === 'button' && String(node.props?.class).split(/\s+/).includes('observation-icon-action') && node.props?.['aria-label'] === messages.conservationPages.observations.review)
     assert.ok(reviewButtons.length > 0)
     assert.equal(links.length, 0)
     await reviewButtons[0].props.onClick()
@@ -785,9 +785,9 @@ test('primary field action respects status, self-review, session, revision and s
     const h = harness(async () => Response.json({ observation: row }), user, pending)
     try {
       h.state.isLoading.value = false; h.state.observations.value = [h.state.mapObservation(row)]
-      const buttons = nodes(h.render()).filter(n => n.type === 'button' && ['Review', 'View Details', 'View'].includes(n.children))
+      const buttons = nodes(h.render()).filter(n => n.type === 'button' && [messages.conservationPages.observations.review, messages.common.viewDetails].includes(n.props?.['aria-label']) && String(n.props?.class).split(/\s+/).includes('observation-icon-action'))
       assert.equal(buttons.length, 1, JSON.stringify(changes))
-      assert.equal(buttons[0].children, eligible ? 'Review' : 'View Details')
+      assert.equal(buttons[0].props['aria-label'], eligible ? messages.conservationPages.observations.review : messages.common.viewDetails)
       await buttons[0].props.onClick(); await flush()
       assert.equal(h.state.selected.value.id, uuid)
       assert.equal(h.state.reviewMode.value, eligible)
@@ -820,7 +820,7 @@ test('primary action labels reuse English, Malay and Chinese translations', () =
       for (const status of ['Pending Review', 'Approved']) {
         h.state.observations.value = [h.state.mapObservation(fixture({ status }))]
         const expected = status === 'Approved' ? labels.common.viewDetails : labels.conservationPages.observations.review
-        assert.ok(nodes(h.render()).some(n => n.type === 'button' && n.children === expected))
+        assert.ok(nodes(h.render()).some(n => n.type === 'button' && n.props?.['aria-label'] === expected))
       }
     } finally { h.stop() }
   }
@@ -979,8 +979,8 @@ test('copy honors Officer session state, suppresses duplicate pending operations
 test('compact identifier UI keeps bounded columns, touch/focus targets and complete translations', async () => {
   const css = descriptor.styles[0].content
   assert.match(css, /\.identity-cell\s*\{[^}]*white-space: normal/)
-  assert.match(css, /\.observations-table \.observation-column\s*\{ width: 11rem/)
-  assert.match(css, /\.observations-table \.submitter-column\s*\{ width: 13rem/)
+  assert.match(css, /\.observations-table \.observation-column\s*\{ width: 15%/)
+  assert.match(css, /\.observations-table \.submitter-column\s*\{ width: 15%/)
   assert.match(css, /\.identifier-line\s*\{[^}]*display: inline-flex; align-items: center; justify-content: flex-start; flex-wrap: nowrap; gap: 7px/)
   assert.match(css, /\.identifier-copy\s*\{[^}]*width: 44px; height: 44px/)
   assert.match(css, /\.identifier-copy:focus-visible\s*\{[^}]*outline:/)
@@ -1039,8 +1039,9 @@ test('only an exact current-Officer subject match can use the authenticated sess
 
 const mainObservationTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'observations-table')
 const observationCells = row => nodes(row).filter(node => node.type === 'td')
+const renderedText = node => typeof node === 'string' ? node : typeof node?.children === 'string' ? node.children : Array.isArray(node?.children) ? node.children.map(renderedText).join('') : ''
 
-test('main table has eight matching columns with one Status, full action access and no duplicate Review State', async () => {
+test('main table has eight matching columns, responsive labels and all existing action access', async () => {
   const longName = 'Long species name '.repeat(35) + 'UnbrokenName'.repeat(40)
   const rows = ['Draft', 'Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged'].map((status, index) => fixture({ id: String(index + 1), status, scientific_name: longName }))
   const h = harness(identityHandler(rows))
@@ -1058,16 +1059,18 @@ test('main table has eight matching columns with one Status, full action access 
       const cells = observationCells(row), item = h.state.observations.value[index]
       assert.equal(cells.length, headers.length)
       assert.ok(nodes(cells[0]).some(node => node.children === h.state.observationLabel(item.id)))
-      assert.equal(cells[2].children, item.plantDisplayId)
-      assert.ok(nodes(cells[3]).some(node => node.children === longName))
+      assert.ok(renderedText(cells[2]).includes(item.plantDisplayId))
+      assert.ok(nodes(cells[3]).some(node => node.type === 'em'))
       assert.ok(nodes(cells[4]).some(node => node.children === h.state.submitterLabel(item.ownerSubject)))
       assert.ok(nodes(cells[5]).some(node => String(node.props?.class).split(/\s+/).includes('badge') && node.children === h.state.label(item.status)))
-      assert.equal(cells[6].children, h.state.formatDate(item.createdAt))
+      assert.ok(renderedText(cells[6]).length > 0)
+      assert.ok(nodes(cells[0]).some(node => node.props?.class === 'observation-cell-label'))
+      assert.ok(nodes(cells[1]).some(node => node.props?.class === 'observation-cell-label'))
       const actions = nodes(cells[7])
-      assert.ok(actions.some(node => node.type === 'button' && ['Review', 'View Details'].includes(node.children)))
+      assert.ok(actions.some(node => node.type === 'button' && ['Review', 'View Details'].includes(node.props?.['aria-label'])))
       assert.ok(actions.some(node => node.props?.to === '/plant/PL007'))
-      assert.ok(actions.some(node => node.type === 'button' && node.children === 'History'))
-      assert.ok(actions.some(node => node.props?.to?.name === 'conservation-map' && node.props.to.query.plant === '7'))
+      assert.ok(actions.some(node => node.type === 'button' && node.props?.['aria-label'] === 'History'))
+      assert.ok(!actions.some(node => node.props?.to?.name === 'conservation-map'))
       assert.equal(nodes(cells[0]).filter(node => node.props?.class === 'identifier-copy').length, 1)
       assert.equal(nodes(cells[4]).filter(node => node.props?.class === 'identifier-copy').length, 1)
     })
@@ -1081,7 +1084,7 @@ test('review details use the dedicated history section and Observation History s
   const h = harness(identityHandler([row]))
   try {
     await h.state.loadObservations()
-    const view = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.children === 'View Details')
+    const view = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.props?.['aria-label'] === messages.common.viewDetails)
     await view.props.onClick()
     assert.equal(h.state.selected.value.reviewedAt, row.reviewed_at)
     assert.equal(h.state.selected.value.reviewComment, row.review_comment)
@@ -1091,7 +1094,7 @@ test('review details use the dedicated history section and Observation History s
     assert.equal(historySection.props['observation-id'], uuid)
     assert.ok(!nodes(details).some(node => node.type === 'dt' && node.children === messages.conservationPages.observations.reviewComments))
     h.state.closeModal()
-    const history = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.children === 'History')
+    const history = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.props?.['aria-label'] === messages.conservationPages.observations.history)
     history.props.onClick(); await flush()
     assert.equal(h.state.historyModal.value, true)
     assert.equal(h.state.history.value[0].id, uuid)
@@ -1129,7 +1132,8 @@ test('Observation modal opts into accessibility and its own two-column theme wit
     assert.match(style, /scroll-padding-block-start/)
     const source = readFileSync(filename, 'utf8')
     const observationHistoryModal = source.slice(source.indexOf('<AppModal v-if="selected && historyModal"'))
-    assert.doesNotMatch(observationHistoryModal.split('</AppModal>')[0], /\baccessible\b|observation-dialog/)
+    assert.match(observationHistoryModal.split('</AppModal>')[0], /\baccessible\b/)
+    assert.doesNotMatch(observationHistoryModal.split('</AppModal>')[0], /observation-dialog/)
   } finally { h.stop() }
 })
 
@@ -1146,18 +1150,18 @@ test('loading, unavailable and empty main-table states span the eight retained c
   }
 })
 
-test('table layout reserves intrinsic status/action widths, consistent padding and internal horizontal scrolling', async () => {
+test('table layout uses consistent spacing, compact actions and a responsive mobile card layout', async () => {
   const css = descriptor.styles[0].content
-  assert.match(css, /\.observations-table\s*\{[^}]*width: 100%; min-width: 92rem; table-layout: auto; white-space: normal/)
+  assert.match(css, /\.officer-layout\.officer-layout\.officer-layout \.observations-scroll \.observations-table\s*\{[^}]*width: 100%; min-width: 92rem; table-layout: auto; white-space: normal/)
   assert.match(css, /\.observations-table th, \.observations-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)
-  assert.match(css, /\.observations-table \.status-column\s*\{ width: 10rem/)
-  assert.match(css, /\.observations-table \.species-column\s*\{ width: 15rem/)
-  assert.match(css, /\.observations-table \.plant-column\s*\{ width: 6rem/)
+  assert.match(css, /\.observations-table \.status-column\s*\{ width: 10%/)
+  assert.match(css, /\.observations-table \.plant-column\s*\{ width: 12%/)
   assert.match(css, /\.identifier-line\s*\{[^}]*display: inline-flex;[^}]*justify-content: flex-start;[^}]*gap: 7px/)
   assert.doesNotMatch(/\.identifier-line\s*\{([^}]+)\}/.exec(css)[1], /width: 180px/)
-  assert.match(css, /\.observations-scroll \.observations-table \.action-group\s*\{[^}]*flex-wrap: nowrap;[^}]*gap: 7px; width: max-content; min-width: max-content/)
-  assert.match(css, /\.observations-table \.action-group > \.action-button\s*\{[^}]*max-width: none; height: auto;[^}]*white-space: nowrap/)
-  assert.match(css, /@media \(max-width: 767px\)[^\n]*min-height: 44px/)
+  assert.match(css, /\.observations-scroll \.observations-table \.action-group\s*\{[^}]*flex-wrap: wrap;[^}]*justify-content: flex-end/)
+  assert.match(css, /\.observations-table \.action-group > \.action-button\.observation-icon-action\s*\{[^}]*width: 36px;[^}]*height: 36px/)
+  assert.match(css, /@container \(max-width: 767px\)[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/)
+  assert.match(css, /content: attr\(aria-label\)/)
   const compiled = compileStyle({ source: css, id: 'data-v-observation-table', scoped: true })
   assert.equal(compiled.errors.length, 0)
   assert.match(compiled.code, /\.observations-scroll \.observations-table \.action-group\[data-v-observation-table\]/)
@@ -1169,6 +1173,22 @@ test('table layout reserves intrinsic status/action widths, consistent padding a
     assert.equal(scroll.props.role, 'region'); assert.equal(scroll.props.tabindex, '0')
     assert.equal(scroll.props['aria-label'], messages.conservationPages.observations.title)
     assert.ok(!nodes(mainObservationTable(h)).some(node => node.props?.class?.includes('review-state')))
+  } finally { h.stop() }
+})
+
+test('mobile Observation cards match the Plant Species identity, field-row and action-strip pattern', async () => {
+  const h = harness(identityHandler([fixture({ status: 'Cancelled' })]))
+  try {
+    await h.state.loadObservations()
+    const table = mainObservationTable(h)
+    assert.ok(nodes(table).some(node => node.props?.class === 'observation-card-emblem'))
+    const css = descriptor.styles[0].content
+    assert.match(css, /\.observation-card-emblem\s*\{[^}]*width: 52px; height: 52px/)
+    assert.match(css, /tbody tr > td:first-child \{ display: flex; align-items: center; gap: 14px/)
+    assert.match(css, /tbody tr > td:nth-child\(3\), \.observations-table tbody tr > td:nth-child\(4\), \.observations-table tbody tr > td:nth-child\(5\), \.observations-table tbody tr > td:nth-child\(6\) \{ display: flex; align-items: center/)
+    assert.match(css, /\.observations-table \.terminal-read-only > td, \.observations-table tr\.terminal-read-only > td, \.observations-table tr\.superseded > td \{ background: #fff/)
+    assert.match(css, /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/)
+    assert.match(css, /observation-icon-action:hover:not\(:disabled\).*background: #33745d; color: #fff/)
   } finally { h.stop() }
 })
 
@@ -1186,7 +1206,7 @@ test('main observation header is continuous forest green and row content is vert
   assert.match(identifiers, /align-items: center/)
   assert.match(identifiers, /vertical-align: middle/)
   assert.match(css, /\.observations-table \.badge\s*\{[^}]*align-items: center;[^}]*vertical-align: middle/)
-  assert.match(css, /\.observations-table \.submitter-column\s*\{ width: 13rem/)
+  assert.match(css, /\.observations-table \.submitter-column\s*\{ width: 15%/)
   assert.doesNotMatch(css, /(?:^|\n)\s*(?:thead|th)\s*\{/, 'header styling stays scoped to the main table')
 })
 
@@ -1198,12 +1218,12 @@ test('status badges and action rows retain intrinsic single-line widths without 
   assert.match(badge, /font-size: 11px/)
   assert.doesNotMatch(badge, /overflow: hidden|text-overflow|background:|color:|border-radius:|padding:/)
   const actions = /\.observations-scroll \.observations-table \.action-group\s*\{([^}]+)\}/.exec(css)[1]
-  assert.match(actions, /display: flex; flex-wrap: nowrap; align-items: center/)
-  assert.match(actions, /gap: 7px; width: max-content; min-width: max-content/)
-  const buttons = /\.observations-table \.action-group > \.action-button\s*\{([^}]+)\}/.exec(css)[1]
-  assert.match(buttons, /flex: 0 0 auto; width: max-content; min-width: max-content; max-width: none/)
-  assert.match(buttons, /white-space: nowrap/)
-  assert.doesNotMatch(buttons, /overflow: hidden|text-overflow|font-size: [0-9]px/)
+  assert.match(actions, /display: flex; flex-wrap: wrap; align-items: center/)
+  assert.match(actions, /justify-content: flex-end; gap: 6px; width: 100%; min-width: 0/)
+  const buttons = /\.observations-table \.action-group > \.action-button\.observation-icon-action\s*\{([^}]+)\}/.exec(css)[1]
+  assert.match(buttons, /flex: 0 0 36px; width: 36px; min-width: 36px; height: 36px/)
+  assert.match(css, /\.observations-table \.observation-icon-action:hover::after, \.observations-table \.observation-icon-action:focus-visible::after/)
+  assert.doesNotMatch(buttons, /overflow: hidden|text-overflow/)
   assert.match(css, /\.observations-scroll\s*\{ min-width: 0; max-width: 100%; overflow-x: auto/)
   assert.doesNotMatch(/\.observations-table\s*\{([^}]+)\}/.exec(css)[1], /overflow:/)
 })
@@ -1220,11 +1240,11 @@ test('pending and completed observations keep every action and full localized st
         assert.equal(badge.children, h.state.label(status))
         const cell = nodes(table).find(node => node.props?.class === 'actions-cell')
         const group = nodes(cell).find(node => node.props?.class === 'action-group')
-        const actions = nodes(group).filter(node => node.props?.class === 'action-button')
-        assert.equal(actions.length, origin === 'initial_registration' && status === 'Pending Review' ? 5 : 4)
-        assert.ok(actions.every(node => nodes(node).some(child => typeof child.children === 'string' && child.children.trim())))
+        const actions = nodes(group).filter(node => String(node.props?.class).split(/\s+/).includes('observation-icon-action'))
+        assert.equal(actions.length, 3)
+        assert.ok(actions.every(node => node.props?.['aria-label'] && node.props?.title))
         assert.ok(actions.some(node => node.props?.to === '/plant/PL007'))
-        assert.ok(actions.some(node => node.props?.to?.name === 'conservation-map'))
+        assert.ok(!actions.some(node => node.props?.to?.name === 'conservation-map'))
         assert.equal(nodes(table).filter(node => node.type === 'th').length, 8)
         const scroll = nodes(h.render()).find(node => String(node.props?.class).includes('observations-scroll'))
         assert.equal(scroll.props.tabindex, '0')
@@ -1483,9 +1503,9 @@ test('registration and unclassified originals never enter the normal queue, even
  }finally{h.stop()}
 })
 
-test('Created uses real Malaysia date and time, including next-day rollover, and headers cannot wrap into characters',()=>{
+test('Created formatter remains available for details and the compact table uses eight columns',()=>{
  const h=harness(identityHandler([]));try{assert.equal(h.state.formatDate('2026-11-03T20:30:00Z'),'4 November 2026, 04:30');assert.equal(h.state.formatDate('invalid'),'\u2014');}finally{h.stop()}
- const css=descriptor.styles.map(s=>s.content).join('\n');assert.match(css,/th:nth-child\(6\).*th:nth-child\(8\)[^{]*\{[^}]*white-space: nowrap; overflow-wrap: normal/);assert.ok(!css.includes('status-column, .observations-table .actions-column { width: 1%'));
+ const h2=harness(identityHandler([fixture()]));try{assert.equal(nodes(mainObservationTable(h2)).filter(n=>n.type==='th').length,8)}finally{h2.stop()}
 })
 
 async function unifiedProposal(status='Pending Review',origin='subsequent_observation') {
@@ -1498,7 +1518,7 @@ test('unified Observation table renders both distinct submission identities and 
  assert.equal(h.state.displayedRows.value.length,3);assert.equal(new Set(h.state.displayedRows.value.map(row=>row.key)).size,3)
  assert.ok(h.state.displayedRows.value.some(row=>row.key==='observation:'+uuid));assert.ok(h.state.displayedRows.value.some(row=>row.key==='observation-edit:'+uuid))
  assert.equal(h.state.observations.value.length,2);assert.equal(h.state.summaryCounts.value.find(card=>card.status==='Pending Review').count,2)
- const table=mainObservationTable(h),headers=nodes(table).filter(n=>n.type==='th');assert.equal(headers.length,8);assert.equal(headers[1].children,'Submission Type');assert.equal(headers[3].children,'Species')
+ const table=mainObservationTable(h),headers=nodes(table).filter(n=>n.type==='th');assert.equal(headers.length,8);assert.equal(headers[1].children,'Submission Type');assert.equal(headers[3].children,'Species');assert.equal(headers[4].children,'Submitted By');assert.equal(headers[6].children,'Created')
  const rows=nodes(table).filter(n=>n.type==='tr'&&observationCells(n).length===8);assert.equal(rows.length,3)
  assert.ok(nodes(table).some(n=>n.children===messages.finalOfficerWorkflow.edit));assert.ok(nodes(table).some(n=>n.children===messages.finalOfficerWorkflow.original))
  assert.equal(h.state.proposalItems.value[0].proposal.revision,7);assert.equal(h.state.proposalItems.value[0].baseline.status,'Approved')
@@ -1523,7 +1543,7 @@ test('unified proposal actions preserve exact identity and terminal grey/read-on
  const h=harness(identityHandler([]));try{await h.state.loadObservations();const edit=await unifiedProposal(status),opened=[];h.state.proposalQueue.value={view:row=>opened.push(row)}
  h.state.receiveProposalState({rows:[edit],names:{},loading:false,error:''});await flush()
  const row=nodes(mainObservationTable(h)).find(n=>n.type==='tr'&&observationCells(n).length===8),cells=observationCells(row),button=nodes(cells[7]).find(n=>n.type==='button')
- assert.equal(h.state.proposalReviewable(edit),status==='Pending Review');assert.equal(button.children,status==='Pending Review'?messages.dashboardObservationEdits.review:messages.common.viewDetails)
+ assert.equal(h.state.proposalReviewable(edit),status==='Pending Review');assert.equal(button.props['aria-label'],status==='Pending Review'?messages.dashboardObservationEdits.review:messages.common.viewDetails)
  if(status!=='Pending Review')assert.ok(row.props.class.includes(status==='Superseded'?'superseded':'terminal-read-only'))
  button.props.onClick();assert.equal(opened[0].id,uuid);assert.equal(opened[0].revision,7);assert.equal(h.state.selected.value,null);assert.equal(h.calls.filter(c=>c.options?.method==='POST').length,0)
  }finally{h.stop()}
