@@ -7,6 +7,7 @@ import {
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { plantApi, plantAssetSources } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
 import { saveDraft, readDrafts } from "../utils/fieldStorage";
@@ -19,7 +20,7 @@ import RefreshButton from "../components/RefreshButton";
 import GpsLocationPicker from "../components/GpsLocationPicker";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
-import { imageSizeAlert } from "../utils/imageSelection";
+import { imageSizeAlert, inspectPickedImages, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 const fieldCapture = createFieldCapture({
   imagePicker: ImagePicker,
   location: Location,
@@ -298,7 +299,16 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     setError("");
     try {
       const asset = await fieldCapture.photo(camera, photos.length);
-      if (asset)
+      if (asset) {
+        const label = `${t("imageSizeAlert.observationPhoto")} ${photos.length + 1}`;
+        // A picker without a local URI returns the exact Base64 payload checked by fieldCapture.
+        const checked = asset.uri.startsWith("data:") ? { accepted: [asset], rejected: [] }
+          : await inspectPickedImages([asset], [label], FileSystem.getInfoAsync);
+        if (checked.rejected.length) {
+          const alert = imageSizeAlert(t, checked.rejected);
+          Alert.alert(alert.title, alert.message);
+          return;
+        }
         setPhotos((old) => [
           ...old,
           {
@@ -306,6 +316,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             client_key: `photo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
           },
         ]);
+      }
     } catch (e) {
       if (e.oversizedPhoto) {
         const alert = imageSizeAlert(t, [{ ...e.oversizedPhoto, label: `${t("imageSizeAlert.observationPhoto")} ${e.oversizedPhoto.position}` }]);
@@ -424,6 +435,9 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       }
       const draft = createDraft();
       if (online) {
+        const oversizedPhotos = (draft.assets || []).map((photo, index) => ({ label: `${t("imageSizeAlert.observationPhoto")} ${index + 1}`, bytes: base64Bytes(photo.base64 || "") }))
+          .filter((photo) => photo.bytes > MAX_IMAGE_BYTES);
+        if (oversizedPhotos.length) { const error = Error("Image too large"); error.imageAlert = imageSizeAlert(t, oversizedPhotos); throw error; }
         try { validateObservationDraft(draft); }
         catch (validationError) { currentValidationFailed = true; throw validationError; }
       }
@@ -460,6 +474,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           : navigation.navigate("MainTabs", { screen: "PlantsTab", params: { screen: "PlantDetails", params: { plantId: submittedItem.plantId, focusObservationId: submittedItem.id } } }) }]);
       }
     } catch (e) {
+      if (e.imageAlert) { Alert.alert(e.imageAlert.title, e.imageAlert.message); return; }
       setInvalidField(currentValidationFailed ? e.field || "" : "");
       setError(e.message);
     } finally {

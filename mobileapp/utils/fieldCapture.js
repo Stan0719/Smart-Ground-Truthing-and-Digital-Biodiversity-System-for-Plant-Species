@@ -41,6 +41,7 @@ export function createFieldCapture({ imagePicker, location }) {
         base64: asset.base64,
         content_type,
         uri: asset.uri || `data:${content_type};base64,${asset.base64}`,
+        fileName: asset.fileName,
       };
     },
     async coordinates() {

@@ -13,7 +13,7 @@ import OriginalUpdatedField from "../components/OriginalUpdatedField";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
-import { inspectPickedImages, imageSizeAlert } from "../utils/imageSelection";
+import { inspectPickedImages, imageSizeAlert, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 
 const fields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const makeKey = () => `species-edit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -272,8 +272,11 @@ export default function EditSpeciesRequest({ route, navigation }) {
         }
       }
       const proposed = Object.fromEntries(fields.map((field) => [field, form[field].trim()]));
-      if (photo) proposed.photo = { content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg",
-        base64: await FileSystem.readAsStringAsync(photo, { encoding: FileSystem.EncodingType.Base64 }) };
+      if (photo) {
+        const base64 = await FileSystem.readAsStringAsync(photo, { encoding: FileSystem.EncodingType.Base64 });
+        if (base64Bytes(base64) > MAX_IMAGE_BYTES) { const error = Error("Image too large"); error.imageAlert = imageSizeAlert(t, [{ label: t("imageSizeAlert.speciesPhoto"), bytes: base64Bytes(base64) }]); throw error; }
+        proposed.photo = { content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg", base64 };
+      }
       else if (reuseOriginalPhoto && (state.correctionPhoto || state.request.request_status === "Correction Required")) {
         reusedFile = await downloadPhotoForReuse(FileSystem, state.request.photo);
         proposed.photo = reusedFile.photo;
@@ -302,6 +305,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
         botanist: route.params?.botanist, openTarget: { kind: "species", recordId: requestId },
       }) }]);
     } catch (error) {
+      if (error.imageAlert) { Alert.alert(error.imageAlert.title, error.imageAlert.message); return; }
       if (error.code === "SUBMISSION_REJECTED") {
         setState(old => ({ ...old, request: { ...old.request, request_status: "Rejected" } }));
         Alert.alert(t("common.error"), t("recordEdits.finalRejected"));

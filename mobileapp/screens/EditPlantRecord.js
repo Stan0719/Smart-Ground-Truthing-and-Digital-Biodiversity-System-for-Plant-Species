@@ -18,7 +18,7 @@ import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import { fieldFormStyles } from "../components/fieldFormStyles";
-import { inspectPickedImages, imageSizeAlert } from "../utils/imageSelection";
+import { inspectPickedImages, imageSizeAlert, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 
 const fields = ["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "notes", "zone", "latitude", "longitude", "accuracy_m", "altitudeM"];
 const requiredFields = new Set(["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "latitude", "longitude"]);
@@ -577,8 +577,14 @@ export default function EditPlantRecord({ route, navigation }) {
           ? selectedOriginalPhotos
           : originalPhotoIds;
         proposed.photos = [];
-        for (const uri of newPhotos) proposed.photos.push({ content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg",
-          base64: await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 }) });
+        const oversizedPhotos = [];
+        for (const [index, uri] of newPhotos.entries()) {
+          const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+          const bytes = base64Bytes(base64);
+          if (bytes > MAX_IMAGE_BYTES) { oversizedPhotos.push({ label: `${t("imageSizeAlert.plantPhoto")} ${index + 1}`, bytes }); continue; }
+          proposed.photos.push({ content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg", base64 });
+        }
+        if (oversizedPhotos.length) { const error = Error("Image too large"); error.imageAlert = imageSizeAlert(t, oversizedPhotos); throw error; }
       }
       if (state.correctionChange) {
         await plantApi(`/record-changes/${encodeURIComponent(state.correctionChange.id)}`, { method: "PATCH", expectedAccountId: accountId,
@@ -605,6 +611,7 @@ export default function EditPlantRecord({ route, navigation }) {
         botanist: route.params?.botanist, openTarget: { kind: "plant", recordId: plantId },
       }) }]);
     } catch (error) {
+      if (error.imageAlert) { Alert.alert(error.imageAlert.title, error.imageAlert.message); return; }
       if (error.code === "SUBMISSION_REJECTED") {
         setState(old => ({ ...old, plant: { ...old.plant, status: "Rejected" } }));
         Alert.alert(t("common.error"), t("recordEdits.finalRejected"));

@@ -6,14 +6,15 @@ export async function inspectPickedImages(assets, labels, getInfoAsync) {
   for (let index = 0; index < (assets || []).length; index += 1) {
     const asset = assets[index];
     if (!asset?.uri) continue;
-    let bytes = Number.isFinite(asset.fileSize) ? asset.fileSize : null;
-    if (bytes == null && getInfoAsync) {
+    let bytes = null;
+    if (getInfoAsync) {
       try {
         const info = await getInfoAsync(asset.uri);
         bytes = info?.exists && Number.isFinite(info.size) ? info.size : null;
       } catch { /* A missing file size must never replace a valid selection. */ }
     }
-    // Do not replace a valid selection when the picker cannot establish the file size.
+    // Picker metadata may describe the original asset rather than the local file to upload.
+    // Never accept a file whose local size could not be verified.
     if (bytes == null || bytes < 0 || bytes > MAX_IMAGE_BYTES) {
       const name = typeof asset.fileName === "string" ? asset.fileName.split(/[\\/]/).pop()?.trim() : "";
       rejected.push({ label: labels[index] || labels[0], filename: name && name !== "null" && name !== "undefined" ? name : "", bytes });
@@ -29,7 +30,8 @@ export function imageSizeAlert(t, rejected) {
   const title = t(oversized.length > 1 ? "imageSizeAlert.pluralTitle" : "imageSizeAlert.title");
   const lines = oversized.map((item, index) => {
     const label = item.label || t("imageSizeAlert.photo");
-    const name = item.filename ? `${t("imageSizeAlert.filename")}: ${item.filename}\n` : "";
+    const filename = typeof item.filename === "string" ? item.filename.split(/[\\/]/).pop()?.trim() : "";
+    const name = filename && filename !== "null" && filename !== "undefined" ? `${t("imageSizeAlert.filename")}: ${filename}\n` : "";
     return `${oversized.length > 1 ? `${index + 1}. ` : ""}${t("imageSizeAlert.photo")}: ${label}\n${name}${t("imageSizeAlert.imageSize")}: ${(item.bytes / 1048576).toFixed(1)} MB`;
   });
   const intro = t(oversized.length > 1 ? "imageSizeAlert.pluralIntro" : "imageSizeAlert.intro");
