@@ -70,6 +70,13 @@ test("photo cancellation, missing data, unsupported image and size limits are ex
   await assert.rejects(f.capture.photo(false, 0), /JPEG or PNG/);
   f.result({ assets: [{ base64: "/9j/" + "A".repeat(5592408) }] });
   await assert.rejects(f.capture.photo(true, 0), /4 MB/);
+  f.result({ assets: [{ base64: "/9j/" + "A".repeat(5592408), fileName: "observation.jpg" }] });
+  await assert.rejects(f.capture.photo(true, 1), (error) => {
+    assert.equal(error.oversizedPhoto.filename, "observation.jpg");
+    assert.equal(error.oversizedPhoto.position, 2);
+    assert.ok(error.oversizedPhoto.bytes > 4194304);
+    return true;
+  });
   await assert.rejects(f.capture.photo(true, 3), /three/);
 });
 test("captured base64 survives local URI loss and valid zero GPS coordinates are retained", async () => {

@@ -13,6 +13,7 @@ import OriginalUpdatedField from "../components/OriginalUpdatedField";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
+import { inspectPickedImages, imageSizeAlert } from "../utils/imageSelection";
 
 const fields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const makeKey = () => `species-edit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -151,7 +152,11 @@ export default function EditSpeciesRequest({ route, navigation }) {
       if (!permission.granted) return Alert.alert(t("common.error"), t(camera ? "addPlant.cameraPermissionIsRequired" : "recordEdits.photoPermission"));
       const result = camera ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.85 })
         : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.85 });
-      if (!result.canceled && result.assets?.[0]) { setPhoto(result.assets[0].uri); setReuseOriginalPhoto(false); }
+      if (!result.canceled && result.assets?.[0]) {
+        const checked = await inspectPickedImages(result.assets, [t("imageSizeAlert.speciesPhoto")], FileSystem.getInfoAsync);
+        if (checked.rejected.length) { const alert = imageSizeAlert(t, checked.rejected); Alert.alert(alert.title, alert.message); }
+        if (checked.accepted[0]) { setPhoto(checked.accepted[0].uri); setReuseOriginalPhoto(false); }
+      }
     } catch { Alert.alert(t("common.error"), t("recordEdits.photoUnavailable")); }
   }
   async function saveLocalDraft() {
