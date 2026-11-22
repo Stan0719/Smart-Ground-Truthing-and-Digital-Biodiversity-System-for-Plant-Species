@@ -276,19 +276,6 @@ const reviewBusy = computed(() => isSaving.value || speciesSaving.value)
 const skippedRecords = ref(0)
 const reviewMessage = ref<{ variant: 'success' | 'error' | 'info'; message: string } | null>(null)
 const feedback = ref<{ id: number; variant: 'success' | 'error' | 'info'; message: string } | null>(null)
-const queueHelp = ref<HTMLElement | null>(null), queueHelpOpen = ref(false)
-function showQueueHelp(event: Event) {
-  const tooltip = queueHelp.value
-  if (!tooltip) return
-  tooltip.showPopover()
-  const anchor = (event.currentTarget as HTMLElement).getBoundingClientRect(), box = tooltip.getBoundingClientRect()
-  tooltip.style.left = `${Math.max(12, Math.min(anchor.left, window.innerWidth - box.width - 12))}px`
-  tooltip.style.top = `${Math.max(12, Math.min(anchor.bottom + 8, window.innerHeight - box.height - 12))}px`
-}
-function hideQueueHelp(event?: Event) {
-  if (event?.type === 'mouseleave' && event.currentTarget === document.activeElement) return
-  queueHelp.value?.hidePopover()
-}
 let feedbackId = 0
 let selectionRequest = 0
 let disposed = false
@@ -311,6 +298,7 @@ const supportedStatuses: ObservationStatus[] = [
   'Rejected',
   'Correction Required',
   'Flagged',
+  'Withdrawn',
 ]
 const canonicalStatus = (value: string | null | undefined) => {
   const normalized = (value || '').trim().toLowerCase().replace(/[_-]+/g, ' ')
@@ -496,7 +484,6 @@ const submissionSubmitterLabels = computed(() => labelsWithSubmitterNames([
   ...standaloneSpecies.value.flatMap(item => [item.requestedBy, item.reviewedBy || '']),
       ...observations.value.map(item => item.recordedBy), selected.value?.recordedBy,
 ]))
-// The directory resolves names only; review ownership comes from the row's decision.
 const reviewerName = (subject: string) => {
   if (!officerSessionReady.value || !subject.startsWith('staff:')) return '—'
   const id = subject.slice(6)
@@ -1456,16 +1443,11 @@ onBeforeUnmount(() => {
     @dismiss="dismissFeedback"
   />
 
-  <ApprovedRecordChanges ref="changeDialog" @updated="updateChange" @reviewing="reviewQueueCache.invalidate()" />
+  <ApprovedRecordChanges ref="changeDialog" :staff-names="submitterNames" @updated="updateChange" @reviewing="reviewQueueCache.invalidate()" />
   <section class="page-intro reviews-intro">
     <div>
       <p class="page-kicker">{{ rt('queues.registrationEyebrow') }}</p>
-      <div class="registration-title-row"><h2>{{ rt('queues.registrations') }}</h2><button type="button" class="queue-help-button" :aria-label="rt('queues.aboutQueue')" :aria-expanded="queueHelpOpen" aria-controls="registration-queue-help" @mouseenter="showQueueHelp" @mouseleave="hideQueueHelp" @focus="showQueueHelp" @blur="hideQueueHelp" @click="showQueueHelp" @keydown.esc.stop.prevent="hideQueueHelp()">?</button></div>
-      <div id="registration-queue-help" ref="queueHelp" popover="auto" role="tooltip" class="queue-help-popover" @toggle="queueHelpOpen = ($event as ToggleEvent).newState === 'open'">
-        <div class="queue-help-heading"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 10v7m0-11v1" /></svg><strong>{{ rt('queues.aboutQueue') }}</strong></div>
-        <div class="queue-help-section"><span class="queue-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4C10 3 4 7 5 13c1 7 14 5 15-9Z" /><path d="M3 21 15 9" /></svg></span><div><h3>{{ rt('queues.includedHeading') }}</h3><p>{{ rt('queues.includedText') }}</p></div></div>
-        <div class="queue-help-section"><span class="queue-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-5 9 5-9 5-9-5Zm0 5 9 5 9-5M3 17l9 5 9-5" /></svg></span><div><h3>{{ rt('queues.countsHeading') }}</h3><p>{{ rt('queues.countsText') }}</p></div></div>
-      </div>
+      <h2>{{ rt('queues.registrations') }}</h2>
       <p>{{ rt('queues.registrationIntro') }}</p>
     </div>
   </section>
@@ -1528,20 +1510,21 @@ onBeforeUnmount(() => {
         </thead>
         <tbody>
           <tr v-for="row in (queueReady ? reviewRows : [])" :key="row.key" :class="{ 'terminal-read-only': ['Withdrawn', 'Cancelled'].includes(rowStatus(row)) }">
-          <StandaloneSpeciesRows v-if="'speciesRequest' in row" :row="row.speciesRequest" :submitter="submitterLabel(row.speciesRequest.requestedBy)" :reviewer="row.speciesRequest.state === 'pending' || !row.speciesRequest.reviewedAt ? '\u2014' : reviewerName(row.speciesRequest.reviewedBy || '')" :authorized="officerSessionReady" @open="router.push({ name: 'conservation-reviews', query: { speciesRequest: $event } })" />
+          <StandaloneSpeciesRows v-if="'speciesRequest' in row" :row="row.speciesRequest" :submitter="submitterLabel(row.speciesRequest.requestedBy)" :reviewer="row.speciesRequest.state === 'pending' || !row.speciesRequest.reviewedAt ? '—' : reviewerName(row.speciesRequest.reviewedBy || '')" :zone-label="ct('Location Zone')" :authorized="officerSessionReady" @open="router.push({ name: 'conservation-reviews', query: { speciesRequest: $event } })" />
           <template v-else-if="'observation' in row"><template v-for="observation in [row.observation]" :key="observation.id">
-          <td class="identity-cell"><div class="identifier-line"><strong :title="observation.id">{{ observationLabel(observation.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" @click="copyIdentifier(observation.id, 'observation', `review-icon-0:${observation.id}`)"><svg v-if="!controlCopied[`review-icon-0:${observation.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `review-icon-0:${observation.id}`" :key="`review-icon-0:${observation.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div></td>
-            <td class="plant-id-cell">{{ observation.plantId }}</td>
-            <td class="submission-type-cell"><div class="species-request-list">
+          <td class="identity-cell"><span class="review-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 3C8 3 3 7 4 15s12 6 16-12ZM3 22 16 9" /></svg></span><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.submissionId') }}</span><div class="identifier-line"><strong :title="observation.id">{{ observationLabel(observation.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" @click="copyIdentifier(observation.id, 'observation', `review-icon-0:${observation.id}`)"><svg v-if="!controlCopied[`review-icon-0:${observation.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `review-icon-0:${observation.id}`" :key="`review-icon-0:${observation.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div></td>
+            <td class="plant-id-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.plantId') }}</span>{{ observation.plantId }}</td>
+            <td class="submission-type-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.submissionType') }}</span><div class="species-request-list">
               <span class="species-request-badge">{{ observation.origin === 'unknown' ? rt('queues.unverifiedOriginSubmissions') : observation.speciesRequest ? rt('speciesRequest.title') : t('approvedChanges.originalRegistration') }}</span>
               <span v-if="observation.speciesRequest?.updated" class="badge species-updated-badge">{{ rt('speciesRequest.updated') }}</span>
             </div></td>
-            <td><em v-if="observation.speciesRequest?.scientificName || observation.plantScientificName || observation.scientificName">{{ observation.speciesRequest ? observation.speciesRequest.scientificName || ct('Species unavailable') : observation.plantScientificName || observation.scientificName }}</em><span v-else>{{ ct('Species unavailable') }}</span></td>
-          <td class="identity-cell"><div class="identifier-line"><span :title="observation.recordedBy">{{ submitterLabel(observation.recordedBy) }}</span><template v-if="observation.recordedBy"><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="submitter-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></template></div></td>
-            <td class="reviewer-cell">{{ reviewerName(observation.tableReviewedBy) }}</td>
-            <td>{{ observation.zone || rt('notRecorded') }}</td>
-            <td>{{ formatDate(observation.createdAt) }}</td>
+            <td><span class="review-cell-label" aria-hidden="true">{{ ct('Species') }}</span><em v-if="observation.speciesRequest?.scientificName || observation.plantScientificName || observation.scientificName">{{ observation.speciesRequest ? observation.speciesRequest.scientificName || ct('Species unavailable') : observation.plantScientificName || observation.scientificName }}</em><span v-else>{{ ct('Species unavailable') }}</span></td>
+          <td class="identity-cell"><span class="review-cell-label" aria-hidden="true">{{ ct('Submitted By') }}</span><div class="identifier-line"><span :title="observation.recordedBy">{{ submitterLabel(observation.recordedBy) }}</span><template v-if="observation.recordedBy"><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(observation.recordedBy) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="submitter-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></template></div></td>
+            <td class="reviewer-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.reviewedByColumn') }}</span>{{ reviewerName(observation.tableReviewedBy) }}</td>
+            <td><span class="review-cell-label" aria-hidden="true">{{ ct('Location Zone') }}</span>{{ observation.zone || rt('notRecorded') }}</td>
+          <td><span class="review-cell-label" aria-hidden="true">{{ rt('recordCreated') }}</span>{{ formatDate(observation.createdAt) }}</td>
             <td class="status-cell">
+              <span class="review-cell-label" aria-hidden="true">{{ ct('Status') }}</span>
               <span class="review-status-group" :class="{ 'has-historical-version': observation.historicalVersion }"><span class="badge" :style="workflowBadgeStyle(observation.status)" :class="observation.status.toLowerCase().replaceAll(' ', '-')">{{
                 observation.status ? ct(observation.status) : '—'
               }}</span>
@@ -1549,25 +1532,25 @@ onBeforeUnmount(() => {
               <span v-if="observation.status === 'Pending Review' && (observation.submissionUpdate as { state?: string } | null)?.state === 'updated'" class="badge resubmission-tag">{{ t('submissionChanges.updated') }}</span>
               <span v-if="observation.status === 'Pending Review' && observation.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span>
             </td>
-            <td class="proximity-cell"><PlantProximityCell v-if="isProximityEligible(observation)" :key="proximityKey(observation)" :entry="proximityEntries.get(proximityKey(observation))" :enabled="officerSessionReady && !queueUnverified" @visibility="proximityQueue.visibility(observation, $event)" @open="openProximity(observation, $event)" /><span v-else>—</span></td>
-            <td class="actions-cell"><div class="action-group">
-              <button class="action-button" :disabled="reviewBusy" @click="open(observation)">
+            <td class="proximity-cell"><span class="review-cell-label" aria-hidden="true">{{ t('plantProximity.scoreColumn') }}</span><PlantProximityCell v-if="isProximityEligible(observation)" :key="proximityKey(observation)" :entry="proximityEntries.get(proximityKey(observation))" :enabled="officerSessionReady && !queueUnverified" @visibility="proximityQueue.visibility(observation, $event)" @open="openProximity(observation, $event)" /><span v-else>—</span></td>
+            <td class="actions-cell"><span class="review-cell-label" aria-hidden="true">{{ ct('Actions') }}</span><div class="action-group">
+              <button class="action-button" :disabled="reviewBusy" @click="open(observation)"><svg class="review-row-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
                 {{ ct('Review') }}
               </button>
             </div></td>
           </template></template>
           <template v-else>
-            <td class="identity-cell edit-identity"><div class="identifier-line"><strong :title="row.change.id" :aria-label="row.change.id">{{ proposalLabel(row.change.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('approvedChanges.copyProposal')" @click="copyIdentifier(row.change.id, 'change', `review-icon-1:${row.change.id}`)"><svg v-if="!controlCopied[`review-icon-1:${row.change.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `review-icon-1:${row.change.id}`" :key="`review-icon-1:${row.change.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="row.change.plant_id == null">{{ t('approvedChanges.speciesId') + ': ' + row.change.species_id }}</small></td>
-            <td class="plant-id-cell">{{ row.change.plant_id != null ? formatPlantId(row.change.plant_id) || row.change.plant_id : '\u2014' }}</td>
-            <td class="submission-type-cell"><div class="species-request-list"><span class="species-request-badge edit-type-badge" :class="row.kind === 'approved_plant_change' ? 'plant-edit' : 'species-edit'">{{ typeLabel(row.kind) }}</span></div></td>
-            <td><em>{{ row.change.proposed_snapshot.scientific_name || rt('notRecorded') }}</em></td>
-            <td class="identity-cell"><div class="identifier-line"><span :title="row.change.owner_subject">{{ submitterLabel(row.change.owner_subject) }}</span><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(row.change.owner_subject) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="submitter-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></div></td>
-            <td class="reviewer-cell">{{ changeReviewerName(row.change) }}</td>
-            <td>{{ changeZone(row.change) || rt('notRecorded') }}</td>
-            <td>{{ formatDate(row.change.created_at) }}</td>
-            <td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(row.change.status)" :class="row.change.status.toLowerCase().replaceAll(' ', '-')">{{ row.change.status === 'Cancelled' ? t('approvedChanges.cancelled') : ct(row.change.status) }}</span></span></td>
-            <td class="proximity-cell">—</td>
-            <td class="actions-cell"><div class="action-group"><button class="action-button" :disabled="reviewBusy || !officerSessionReady" :aria-label="t('approvedChanges.reviewProposal', { id: proposalLabel(row.change.id) })" @click="openChange(row.change)">{{ ct('Review') }}</button></div></td>
+            <td class="identity-cell edit-identity"><span class="review-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 3C8 3 3 7 4 15s12 6 16-12ZM3 22 16 9" /></svg></span><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.submissionId') }}</span><div class="identifier-line"><strong :title="row.change.id" :aria-label="row.change.id">{{ proposalLabel(row.change.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('approvedChanges.copyProposal')" @click="copyIdentifier(row.change.id, 'change', `review-icon-1:${row.change.id}`)"><svg v-if="!controlCopied[`review-icon-1:${row.change.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `review-icon-1:${row.change.id}`" :key="`review-icon-1:${row.change.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="row.change.plant_id == null">{{ t('approvedChanges.speciesId') + ': ' + row.change.species_id }}</small></td>
+            <td class="plant-id-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.plantId') }}</span>{{ row.change.plant_id != null ? formatPlantId(row.change.plant_id) || row.change.plant_id : '\u2014' }}</td>
+            <td class="submission-type-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.submissionType') }}</span><div class="species-request-list"><span class="species-request-badge edit-type-badge" :class="row.kind === 'approved_plant_change' ? 'plant-edit' : 'species-edit'">{{ typeLabel(row.kind) }}</span></div></td>
+            <td><span class="review-cell-label" aria-hidden="true">{{ ct('Species') }}</span><em>{{ row.change.proposed_snapshot.scientific_name || rt('notRecorded') }}</em></td>
+            <td class="identity-cell"><span class="review-cell-label" aria-hidden="true">{{ ct('Submitted By') }}</span><div class="identifier-line"><span :title="row.change.owner_subject">{{ submitterLabel(row.change.owner_subject) }}</span><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(row.change.owner_subject) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></div></td>
+            <td class="reviewer-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.reviewedByColumn') }}</span>{{ changeReviewerName(row.change) }}</td>
+            <td><span class="review-cell-label" aria-hidden="true">{{ ct('Location Zone') }}</span>{{ changeZone(row.change) || rt('notRecorded') }}</td>
+            <td><span class="review-cell-label" aria-hidden="true">{{ rt('recordCreated') }}</span>{{ formatDate(row.change.created_at) }}</td>
+            <td class="status-cell"><span class="review-cell-label" aria-hidden="true">{{ ct('Status') }}</span><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(row.change.status)" :class="row.change.status.toLowerCase().replaceAll(' ', '-')">{{ row.change.status === 'Cancelled' ? t('approvedChanges.cancelled') : ct(row.change.status) }}</span></span></td>
+            <td class="proximity-cell"><span class="review-cell-label" aria-hidden="true">{{ t('plantProximity.scoreColumn') }}</span>—</td>
+            <td class="actions-cell"><span class="review-cell-label" aria-hidden="true">{{ ct('Actions') }}</span><div class="action-group"><button class="action-button" :disabled="reviewBusy || !officerSessionReady" :aria-label="t('approvedChanges.reviewProposal', { id: proposalLabel(row.change.id) })" @click="openChange(row.change)"><svg class="review-row-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>{{ ct('Review') }}</button></div></td>
           </template>
           </tr>
           <tr v-if="isLoading || loadError || !reviewRows.length">
@@ -1596,6 +1579,7 @@ onBeforeUnmount(() => {
       standaloneRequest ? standaloneRequest.scientificName : ct('{id} · submitted by {name}', { id: selected!.plantId, name: submitterLabel(selected!.recordedBy) })
     "
     wide
+    accessible
     @close="closeReview"
   >
     <template v-if="selected" #title>
@@ -2058,19 +2042,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.registration-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.registration-title-row h2 { margin: 0; }
-.queue-help-button { display: inline-grid; place-items: center; flex: none; width: 22px; min-height: 22px; padding: 0; border: 1px solid #a8b5ac; border-radius: 50%; background: transparent; color: #52685b; font: inherit; font-size: 12px; cursor: help; }
-.queue-help-button:focus-visible { outline: 3px solid #5b9375; outline-offset: 3px; }
-.queue-help-popover { position: fixed; inset: auto; margin: 0; width: min(420px, calc(100vw - 24px)); box-sizing: border-box; max-height: calc(100dvh - 24px); overflow: auto; padding: 10px; border: 1px solid #a8b9ac; border-radius: 18px; background: #fff; color: #17251b; font-size: 14px; line-height: 1.5; box-shadow: 0 8px 28px #102d2526; }
-.queue-help-heading { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 12px; background: #eaf6e5; font-size: 20px; color: #14271a; }
-.queue-help-heading svg { width: 29px; height: 29px; flex: none; fill: none; stroke: #276d28; stroke-width: 2; }
-.queue-help-section { display: grid; grid-template-columns: 48px minmax(0,1fr); gap: 16px; margin: 0 12px; padding: 22px 0; }
-.queue-help-section + .queue-help-section { border-top: 1px solid #dce5dc; }
-.queue-help-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 11px; background: #eaf6e5; }
-.queue-help-icon svg { width: 30px; height: 30px; fill: none; stroke: #206423; stroke-width: 2; stroke-linejoin: round; }
-.queue-help-section h3 { margin: 0 0 7px; font-size: 17px; line-height: 1.35; font-weight: 700; color: #17251b; }
-.queue-help-section p { margin: 0; color: #28342b; font-size: 14px; line-height: 1.5; }
 .plant-observation-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
 .plant-observation-heading h3 { margin: 0; min-width: 0; }
 .plant-observation-badges { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -2145,19 +2116,19 @@ onBeforeUnmount(() => {
 @media (max-width: 1280px) { .review-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .review-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .review-summary-grid { grid-template-columns: minmax(0, 1fr); } }
-.reviews-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.reviews-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; container-type: inline-size; }
 .reviews-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }
-.reviews-table { width: 100%; min-width: 135rem; table-layout: fixed; white-space: normal; border-collapse: separate; border-spacing: 0; }
-.reviews-table .observation-column { width: 12rem; }
-.reviews-table .submitter-column, .reviews-table .reviewer-column { width: 13rem; }
-.reviews-table .plant-column { width: 6rem; }
-.reviews-table .type-column { width: 11rem; }
-.reviews-table .species-column { width: 13rem; }
+.reviews-table { width: 100%; min-width: 108rem; table-layout: fixed; white-space: normal; border-collapse: separate; border-spacing: 0; }
+.reviews-table .observation-column { width: 11rem; }
+.reviews-table .submitter-column, .reviews-table .reviewer-column { width: 11rem; }
+.reviews-table .plant-column { width: 5rem; }
+.reviews-table .type-column { width: 10rem; }
+.reviews-table .species-column { width: 11rem; }
 .reviews-table .zone-column { width: 8rem; }
-.reviews-table .status-column { width: 12rem; }
-.reviews-table .proximity-column { width: 15rem; }
-.reviews-table .actions-column { width: 16rem; }
-.reviews-table .created-column { width: 12rem; }
+.reviews-table .status-column { width: 10rem; }
+.reviews-table .proximity-column { width: 12rem; }
+.reviews-table .actions-column { width: 10rem; }
+.reviews-table .created-column { width: 10rem; }
 .reviews-table th, .reviews-table td { padding: 12px 14px; text-align: left; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
 .reviews-table th { background: #245443; color: #fff; border-bottom-color: #245443; font-size: 12px; font-weight: 700; line-height: 1.4; }
 .reviews-table thead th:first-child { border-top-left-radius: 10px; }
@@ -2179,6 +2150,46 @@ onBeforeUnmount(() => {
 .reviews-scroll .reviews-table .identifier-copy { flex: 0 0 44px; width: 44px; min-width: 44px; max-width: 44px; }
 .reviews-table .state-cell { padding: 30px 14px; text-align: center; }
 @media (max-width: 767px) { .reviews-table .action-group > .action-button { min-height: 44px; } }
+.review-cell-label { display: none; }
+.review-card-emblem { display:none; }
+.review-row-action-icon { display: none; }
+@media (max-width: 767px) {
+  .officer-layout .reviews-panel { padding: 0; border: 0; background: transparent; box-shadow: none; }
+}
+@container (max-width: 767px) {
+  :is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) .reviews-scroll .reviews-table { min-width: 0; }
+  .reviews-table { display: block; width: 100%; min-width: 0; table-layout: auto; }
+  .reviews-table colgroup { display: none; }
+  .reviews-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+  .reviews-table tbody { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 16px; }
+  .reviews-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; min-width: 0; box-sizing: border-box; gap: 10px; padding: 16px; border: 1px solid #d7e0db; border-radius: 16px; background: #fff; }
+  .reviews-table tbody td { display: block; min-width: 0; padding: 0; border: 0; white-space: normal; overflow-wrap: anywhere; }
+  .reviews-table tbody td { grid-column: 1 / -1; }
+  .reviews-table tbody td:first-child { position:relative;min-height:48px;padding:0 0 12px 64px;border-bottom:1px solid #d7e0db; }
+  .reviews-table tbody td:first-child .review-card-emblem { position:absolute;left:0;top:0;display:grid;place-items:center;width:48px;height:48px;border-radius:10px;background:#dcebd8;color:#245443; }
+  .reviews-table tbody td:first-child .review-card-emblem svg { width:32px;height:32px; }
+  .reviews-table tbody td:not(:first-child):not(:nth-child(4)):not(.actions-cell) { display:flex;align-items:center;flex-wrap:wrap;gap:6px 0; }
+  .reviews-table tbody td.status-cell .review-status-group { min-width: 0; }
+  .reviews-table tbody td.proximity-cell > :not(.review-cell-label) { min-width: 0; }
+  .review-cell-label { display:inline-flex;align-items:center;flex:0 0 auto;margin:0 8px 0 0;color:#315848;font-size:14px;font-weight:600;line-height:20px; }
+  .review-cell-label::after { content: ':'; }
+  .reviews-table tbody td:first-child .review-cell-label { display: none; }
+  .officer-layout.officer-layout.officer-layout .reviews-table tbody td:first-child .identifier-line > strong { color:#174c38;font-family:inherit;font-size:18px;font-weight:700;line-height:24px; }
+  .reviews-table tbody td:first-child small { display: block; margin-top: 4px; }
+  .reviews-table tbody td:not(:first-child) { color:#29483e;font-size:14px;line-height:20px; }
+  .reviews-table tbody td.submission-type-cell .species-request-list { display:inline-flex;min-width:0;align-items:center;flex-wrap:wrap;gap:6px; }
+  .reviews-table tbody td.submission-type-cell .species-request-list > * { min-width:0; }
+  .reviews-table tbody td .badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .reviews-table tbody tr.terminal-read-only > td { background: transparent; color: #29483e; }
+  .reviews-table tbody tr.terminal-read-only { background: #fff; }
+  .reviews-table tbody td.actions-cell { grid-column: 1 / -1; padding-top: 12px; border-top: 1px solid #d7e0db; }
+  .reviews-table tbody td.actions-cell > .review-cell-label { display: none; }
+  .reviews-table tbody td.actions-cell .action-group { justify-content: stretch; }
+  .reviews-table tbody td.actions-cell .action-button { display: inline-flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; justify-content: center; border: 0; background: transparent; color: #245443; font-size: 14px; font-weight: 600; }
+  .review-row-action-icon { display: block; width: 18px; height: 18px; flex: none; }
+  .reviews-table tbody td.actions-cell .action-button:hover { background: #eaf3e9; }
+  .reviews-table tbody td[colspan] { grid-column: 1 / -1; }
+}
 .identity-cell { white-space: normal; }
 .identifier-line { display: inline-flex; align-items: center; justify-content: flex-start; flex-wrap: nowrap; gap: 7px; max-width: 100%; vertical-align: middle; }
 .identifier-line > strong, .identifier-line > span { min-width: 0; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }

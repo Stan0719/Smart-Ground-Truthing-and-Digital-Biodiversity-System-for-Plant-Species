@@ -77,9 +77,9 @@ export async function createAuth(database = connectAuth(), {
   }
   const dummy = await hashPassword(randomBytes(32).toString('hex'))
   const event = async (userId, ip, reason, actor = null) =>
-    await db
-      .prepare('INSERT INTO auth_events(created_at,user_id,ip,reason,actor_id) VALUES(?,?,?,?,?)')
-      .run(now(), userId, ip, reason, actor)
+    (await db
+      .prepare('INSERT INTO auth_events(created_at,user_id,ip,reason,actor_id) VALUES(?,?,?,?,?) RETURNING id')
+      .get(now(), userId, ip, reason, actor))?.id
   const inactivity = createAccountInactivity({ db, event, now })
   const temporaryExpired=async(user)=>Boolean(user?.must_change_password&&await db.prepare('SELECT 1 FROM activation_tokens WHERE user_id=? AND used=0 AND expires_at<=?').get(user.id,now()))
   const byEmail = async (email) =>
@@ -89,6 +89,23 @@ export async function createAuth(database = connectAuth(), {
     inactivity.apply((await db.prepare('SELECT * FROM users WHERE id=?').get(id)) ??
     (await db.prepare('SELECT * FROM visitors WHERE id=?').get(id)))
   const sessionTable = (user) => (user.role === 'Visitor' ? 'visitor_sessions' : 'sessions')
+  const setStatusWithDetails = async (id, status, actor, ip) => {
+    if (!['Active', 'Inactive', 'Suspended'].includes(status)) throw Error('Invalid status')
+    return db.transaction(async () => {
+      await inactivity.lock()
+      const existing = await byId(id)
+      if (!existing) return { changed: false, statusChanged: false, eventId: null }
+      const table = existing.role === 'Visitor' ? 'visitors' : 'users'
+      const locked = await db.prepare(`SELECT * FROM ${table} WHERE id=? FOR UPDATE`).get(id)
+      if (await db.prepare("SELECT 1 FROM auth_events WHERE user_id=? AND reason='account_archived'").get(id))
+        return { changed: false, statusChanged: false, eventId: null }
+      const result = await db.prepare(`UPDATE ${table} SET status=? WHERE id=?`).run(status, id)
+      if (result.changes) await inactivity.reactivated(id, locked.status, status, actor, ip)
+      const statusChanged = Boolean(result.changes && locked.status !== status)
+      const eventId = statusChanged ? await event(id, ip, `status_${status}`, actor) : null
+      return { changed: Boolean(result.changes), statusChanged, eventId, accountName: locked.name, role: locked.role, previousStatus: locked.status }
+    })
+  }
   // These reasons stay in opt-in server logs; clients receive the same generic error.
   const accountDenial = async (current, expectedHash, requirements) => {
     if (!current) return 'account_missing'
@@ -282,25 +299,9 @@ export async function createAuth(database = connectAuth(), {
       if(await temporaryExpired(user))return null
       return publicUser(checked)
     },
+    setStatusWithDetails,
     async setStatus(id, status, actor, ip) {
-      if (!['Active', 'Inactive', 'Suspended'].includes(status)) throw Error('Invalid status')
-      return db.transaction(async () => {
-        await inactivity.lock()
-        const existing = await byId(id)
-        if (!existing) return false
-        const table = existing.role === 'Visitor' ? 'visitors' : 'users'
-        const locked = await db.prepare(`SELECT * FROM ${table} WHERE id=? FOR UPDATE`).get(id)
-        if (
-          await db
-            .prepare("SELECT 1 FROM auth_events WHERE user_id=? AND reason='account_archived'")
-            .get(id)
-        )
-          return false
-        const result = await db.prepare(`UPDATE ${table} SET status=? WHERE id=?`).run(status, id)
-        if (result.changes) await inactivity.reactivated(id, locked.status, status, actor, ip)
-        if (result.changes && locked.status !== status) await event(id, ip, `status_${status}`, actor)
-        return Boolean(result.changes)
-      })
+      return (await setStatusWithDetails(id, status, actor, ip)).changed
     },
     async changePassword(id, password) {
       const hash = await hashPassword(password)

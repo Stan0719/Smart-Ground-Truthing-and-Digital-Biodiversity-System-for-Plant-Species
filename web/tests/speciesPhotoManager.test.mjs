@@ -60,8 +60,8 @@ function harness(handler, account = officer, options = {}) {
       if (name === 'vue-i18n') return { useI18n: () => ({ t, locale: vue.ref('en') }) }
       if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: listener => { listeners.add(listener); return () => listeners.delete(listener) } }
       if (name.endsWith('/assetImages')) return assets
-      if (name.endsWith('/speciesManagement')) return { ...service, ...(options.services || {}), requestSpeciesApi: async (url, options = {}) => {
-        calls.push({ url, options }); return handler ? handler(url, options) : url.startsWith('/api/species/')
+      if (name.endsWith('/speciesManagement')) return { ...service, readSpeciesGallery: async () => snapshot(), ...(options.services || {}), requestSpeciesApi: async (url, options = {}) => {
+        calls.push({ url, options }); return handler ? handler(url, options) : url.endsWith('/photos/capabilities') ? readyCapability : url.startsWith('/api/species/')
           ? { species: { species_id: props.species?.id, image_url: '/api/assets/official' } }
           : { assets: [{ id: 'a', content_type: 'image/jpeg' }, { id: 'b', content_type: 'image/png' }] }
       } }
@@ -89,7 +89,7 @@ test('real species names, authoritative portrait and safe JPEG/PNG gallery rende
   try {
     await h.mount()
     assert.match(allText(h.render()), /Common 12/); assert.match(allText(h.render()), /Scientific 12/)
-    assert.equal(h.state.mainImage.value, '/api/data/assets/official')
+    assert.equal(h.state.portrait.value, '/api/data/assets/official')
     assert.deepEqual(Array.from(h.state.images.value, image => image.assetId), ['a', 'b'])
     assert.equal(h.state.draft.value, null); assert.equal(h.state.canonical.value, null)
     assert.deepEqual(h.calls.map(call => call.url).sort(), ['/api/data/assets?species_id=12', '/api/species/12', '/api/species/photos/capabilities'])
@@ -120,9 +120,10 @@ test('gallery-unavailable guidance follows canonical loading state without losin
         assert.doesNotMatch(allText(h.render()), /Saved primary and arrangement metadata are not available yet/)
         assert.equal(h.state.canonical.value.revision, 7)
       } else {
-        assert.match(allText(h.render()), /Saved primary and arrangement metadata are not available yet/)
+        assert.match(allText(h.render()), /Photo changes are currently unavailable/)
       }
-      assert.equal(h.state.queue.value.length, 1)
+      assert.equal(h.state.queue.value.length, 0)
+      assert.equal(h.state.dirty.value, false)
       assert.equal(h.state.writesAvailable.value, false)
       assert.ok(h.calls.every(call => !call.options.method || call.options.method === 'GET'))
     } finally { resolveGallery(snapshot()); h.stop() }
@@ -131,17 +132,17 @@ test('gallery-unavailable guidance follows canonical loading state without losin
 
 test('missing and failed images render neutral placeholders; failed reads are retryable', async () => {
   let failing = true
-  const h = harness(() => { if (failing) throw Error('Unavailable'); return { assets: [] } })
+  const h = harness(url => { if (url.endsWith('/photos/capabilities')) return readyCapability; if (failing) throw Error('Unavailable'); return url === '/api/species/12' ? { species: { species_id: 12, image_url: '/api/assets/official' } } : { assets: [] } })
   try {
     await h.mount(); assert.equal(h.state.readErrors.value.length, 2)
     assert.match(allText(h.render()), /could not be loaded/)
     failing = false
     await h.files([jpeg()]); await h.state.loadImages()
     assert.equal(h.state.queue.value.length, 1, 'retry must retain selected files')
-    assert.match(allText(h.render()), /No authorized reference images/)
+    assert.equal(h.state.readErrors.value.length, 0, 'retry clears the read error')
   } finally { h.stop() }
   const broken = harness()
-  try { await broken.mount(); broken.state.failImage('/api/data/assets/a'); assert.match(allText(broken.render()), /Image unavailable/) }
+  try { await broken.mount(); broken.state.failImage('/api/assets/a'); assert.match(allText(broken.render()), /Image unavailable/) }
   finally { broken.stop() }
 })
 
@@ -166,7 +167,7 @@ test('native input remains keyboard-focusable, labeled, multiple and restricted 
     const rendered = nodes(h.render()), field = rendered.find(node => node.type === 'input')
     assert.equal(field.props.type, 'file'); assert.equal(field.props.accept, 'image/jpeg,image/png'); assert.equal(field.props.multiple, '')
     assert.ok(rendered.some(node => node.type === 'label' && node.props.for === field.props.id))
-    assert.notEqual(field.props.tabindex, -1); assert.ok(field.props['aria-describedby'].includes('guidance'))
+    assert.notEqual(field.props.tabindex, -1); assert.ok(field.props.disabled === undefined || field.props.disabled === false)
     assert.match(descriptor.styles[0].content, /focus-within[\s\S]*?outline: 3px/)
     assert.doesNotMatch(descriptor.styles[0].content, /\.visually-hidden\s*\{[^}]*display:\s*none/)
     assert.ok(!field.props.onKeydown, 'native file input supplies keyboard activation')
@@ -215,31 +216,58 @@ test('file limit is exactly 4 MiB and extension alone grants no trust', async ()
   assert.equal(await service.validateSpeciesPhoto(new File([png()], 'fake.jpg', { type: 'image/jpeg' })), 'invalidImage')
 })
 
-test('central gate disables uploads and arrangement saves even with valid files and a dirty draft', async () => {
-  const h = harness()
+test('central gate keeps viewing available but disables upload, removal, reordering and saving', async () => {
+  const h = harness(url => url.endsWith('/photos/capabilities') ? { ...readyCapability, activationRequested: false, writesEnabled: false, galleryAvailable: false } : { assets: [] })
   try {
-    await h.mount(); await h.files([jpeg()]); h.state.initializeDraft(snapshot()); h.state.setMain('b')
-    assert.equal(service.speciesPhotoWritesAvailable({}), false); assert.equal(h.state.dirty.value, true)
+    await h.mount(); h.state.initializeDraft(snapshot()); await h.files([jpeg()]); h.state.setMain('b'); h.state.moveCard('saved:b', -1); h.state.stageRemoval('a')
+    assert.equal(service.speciesPhotoWritesAvailable({}), false); assert.equal(h.state.dirty.value, false)
+    assert.equal(h.state.queue.value.length, 0); assert.equal(h.state.draft.value.primaryAssetId, 'a')
     for (const label of ['Upload Photos', 'Save Arrangement']) {
       const button = nodes(h.render()).find(node => node.type === 'button' && node.children === label)
       assert.equal(button.props.disabled, true)
     }
+    const fileInput = nodes(h.render()).find(node => node.type === 'input' && node.props?.type === 'file')
+    assert.equal(fileInput.props.disabled, true)
+    assert.ok(nodes(h.render()).some(node => node.type === 'li' && node.props?.class?.includes('add-photo-tile')))
+    const remove = nodes(h.render()).find(node => node.type === 'button' && node.props?.class?.includes('thumbnail-remove'))
+    assert.equal(remove.props.disabled, true)
+    const setMain = nodes(h.render()).find(node => node.type === 'button' && node.props?.class?.includes('set-main'))
+    assert.equal(setMain.props.disabled, true)
+    assert.ok(nodes(h.render()).filter(node => node.type === 'li' && node.props?.class?.includes('photo-card')).every(node => node.props.draggable === false && node.props.tabindex === undefined))
     assert.ok(h.calls.every(call => call.url !== '/api/assets' && !/\/images$/.test(call.url)))
     const text = allText(h.render())
-    assert.match(text, /selected photos will remain unsaved/); assert.match(text, /after species image management is enabled/)
+    assert.match(text, /Photo changes are currently unavailable/)
+    assert.doesNotMatch(text, /will remain unsaved|management is being prepared|reorder|first eligible reference photo/)
     assert.doesNotMatch(text, /successfully|Uploaded|saved successfully/)
   } finally { h.stop() }
 })
 
+test('draft hydration preserves stored primary and missing primary without reporting unsaved changes', async () => {
+  for (const primaryAssetId of ['b', null]) {
+    const base = { ...snapshot(), primaryAssetId }
+    const h = harness(url => url.endsWith('capabilities') ? readyCapability : url.includes('assets?') ? { assets: [] } : { species: { species_id: 12 } }, officer,
+      { embedded: true, services: { readSpeciesGallery: async () => structuredClone(base) } })
+    try {
+      await h.mount()
+      assert.equal(h.state.draft.value.primaryAssetId, primaryAssetId)
+      assert.equal(h.state.dirty.value, false)
+      assert.equal(h.state.firstEligible.value, primaryAssetId ? `saved:${primaryAssetId}` : null)
+      assert.doesNotMatch(allText(h.render()), /Unsaved arrangement changes/)
+    } finally { h.stop() }
+  }
+})
+
 test('read-only galleries cannot imply canonical primary/order or enable arrangement controls', async () => {
-  const h = harness()
+  const h = harness(url => url.endsWith('/photos/capabilities') ? { ...readyCapability, galleryAvailable: false }
+    : url.includes('photo-library') ? { images: [{ assetId: 'whole', source: 'plant' }], page: {} }
+      : url.includes('assets?') ? { assets: [] } : { species: { species_id: 12 } })
   try {
     await h.mount(); assert.equal(h.state.draft.value, null)
     h.state.expanded.value = true; await flush()
     const buttons = nodes(h.render()).filter(node => node.type === 'button' && (node.props?.class?.includes('set-main') || node.props?.title))
     assert.equal(buttons.length, 0, 'read-only library has no editing controls')
     assert.equal(h.state.editableCards.value.length, 0)
-    h.state.setMain('b'); h.state.move('b', -1); h.state.stageRemoval('a')
+    h.state.setMain('b'); h.state.moveCard('saved:b', -1); h.state.stageRemoval('a')
     assert.equal(h.state.draft.value, null)
   } finally { h.stop() }
 })
@@ -250,8 +278,9 @@ test('future canonical draft uses real revision, supports local primary/order/re
     await h.mount(); h.state.initializeDraft(snapshot())
     assert.equal(h.state.draft.value.expectedRevision, 7)
     assert.equal(h.state.dirty.value, false)
-    h.state.move('b', -1); assert.deepEqual(Array.from(h.state.draft.value.orderedAssetIds), ['b', 'a'])
-    h.state.setMain('b'); assert.equal(h.state.mainImage.value, '/api/data/assets/b')
+    const setMain = nodes(h.render()).find(node => node.type === 'button' && node.props?.class?.includes('set-main'))
+    setMain.props.onClick(); assert.equal(h.state.draft.value.primaryAssetId, 'b')
+    assert.deepEqual(Array.from(h.state.draft.value.orderedAssetIds), ['b', 'a'])
     h.state.stageRemoval('b'); assert.equal(h.state.draft.value.primaryAssetId, 'a')
     h.state.setMain('b'); assert.equal(h.state.draft.value.primaryAssetId, 'a', 'a staged removal cannot become primary again')
     assert.deepEqual(Array.from(h.state.draft.value.removedAssetIds), ['b'])
@@ -323,25 +352,17 @@ test('responsive CSS keeps dialog, uploader and controls usable at required view
   }
 })
 
-test('embedded Create uses first-position main while drag ordering and accessible moves preserve photo IDs', async () => {
-  const h = harness(undefined, officer, { create: true, embedded: true })
+test('embedded Create has no photo editing controls until server capability is enabled', async () => {
+  const h = harness(url => url.endsWith('/photos/capabilities') ? { ...readyCapability, activationRequested: false, writesEnabled: false } : { assets: [] }, officer, { create: true, embedded: true })
   try {
     await h.mount(); assert.equal(h.dialog.open, false); assert.equal(h.render().type, 'section')
     assert.equal(h.calls.length, 1) // Create also verifies explicit server capability.
     await h.files([jpeg(), png()])
-    const first = h.state.queue.value[0].id, second = h.state.queue.value[1].id
-    assert.equal(h.state.queuePrimary.value, first)
-    h.state.startDrag({ dataTransfer: { setData() {} } }, first, true)
-    h.state.dropImage(second, true)
-    assert.deepEqual(Array.from(h.state.queue.value, item => item.id), [second, first])
-    assert.equal(h.state.queuePrimary.value, second)
-    h.state.moveQueued(first, -1); assert.equal(h.state.queue.value[0].id, first)
-    h.state.queuePrimary.value = second
-    h.state.removeQueued(second); assert.equal(h.state.queuePrimary.value, first)
-    assert.match(allText(h.render()), /Main Image/)
+    assert.equal(h.state.queue.value.length, 0)
+    assert.equal(h.state.canReorder('queued:missing'), false)
     const saved = await h.state.commitPhotos('42')
-    assert.equal(saved.complete, false); assert.equal(saved.deferred, true)
-    assert.equal(h.calls.length, 1); assert.equal(h.state.queue.value.length, 1)
+    assert.equal(saved.complete, true); assert.equal(saved.deferred, false)
+    assert.equal(h.calls.length, 1); assert.equal(h.state.queue.value.length, 0)
   } finally { h.stop() }
 })
 
@@ -414,12 +435,11 @@ test('Edit appends new photos and promotes them only when moved ahead of saved r
   try {
     await h.mount(); h.state.initializeDraft(snapshot()); await h.files([jpeg()])
     assert.equal(h.state.queuePrimary.value, null)
-    assert.equal(h.state.mainImage.value, '/api/data/assets/a')
     h.state.setQueuedMain(h.state.queue.value[0].id)
-    assert.equal(h.state.mainImage.value, h.state.queue.value[0].url)
+    assert.equal(h.state.queuePrimary.value, h.state.queue.value[0].id)
     h.state.setMain('b')
     assert.equal(h.state.queuePrimary.value, null)
-    assert.equal(h.state.mainImage.value, '/api/data/assets/b')
+    assert.equal(h.state.draft.value.primaryAssetId, 'b')
   } finally { h.stop() }
 })
 
@@ -591,7 +611,7 @@ test('a mixed saved/queued order persists through explicit commit only, retainin
     { embedded: true, services: { readSpeciesGallery: async () => structuredClone(live) } })
   try {
     await h.mount(); await h.files([jpeg()])
-    h.state.move('b', -1)
+    h.state.moveCard('saved:b', -1)
     h.state.startDrag({ dataTransfer: { setData() {} } }, h.state.queue.value[0].id, true)
     h.state.dropImage('b', false)
     assert.equal(posts, 0); assert.equal(puts, 0)
@@ -647,7 +667,7 @@ test('library plant evidence has no editable controls and cannot enter the prima
     await h.mount(); h.state.expanded.value = true; await flush()
     const before = JSON.stringify(h.state.draft.value)
     h.state.startDrag({ preventDefault() {} }, 'evidence', false)
-    h.state.setMain('evidence'); h.state.move('evidence', -1); h.state.stageRemoval('evidence')
+    h.state.setMain('evidence'); h.state.moveCard('saved:evidence', -1); h.state.stageRemoval('evidence')
     assert.equal(h.state.dragging.value, null); assert.equal(JSON.stringify(h.state.draft.value), before)
     const evidence = nodes(h.render()).find(node => node.type === 'li' && node.props?.class === 'library-photo')
     assert.ok(evidence); assert.ok(!nodes(evidence).some(node => node.type === 'button' || node.type === 'select'))
@@ -711,7 +731,7 @@ test('photo validation bridge reports rejected selections without changing valid
   const h = harness()
   try {
     await h.mount(); h.state.initializeDraft(snapshot()); await h.files([jpeg()])
-    h.state.moveQueued(h.state.queue.value[0].id, -1)
+    h.state.moveCard(`queued:${h.state.queue.value[0].id}`, -1)
     const order = JSON.stringify(h.state.photoOrder.value), queue = h.state.queue.value[0], main = h.state.queuePrimary.value
     await h.files([new File(['invalid'], 'fake.jpg', { type: 'application/pdf' }), new File([], 'empty.png', { type: 'image/png' })])
     assert.equal(h.state.validationState().invalid, true)

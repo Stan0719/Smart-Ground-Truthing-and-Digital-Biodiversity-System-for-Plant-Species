@@ -1,7 +1,66 @@
 {
+  "officerPlantEdit": {
+    "latest": "Nama terkini yang disimpan",
+    "title": "Edit Tumbuhan",
+    "name": "Nama saintifik tumbuhan",
+    "reason": "Sebab perubahan",
+    "restriction": "Spesies, GPS, foto dan QR kekal baca sahaja. Gunakan aliran cadangan Ahli Botani untuk mengubahnya.",
+    "loading": "Memuatkan versi tumbuhan yang disahkan…",
+    "saved": "Perubahan tumbuhan disimpan.",
+    "save": "Simpan perubahan",
+    "saving": "Menyimpan…",
+    "close": "Tutup",
+    "refresh": "Segar semula versi terkini",
+    "required": "Medan ini diperlukan.",
+    "active": "Cadangan aktif wujud. Selesaikannya melalui aliran semakan sedia ada sebelum mengedit.",
+    "permission": "Anda tidak mempunyai kebenaran mengedit tumbuhan ini.",
+    "unavailable": "Garis dasar disahkan atau sejarah kekal yang diperlukan tidak tersedia.",
+    "conflict": "Tumbuhan berubah atau cadangan bercanggah wujud. Segar semula dan semak sebelum menyimpan.",
+    "invalid": "Semak nama saintifik dan sebab.",
+    "uncertain": "Hasil simpanan belum pasti. Segar semula dan semak rekod sebelum menyimpan lagi.",
+    "inspect": "Saya telah menyemak versi terkini dan ingin menghantar perubahan ini.",
+    "history": "Sejarah edit terus Pegawai"
+  },
+  "officerPlants": {
+    "plantName": "Tumbuhan",
+    "title": "Tumbuhan",
+    "eyebrow": "Daftar tumbuhan",
+    "search": "Cari",
+    "searchPlaceholder": "ID Tumbuhan, nama Tumbuhan atau Spesies, atau pengecam QR",
+    "species": "Spesies",
+    "allSpecies": "Semua spesies",
+    "plantId": "ID Tumbuhan",
+    "registered": "Tarikh didaftarkan",
+    "actions": "Tindakan",
+    "view": "Lihat butiran Tumbuhan",
+    "edit": "Edit",
+    "delete": "Padam",
+    "editBlocked": "Pengeditan memerlukan cadangan Edit Tumbuhan oleh Ahli Botani dan semakan Pegawai.",
+    "deleteBlocked": "Pemadaman Tumbuhan tidak tersedia bagi mengekalkan rekod dan bukti berkaitan.",
+    "registration": "Semakan pendaftaran",
+    "observations": "Semakan pemerhatian",
+    "pagination": "Halaman tumbuhan",
+    "previous": "Sebelumnya",
+    "next": "Seterusnya",
+    "page": "Halaman",
+    "loading": "Memuatkan Tumbuhan…",
+    "empty": "Tiada Tumbuhan sepadan ditemui.",
+    "error": "Tumbuhan tidak dapat dimuatkan.",
+    "retry": "Cuba lagi",
+    "session": "Sahkan sesi Pegawai untuk melihat Tumbuhan.",
+    "viewLoading": "Memuatkan maklumat Tumbuhan…",
+    "plantScientificName": "Nama saintifik Tumbuhan",
+    "viewError": "Maklumat Tumbuhan tidak dapat dimuatkan.",
+    "viewRegistry": "Maklumat pendaftaran",
+    "viewApprovedLocation": "Lokasi yang diluluskan",
+    "viewLatestApprovedObservation": "Pemerhatian terkini yang diluluskan",
+    "viewNoApprovedObservation": "Tiada pemerhatian yang diluluskan direkodkan.",
+    "viewLatestObservation": "Pemerhatian terkini",
+    "viewNoLatestObservation": "Tiada pemerhatian direkodkan."
+  },
   "officerFeedback": {
     "visibilityRequired": "Pilih pilihan keterlihatan sebelum meluluskan spesies ini.",
-    "speciesReferenced": "Spesies ini digunakan oleh rekod tumbuhan dan tidak boleh dipadamkan.",
+    "speciesReferenced": "Spesies ini dirujuk oleh rekod sedia ada dan tidak boleh dipadamkan.",
     "speciesConflict": "Perubahan ini bercanggah dengan data spesies sedia ada. Muat semula dan semak butiran sebelum mencuba lagi.",
     "validateOnly": "Sahkan sahaja",
     "saved": "Keputusan disimpan.",
@@ -984,25 +1043,25 @@
       "unread": "Belum dibaca"
     },
     "admin": {
-      "N001": {
-        "title": "Amaran ancaman tahap tinggi",
-        "message": "Pergerakan dikesan berhampiran PL002.",
-        "time": "2 minit lalu"
-      },
-      "N002": {
-        "title": "Sensor luar talian",
-        "message": "Sensor S003 berhenti melaporkan bacaan.",
-        "time": "8 minit lalu"
-      },
-      "N003": {
-        "title": "Amaran ancaman perlu disemak",
-        "message": "Suhu tinggi dikesan berhampiran PL010.",
-        "time": "15 minit lalu"
-      },
-      "N004": {
-        "title": "Amaran sistem",
-        "message": "Rangkaian sensor melaporkan amaran sambungan.",
-        "time": "25 minit lalu"
+      "loading": "Memuatkan pemberitahuan…",
+      "loadFailed": "Pemberitahuan tidak dapat dimuatkan.",
+      "sessionUnavailable": "Pemberitahuan tidak tersedia untuk sesi ini. Log masuk semula dan cuba lagi.",
+      "readFailed": "Status dibaca tidak dapat disimpan. Cuba lagi.",
+      "retry": "Cuba lagi",
+      "unknownAccount": "Akaun kakitangan",
+      "unknownTime": "Masa tidak tersedia",
+      "roles": { "Administrator": "Pentadbir", "Conservation Officer": "Pegawai Pemuliharaan", "Botanist": "Ahli Botani", "Visitor": "Pelawat" },
+      "statuses": { "Active": "Aktif", "Inactive": "Tidak aktif", "Suspended": "Digantung", "Pending Activation": "Menunggu pengaktifan" },
+      "actions": {
+        "staff_created": { "title": "Akaun kakitangan dicipta", "message": "{name} ditambah sebagai {role}." },
+        "staff_deactivated": { "title": "Akaun kakitangan dinyahaktifkan", "message": "Status {name} kini {status}." },
+        "staff_reactivated": { "title": "Akaun kakitangan diaktifkan semula", "message": "Akaun {name} aktif semula." },
+        "staff_role_changed": { "title": "Peranan kakitangan berubah", "message": "Peranan {name} kini {role}." },
+        "staff_profile_updated": { "title": "Akaun kakitangan dikemas kini", "message": "Butiran akaun {name} telah dikemas kini." },
+        "staff_archived": { "title": "Akaun kakitangan diarkibkan", "message": "{name} telah diarkibkan daripada pengurusan akaun." },
+        "security_settings_changed": { "title": "Tetapan keselamatan berubah", "message": "Pentadbir mengemas kini had sesi atau log masuk." },
+        "security_event": { "title": "Peristiwa keselamatan", "message": "Peristiwa keselamatan memerlukan perhatian pentadbir." },
+        "system_failure": { "title": "Kegagalan sistem", "message": "Kegagalan sistem memerlukan perhatian pentadbir." }
       }
     },
     "conservation": {
@@ -1191,6 +1250,7 @@
     }
   },
   "conservationDashboard": {
+    "previewError": "Rekod menunggu tidak dapat dimuatkan. Sila cuba lagi.",
     "pendingPlantRegistrations": "Pendaftaran Tumbuhan Menunggu Semakan",
     "pendingObservations": "Pemerhatian Menunggu Semakan",
     "fieldRecords": "Rekod Lapangan",
@@ -1201,7 +1261,7 @@
     "speciesConservationStatus": "Status Konservasi Spesies",
     "speciesStatusShare": "{status}: {count} daripada {total} spesies dimuatkan",
     "speciesStatusScope": "Daripada {total} spesies dimuatkan",
-    "countScope": "Bilangan berdasarkan rekod yang dimuatkan.",
+    "countScope": "Kiraan pemerhatian merangkumi semua rekod yang boleh diakses; kiraan lain berdasarkan rekod yang dimuatkan.",
     "viewAllObservations": "Lihat Semua Pemerhatian",
     "overview": "Gambaran Keseluruhan",
     "greeting": "Selamat petang, Pegawai Pemuliharaan",
@@ -1242,6 +1302,7 @@
       "currentDataset": "Pemerhatian dimuatkan · sehingga 500"
     },
     "table": {
+      "submittedAt": "Dihantar",
       "registeredBy": "Didaftarkan Oleh",
       "registeredAt": "Didaftarkan Pada",
       "observationId": "ID Pemerhatian",
@@ -2170,11 +2231,17 @@
       "genus": "Genus",
       "conservationStatus": "Status Pemuliharaan",
       "visibility": "Keterlihatan",
+      "visibilityHelp": "Pilih pihak yang boleh melihat spesies ini selepas diluluskan.",
       "actions": "Tindakan",
       "view": "Lihat",
       "visibilityPublic": "Awam",
-      "visibilityInternal": "Dalaman / Saintifik",
+      "visibilityPublicDescription": "Boleh dilihat oleh semua orang, termasuk pelawat.",
+      "visibilityInternal": "Dalaman",
+      "visibilityInternalDescription": "Boleh dilihat oleh ahli botani, Pegawai Pemuliharaan dan pentadbir.",
       "visibilityProtected": "Dilindungi",
+      "visibilityProtectedDescription": "Hanya boleh dilihat oleh Pegawai Pemuliharaan dan pentadbir.",
+      "basicInformation": "Maklumat Asas",
+      "speciesDetails": "Butiran Spesies",
       "unavailable": "Tidak tersedia",
       "loadedLimit": "Carian dan penapis sisi klien digunakan pada sehingga 200 spesies dimuatkan.",
       "skipped": "{count} rekod rosak dilangkau",
@@ -2196,6 +2263,7 @@
       "validationSummary": "Sila semak medan yang ditandakan ({count}) sebelum menyimpan.",
       "validationInvalid": "Sila semak medan ini.",
       "formSubtitle": "Perubahan ditulis ke daftar spesies bersandarkan PostgreSQL.",
+      "createFormSubtitle": "Tambah spesies tumbuhan baharu ke daftar spesies.",
       "loadingDetail": "Memuatkan butiran spesies berautoriti…",
       "taxonomyUnavailable": "Pemilihan taksonomi tidak tersedia:",
       "noGenus": "Tiada genus ditetapkan",
@@ -2218,8 +2286,8 @@
         "conflict": "Maklumat spesies disimpan, tetapi pustaka foto telah berubah. Draf dan fail yang dimuat naik dikekalkan; semak pustaka terkini sebelum menyimpan semula.",
         "plantEligibility": "Hanya foto yang diluluskan dan direkodkan sebagai pandangan keseluruhan tumbuhan dipaparkan. Foto lama tanpa label tidak disertakan.",
         "sectionTitle": "Foto Spesies",
-        "sectionDescription": "Tambah foto rujukan dan susun urutannya.",
-        "formUnavailable": "Muat naik dan penyimpanan susunan foto belum diaktifkan. Maklumat spesies boleh disimpan; foto yang dipilih belum akan disimpan.",
+        "sectionDescription": "Lihat foto spesies.",
+        "formUnavailable": "Perubahan foto tidak tersedia buat masa ini. Maklumat spesies masih boleh disimpan.",
         "textSavedDeferred": "Maklumat spesies telah disimpan. Foto belum dimuat naik dan kekal dalam borang ini sehingga dibatalkan atau ditutup.",
         "partialFailure": "Maklumat spesies disimpan, tetapi sesetengah operasi foto gagal. Imej yang dimuat naik dikekalkan. Biarkan borang terbuka untuk mencuba semula.",
         "expandLibrary": "Lihat & Susun Semua Foto",
@@ -2243,10 +2311,8 @@
         "uploadFailed": "Muat naik gagal. Simpan semula untuk mencuba lagi.",
         "libraryUnavailable": "Pustaka foto berhalaman tidak tersedia. Pratonton rujukan yang dimuatkan masih tersedia.",
         "addPhotos": "Tambah Foto",
-        "reorderHint": "Seret foto untuk menyusun, atau fokus pada kad dan tekan Alt + kekunci anak panah.",
         "invalidSelection": "Sesetengah fail ditolak. Pilih imej JPEG/PNG sehingga 4 MiB, atau buang pilihan yang ditolak di bawah.",
         "discardRejected": "Buang pilihan yang ditolak",
-        "mainDefault": "Foto rujukan layak pertama ialah imej utama. Perubahan disimpan bersama borang spesies.",
         "manage": "Urus Foto",
         "title": "Urus Foto Spesies",
         "subtitle": "Muat naik dan susun foto rujukan untuk spesies ini.",
@@ -2269,11 +2335,8 @@
         "queuedCount": "{count} fail dalam giliran untuk pratonton.",
         "validated": "Disahkan untuk pratonton setempat",
         "uploadPhotos": "Muat Naik Foto",
-        "uploadUnavailable": "Muat naik foto akan tersedia selepas pengurusan imej spesies diaktifkan.",
         "saveArrangement": "Simpan Susunan",
         "cancel": "Batal",
-        "managementUnavailable": "Pengurusan foto sedang disediakan. Anda boleh melihat pratonton dan memilih fail, tetapi perubahan belum boleh disimpan.",
-        "readOnlyGallery": "Imej rujukan yang dibenarkan dipaparkan untuk bacaan sahaja. Metadata imej utama dan susunan tersimpan belum tersedia.",
         "newPhotos": "Foto Baharu",
         "loading": "Memuatkan imej yang dibenarkan…",
         "validating": "Menyemak fail yang dipilih…",
@@ -2298,6 +2361,9 @@
       "saving": "Menyimpan…",
       "deleting": "Memadam…",
       "deleteConfirmTitle": "Padam Spesies?",
+      "deleteDialogSubtitle": "Keluarkan spesies ini secara kekal daripada daftar.",
+      "deleteIrreversible": "Tindakan ini tidak boleh dibuat asal.",
+      "deleteImportant": "Penting",
       "deleteConfirmation": "Ini memadam spesies secara kekal melalui backend.",
       "deleteReferenceWarning": "Pemadaman mungkin gagal jika tumbuhan, permohonan atau rekod lain merujuk spesies ini. Rekod berkaitan tidak akan dipadam oleh halaman ini.",
       "errors": {
@@ -2308,7 +2374,11 @@
         "save": "Tidak dapat menyimpan spesies.",
         "delete": "Tidak dapat memadam spesies.",
         "savedRefresh": "Spesies telah disimpan, tetapi data kekal tidak dapat disegar semula: {message}",
-        "deletedRefresh": "Spesies telah dipadam, tetapi senarai tidak dapat disegar semula: {message}"
+        "deletedRefresh": "Spesies telah dipadam, tetapi senarai tidak dapat disegar semula: {message}",
+        "deleteUncertain": "Hasil pemadaman belum pasti. Segar semula untuk mengesahkan Spesies sebelum mencuba lagi.",
+        "deletedRefreshPending": "Spesies telah dipadam. Segar semula untuk memuatkan senarai.",
+        "deleteStillPresent": "Spesies masih wujud. Semak butirannya sebelum mencuba Padam lagi.",
+        "deleteVerificationFailed": "Hasil pemadaman tidak dapat disahkan. Padam kekal dinyahdayakan. {message}"
       },
       "feedback": {
         "added": "Spesies dicipta dan disahkan daripada data backend kekal.",
@@ -2873,7 +2943,7 @@
     "proposed": "Nilai dicadangkan",
     "baselinePhotos": "Foto asas diluluskan",
     "proposedPhotos": "Foto dicadangkan",
-    "history": "Peristiwa semakan tersedia",
+    "history": "Sejarah semakan",
     "unavailable": "Tidak tersedia",
     "reload": "Muat Semula Cadangan Terkini",
     "inspect": "Saya telah memeriksa cadangan yang dimuat semula.",
@@ -2894,7 +2964,9 @@
       "zone": "Zon",
       "latitude": "Latitud",
       "longitude": "Longitud",
-      "accuracy_m": "Ketepatan (m)"
+      "accuracy_m": "Ketepatan (m)",
+      "altitudeM": "Altitud (m)",
+      "taxonomy": "Taksonomi"
     },
     "decisions": {
       "Approved": "Luluskan",
@@ -2918,7 +2990,19 @@
       "Withdrawn": "Ditarik Balik",
       "Superseded": "Digantikan"
     },
-    "cancelledReadOnly": "Cadangan ini telah dibatalkan. Ia tidak boleh disemak; pemerhatian Diluluskan kekal tidak berubah."
+    "cancelledReadOnly": "Cadangan ini telah dibatalkan. Ia tidak boleh disemak; pemerhatian Diluluskan kekal tidak berubah.",
+    "notRecorded": "Tidak direkodkan",
+    "nullValue": "Tiada nilai",
+    "emptyValue": "Kosong",
+    "noPhotos": "Tiada foto.",
+    "baselinePhotosUnavailable": "Foto asas tidak tersedia.",
+    "photosUnavailable": "Foto tidak tersedia.",
+    "photosUnchanged": "Tidak berubah",
+    "photoComparisonUnavailable": "Asas tidak diketahui",
+    "baseRevision": "Semakan asas diluluskan",
+    "currentStatus": "Status Pemerhatian semasa",
+    "loadingRequest": "Memuatkan permintaan...",
+    "retry": "Cuba lagi"
   },
   "observationVersions": {
     "registrationTitle": "Sejarah Penyerahan Pendaftaran",
@@ -3058,5 +3142,20 @@
       "animal_detected": "Haiwan dikesan",
       "suspicious_movement": "Pergerakan mencurigakan"
     }
+  },
+  "officerPlantDelete": {
+    "title": "Padam Tumbuhan",
+    "confirm": "Padam secara kekal",
+    "checking": "Menyemak rekod berkaitan...",
+    "close": "Tutup",
+    "verify": "Semak keadaan semasa",
+    "referenced": "Tumbuhan ini dirujuk oleh rekod sedia ada dan tidak boleh dipadam.",
+    "permission": "Anda tidak mempunyai kebenaran untuk memadam tumbuhan ini.",
+    "unavailable": "Tumbuhan tidak dapat disahkan. Sila cuba lagi.",
+    "conflict": "Rekod dikemas kini. Semak versi terkini sebelum memadam.",
+    "uncertain": "Hasil pemadaman tidak pasti. Semak keadaan semasa sebelum mencuba lagi.",
+    "saved": "Tumbuhan dipadam.",
+    "savedRefresh": "Tumbuhan dipadam. Maklumat terkini tidak dapat dimuatkan. Cuba muat semula senarai.",
+    "absent": "Tumbuhan tidak lagi wujud. Tiada pemadaman lanjut akan dicuba."
   }
 }

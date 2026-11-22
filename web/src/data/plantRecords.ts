@@ -20,6 +20,7 @@ export interface PlantRecord {
   plantId: string
   speciesSlug: string
   speciesId: string
+  plantScientificName?: string
   speciesName: string
   commonName: string
   latestApproved: Omit<PlantObservation, 'observationId' | 'recordedBy' | 'status'>

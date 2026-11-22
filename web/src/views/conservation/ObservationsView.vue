@@ -463,6 +463,10 @@ async function refreshSummary() {
   }
 }
 
+function retrySummary() {
+  summaryTask = refreshSummary()
+}
+
 async function open(item: ObservationView, reviewing = false, expectedOrigin?: ObservationOrigin) {
   if (reviewSaving.value || (reviewing && !authorizedOfficer.value)) return
   reviewHistoryRefresh.value = 0
@@ -850,7 +854,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
       </article>
     </div>
     <p v-if="summaryBusy || summaryUnavailable || summaryIncomplete" id="observation-summary-definition" class="observation-summary-definition" role="status">{{ summaryScope }}</p>
-    <button v-if="summaryError && !isLoading && !loadError" type="button" class="action-button" :disabled="summaryLoading || !authorizedOfficer" @click="summaryTask = refreshSummary()">{{ t('conservationPages.observations.retry') }}</button>
+    <button v-if="summaryError && !isLoading && !loadError" type="button" class="action-button" :disabled="summaryLoading || !authorizedOfficer" @click="retrySummary">{{ t('conservationPages.observations.retry') }}</button>
   </section>
 
   <div class="control-bar">
@@ -875,25 +879,26 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
       <tbody>
         <tr v-for="row in displayedRows" :key="row.key" :class="{ 'terminal-read-only': ['Withdrawn','Cancelled'].includes(row.kind === 'original' ? row.observation.status : row.proposal.status), superseded: (row.kind === 'original' ? row.observation.status : String(row.proposal.status)) === 'Superseded' }">
           <template v-if="row.kind === 'original'"><template v-for="item in [row.observation]" :key="item.id">
-          <td class="identity-cell"><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation', false, `observation-icon-0:${item.id}`)"><svg v-if="!controlCopied[`observation-icon-0:${item.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-0:${item.id}`" :key="`observation-icon-0:${item.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></td><td><span class="submission-type-badge submission-type-original">{{ t('finalOfficerWorkflow.original') }}</span></td><td class="plant-id-cell">{{ item.plantDisplayId }}</td>
-          <td><em>{{ speciesName(item) }}</em><small v-if="item.commonName && item.scientificName">{{ item.commonName }}</small><small v-if="item.hasSpeciesRequest">{{ t('conservationPages.observations.newSpeciesRequest') }}</small></td>
-          <td class="identity-cell"><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject', false, `observation-icon-1:${item.id}:${item.ownerSubject}`)"><svg v-if="!controlCopied[`observation-icon-1:${item.id}:${item.ownerSubject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-1:${item.id}:${item.ownerSubject}`" :key="`observation-icon-1:${item.id}:${item.ownerSubject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></div></td><td class="status-cell"><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(item.status)" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td><td class="created-cell">{{ formatDate(item.createdAt) }}</td>
-          <td class="actions-cell"><div class="action-group">
-            <button v-if="canReviewField(item)" class="action-button" :disabled="reviewSaving" @click="open(item, true)">{{ t('conservationPages.observations.review') }}</button>
-            <button v-else class="action-button" @click="open(item)">{{ t('common.viewDetails') }}</button>
-            <RouterLink v-if="item.plantRouteId" class="action-button" :to="`/plant/${item.plantRouteId}`">{{ t('conservationPages.observations.viewPlant') }}</RouterLink>
-            <button class="action-button" @click="openHistory(item)">{{ t('conservationPages.observations.history') }}</button>
-            <RouterLink class="action-button" :to="{ name: 'conservation-map', query: { plant: item.plantRawId } }">{{ t('conservationPages.observations.location') }}</RouterLink>
-            <RouterLink v-if="authorizedOfficer && item.origin !== 'subsequent_observation' && (item.status === 'Pending Review' || item.status === 'Flagged')" class="action-button" :to="{ name: 'conservation-reviews', query: { review: item.id } }">{{ rt('queues.registrationReview') }}</RouterLink>
+          <td class="identity-cell"><span class="observation-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 3C9 3 3 7 5 14s13 7 15-11ZM4 21 16 9" /></svg></span><span class="observation-cell-label">{{ t('unifiedObservations.submissionId') }}</span><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation', false, `observation-icon-0:${item.id}`)"><svg v-if="!controlCopied[`observation-icon-0:${item.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-0:${item.id}`" :key="`observation-icon-0:${item.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></td><td class="submission-type-cell"><span class="observation-cell-label">{{ t('unifiedObservations.submissionType') }}</span><span class="submission-type-badge submission-type-original">{{ t('finalOfficerWorkflow.original') }}</span></td><td class="plant-id-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.plantId') }}</span><span class="plant-id-value"><strong>{{ item.plantDisplayId }}</strong><em v-if="item.plantScientificName" class="observation-plant-name">{{ item.plantScientificName }}</em></span></td>
+          <td><span class="observation-cell-label">{{ t('conservationPages.observations.species') }}</span><em>{{ speciesName(item) }}</em><small v-if="item.commonName && item.scientificName">{{ item.commonName }}</small><small v-if="item.hasSpeciesRequest">{{ t('conservationPages.observations.newSpeciesRequest') }}</small></td>
+          <td class="identity-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.submittedBy') }}</span><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject', false, `observation-icon-1:${item.id}:${item.ownerSubject}`)"><svg v-if="!controlCopied[`observation-icon-1:${item.id}:${item.ownerSubject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-1:${item.id}:${item.ownerSubject}`" :key="`observation-icon-1:${item.id}:${item.ownerSubject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></div></td><td class="status-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.status') }}</span><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(item.status)" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td>
+          <td class="created-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.created') }}</span>{{ formatDate(item.createdAt) }}</td>
+          <td class="actions-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.actions') }}</span><div class="action-group">
+            <button v-if="canReviewField(item)" type="button" class="action-button observation-icon-action" :disabled="reviewSaving" :aria-label="t('conservationPages.observations.review')" :title="t('conservationPages.observations.review')" @click="open(item, true)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 4H5v16h14V4h-3M9 2h6v4H9z" /><path d="m8 13 2.5 2.5L16 10" /></svg></button>
+            <button v-else type="button" class="action-button observation-icon-action" :aria-label="t('common.viewDetails')" :title="t('common.viewDetails')" @click="open(item)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg></button>
+            <RouterLink v-if="item.plantRouteId" class="action-button observation-icon-action" :to="`/plant/${item.plantRouteId}`" :aria-label="t('conservationPages.observations.viewPlant')" :title="t('conservationPages.observations.viewPlant')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 11 12 4l9 7v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><path d="M9 21v-7h6v7" /></svg></RouterLink>
+            <button type="button" class="action-button observation-icon-action" :aria-label="t('conservationPages.observations.history')" :title="t('conservationPages.observations.history')" @click="openHistory(item)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></svg></button>
+            <RouterLink v-if="authorizedOfficer && item.origin !== 'subsequent_observation' && (item.status === 'Pending Review' || item.status === 'Flagged')" class="action-button observation-icon-action" :to="{ name: 'conservation-reviews', query: { review: item.id } }" :aria-label="rt('queues.registrationReview')" :title="rt('queues.registrationReview')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 3h14v18l-7-4-7 4z" /><path d="M9 8h6m-6 4h6" /></svg></RouterLink>
           </div></td>
         </template></template>
           <template v-else>
-            <td class="identity-cell"><div class="identifier-line"><strong :title="row.proposal.id">{{ proposalLabels.get(row.proposal.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" :title="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" @click="copyIdentifier(row.proposal.id, 'submission', false, `submission-icon:${row.proposal.id}`)"><svg v-if="!controlCopied[`submission-icon:${row.proposal.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `submission-icon:${row.proposal.id}`" :key="`submission-icon:${row.proposal.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div></td>
-            <td><span class="submission-type-badge submission-type-edit">{{ t('finalOfficerWorkflow.edit') }}</span></td><td class="plant-id-cell">{{ row.baseline.plantDisplayId }}</td>
-
-            <td><em>{{ speciesName(row.baseline) }}</em></td><td class="identity-cell"><MonitoringIdentifier :value="row.proposal.owner_subject" :labels="new Map([[row.proposal.owner_subject,submitterLabel(row.proposal.owner_subject)]])" /></td>
-            <td class="status-cell"><span class="badge" :style="workflowBadgeStyle(row.proposal.status)">{{ label(row.proposal.status) }}</span></td><td class="created-cell">{{ formatDate(row.proposal.created_at) }}</td>
-            <td class="actions-cell"><button type="button" class="action-button" :disabled="!authorizedOfficer || reviewSaving" @click="openProposal(row.proposal)">{{ proposalReviewable(row.proposal) ? t('dashboardObservationEdits.review') : t('common.viewDetails') }}</button></td>
+            <td class="identity-cell"><span class="observation-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 3C9 3 3 7 5 14s13 7 15-11ZM4 21 16 9" /></svg></span><span class="observation-cell-label">{{ t('unifiedObservations.submissionId') }}</span><div class="identifier-line"><strong :title="row.proposal.id">{{ proposalLabels.get(row.proposal.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" :title="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" @click="copyIdentifier(row.proposal.id, 'submission', false, `submission-icon:${row.proposal.id}`)"><svg v-if="!controlCopied[`submission-icon:${row.proposal.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `submission-icon:${row.proposal.id}`" :key="`submission-icon:${row.proposal.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div></td>
+            <td class="submission-type-cell"><span class="observation-cell-label">{{ t('unifiedObservations.submissionType') }}</span><span class="submission-type-badge submission-type-edit">{{ t('finalOfficerWorkflow.edit') }}</span></td><td class="plant-id-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.plantId') }}</span><span class="plant-id-value"><strong>{{ row.baseline.plantDisplayId }}</strong><em v-if="row.baseline.plantScientificName" class="observation-plant-name">{{ row.baseline.plantScientificName }}</em></span></td>
+            <td><span class="observation-cell-label">{{ t('conservationPages.observations.species') }}</span><em>{{ speciesName(row.baseline) }}</em></td>
+            <td class="identity-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.submittedBy') }}</span><MonitoringIdentifier :value="row.proposal.owner_subject" :labels="new Map([[row.proposal.owner_subject,submitterLabel(row.proposal.owner_subject)]])" /></td>
+            <td class="status-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.status') }}</span><span class="badge" :style="workflowBadgeStyle(row.proposal.status)">{{ label(row.proposal.status) }}</span></td>
+            <td class="created-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.created') }}</span>{{ formatDate(row.proposal.created_at) }}</td>
+            <td class="actions-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.actions') }}</span><div class="action-group"><button type="button" class="action-button observation-icon-action" :disabled="!authorizedOfficer || reviewSaving" :aria-label="proposalReviewable(row.proposal) ? t('dashboardObservationEdits.review') : t('common.viewDetails')" :title="proposalReviewable(row.proposal) ? t('dashboardObservationEdits.review') : t('common.viewDetails')" @click="openProposal(row.proposal)"><svg v-if="proposalReviewable(row.proposal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 4H5v16h14V4h-3M9 2h6v4H9z" /><path d="m8 13 2.5 2.5L16 10" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg></button></div></td>
           </template>
         </tr>
         <tr v-if="isLoading"><td colspan="8" class="state-cell">{{ t(scannedPages > 0 ? 'conservationPages.observations.scanning' : 'conservationPages.observations.loading') }}</td></tr>
@@ -1015,12 +1020,12 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
     <PlantPhotoLightbox ref="observationPhotoPreview" root-scroll-lock />
   </AppModal>
 
-  <AppModal v-if="selected && historyModal" :title="t('conservationPages.observations.historyTitle', { id: selected.plantDisplayId })" :subtitle="t('conservationPages.observations.historyLimit')" wide @close="closeModal">
+  <AppModal v-if="selected && historyModal" :title="t('conservationPages.observations.historyTitle', { id: selected.plantDisplayId })" :subtitle="t('conservationPages.observations.historyLimit')" wide accessible @close="closeModal">
     <p v-if="isLoading" role="status">{{ t('conservationPages.observations.loading') }}</p>
     <p v-if="loadError" role="alert">{{ loadError }}</p>
     <button v-if="hasMore || loadError" class="action-button" :disabled="isLoading" @click="loadObservations(Boolean(nextCursor))">{{ rt('queues.loadMore') }}</button>
     <p class="observation-data-provenance" role="note">{{ modalText('historyReadOnly') }}</p>
-    <div class="table-scroll"><table><thead><tr><th>{{ t('conservationPages.observations.id') }}</th><th>{{ t('conservationPages.observations.created') }}</th><th>{{ t('conservationPages.observations.height') }}</th><th>{{ t('conservationPages.observations.health') }}</th><th>{{ t('conservationPages.observations.status') }}</th></tr></thead><tbody><tr v-for="item in history" :key="item.id"><td>{{ item.id }}</td><td class="created-cell">{{ formatDate(item.createdAt) }}</td><td>{{ textOrUnavailable(item.height) }}</td><td>{{ label(item.healthStatus) }}</td><td>{{ label(item.status) }}</td></tr></tbody></table></div>
+    <div class="table-scroll history-table-scroll" role="region" tabindex="0" :aria-label="t('conservationPages.observations.historyTitle', { id: selected.plantDisplayId })"><table><thead><tr><th>{{ t('conservationPages.observations.id') }}</th><th>{{ t('conservationPages.observations.created') }}</th><th>{{ t('conservationPages.observations.height') }}</th><th>{{ t('conservationPages.observations.health') }}</th><th>{{ t('conservationPages.observations.status') }}</th></tr></thead><tbody><tr v-for="item in history" :key="item.id"><td>{{ item.id }}</td><td class="created-cell">{{ formatDate(item.createdAt) }}</td><td>{{ textOrUnavailable(item.height) }}</td><td>{{ label(item.healthStatus) }}</td><td>{{ label(item.status) }}</td></tr></tbody></table></div>
   </AppModal>
 </template>
 
@@ -1029,7 +1034,6 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
 .proposal-loading-note { color:#52685d; font-size:13px; line-height:1.5; }
 .proposal-warning { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:10px 14px; background:#fff7ed; color:#7c2d12; border-radius:8px; }
 .superseded > td { background:#f3f4f6; color:#4b5563; }
-.observations-table .submission-column { width: 14rem; }
 .terminal-read-only > td { background-color: #F3F4F6; color: #374151; }
 @media (max-width: 640px) { .observation-type-field { flex-basis: 100%; width: 100%; min-width: 0; } }
 
@@ -1037,6 +1041,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
 .observations-table .status-cell .review-status-group .resubmission-tag { background: #FFF1DB; color: #926119; font-size: 12px; padding: 3px 8px; flex-shrink: 0; }
 
 .observation-summary { min-width: 0; max-width: 100%; container-type: inline-size; margin-bottom: 18px; }
+.observation-summary > h3 { margin: 0 0 16px; }
 .observation-summary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 8px; }
 .observation-summary-card { min-width: 0; padding: 18px; border: 1px solid currentColor; border-radius: 14px; background: var(--observation-summary-background); color: var(--observation-summary-ink); box-shadow: none; display: grid; grid-template-rows: 1fr auto; }
 .observation-summary-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
@@ -1061,40 +1066,93 @@ a.action-button { text-decoration: none; }
 .state-cell span, td small { display: block; margin-top: 4px; }
 .error-state { color: #9b3d35; }
 .error-state .action-button { margin-top: 12px; }
-.observations-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.observations-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; container-type: inline-size; }
 .observations-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }
-.observations-table { width: 100%; min-width: 92rem; table-layout: auto; white-space: normal; border-collapse: separate; border-spacing: 0; }
-.observations-table .observation-column { width: 11rem; }
-.observations-table .submitter-column { width: 13rem; }
-.observations-table .plant-column { width: 6rem; }
-.observations-table .species-column { width: 15rem; }
-.observations-table .status-column { width: 10rem; }
-.observations-table .actions-column { width: 18rem; }
-.observations-table .created-column { width: 10rem; }
+.officer-layout.officer-layout.officer-layout .observations-scroll .observations-table { width: 100%; min-width: 92rem; table-layout: auto; white-space: normal; border-collapse: separate; border-spacing: 0; }
+.observations-table .observation-column { width: 15%; }
+.observations-table .submission-column { width: 15%; }
+.observations-table .plant-column { width: 12%; }
+.observations-table .species-column { width: 17%; }
+.observations-table .submitter-column { width: 15%; }
+.observations-table .status-column { width: 10%; }
+.observations-table .created-column { width: 11%; }
+.observations-table .actions-column { width: 10%; }
 .observations-table th, .observations-table td { padding: 12px 14px; text-align: left; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
 .observations-table th:nth-child(1), .observations-table td:nth-child(1) { min-width: 12rem; }
-.observations-table th:nth-child(2), .observations-table td:nth-child(2) { min-width: 14rem; }
-.observations-table th:nth-child(3), .observations-table td:nth-child(3) { min-width: 6rem; white-space: nowrap; overflow-wrap: normal; }
-.observations-table th:nth-child(4), .observations-table td:nth-child(4) { min-width: 14rem; }
-.observations-table th:nth-child(5), .observations-table td:nth-child(5) { min-width: 13rem; }
-.observations-table th:nth-child(7), .observations-table td:nth-child(7) { min-width: 10rem; white-space: nowrap; overflow-wrap: normal; }
-.observations-table td:first-child .identifier-line { flex-wrap: nowrap; width: max-content; }
-.observations-table td:first-child .identifier-line strong { white-space: nowrap; overflow-wrap: normal; word-break: normal; }
-.observations-table td:nth-child(5) .identifier-line { flex-wrap: nowrap; align-items: center; }
-.observations-table td:nth-child(5) .identifier-line > span:first-child { white-space: normal; overflow-wrap: break-word; word-break: normal; }
+.observations-table th:nth-child(2), .observations-table td:nth-child(2) { min-width: 11rem; }
+.observations-table th:nth-child(3), .observations-table td:nth-child(3) { min-width: 7rem; }
+.observations-table th:nth-child(4), .observations-table td:nth-child(4) { min-width: 12rem; }
+.observations-table th:nth-child(5), .observations-table td:nth-child(5) { min-width: 10rem; }
+.observations-table th:nth-child(6), .observations-table td:nth-child(6) { min-width: 10rem; }
+.observations-table th:nth-child(7), .observations-table td:nth-child(7) { min-width: 10rem; }
+.observations-table th:nth-child(8), .observations-table td:nth-child(8) { min-width: 10rem; }
+.observations-table td:first-child .identifier-line { flex-wrap: wrap; max-width: 100%; }
+.observations-table td:first-child .identifier-line strong { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.observations-table td:nth-child(5) .identifier-line { flex-wrap: wrap; align-items: center; }
+.observations-table td:nth-child(5) .identifier-line > span:first-child { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.observation-cell-label, .observation-card-emblem { display: none; }
 .observations-table th { background: #245443; color: #fff; border-bottom-color: #245443; font-size: 10px; font-weight: 700; line-height: 1.4; }
 .observations-table thead th:first-child { border-top-left-radius: 10px; }
 .observations-table thead th:last-child { border-top-right-radius: 10px; }
 .observations-table td { font-size: 12px; line-height: 1.5; }
-.observations-table th:nth-child(6), .observations-table th:nth-child(8) { min-width: 10rem; white-space: nowrap; overflow-wrap: normal; }
-.observations-table .status-cell, .observations-table .actions-cell { white-space: nowrap; }
+.observations-table th:nth-child(5), .observations-table th:nth-child(6), .observations-table th:nth-child(8) { white-space: nowrap; overflow-wrap: normal; }
+.observations-table .status-cell { white-space: normal; }
+.observations-table .actions-cell { text-align: right; white-space: nowrap; }
+.observations-table th:nth-child(8) { text-align: right; }
 .observations-table .badge { display: inline-flex; align-items: center; width: max-content; max-width: none; box-sizing: border-box; white-space: nowrap; overflow-wrap: normal; font-size: 11px; line-height: 1.4; vertical-align: middle; }
-/* Auto-layout lets nonwrapping status/action content set its own minimum column width. */
-.observations-scroll .observations-table .action-group { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 7px; width: max-content; min-width: max-content; }
-.observations-table .action-group > .action-button { flex: 0 0 auto; width: max-content; min-width: max-content; max-width: none; height: auto; min-height: 32px; white-space: nowrap; overflow-wrap: normal; font-size: 11px; }
-.observations-scroll .observations-table .identifier-copy { flex: 0 0 44px; width: 44px; min-width: 44px; max-width: 44px; }
+.observations-scroll .observations-table .action-group { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; width: 100%; min-width: 0; }
+.observations-table .action-group > .action-button.observation-icon-action { display: inline-grid; place-items: center; flex: 0 0 36px; width: 36px; min-width: 36px; height: 36px; min-height: 36px; max-width: 36px; padding: 0; border-radius: 8px; }
+.officer-layout.officer-layout.officer-layout .observations-table .observation-icon-action:hover:not(:disabled), .officer-layout.officer-layout.officer-layout .observations-table .observation-icon-action:focus-visible:not(:disabled) { border-color: #245443; background: #33745d; color: #fff; }
+.observations-table .observation-icon-action { position: relative; }
+.observations-table .observation-icon-action svg { display: block; width: 17px; height: 17px; }
+.observations-table .observation-icon-action::after { content: attr(title); position: absolute; z-index: 5; right: 0; bottom: calc(100% + 6px); width: max-content; max-width: 180px; padding: 6px 9px; border-radius: 6px; background: #173f34; color: #fff; font-size: 12px; line-height: 1.5; text-align: center; white-space: normal; pointer-events: none; opacity: 0; visibility: hidden; }
+.observations-table .observation-icon-action:hover::after, .observations-table .observation-icon-action:focus-visible::after { opacity: 1; visibility: visible; }
+.observations-table .observation-icon-action:focus-visible { outline: 3px solid #315b49; outline-offset: 2px; }
+.observations-scroll .observations-table .identifier-copy { flex: 0 0 44px; width: 44px; min-width: 44px; max-width: 44px; height: 44px; }
 .observations-table .state-cell { padding: 30px 14px; text-align: center; }
-@media (max-width: 767px) { .observations-table .action-group > .action-button { min-height: 44px; } }
+@container (max-width: 767px) {
+  .officer-layout.officer-layout.officer-layout .observations-scroll .observations-table { display: block; width: 100%; min-width: 0; }
+  .observations-table colgroup { display: none; }
+  .observations-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  .observations-table tbody { display: grid; gap: 12px; }
+  .observations-table tbody tr { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;padding:16px;border:1px solid #d7e0db;border-radius:16px;background:#fff; }
+  .observations-table tbody tr > td { display: block; min-width: 0 !important; padding: 0; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .observations-table tbody tr > td:first-child, .observations-table tbody tr > td:nth-child(2), .observations-table tbody tr > td:nth-child(7), .observations-table tbody tr > td:nth-child(8) { grid-column: 1 / -1; }
+  .observations-table tbody tr > td:first-child { display: flex; align-items: center; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid #d7e0db; }
+  .observations-table .observation-card-emblem { display: grid; place-items: center; flex: 0 0 52px; width: 52px; height: 52px; border-radius: 11px; background: #dcebd8; color: #245443; }
+  .observations-table .observation-card-emblem svg { width: 34px; height: 34px; }
+  .observations-table tbody tr > td:first-child .identifier-line { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; }
+  .officer-layout.officer-layout.officer-layout .observations-table tbody tr > td:first-child .identifier-line > strong { color:#174c38;font-family:inherit;font-size:18px;font-weight:700;line-height:24px;overflow-wrap:anywhere; }
+  .observations-table tbody tr > td:first-child .identifier-copy { flex: 0 0 40px; width: 40px; min-width: 40px; max-width: 40px; height: 40px; }
+  .observations-table tbody tr > td:nth-child(2) { display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:6px 8px;margin-top:-8px;padding:0 0 12px;border-bottom:1px solid #d7e0db; }
+  .observations-table tbody tr > td:nth-child(3), .observations-table tbody tr > td:nth-child(4), .observations-table tbody tr > td:nth-child(5), .observations-table tbody tr > td:nth-child(6) { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+  .observations-table .observation-cell-label { display:inline-flex;flex:0 0 auto;align-items:center;margin:0;color:#315848;font-size:14px;font-weight:600;line-height:20px; }
+  .observations-table .observation-cell-label::after { content: ':'; }
+  .observations-table tbody tr > td:first-child > .observation-cell-label { display:none; }
+  .observations-table .submission-type-cell .observation-cell-label { flex:0 0 auto; }
+  .observations-table .plant-id-cell, .observations-table .status-cell, .observations-table .identity-cell { font-size:14px;line-height:20px; }
+  .observations-table .plant-id-value { display:flex;flex:1 1 50%;min-width:0;align-items:baseline;flex-wrap:wrap;gap:4px 7px; }
+  .observations-table .plant-id-value strong { color:#174c38;font-size:14px;font-weight:700;line-height:20px; }
+  .observations-table .observation-plant-name { color:#53695e;font-size:14px;font-style:italic;line-height:20px;overflow-wrap:anywhere; }
+  .observations-table .identity-cell .identifier-line > span:first-child { font-size:14px;line-height:20px; }
+  .observations-table tbody tr > td:nth-child(7) { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+  .observations-table .identity-cell .identifier-line { display: flex; width: auto; align-items: center; flex-wrap: wrap; }
+  .observations-table .identity-cell > .identifier-line,
+  .observations-table .identity-cell > div.identifier-line { flex:1 1 48%;min-width:0; }
+  .observations-table .identity-cell > .monitoring-identifier { flex:1 1 48%;min-width:0; }
+  .observations-table .identity-cell > .identifier-line > span:first-child { min-width:0;overflow-wrap:anywhere; }
+  .observations-table .terminal-read-only > td, .observations-table tr.terminal-read-only > td, .observations-table tr.superseded > td { background: #fff; color: inherit; }
+  .observations-table .status-cell .review-status-group { justify-content:flex-start;flex-wrap:wrap;white-space:normal; }
+  .observations-table tbody tr > td:nth-child(8) { padding-top: 12px; border-top: 1px solid #d7e0db; }
+  .observations-table .actions-cell > .observation-cell-label { display: none; }
+  .officer-layout.officer-layout.officer-layout .observations-scroll .observations-table .action-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 0; width: 100%; min-width: 0; }
+  .officer-layout.officer-layout.officer-layout .observations-table .action-group > .action-button.observation-icon-action { display: flex; flex: 1 1 0; width: 100%; min-width: 0; max-width: none; height: auto; min-height: 56px; align-items: center; justify-content: center; flex-direction: column; gap: 6px; padding: 6px 4px; border: 0; border-radius: 6px; background: transparent; color: #2b6b50; white-space: normal; }
+  .officer-layout.officer-layout.officer-layout .observations-table .action-group > .action-button.observation-icon-action:nth-child(3n + 2), .officer-layout.officer-layout.officer-layout .observations-table .action-group > .action-button.observation-icon-action:nth-child(3n) { border-left: 1px solid #d7e0db; }
+  .officer-layout.officer-layout.officer-layout .observations-table .action-group > .action-button.observation-icon-action:hover:not(:disabled), .officer-layout.officer-layout.officer-layout .observations-table .action-group > .action-button.observation-icon-action:focus-visible:not(:disabled) { background: #33745d; color: #fff; }
+  .observations-table .observation-icon-action::after { content: attr(aria-label); position: static; display: block; width: auto; max-width: 100%; padding: 0; border-radius: 0; background: transparent; color: inherit; font-size: 12px; line-height: 1.3; text-align: center; overflow-wrap: anywhere; opacity: 1; visibility: visible; }
+  .observations-scroll .observations-table .identifier-copy { flex-basis: 44px; width: 44px; min-width: 44px; max-width: 44px; height: 44px; }
+  .observations-table .state-cell { grid-column: 1 / -1; padding: 20px 12px; }
+}
 .identity-cell { white-space: normal; }
 .identifier-line { display: inline-flex; align-items: center; justify-content: flex-start; flex-wrap: nowrap; gap: 7px; max-width: 100%; vertical-align: middle; }
 .identifier-line > strong, .identifier-line > span { min-width: 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
@@ -1122,3 +1180,4 @@ a.action-button { text-decoration: none; }
 .submission-type-original { background-color: #e0f2fe; color: #075985; }
 .submission-type-edit { background-color: #f3e8ff; color: #6b21a8; }
 </style>
+

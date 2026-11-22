@@ -3,8 +3,8 @@ import { createServer, request as proxyRequest } from 'node:http'
 import { once } from 'node:events'
 import { mkdtempSync, readFileSync, existsSync, statSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { resolve, extname, sep } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { resolve, extname, sep, relative as relativePath, isAbsolute } from 'node:path'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { createTestAuth } from '../../server/test-postgres.mjs'
 import { createAuthServer } from '../../server/http.mjs'
@@ -14,8 +14,10 @@ const { createPlantDatabase } = require('../../../plant-conservation-backend/tes
 const { createPlantApp } = require('../../../plant-conservation-backend/server.js')
 const sharp = require('../../../plant-conservation-backend/node_modules/sharp')
 const root = resolve(import.meta.dirname, '../..'),
-  dist = resolve(root, 'dist')
+  repositoryRoot = resolve(root, '..'),
+  dist = resolve(process.env.NIAH_BROWSER_DIST || resolve(root, 'dist'))
 let folder, auth, pool, plantServer, site, authServer, authPort, plantPort, origin
+let responsiveFixtureSchemaReady = false
 const password = randomBytes(24).toString('hex')
 const failures = new Map()
 function monitor(page) {
@@ -28,7 +30,7 @@ function monitor(page) {
   })
   page.on('response', (response) => {
     if (response.url().startsWith(origin) && response.status() >= 500)
-      errors.push(`HTTP ${response.status()} from local app`)
+      errors.push(`HTTP ${response.status()} from ${new URL(response.url()).pathname}`)
   })
 }
 async function call(context, path, method = 'GET', data) {
@@ -58,8 +60,16 @@ async function uiLogin(page, role) {
 }
 
 test.beforeAll(async () => {
+  if (process.env.NIAH_BROWSER_DIST) {
+    const inDirectory = (parent, child) => {
+      const relative = relativePath(resolve(parent), resolve(child))
+      return relative === '' || (relative !== '..' && !relative.startsWith(`..${sep}`) && !isAbsolute(relative))
+    }
+    if (!inDirectory(tmpdir(), dist) || inDirectory(repositoryRoot, dist))
+      throw Error('NIAH_BROWSER_DIST must be outside the repository and inside the system temporary directory.')
+  }
   if (!existsSync(resolve(dist, 'index.html')))
-    throw Error('Run npm run build before browser tests.')
+    throw Error('Build the website into NIAH_BROWSER_DIST before browser tests.')
   folder = mkdtempSync(resolve(tmpdir(), 'niah-browser-'))
   auth = await createTestAuth()
   await auth.db.prepare('UPDATE security_settings SET login_limit=100 WHERE id=1').run()
@@ -128,6 +138,9 @@ test.beforeAll(async () => {
   plantServer = createPlantApp({ auth, pool, origins: new Set([origin]) }).listen(0, '127.0.0.1')
   await once(plantServer, 'listening')
   plantPort = plantServer.address().port
+  for (const server of [site, authServer, plantServer])
+    expect(server.address().address).toBe('127.0.0.1')
+  expect(new URL(origin).hostname).toBe('127.0.0.1')
 })
 test.afterAll(async () => {
   for (const server of [site, plantServer, authServer])
@@ -635,6 +648,7 @@ test('Administrator modules render correct headings, active menus and empty data
       if (path === 'profile')
         await expect(page.getByLabel('Full Name', { exact: true })).toHaveValue('admin')
       if (width === 1366 && path === 'sensors')
+        await row.scrollIntoViewIfNeeded()
         await page.screenshot({
           path: test.info().outputPath('sensors-desktop.png'),
           fullPage: false,
@@ -903,6 +917,639 @@ for(const role of ['admin','officer','botanist','guest']){
   }
  });
 }
+
+async function seedResponsivePlants() {
+  const suffix = randomBytes(5).toString('hex')
+  const firstSpecies = (await pool.query(
+    'INSERT INTO species(scientific_name,common_name) VALUES($1,$2) RETURNING species_id',
+    [`Species scientific name for responsive test ${suffix} with a long descriptive phrase`, `Species common name for responsive test ${suffix}`],
+  )).rows[0].species_id
+  const secondSpecies = (await pool.query(
+    'INSERT INTO species(scientific_name,common_name) VALUES($1,$2) RETURNING species_id',
+    [`Second species scientific name ${suffix}`, `Second species common name ${suffix}`],
+  )).rows[0].species_id
+  const approved = []
+  for (let index = 0; index < 28; index++) {
+    const speciesId = index < 26 ? firstSpecies : secondSpecies
+    const plantName = `Plant-level scientific name ${suffix} specimen ${String(index + 1).padStart(2, '0')} with a long botanical description`
+    const row = (await pool.query(
+      `INSERT INTO plant_record(species_id,scientific_name,registered_subject,rbac_status,qr_token)
+       VALUES($1,$2,'staff:responsive-fixture','Approved',$3) RETURNING plant_id`,
+      [speciesId, plantName, `responsive-${suffix}-${index}`],
+    )).rows[0]
+    approved.push({ id: String(row.plant_id), speciesId: String(speciesId), plantName })
+  }
+  const pending = (await pool.query(
+    `INSERT INTO plant_record(species_id,scientific_name,registered_subject,rbac_status,qr_token)
+     VALUES($1,$2,'staff:responsive-fixture','Pending Review',$3) RETURNING plant_id`,
+    [firstSpecies, `Unapproved responsive fixture ${suffix}`, `responsive-${suffix}-pending`],
+  )).rows[0]
+  return {
+    suffix,
+    firstSpecies: String(firstSpecies),
+    secondSpecies: String(secondSpecies),
+    approved,
+    pendingId: String(pending.plant_id),
+  }
+}
+
+async function prepareResponsiveFixtureSchema() {
+  if (responsiveFixtureSchemaReady) return
+  for (const name of [
+    '004-species-requests.sql',
+    '006-atomic-plant-submissions.sql',
+    '008-record-change-submissions.sql',
+    '009-record-version-history.sql',
+    '013-staff-notification-foundation.sql',
+    '016-species-request-content-revision.sql',
+    '017-species-review-cycle.sql',
+  ]) {
+    const path = resolve(repositoryRoot, 'plant-conservation-backend', 'migrations', name)
+    await pool.query(readFileSync(path, 'utf8'))
+  }
+  // This read-only queue projection selects QR metadata. Match the isolated
+  // observation-queue fixture without changing any persistent database.
+  await pool.query(`CREATE TABLE IF NOT EXISTS plant_app.qr_code(
+    qr_id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    plant_id INTEGER UNIQUE REFERENCES plant_app.plant_record(plant_id) ON DELETE SET NULL,
+    qr_code TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'generated',
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    assigned_at TIMESTAMPTZ,
+    activated_at TIMESTAMPTZ,
+    retired_at TIMESTAMPTZ
+  )`)
+  responsiveFixtureSchemaReady = true
+}
+
+async function seedResponsiveReviewSubmission() {
+  const suffix = randomBytes(5).toString('hex')
+  const speciesName = `Review species scientific name ${suffix} with deliberately long text for narrow mobile cards`
+  const commonName = `Review species common name ${suffix} with a long description`
+  const plantName = `Review Plant-level scientific name ${suffix}`
+  const speciesId = (await pool.query(
+    'INSERT INTO species(scientific_name,common_name) VALUES($1,$2) RETURNING species_id',
+    [speciesName, commonName],
+  )).rows[0].species_id
+  const plantId = (await pool.query(
+    `INSERT INTO plant_record(species_id,scientific_name,registered_subject,rbac_status,qr_token)
+     VALUES($1,$2,'staff:responsive-fixture','Approved',$3) RETURNING plant_id`,
+    [speciesId, plantName, `review-responsive-${suffix}`],
+  )).rows[0].plant_id
+  const observationId = randomUUID()
+  const content = {
+    heightCm: 125,
+    healthStatus: 'Healthy',
+    lifeStage: 'Mature',
+    morphology: `Long review field ${suffix}: ${'leaf and stem detail '.repeat(9)}`,
+    notes: `Long review notes ${suffix}: ${'synthetic fixture text '.repeat(9)}`,
+    latitude: 1,
+    longitude: 2,
+    taxonomy: { family: 'Synthetic family', genus: 'Synthetic genus' },
+  }
+  await pool.query(
+    `INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key,origin_type)
+     VALUES($1,$2,'staff:responsive-fixture','Pending Review',$3::jsonb,$4,'initial_registration')`,
+    [observationId, plantId, JSON.stringify(content), `review-responsive-${suffix}`],
+  )
+  await pool.query(
+    `INSERT INTO plant_submission_receipt(owner_subject,client_key,payload_hash,result)
+     VALUES('staff:responsive-fixture',$1,$2,$3::jsonb)`,
+    [`review-responsive-${suffix}`, 'a'.repeat(64), JSON.stringify({
+      id: observationId,
+      plant_id: String(plantId),
+      species_id: String(speciesId),
+      species_request_id: null,
+      status: 'Pending Review',
+      qr_token: `review-responsive-${suffix}`,
+    })],
+  )
+  return { suffix, observationId, plantId: `PL${String(plantId).padStart(3, '0')}`, plantName, speciesName, commonName }
+}
+
+async function seedAdminAlertFixture() {
+  const suffix = randomUUID().replaceAll('-', '')
+  const deviceId = `browser-device-${suffix}`
+  const alertId = `browser-alert-${suffix}`
+  const readingId = `browser-reading-${suffix}`
+  await pool.query(
+    `INSERT INTO iot_device(id,name,device_type,key_hash,status)
+     VALUES($1,'Synthetic Admin Alert Sensor','Sensor','test-only-key-hash','Active')`,
+    [deviceId],
+  )
+  await pool.query(
+    `INSERT INTO sensor_reading(id,device_id,"values",created_at)
+     VALUES($1,$2,'{"temperature":31}'::jsonb,'2026-11-22T08:00:00Z')`,
+    [readingId, deviceId],
+  )
+  await pool.query(
+    `INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value,status,created_at,detected_at)
+     VALUES($1,$2,$3,'temperature',31,'New','2026-11-22T08:01:00Z','2026-11-22T08:00:00Z')`,
+    [alertId, deviceId, readingId],
+  )
+  return { deviceId, alertId, readingId }
+}
+
+async function seedAdminNotificationFixture() {
+  await prepareResponsiveFixtureSchema()
+  const admin = await auth.byEmail('admin@example.invalid')
+  const eventId = randomUUID()
+  const notificationId = randomUUID()
+  const accountName = `Synthetic Notification Officer ${randomUUID().slice(0, 8)}`
+  await pool.query(
+    `INSERT INTO staff_notification_event(id,source_key,event_type,audience_role,resource_kind,metadata,delivery_state,attempts,delivered_at)
+     VALUES($1,$2,'account_administration','Administrator','system',$3::jsonb,'delivered',1,CURRENT_TIMESTAMP)`,
+    [eventId, `browser-admin-notification:${eventId}`, JSON.stringify({ action: 'staff_created', account_name: accountName, role: 'Conservation Officer' })],
+  )
+  await pool.query(
+    `INSERT INTO staff_notification(id,event_id,recipient_subject,intended_role)
+     VALUES($1,$2,$3,'Administrator')`,
+    [notificationId, eventId, `staff:${admin.id}`],
+  )
+  return { notificationId, accountName }
+}
+
+async function guardResponsiveNetwork(page) {
+  await page.route('**/*', (route) => {
+    const requested = new URL(route.request().url())
+    if (requested.origin === origin || requested.protocol === 'data:' || requested.protocol === 'blob:')
+      return route.continue()
+    return route.abort()
+  })
+}
+
+async function chooseLocale(page, index) {
+  await page.locator('.language-trigger').click()
+  const options = page.locator('.language-menu').getByRole('option')
+  await expect(options).toHaveCount(3)
+  await options.nth(index).click()
+  await expect(page.locator('.language-trigger')).toHaveAttribute('aria-expanded', 'false')
+}
+
+async function expectNoHorizontalOverflow(page, soft = false) {
+  const widths = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    document: document.documentElement.scrollWidth,
+    body: document.body.scrollWidth,
+  }))
+  const check = soft ? expect.soft : expect
+  check(widths.document, 'Document width must not overflow viewport').toBeLessThanOrEqual(widths.viewport + 1)
+  check(widths.body, 'Body width must not overflow viewport').toBeLessThanOrEqual(widths.viewport + 1)
+}
+
+test.describe('Officer responsive browser checks', () => {
+  test.setTimeout(180000)
+
+  test('Officer responsive Plants Registry: widths, languages, filtering, pagination and read-only modal focus', async ({ page, context }) => {
+    monitor(page)
+    await guardResponsiveNetwork(page)
+    await apiLogin(context, 'officer')
+    await prepareResponsiveFixtureSchema()
+    const fixture = await seedResponsivePlants()
+    const topPlant = fixture.approved.at(-1)
+    expect(topPlant).toBeTruthy()
+    const registryResponse = await call(context, '/api/data/officer/plants')
+    const registryBody = await registryResponse.text()
+    expect(registryResponse.status(), registryBody).toBe(200)
+    const registry = JSON.parse(registryBody)
+    expect(registry.plants.every((plant) => plant.status === 'Approved')).toBe(true)
+    expect(registry.plants.some((plant) => plant.id === fixture.pendingId)).toBe(false)
+    expect(registry.plants.map((plant) => plant.id), JSON.stringify(registry.plants.slice(0, 2))).toContain(topPlant.id)
+
+    const widths = [320, 375, 430, 720, 768, 1366]
+    const locales = [
+      { index: 0, name: 'en' },
+      { index: 1, name: 'ms' },
+      { index: 2, name: 'zh' },
+    ]
+    for (const locale of locales) {
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.goto(origin + '/conservation/plants')
+        await chooseLocale(page, locale.index)
+        await expect.soft(page.locator('.page-intro h2'), `${locale.name} ${width}px page heading`).toBeVisible()
+        const rows = page.locator('.registry-table tbody tr')
+        await expect.soft(rows, `${locale.name} ${width}px approved page size`).toHaveCount(25)
+        const row = rows.filter({ hasText: `PL${String(topPlant.id).padStart(3, '0')}` })
+        await expect.soft(row, `${locale.name} ${width}px Plant row`).toBeVisible()
+        await expect.soft(row.locator('.plant-identity'), `${locale.name} ${width}px Plant-level name`).toContainText(fixture.suffix)
+        await expect.soft(row.locator('td').nth(1), `${locale.name} ${width}px Species name`).toContainText(fixture.suffix)
+        await expect.soft(row.locator('.plant-identity'), `${locale.name} ${width}px names remain distinct`).not.toContainText(`Second species scientific name ${fixture.suffix}`)
+
+        const layout = await page.locator('.plants-registry').evaluate((container) => ({
+          width: container.getBoundingClientRect().width,
+          table: getComputedStyle(container.querySelector('.registry-table')).display,
+          row: getComputedStyle(container.querySelector('.registry-table tbody tr')).display,
+        }))
+        const cards = layout.width <= 900
+        expect.soft(layout.table, `${locale.name} ${width}px Registry table/card layout`).toBe(cards ? 'block' : 'table')
+        expect.soft(layout.row, `${locale.name} ${width}px Registry row layout`).toBe(cards ? 'grid' : 'table-row')
+        const responsiveBounds = await row.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          const registry = element.closest('.plants-registry')?.getBoundingClientRect()
+          const actions = element.querySelector('.registry-actions')
+          const actionRect = actions?.getBoundingClientRect()
+          const text = [...element.querySelectorAll('.plant-name-inline, .species-name, td:nth-child(2) .cell-value small')]
+            .map((node) => {
+              const bounds = node.getBoundingClientRect()
+              const style = getComputedStyle(node)
+              return {
+                label: node.className || node.tagName,
+                whiteSpace: style.whiteSpace,
+                clientWidth: node.clientWidth,
+                scrollWidth: node.scrollWidth,
+                right: bounds.right,
+              }
+            })
+          const buttons = [...element.querySelectorAll('.registry-actions button')].map((button) => {
+            const bounds = button.getBoundingClientRect()
+            return { left: bounds.left, right: bounds.right, visible: bounds.width > 0 && bounds.height > 0 }
+          })
+          return {
+            left: rect.left,
+            right: rect.right,
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+            registryRight: registry?.right ?? 0,
+            actions: actionRect ? { left: actionRect.left, right: actionRect.right, clientWidth: actions.clientWidth, scrollWidth: actions.scrollWidth } : null,
+            text,
+            buttons,
+            viewport: window.innerWidth,
+          }
+        })
+        expect.soft(responsiveBounds.right, `${locale.name} ${width}px Plant card/row stays inside registry`).toBeLessThanOrEqual(responsiveBounds.registryRight + 1)
+        expect.soft(responsiveBounds.right, `${locale.name} ${width}px Plant card/row stays inside viewport`).toBeLessThanOrEqual(responsiveBounds.viewport + 1)
+        expect.soft(responsiveBounds.scrollWidth, `${locale.name} ${width}px Plant card/row has no horizontal content overflow`).toBeLessThanOrEqual(responsiveBounds.clientWidth + 1)
+        expect.soft(responsiveBounds.text.every((item) => item.whiteSpace !== 'nowrap'), `${locale.name} ${width}px long Plant/Species names are allowed to wrap`).toBe(true)
+        expect.soft(responsiveBounds.text.every((item) => item.scrollWidth <= item.clientWidth + 1 && item.right <= responsiveBounds.right + 1), `${locale.name} ${width}px Plant/Species names are not clipped`).toBe(true)
+        expect.soft(responsiveBounds.actions?.scrollWidth ?? 0, `${locale.name} ${width}px action group has no fixed-width overflow`).toBeLessThanOrEqual((responsiveBounds.actions?.clientWidth ?? 0) + 1)
+        expect.soft(responsiveBounds.actions?.right ?? 0, `${locale.name} ${width}px action group stays inside card`).toBeLessThanOrEqual(responsiveBounds.right + 1)
+        expect.soft(responsiveBounds.buttons.length, `${locale.name} ${width}px View/Edit/Delete controls exist`).toBe(3)
+        expect.soft(responsiveBounds.buttons.every((button) => button.visible && button.left >= responsiveBounds.left - 1 && button.right <= Math.min(responsiveBounds.right, responsiveBounds.viewport) + 1), `${locale.name} ${width}px View/Edit/Delete controls fit inside visible card`).toBe(true)
+        await expect.soft(page.locator('.registry-filters input')).toBeVisible()
+        await expect.soft(page.locator('.registry-filters select')).toBeVisible()
+        const filterBounds = await page.locator('.registry-filters .field').evaluateAll((fields) =>
+          fields.map((field) => {
+            const rect = field.getBoundingClientRect()
+            return rect.left >= 0 && rect.right <= window.innerWidth + 1
+          }),
+        )
+        expect.soft(filterBounds.every(Boolean), `${locale.name} ${width}px filters fit`).toBe(true)
+        const rowActions = row.locator('.registry-actions button')
+        await expect.soft(rowActions, `${locale.name} ${width}px View/Edit/Delete`).toHaveCount(3)
+        for (const button of await rowActions.all())
+          await expect.soft(button).toBeVisible()
+        await expect.soft(page.locator('.registry-table')).not.toContainText('Map')
+        await expect.soft(page.locator('.registry-table')).not.toContainText('QR-')
+        await page.screenshot({
+          path: test.info().outputPath(`plants-${width}-${locale.name}.png`),
+          fullPage: false,
+        })
+        await expectNoHorizontalOverflow(page, true)
+      }
+    }
+
+    await page.setViewportSize({ width: 375, height: 900 })
+    await page.goto(origin + '/conservation/plants')
+    await chooseLocale(page, 0)
+    const search = page.locator('.registry-filters input')
+    const plantIdQuery = `PL${String(topPlant.id).padStart(3, '0')}`
+    const idSearchResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return url.pathname === '/api/data/officer/plants' && url.searchParams.get('q') === plantIdQuery
+    })
+    await search.fill(plantIdQuery)
+    const idSearch = await idSearchResponse
+    expect(idSearch.status(), await idSearch.text()).toBe(200)
+    await expect(page.locator('.registry-table tbody tr')).toHaveCount(1)
+    await expect(page.locator('.registry-table tbody tr').first()).toContainText(topPlant.plantName)
+    const plantNameQuery = `specimen ${String(topPlant.id).padStart(2, '0')}`
+    const nameSearchResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return url.pathname === '/api/data/officer/plants' && url.searchParams.get('q') === plantNameQuery
+    })
+    await search.fill(plantNameQuery)
+    const nameSearch = await nameSearchResponse
+    const nameSearchBody = await nameSearch.text()
+    expect(nameSearch.status(), nameSearchBody).toBe(200)
+    expect(JSON.parse(nameSearchBody).plants).toHaveLength(1)
+    await expect(page.locator('.registry-table tbody tr')).toHaveCount(1)
+    await search.fill('')
+    await page.locator('.registry-filters select').selectOption(fixture.secondSpecies)
+    await expect(page.locator('.registry-table tbody tr')).toHaveCount(2)
+    await page.locator('.registry-filters select').selectOption('')
+    const registryRows = page.locator('.registry-table tbody tr')
+    await expect(registryRows).toHaveCount(25)
+    const pagination = page.locator('.registry-pagination button')
+    await expect(pagination.last()).toBeEnabled()
+    await pagination.last().click()
+    await expect(registryRows).toHaveCount(3)
+    await expect(pagination.first()).toBeEnabled()
+    await pagination.first().click()
+    await expect(registryRows).toHaveCount(25)
+
+    const viewButton = page.locator('.registry-table tbody tr').first().locator('.registry-actions button').first()
+    await viewButton.focus()
+    await page.keyboard.press('Tab')
+    await expect(page.locator('.registry-actions button').nth(1)).toBeFocused()
+    expect(await page.locator('.registry-actions button').nth(1).evaluate((element) => element.matches(':focus-visible'))).toBe(true)
+    await viewButton.click()
+    const dialog = page.getByRole('dialog', { name: 'Plant Information' })
+    await expect(dialog).toBeVisible()
+    for (let index = 0; index < 3; index++) {
+      await page.keyboard.press('Tab')
+      await expect(dialog.locator(':focus')).toHaveCount(1)
+    }
+    await dialog.locator('.close-button').click()
+    await expect(dialog).toHaveCount(0)
+    await expect(viewButton).toBeFocused()
+  })
+
+  test('Officer responsive Review Submissions: widths, languages, field labels, wrapping and read-only keyboard actions', async ({ page, context }) => {
+    monitor(page)
+    await guardResponsiveNetwork(page)
+    await apiLogin(context, 'officer')
+    await prepareResponsiveFixtureSchema()
+    const fixture = await seedResponsiveReviewSubmission()
+    const observationsResponse = await call(context, '/api/data/observations?limit=100')
+    const observationsBody = await observationsResponse.text()
+    expect(observationsResponse.status(), observationsBody).toBe(200)
+    const queuedObservation = JSON.parse(observationsBody).observations.find((row) => row.id === fixture.observationId)
+    expect(queuedObservation, JSON.stringify(queuedObservation)).toMatchObject({
+      id: fixture.observationId,
+      status: 'Pending Review',
+      revision: 1,
+      origin_type: 'initial_registration',
+      content: expect.any(Object),
+    })
+    for (const path of ['/api/data/record-changes?limit=100', '/api/species-requests']) {
+      const response = await call(context, path)
+      expect(response.status(), `${path}: ${await response.text()}`).toBe(200)
+    }
+    const widths = [320, 375, 430, 720, 768, 1366]
+    const locales = [
+      { index: 0, name: 'en' },
+      { index: 1, name: 'ms' },
+      { index: 2, name: 'zh' },
+    ]
+    for (const locale of locales) {
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.goto(origin + '/conservation/reviews')
+        await chooseLocale(page, locale.index)
+        await expect.soft(page.locator('.page-header h1, .section-header h1, h1').first(), `${locale.name} ${width}px page heading`).toBeVisible()
+        const row = page.locator('.reviews-table tbody tr').filter({ hasText: fixture.suffix })
+        await expect.soft(row, `${locale.name} ${width}px submission row`).toBeVisible()
+        await expect.soft(row.locator('.status-cell .badge')).toBeVisible()
+        await expect.soft(row.locator('.status-cell .badge')).toHaveClass(/pending-review/)
+        await expect.soft(row).toContainText(fixture.suffix)
+        await expect.soft(row).toContainText(fixture.plantName.slice(-10))
+        await expect.soft(row).toContainText(fixture.plantId)
+        await expect.soft(row.locator('.submission-type-cell .species-request-badge')).toBeVisible()
+        await expect.soft(row.locator('.actions-cell .action-button')).toBeVisible()
+
+        const layout = await page.locator('.reviews-scroll').evaluate((container) => ({
+          width: container.getBoundingClientRect().width,
+          table: getComputedStyle(container.querySelector('.reviews-table')).display,
+          row: getComputedStyle(container.querySelector('.reviews-table tbody tr')).display,
+        }))
+        const cards = layout.width <= 767
+        expect.soft(layout.table, `${locale.name} ${width}px table/card layout`).toBe(cards ? 'block' : 'table')
+        expect.soft(layout.row, `${locale.name} ${width}px row layout`).toBe(cards ? 'grid' : 'table-row')
+        if (cards) {
+          const mobileLabels = row.locator('.review-cell-label')
+          await expect.soft(mobileLabels.first()).toHaveCount(1)
+          const labelCount = await mobileLabels.count()
+          expect.soft(labelCount, `${locale.name} ${width}px mobile field labels`).toBeGreaterThanOrEqual(7)
+          for (let index = 1; index < labelCount; index++) {
+            const colon = await mobileLabels.nth(index).evaluate((element) => getComputedStyle(element, '::after').content)
+            expect.soft(colon, `${locale.name} ${width}px label colon ${index}`).toContain(':')
+          }
+        } else {
+          await expect.soft(page.getByRole('columnheader').first()).toBeVisible()
+        }
+        const overflow = await row.evaluate((element) => ({
+          client: element.clientWidth,
+          scroll: element.scrollWidth,
+          right: element.getBoundingClientRect().right,
+          containerRight: element.closest('.reviews-scroll')?.getBoundingClientRect().right ?? 0,
+        }))
+        if (cards) {
+          expect.soft(overflow.scroll, `${locale.name} ${width}px card content fits`).toBeLessThanOrEqual(overflow.client + 1)
+          expect.soft(overflow.right, `${locale.name} ${width}px card stays inside its container`).toBeLessThanOrEqual(overflow.containerRight + 1)
+        }
+        await row.scrollIntoViewIfNeeded()
+        await page.screenshot({
+          path: test.info().outputPath(`reviews-${width}-${locale.name}.png`),
+          fullPage: false,
+        })
+        await expectNoHorizontalOverflow(page, true)
+      }
+    }
+
+    await page.setViewportSize({ width: 375, height: 900 })
+    await page.goto(origin + '/conservation/reviews')
+    await chooseLocale(page, 0)
+    const search = page.locator('.reviews-filters .search-field input')
+    await expect(search).toBeVisible()
+    await search.focus()
+    await page.keyboard.press('Tab')
+    expect(await page.evaluate(() => document.activeElement?.matches(':focus-visible'))).toBe(true)
+    const row = page.locator('.reviews-table tbody tr').filter({ hasText: fixture.suffix })
+    const action = row.locator('.actions-cell .action-button')
+    await expect(action).toBeVisible()
+    await action.focus()
+    await page.keyboard.press('Enter')
+    const dialog = page.getByRole('dialog').first()
+    await expect(dialog).toBeVisible()
+    for (let index = 0; index < 3; index++) {
+      await page.keyboard.press('Tab')
+      await expect(dialog.locator(':focus')).toHaveCount(1)
+    }
+    await dialog.locator('.close-button').click()
+    await expect(dialog).toHaveCount(0)
+    await expect(action).toBeFocused()
+  })
+})
+test('Admin Recent Alerts opens the selected read-only detail and preserves Device View', async ({ page }) => {
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  await page.addInitScript(() => {
+    window.__niahUnhandledRejections = []
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event.reason
+      window.__niahUnhandledRejections.push(reason instanceof Error ? reason.message : String(reason))
+    })
+  })
+  await guardResponsiveNetwork(page)
+  const fixture = await seedAdminAlertFixture()
+  await uiLogin(page, 'admin')
+  await page.goto(origin + '/admin/iot')
+  await expect(page.getByRole('heading', { level: 1, name: 'IoT Monitoring', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Latest Available Readings' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Latest Alerts' })).toBeVisible()
+  await expect(page.locator('.admin-alert-table')).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('admin-iot-rendered.png'), fullPage: true })
+  expect(pageErrors, 'no uncaught page errors during initial route rendering').toEqual([])
+  expect(await page.evaluate(() => window.__niahUnhandledRejections), 'no unhandled rejections during initial route rendering').toEqual([])
+
+  let detailCalls = 0
+  let releaseFirstFailure
+  const firstFailureGate = new Promise((resolve) => { releaseFirstFailure = resolve })
+  await page.route(`${origin}/api/data/alerts/${fixture.alertId}`, async (route) => {
+    detailCalls += 1
+    if (detailCalls === 1) {
+      await firstFailureGate
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Synthetic detail request failure.' }),
+      })
+      return
+    }
+    await route.continue()
+  })
+
+  const alertView = page.locator('.admin-alert-table tbody tr')
+    .filter({ hasText: fixture.alertId })
+    .getByRole('button', { name: 'View', exact: true })
+  await expect(alertView).toBeVisible()
+  await alertView.click()
+  const alertDialog = page.getByRole('dialog', { name: 'Alert Details' })
+  await expect(alertDialog.getByRole('status')).toContainText('Loading alert details')
+  releaseFirstFailure()
+  await expect(alertDialog.getByRole('alert')).toBeVisible()
+  await expect(alertDialog.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await alertDialog.getByRole('button', { name: 'Retry' }).click()
+  await expect(alertDialog.getByText(fixture.alertId, { exact: true })).toBeVisible()
+  await expect(alertDialog.getByText('Synthetic Admin Alert Sensor')).toBeVisible()
+  await expect(alertDialog.getByText(fixture.readingId, { exact: true })).toBeVisible()
+  const recordedMetric = await alertDialog.locator('dt').filter({ hasText: 'Metric' })
+    .evaluate((element) => element.nextElementSibling?.textContent?.trim())
+  const recordedValue = await alertDialog.locator('dt').filter({ hasText: 'Recorded Value' })
+    .evaluate((element) => element.nextElementSibling?.textContent?.trim())
+  expect(recordedMetric).toBe('temperature')
+  expect(recordedValue).toBe('31')
+  await page.screenshot({ path: test.info().outputPath('admin-alert-details.png'), fullPage: true })
+  const severityValue = await alertDialog.locator('dt').filter({ hasText: 'Severity' })
+    .evaluate((element) => element.nextElementSibling?.textContent?.trim())
+  expect(severityValue).toBe('—')
+  await expect(alertDialog.getByRole('button', { name: /Mark as Reviewing|Resolve/ })).toHaveCount(0)
+
+  const closeIcon = alertDialog.getByRole('button', { name: 'Close alert details' })
+  const closeFooter = alertDialog.getByRole('button', { name: 'Close', exact: true })
+  await expect(closeIcon).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(closeFooter).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(closeIcon).toBeFocused()
+  await closeIcon.click()
+  await expect(alertDialog).toHaveCount(0)
+  await expect(alertView).toBeFocused()
+  expect(detailCalls).toBe(2)
+
+  const deviceView = page.locator('.admin-reading-table tbody tr')
+    .filter({ hasText: fixture.deviceId })
+    .getByRole('button', { name: 'View', exact: true })
+  await expect(deviceView).toBeVisible()
+  await deviceView.click()
+  const deviceDialog = page.getByRole('dialog', { name: 'Synthetic Admin Alert Sensor' })
+  await expect(deviceDialog).toBeVisible()
+  const deviceCloseIcon = deviceDialog.getByRole('button', { name: 'Close sensor details' })
+  await expect(deviceCloseIcon).toBeFocused()
+  await page.screenshot({ path: test.info().outputPath('admin-device-details.png'), fullPage: true })
+  await page.keyboard.press('Shift+Tab')
+  await expect(deviceDialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(deviceCloseIcon).toBeFocused()
+  await expect(deviceDialog.locator('dt').filter({ hasText: 'Device Type' }).locator('xpath=following-sibling::dd'))
+    .toHaveText('Sensor')
+  for (const label of ['Serial Number', 'Location Description', 'Installed At']) {
+    const value = await deviceDialog.locator('dt').filter({ hasText: label })
+      .evaluate((element) => element.nextElementSibling?.textContent?.trim())
+    expect(value).toBe('—')
+  }
+  await deviceCloseIcon.click()
+  await expect(deviceDialog).toHaveCount(0)
+  await expect(deviceView).toBeFocused()
+  expect(pageErrors, 'no uncaught page errors through the modal flows').toEqual([])
+  expect(await page.evaluate(() => window.__niahUnhandledRejections), 'no unhandled rejections through the modal flows').toEqual([])
+})
+test('Admin notification bell dispatches fetch, retries, renders and marks a synthetic notice read', async ({ page }) => {
+  const pageErrors = []
+  const notificationRequests = []
+  const notificationResponses = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.origin === origin && url.pathname.startsWith('/api/data/staff-notifications'))
+      notificationRequests.push({ path: url.pathname, method: request.method() })
+  })
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    if (url.origin === origin && url.pathname.startsWith('/api/data/staff-notifications'))
+      notificationResponses.push({ path: url.pathname, status: response.status() })
+  })
+  await page.addInitScript(() => {
+    window.__niahUnhandledRejections = []
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event.reason
+      window.__niahUnhandledRejections.push(reason instanceof Error ? reason.message : String(reason))
+    })
+  })
+  await guardResponsiveNetwork(page)
+  const fixture = await seedAdminNotificationFixture()
+  let allowListSuccess = false
+  await page.route((url) => url.origin === origin && url.pathname === '/api/data/staff-notifications' && url.searchParams.get('limit') === '20', async (route) => {
+    if (!allowListSuccess) {
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Synthetic transient failure.' }) })
+      return
+    }
+    await route.continue()
+  })
+  const initialListFailure = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === '/api/data/staff-notifications' && response.status() === 503,
+  )
+  await uiLogin(page, 'admin')
+  await initialListFailure
+  await expect.poll(() => notificationResponses.some(({ path, status }) => path.endsWith('/unread-count') && status === 200)).toBe(true)
+
+  const bell = page.locator('.notification-button')
+  await expect(bell).toBeVisible()
+  await bell.click()
+  const menu = page.locator('#admin-notifications')
+  await expect(menu.getByRole('alert')).toContainText('Notifications could not be loaded.')
+  const retry = menu.getByRole('button', { name: 'Retry', exact: true })
+  await expect(retry).toBeVisible()
+  const listsBeforeRetry = notificationRequests.filter(({ path, method }) => path === '/api/data/staff-notifications' && method === 'GET').length
+  allowListSuccess = true
+  const successfulList = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === '/api/data/staff-notifications' && response.status() === 200,
+  )
+  await retry.click()
+  const successfulResponse = await successfulList
+  expect(successfulResponse.status()).toBe(200)
+  await expect(bell).toHaveAttribute('aria-expanded', 'true')
+  await expect(menu).toBeVisible()
+  await expect.poll(() => notificationRequests.filter(({ path, method }) => path === '/api/data/staff-notifications' && method === 'GET').length).toBeGreaterThan(listsBeforeRetry)
+  await expect(menu.getByText(fixture.accountName, { exact: false })).toBeVisible()
+  await expect(menu.locator('.notification-item')).toHaveCount(1)
+  await page.screenshot({ path: test.info().outputPath('admin-notifications-loaded.png'), fullPage: true })
+
+  const readResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === `/api/data/staff-notifications/${fixture.notificationId}/read`,
+  )
+  await menu.locator('.notification-item').click()
+  expect((await readResponse).status()).toBe(200)
+  expect(notificationRequests).toContainEqual({
+    path: `/api/data/staff-notifications/${fixture.notificationId}/read`,
+    method: 'POST',
+  })
+  expect(notificationRequests).toContainEqual({ path: '/api/data/staff-notifications/unread-count', method: 'GET' })
+  expect(notificationResponses.some(({ path, status }) => path.endsWith('/unread-count') && status === 200)).toBe(true)
+  expect(pageErrors, 'no uncaught browser errors').toEqual([])
+  await expect.poll(async () => page.evaluate(() => window.__niahUnhandledRejections)).toEqual([])
+})
 for(const [role,paths] of [['admin',adminPaths],['officer',officerPaths]])for(const path of paths){
  test('PostgreSQL page connection '+path,async({page,context})=>{
   await apiLogin(context,role);

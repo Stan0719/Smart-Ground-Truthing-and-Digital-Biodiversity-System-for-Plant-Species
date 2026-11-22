@@ -20,32 +20,55 @@ import { formatPlantId } from '../src/utils/plantId.ts'
 import * as speciesRequestIntegration from '../src/services/reviewSpeciesRequest.ts'
 
 // Execute the actual SFC setup/render code with an in-memory HTTP boundary.
-test('UIUX-003 compact header preserves technical limitations in a localized top-layer help popover',async()=>{
+test('withdrawn Plant registrations retain localized status, filtering and terminal read-only behavior',async()=>{
+ for(const language of ['en','ms','zh-CN']) {
+  const dictionary=JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`,import.meta.url),'utf8'));
+  const withdrawn=fixture({status:'Withdrawn'}),pending=fixture({id:secondId,status:'Pending Review'});
+  const h=harness(url=>fixtureResponse(url,[withdrawn,pending]),{},language,undefined,null,{
+   ct:value=>value==='Withdrawn'?dictionary.conservationText.withdrawn:String(value),
+  });
+  try {
+   await h.state.loadObservations();
+   assert.equal(h.state.observations.value.find(r=>r.id===firstId).status,'Withdrawn');
+   assert.equal(h.state.canonicalStatus(' withdrawn '),'Withdrawn');
+   assert.equal(h.state.canonicalStatus('Cancelled'),'','edit cancellation is not an Observation status');
+   assert.equal(h.state.canonicalStatus('invalid-status'),'','unsupported statuses remain unverified');
+   h.state.status.value='Withdrawn';
+   assert.deepEqual(Array.from(h.state.filtered.value,r=>r.id),[firstId]);
+   const tree=nodes(h.render());
+   assert.ok(tree.some(n=>n.type==='tr'&&String(n.props?.class).includes('terminal-read-only')));
+   assert.ok(tree.some(n=>n.type==='span'&&n.children===dictionary.conservationText.withdrawn));
+   await h.state.open(h.state.observations.value.find(r=>r.id===firstId));
+   for(const decision of ['Approved','Rejected','Correction Required','Flagged']) {
+    assert.equal(h.state.canDecide(decision),false);
+    await h.state.decide(decision);
+   }
+   assert.equal(h.calls.filter(c=>c.options.method==='POST').length,0);
+   h.state.status.value='Pending Review';
+   assert.deepEqual(Array.from(h.state.filtered.value,r=>r.id),[secondId]);
+  }finally{h.stop()}
+ }
+});
+
+test('review queue keeps its localized heading while omitting the removed help tooltip',async()=>{
  for(const language of ['en','ms','zh-CN']) {
   const dictionary=JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`,import.meta.url),'utf8')).conservationPages.reviews.queues
   const h=harness(url=>fixtureResponse(url,[fixture()]),{},language)
   try {
    await h.state.loadObservations()
-   const tree=nodes(h.render()),button=tree.find(n=>n.props?.class==='queue-help-button'),popover=tree.find(n=>n.props?.id==='registration-queue-help')
+   const tree=nodes(h.render())
    assert.ok(tree.some(n=>n.type==='h2'&&n.children===dictionary.registrations))
    assert.ok(tree.some(n=>n.props?.class==='page-kicker'&&n.children===dictionary.registrationEyebrow))
    assert.ok(tree.some(n=>n.type==='p'&&n.children===dictionary.registrationIntro))
-   if(language==='en') {assert.equal(dictionary.registrationIntro,'Review and manage plant registrations and species requests.');assert.match(dictionary.queueHelp,/not necessarily every database record/);assert.match(dictionary.queueHelp,/Species results may be incomplete/)}
-   assert.equal(button.props['aria-label'],dictionary.aboutQueue);assert.equal(popover.props.popover,'auto');assert.equal(popover.props.role,'tooltip')
-   for(const key of ['aboutQueue','includedHeading','includedText','countsHeading','countsText']) assert.ok(nodes(popover).some(n=>n.children===dictionary[key]))
-   let shown=0,hidden=0;const style={}
-   h.state.queueHelp.value={style,showPopover(){shown++},hidePopover(){hidden++},getBoundingClientRect(){return {width:300,height:100}}}
-   const event={currentTarget:{getBoundingClientRect(){return {left:100,bottom:70}}}}
-   button.props.onMouseenter(event);button.props.onFocus(event);button.props.onClick(event)
-   assert.equal(shown,3);assert.ok(parseInt(style.left)>=12);assert.ok(parseInt(style.top)>=12)
-   h.state.hideQueueHelp();assert.equal(hidden,1)
+   if(language==='en') assert.equal(dictionary.registrationIntro,'Review and manage plant registrations and species requests.')
+   assert.ok(!tree.some(n=>n.props?.class==='queue-help-button'))
+   assert.ok(!tree.some(n=>n.props?.id==='registration-queue-help'))
    assert.ok(!tree.some(n=>n.type==='p'&&n.children===messages.finalOfficerWorkflow.loadedQueue))
   }finally{h.stop()}
  }
  assert.doesNotMatch(descriptor.template.content,/t\('approvedChanges.queueScope'\)|t\('finalOfficerWorkflow.loadedQueue'\)/)
- assert.match(descriptor.template.content,/@keydown.esc.stop.prevent="hideQueueHelp\(\)"/)
- assert.match(descriptor.styles[0].content,/max-width:|width: min\(420px, calc\(100vw - 24px\)\)/)
- assert.match(descriptor.styles[0].content,/registration-title-row \{ display: flex; align-items: center; flex-wrap: wrap/)
+ assert.doesNotMatch(descriptor.template.content,/queue-help-button|registration-queue-help/)
+ assert.doesNotMatch(descriptor.styles[0].content,/queue-help-popover|queue-help-section/)
 })
 
 // No server, credentials, live database, or browser storage is used.
@@ -180,7 +203,7 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
       if (name === 'vue-i18n') return { useI18n: () => ({ t }) }
       if (name.endsWith('useConservationText'))
         return {
-          useConservationText: () => ({ ct: (value, params = {}) => Object.entries(params).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), String(value)), locale: vue.ref('en') }),
+          useConservationText: () => ({ ct: options.ct || ((value, params = {}) => Object.entries(params).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), String(value))), locale: vue.ref(language) }),
         }
       if (name.endsWith('/auth')) return { sessionSnapshot: () => session, subscribeSession: fn => { sessionListener = fn; return () => { sessionListener = null } } }
       if (name.endsWith('observationId')) return { formatObservationId }
@@ -1352,7 +1375,7 @@ test('submitted zone is preserved in the row and selected modal; missing values 
   try {
     await h.state.loadObservations()
     assert.equal(h.state.observations.value[0].zone, '  Field zone A  ')
-    assert.ok(nodes(h.render()).some(n => n.type === 'td' && n.children === '  Field zone A  '))
+    assert.ok(nodes(h.render()).some(n => n.type === 'td' && renderText({ render: () => n }).includes('Field zone A')))
     await h.state.open(h.state.observations.value[0]); await flush()
     assert.ok(nodes(h.render()).some(n => n.type === 'dd' && n.children === '  Field zone A  '))
     assert.ok(renderText(h).includes('-5 m'))
@@ -1656,13 +1679,13 @@ test('review table preserves alignment/header and uses shared workflow colors wi
   const shared = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
   const observationSource = readFileSync(new URL('../src/views/conservation/ObservationsView.vue', import.meta.url), 'utf8')
   assert.match(css, /\.reviews-table th, \.reviews-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)
-  assert.match(css, /\.reviews-table \.species-column\s*\{ width: 13rem/)
+  assert.match(css, /\.reviews-table \.species-column\s*\{ width: 11rem/)
   const header = /\.reviews-table th\s*\{([^}]+)\}/.exec(css)[1]
   assert.equal(header.replace('font-size: 12px', 'font-size: 10px'), /\.observations-table th\s*\{([^}]+)\}/.exec(observationSource)[1])
   const sharedHeader = /th\s*\{([^}]+)\}/.exec(shared)[1]
   assert.match(sharedHeader, /text-transform: uppercase/)
   assert.match(sharedHeader, /letter-spacing: 0.6px/)
-  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 135rem; table-layout: fixed;[^}]*border-collapse: separate; border-spacing: 0/)
+  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 108rem; table-layout: fixed;[^}]*border-collapse: separate; border-spacing: 0/)
   assert.match(css, /\.reviews-scroll\s*\{ min-width: 0; max-width: 100%; overflow-x: auto/)
   assert.match(css, /\.reviews-table \.badge\s*\{[^}]*display: inline-flex; align-items: center;[^}]*white-space: nowrap/)
   assert.match(css, /\.reviews-scroll \.reviews-table \.action-group\s*\{[^}]*flex-wrap: wrap; align-items: center;[^}]*gap: 7px; width: 100%; min-width: 0/)
@@ -2227,7 +2250,7 @@ test('Review Submissions retains exactly eleven aligned columns while full obser
     const cells = nodes(renderedRow).filter(node => node.type === 'td')
     assert.equal(cells.length, 11)
     assert.equal(cells[1].props.class, 'plant-id-cell')
-    assert.equal(cells[1].children, 'PL018')
+    assert.equal(cells[1].children.at(-1).children, 'PL018')
     assert.equal(cells[0].props.class, 'identity-cell')
     assert.match(descriptor.styles[0].content, /\.reviews-table \.plant-id-cell\s*\{ color: #315749; font-weight: 700/)
     assert.match(descriptor.styles[0].content, /\.reviews-table \.identity-cell strong\s*\{ color: inherit; font-weight: 700/)

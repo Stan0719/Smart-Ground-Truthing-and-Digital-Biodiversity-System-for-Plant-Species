@@ -32,12 +32,26 @@ async function resolvePlantRegistrations(c, plantIds) {
   const assets = (await c.query(`SELECT id,plant_id,observation_id,owner_subject,approved,client_key,content_type
     FROM plant_asset WHERE plant_id::text=ANY($1::text[]) AND species_id IS NULL
       AND content_type IN ('image/jpeg','image/png') ORDER BY created_at,id`, [ids])).rows;
+  const direct = historyReady ? (await c.query(`SELECT v.* FROM record_version_history v
+    JOIN business_audit a ON a.id=v.snapshot->'review_provenance'->>'audit_id'
+      AND a.action='officer_plant_direct_edit' AND a.target=v.plant_id::text
+      AND a.actor_subject=v.edited_by AND a.created_at=v.created_at
+    JOIN record_version_history base ON base.id=v.snapshot->'review_provenance'->>'base_version_id'
+      AND base.plant_id=v.plant_id AND base.version_number<v.version_number AND base.snapshot=v.previous_snapshot
+    WHERE v.plant_id::text=ANY($1::text[]) AND v.record_type='plant' AND v.change_id IS NULL
+      AND v.reviewed_by IS NULL AND v.reviewed_at IS NULL AND v.status IN ('Approved','Superseded')
+      AND v.snapshot->'review_provenance'->>'kind'='officer_direct_edit'
+    ORDER BY v.version_number DESC`,[ids])).rows : [];
   for (const id of ids) {
     const initial = observations.filter(o => String(o.plant_id) === id && o.origin_type === 'initial_registration');
     if (initial.length !== 1 || initial[0].status !== 'Approved') continue;
     const original = initial[0];
-    const edit = edits.find(v => String(v.plant_id) === id && v.request_owner === original.owner_subject &&
+    let edit = edits.find(v => String(v.plant_id) === id && v.request_owner === original.owner_subject &&
       v.base_snapshot?.workflow_type !== 'initial_registration_observation_edit');
+    const officerEdit=direct.find(v=>String(v.plant_id)===id && v.owner_subject===original.owner_subject);
+    const latestCapture=captures.find(v=>String(v.plant_id)===id && v.snapshot.observation_id===original.id);
+    if(officerEdit && officerEdit.version_number>Math.max(edit?.version_number||0,latestCapture?.version_number||0))
+      edit={...officerEdit,request_owner:officerEdit.owner_subject,base_snapshot:officerEdit.previous_snapshot};
     const source = edit ? observations.find(o => o.id === edit.base_snapshot?.observation_id &&
       String(o.plant_id) === id && o.owner_subject === original.owner_subject && o.status === 'Approved') : original;
     if (!source) continue;

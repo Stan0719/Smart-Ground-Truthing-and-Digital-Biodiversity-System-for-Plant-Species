@@ -57,7 +57,10 @@ test('all frontend navigation avoids the deleted route and existing alert links 
   }
   inspect(new URL('../src/', import.meta.url))
   assert.match(read('views/AdminDashboardView.vue'), /const openThreatAlerts[\s\S]*?name: 'admin-iot'/)
-  assert.equal([...read('data/adminNotifications.ts').matchAll(/route: '\/admin\/iot'/g)].length, 3)
+  const bell = read('components/AdminNotificationBell.vue')
+  assert.match(bell, /createAdminInbox\(\{ transport: \(\.\.\.args\) => fetch\(\.\.\.args\) \}\)/)
+  assert.match(bell, /from ['"]\.\.\/services\/adminNotifications['"]?/)
+  assert.match(read('services/adminNotifications.ts'), /\/api\/data\/staff-notifications\?limit=20/)
 })
 
 test('Administrator IoT keeps canonical alerts, preview, error retry and data mappings while the removed table is absent', () => {
@@ -71,6 +74,21 @@ test('Administrator IoT keeps canonical alerts, preview, error retry and data ma
   assert.doesNotMatch(operations, /filteredAlerts|interface Alert|requested === 'alerts'|section === 'alerts'/)
   assert.match(operations, /plantApi<\{ provisioningKey: string \}>\('\/devices', 'POST'/)
   assert.match(operations, /\/thresholds`, 'PATCH'/)
+})
+
+test('Recent Alerts opens selected authorized detail in a read-only modal and Device View uses real device type', () => {
+  const source = read('views/AdminModuleView.vue')
+  assert.match(source, /@click="openLiveAlertDetails\(alert\)"/)
+  assert.match(source, /plantApi<ThreatAlertDetailResponse>\(`\/alerts\/\$\{encodeURIComponent\(selected\.id\)\}`\)/)
+  assert.match(source, /result\.alert\.id !== selected\.id/)
+  assert.match(source, /liveAlertDetailLoading/)
+  assert.match(source, /liveAlertDetailError/)
+  assert.match(source, /@click="loadLiveAlertDetail"/)
+  assert.match(source, /aria-modal="true"[\s\S]*?@keydown="trapModalFocus"[\s\S]*?@keydown\.esc="closeLiveAlertDetails"/)
+  const liveModal = source.slice(source.indexOf('v-if="liveAlertDetailOpen"'), source.indexOf('v-if="alertModal === \'view\''))
+  assert.doesNotMatch(liveModal, /responses\.manage|Mark as Reviewing|Resolve/)
+  assert.match(source, /deviceType: scalarText\(device\.device_type\)/)
+  assert.match(source, /serialNumber: '—'[\s\S]*?locationDescription: '—'[\s\S]*?installedAt: '—'/)
 })
 
 test('alert read and response permissions retain the existing Administrator and Officer boundary', () => {

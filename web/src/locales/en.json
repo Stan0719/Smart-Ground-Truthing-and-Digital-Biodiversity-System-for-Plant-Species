@@ -1,7 +1,66 @@
 {
+  "officerPlantEdit": {
+    "latest": "Latest saved name",
+    "title": "Edit Plant",
+    "name": "Plant scientific name",
+    "reason": "Reason for change",
+    "restriction": "Species, GPS, photographs and QR assignments remain read-only. Use the existing Botanist proposal workflow to change them.",
+    "loading": "Loading verified Plant version…",
+    "saved": "Plant change saved.",
+    "save": "Save change",
+    "saving": "Saving…",
+    "close": "Close",
+    "refresh": "Refresh latest version",
+    "required": "This field is required.",
+    "active": "An active proposal exists. Resolve it in the existing review workflow before editing.",
+    "permission": "You do not have permission to edit this Plant.",
+    "unavailable": "This Plant has no editable verified baseline or required immutable history is unavailable.",
+    "conflict": "Plant changed or a conflicting proposal exists. Refresh and inspect before saving.",
+    "invalid": "Check the scientific name and reason.",
+    "uncertain": "The save outcome is uncertain. Refresh and inspect the record before another save.",
+    "inspect": "I have inspected the refreshed version and want to submit this change.",
+    "history": "Officer direct-edit history"
+  },
+  "officerPlants": {
+    "plantName": "Plant",
+    "title": "Plants",
+    "eyebrow": "Plant registry",
+    "search": "Search",
+    "searchPlaceholder": "Plant ID, Plant or Species name, or QR identifier",
+    "species": "Species",
+    "allSpecies": "All species",
+    "plantId": "Plant ID",
+    "registered": "Registered date",
+    "actions": "Actions",
+    "view": "View Plant details",
+    "edit": "Edit",
+    "delete": "Delete",
+    "editBlocked": "Editing requires a Botanist Plant Edit proposal and Officer review.",
+    "deleteBlocked": "Plant deletion is unavailable to preserve linked records and evidence.",
+    "registration": "Registration review",
+    "observations": "Observation review",
+    "pagination": "Plant pages",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page",
+    "loading": "Loading Plants…",
+    "empty": "No matching Plants found.",
+    "error": "Plants could not be loaded.",
+    "retry": "Retry",
+    "session": "Verify your Officer session to view Plants.",
+    "viewLoading": "Loading Plant information…",
+    "plantScientificName": "Plant scientific name",
+    "viewError": "Plant information could not be loaded.",
+    "viewRegistry": "Registry information",
+    "viewApprovedLocation": "Approved location",
+    "viewLatestApprovedObservation": "Latest approved observation",
+    "viewNoApprovedObservation": "No approved observation is recorded.",
+    "viewLatestObservation": "Latest observation",
+    "viewNoLatestObservation": "No observation is recorded."
+  },
   "officerFeedback": {
     "visibilityRequired": "Please select a visibility option before approving this species.",
-    "speciesReferenced": "This species is used by Plant records and cannot be deleted.",
+    "speciesReferenced": "This Species is referenced by existing records and cannot be deleted.",
     "speciesConflict": "This change conflicts with existing species data. Refresh and check the details before trying again.",
     "validateOnly": "Validate only",
     "saved": "Decision saved.",
@@ -850,25 +909,25 @@
       "unread": "Unread"
     },
     "admin": {
-      "N001": {
-        "title": "High-severity threat alert",
-        "message": "Movement detected near PL002.",
-        "time": "2 mins ago"
-      },
-      "N002": {
-        "title": "Sensor offline",
-        "message": "Sensor S003 stopped reporting readings.",
-        "time": "8 mins ago"
-      },
-      "N003": {
-        "title": "Threat alert needs review",
-        "message": "High temperature detected near PL010.",
-        "time": "15 mins ago"
-      },
-      "N004": {
-        "title": "System warning",
-        "message": "Sensor network reported a connectivity warning.",
-        "time": "25 mins ago"
+      "loading": "Loading notifications…",
+      "loadFailed": "Notifications could not be loaded.",
+      "sessionUnavailable": "Notifications are unavailable for this session. Sign in again and retry.",
+      "readFailed": "The read status could not be saved. Retry.",
+      "retry": "Retry",
+      "unknownAccount": "Staff account",
+      "unknownTime": "Time unavailable",
+      "roles": { "Administrator": "Administrator", "Conservation Officer": "Conservation Officer", "Botanist": "Botanist", "Visitor": "Visitor" },
+      "statuses": { "Active": "Active", "Inactive": "Inactive", "Suspended": "Suspended", "Pending Activation": "Pending activation" },
+      "actions": {
+        "staff_created": { "title": "Staff account created", "message": "{name} was added as {role}." },
+        "staff_deactivated": { "title": "Staff account deactivated", "message": "{name} is now {status}." },
+        "staff_reactivated": { "title": "Staff account reactivated", "message": "{name} is active again." },
+        "staff_role_changed": { "title": "Staff role changed", "message": "{name} now has the {role} role." },
+        "staff_profile_updated": { "title": "Staff account updated", "message": "Account details for {name} were updated." },
+        "staff_archived": { "title": "Staff account archived", "message": "{name} was archived from account management." },
+        "security_settings_changed": { "title": "Security settings changed", "message": "An administrator updated session or sign-in limits." },
+        "security_event": { "title": "Security event", "message": "A security event requires administrator attention." },
+        "system_failure": { "title": "System failure", "message": "A system failure requires administrator attention." }
       }
     },
     "conservation": {
@@ -1057,6 +1116,7 @@
     }
   },
   "conservationDashboard": {
+    "previewError": "Unable to load pending records. Please retry.",
     "pendingPlantRegistrations": "Pending Plant Registrations",
     "pendingObservations": "Pending Observations",
     "fieldRecords": "Field Records",
@@ -1067,7 +1127,7 @@
     "speciesConservationStatus": "Species Conservation Status",
     "speciesStatusShare": "{status}: {count} of {total} loaded species",
     "speciesStatusScope": "Of {total} loaded species",
-    "countScope": "Counts reflect loaded records.",
+    "countScope": "Observation counts cover all accessible records; other counts reflect loaded records.",
     "viewAllObservations": "View All Observations",
     "overview": "Overview",
     "greeting": "Good afternoon, Conservation Officer",
@@ -1108,6 +1168,7 @@
       "currentDataset": "Loaded observations · up to 500"
     },
     "table": {
+      "submittedAt": "Submitted",
       "registeredBy": "Registered By",
       "registeredAt": "Registered At",
       "observationId": "Observation ID",
@@ -2036,11 +2097,17 @@
       "genus": "Genus",
       "conservationStatus": "Conservation Status",
       "visibility": "Visibility",
+      "visibilityHelp": "Choose who can view this species after approval.",
       "actions": "Actions",
       "view": "View",
       "visibilityPublic": "Public",
-      "visibilityInternal": "Internal / Scientific",
+      "visibilityPublicDescription": "Visible to everyone, including visitors.",
+      "visibilityInternal": "Internal",
+      "visibilityInternalDescription": "Visible to Botanists, Conservation Officers and Administrators.",
       "visibilityProtected": "Protected",
+      "visibilityProtectedDescription": "Visible only to Conservation Officers and Administrators.",
+      "basicInformation": "Basic Information",
+      "speciesDetails": "Species Details",
       "unavailable": "Unavailable",
       "loadedLimit": "Client-side search and filters apply to up to 200 loaded species.",
       "skipped": "{count} malformed record(s) skipped",
@@ -2062,6 +2129,7 @@
       "validationSummary": "Please review the highlighted fields ({count}) before saving.",
       "validationInvalid": "Please check this field.",
       "formSubtitle": "Changes are written to the PostgreSQL-backed species registry.",
+      "createFormSubtitle": "Add a new plant species to the species registry.",
       "loadingDetail": "Loading authoritative species details…",
       "taxonomyUnavailable": "Taxonomy selection is unavailable:",
       "noGenus": "No genus assigned",
@@ -2084,8 +2152,8 @@
         "conflict": "Species information was saved, but the photo library changed. Your photo draft and uploaded files are retained; review the latest library before saving again.",
         "plantEligibility": "Only approved photos explicitly recorded as whole-plant views appear here. Older unlabeled photos are not included.",
         "sectionTitle": "Species Photos",
-        "sectionDescription": "Add reference photos and arrange their order.",
-        "formUnavailable": "Photo uploads and arrangement saves are not enabled. You may save species information; selected photos will remain unsaved.",
+        "sectionDescription": "View species photos.",
+        "formUnavailable": "Photo changes are currently unavailable. Species information can still be saved.",
         "textSavedDeferred": "Species information was saved. Selected photos were not uploaded; they remain in this form until you cancel or close it.",
         "partialFailure": "Species information was saved, but some photo operations failed. Uploaded images are retained. Keep this form open to retry.",
         "expandLibrary": "View & Organize All Photos",
@@ -2109,10 +2177,8 @@
         "uploadFailed": "Upload failed. Save again to retry.",
         "libraryUnavailable": "The paged photo library is unavailable. Existing loaded reference previews remain available.",
         "addPhotos": "Add Photos",
-        "reorderHint": "Drag photos to reorder, or focus a card and press Alt + an arrow key.",
         "invalidSelection": "Some files were rejected. Choose JPEG/PNG images up to 4 MiB, or discard the rejected selections below.",
         "discardRejected": "Discard rejected selections",
-        "mainDefault": "The first eligible reference photo is the main image. Changes are saved with the species form.",
         "manage": "Manage Photos",
         "title": "Manage Species Photos",
         "subtitle": "Upload and organize reference photos for this species.",
@@ -2135,11 +2201,8 @@
         "queuedCount": "{count} files queued for preview.",
         "validated": "Validated for local preview",
         "uploadPhotos": "Upload Photos",
-        "uploadUnavailable": "Photo uploads will be available after species image management is enabled.",
         "saveArrangement": "Save Arrangement",
         "cancel": "Cancel",
-        "managementUnavailable": "Photo management is being prepared. You can preview images and select files, but changes cannot be saved yet.",
-        "readOnlyGallery": "Authorized reference images are shown read-only. Saved primary and arrangement metadata are not available yet.",
         "newPhotos": "New Photos",
         "loading": "Loading authorized images…",
         "validating": "Checking selected files…",
@@ -2164,6 +2227,9 @@
       "saving": "Saving…",
       "deleting": "Deleting…",
       "deleteConfirmTitle": "Delete Species?",
+      "deleteDialogSubtitle": "Permanently remove this species from the registry.",
+      "deleteIrreversible": "This action cannot be undone.",
+      "deleteImportant": "Important",
       "deleteConfirmation": "This permanently deletes the species through the backend.",
       "deleteReferenceWarning": "Deletion may fail if plants, requests, or other records reference this species. Related records will not be deleted by this page.",
       "errors": {
@@ -2174,7 +2240,11 @@
         "save": "Unable to save the species.",
         "delete": "Unable to delete the species.",
         "savedRefresh": "The species was saved, but persisted data could not be refreshed: {message}",
-        "deletedRefresh": "The species was deleted, but the list could not be refreshed: {message}"
+        "deletedRefresh": "The species was deleted, but the list could not be refreshed: {message}",
+        "deleteUncertain": "The deletion outcome is uncertain. Refresh to verify the Species before trying again.",
+        "deletedRefreshPending": "The Species was deleted. Refresh to reload the list.",
+        "deleteStillPresent": "The Species still exists. Check its details before trying Delete again.",
+        "deleteVerificationFailed": "The deletion outcome could not be verified. Delete remains disabled. {message}"
       },
       "feedback": {
         "added": "Species created and verified from persisted backend data.",
@@ -2738,7 +2808,7 @@
     "proposed": "Proposed values",
     "baselinePhotos": "Approved baseline photos",
     "proposedPhotos": "Proposed photos",
-    "history": "Available review events",
+    "history": "Review history",
     "unavailable": "Unavailable",
     "reload": "Reload Latest Proposal",
     "inspect": "I have inspected the refreshed proposal.",
@@ -2759,7 +2829,9 @@
       "zone": "Zone",
       "latitude": "Latitude",
       "longitude": "Longitude",
-      "accuracy_m": "Accuracy (m)"
+      "accuracy_m": "Accuracy (m)",
+      "altitudeM": "Altitude (m)",
+      "taxonomy": "Taxonomy"
     },
     "decisions": {
       "Approved": "Approve",
@@ -2783,7 +2855,19 @@
       "Withdrawn": "Withdrawn",
       "Superseded": "Superseded"
     },
-    "cancelledReadOnly": "This proposal has been cancelled. It cannot be reviewed; the Approved observation remains unchanged."
+    "cancelledReadOnly": "This proposal has been cancelled. It cannot be reviewed; the Approved observation remains unchanged.",
+    "notRecorded": "Not recorded",
+    "nullValue": "No value",
+    "emptyValue": "Empty",
+    "noPhotos": "No photographs.",
+    "baselinePhotosUnavailable": "Baseline photographs unavailable.",
+    "photosUnavailable": "Photograph unavailable.",
+    "photosUnchanged": "Unchanged",
+    "photoComparisonUnavailable": "Baseline unknown",
+    "baseRevision": "Approved baseline revision",
+    "currentStatus": "Current Observation status",
+    "loadingRequest": "Loading request...",
+    "retry": "Retry"
   },
   "observationVersions": {
     "registrationTitle": "Registration Submission History",
@@ -2923,5 +3007,20 @@
       "animal_detected": "Animal detected",
       "suspicious_movement": "Suspicious movement"
     }
+  },
+  "officerPlantDelete": {
+    "title": "Delete Plant",
+    "confirm": "Permanently delete",
+    "checking": "Checking linked records...",
+    "close": "Close",
+    "verify": "Check current state",
+    "referenced": "This Plant is referenced by existing records and cannot be deleted.",
+    "permission": "You do not have permission to delete this Plant.",
+    "unavailable": "Unable to verify this Plant. Please retry.",
+    "conflict": "Record updated. Check the latest version before deleting.",
+    "uncertain": "Deletion outcome is uncertain. Check the current state before trying again.",
+    "saved": "Plant deleted.",
+    "savedRefresh": "Plant deleted. Latest information could not be loaded. Retry the list refresh.",
+    "absent": "The Plant no longer exists. No further deletion will be attempted."
   }
 }

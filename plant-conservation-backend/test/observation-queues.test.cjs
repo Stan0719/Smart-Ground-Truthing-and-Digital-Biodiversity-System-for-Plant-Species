@@ -62,6 +62,35 @@ test("Phase 3: authorized effective-origin queues and bounded pagination", async
     assert.equal(new Set(found.map(row => row.id)).size, found.length);
     return found;
   }
+  await t.test('dashboard previews use filtered pending pagination without assets or review history', async () => {
+    const queries = [], original = pool.query.bind(pool);
+    pool.query = async (sql, values) => { queries.push(String(sql)); return original(sql, values); };
+    try {
+      for (const origin of ['initial_registration','subsequent_observation']) {
+        const result = await call('/observations?view=dashboard&origin_type='+origin+'&status=Pending+Review&limit=10','GET',undefined,'officer');
+        assert.equal(result.status,200,JSON.stringify(result.data));
+        assert.equal(result.data.observations.length,10);
+        assert.ok(result.data.observations.every(row=>row.origin_type===origin && row.status==='Pending Review'));
+        assert.ok(result.data.observations.every(row=>!('content' in row) && !('assets' in row) && !('historical_review' in row)));
+        assert.equal(result.data.page.has_more,true);
+        const next=await call('/observations?view=dashboard&origin_type='+origin+'&status=Pending+Review&limit=10&cursor='+encodeURIComponent(result.data.page.next_cursor),'GET',undefined,'officer');
+        assert.equal(next.status,200);assert.ok(next.data.observations.every(row=>!result.data.observations.some(first=>first.id===row.id)));
+      }
+      assert.ok(!queries.some(sql=>/^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql)));
+      assert.ok(!queries.some(sql=>sql.includes('FROM plant_asset') || sql.includes('FROM observation_review') || sql.includes('AS creation_events')));
+    } finally { pool.query=original; }
+  });
+  await t.test('dashboard access and bounded scan cannot bypass origin, status or Officer permission', async () => {
+    for (const query of ['view=dashboard','view=dashboard&origin_type=unknown&status=Pending+Review&limit=10','view=dashboard&origin_type=initial_registration&status=Approved&limit=10','view=dashboard&origin_type=initial_registration&status=Pending+Review&limit=200'])
+      assert.equal((await call('/observations?'+query,'GET',undefined,'officer')).status,400);
+    assert.equal((await call('/observations?view=dashboard&origin_type=initial_registration&status=Pending+Review&limit=10','GET',undefined,'bot')).status,403);
+    assert.equal((await call('/observations?view=dashboard-counts','GET',undefined,'bot')).status,403);
+  });
+  await t.test('dashboard totals cover more than 500 records without returning or enriching them', async () => {
+    const result=await call('/observations?view=dashboard-counts','GET',undefined,'officer');
+    assert.equal(result.status,200,JSON.stringify(result.data));assert.ok(result.data.totals.total>1200);assert.ok(result.data.totals.pending>1200);
+    assert.equal(result.data.observations,undefined);
+  });
   await t.test('all 520 receipt-backed initial registrations remain reachable beyond the old cap with tied timestamps', async () => {
     const rows = await collect('initial_registration'); assert.equal(rows.length, 520);
     assert.ok(rows.some(row => row.id === '100'));
@@ -88,4 +117,15 @@ test("Phase 3: authorized effective-origin queues and bounded pagination", async
     assert.equal((await call('/observations/30000/review', 'POST', { decision: 'Approved', revision: 1 }, 'bot')).status, 403);
     assert.equal((await call('/observations/30000/review', 'POST', { decision: 'Approved', revision: 1 }, 'officer')).status, 200);
   });
+  await t.test('hundreds of completed records do not crowd pending previews; empty pending results stay successful', async () => {
+    await pool.query(`UPDATE plant_observation SET status='Approved' WHERE origin_type='subsequent_observation';
+      UPDATE plant_observation SET status='Pending Review',created_at='2028-01-01' WHERE id='20000';
+      UPDATE plant_observation SET created_at='2029-01-01' WHERE status='Approved'`);
+    const first=await call('/observations?view=dashboard&origin_type=subsequent_observation&status=Pending+Review&limit=10','GET',undefined,'officer');
+    assert.equal(first.status,200);assert.deepEqual(first.data.observations.map(row=>row.id),['20000']);assert.equal(first.data.page.has_more,false);
+    await pool.query("UPDATE plant_observation SET status='Approved' WHERE id='20000'");
+    const empty=await call('/observations?view=dashboard&origin_type=subsequent_observation&status=Pending+Review&limit=10','GET',undefined,'officer');
+    assert.equal(empty.status,200);assert.deepEqual(empty.data.observations,[]);assert.equal(empty.data.page.has_more,false);
+  });
+
 });

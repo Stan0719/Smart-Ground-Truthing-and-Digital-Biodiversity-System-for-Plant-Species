@@ -175,7 +175,7 @@ export const hasValidCoordinates = (plant: PlantContract) =>
 export const matchesPlantQuery = (plant: EnrichedPlant, query: string) => {
   const normalized = query.trim().toLowerCase()
   if (!normalized) return true
-  return `${plant.id} ${plant.displayId} ${plant.speciesId} ${plant.species?.scientificName || ''} ${plant.species?.commonName || ''} ${plant.status}`
+  return `${plant.id} ${plant.displayId} ${plant.scientificName || ''} ${plant.speciesId} ${plant.species?.scientificName || ''} ${plant.species?.commonName || ''} ${plant.status}`
     .toLowerCase()
     .includes(normalized)
 }

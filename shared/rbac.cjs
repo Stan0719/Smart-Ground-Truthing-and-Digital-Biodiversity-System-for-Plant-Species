@@ -27,6 +27,8 @@ const grants = Object.freeze({
   "observations.create": ["Botanist"],
   "observations.edit.own": ["Botanist"],
   "observations.review": ["Conservation Officer"],
+  "plants.officer.edit": ["Conservation Officer"],
+  "plants.officer.delete": ["Conservation Officer"],
   "species.manage": ["Conservation Officer"],
   "reports.read": ["Conservation Officer"],
   "devices.manage": ["Administrator"],
