@@ -128,7 +128,8 @@
   max-width: 100%;
 }
 
-:is(.admin-shell.admin-shell.admin-shell, body:has(.admin-shell) .staff-dialog-mask.staff-dialog-mask.staff-dialog-mask) :is(button, a, input, select, textarea, [tabindex="0"]):focus-visible {
+/* Threshold inputs share a focus ring with their unit-bearing wrapper. */
+:is(.admin-shell.admin-shell.admin-shell, body:has(.admin-shell) .staff-dialog-mask.staff-dialog-mask.staff-dialog-mask) :is(button, a, input, select, textarea, [tabindex="0"]):not(.threshold-input input):focus-visible {
   outline: 3px solid #245443;
   outline-offset: 3px;
 }

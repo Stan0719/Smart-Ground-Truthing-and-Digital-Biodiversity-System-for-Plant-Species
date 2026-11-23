@@ -9,7 +9,7 @@ import AdminTableIdentifier from '../components/AdminTableIdentifier.vue'
 import StaffDialog from '../components/StaffDialog.vue'
 import { api, logout, type AuthUser } from '../services/auth'
 import { plantApi, type Device } from '../services/plantApi'
-import { DEFAULT_SENSOR_THRESHOLDS, sensorLimits, thresholdLabel, type SensorThresholds } from '../services/sensorThresholds'
+import { DEFAULT_SENSOR_THRESHOLDS, sensorLimits, thresholdRangeLabel, type SensorThresholds } from '../services/sensorThresholds'
 const { t } = useI18n()
 const da = (key: string) => t('adminDeviceAssignment.' + key)
 const assignmentLabel = (device: Device) => { const a = currentAssignment(device); return a.state === 'assigned' ? plantLabel(a.id) : da(a.state) }
@@ -110,7 +110,10 @@ const measurement = (values: Record<string, number>) =>
         `${metric}: ${value}${metric === 'temperature' ? ' °C' : metric === 'humidity' ? ' %' : ''}`,
     )
     .join(' · ')
-const configuredThresholds = (values: SensorThresholds) => Object.entries(values).filter(([metric]) => metrics.includes(metric)).map(([metric, limits]) => `${metric}: ${thresholdLabel(limits)}`).join(' · ')
+const configuredThresholds = (values: SensorThresholds) => thresholdMetrics.flatMap(metric => {
+  const range = thresholdRangeLabel(values[metric], metricUnits[metric])
+  return range ? [{ metric, label: metricLabels[metric], range }] : []
+})
 const filteredDevices = computed(() =>
   devices.value.filter(
     (d) =>
@@ -379,47 +382,50 @@ watch(section, () => {
             <span>Received readings</span><strong>{{ error ? '—' : readings.length }}</strong>
           </div>
         </div>
-        <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="Sensor devices">
-          <table class="admin-data-table admin-device-table">
-            <thead>
-              <tr>
-                <th>Sensor</th>
-                <th>{{ da('deviceType') }}</th>
-                <th>Status</th>
-                <th>{{ da('currentPlant') }}</th>
-                <th>Last report</th>
-                <th>Thresholds</th>
-                <th v-if="section === 'sensors'">Actions</th>
+        <div class="sensor-device-container">
+        <div class="table-scroll admin-table-scroll sensor-device-scroll" tabindex="0" role="region" aria-label="Sensor devices">
+          <table class="admin-data-table admin-device-table sensor-device-table" role="table">
+            <thead role="rowgroup">
+              <tr role="row">
+                <th scope="col" role="columnheader">Sensor</th>
+                <th scope="col" role="columnheader">{{ da('deviceType') }}</th>
+                <th scope="col" role="columnheader">Status</th>
+                <th scope="col" role="columnheader">{{ da('currentPlant') }}</th>
+                <th scope="col" role="columnheader">Last report</th>
+                <th scope="col" role="columnheader">Thresholds</th>
+                <th v-if="section === 'sensors'" scope="col" role="columnheader">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              <tr v-for="d in filteredDevices" :key="d.id">
-                <td>
-                  {{ d.name }}<small><AdminTableIdentifier :value="d.id" copy-label="Copy full Device ID" /></small>
+            <tbody role="rowgroup">
+              <tr v-for="d in filteredDevices" :key="d.id" role="row">
+                <td role="cell" class="sensor-identity-cell">
+                  <span class="sensor-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="12" height="11" rx="3" /><path d="M7 19v3m4-3v3M7 11v4h4v-4M16 3a7 7 0 0 1 6 6m-7-2a3 3 0 0 1 3 3" /></svg></span>
+                  <strong class="sensor-device-name">{{ d.name }}</strong><small><AdminTableIdentifier :value="d.id" copy-label="Copy full Device ID" /></small>
                 </td>
-                <td>{{ da(deviceType(d)) }}</td>
-                <td>
+                <td role="cell" class="sensor-type-cell"><span class="sensor-cell-label" aria-hidden="true">{{ da('deviceType') }}</span><span>{{ da(deviceType(d)) }}</span></td>
+                <td role="cell"><span class="sensor-cell-label" aria-hidden="true">Status:</span>
                   <span class="badge" :class="{ neutral: d.status !== 'Active' }">{{
                     d.status
                   }}</span>
                 </td>
-                <td>{{ assignmentLabel(d) }}</td>
-                <td>{{ date(d.last_seen) }}</td>
-                <td v-if="deviceType(d) !== 'Sensor'">{{ da(deviceType(d) === 'Camera' ? 'cameraRules' : 'thresholdUnavailable') }}</td>
-                <td v-else>
-                  {{
-                    configuredThresholds(d.thresholds) || 'No thresholds configured'
-                  }}
+                <td role="cell"><span class="sensor-cell-label" aria-hidden="true">{{ da('currentPlant') }}:</span><span>{{ assignmentLabel(d) }}</span></td>
+                <td role="cell"><span class="sensor-cell-label" aria-hidden="true">Last report:</span><span>{{ date(d.last_seen) }}</span></td>
+                <td v-if="deviceType(d) !== 'Sensor'" role="cell" class="sensor-threshold-cell"><span class="sensor-cell-label" aria-hidden="true">Thresholds:</span><span>{{ da(deviceType(d) === 'Camera' ? 'cameraRules' : 'thresholdUnavailable') }}</span></td>
+                <td v-else role="cell" class="sensor-threshold-cell"><span class="sensor-cell-label" aria-hidden="true">Thresholds:</span>
+                  <ul v-if="configuredThresholds(d.thresholds).length" class="sensor-threshold-list">
+                    <li v-for="entry in configuredThresholds(d.thresholds)" :key="entry.metric"><span class="sensor-threshold-name">{{ entry.label }}:</span><span>{{ entry.range }}</span></li>
+                  </ul>
+                  <span v-else>No thresholds configured</span>
                 </td>
-                <td v-if="section === 'sensors'">
+                <td v-if="section === 'sensors'" role="cell" class="sensor-actions-cell">
                   <div class="actions">
                     <button @click="open('edit', d)">Edit sensor</button
                     ><button v-if="deviceType(d) === 'Sensor'" @click="open('threshold', d)">Configure threshold</button>
                   </div>
                 </td>
               </tr>
-              <tr v-if="!filteredDevices.length">
-                <td :colspan="section === 'sensors' ? 7 : 6" class="empty">
+              <tr v-if="!filteredDevices.length" role="row">
+                <td :colspan="section === 'sensors' ? 7 : 6" class="empty" role="cell">
                   {{
                     busy
                       ? 'Loading sensors…'
@@ -433,6 +439,7 @@ watch(section, () => {
               </tr>
             </tbody>
           </table>
+        </div>
         </div>
         <section v-if="section === 'iot'" class="panel" style="margin-top: 22px">
           <h3>Latest sensor readings</h3>
@@ -599,7 +606,10 @@ watch(section, () => {
               <p class="threshold-hint">Leave both limits blank to disable a metric's alerts. Save changes to apply all thresholds.</p>
             </div>
             <div class="actions" :class="{ 'threshold-footer': modal === 'threshold' }">
-              <button v-if="modal === 'threshold'" class="threshold-reset" type="button" :disabled="operationBusy" @click="resetThresholds()">Use all defaults</button>
+              <button v-if="modal === 'threshold'" class="threshold-reset" type="button" :disabled="operationBusy" @click="resetThresholds()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7.4M3 4v7h7" /></svg>
+                <span>Use all defaults</span>
+              </button>
               <button type="button" :disabled="operationBusy" @click="modal = null">Cancel</button
               ><button class="primary" :disabled="operationBusy">
                 {{
@@ -720,7 +730,8 @@ watch(section, () => {
   border-radius: 10px;
   background: #fff;
 }
-.threshold-input:focus-within { outline: 2px solid #33745d; outline-offset: 1px; }
+.threshold-input:hover { border-color: #8caa99; }
+.threshold-input:focus-within { border-color: #33745d; outline: 2px solid #33745d; outline-offset: 0; }
 .threshold-form .threshold-input input {
   min-width: 0;
   padding: 10px 8px;
@@ -751,12 +762,22 @@ watch(section, () => {
 .threshold-footer > button:not(.primary):not(.threshold-reset) { border-color: #38634f; color: #315b47; }
 .threshold-footer .primary { background: #285c46; }
 .threshold-footer .threshold-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
   margin-right: auto;
-  padding-left: 0;
-  border-color: transparent;
-  background: transparent;
-  color: #6e7c70;
+  padding: 10px 14px;
+  border: 1px solid #b8cfc0;
+  border-radius: 9px;
+  background: #edf5ef;
+  color: #315b47;
+  white-space: nowrap;
 }
+.threshold-reset svg { width: 17px; height: 17px; flex-shrink: 0; }
+.threshold-footer .threshold-reset:not(:disabled):hover { border-color: #8fb29b; background: #e0eee4; }
+.threshold-footer .threshold-reset:not(:disabled):active { background: #d5e6db; }
 @media (max-width: 600px) {
   .threshold-grid { grid-template-columns: 1fr; gap: 12px; }
 }
@@ -769,12 +790,9 @@ watch(section, () => {
   .threshold-form .threshold-input input { padding: 10px 8px; }
   .threshold-form .threshold-footer { padding: 14px 18px; flex-wrap: wrap; gap: 8px; }
   .threshold-footer > button { padding: 10px 12px; }
+  .threshold-footer .threshold-reset { flex-basis: 100%; margin-right: 0; }
 }
 @media (max-width: 350px) {
   .threshold-range { grid-template-columns: 1fr; }
-  .threshold-footer .threshold-reset {
-    flex-basis: 100%;
-    text-align: left;
-  }
 }
 </style>

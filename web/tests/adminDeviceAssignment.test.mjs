@@ -63,7 +63,15 @@ test('Admin edits all metric ranges together and saves them in one request with 
     h.state.open('threshold', sensor)
     assert.deepEqual(plain(h.state.metrics), ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall'])
     assert.equal(h.state.measurement({ movement: 1 }), 'movement: 1')
-    assert.equal(h.state.configuredThresholds({ sound: 50 }), '')
+    assert.deepEqual(plain(h.state.configuredThresholds({ sound: 50 })), [])
+    assert.deepEqual(plain(h.state.configuredThresholds({
+      humidity: { min: 40, max: 80 }, rainfall: { min: 2200 }, temperature: { min: 20, max: 40 }, soilMoisture: { min: 2300, max: 2700 }, movement: 0,
+    })), [
+      { metric: 'temperature', label: 'Temperature', range: '20–40 °C' },
+      { metric: 'humidity', label: 'Humidity', range: '40–80 %' },
+      { metric: 'soilMoisture', label: 'Soil moisture', range: '2300–2700 raw ADC' },
+      { metric: 'rainfall', label: 'Rainfall', range: '≥ 2200 raw ADC' },
+    ])
     assert.equal(h.state.measurement({ temperature: 25, sound: 50 }), 'temperature: 25 °C')
     h.state.thresholdRows.value.push({ metric: 'sound', minimum: '', maximum: '50' }); await h.state.saveDevice()
     assert.equal(calls.length, 0)
@@ -140,7 +148,10 @@ test('sensor cards apply individual or all defaults to drafts and save the range
       assert.equal(calls.length, 0)
     }
     h.state.thresholdRows.value[0].minimum = '10'; h.state.error.value = 'Old error'
-    tree.find(n => n.type === 'button' && n.children === 'Use all defaults').props.onClick()
+    const allDefaults = tree.find(n => n.type === 'button' && n.props?.class === 'threshold-reset')
+    assert.equal(allDefaults.props.type, 'button')
+    assert.ok(nodes(allDefaults).some(n => n.type === 'span' && n.children === 'Use all defaults'))
+    allDefaults.props.onClick()
     assert.deepEqual(plain(h.state.thresholdRows.value), [
       { metric: 'temperature', minimum: '26', maximum: '40' },
       { metric: 'humidity', minimum: '40', maximum: '80' },
@@ -359,6 +370,16 @@ test('Admin table exposes types and current links; Camera/Unknown thresholds are
     h.state.devices.value = [device({ id: 's', device_type: 'Sensor', plant_id: 1 }), device({ id: 'c', device_type: 'Camera', plant_id: null }), device({ id: 'u' })]
     const tree = nodes(h.render())
     for (const label of [messages.deviceType, messages.currentPlant, 'Sensor', 'Camera', 'Unknown', 'PL001', 'Not linked', 'Unavailable']) assert.ok(tree.some(n => n.children === label), label)
+    const deviceTable = tree.find(n => n.type === 'table' && n.props?.class.includes('sensor-device-table'))
+    assert.equal(deviceTable.props.role, 'table')
+    const deviceRows = nodes(deviceTable).filter(n => n.type === 'tr' && nodes(n).some(child => child.props?.class === 'sensor-identity-cell'))
+    assert.equal(deviceRows.length, 3)
+    for (const row of deviceRows) {
+      assert.equal(row.props.role, 'row')
+      assert.equal(nodes(row).filter(n => n.type === 'td' && n.props?.role === 'cell').length, 7)
+      for (const label of ['Status:', `${messages.currentPlant}:`, 'Last report:', 'Thresholds:'])
+        assert.ok(nodes(row).some(n => n.props?.class === 'sensor-cell-label' && n.children === label), label)
+    }
     assert.equal(tree.filter(n => n.type === 'button' && n.children === 'Configure threshold').length, 1)
     assert.ok(tree.some(n => n.children === messages.cameraRules))
     h.state.open('threshold', h.state.devices.value[1]); assert.equal(h.state.modal.value, null)

@@ -96,7 +96,7 @@ test('existing row actions, mappings and separate IoT/Sensor routes remain wired
   assert.match(modules, /\{\{ formattedTimestamp\(alert.created_at\) \}\}/)
   assert.match(operations, /@click="open\('edit', d\)"/)
   assert.match(operations, /@click="open\('threshold', d\)"/)
-  assert.match(operations, /<td>\{\{ date\(d.last_seen\) \}\}<\/td>/)
+  assert.match(operations, /<span>\{\{ date\(d.last_seen\) \}\}<\/span>/)
   assert.match(operations, /v-for="d in filteredDevices" :key="d.id"/)
   assert.match(read('router/index.ts'), /path: '\/admin\/iot'/)
   assert.match(read('router/index.ts'), /path: '\/admin\/sensors'/)
