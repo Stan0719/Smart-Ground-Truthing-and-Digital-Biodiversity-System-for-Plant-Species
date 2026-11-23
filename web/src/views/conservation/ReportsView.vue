@@ -262,7 +262,6 @@ onMounted(() => loadReport())
         <table class="officer-data-table report-summary-table"><colgroup><col class="column-report-scientific" /><col class="column-report-common" /><col class="column-report-count" /></colgroup><thead><tr><th scope="col">{{ rt('scientificName') }}</th><th scope="col">{{ rt('commonName') }}</th><th scope="col">{{ rt('approvedPlants') }}</th></tr></thead><tbody><tr v-for="row in filteredRows" :key="row.speciesId || row.scientificName" :class="{ 'chart-row-selected': selectedChartRow === row }" tabindex="0" :aria-selected="selectedChartRow === row" @click="selectTableSpecies(row)" @keydown.enter.prevent="selectTableSpecies(row)"><td><em>{{ row.scientificName }}</em></td><td>{{ row.commonName || rt('unavailable') }}</td><td>{{ row.approvedPlants }}</td></tr><tr v-if="!filteredRows.length"><td colspan="3" class="empty-row">{{ report.rows.length ? rt('noMatches') : rt('empty') }}</td></tr></tbody></table></div>
       </section>
       <div class="modal-actions report-actions"><button type="button" class="secondary-button" :disabled="isLoading || exporting || !filteredRows.length" @click="exportPdf">{{ rt('exportPdf') }}</button><button type="button" class="secondary-button" :disabled="isLoading || exporting || !filteredRows.length" @click="exportCsv">{{ rt('exportCsv') }}</button></div>
-      <p class="persistence-note">{{ rt('downloadOnly') }}</p>
     </article>
     </template>
   </section>
@@ -301,7 +300,7 @@ onMounted(() => loadReport())
 .category-field { flex: 1.6; }
 .filter-actions { display: flex; align-items: center; align-self: flex-end; flex-wrap: wrap; gap: 8px; }
 .filter-error { flex-basis: 100%; margin: 0; color: #9b3d35; font-size: 12px; }
-.persistence-note, .chart-note { color: #63776d; font-size: 11px; }
+.chart-note { color: #63776d; font-size: 11px; }
 .chart-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 4px 0 -14px; color: #526b5f; font-size: 12px; }
 .report-view-switch { display: inline-flex; width: fit-content; gap: 2px; margin: 14px 0 2px; padding: 3px; border: 1px solid #cbd9cf; border-radius: 8px; background: #f3f7f3; }
 .report-view-button { min-width: 82px; min-height: 36px; padding: 6px 14px; border: 0; border-radius: 6px; background: transparent; color: #426554; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
@@ -325,7 +324,6 @@ onMounted(() => loadReport())
 .report-state.error { color: #9b3d35; }
 .report-title p { color: #64776e; }
 .report-actions { padding-top: 18px; border-top: 1px solid #edf0ed; }
-.persistence-note { margin-bottom: 0; }
 .toast.error { background: #8f3128; }
 
 /* Beat shared Officer minimum-height/stretch rules only for these three controls. */

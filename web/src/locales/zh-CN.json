@@ -2619,7 +2619,7 @@
         "observationStorySingle": "在 {periodCount} 个报告周期内共记录 {total} 条观察。最新显示周期（{latestPeriod}）创建了 {latestTotal} 条；{topStatus} 是当前数量最多的状态（{statusCount}）。",
         "observationStoryChange": "{latestPeriod} 创建了 {latestTotal} 条观察，较上一个显示周期 {previousPeriod}（{previousTotal}）{changeDirection} {changeAmount} 条。{topStatus} 是当前最常见的状态（{statusCount}）。",
         "observationStoryNoChange": "{latestPeriod} 创建了 {latestTotal} 条观察，与上一个显示周期 {previousPeriod} 持平。{topStatus} 是当前最常见的状态（{statusCount}）。",
-        "observationStoryNote": "周期按周或月汇总。记录按创建日期分组，状态反映报告生成时的当前审核状态；不含草稿。",
+        "observationStoryNote": "周期根据数据跨度按日、周或月汇总。记录按创建日期分组，状态反映报告生成时的当前审核状态；不含草稿。",
         "observationView": "观察报告视图",
         "selectedObservationPeriod": "已选周期",
         "clearObservationPeriod": "清除周期选择",

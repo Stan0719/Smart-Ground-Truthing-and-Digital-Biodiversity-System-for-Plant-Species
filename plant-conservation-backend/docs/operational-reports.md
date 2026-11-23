@@ -20,8 +20,9 @@ are in Asia/Kuala_Lumpur, inclusive start and exclusive midnight after end.
   Draft. Initial-registration, subsequent and legacy origins are included once
   per stored observation. No joins to reviews or submission receipts, and no
   private content or owner/reviewer identities. This is creation-period reporting,
-  not a review-decision history. Ranges of at most 120 days use Monday-start
-  calendar weeks; longer ranges and all-time use calendar months. Five canonical
+  not a review-decision history. The report chooses granularity from the span of
+  matching records: up to 30 days uses calendar days, up to 120 days uses
+  Monday-start calendar weeks, and longer spans use calendar months. Five canonical
   non-draft statuses have separate counts, with their sum as the total.
 - Threats: `threat_alert_history.created_at`, with current New/Reviewing/Resolved
   status. Group by stored `metric`. New and Reviewing are unresolved. Severity
