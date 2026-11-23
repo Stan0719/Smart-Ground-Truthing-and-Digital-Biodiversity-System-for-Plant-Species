@@ -12,6 +12,7 @@ export function mapPlantCardMetadata(value: unknown) {
     content && typeof content === 'object' && !Array.isArray(content) ? content as Record<string, unknown> : null
   const text = (key: string) => typeof approved?.[key] === 'string' ? approved[key] as string : ''
   return {
+    plantScientificName: typeof row?.scientific_name === 'string' ? row.scientific_name : '',
     reviewStatus: plantReviewStatuses.find(status => status === plant?.status) || '',
     measurementSource: approved ? 'registration' as const : 'unavailable' as const,
     latestApproved: {

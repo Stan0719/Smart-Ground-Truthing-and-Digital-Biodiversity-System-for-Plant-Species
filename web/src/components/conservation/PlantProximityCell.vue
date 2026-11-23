@@ -2,18 +2,36 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProximityEntry } from '../../services/plantProximityQueue'
-import { gpsProximityScore, proximityScoreTone, formatProximityScore, gpsAccuracyUncertain } from '../../services/plantProximityScore'
+import { proximityScoreTone, formatProximityScore, gpsAccuracyUncertain, groupRiskScore, nearestGroupCandidate, hasUncertainGroupCandidate } from '../../services/plantProximityScore'
 const props = defineProps<{ entry?: ProximityEntry; enabled: boolean }>()
 const emit = defineEmits<{ visibility: [visible: boolean]; open: [event: MouseEvent] }>()
 const { t, locale } = useI18n(), anchor = ref<HTMLElement | null>(null)
-const nearest = computed(() => props.entry?.result?.candidates[0])
+const nearest = computed(() => {
+  const candidates = props.entry?.result?.candidates || []
+  return nearestGroupCandidate(candidates) || candidates[0]
+})
 const text = (key: string) => t('plantProximity.' + key)
 const score = computed(() => props.enabled && props.entry?.state === 'ready' && props.entry.result?.state === 'complete' && nearest.value
-  ? gpsProximityScore(nearest.value.distance_m, props.entry.result.config) : null)
+  ? groupRiskScore(nearest.value, props.entry.result) : null)
+const groupUnavailable = computed(() => {
+  const result = props.entry?.result
+  return result?.state === 'complete' && !nearestGroupCandidate(result.candidates) && hasUncertainGroupCandidate(result.candidates)
+})
+const matchMessage = computed(() => {
+  const result = props.entry?.result
+  if (!result || result.state !== 'complete') return ''
+  if (nearest.value?.species_match_status === 'provisional_same_name' || nearest.value?.species_match_status === 'provisional_different_name' ||
+      result.candidates.some(candidate => candidate.species_match_status === 'provisional_same_name' || candidate.species_match_status === 'provisional_different_name')) return text('tableProvisionalMatch')
+  if (groupUnavailable.value || nearest.value?.species_match_status === 'unknown' ||
+      (nearest.value?.match_status === 'same_species_zone' && score.value === null)) return text('tableUncertainMatch')
+  if (nearest.value?.match_status === 'different_species' || nearest.value?.match_status === 'different_zone') return text('tableNoMatch')
+  return ''
+})
 const tooltip = computed(() => {
   const result = props.entry?.result
   const uncertainty = result && nearest.value && (gpsAccuracyUncertain(result.accuracy_m, result.config.accuracy_warning_m) || gpsAccuracyUncertain(nearest.value.accuracy_m, result.config.accuracy_warning_m))
-  return text('scoreDisclaimer') + (result?.state === 'complete' && !nearest.value ? ' ' + text('noScore') : '') + (uncertainty ? ' ' + text('scoreUncertain') : '')
+  return text('scoreDisclaimer') + (matchMessage.value ? ' ' + matchMessage.value : '') +
+    (result?.state === 'complete' && !nearest.value ? ' ' + text('noScore') : '') + (uncertainty ? ' ' + text('scoreUncertain') : '')
 })
 const label = computed(() => {
   const entry = props.entry
@@ -22,7 +40,11 @@ const label = computed(() => {
   if (entry.state === 'failed' || entry.result?.state === 'unavailable') return text('tableUnavailable')
   if (entry.result?.state === 'not_eligible') return '—'
   if (entry.result?.state === 'incomplete') return text('tableIncomplete')
-  if (entry.result?.state === 'complete') return formatProximityScore(score.value, locale.value)
+  if (entry.result?.state === 'complete') {
+    if (matchMessage.value) return matchMessage.value
+    if (!nearest.value) return '—'
+    return score.value === null ? text('tableUncertainMatch') : formatProximityScore(score.value, locale.value)
+  }
   return text('tableUnavailable')
 })
 let observer: IntersectionObserver | null = null, disposed = false

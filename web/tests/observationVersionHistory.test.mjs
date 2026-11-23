@@ -14,7 +14,7 @@ test('authenticated supported history reads only genuine matching initial snapsh
  const result = await loadObservationVersionHistory('obs-1','24','initial_registration',async (url,options) => { calls.push({url,options}); return Response.json(payload([row(), row({id:'edit',change_id:'proposal'}), row({id:'capture',snapshot:{observation_id:'obs-1',review_provenance:{}}}),row({id:'foreign',plant_id:25})])) })
  assert.equal(result.versions.length,1); assert.equal(result.versions[0].key,'record-version:history-1'); assert.equal(result.versions[0].observationId,'obs-1'); assert.equal(result.versions[0].reviewable,false)
  assert.equal(result.versions[0].content.notes,'Original notes'); assert.deepEqual(result.versions[0].photos,['/api/data/assets/original-photo'])
- assert.equal(calls[0].url,'/api/data/record-versions?kind=plant&id=24');assert.equal(calls[0].options.credentials,'same-origin');assert.equal(calls[0].options.method,undefined)
+ assert.equal(calls[0].url,'/api/data/observations/obs-1/registration-history');assert.equal(calls[0].options.credentials,'same-origin');assert.equal(calls[0].options.method,undefined)
 })
 test('subsequent and unknown origins never call an unsupported version API',async()=>{
  for(const origin of ['subsequent_observation','unknown']) assert.deepEqual(await loadObservationVersionHistory('obs-1','24',origin,()=>{throw Error('Unsupported call')}),{available:false,versions:[]})
@@ -101,9 +101,22 @@ test('UIUX-002 genuine stored ordinals retain gaps, missing ordinals stay neutra
 test('UIUX-002 failed and missing history stay honest; retry is read-only and preserves context protection',async()=>{
  let calls=0
  const h=harness(async()=>{calls++;if(calls===1)throw Error('Unavailable');return {available:true,versions:[]}})
- try{await flush();assert.equal(h.state.failed.value,true);const retry=nodes(h.render()).find(n=>n.type==='button'&&n.props.class==='secondary-button');await retry.props.onClick();assert.equal(calls,2);assert.equal(h.state.available.value,true);assert.equal(h.state.selected.value,null)}finally{h.stop()}
+ try{await flush();assert.equal(h.state.failed.value,true);const retry=nodes(h.render()).find(n=>n.type==='button'&&n.props.class==='secondary-button');await retry.props.onClick();assert.equal(calls,2);assert.equal(h.state.available.value,true);assert.equal(h.state.selected.value,null);assert.ok(nodes(h.render()).some(n=>n.children===dictionaries.en.observationVersions.noSnapshots))}finally{h.stop()}
  const css=descriptor.styles[0].content
  assert.match(css,/table-layout: fixed/);assert.match(css,/max-width: 100%/);assert.match(css,/focus-visible/);assert.match(css,/@media \(max-width: 480px\)/)
+})
+
+test('registration history distinguishes the original submission from corrected resubmissions in all locales',async()=>{
+ const result=await loadObservationVersionHistory('obs-1','24','initial_registration',async()=>Response.json(payload([
+  row({id:'corrected-v2',version_number:2,status:'Correction Required'}),
+  row({id:'original-v1',version_number:1,status:'Superseded'}),
+ ])))
+ for(const language of ['en','ms','zh-CN']) {
+  const h=harness(async()=>result,language)
+  try{await flush();const labels=nodes(h.render()).filter(n=>n.props?.class==='submission-cycle-label').map(n=>n.children)
+   assert.deepEqual(labels,[dictionaries[language].observationVersions.correctedResubmission,dictionaries[language].observationVersions.originalSubmission])
+  }finally{h.stop()}
+ }
 })
 
 test('compact registration history hides explanatory paragraphs and provides localized accessible help',async()=>{

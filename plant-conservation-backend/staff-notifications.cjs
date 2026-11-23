@@ -95,6 +95,19 @@ function mountStaffNotifications(app, { pool }) {
       if(!cursor) await db.query('SELECT pg_advisory_xact_lock(193701,2)');
       const cap=cursor?.cap ?? (await db.query(`SELECT COALESCE(max(n.delivery_seq),0)::text AS cap FROM ${joined} WHERE ${visibility}`,args)).rows[0].cap;
       const rows=(await db.query(`SELECT n.id,n.created_at,n.read_at,n.delivery_seq::text AS seq,e.event_type,e.priority,e.occurred_at,
+        CASE WHEN $2='Administrator' AND e.resource_kind='system'
+          AND e.event_type IN ('account_administration','security_event')
+          AND e.metadata->>'action'=ANY(ARRAY['staff_created','staff_deactivated','staff_reactivated','staff_role_changed','staff_profile_updated','staff_archived','security_settings_changed'])
+          THEN jsonb_strip_nulls(jsonb_build_object(
+            'action',e.metadata->'action',
+            'account_name',CASE WHEN length(e.metadata->>'account_name') BETWEEN 1 AND 100 THEN e.metadata->'account_name' ELSE NULL END,
+            'previous_role',CASE WHEN e.metadata->>'previous_role'=ANY(ARRAY['Administrator','Conservation Officer','Botanist','Visitor']) THEN e.metadata->'previous_role' ELSE NULL END,
+            'role',CASE WHEN e.metadata->>'role'=ANY(ARRAY['Administrator','Conservation Officer','Botanist','Visitor']) THEN e.metadata->'role' ELSE NULL END,
+            'status',CASE WHEN e.metadata->>'status'=ANY(ARRAY['Active','Inactive','Suspended','Pending Activation']) THEN e.metadata->'status' ELSE NULL END
+          ))
+          WHEN $2='Administrator' AND e.resource_kind='system' AND e.event_type='system_failure' THEN jsonb_build_object('action','system_failure')
+          WHEN $2='Administrator' AND e.resource_kind='system' AND e.event_type='security_event' THEN jsonb_build_object('action','security_event')
+          ELSE NULL END AS admin_details,
         CASE WHEN e.audience_role='Conservation Officer' AND e.event_type='registration_submitted'
           THEN e.metadata->'species_review_required' ELSE NULL END AS species_review_required,
         CASE WHEN e.resource_kind='record_change' THEN (SELECT CASE WHEN r.plant_id IS NOT NULL THEN 'plant' ELSE 'species' END FROM plant_app.record_change_submission r WHERE r.id=e.record_change_id) ELSE NULL END AS change_target_type,
@@ -105,7 +118,7 @@ function mountStaffNotifications(app, { pool }) {
         ORDER BY n.delivery_seq DESC LIMIT $9`,[...args,cap,cursor?.before??null,limit+1])).rows;
       const unread=await count(db,args,visibility), hasMore=rows.length>limit, page=rows.slice(0,limit);
       await db.query('COMMIT');
-      res.json({notifications:page.map(({seq,resource_kind,resource_id,proposal_revision,species_review_required,threat_context,...row})=>({...row,...(resource_kind==='threat_alert'?{threat_context}:{}),resource:{kind:resource_kind,id:resource_id,...(resource_kind==='observation_edit'?{revision:proposal_revision}:{})},
+      res.json({notifications:page.map(({seq:_seq,resource_kind,resource_id,proposal_revision,species_review_required,threat_context,admin_details,...row})=>({...row,...(resource_kind==='threat_alert'?{threat_context}:{}),...(user.role==='Administrator'&&admin_details?{admin_details}:{}),resource:{kind:resource_kind,id:resource_id,...(resource_kind==='observation_edit'?{revision:proposal_revision}:{})},
         ...(user.role==='Conservation Officer'&&row.event_type==='registration_submitted'?{species_review_required:species_review_required===true}:{})})),
         unread_count:unread,page:{limit,has_more:hasMore,next_cursor:hasMore?encode({cap,before:page.at(-1).seq},user,'cursor'):null},
         read_through:encode({cap},user,'boundary')});

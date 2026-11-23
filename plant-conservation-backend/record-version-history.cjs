@@ -133,6 +133,28 @@ function mountRecordVersionHistory(app, { pool, allow }) {
   app.get("/api/record-versions/capabilities", read, async (_req, res) => {
     res.json({ history_available: await historyAvailable(pool) });
   });
+  // Officers need the submitted registration cycles while reviewing a Plant.
+  // Keep this read path limited to the exact initial Observation and omit
+  // approval captures, change proposals, and unrelated Plant history.
+  app.get("/api/observations/:observationId/registration-history", allow("observations.review"), async (req, res) => {
+    const observationId = String(req.params.observationId || "");
+    if (!/^(?:[1-9]\d{0,18}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.test(observationId))
+      fail(400, "Invalid registration history target.");
+    const receiptsAvailable = Boolean((await pool.query("SELECT to_regclass(current_schema() || '.plant_submission_receipt') IS NOT NULL AS available")).rows[0]?.available);
+    const observation = (await pool.query(`SELECT plant_id,to_jsonb(o)->>'origin_type' AS origin_type,
+        ${receiptsAvailable ? "EXISTS (SELECT 1 FROM plant_submission_receipt r WHERE r.owner_subject=o.owner_subject AND r.result->>'id'=o.id)" : "FALSE"} AS has_initial_receipt
+      FROM plant_observation o WHERE id=$1`, [observationId])).rows[0];
+    const verifiedInitial = observation?.origin_type === "initial_registration" ||
+      (observation?.origin_type !== "subsequent_observation" && observation?.has_initial_receipt === true);
+    if (!observation || !verifiedInitial) fail(404, "Registration history unavailable.");
+    if (!(await historyAvailable(pool))) return res.json({ history_available: false, versions: [] });
+    const versions = (await pool.query(`SELECT id,record_type,plant_id,version_number,status,
+        snapshot - 'qr_token' - 'photo_refs' AS snapshot,reviewed_by,reviewed_at,review_comment,created_at
+      FROM record_version_history WHERE record_type='plant' AND plant_id=$1 AND change_id IS NULL
+        AND snapshot->>'observation_id'=$2 AND NOT (snapshot ? 'review_provenance')
+      ORDER BY version_number DESC`, [observation.plant_id, observationId])).rows;
+    res.json({ history_available: true, versions });
+  });
   app.get("/api/record-versions", read, async (req, res) => {
     if (!(await historyAvailable(pool))) return res.json({ history_available: false, versions: [] });
     const kind = req.query.kind;

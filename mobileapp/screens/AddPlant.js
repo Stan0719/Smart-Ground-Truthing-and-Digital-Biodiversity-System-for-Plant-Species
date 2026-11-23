@@ -1,3 +1,4 @@
+import PreviewableImage, { confirmPhotoRemoval } from "../components/PreviewableImage";
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -11,7 +12,6 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  Image,
 } from "react-native";
 
 import * as Location from "expo-location";
@@ -31,6 +31,7 @@ import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, del
 import { useBotanistDraftAutosave, stopBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import SpeciesDictionary from "../components/SpeciesDictionary";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
+import { inspectPickedImages, imageSizeAlert, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 
 const createPlantClientKey = () =>
   `plant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -543,6 +544,16 @@ export function AddPlantForm({
   // TAKE PHOTO
   // ===================================================
 
+  async function checkedPhotos(assets, labels) {
+    const result = await inspectPickedImages(assets, labels, FileSystem.getInfoAsync);
+    if (result.rejected.length) {
+      const alert = imageSizeAlert(t, result.rejected);
+      Alert.alert(alert.title, alert.message);
+    }
+    return result.accepted;
+  }
+  const guidedPhotoLabel = (key) => t(`imageSizeAlert.${({ wholePlant: "wholePlantPhoto", leafCloseUp: "leafPhoto", stemBark: "stemBarkPhoto", flowerFruit: "flowerFruitPhoto" })[key] || "plantPhoto"}`);
+
   async function handleTakeGuidedPhoto(photoKey) {
 
     try {
@@ -573,8 +584,9 @@ export function AddPlantForm({
 
       if (!result.canceled) {
 
-        const uri =
-          result.assets[0].uri;
+        const accepted = await checkedPhotos(result.assets, [guidedPhotoLabel(photoKey)]);
+        if (!accepted.length) return;
+        const uri = accepted[0].uri;
 
 
         setGuidedPhotos((current) => ({
@@ -614,9 +626,11 @@ export function AddPlantForm({
       });
 
       if (!result.canceled) {
+        const accepted = await checkedPhotos(result.assets, [`${t("addPlant.additionalPhotos")} ${additionalPhotos.length + 1}`]);
+        if (!accepted.length) return;
         setAdditionalPhotos((current) => [
           ...current,
-          result.assets[0].uri,
+          accepted[0].uri,
         ]);
       }
     } catch (error) {
@@ -648,9 +662,11 @@ export function AddPlantForm({
       });
 
       if (!result.canceled) {
+        const accepted = await checkedPhotos(result.assets, [guidedPhotoLabel(photoKey)]);
+        if (!accepted.length) return;
         setGuidedPhotos((current) => ({
           ...current,
-          [photoKey]: result.assets[0].uri,
+          [photoKey]: accepted[0].uri,
         }));
       }
     } catch (error) {
@@ -690,8 +706,9 @@ export function AddPlantForm({
 
       if (!result.canceled) {
 
+        const accepted = await checkedPhotos(result.assets, result.assets.map((_, index) => `${t("addPlant.additionalPhotos")} ${additionalPhotos.length + index + 1}`));
         const selectedPhotos =
-          result.assets.map(
+          accepted.map(
             (asset) => asset.uri
           );
 
@@ -765,7 +782,8 @@ async function handleTakeSpeciesPhoto() {
     });
 
     if (!result.canceled && result.assets?.length > 0) {
-      setSpeciesImages([result.assets[0].uri]);
+      const accepted = await checkedPhotos(result.assets, [t("imageSizeAlert.speciesPhoto")]);
+      if (accepted.length) setSpeciesImages([accepted[0].uri]);
     }
   } catch (error) {
     console.log("Species camera error:", error);
@@ -793,7 +811,8 @@ async function handlePickSpeciesPhoto() {
     });
 
     if (!result.canceled && result.assets?.length > 0) {
-      setSpeciesImages([result.assets[0].uri]);
+      const accepted = await checkedPhotos(result.assets, [t("imageSizeAlert.speciesPhoto")]);
+      if (accepted.length) setSpeciesImages([accepted[0].uri]);
     }
   } catch (error) {
     console.log("Species gallery error:", error);
@@ -923,28 +942,25 @@ function handleRemoveSpeciesPhoto(index) {
       };
 
       const photoUris = [
-        guidedPhotos.wholePlant,
-        guidedPhotos.leafCloseUp,
-        guidedPhotos.stemBark,
-        guidedPhotos.flowerFruit,
-        ...additionalPhotos,
-      ].filter(Boolean);
+        ...["wholePlant", "leafCloseUp", "stemBark", "flowerFruit"].map((key) => ({ uri: guidedPhotos[key], label: guidedPhotoLabel(key) })),
+        ...additionalPhotos.map((uri, index) => ({ uri, label: `${t("addPlant.additionalPhotos")} ${index + 1}` })),
+      ].filter((item) => item.uri);
       const photos = [];
-      for (const uri of photoUris) {
+      const oversizedPhotos = [];
+      for (const { uri, label } of photoUris) {
         const base64 = await FileSystem.readAsStringAsync(uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        if (base64.length > 5592408) {
-          throw Error("One of the photos is over 4 MB. Choose a smaller image and retry.");
-        }
+        if (base64Bytes(base64) > MAX_IMAGE_BYTES) { oversizedPhotos.push({ label, bytes: base64Bytes(base64) }); continue; }
         const contentType = /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg";
         photos.push({ content_type: contentType, base64 });
       }
+      if (oversizedPhotos.length) { const error = Error("Image too large"); error.imageAlert = imageSizeAlert(t, oversizedPhotos); throw error; }
       let newSpecies;
       if (speciesData) {
         const uri = speciesImages[0];
         const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-        if (base64.length > 5592408) throw Error(t("addPlantWorkflow.speciesPhotoTooLarge"));
+        if (base64Bytes(base64) > MAX_IMAGE_BYTES) { const error = Error("Image too large"); error.imageAlert = imageSizeAlert(t, [{ label: t("imageSizeAlert.speciesPhoto"), bytes: base64Bytes(base64) }]); throw error; }
         newSpecies = { ...speciesData, photo: { base64, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" } };
       }
       const created = await plantApi("/plant-submissions", {
@@ -979,6 +995,7 @@ function handleRemoveSpeciesPhoto(index) {
       );
     } catch (error) {
       await autosave.flush().catch(() => {});
+      if (error?.imageAlert) { Alert.alert(error.imageAlert.title, error.imageAlert.message); return; }
       if (error?.duplicateType) {
         let match = error.speciesId ? speciesCatalog.find((row) => String(row.id) === String(error.speciesId)) :
           error.duplicateType === "approved" ? speciesCatalog.find((row) => normalizeSpeciesName(row.scientificName) === normalizeSpeciesName(speciesScientificName)) :
@@ -1061,6 +1078,7 @@ function handleRemoveSpeciesPhoto(index) {
           styles.scrollContent
         }
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator
       >
 
@@ -1538,7 +1556,7 @@ function handleRemoveSpeciesPhoto(index) {
                       key={`${photo}-${index}`}
                       style={styles.speciesPhotoItem}
                     >
-                      <Image
+                      <PreviewableImage
                         source={{ uri: photo }}
                         style={styles.speciesPhotoPreview}
                         resizeMode="cover"
@@ -1547,7 +1565,7 @@ function handleRemoveSpeciesPhoto(index) {
                       <TouchableOpacity
                         style={styles.removeSpeciesPhotoButton}
                         disabled={submitting}
-                        onPress={() => handleRemoveSpeciesPhoto(index)}
+                        onPress={() => confirmPhotoRemoval(t, () => handleRemoveSpeciesPhoto(index))}
                         activeOpacity={0.8}
                         accessibilityRole="button"
                         accessibilityLabel={t("recordEdits.removePhoto")}
@@ -1903,7 +1921,7 @@ function handleRemoveSpeciesPhoto(index) {
                 </Text>
 
                 {photo && (
-                  <Image
+                  <PreviewableImage
                     source={{ uri: photo }}
                     style={styles.guidedPhotoPreview}
                     resizeMode="cover"
@@ -1935,7 +1953,7 @@ function handleRemoveSpeciesPhoto(index) {
                 {photo && (
                   <TouchableOpacity
                     style={styles.removeGuidedPhotoButton}
-                    onPress={() => handleRemoveGuidedPhoto(item.key)}
+                    onPress={() => confirmPhotoRemoval(t, () => handleRemoveGuidedPhoto(item.key))}
                     activeOpacity={0.8}
                     accessibilityRole="button"
                     accessibilityLabel={t("recordEdits.removePhoto")}
@@ -2009,7 +2027,7 @@ function handleRemoveSpeciesPhoto(index) {
                     }
                   >
 
-                    <Image
+                    <PreviewableImage
                       source={{ uri: photo }}
                       style={styles.additionalPhotoPreview}
                       resizeMode="cover"
@@ -2028,11 +2046,7 @@ function handleRemoveSpeciesPhoto(index) {
                       style={styles.removeAdditionalPhotoButton}
                       accessibilityRole="button"
                       accessibilityLabel={t("recordEdits.removePhoto")}
-                      onPress={() =>
-                        handleRemovePhoto(
-                          index
-                        )
-                      }
+                      onPress={() => confirmPhotoRemoval(t, () => handleRemovePhoto(index))}
                     >
 
                       <Ionicons name="trash-outline" size={21} color="#B42318" />

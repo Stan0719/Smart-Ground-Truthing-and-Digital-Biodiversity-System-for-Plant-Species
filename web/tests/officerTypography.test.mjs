@@ -112,6 +112,7 @@ test('tables retain scrolling, middle alignment, adjacent copy icons and nonwrap
     assert.match(page, /\.identifier-copy[^}]*width: 44px/)
     assert.match(page, /background: #245443; color: #fff/)
   }
+  // This checks the shared fallback, not the page's more specific 78rem override.
   assert.equal(declarations(find('.observations-table', 'min-width'))['min-width'], '90rem')
 })
 

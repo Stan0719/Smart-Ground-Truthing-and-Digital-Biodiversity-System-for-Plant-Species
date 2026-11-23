@@ -1,5 +1,5 @@
 import { formatPlantId, parsePlantId } from '../utils/plantId.ts'
-import { webAssetUrl } from './assetImages.ts'
+import { plantThumbnailImages, webAssetUrl } from './assetImages.ts'
 import { trackDatabaseTranslationResponse } from './databaseTranslation.ts'
 
 export interface SpeciesContract {
@@ -37,6 +37,7 @@ export interface SubmittedGpsEvidence {
 
 export interface PlantContract {
   scientificName?: string
+  imageUrl: string
   id: string
   displayId: string
   speciesId: string
@@ -144,6 +145,10 @@ export const mapPlantContract = (value: unknown): PlantContract | null => {
     id,
     displayId: formatPlantId(id) || id,
     scientificName: text(item.scientific_name),
+    imageUrl: plantThumbnailImages({
+      plant_image_asset_id: item.plant_image_asset_id,
+      rbac_status: item.rbac_status,
+    })[0]?.path ?? '',
     speciesId,
     status: text(item.rbac_status),
     registeredSubject: text(item.registered_subject),
@@ -170,7 +175,7 @@ export const hasValidCoordinates = (plant: PlantContract) =>
 export const matchesPlantQuery = (plant: EnrichedPlant, query: string) => {
   const normalized = query.trim().toLowerCase()
   if (!normalized) return true
-  return `${plant.id} ${plant.displayId} ${plant.speciesId} ${plant.species?.scientificName || ''} ${plant.species?.commonName || ''} ${plant.status}`
+  return `${plant.id} ${plant.displayId} ${plant.scientificName || ''} ${plant.speciesId} ${plant.species?.scientificName || ''} ${plant.species?.commonName || ''} ${plant.status}`
     .toLowerCase()
     .includes(normalized)
 }

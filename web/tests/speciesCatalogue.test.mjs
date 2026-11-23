@@ -56,6 +56,53 @@ test('families derive from refreshed authorized data, normalize, deduplicate, so
   } finally { h.stop() }
 })
 
+test('searchable family dropdown filters dynamic options and keyboard-selects without changing taxonomy labels', async () => {
+  const h = harness()
+  try {
+    const names = ['Araceae', 'Asparagaceae', 'Myrtaceae', 'Plantaginaceae', 'Family', 'mii family correct Edit /Edit']
+    h.state.species.value = names.map((name, index) => fixture(String(index), name))
+    assert.equal(h.state.familyOptions.value.length, names.length + 1)
+    assert.equal(h.state.selectedFamilyLabel.value, 'species.allFamilies')
+
+    h.state.familySearchQuery.value = 'plant'
+    await vue.nextTick()
+    assert.deepEqual(Array.from(h.state.matchingFamilyOptions.value, option => option.label), ['Plantaginaceae'])
+    h.state.familySearchQuery.value = 'no match'
+    await vue.nextTick()
+    assert.equal(h.state.matchingFamilyOptions.value.length, 0)
+
+    h.state.familySearchQuery.value = ''
+    h.state.familyDropdownOpen.value = true
+    const lastOption = h.state.familyOptions.value.at(-1)
+    h.state.handleFamilySearchKeydown({ key: 'End', preventDefault() {} })
+    assert.equal(h.state.activeFamilyOption.value, names.length)
+    h.state.handleFamilySearchKeydown({ key: 'Enter', preventDefault() {} })
+    await vue.nextTick()
+    assert.equal(h.state.activeFamily.value, lastOption.key)
+    assert.equal(h.state.selectedFamilyLabel.value, lastOption.label)
+    assert.deepEqual(Array.from(h.state.filteredSpecies.value, item => item.family), [lastOption.label])
+    assert.ok(h.state.familyOptions.value.some(option => option.label === 'mii family correct Edit /Edit'))
+
+    h.state.familyDropdownOpen.value = true
+    h.state.handleFamilySearchKeydown({ key: 'Escape', preventDefault() {} })
+    assert.equal(h.state.familyDropdownOpen.value, false)
+  } finally { h.stop() }
+})
+
+test('family dropdown and reset labels exist in English, Malay, and Simplified Chinese', () => {
+  const expected = {
+    en: { allFamilies: 'All Families', filterByFamily: 'Filter by Family', searchFamilies: 'Search families', noFamiliesFound: 'No families found', currentFilter: 'Current filter: {family}', reset: 'Reset' },
+    ms: { allFamilies: 'Semua Famili', filterByFamily: 'Tapis Mengikut Famili', searchFamilies: 'Cari famili', noFamiliesFound: 'Tiada famili ditemui', currentFilter: 'Penapis semasa: {family}', reset: 'Tetapkan Semula' },
+    'zh-CN': { allFamilies: '所有科', filterByFamily: '按植物科筛选', searchFamilies: '搜索植物科', noFamiliesFound: '未找到植物科', currentFilter: '当前筛选：{family}', reset: '重置' },
+  }
+  for (const [locale, labels] of Object.entries(expected)) {
+    const messages = JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`, import.meta.url), 'utf8'))
+    for (const [key, value] of Object.entries(labels)) assert.equal(messages.species[key], value)
+    assert.equal(messages.species.moreFilters, undefined)
+    assert.equal(messages.species.showLess, undefined)
+  }
+})
+
 test('family combines with search and each sort; All and Clear reset selection; route search remains reactive', async () => {
   const h = harness()
   try {
@@ -67,22 +114,26 @@ test('family combines with search and each sort; All and Clear reset selection; 
     }
     h.route.query.search = 'BETA'; await vue.nextTick()
     assert.deepEqual(Array.from(h.state.filteredSpecies.value, x => x.slug), ['b'])
+    h.state.sortOption.value = 'name-desc'
     h.state.clearFilters()
     assert.equal(h.state.searchQuery.value, ''); assert.equal(h.state.activeFamily.value, '')
+    assert.equal(h.state.sortOption.value, 'name-desc')
     assert.equal(h.state.filteredSpecies.value.length, 3)
     h.state.searchQuery.value = 'Uncategorized'; assert.equal(h.state.filteredSpecies.value.length, 0)
     for (const query of ['Scientific', 'Genus', 'Forest', 'alpha']) { h.state.searchQuery.value = query; assert.ok(h.state.filteredSpecies.value.length) }
   } finally { h.stop() }
 })
 
-test('render keeps accessible family buttons, both actions, placeholders and authorized conservation badge', () => {
+test('render exposes the searchable family combobox, reset, current selection, and existing card actions', () => {
   const h = harness()
   try {
     h.state.isLoading.value = false
     h.state.species.value = [{ ...fixture('long', 'VeryLongFamily'.repeat(8), 'LongCommonName'.repeat(8)), conservationStatus: 'Vulnerable' }]
     let nodes = flat(h.render())
-    assert.ok(nodes.some(x => x.props?.role === 'group' && x.props['aria-label'] === 'common.family'))
-    assert.ok(nodes.some(x => x.type === 'button' && x.props?.['aria-pressed'] === true))
+    assert.ok(nodes.some(x => x.props?.class === 'family-select-trigger' && x.props['aria-haspopup'] === 'listbox'))
+    assert.ok(nodes.some(x => x.props?.class === 'filter-reset-button'))
+    assert.ok(nodes.some(x => x.props?.class === 'current-family-filter'))
+    assert.ok(!nodes.some(x => /family-filter-toggle|family-filters/.test(x.props?.class || '')))
     assert.equal(nodes.filter(x => x.props?.to?.startsWith('/species/')).length, 2)
     assert.ok(nodes.some(x => x.props?.class === 'plant-image-placeholder'))
     assert.ok(!nodes.some(x => /category-badge|status-badge/.test(x.props?.class || '')))
@@ -99,7 +150,10 @@ test('layout declares 4/3/2 columns, wrapping long text and original mobile acti
   assert.match(css, /@media \(max-width: 950px\)[\s\S]*?repeat\(2, minmax\(0, 1fr\)\)/)
   assert.match(css, /@media \(max-width: 620px\)[\s\S]*?\.card-actions\s*\{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
   assert.match(css, /\.plant-card-content\s*\{[^}]*overflow-wrap: anywhere/)
-  assert.match(css, /\.family-filters button:focus-visible/)
+  assert.match(css, /\.family-dropdown-panel\s*\{[^}]*position: absolute;[^}]*z-index: 10/)
+  assert.match(css, /\.family-option\s*\{[^}]*overflow-wrap: anywhere/)
+  assert.match(css, /@media \(max-width: 620px\)[\s\S]*?\.family-controls\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\) auto auto/)
+  assert.doesNotMatch(source, /familyFiltersExpanded|visibleFamilies|species\.moreFilters|species\.showLess/)
   assert.match(css, /\.card-badges\s*\{[^}]*justify-content: flex-end/)
   assert.doesNotMatch(source, /activeCategory|category-badge|item\.category|const categories/)
 })

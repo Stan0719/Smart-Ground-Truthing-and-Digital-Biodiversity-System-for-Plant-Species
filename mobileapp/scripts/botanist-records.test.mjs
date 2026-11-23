@@ -45,6 +45,7 @@ function moduleFrom(file, deps) {
     if (name === "../components/DiscoverableScrollView") return { default: "FlatList", __esModule: true };
     if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     if (name === "../utils/submissionSearch") return { ...moduleFrom("utils/submissionSearch.js", {}), __esModule: true };
+    if (name === "../components/PreviewableImage" || name === "./PreviewableImage") return { default: "Image", confirmPhotoRemoval: (_translate, remove) => remove(), __esModule: true };
     assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" };
   }, module, module.exports);
   return module.exports;
@@ -1127,7 +1128,7 @@ test("Field Record Timeline resolves the signed-in profile name only for its con
   assert.match(detailSource, /key=\{observation\.observationId\}/);
   assert.match(detailSource, /getObservationRecorderDisplayName\(observation, user/);
   assert.match(detailSource, /getObservationRecorderDisplayName\(detailsObservation, user/);
-  assert.match(detailSource, /selectLatestApprovedObservation\(plant\.observations \|\| \[\]\)/);
+  assert.match(detailSource, /selectLatestApprovedObservation\(plant\?\.observations \|\| \[\]\)/);
   assert.match(detailSource, /selectOwnedPendingPlantObservation\(plant, user\?\.id\)/);
   assert.match(detailSource, /<ObservationPhotos photos=\{detailsObservation\.photos\}/);
   assert.match(detailSource, /<ObservationPhotos photos=\{observation\.photos\}/);

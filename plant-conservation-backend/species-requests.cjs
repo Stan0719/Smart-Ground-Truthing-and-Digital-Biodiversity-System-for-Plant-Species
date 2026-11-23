@@ -15,6 +15,24 @@ const fields = ["scientific_name", "common_name", "genus_name", "family_name",
   "conservation_status", "description", "habitat"];
 const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id,(to_jsonb(species_request_submission)->>'content_revision')::integer AS content_revision,to_jsonb(species_request_submission)->>'content_updated_at' AS content_updated_at,(to_jsonb(species_request_submission)->>'review_cycle')::integer AS review_cycle,to_jsonb(species_request_submission)->>'withdrawn_by' AS withdrawn_by,to_jsonb(species_request_submission)->>'withdrawn_at' AS withdrawn_at";
 const project = (row) => ({ ...row, photo_url: `/api/species-requests/${row.request_id}/photo`, proposed_photo_url: `/api/species-requests/${row.request_id}/proposed-photo` });
+function speciesRequestPage(query, scope, fail) {
+  const rawLimit = query.limit;
+  const limit = rawLimit === undefined ? 500 : Number(rawLimit);
+  if ((rawLimit !== undefined && (typeof rawLimit !== "string" || !/^[1-9][0-9]*$/.test(rawLimit))) ||
+      !Number.isInteger(limit) || limit < 1 || limit > 500) fail(400, "Invalid Species request page size.");
+  let cursor = null;
+  if (query.cursor !== undefined) {
+    if (typeof query.cursor !== "string" || !/^[A-Za-z0-9_-]{1,512}$/.test(query.cursor)) fail(400, "Invalid Species request cursor.");
+    try { cursor = JSON.parse(Buffer.from(query.cursor, "base64url").toString("utf8")); }
+    catch { fail(400, "Invalid Species request cursor."); }
+    const at = cursor?.at;
+    if (cursor?.v !== 1 || cursor.scope !== scope || !/^[1-9][0-9]{0,9}$/.test(String(cursor.id || "")) ||
+        Number(cursor.id) > 2147483647 || typeof at !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(at) || !Number.isFinite(Date.parse(at)))
+      fail(400, "Invalid Species request cursor.");
+  }
+  return { limit, cursor };
+}
 
 // The deployed table predates this API. Older installations without it retain
 // ordinary observation behavior; no runtime DDL or migrations are performed.
@@ -259,10 +277,21 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
         ORDER BY submitted_at DESC,request_id DESC`, [subject(req.user)])).rows;
       return res.json({ species_requests: rows.map(project) });
     }
-    const rows = (await pool.query(`SELECT ${columns} FROM species_request_submission
-      WHERE ($1 OR owner_subject=$2) ORDER BY submitted_at DESC,request_id DESC LIMIT 500`,
-      [permitted(req.user, "species.manage"), subject(req.user)])).rows;
-    res.json({ species_requests: rows.map(project) });
+    const reviewer = permitted(req.user, "species.manage"), owner = subject(req.user);
+    const scope = reviewer ? "reviewers" : `owner:${owner}`;
+    const { limit, cursor } = speciesRequestPage(req.query, scope, fail);
+    const rows = (await pool.query(`SELECT ${columns},
+        to_char(submitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS _page_submitted_at
+      FROM species_request_submission
+      WHERE ($1 OR owner_subject=$2)
+        AND ($3::timestamptz IS NULL OR (submitted_at,request_id)<($3::timestamptz,$4::integer))
+      ORDER BY submitted_at DESC,request_id DESC LIMIT $5`,
+    [reviewer, owner, cursor?.at || null, cursor?.id || null, limit + 1])).rows;
+    const hasMore = rows.length > limit, page = rows.slice(0, limit), last = page.at(-1);
+    const nextCursor = hasMore && last ? Buffer.from(JSON.stringify({ v: 1, scope, at: last._page_submitted_at,
+      id: String(last.request_id) })).toString("base64url") : null;
+    res.json({ species_requests: page.map(({ _page_submitted_at, ...row }) => project(row)),
+      page: { limit, has_more: hasMore, next_cursor: nextCursor } });
   });
   app.get("/api/species-requests/:id", read, async (req, res) => {
     const row = (await pool.query(`SELECT ${columns} FROM species_request_submission

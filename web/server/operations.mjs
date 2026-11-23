@@ -1,7 +1,11 @@
 import { publicUser } from './auth.mjs'
 import policy from '../../shared/rbac.cjs'
 const { grants } = policy
-export async function adminRequest({ auth, activation, recovery, path, method, body, user, ip }) {
+async function emitAccountEvent(adminNotifications, details) {
+  if (!adminNotifications?.accountEvent) return
+  await adminNotifications.accountEvent(details)
+}
+export async function adminRequest({ auth, activation, recovery, adminNotifications, path, method, body, user, ip }) {
   if (!policy.permitted(user, 'accounts.manage')) return { status: user ? 403 : 401, error: 'Access denied.' }
   const db = auth.db
   if (path === '/api/admin/permissions' && method === 'GET')
@@ -45,12 +49,20 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
         body.login_limit > 100
       )
         return { status: 400, error: 'Session hours must be 1–24; login limit 5–100.' }
+      let eventId = null
+      let changed = false
       await db.transaction(async () => {
+        const previous = await db.prepare('SELECT session_hours,login_limit FROM security_settings WHERE id=1 FOR UPDATE').get()
+        changed = previous.session_hours !== body.session_hours || previous.login_limit !== body.login_limit
         await db
           .prepare('UPDATE security_settings SET session_hours=?,login_limit=? WHERE id=1')
           .run(body.session_hours, body.login_limit)
         await db.exec('DELETE FROM sessions; DELETE FROM visitor_sessions')
-        await auth.event(null, ip, 'security_settings_changed', user.id)
+        eventId = await auth.event(null, ip, 'security_settings_changed', user.id)
+      })
+      if (changed && eventId) await emitAccountEvent(adminNotifications, {
+        sourceKey: `admin-security:settings:${eventId}`,
+        action: 'security_settings_changed',
       })
       return { status: 200, reauthenticate: true }
     }
@@ -73,7 +85,17 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
         .map(publicUser)
         .sort((a, b) => a.name.localeCompare(b.name)),
     }
-  if (path === '/api/admin/users' && method === 'POST') return activation.invite(body, user.id, ip)
+  if (path === '/api/admin/users' && method === 'POST') {
+    const result = await activation.invite(body, user.id, ip)
+    if ([201, 202].includes(result.status) && result.user?.id) await emitAccountEvent(adminNotifications, {
+      sourceKey: `admin-account:created:${result.user.id}`,
+      action: 'staff_created',
+      accountName: result.user.name,
+      role: result.user.role,
+      status: result.user.status,
+    })
+    return result
+  }
   const reset=/^\/api\/admin\/users\/([^/]+)\/reset$/.exec(path)
   if(reset&&method==='POST'){
     if(!recovery)return {status:503,error:'Recovery delivery is unavailable.'}
@@ -99,13 +121,26 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
       return { status: 400, error: 'Invalid status.' }
     if (id === user.id && body.status !== 'Active')
       return { status: 400, error: 'Ask another administrator to disable your account.' }
-    return { status: (await auth.setStatus(id, body.status, user.id, ip)) ? 200 : 409 }
+    const changed = auth.setStatusWithDetails
+      ? await auth.setStatusWithDetails(id, body.status, user.id, ip)
+      : { changed: await auth.setStatus(id, body.status, user.id, ip), statusChanged: current.status !== body.status }
+    if (!changed.changed) return { status: 409 }
+    if (changed.role !== 'Visitor' && changed.statusChanged && changed.eventId) await emitAccountEvent(adminNotifications, {
+      sourceKey: `admin-account:status:${changed.eventId}`,
+      action: body.status === 'Active' ? 'staff_reactivated' : 'staff_deactivated',
+      accountName: changed.accountName,
+      previousRole: changed.role,
+      role: changed.role,
+      status: body.status,
+    })
+    return { status: 200 }
   }
   const table = current.role === 'Visitor' ? 'visitors' : 'users',
     sessions = table === 'visitors' ? 'visitor_sessions' : 'sessions'
   if (method === 'DELETE') {
     if (id === user.id) return { status: 400, error: 'You cannot delete your own account.' }
     // Archive without breaking observation, enrollment, or audit references.
+    let archiveEventId = null
     await db.transaction(async () => {
       if (current.status !== 'Pending Activation') await auth.setStatus(id, 'Inactive', user.id, ip)
       await db.prepare(`DELETE FROM ${sessions} WHERE user_id=?`).run(id)
@@ -119,7 +154,14 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
           .prepare('UPDATE users SET email=?,username=? WHERE id=?')
           .run(archivedEmail, `archived_${id.replaceAll('-', '')}`, id)
       else await db.prepare('UPDATE visitors SET email=? WHERE id=?').run(archivedEmail, id)
-      await auth.event(id, ip, 'account_archived', user.id)
+      archiveEventId = await auth.event(id, ip, 'account_archived', user.id)
+    })
+    if (table === 'users' && archiveEventId) await emitAccountEvent(adminNotifications, {
+      sourceKey: `admin-account:archived:${archiveEventId}`,
+      action: 'staff_archived',
+      accountName: current.name,
+      previousRole: current.role,
+      role: current.role,
     })
     return { status: 200, archived: true }
   }
@@ -141,6 +183,8 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
     return { status: 409, error: 'Use the activation workflow for pending accounts.' }
   if (id === user.id && (body.role !== current.role || body.status !== current.status))
     return { status: 400, error: 'You cannot change your own role or status.' }
+  let updateEventId = null
+  let changedFields = []
   await db.transaction(async () => {
     await auth.lockAccountPolicy()
     const locked = await db.prepare(`SELECT * FROM ${table} WHERE id=? FOR UPDATE`).get(id)
@@ -150,13 +194,31 @@ export async function adminRequest({ auth, activation, recovery, path, method, b
         .get(id)
     )
       throw Object.assign(Error('Account not found.'), { status: 404 })
+    changedFields = [
+      ...(locked.name !== body.name.trim() ? ['name'] : []),
+      ...(locked.email !== body.email.trim().toLowerCase() ? ['email'] : []),
+      ...(locked.role !== body.role ? ['role'] : []),
+      ...(locked.status !== body.status ? ['status'] : []),
+    ]
     await db
       .prepare(`UPDATE ${table} SET name=?,email=?,role=?,status=? WHERE id=?`)
       .run(body.name.trim(), body.email.trim().toLowerCase(), body.role, body.status, id)
     await auth.recordReactivation(id, locked.status, body.status, user.id, ip)
     if (current.role !== body.role || current.email !== body.email.trim().toLowerCase())
       await db.prepare(`DELETE FROM ${sessions} WHERE user_id=?`).run(id)
-    await auth.event(id, ip, 'account_updated', user.id)
+    updateEventId = await auth.event(id, ip, 'account_updated', user.id)
   })
+  if (table === 'users' && changedFields.length && updateEventId) {
+    const roleChanged = changedFields.includes('role')
+    await emitAccountEvent(adminNotifications, {
+      sourceKey: `admin-account:updated:${updateEventId}`,
+      action: roleChanged ? 'staff_role_changed' : 'staff_profile_updated',
+      accountName: body.name.trim(),
+      previousRole: current.role,
+      role: body.role,
+      status: body.status,
+      changedFields,
+    })
+  }
   return { status: 200 }
 }

@@ -147,6 +147,21 @@ test("Administrator catalogue reads match Officer records/projections and retain
         : Buffer.from(await response.arrayBuffer()).toString("hex"),
     };
   };
+  await t.test('Species deletion returns a stable FK restriction code and preserves related evidence', async () => {
+    const before = (await pool.query('SELECT count(*)::integer AS count FROM plant_record')).rows[0].count;
+    const blocked = await call('/species/3', 'officer', 'DELETE', {});
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.data.code, 'SPECIES_DELETE_REFERENCED');
+    assert.equal(blocked.data.error, 'This Species is referenced by existing records and cannot be deleted.');
+    assert.equal((await pool.query('SELECT count(*)::integer AS count FROM plant_record')).rows[0].count, before);
+    assert.equal((await pool.query('SELECT species_id FROM species WHERE species_id=3')).rows.length, 1);
+    await pool.query("INSERT INTO species(species_id,scientific_name) VALUES(9999,'Isolated unused Species')");
+    const deleted = await call('/species/9999', 'officer', 'DELETE', {});
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.data.deleted, true);
+    assert.equal((await pool.query('SELECT species_id FROM species WHERE species_id=9999')).rows.length, 0);
+    assert.equal((await call('/species/9999', 'officer', 'DELETE', {})).status, 404);
+  });
   await t.test(
     "catalogue, protected parent, exact approved locations and thumbnails use the same read contract",
     async () => {

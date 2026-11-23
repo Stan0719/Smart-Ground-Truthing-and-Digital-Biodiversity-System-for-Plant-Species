@@ -38,6 +38,7 @@
     "@electric-sql/pglite": "^0.5.11",
     "@electric-sql/pglite-postgis": "^0.2.11",
     "@electric-sql/pglite-socket": "^0.2.14",
+    "@playwright/test": "^1.65.1",
     "@tsconfig/node24": "^24.0.5",
     "@types/leaflet": "^1.9.22",
     "@types/node": "^24.13.4",

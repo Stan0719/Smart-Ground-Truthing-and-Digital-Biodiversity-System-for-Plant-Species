@@ -1,7 +1,68 @@
 {
+  "officerPlantEdit": {
+    "latest": "最新保存的名称",
+    "title": "编辑植物",
+    "name": "植物学名",
+    "reason": "修改原因",
+    "restriction": "物种、GPS、照片和二维码保持只读。如需更改，请使用现有植物学家修改申请流程。",
+    "loading": "正在加载已核实的植物版本…",
+    "saved": "植物修改已保存。",
+    "save": "保存修改",
+    "saving": "正在保存…",
+    "close": "关闭",
+    "refresh": "刷新最新版本",
+    "required": "此字段为必填项。",
+    "active": "存在进行中的申请。请先通过现有审核流程处理申请。",
+    "permission": "您无权编辑此植物。",
+    "unavailable": "缺少可编辑的已核实基线或所需的不可变历史记录。",
+    "conflict": "植物已更改或存在冲突申请。请刷新并检查后再保存。",
+    "invalid": "请检查学名和修改原因。",
+    "uncertain": "保存结果尚不确定。请刷新并检查记录后再保存。",
+    "inspect": "我已检查最新版本并希望提交此修改。",
+    "history": "官员直接修改历史"
+  },
+  "officerPlants": {
+    "updatingPrevious": "正在更新结果。更新完成前将继续显示先前的结果。",
+    "updateFailedPrevious": "无法更新结果。仍显示先前的结果。",
+    "plantName": "植株",
+    "title": "植物",
+    "eyebrow": "植物登记册",
+    "search": "搜索",
+    "searchPlaceholder": "植物编号、植物或物种名称、二维码编号",
+    "species": "物种",
+    "allSpecies": "所有物种",
+    "plantId": "植物编号",
+    "registered": "登记日期",
+    "actions": "操作",
+    "view": "查看植物详情",
+    "edit": "编辑",
+    "delete": "删除",
+    "editBlocked": "编辑需要植物学家提交植物修改申请并由官员审核。",
+    "deleteBlocked": "为保留关联记录和证据，植物删除功能不可用。",
+    "registration": "登记审核",
+    "observations": "观察审核",
+    "pagination": "植物分页",
+    "previous": "上一页",
+    "next": "下一页",
+    "page": "页",
+    "loading": "正在加载植物…",
+    "empty": "未找到匹配的植物。",
+    "error": "无法加载植物。",
+    "retry": "重试",
+    "session": "请验证官员会话以查看植物。",
+    "viewLoading": "正在加载植物信息…",
+    "plantScientificName": "植物学名",
+    "viewError": "无法加载植物信息。",
+    "viewRegistry": "登记信息",
+    "viewApprovedLocation": "已批准的位置",
+    "viewLatestApprovedObservation": "最新的已批准观察记录",
+    "viewNoApprovedObservation": "尚无已批准的观察记录。",
+    "viewLatestObservation": "最新观察记录",
+    "viewNoLatestObservation": "尚无观察记录。"
+  },
   "officerFeedback": {
     "visibilityRequired": "批准此物种前，请选择可见性选项。",
-    "speciesReferenced": "此物种已被植物记录使用，无法删除。",
+    "speciesReferenced": "此物种被现有记录引用，无法删除。",
     "speciesConflict": "此更改与现有物种数据冲突。请刷新并检查详情后重试。",
     "validateOnly": "仅验证",
     "saved": "审核决定已保存。",
@@ -37,7 +98,7 @@
   },
   "plantProximity": {
     "scoreHeading": "重复风险评分",
-    "scoreTooltip": "此评分衡量 GPS 位置的接近程度，并非重复的概率。",
+    "scoreTooltip": "仅在已确认的物种和分区相同时显示距离评分；这不是重复概率。",
     "drawerGpsWarning": "GPS 可能不准确。请查看植物详情和照片，判断是否可能重复。",
     "accuracyHeading": "GPS 定位精度",
     "newPlantAccuracy": "新植物",
@@ -84,16 +145,36 @@
     "tableUnavailable": "暂不可用",
     "tableIncomplete": "检查不完整",
     "tableNone": "无",
+    "tableNoMatch": "无匹配",
+    "tableUncertainMatch": "不确定",
     "tableNotEligible": "此提交不适用于新植株邻近检查。",
     "scoreColumn": "重复风险评分 (%)",
     "nearestRisk": "重复风险（最近植株）",
     "candidateRisk": "重复风险",
     "scoreAbout": "关于重复风险评分",
-    "scoreDisclaimer": "仅根据记录距离计算的 GPS 邻近评分，并非经科学验证的概率，也不代表已确认重复。",
-    "scorePriority": "评分越高，表示记录的坐标越接近、复核优先级越高，并不证明是同一植株。",
+    "scoreDisclaimer": "仅在已确认的物种和分区匹配时显示距离评分。这不是概率，也不能证明属于同一植物群组。",
+    "scorePriority": "只有物种和分区确认匹配且 GPS 精度可信时才显示评分；评分仅供审核参考，不能证明身份相同。",
     "scoreEvidence": "请结合 GPS 精度、植株标签、实地照片及其他证据判断。最终决定由保护官作出。",
-    "scoreFormula": "线性插值：0 米 → 100%；{veryClose} 米 → 80%；{close} 米 → 50%；{nearby} 米 → 20%；{radius} 米 → 0%。四舍五入为整数百分比。这些数值是设计选项，并非经验证的概率。",
-    "scoreUncertain": "GPS 精度未知或不可靠。仅依据距离计算的评分保持不变；请核实实地证据。",
+    "scoreFormula": "仅适用于已确认物种和分区匹配且 GPS 精度可信的记录：距离线性插值锚点为 0 米 → 100%；{veryClose} 米 → 80%；{close} 米 → 50%；{nearby} 米 → 20%；{radius} 米 → 0%。四舍五入为整数百分比，并非经验证的概率。群组半径是独立的邻近参考值。",
+    "scoreUncertain": "GPS 精度未知或不可靠，因此不显示评分。请核实现场证据。",
+    "matchSameSpeciesZone": "已确认物种和分区匹配",
+    "matchWithinGroupingRadius": "已确认物种和分区匹配；位于 {radius} 米群组半径内。",
+    "matchBeyondGroupingRadius": "已确认物种和分区匹配；超出 {radius} 米群组半径。",
+    "matchGpsUncertain": "物种和分区匹配，但 GPS 精度不确定，无法评分重叠风险。",
+    "matchDifferentSpecies": "物种不同 — 不属于同一物种群组匹配。",
+    "matchDifferentZone": "分区不同 — 属于不同群组。",
+    "matchProvisionalSpecies": "物种比较为暂定结果。",
+    "matchProvisionalSameNameSameZone": "名称暂定匹配；分区相同，尚未确认。",
+    "matchProvisionalSameNameDifferentZone": "名称暂定匹配；分区不同。",
+    "matchProvisionalSameNameUnknownZone": "名称暂定匹配；分区未知。",
+    "matchProvisionalDifferentNameSameZone": "名称暂定不同；分区相同，但不能据此确认不匹配。",
+    "matchProvisionalDifferentNameDifferentZone": "名称暂定不同；分区不同。",
+    "matchProvisionalDifferentNameUnknownZone": "名称暂定不同；分区未知。",
+    "matchSpeciesAndZoneUnknown": "物种身份和分区均未知。",
+    "matchUncertainSpecies": "物种身份尚未确认。",
+    "matchUncertainZone": "分区缺失或不确定。",
+    "matchUncertainMatch": "物种和分区匹配信息不可用。",
+    "tableProvisionalMatch": "暂定",
     "noScore": "搜索范围内没有附近候选植株，因此不提供评分。这并不证明该植株是唯一的。",
     "distanceLabel": "距离"
   },
@@ -302,7 +383,7 @@
     "unavailable": "暂不可用",
     "conflict": "审核已暂停。请重新加载并检查最新提案后再决定。",
     "requestFailed": "无法加载或保存提案。请重新加载。",
-    "commentRequired": "请先填写审核意见。",
+    "commentRequired": "拒绝修改前请填写审核意见。",
     "sessionRequired": "需要有效的保育人员会话。",
     "reload": "重新加载最新提案",
     "comparison": "已批准基准与提议值",
@@ -440,6 +521,26 @@
     "login": "登录",
     "logout": "退出登录"
   },
+  "globalSearch": {
+    "eyebrow": "\u7f51\u7ad9\u641c\u7d22",
+    "title": "\u641c\u7d22\u7f51\u7ad9",
+    "queryLabel": "\u641c\u7d22\u7ed3\u679c",
+    "inputLabel": "\u641c\u7d22\u7f51\u7ad9",
+    "placeholder": "\u641c\u7d22\u7269\u79cd\u3001\u690d\u7269\u548c\u89c2\u5bdf\u8bb0\u5f55...",
+    "submit": "\u641c\u7d22\u7f51\u7ad9\u6240\u6709\u5185\u5bb9",
+    "suggestions": "\u5168\u7ad9\u641c\u7d22\u5efa\u8bae",
+    "loading": "\u6b63\u5728\u641c\u7d22...",
+    "empty": "\u6ca1\u6709\u627e\u5230\u5339\u914d\u7ed3\u679c\u3002",
+    "error": "\u641c\u7d22\u6682\u65f6\u4e0d\u53ef\u7528\u3002",
+    "minimumLength": "\u8bf7\u8f93\u5165\u81f3\u5c11\u4e24\u4e2a\u5b57\u7b26\u8fdb\u884c\u641c\u7d22\u3002",
+    "viewAll": "\u67e5\u770b\u6240\u6709\u7ed3\u679c",
+    "resultCount": "{count} \u6761\u7ed3\u679c",
+    "pagination": "\u641c\u7d22\u7ed3\u679c\u9875",
+    "previous": "\u4e0a\u4e00\u9875",
+    "next": "\u4e0b\u4e00\u9875",
+    "batch": "\u7ed3\u679c {start}\u2013{end}",
+    "categories": { "species": "\u7269\u79cd", "plants": "\u690d\u7269\u8bb0\u5f55", "observations": "\u89c2\u5bdf\u8bb0\u5f55", "alerts": "\u5a01\u80c1\u8b66\u62a5", "pages": "\u7f51\u7ad9\u9875\u9762" }
+  },
   "common": {
     "learnMore": "了解更多",
     "viewDetails": "查看详情",
@@ -524,6 +625,12 @@
     "sortNameAsc": "名称 A–Z",
     "sortNameDesc": "名称 Z–A",
     "sortScientific": "学名 A–Z",
+    "allFamilies": "所有科",
+      "filterByFamily": "按植物科筛选",
+      "searchFamilies": "搜索植物科",
+      "noFamiliesFound": "未找到植物科",
+      "currentFilter": "当前筛选：{family}",
+      "reset": "重置",
     "imageComingSoon": "图片即将提供",
     "categories": {
       "all": "全部",
@@ -958,25 +1065,62 @@
       "unread": "未读"
     },
     "admin": {
-      "N001": {
-        "title": "高严重度威胁警报",
-        "message": "在 PL002 附近检测到移动。",
-        "time": "2 分钟前"
+      "loading": "正在加载通知…",
+      "loadFailed": "无法加载通知。",
+      "sessionUnavailable": "当前会话无法访问通知。请重新登录后重试。",
+      "readFailed": "无法保存已读状态，请重试。",
+      "retry": "重试",
+      "unknownAccount": "员工账户",
+      "unknownTime": "时间不可用",
+      "roles": {
+        "Administrator": "管理员",
+        "Conservation Officer": "保护专员",
+        "Botanist": "植物学家",
+        "Visitor": "访客"
       },
-      "N002": {
-        "title": "传感器离线",
-        "message": "传感器 S003 已停止报告读数。",
-        "time": "8 分钟前"
+      "statuses": {
+        "Active": "启用",
+        "Inactive": "未启用",
+        "Suspended": "已停用",
+        "Pending Activation": "等待启用"
       },
-      "N003": {
-        "title": "威胁警报需要审核",
-        "message": "在 PL010 附近检测到高温。",
-        "time": "15 分钟前"
-      },
-      "N004": {
-        "title": "系统警告",
-        "message": "传感器网络报告了连接警告。",
-        "time": "25 分钟前"
+      "actions": {
+        "staff_created": {
+          "title": "已创建员工账户",
+          "message": "已将 {name} 添加为{role}。"
+        },
+        "staff_deactivated": {
+          "title": "员工账户已停用",
+          "message": "{name} 的状态现为：{status}。"
+        },
+        "staff_reactivated": {
+          "title": "员工账户已重新启用",
+          "message": "{name} 的账户已恢复启用。"
+        },
+        "staff_role_changed": {
+          "title": "员工角色已更改",
+          "message": "{name} 的新角色为：{role}。"
+        },
+        "staff_profile_updated": {
+          "title": "员工账户已更新",
+          "message": "{name} 的账户信息已更新。"
+        },
+        "staff_archived": {
+          "title": "员工账户已归档",
+          "message": "{name} 已从账户管理中归档。"
+        },
+        "security_settings_changed": {
+          "title": "安全设置已更改",
+          "message": "管理员更新了会话或登录限制。"
+        },
+        "security_event": {
+          "title": "安全事件",
+          "message": "安全事件需要管理员关注。"
+        },
+        "system_failure": {
+          "title": "系统故障",
+          "message": "系统故障需要管理员关注。"
+        }
       }
     },
     "conservation": {
@@ -1165,6 +1309,7 @@
     }
   },
   "conservationDashboard": {
+    "previewError": "无法加载待处理记录，请重试。",
     "pendingPlantRegistrations": "待审核植物登记",
     "pendingObservations": "待审核观察",
     "fieldRecords": "野外记录",
@@ -1175,7 +1320,7 @@
     "speciesConservationStatus": "物种保护状态",
     "speciesStatusShare": "{status}：已加载 {total} 个物种中的 {count} 个",
     "speciesStatusScope": "已加载 {total} 个物种",
-    "countScope": "数量仅反映已加载记录。",
+    "countScope": "观察记录计数涵盖所有可访问记录；其他计数基于已加载记录。",
     "viewAllObservations": "查看所有观察",
     "overview": "概览",
     "greeting": "下午好，保育专员",
@@ -1216,6 +1361,7 @@
       "currentDataset": "已加载观察记录 · 最多500条"
     },
     "table": {
+      "submittedAt": "已提交",
       "registeredBy": "登记人",
       "registeredAt": "登记时间",
       "observationId": "观察编号",
@@ -1343,7 +1489,30 @@
       "noCriticalIncidents": "没有严重事件",
       "auditEyebrow": "管理审计记录",
       "recentActivity": "近期系统活动",
-      "searchPlaceholder": "搜索操作人员、操作、模块或 IP……"
+      "searchPlaceholder": "搜索操作人员、操作、模块或 IP……",
+      "tableLabel": "\u7cfb\u7edf\u6d3b\u52a8\u8bb0\u5f55",
+      "time": "\u65f6\u95f4",
+      "account": "\u8d26\u6237",
+      "actor": "\u64cd\u4f5c\u4eba",
+      "action": "\u64cd\u4f5c",
+      "anonymous": "\u533f\u540d",
+      "actorUnavailable": "\u672a\u8bb0\u5f55",
+      "noRecords": "\u6ca1\u6709\u8d26\u6237\u6d3b\u52a8\u8bb0\u5f55\u3002",
+      "actions": {
+        "loginAttempt": "\u767b\u5f55\u5c1d\u8bd5",
+        "authenticated": "\u767b\u5f55\u6210\u529f",
+        "invalidCredentials": "\u767b\u5f55\u5931\u8d25",
+        "accountBlocked": "\u8d26\u6237\u767b\u5f55\u88ab\u963b\u6b62",
+        "throttled": "\u767b\u5f55\u5c1d\u8bd5\u53d7\u9650",
+        "faceAttempt": "Face ID \u5c1d\u8bd5",
+        "faceAuthenticated": "Face ID \u767b\u5f55\u6210\u529f",
+        "faceAccountBlocked": "Face ID \u767b\u5f55\u88ab\u963b\u6b62",
+        "accountCreated": "\u8d26\u6237\u5df2\u521b\u5efa",
+        "invitationCreated": "\u9080\u8bf7\u5df2\u521b\u5efa",
+        "accountArchived": "\u8d26\u6237\u5df2\u5f52\u6863",
+        "accountReactivated": "\u8d26\u6237\u5df2\u91cd\u65b0\u6fc0\u6d3b",
+        "securitySettingsChanged": "\u5b89\u5168\u8bbe\u7f6e\u5df2\u66f4\u6539"
+      }
     },
     "export": {
       "eyebrow": "活动导出",
@@ -1565,6 +1734,15 @@
     }
   },
   "conservationText": {
+    "visualiseupto500authorisedplantrecordsusingcurrentplantlocations": "使用植物的最新位置信息，在地图上展示最多 500 条已授权的植物记录。",
+    "searchloadedplants": "搜索已加载的植物",
+    "plantidspeciesidspeciesnameorstatus": "植物编号、物种编号、物种名称或状态",
+    "mappedrecords": "已定位记录",
+    "registeredat": "注册时间",
+    "latestapprovedobservation": "最近一次已批准的观察记录",
+    "gpsaccuracy": "GPS 精度",
+    "historyavailability": "历史记录可用性",
+    "selectedplantinformation": "所选植物信息",
     "available": "可用",
     "eventrecording": "事件录像",
     "interrupted": "已中断",
@@ -1952,6 +2130,10 @@
       "paginationInvalid": "观察记录分页未向前推进。请重新加载列表以继续。",
       "resubmitted": "已重新提交",
       "summaryTitle": "观察审核状态",
+      "autoRefreshing": "正在刷新观察记录… 更新完成前将继续显示上次已验证的行。",
+      "autoRefreshFailed": "无法刷新观察记录。仍显示先前已验证的行。",
+      "autoRefreshDeferred": "已加载超过 20 页结果，自动刷新已暂停。请手动刷新以验证完整视图。",
+      "refreshNow": "立即刷新",
       "staffIdentifier": "工作人员 · {id}",
       "visitorIdentifier": "访客 · {id}",
       "submitterIdentifier": "提交者 · {id}",
@@ -1961,6 +2143,7 @@
       "copiedSubject": "已复制 {id} 的完整提交者标识。",
       "copyUnavailable": "无法复制。请打开观察详情，查看并选择完整 ID 和提交者标识。",
       "reviewSubmission": "审核提交",
+      "reviewComment": "审核意见",
       "eyebrow": "实地记录",
       "title": "观察记录",
       "intro": "浏览植物学家在不同时间提交的测量数据，同时保留植物历史记录。",
@@ -2137,11 +2320,17 @@
       "genus": "属",
       "conservationStatus": "保护状态",
       "visibility": "可见性",
+      "visibilityHelp": "选择此物种获批后可查看的对象。",
       "actions": "操作",
       "view": "查看",
       "visibilityPublic": "公开",
-      "visibilityInternal": "内部 / 科学",
+      "visibilityPublicDescription": "所有人（包括访客）均可查看。",
+      "visibilityInternal": "内部",
+      "visibilityInternalDescription": "植物学家、保护官员和管理员可查看。",
       "visibilityProtected": "受保护",
+      "visibilityProtectedDescription": "仅保护官员和管理员可查看。",
+      "basicInformation": "基本信息",
+      "speciesDetails": "物种详情",
       "unavailable": "不可用",
       "loadedLimit": "客户端搜索和筛选适用于最多 200 条已加载物种记录。",
       "skipped": "已跳过 {count} 条格式错误的记录",
@@ -2163,6 +2352,7 @@
       "validationSummary": "保存前请检查标记的字段（{count}）。",
       "validationInvalid": "请检查此字段。",
       "formSubtitle": "更改将写入由 PostgreSQL 支持的物种登记册。",
+      "createFormSubtitle": "将新的植物物种添加到物种名录。",
       "loadingDetail": "正在加载权威物种详情…",
       "taxonomyUnavailable": "分类选择不可用：",
       "noGenus": "未指定属",
@@ -2185,8 +2375,8 @@
         "conflict": "物种信息已保存，但照片库已更改。照片草稿和已上传文件会保留，请查看最新照片库后再保存。",
         "plantEligibility": "此处仅显示已批准且明确记录为整株视图的照片，不包括未标注的旧照片。",
         "sectionTitle": "物种照片",
-        "sectionDescription": "添加参考照片并调整顺序。",
-        "formUnavailable": "照片上传和排列保存尚未启用。您可以保存物种信息，所选照片暂不会保存。",
+        "sectionDescription": "查看物种照片。",
+        "formUnavailable": "当前无法更改照片。仍可保存物种信息。",
         "textSavedDeferred": "物种信息已保存。所选照片尚未上传，将保留在此表单中，直到您取消或关闭。",
         "partialFailure": "物种信息已保存，但部分照片操作失败。已上传的图片会保留，请保持表单打开以重试。",
         "expandLibrary": "查看并整理所有照片",
@@ -2210,10 +2400,8 @@
         "uploadFailed": "上传失败，请再次保存以重试。",
         "libraryUnavailable": "分页照片库暂不可用，已加载的参考预览仍可查看。",
         "addPhotos": "添加照片",
-        "reorderHint": "拖动照片，或聚焦卡片并按 Alt + 方向键调整顺序。",
         "invalidSelection": "部分文件被拒绝。请选择不超过 4 MiB 的 JPEG/PNG 图像，或在下方丢弃被拒绝的选择。",
         "discardRejected": "丢弃被拒绝的选择",
-        "mainDefault": "第一张符合条件的参考照片为主图。更改随物种表单保存。",
         "manage": "管理照片",
         "title": "管理物种照片",
         "subtitle": "上传并整理此物种的参考照片。",
@@ -2236,11 +2424,8 @@
         "queuedCount": "已将 {count} 个文件加入预览队列。",
         "validated": "已通过本地预览验证",
         "uploadPhotos": "上传照片",
-        "uploadUnavailable": "启用物种图片管理后即可上传照片。",
         "saveArrangement": "保存排列",
         "cancel": "取消",
-        "managementUnavailable": "照片管理功能正在准备中。您可以预览图片并选择文件，但暂时无法保存更改。",
-        "readOnlyGallery": "已授权的参考图片以只读方式显示。暂未提供已保存的主图和排列元数据。",
         "newPhotos": "新照片",
         "loading": "正在加载已授权图片…",
         "validating": "正在检查所选文件…",
@@ -2265,6 +2450,9 @@
       "saving": "正在保存…",
       "deleting": "正在删除…",
       "deleteConfirmTitle": "删除物种？",
+      "deleteDialogSubtitle": "从名录中永久移除此物种。",
+      "deleteIrreversible": "此操作无法撤销。",
+      "deleteImportant": "重要提示",
       "deleteConfirmation": "此操作将通过后端永久删除该物种。",
       "deleteReferenceWarning": "如果植物、申请或其他记录引用该物种，删除可能失败。本页面不会删除相关记录。",
       "errors": {
@@ -2275,7 +2463,11 @@
         "save": "无法保存物种。",
         "delete": "无法删除物种。",
         "savedRefresh": "物种已保存，但无法刷新持久化数据：{message}",
-        "deletedRefresh": "物种已删除，但无法刷新列表：{message}"
+        "deletedRefresh": "物种已删除，但无法刷新列表：{message}",
+        "deleteUncertain": "删除结果尚不确定。请刷新以核实物种后再试。",
+        "deletedRefreshPending": "物种已删除。请刷新以重新加载列表。",
+        "deleteStillPresent": "物种仍然存在。请检查详情后再尝试删除。",
+        "deleteVerificationFailed": "无法核实删除结果。删除操作仍被禁用。{message}"
       },
       "feedback": {
         "added": "物种已创建，并通过持久化后端数据验证。",
@@ -2566,7 +2758,10 @@
       "queueRefresh": {
         "loading": "正在加载待审核提交…",
         "refreshing": "正在刷新提交… 当前显示上次已验证的队列。",
-        "unverified": "无法验证完整审核队列。先前加载的记录可能已过时。请重新加载后再审核。"
+        "unverified": "无法验证完整审核队列。先前加载的记录可能已过时。请重新加载后再审核。",
+        "countsAwaitingVerification": "正在显示近期提交。摘要计数等待完整队列验证。",
+        "pollFailed": "无法检查近期提交。现有记录和已验证的计数仍会显示。",
+        "verifyQueue": "验证完整队列"
       },
       "copiedToast": "已复制",
       "queues": {
@@ -2619,7 +2814,7 @@
       "retryRefresh": "重试",
       "speciesRequestIdLabel": "物种申请编号",
       "officerReview": "官员审核",
-      "reviewComment": "审核意见（拒绝、要求修正或标记时必填）",
+      "reviewComment": "审核意见（批准时可选；拒绝、要求修正或标记时必填）",
       "reviewUnavailable": "暂时无法审核。请查看最新详情及关联的物种申请。",
       "decisions": {
         "approved": "批准",
@@ -2676,7 +2871,7 @@
           "saving": "正在保存物种审核决定并核实提交记录。植物审核保持锁定。",
           "withdrawn": "此申请已撤回。详情和可用证据仅供查看。"
         },
-        "commentHelp": "拒绝或要求更正时必须填写意见。最多 4,000 个字符。",
+        "commentHelp": "批准时审核意见可选；拒绝或要求更正时必须填写。最多 4,000 个字符。",
         "commentRequired": "请填写拒绝或要求更正的物种审核意见。",
         "commentTooLong": "物种审核意见不得超过 4,000 个字符。",
         "saved": "物种审核决定已保存，提交记录已刷新。",
@@ -2840,7 +3035,7 @@
     "proposed": "提议值",
     "baselinePhotos": "已批准基准照片",
     "proposedPhotos": "提议照片",
-    "history": "可用审核事件",
+    "history": "审核历史",
     "unavailable": "不可用",
     "reload": "重新加载最新提案",
     "inspect": "我已检查重新加载的提案。",
@@ -2861,7 +3056,9 @@
       "zone": "区域",
       "latitude": "纬度",
       "longitude": "经度",
-      "accuracy_m": "精度（米）"
+      "accuracy_m": "精度（米）",
+      "altitudeM": "海拔（米）",
+      "taxonomy": "分类信息"
     },
     "decisions": {
       "Approved": "批准",
@@ -2885,7 +3082,19 @@
       "Withdrawn": "已撤回",
       "Superseded": "已被取代"
     },
-    "cancelledReadOnly": "此提案已取消，不能审核；已批准的观察保持不变。"
+    "cancelledReadOnly": "此提案已取消，不能审核；已批准的观察保持不变。",
+    "notRecorded": "未记录",
+    "nullValue": "无值",
+    "emptyValue": "空白",
+    "noPhotos": "没有照片。",
+    "baselinePhotosUnavailable": "基准照片不可用。",
+    "photosUnavailable": "照片不可用。",
+    "photosUnchanged": "未更改",
+    "photoComparisonUnavailable": "基准未知",
+    "baseRevision": "已批准基准修订号",
+    "currentStatus": "当前观察状态",
+    "loadingRequest": "正在加载申请…",
+    "retry": "重试"
   },
   "observationVersions": {
     "registrationTitle": "登记提交历史",
@@ -2894,6 +3103,8 @@
     "submittedFields": "原始提交观察记录",
     "historyHelp": "显示初始植物登记的可用已保存快照。较早的历史记录或照片可能不完整。",
     "savedSnapshots": "已保存的登记快照",
+    "originalSubmission": "原始提交",
+    "correctedResubmission": "更正后重新提交",
     "currentlyViewing": "正在查看",
     "approvedSource": "上方显示此提交的批准记录",
     "viewSubmission": "查看提交内容",
@@ -2928,6 +3139,7 @@
     "limited": "仅显示可用的初始登记快照。此列表可能不完整，且无法保证照片保留。",
     "loading": "正在加载历史",
     "unavailable": "此观察的提交版本历史不可用。",
+    "noSnapshots": "没有可用的已保存登记提交快照。",
     "identity": "已存版本 ID / 序号",
     "status": "状态",
     "details": "查看历史详情",
@@ -2948,6 +3160,7 @@
       "Flagged": "已标记"
     }
   },
+  "reviewComments": { "optionalForApproval": "批准时可选" },
   "observationOriginFilter": {
     "label": "观察类型",
     "all": "全部观察",
@@ -3025,5 +3238,20 @@
       "animal_detected": "检测到动物",
       "suspicious_movement": "可疑移动"
     }
+  },
+  "officerPlantDelete": {
+    "title": "删除植株",
+    "confirm": "永久删除",
+    "checking": "正在检查关联记录…",
+    "close": "关闭",
+    "verify": "检查当前状态",
+    "referenced": "此植株被现有记录引用，无法删除。",
+    "permission": "您无权删除此植株。",
+    "unavailable": "无法核实此植株，请重试。",
+    "conflict": "记录已更新，请先检查最新版本。",
+    "uncertain": "删除结果尚不确定，请先检查当前状态再重试。",
+    "saved": "植株已删除。",
+    "savedRefresh": "植株已删除，但无法加载最新信息，请重试刷新列表。",
+    "absent": "植株已不存在，不会再次尝试删除。"
   }
 }

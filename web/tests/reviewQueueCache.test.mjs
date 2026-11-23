@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createReviewQueueCache, REVIEW_QUEUE_TTL } from '../src/services/reviewQueueCache.ts'
+import { createReviewQueueCache, REVIEW_QUEUE_TTL, REVIEW_QUEUE_NAVIGATION_STALE_TTL } from '../src/services/reviewQueueCache.ts'
 
 const officer = id => ({ id, role: 'Conservation Officer', status: 'Active', mustChangePassword: false, lastLogin: 'session-1' })
 function fixture() {
@@ -16,7 +16,13 @@ test('one bounded memory snapshot, shared in-flight load, copies and 45-second e
   release({ rows: ['verified'] }); const [first, second] = await Promise.all([a, b])
   first.rows.push('local draft'); assert.deepEqual(second, { rows: ['verified'] })
   assert.deepEqual(f.cache.read(), second)
-  f.advance(REVIEW_QUEUE_TTL); assert.equal(f.cache.read(), null)
+  f.advance(REVIEW_QUEUE_TTL - 1)
+  assert.deepEqual(f.cache.readForNavigation(), { data: second, fresh: true })
+  f.advance(1)
+  assert.deepEqual(f.cache.readForNavigation(), { data: second, fresh: false })
+  f.advance(REVIEW_QUEUE_NAVIGATION_STALE_TTL - REVIEW_QUEUE_TTL)
+  assert.equal(f.cache.readForNavigation(), null)
+  assert.equal(f.cache.read(), null)
 })
 for (const boundary of ['logout', 'switch', 'role', 'status', 'password', 'temporary', 'new session', 'decision']) {
   test(`cached and in-flight private data are invalidated on ${boundary}`, async () => {
@@ -33,6 +39,7 @@ for (const boundary of ['logout', 'switch', 'role', 'status', 'password', 'tempo
       f.change({ user: boundary === 'logout' ? null : user, pending: boundary === 'temporary' })
     }
     assert.equal(f.cache.read(), null)
+    assert.equal(f.cache.readForNavigation(), null)
     release({ rows: ['obsolete'] }); await assert.rejects(old, /superseded/)
     assert.equal(f.cache.read(), null)
   })

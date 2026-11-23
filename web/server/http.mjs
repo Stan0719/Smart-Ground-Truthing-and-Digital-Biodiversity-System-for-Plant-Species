@@ -4,7 +4,7 @@ import { createFaceServiceHandler } from './face-service.mjs'
 import { digest, LOGIN_ERROR, WEBSITE_ROLES } from './auth.mjs'
 import { adminRequest } from './operations.mjs'
 import { traceMobileRequest } from '../../shared/mobile-request-trace.mjs'
-export function createAuthServer({ auth, recovery, staff, diagnostics = null, key = null, env = process.env }) {
+export function createAuthServer({ auth, recovery, staff, adminNotifications, diagnostics = null, key = null, env = process.env }) {
   const faceHandler = createFaceServiceHandler({ auth, recovery, key })
   const origin = env.APP_ORIGIN ?? 'http://localhost:5173'
   const secure = env.NODE_ENV === 'production'
@@ -172,6 +172,7 @@ export function createAuthServer({ auth, recovery, staff, diagnostics = null, ke
           auth,
           activation: staff,
           recovery,
+          adminNotifications,
           path,
           method: req.method,
           body,

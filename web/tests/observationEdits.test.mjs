@@ -1,3 +1,4 @@
+import {workflowBadgeStyle} from '../src/utils/workflowBadge.ts'
 import * as officerActionFeedback from '../src/services/officerActionFeedback.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -14,32 +15,56 @@ import {reviewDateTime} from '../src/utils/officerMonitoringDisplay.ts'
 const original={id:'obs-1',plant_id:24,species_id:8,owner_subject:'staff:bot',status:'Approved',scientific_name:'Plant',content:{heightCm:12,notes:'Approved notes'}}
 const proposal=(overrides={})=>({id:'edit-1',observation_id:'obs-1',owner_subject:'staff:bot',status:'Pending Review',revision:7,base_revision:3,created_at:'2026-11-16T00:00:00Z',base_snapshot:{content:original.content,photo_ids:['old-photo']},proposed_content:{heightCm:18,notes:'Proposed notes'},retained_photo_ids:['old-photo'],added_photo_count:1,...overrides})
 const flush=async()=>{for(let i=0;i<8;i++){await vue.nextTick();await new Promise(setImmediate)}}
+
+test('mobile comparison separates changed fields from collapsed unchanged fields without losing precision',async()=>{
+ const h=harness();try{
+  await flush();
+  const before={notes:'Catatan asal 原始记录',latitude:1.5337324668707153,heightCm:12};
+  const after={notes:'Catatan baharu 新记录 '+ 'long observation '.repeat(30),latitude:1.5337324668707153,heightCm:null};
+  h.state.selected.value.base_snapshot.content=before;
+  h.state.selected.value.proposed_snapshot.content=after;
+  await vue.nextTick();
+  assert.deepEqual(Array.from(h.state.changedFields.value,f=>f.key).sort(),['heightCm','notes']);
+  assert.deepEqual(Array.from(h.state.unchangedFields.value,f=>f.key),['latitude']);
+  const nodes=[];
+  function visit(n){if(Array.isArray(n))return n.forEach(visit);if(!n||typeof n!=='object')return;nodes.push(n);visit(n.children?.default?n.children.default():n.children)}
+  visit(h.render());
+  const mobile=nodes.find(n=>n.props?.class==='mobile-comparison');
+  assert.ok(mobile);assert.ok(text(mobile).includes(after.notes));
+  assert.ok(text(mobile).includes(String(before.latitude)));
+  const unchanged=nodes.find(n=>n.type==='details'&&n.props?.class==='unchanged-fields');
+  assert.ok(unchanged);assert.ok(!unchanged.props.open);
+  assert.ok(nodes.some(n=>n.type==='summary'&&n.props?.tabindex==='0'));
+  assert.equal(h.state.comparisons.value.length,3);
+ }finally{h.stop()}
+})
 const messages=JSON.parse(readFileSync(new URL('../src/locales/en.json',import.meta.url),'utf8'))
 const filename=new URL('../src/components/conservation/ObservationEditReview.vue',import.meta.url)
 const {descriptor}=parse(readFileSync(filename,'utf8'))
 const script=compileScript(descriptor,{id:'observation-edit-test'})
 const template=compileTemplate({source:descriptor.template.content,filename:filename.pathname,id:'observation-edit-test',compilerOptions:{bindingMetadata:script.bindings}})
 const transpile=source=>ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
-function harness({origin,routeName}={}){
- let row=proposal(),mode='success',release,sessionCallback
+function harness({origin,routeName,initialMode='success',initialDirectoryMode='success'}={}){
+ let row=proposal(),mode=initialMode,directoryMode=initialDirectoryMode,release,directoryRelease,sessionCallback
  const route=vue.reactive({name:routeName,query:{observationEdit:'edit-1'}}),calls=[],cleanup=[],updates=[],scope=vue.effectScope()
  const officer={id:'officer',role:'Conservation Officer',status:'Active',mustChangePassword:false}
  const api=async(path,body)=>{
   calls.push({path,body})
   if(body){if(mode==='post-validation')throw new ObservationEditError(400);if(mode==='post-permission')throw new ObservationEditError(403);if(mode==='post-network')throw Error('Private connection details');if(mode==='post-evidence')throw Object.assign(Error('Private evidence'),{name:'ObservationEditEvidenceError'});if(mode==='post-fail')throw new ObservationEditError(500);if(mode==='success-readback-fail')mode='readback-failed';if(mode==='conflict'){row={...row,revision:8};throw new ObservationEditError(409)}row={...row,status:body.decision,reviewed_by:'staff:officer',reviewed_at:'2026-11-16T01:00:00Z'};return mode==='post-malformed'?{}:{edit:row}}
-  if(path.endsWith('/edit-history'))return {events:[{id:'event',request_id:row.id,event_type:'submitted',created_at:row.created_at,actor_subject:'staff:bot'}]}
+  if(path.endsWith('/edit-history'))throw Error('Optional history must not be requested by this modal')
   if(path.startsWith('/observations/'))return {observation:{...original,...(origin?{origin_type:origin}:{})}}
   if(mode==='readback-failed')throw Error('Isolated readback failure');if(mode==='delay')return new Promise(resolve=>release=resolve)
   return {edit:row}
  }
  const exports={}
- const context={exports,console,Error,fetch:async()=>Response.json({names:{bot:'Botanist A',officer:'Officer B'}}),require(name){
+ const context={exports,console,Error,fetch:async()=>directoryMode==='delay'?new Promise(resolve=>directoryRelease=resolve):Response.json({names:{bot:'Botanist A',officer:'Officer B'}}),require(name){
   if(name.endsWith('officerActionFeedback'))return officerActionFeedback
     if(name==='vue')return {...vue,onBeforeUnmount:fn=>cleanup.push(fn),withDirectives:node=>node}
   if(name==='vue-router')return {useRoute:()=>route,useRouter:()=>({replace:async({query,name})=>{route.query=query;if(name)route.name=name}})}
   if(name==='vue-i18n')return {useI18n:()=>({t:key=>key.split('.').reduce((v,k)=>v?.[k],messages)||key})}
   if(name.endsWith('/auth'))return {sessionSnapshot:()=>({user:officer,pending:false}),subscribeSession:fn=>{sessionCallback=fn;return ()=>{sessionCallback=null}}}
   if(name.endsWith('observationEdits'))return {observationEditDestination,mapObservationEdit:value=>mapObservationEdit(value,api),observationEditRequest:api}
+  if(name.endsWith('workflowBadge'))return {workflowBadgeStyle}
   if(name.endsWith('assetImages'))return {assetUrlFromId}
   if(name.endsWith('officerMonitoringDisplay'))return {reviewDateTime}
   if(name.endsWith('.vue'))return {name}
@@ -48,7 +73,7 @@ function harness({origin,routeName}={}){
  vm.runInNewContext('(function(){'+transpile(script.content)+'})()',context)
  const state=scope.run(()=>exports.default.setup({},{emit:(...args)=>updates.push(args),expose(){}}))
  vm.runInNewContext('(function(){'+transpile(template.code)+'})()',context)
- return {route,state,calls,updates,setMode:value=>mode=value,setRow:value=>row=value,release:()=>release({edit:row}),session:(user,pending=false)=>sessionCallback(user,pending),officer,render:()=>exports.render({},[],{},vue.proxyRefs(state),{},{}),stop(){cleanup.forEach(fn=>fn());scope.stop()}}
+ return {route,state,calls,updates,setDirectoryMode:value=>directoryMode=value,releaseDirectory:()=>directoryRelease(Response.json({names:{bot:'Botanist A',officer:'Officer B'}})),takeRelease:()=>release,setMode:value=>mode=value,setRow:value=>row=value,release:()=>release({edit:row}),session:(user,pending=false)=>sessionCallback(user,pending),officer,render:()=>exports.render({},[],{},vue.proxyRefs(state),{},{}),stop(){cleanup.forEach(fn=>fn());scope.stop()}}
 }
 function text(node){if(Array.isArray(node))return node.map(text).join(' ');if(!node||typeof node!=='object')return String(node??'');return text(node.children?.default?node.children.default():node.children)}
 test('legacy initial and subsequent proposals retain identities and exact revisions; queue is bounded and capability-aware',async()=>{
@@ -147,7 +172,7 @@ test('malformed retained or baseline photo evidence is rejected, never replaced 
  for(const retained_photo_ids of [{},null,'[]',[{}],['']])await assert.rejects(mapObservationEdit(proposal({retained_photo_ids}),async()=>({observation:original})),error=>error.name==='ObservationEditEvidenceError')
  await assert.rejects(mapObservationEdit(proposal({base_snapshot:{content:original.content,photo_ids:{}}}),async()=>({observation:original})),error=>error.name==='ObservationEditEvidenceError')
  const row=await mapObservationEdit(proposal({retained_photo_ids:[],added_photo_count:0}),async()=>({observation:{...original,plant_id:'24'}}));assert.deepEqual(row.observation_edit.retained_photo_ids,[])
- const h=harness();try{h.setRow(proposal({retained_photo_ids:{}}));await h.state.open('edit-1');assert.equal(h.state.eligible.value,false);assert.equal(h.state.message.value,messages.unifiedObservations.invalidEvidence);await h.state.decide('Approved');assert.equal(h.calls.filter(c=>c.body).length,0)}finally{h.stop()}
+ const h=harness();try{await flush();h.setRow(proposal({retained_photo_ids:{}}));await h.state.open('edit-1');assert.equal(h.state.eligible.value,false);assert.equal(h.state.message.value,messages.unifiedObservations.invalidEvidence);await h.state.decide('Approved');assert.equal(h.calls.filter(c=>c.body).length,0)}finally{h.stop()}
 })
 test('HTTP evidence-integrity errors remain explicit rather than generic conflicts or empty queues',async()=>{
  const old=globalThis.fetch;globalThis.fetch=async()=>Response.json({error:'Observation edit photo evidence is invalid. Contact support for an evidence-preserving assessment.'},{status:409})
@@ -201,3 +226,144 @@ test('a malformed successful acknowledgement stays uncertain until GET readback,
   assert.equal(h.state.comment.value,'Keep my draft');assert.equal(h.calls.filter(c=>c.body).length,1)
  }finally{h.stop()}
 })
+
+
+test('proposal redesign compares the saved baseline exactly and highlights actual changes only',async()=>{
+ const h=harness();try{
+  await flush();
+  h.setRow(proposal({base_snapshot:{content:{latitude:0,longitude:110.3301555,accuracy_m:9.918740950499858,heightCm:12,notes:null},photo_ids:[]},proposed_content:{latitude:0,longitude:110.3301555,accuracy_m:9.918740950499858,heightCm:18,notes:''},retained_photo_ids:[],added_photo_count:0}));
+  await h.state.open('edit-1');
+  assert.deepEqual(Array.from(h.state.changedFields.value,r=>r.key),['heightCm','notes']);
+  assert.equal(h.state.comparisons.value.find(r=>r.key==='latitude').changed,false);
+  assert.equal(h.state.show(h.state.comparisons.value.find(r=>r.key==='accuracy_m').before),'9.918740950499858');
+  assert.ok(!h.state.comparisons.value.some(r=>r.key==='morphology'));
+  assert.equal(h.state.show(undefined),messages.observationEdits.notRecorded);
+  assert.equal(h.state.show(null),messages.observationEdits.nullValue);
+  assert.equal(h.state.show(''),messages.observationEdits.emptyValue);
+  assert.equal(h.state.photoChanges.value,false);
+  assert.equal(h.state.eligible.value,true);
+  const body=text(h.render());assert.ok(!body.includes(messages.observationEdits.reasonUnavailable));assert.ok(!body.includes(messages.observationEdits.limitations));
+ }finally{h.stop()}
+});
+
+test('photo-only proposals retain authenticated baseline and proposed galleries and open the shared zoom',async()=>{
+ const h=harness();try{
+  await flush();h.setRow(proposal({proposed_content:original.content}));await h.state.open('edit-1');
+  assert.equal(h.state.changedFields.value.length,0);assert.equal(h.state.photoChanges.value,true);
+  assert.equal(h.state.photoPanels.value.length,2);
+  const baseline=h.state.basePhotos.value,proposed=h.state.proposedPhotos.value;
+  assert.equal(baseline.length,1);assert.equal(proposed.length,2);
+  assert.ok(proposed[1].startsWith('/api/data/observation-edits/edit-1/photos/'));
+  let opened,closed=0;h.state.preview.value={open(...args){opened=args},close(){closed++}};
+  const source={};h.state.enlarge(proposed,1,{currentTarget:source},messages.observationEdits.proposedPhotos);
+  assert.equal(opened[0][1].url,proposed[1]);assert.equal(opened[1],1);assert.equal(opened[3],source);
+  h.state.failed.value=new Set([proposed[0]]);h.state.enlarge(proposed,1,{currentTarget:source},'Photos');assert.equal(opened[0].length,1);assert.equal(opened[1],0);
+  opened=null;h.state.enlarge([],0,{currentTarget:source},'Photos');assert.equal(opened,null);
+  h.state.busy.value=true;h.state.enlarge(proposed,1,{currentTarget:source},'Photos');assert.equal(opened,null);h.state.busy.value=false;
+  await h.state.open('edit-1',true);assert.ok(closed>0);
+  assert.equal(h.calls.filter(c=>c.body).length,0);
+ }finally{h.stop()}
+});
+
+test('unknown baseline photos never become an invented empty baseline and absent history stays compact',async()=>{
+ const h=harness();try{
+  await flush();h.setRow(proposal({base_snapshot:{content:{}},proposed_content:{notes:null},retained_photo_ids:[],added_photo_count:0}));await h.state.open('edit-1');
+  assert.equal(h.state.baselinePhotosKnown.value,false);assert.equal(h.state.photoChanges.value,null);
+  assert.equal(h.state.photoPanels.value[0].empty,messages.observationEdits.baselinePhotosUnavailable);
+  assert.equal(h.state.photoPanels.value[1].empty,messages.observationEdits.noPhotos);
+  assert.equal(h.state.comparisons.value[0].changed,true,'missing and explicit null differ');
+  assert.ok(!text(h.render()).includes(messages.observationEdits.history));
+  assert.ok(!h.calls.some(c=>c.path.endsWith('/edit-history')));
+ }finally{h.stop()}
+});
+
+test('proposal modal keeps content scrolling and sticky actions scoped to Observation Edit',()=>{
+ assert.deepEqual(template.errors,[]);
+ assert.match(descriptor.template.content,/class="review-content"/);
+ assert.match(descriptor.template.content,/footer[^>]*class="review-footer"/);
+ assert.doesNotMatch(descriptor.template.content,/review-history|history-load-error|history-loading/);
+ assert.match(descriptor.template.content,/<PlantPhotoLightbox ref="preview" root-scroll-lock/);
+ const css=descriptor.styles.map(s=>s.content).join('\n');
+ assert.match(css,/overflow-y: auto/);assert.match(css,/flex-direction: column/);assert.match(css,/max-height: calc\(100dvh - 40px\)/);assert.match(css,/\.review-footer \{ flex: none/);
+});
+
+
+test('request modal opens synchronously with a skeleton, deduplicates pending reads and keeps decisions disabled',async()=>{
+ const h=harness({initialMode:'delay'});try{
+  assert.equal(h.state.modalId.value,'edit-1');assert.equal(h.state.selected.value,null);
+  assert.equal(h.state.loadingDetails.value,true);assert.ok(text(h.render()).includes(messages.observationEdits.loadingRequest));
+  assert.equal(h.state.eligible.value,false);await h.state.decide('Approved');assert.equal(h.calls.filter(c=>c.body).length,0);
+  const one=h.state.open('edit-1'),two=h.state.open('edit-1');assert.equal(one,two);
+  assert.equal(h.calls.filter(c=>c.path==='/observation-edits/edit-1').length,1);
+  h.setMode('success');h.release();await one;await flush();
+  assert.equal(h.state.loadingDetails.value,false);assert.equal(h.state.selected.value.id,'edit-1');
+  assert.ok(!text(h.render()).includes(messages.observationEdits.loadingRequest));
+ }finally{h.stop()}
+});
+
+test('failed initial details stay inside the open modal and Retry starts a fresh safe GET',async()=>{
+ const h=harness({initialMode:'readback-failed'});try{
+  await flush();assert.equal(h.state.modalId.value,'edit-1');assert.equal(h.state.selected.value,null);
+  assert.equal(h.state.loadingDetails.value,false);assert.ok(text(h.render()).includes(messages.observationEdits.retry));
+  assert.ok(!text(h.render()).includes('Private'));assert.equal(h.state.eligible.value,false);
+  h.setMode('success');await h.state.open('edit-1');await flush();
+  assert.equal(h.state.selected.value.id,'edit-1');assert.equal(h.calls.filter(c=>c.path==='/observation-edits/edit-1').length,2);
+  assert.equal(h.calls.filter(c=>c.body).length,0);
+ }finally{h.stop()}
+});
+
+test('Close works before details arrive and abandoned reads cannot reopen or fetch linked private details',async()=>{
+ const h=harness({initialMode:'delay'});try{
+  const pending=h.state.open('edit-1');h.state.close();assert.equal(h.state.modalId.value,null);
+  await flush();h.release();await pending;await flush();
+  assert.equal(h.state.selected.value,null);assert.equal(h.state.modalId.value,null);
+  assert.equal(h.calls.filter(c=>c.path.startsWith('/observations/')).length,0);
+ }finally{h.stop()}
+});
+
+test('switching requests ignores the old response and only shows the newly selected request',async()=>{
+ const h=harness({initialMode:'delay'});try{
+  const old=h.state.open('edit-1'),finishOld=h.takeRelease();
+  h.setRow(proposal({id:'edit-2'}));h.setMode('success');h.route.query={observationEdit:'edit-2'};await flush();
+  assert.equal(h.state.selected.value.id,'edit-2');finishOld({edit:proposal()});await old;await flush();
+  assert.equal(h.state.modalId.value,'edit-2');assert.equal(h.state.selected.value.id,'edit-2');
+  assert.equal(h.calls.filter(c=>c.body).length,0);
+ }finally{h.stop()}
+});
+
+test('optional history UI and requests are absent while Refresh preserves drafts',async()=>{
+ const h=harness();try{
+  await flush();h.state.comment.value='Preserve my draft';await h.state.open('edit-1',true);await flush();
+  assert.equal(h.state.comment.value,'Preserve my draft');assert.equal(h.calls.filter(c=>c.body).length,0);
+  assert.ok(!h.calls.some(c=>c.path.endsWith('/edit-history')));
+  assert.doesNotMatch(descriptor.template.content,/review-history|historyLoadFailed|loadingHistory|retryHistory/);
+  assert.ok(!text(h.render()).includes(messages.observationEdits.history));
+ }finally{h.stop()}
+});
+
+
+test('recorded decisions retain exact status, reviewer and comments without optional history',async()=>{
+ const h=harness();try{
+  await flush();
+  for(const status of ['Approved','Rejected','Correction Required']){
+   h.setRow(proposal({status,reviewed_at:'2026-11-16T01:00:00Z',reviewed_by:'staff:officer',review_comment:'Recorded review comment'}));
+   await h.state.open('edit-1');await flush();const body=text(h.render());
+   assert.ok(body.includes(messages.approvedChanges.decision));assert.ok(body.includes(messages.observationEdits.statuses[status]));
+   assert.ok(body.includes('Officer B'));assert.ok(body.includes(h.state.stamp('2026-11-16T01:00:00Z')));
+   assert.equal(body.split('Recorded review comment').length-1,1);assert.equal(h.state.eligible.value,false);
+  }
+  assert.ok(!h.calls.some(c=>c.path.endsWith('/edit-history')));
+  h.setRow(proposal({status:'Rejected',review_comment:'A recorded comment without timestamp'}));await h.state.open('edit-1');await flush();
+  assert.ok(text(h.render()).includes('A recorded comment without timestamp'));
+ }finally{h.stop()}
+});
+
+
+test('late optional name read after Close cannot restore modal content',async()=>{
+ const h=harness({initialDirectoryMode:'delay'});try{
+  await flush();assert.equal(h.state.selected.value.id,'edit-1');assert.equal(h.state.busy.value,true);
+  h.state.close();await flush();h.releaseDirectory();await flush();
+  assert.equal(h.state.modalId.value,null);assert.equal(h.state.selected.value,null);assert.deepEqual(Object.keys(h.state.names.value),[]);
+  assert.ok(!h.calls.some(c=>c.path.endsWith('/edit-history')));
+ }finally{h.stop()}
+});

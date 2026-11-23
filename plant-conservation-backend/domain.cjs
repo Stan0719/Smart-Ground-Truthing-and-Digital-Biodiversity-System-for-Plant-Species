@@ -788,12 +788,37 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
   const enrichObservationRead = async (rows, officer, classified = false) => withRecorderNames(
     await withCurrentApprovedEditReview(await withResubmissionEvidence(pool,
       classified ? rows : await classifyObservations(pool, rows), officer)));
+  // Same visibility predicate as the normal observation read; dashboard reads
+  // deliberately omit assets, content and historical review enrichment.
+  const observationVisibility = `($1 OR o.owner_subject = $2 OR (o.status = 'Approved'
+    AND COALESCE(v.visibility, 'protected') = ANY($3::text[])))
+    AND (CASE WHEN $5 THEN o.owner_subject = $2 ELSE
+      (COALESCE(v.visibility, 'protected') = ANY($3::text[]) OR o.owner_subject = $2) END)`;
   const readObservations = async (req, res) => {
     const mine = req.query.scope === "mine";
     if (mine && !permitted(req.user, "plants.create"))
       fail(req.user ? 403 : 401, "Botanist access required.");
+    const dashboard = req.query.view === "dashboard";
+    const counts = req.query.view === "dashboard-counts";
+    if (dashboard || counts) {
+      if (req.user.role !== "Conservation Officer" || !permitted(req.user, "observations.review"))
+        fail(403, "Officer access required.");
+      if (req.params.id || mine) fail(400, "Invalid dashboard request.");
+    }
+    if (counts) {
+      const totals = (await pool.query(`SELECT count(*)::integer AS total,
+        count(*) FILTER (WHERE o.status IN ('Pending Review','Flagged','Correction Required'))::integer AS pending
+        FROM plant_observation o JOIN plant_record p ON p.plant_id=o.plant_id
+        JOIN species s ON s.species_id=p.species_id
+        LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
+        WHERE ${observationVisibility} AND $4::text IS NULL`,
+      [true,subject(req.user),visibilityFor(req.user),null,false])).rows[0];
+      return res.json({ totals });
+    }
     const observationId = req.params.id ?? null;
     const pageOptions = observationId === null ? queueOptions(req.query, fail) : null;
+    if (dashboard && (!pageOptions || !["initial_registration","subsequent_observation"].includes(pageOptions.origin) ||
+        pageOptions.status !== "Pending Review" || pageOptions.limit > 25)) fail(400, "Invalid dashboard preview.");
     // Imported IDs may be numeric; new records use UUIDs.
     if (
       observationId !== null &&
@@ -803,12 +828,13 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     )
       fail(400, "Invalid observation identifier.");
     const officer = req.user.role === "Conservation Officer";
-    const requestSql = observationRequestSql(await requestsAvailable(pool), await provenanceAvailable(pool));
+    const hasProvenance = await provenanceAvailable(pool);
+    const requestSql = observationRequestSql(await requestsAvailable(pool), hasProvenance);
     const rows = (
       await pool.query(
 
-        `SELECT o.*,${pageOptions ? `to_char(o.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS queue_created_at,` : ""}
-          COALESCE((
+        `SELECT ${dashboard ? "o.id,o.plant_id,o.owner_subject,o.status,o.revision,o.created_at,to_jsonb(o)->>'origin_type' AS origin_type" : "o.*"},${pageOptions ? `to_char(o.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS queue_created_at,` : ""}
+          ${dashboard ? "'[]'::json AS assets," : `COALESCE((
             SELECT jsonb_agg(
               jsonb_build_object(
                 'id', a.id,
@@ -824,7 +850,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             )
             FROM plant_asset a
             WHERE a.observation_id = o.id
-          ), '[]') AS assets,
+          ), '[]') AS assets,`}
           p.species_id,
           COALESCE(v.visibility, 'protected') = ANY($3::text[]) AS gps_visibility_allowed,
           CASE WHEN $1 OR COALESCE(v.visibility, 'protected') = ANY($3::text[]) THEN p.scientific_name END AS plant_scientific_name,
@@ -839,37 +865,27 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
               OR COALESCE(v.visibility, 'protected') = ANY($3::text[])
             THEN s.common_name
           END AS common_name,
-          r.comment AS review_comment,
+          ${dashboard ? "" : `r.comment AS review_comment,
           r.decision AS review_decision,
-          r.created_at AS reviewed_at,r.review_origin,CASE WHEN $1 THEN r.reviewer_subject END AS reviewed_by,
+          r.created_at AS reviewed_at,r.review_origin,CASE WHEN $1 THEN r.reviewer_subject END AS reviewed_by,` }
           ${requestSql.select}
         FROM plant_observation o
         JOIN plant_record p ON p.plant_id = o.plant_id
         JOIN species s ON s.species_id = p.species_id
         ${requestSql.join}
-        LEFT JOIN LATERAL (
+        ${dashboard ? "" : `LEFT JOIN LATERAL (
           SELECT comment, decision, created_at,reviewer_subject,to_jsonb(observation_review)->>'review_origin' AS review_origin
           FROM observation_review
           WHERE observation_id = o.id
           ORDER BY created_at DESC
           LIMIT 1
-        ) r ON true
+        ) r ON true`}
         LEFT JOIN rbac_species_visibility v
           ON v.species_id = p.species_id
-        WHERE ($1 OR o.owner_subject = $2 OR (
-            o.status = 'Approved'
-            AND COALESCE(v.visibility, 'protected') = ANY($3::text[])
-          ))
-          AND (
-            CASE
-              WHEN $5 THEN
-                o.owner_subject = $2
-              ELSE (
-                COALESCE(v.visibility, 'protected') = ANY($3::text[])
-                OR o.owner_subject = $2
-              )
-            END
-          )
+        WHERE ${observationVisibility}
+          ${dashboard ? (pageOptions.origin === "initial_registration"
+            ? (hasProvenance ? "AND EXISTS (SELECT 1 FROM plant_submission_receipt candidate WHERE candidate.result->>'id'=o.id)" : "AND FALSE")
+            : "AND to_jsonb(o)->>'origin_type'='subsequent_observation'") : ""}
           AND ($4::text IS NULL OR o.id = $4)
           ${pageOptions ? "AND ($6::text='' OR o.status=$6) AND ($7::timestamptz IS NULL OR (o.created_at,o.id)<($7::timestamptz,$8::text))" : ""}
         ORDER BY o.created_at DESC,o.id DESC
@@ -896,6 +912,8 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     const batch = pageOptions ? rows.slice(0, pageOptions.limit) : rows;
     const classified = await classifyObservations(pool, batch);
     const visible = pageOptions?.origin ? classified.filter(row => row.origin_type === pageOptions.origin) : classified;
+    if (dashboard) return res.json({ observations: visible.map(({ queue_created_at, assets, ...row }) => row),
+      page: queuePage(batch, pageOptions, Boolean(hasMore)) });
     const enriched = await enrichObservationRead(visible, officer, true);
     const updated = await withSubmissionUpdates(pool, enriched, officer);
     const projected = officer ? await observationHistory(pool, updated) : updated;
@@ -1281,11 +1299,14 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           )
         ).rows[0];
         if (!row) fail(404, "Observation not found.");
+        const reviewComment = req.body.comment === undefined && req.body.decision === "Approved" ? "" : req.body.comment;
+        if (typeof reviewComment !== "string" || reviewComment.length > 4000)
+          fail(400, "Invalid review comment.");
         const denied = assertReview(
           req.user,
           row,
           req.body.decision,
-          req.body.comment,
+          reviewComment,
         );
         if (denied)
           fail(denied, "Review is not permitted or feedback is missing.");
@@ -1325,7 +1346,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             row.id,
             subject(req.user),
             req.body.decision,
-            req.body.comment || "Verified.",
+            reviewComment.trim(),
             ...(submittedVersion ? [submittedVersion.id] : legacyReview ? [req.body.revision] : []),
           ],
         )).rows[0];
@@ -1778,10 +1799,18 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
   });
   app.delete("/api/species/:id", allow("species.manage"), async (req, res) => {
     await transaction(pool, async (c) => {
-      const result = await c.query(
-        "DELETE FROM species WHERE species_id=$1 RETURNING species_id",
-        [id(req.params.id)],
-      );
+      let result;
+      try {
+        result = await c.query(
+          "DELETE FROM species WHERE species_id=$1 RETURNING species_id",
+          [id(req.params.id)],
+        );
+      } catch (error) {
+        if (error.code === "23503") throw Object.assign(new Error("This Species is referenced by existing records and cannot be deleted."), {
+          status: 409, code: "SPECIES_DELETE_REFERENCED",
+        });
+        throw error;
+      }
       if (!result.rows.length) fail(404, "Species not found.");
       await audit(c, req.user, "species_deleted", req.params.id);
     });

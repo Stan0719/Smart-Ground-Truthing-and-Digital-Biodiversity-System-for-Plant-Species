@@ -42,11 +42,12 @@ export function compareChange(change: RecordChange) {
 }
 
 // Exhaust each source before combining it. Never sort two partial pages as a complete queue.
-export async function readCompleteQueue<T>(read: (cursor: string | null) => Promise<{ rows: T[]; more: boolean; cursor: string | null }>, current: () => boolean = () => true): Promise<T[]> {
+export async function readCompleteQueue<T>(read: (cursor: string | null) => Promise<{ rows: T[]; more: boolean; cursor: string | null }>, current: () => boolean = () => true, beforeRequest?: () => void): Promise<T[]> {
   const rows: T[] = [], seen = new Set<string>()
   let cursor: string | null = null
   for (let pages = 0; pages < 1000; pages++) {
     if (!current()) return []
+    beforeRequest?.()
     const page = await read(cursor)
     if (!current()) return []
     rows.push(...page.rows)

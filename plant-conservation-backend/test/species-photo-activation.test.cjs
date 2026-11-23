@@ -9,22 +9,18 @@ const { createReadySpeciesPhotoDatabase } = require("./species-photo-bigint-fixt
 const { speciesPhotoWritesRequested, requireSpeciesPhotoWrites } = require("../species-photo-activation.cjs");
 const { verifySpeciesPhotoStartup } = require("../species-photo-startup.cjs");
 
-test("activation accepts only exact true; absent, empty, invalid and non-string settings are disabled", async () => {
-  assert.equal(speciesPhotoWritesRequested({}), false);
-  for (const value of [undefined, null, "", "false", "TRUE", "True", "1", "yes", "on", " true", "true ", true, false, 1, {}, []])
-    assert.equal(speciesPhotoWritesRequested({ PLANT_SPECIES_PHOTO_WRITES_ENABLED: value }), false);
-  assert.equal(speciesPhotoWritesRequested({ PLANT_SPECIES_PHOTO_WRITES_ENABLED: "true" }), true);
-  for (const enabled of [undefined, false, "true", 1])
-    await assert.rejects(requireSpeciesPhotoWrites({
-      connect: () => assert.fail("disabled gate must not acquire a connection"),
-    }, enabled), { status: 503 });
+test("normal startup requests photo writes without an environment flag; readiness remains required", async () => {
+  assert.equal(speciesPhotoWritesRequested({}), true);
+  assert.equal(speciesPhotoWritesRequested({ PLANT_SPECIES_PHOTO_WRITES_ENABLED: "false" }), true);
+  await assert.rejects(requireSpeciesPhotoWrites({ connect: () => assert.fail("disabled readiness must not acquire a connection") }, false), { status: 503 });
+  await assert.rejects(requireSpeciesPhotoWrites({ connect: () => ({ query: async () => ({ rows: [] }), release() {} }) }, true), { status: 503 });
 });
 
 test("enabled configuration does not weaken the existing writes-off startup preflight", async () => {
   const logs = [];
   let checkouts = 0, released = false;
   await assert.rejects(verifySpeciesPhotoStartup({ enabled: true,
-    writesEnabled: speciesPhotoWritesRequested({ PLANT_SPECIES_PHOTO_WRITES_ENABLED: "true" }),
+    writesEnabled: speciesPhotoWritesRequested(),
     pool: { schema: "plant_app", async connect() {
       checkouts++;
       return { query: async () => ({ rows: [{ current_user: "postgres", session_user: "postgres",
@@ -66,7 +62,7 @@ test("one gate covers species images and arrangements, preserving plant/PDF uplo
     (SELECT count(*)::text FROM species_image_reference) AS refs,
     (SELECT count(*)::text FROM species_image_arrangement_history) AS history`)).rows[0];
 
-  for (const [mode, enabled] of [["default", undefined], ["off", false], ["invalid", "true"], ["on", true], ["rollback", false]]) {
+  for (const [mode, enabled] of [["default", undefined], ["off", false], ["on", true], ["rollback", false]]) {
     await t.test(mode, async () => {
       const options = { pool, auth: {
         event: async () => {},
@@ -88,8 +84,9 @@ test("one gate covers species images and arrangements, preserving plant/PDF uplo
         const cap = await call("/species/photos/capabilities");
         assert.equal(cap.status, 200);
         assert.equal(cap.body.schemaReady, true);
-        assert.equal(cap.body.activationRequested, enabled === true);
-        assert.equal(cap.body.writesEnabled, enabled === true);
+        const expectedEnabled = enabled === undefined || enabled === true;
+        assert.equal(cap.body.activationRequested, expectedEnabled);
+        assert.equal(cap.body.writesEnabled, expectedEnabled);
         const gallery = (await call("/species/1/images")).body;
         const arrangement = { expectedRevision: gallery.revision,
           orderedAssetIds: gallery.images.map((image) => image.assetId),
@@ -105,14 +102,14 @@ test("one gate covers species images and arrangements, preserving plant/PDF uplo
         for (const content_type of ["image/png", "image/jpeg"]) {
           const upload = await call("/assets", "officer", "POST", { ...image, content_type,
             client_key: `${mode}-${content_type}`, base64: (content_type === "image/png" ? png : jpeg).toString("base64") });
-          assert.equal(upload.status, enabled === true ? 201 : 503);
+          assert.equal(upload.status, expectedEnabled ? 201 : 503);
         }
-        if (enabled !== true) assert.deepEqual(await state(), before);
+        if (!expectedEnabled) assert.deepEqual(await state(), before);
         const latest = (await call("/species/1/images")).body;
         const saved = await call("/species/1/images", "officer", "PUT", { ...arrangement,
           expectedRevision: latest.revision, orderedAssetIds: latest.images.map((entry) => entry.assetId) });
-        assert.equal(saved.status, enabled === true ? 200 : 503);
-        if (enabled !== true) assert.deepEqual(await state(), before);
+        assert.equal(saved.status, expectedEnabled ? 200 : 503);
+        if (!expectedEnabled) assert.deepEqual(await state(), before);
         assert.equal((await call("/assets/existing-reference", null)).status, 200);
 
         const pdf = await call("/assets", "officer", "POST", { species_id: 1,
@@ -125,7 +122,7 @@ test("one gate covers species images and arrangements, preserving plant/PDF uplo
         assert.equal((await call("/assets", "officer", "POST", { ...image, plant_id: 1 })).status, 400);
         assert.equal((await call("/assets", "officer", "POST", { ...image, content_type: "application/pdf" })).status, 400);
 
-        if (enabled === true) {
+        if (expectedEnabled) {
           await pool.query("ALTER INDEX species_photo_whole_plant RENAME TO activation_missing_index");
           try {
             assert.equal((await call("/species/photos/capabilities")).body.writesEnabled, false);

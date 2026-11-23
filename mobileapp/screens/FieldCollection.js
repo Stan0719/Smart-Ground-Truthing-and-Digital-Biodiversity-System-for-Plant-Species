@@ -1,12 +1,14 @@
+import PreviewableImage, { confirmPhotoRemoval } from "../components/PreviewableImage";
 import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldLabel } from "../translations/i18n";
 import { canCollectDrafts } from "../utils/rbac";
 import React, { useEffect, useState, useRef } from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
-  StyleSheet, TouchableOpacity, View, Image, ActivityIndicator, Alert } from "react-native";
+  StyleSheet, TouchableOpacity, View, ActivityIndicator, Alert } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { plantApi, plantAssetSources } from "../utils/plantApi";
 import { faceSession } from "../utils/faceSession";
 import { saveDraft, readDrafts } from "../utils/fieldStorage";
@@ -19,6 +21,7 @@ import RefreshButton from "../components/RefreshButton";
 import GpsLocationPicker from "../components/GpsLocationPicker";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
+import { imageSizeAlert, inspectPickedImages, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 const fieldCapture = createFieldCapture({
   imagePicker: ImagePicker,
   location: Location,
@@ -297,7 +300,16 @@ export default function FieldCollection({ route, navigation, onLogout }) {
     setError("");
     try {
       const asset = await fieldCapture.photo(camera, photos.length);
-      if (asset)
+      if (asset) {
+        const label = `${t("imageSizeAlert.observationPhoto")} ${photos.length + 1}`;
+        // A picker without a local URI returns the exact Base64 payload checked by fieldCapture.
+        const checked = asset.uri.startsWith("data:") ? { accepted: [asset], rejected: [] }
+          : await inspectPickedImages([asset], [label], FileSystem.getInfoAsync);
+        if (checked.rejected.length) {
+          const alert = imageSizeAlert(t, checked.rejected);
+          Alert.alert(alert.title, alert.message);
+          return;
+        }
         setPhotos((old) => [
           ...old,
           {
@@ -305,8 +317,12 @@ export default function FieldCollection({ route, navigation, onLogout }) {
             client_key: `photo-${Date.now()}-${Math.random().toString(36).slice(2)}`,
           },
         ]);
+      }
     } catch (e) {
-      setError(e.message);
+      if (e.oversizedPhoto) {
+        const alert = imageSizeAlert(t, [{ ...e.oversizedPhoto, label: `${t("imageSizeAlert.observationPhoto")} ${e.oversizedPhoto.position}` }]);
+        Alert.alert(alert.title, alert.message);
+      } else setError(e.message);
     } finally {
       capturing.current = false;
     }
@@ -420,6 +436,9 @@ export default function FieldCollection({ route, navigation, onLogout }) {
       }
       const draft = createDraft();
       if (online) {
+        const oversizedPhotos = (draft.assets || []).map((photo, index) => ({ label: `${t("imageSizeAlert.observationPhoto")} ${index + 1}`, bytes: base64Bytes(photo.base64 || "") }))
+          .filter((photo) => photo.bytes > MAX_IMAGE_BYTES);
+        if (oversizedPhotos.length) { const error = Error("Image too large"); error.imageAlert = imageSizeAlert(t, oversizedPhotos); throw error; }
         try { validateObservationDraft(draft); }
         catch (validationError) { currentValidationFailed = true; throw validationError; }
       }
@@ -456,6 +475,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           : navigation.navigate("MainTabs", { screen: "PlantsTab", params: { screen: "PlantDetails", params: { plantId: submittedItem.plantId, focusObservationId: submittedItem.id } } }) }]);
       }
     } catch (e) {
+      if (e.imageAlert) { Alert.alert(e.imageAlert.title, e.imageAlert.message); return; }
       setInvalidField(currentValidationFailed ? e.field || "" : "");
       setError(e.message);
     } finally {
@@ -532,7 +552,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
   };
   return (
     <DiscoverableScrollView scrollEnabled={!mapInteracting} style={styles.screen} contentContainerStyle={styles.scrollContent}
-      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+      keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
       <View style={[styles.page, isNewObservation && styles.observationPage]}>
       <View style={styles.pageHeadingRow}>
       <Text style={styles.pageTitle}>
@@ -665,13 +685,13 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           {observationForm && ["taxonomy", "notes"].map(renderObservationField)}
           {edit && <>
             <Text style={styles.originalInformationLabel}>{t("recordEdits.originalInformation")}</Text>
-            {originalPhotos.length ? <View style={styles.photoList}>{originalPhotos.map((source, index) => <Image key={`${originalAssetKey}-${index}`} source={source} style={[styles.photoPreview, observationEditMode && styles.editPhotoPreview]} resizeMode="cover" />)}</View>
+            {originalPhotos.length ? <View style={styles.photoList}>{originalPhotos.map((source, index) => <PreviewableImage key={`${originalAssetKey}-${index}`} source={source} style={[styles.photoPreview, observationEditMode && styles.editPhotoPreview]} resizeMode="cover" />)}</View>
               : <Text style={styles.originalInformationValue}>{t("recordEdits.informationNotAvailable")}</Text>}
             {!observationEditMode && <Text style={styles.originalInformationValue}>{t("fieldCollection.photoReuseUnavailable")}</Text>}
             <Text style={styles.originalInformationLabel}>{t("recordEdits.updatedInformation")}</Text>
             {!observationEditMode && originalPhotos.length > 0 && <View style={styles.photoList}>{originalPhotos.map((source, index) =>
               <View key={`retained-${originalAssetKey}-${index}`} style={styles.editPhotoTile}>
-                <Image source={source} style={styles.editPhotoPreview} resizeMode="cover" />
+                <PreviewableImage source={source} style={styles.editPhotoPreview} resizeMode="cover" />
                 <TouchableOpacity style={styles.removePhotoButton} accessibilityRole="button" accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
                   onPress={() => setError(t("observationEdits.legacyPhotoRemovalUnavailable"))}>
                   <Ionicons name="trash-outline" size={21} color="#B42318" />
@@ -679,10 +699,10 @@ export default function FieldCollection({ route, navigation, onLogout }) {
               </View>)}</View>}
             {observationEditMode && <View style={styles.photoList}>{(originalAssets || []).map((asset, index) => !retainedPhotoIds.includes(asset.id) ? null :
               <View key={asset.id} style={styles.editPhotoTile}>
-                {originalPhotos[index] && <Image source={originalPhotos[index]} style={styles.editPhotoPreview} resizeMode="cover" />}
+                {originalPhotos[index] && <PreviewableImage source={originalPhotos[index]} style={styles.editPhotoPreview} resizeMode="cover" />}
                 <TouchableOpacity style={styles.removePhotoButton} accessibilityRole="button" accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
                   onPress={() => originalObservation?.origin_type === "subsequent_observation"
-                    ? setRetainedPhotoIds((current) => current.filter((id) => id !== asset.id))
+                    ? confirmPhotoRemoval(t, () => setRetainedPhotoIds((current) => current.filter((id) => id !== asset.id)))
                     : setError(t("observationEdits.legacyPhotoRemovalUnavailable"))}>
                   <Ionicons name="trash-outline" size={21} color="#B42318" />
                 </TouchableOpacity>
@@ -692,7 +712,7 @@ export default function FieldCollection({ route, navigation, onLogout }) {
                 <TouchableOpacity key={`restore-${asset.id}`} style={styles.editPhotoTile} accessibilityRole="button"
                   accessibilityLabel={`${t("recordEdits.originalPhoto")} ${index + 1}`} onPress={() => setRetainedPhotoIds((current) =>
                     (originalAssets || []).map((original) => original.id).filter((id) => current.includes(id) || id === asset.id))}>
-                  {originalPhotos[index] && <Image source={originalPhotos[index]} style={styles.editPhotoPreview} resizeMode="cover" />}
+                  {originalPhotos[index] && <PreviewableImage source={originalPhotos[index]} style={styles.editPhotoPreview} resizeMode="cover" />}
                   <View style={styles.restorePhotoOverlay}><Ionicons name="add-circle" size={25} color="#FFFFFF" /></View>
                 </TouchableOpacity>)}</View>}
           </>}
@@ -707,10 +727,10 @@ export default function FieldCollection({ route, navigation, onLogout }) {
           <View style={styles.photoList}>
           {photos.map((p) => (
             <View key={p.client_key} style={observationEditMode ? styles.editPhotoTile : styles.photoItem}>
-              <Image source={{ uri: p.uri }} style={[styles.photoPreview, observationEditMode && styles.editPhotoPreview]} resizeMode="cover" />
+              <PreviewableImage source={{ uri: p.uri }} style={[styles.photoPreview, observationEditMode && styles.editPhotoPreview]} resizeMode="cover" />
               <TouchableOpacity style={styles.removePhotoButton}
                 accessibilityRole="button" accessibilityLabel={t("fieldCollection.removeAttachedPhoto")}
-                onPress={() => setPhotos((old) => old.filter((photo) => photo.client_key !== p.client_key))}>
+                onPress={() => confirmPhotoRemoval(t, () => setPhotos((old) => old.filter((photo) => photo.client_key !== p.client_key)))}>
                 <Ionicons name="trash-outline" size={21} color="#B42318" />
               </TouchableOpacity>
             </View>

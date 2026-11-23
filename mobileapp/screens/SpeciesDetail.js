@@ -1,9 +1,10 @@
+import PreviewableImage from "../components/PreviewableImage";
 import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/SpeciesDetail.js
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
 
-import { AppState, View, StyleSheet, ScrollView, TouchableOpacity, Image, RefreshControl, useWindowDimensions } from "react-native";
+import { AppState, View, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, useWindowDimensions } from "react-native";
 import Text from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -207,7 +208,7 @@ export default function SpeciesDetail({
         <View style={styles.heroImage}>
 
           {primaryImageSource && primaryImageKey !== failedPrimaryImageKey ? (
-            <Image
+            <PreviewableImage
               source={primaryImageSource}
               style={styles.image}
               onError={() => setFailedPrimaryImageKey(primaryImageKey)}
@@ -376,7 +377,7 @@ export default function SpeciesDetail({
                 style={styles.galleryCard}
               >
 
-                <Image source={getSpeciesImageSource(selectedSpecies, image.path)} style={styles.galleryImage} />
+                <PreviewableImage source={getSpeciesImageSource(selectedSpecies, image.path)} style={styles.galleryImage} />
 
                 <Text style={styles.caption}>
                   {image.caption}

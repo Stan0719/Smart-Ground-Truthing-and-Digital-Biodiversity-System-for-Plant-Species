@@ -69,7 +69,7 @@ const displayHeight = computed(() =>
     : '—',
 )
 const displayName = computed(() => props.plant.commonName)
-const displayScientificName = computed(() => props.plant.speciesName)
+const displayScientificName = computed(() => props.plant.plantScientificName || props.plant.speciesName)
 const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
 </script>
 
@@ -92,6 +92,7 @@ const showDetailLink = computed(() => props.plant.detailLinkEnabled !== false)
       </div>
       <p class="record-common-name">{{ displayName }}</p>
       <p class="record-species">{{ displayScientificName }}</p>
+      <p v-if="plant.plantScientificName && plant.plantScientificName !== plant.speciesName" class="record-species">{{ plant.speciesName }}</p>
       <p v-if="!isGuest && plant.measurementSource === 'registration'" class="record-source">{{ t('catalogueDisplay.approvedRegistration') }}</p>
       <dl v-if="canViewStaffPlantData">
         <div>

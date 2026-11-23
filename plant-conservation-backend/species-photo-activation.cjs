@@ -1,9 +1,8 @@
 "use strict";
-// Startup snapshot only. Never loads configuration files or creates a pool.
+// Photo writes are requested by normal server startup; current schema readiness
+// and request authorization remain the actual gates.
 const { inspectPhotoSchema } = require("./species-photo-readiness.cjs");
-function speciesPhotoWritesRequested(env = process.env) {
-  return env.PLANT_SPECIES_PHOTO_WRITES_ENABLED === "true";
-}
+function speciesPhotoWritesRequested() { return true; }
 async function requireSpeciesPhotoWrites(pool, enabled) {
   if (enabled !== true)
     throw Object.assign(Error("Photo management writes are disabled."), { status: 503 });

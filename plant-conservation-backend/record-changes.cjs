@@ -356,7 +356,8 @@ async function reviewInitialObservationEdit(pool, { user, changeId, revision, de
   requireInitialChangePermission(user, "observations.review");
   if (!Number.isInteger(revision) || revision < 1 || !["Approved", "Rejected", "Correction Required"].includes(decision))
     fail(400, "Invalid initial Observation review decision.");
-  const feedback = text(comment);
+  if (typeof comment !== "string" || comment.length > 4000) fail(400, "Invalid review comment.");
+  const feedback = comment.trim();
   if (decision === "Correction Required" && !feedback) fail(400, "Correction feedback is required.");
   const coordinates = await readInitialChange(pool, changeId);
   return transaction(pool, async c => {
@@ -833,7 +834,11 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
     if (!req.body || !["Approved", "Rejected", "Correction Required"].includes(req.body.decision) ||
       (req.body.revision !== undefined && (!Number.isInteger(req.body.revision) || req.body.revision < 1)) ||
       Object.keys(req.body).some((key) => !["decision", "comment", "revision"].includes(key))) fail(400, "Invalid review decision.");
-    const comment = text(req.body.comment);
+    if (req.body.comment !== undefined && (typeof req.body.comment !== "string" || req.body.comment.length > 4000))
+      fail(400, "Invalid review comment.");
+    const comment = typeof req.body.comment === "string" ? req.body.comment.trim() : "";
+    if (req.body.decision !== "Approved" && !comment)
+      fail(400, "Officer feedback is required for this decision.");
     const coordinates = await readInitialChange(pool, req.params.id).catch(error => {
       if (error.status === 404) return null;
       throw error;

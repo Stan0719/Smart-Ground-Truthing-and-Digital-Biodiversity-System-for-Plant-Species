@@ -1,8 +1,9 @@
+import PreviewableImage from "./PreviewableImage";
 import { t, translateLabel, dateLocale, useAppTranslation, translateFieldValue } from "../translations/i18n";
 import React, { useState } from "react";
 
 import {
-  View, StyleSheet, TouchableOpacity, Image, useWindowDimensions, Dimensions, Platform } from "react-native";
+  View, StyleSheet, TouchableOpacity, useWindowDimensions, Dimensions, Platform } from "react-native";
 import Text from "./ScaledText";
 
 import { getPlantDisplayObservation } from "../utils/plantApi";
@@ -54,7 +55,7 @@ export default function PlantCard({
       <View style={[styles.imageContainer, styles.detailImageContainer,
         windowWidth < 390 ? styles.stackedDetailImage : { width: isTabletLayout ? tabletImageWidth : 110 }]}>
         {imageSource && !imageFailed ? (
-          <Image source={imageSource} style={styles.detailImage} onError={() => setFailedImageUri(imageUri)} />
+          <PreviewableImage source={imageSource} style={styles.detailImage} onError={() => setFailedImageUri(imageUri)} />
         ) : <View style={[styles.placeholder, styles.detailImage]}><Text style={styles.placeholderIcon}>🌿</Text></View>}
       </View>
       <View style={styles.content}>
@@ -102,7 +103,7 @@ export default function PlantCard({
       ]}>
 
         {imageSource && !imageFailed ? (
-          <Image
+          <PreviewableImage
             source={imageSource}
             style={speciesDetailCard ? styles.speciesDetailImage : styles.image}
             onError={() => setFailedImageUri(imageUri)}

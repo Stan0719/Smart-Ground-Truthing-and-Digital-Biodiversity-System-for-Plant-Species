@@ -278,11 +278,13 @@ export const speciesPayload = (form: SpeciesForm): SpeciesPayload => ({
 export class SpeciesApiError extends Error {
   readonly status: number
   readonly kind: 'network' | 'invalid' | 'http'
+  readonly code?: string
 
-  constructor(message: string, status = 0, kind: 'network' | 'invalid' | 'http' = 'http') {
+  constructor(message: string, status = 0, kind: 'network' | 'invalid' | 'http' = 'http', code?: string) {
     super(message)
     this.status = status
     this.kind = kind
+    this.code = code
   }
 }
 
@@ -290,14 +292,15 @@ export async function requestSpeciesApi(
   url: string,
   options: { method?: 'POST' | 'PATCH' | 'DELETE'; body?: SpeciesPayload } = {},
 ): Promise<Record<string, unknown>> {
+  const body = options.body ?? (options.method === 'DELETE' ? {} : undefined)
   let response: Response
   try {
     response = await fetch(url, {
       method: options.method || 'GET',
       credentials: 'same-origin',
       signal: AbortSignal.timeout(15000),
-      ...(options.body
-        ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body) }
+      ...(body
+        ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
         : {}),
     })
   } catch {
@@ -322,7 +325,7 @@ export async function requestSpeciesApi(
           : response.status === 409
             ? 'The species conflicts with an existing or referenced record.'
             : `Species request failed (${response.status}).`
-    throw new SpeciesApiError(backendMessage || fallback, response.status)
+    throw new SpeciesApiError(backendMessage || fallback, response.status, 'http', typeof result?.code === 'string' ? result.code : undefined)
   }
   if (!result) throw new SpeciesApiError('The species service returned an invalid response.', response.status, 'invalid')
   return result

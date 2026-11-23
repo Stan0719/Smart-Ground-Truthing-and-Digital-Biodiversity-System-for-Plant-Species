@@ -9,7 +9,7 @@ const object = (v: unknown): Record<string, unknown> | null => v !== null && typ
 export async function loadObservationVersionHistory(observationId: string, plantId: string, origin: string, transport: typeof fetch = fetch) {
   if (origin !== 'initial_registration') return { available: false, versions: [] as ObservationHistoricalVersion[] }
   if (!observationId || !/^[1-9]\d*$/.test(plantId)) throw Error('Invalid history target')
-  const response = await transport('/api/data/record-versions?kind=plant&id=' + encodeURIComponent(plantId), { credentials: 'same-origin', signal: AbortSignal.timeout(15000) })
+  const response = await transport('/api/data/observations/' + encodeURIComponent(observationId) + '/registration-history', { credentials: 'same-origin', signal: AbortSignal.timeout(15000) })
   if (!response.ok) throw Error('History unavailable')
   const payload = object(await response.json())
   if (payload?.history_available === false) return { available: false, versions: [] as ObservationHistoricalVersion[] }

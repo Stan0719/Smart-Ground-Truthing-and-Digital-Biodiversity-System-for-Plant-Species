@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { conservationBadgeStyle } from '../utils/conservationBadge'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import NavigationBar from '../components/NavigationBar.vue'
@@ -31,12 +31,102 @@ watch(families, (options) => {
 const sortOption = ref<'default' | 'name-asc' | 'name-desc' | 'scientific-asc'>('default')
 const sortMenuOpen = ref(false)
 const sortMenu = ref<HTMLElement | null>(null)
+const familyDropdownOpen = ref(false)
+const familyDropdown = ref<HTMLElement | null>(null)
+const familyFilterTrigger = ref<HTMLButtonElement | null>(null)
+const familySearchInput = ref<HTMLInputElement | null>(null)
+const familySearchQuery = ref('')
+const activeFamilyOption = ref(0)
 const route = useRoute()
 const { t } = useI18n()
 // Keep the translated title intact, including Chinese word order.
 const heroTitleParts = computed(() => t('species.heroTitle').split(/(Niah|尼亚)/u))
 const { isLoggedIn, userRole } = usePrototypeSession()
 const searchQuery = ref(typeof route.query.search === 'string' ? route.query.search.slice(0, 100) : '')
+const familyOptions = computed(() => [
+  { key: '', label: t('species.allFamilies') },
+  ...families.value.map(([key, label]) => ({ key, label })),
+])
+const matchingFamilyOptions = computed(() => {
+  const query = familySearchQuery.value.trim().toLocaleLowerCase()
+  return query
+    ? familyOptions.value.filter((option) => option.label.toLocaleLowerCase().includes(query))
+    : familyOptions.value
+})
+const selectedFamilyLabel = computed(() =>
+  familyOptions.value.find((option) => option.key === activeFamily.value)?.label || t('species.allFamilies'),
+)
+const activeFamilyOptionId = computed(() =>
+  matchingFamilyOptions.value[activeFamilyOption.value]
+    ? `family-option-${activeFamilyOption.value}`
+    : undefined,
+)
+
+watch(familyDropdownOpen, async (open) => {
+  if (open) {
+    await nextTick()
+    familySearchInput.value?.focus()
+  }
+})
+watch(familySearchQuery, () => { activeFamilyOption.value = 0 })
+
+const closeFamilyDropdown = () => {
+  familyDropdownOpen.value = false
+  familySearchQuery.value = ''
+}
+
+const toggleFamilyDropdown = () => {
+  if (familyDropdownOpen.value) {
+    closeFamilyDropdown()
+    return
+  }
+  familySearchQuery.value = ''
+  const selectedIndex = familyOptions.value.findIndex((option) => option.key === activeFamily.value)
+  activeFamilyOption.value = Math.max(0, selectedIndex)
+  familyDropdownOpen.value = true
+}
+
+const chooseFamily = async (key: string) => {
+  activeFamily.value = key
+  closeFamilyDropdown()
+  await nextTick()
+  familyFilterTrigger.value?.focus()
+}
+
+const handleFamilySearchKeydown = (event: KeyboardEvent) => {
+  const lastIndex = matchingFamilyOptions.value.length - 1
+  const activeOption = matchingFamilyOptions.value[activeFamilyOption.value]
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    activeFamilyOption.value = Math.min(lastIndex, activeFamilyOption.value + 1)
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    activeFamilyOption.value = Math.max(0, activeFamilyOption.value - 1)
+  } else if (event.key === 'Home' && lastIndex >= 0) {
+    event.preventDefault()
+    activeFamilyOption.value = 0
+  } else if (event.key === 'End' && lastIndex >= 0) {
+    event.preventDefault()
+    activeFamilyOption.value = lastIndex
+  } else if (event.key === 'Enter' && activeOption) {
+    event.preventDefault()
+    void chooseFamily(activeOption.key)
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    closeFamilyDropdown()
+    void nextTick(() => familyFilterTrigger.value?.focus())
+  } else if (event.key === 'Tab') {
+    closeFamilyDropdown()
+    void nextTick(() => familyFilterTrigger.value?.focus())
+  }
+}
+
+const handleFamilyTriggerKeydown = (event: KeyboardEvent) => {
+  if (!familyDropdownOpen.value && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+    event.preventDefault()
+    toggleFamilyDropdown()
+  }
+}
 
 const selectSort = (option: typeof sortOption.value) => {
   sortOption.value = option
@@ -46,6 +136,8 @@ const selectSort = (option: typeof sortOption.value) => {
 const clearFilters = () => {
   searchQuery.value = ''
   activeFamily.value = ''
+  sortMenuOpen.value = false
+  closeFamilyDropdown()
 }
 
 const fetchSpecies = async (current: () => boolean, user: AuthUser | null) => {
@@ -78,12 +170,13 @@ const displayScientificName = (item: Plant) =>
 const displayFamily = (item: Plant) => item.family || ''
 
 const closeSortMenu = (event: MouseEvent | KeyboardEvent) => {
-  if (
-    event instanceof KeyboardEvent
-      ? event.key === 'Escape'
-      : !sortMenu.value?.contains(event.target as Node)
-  ) {
+  if (event instanceof KeyboardEvent && event.key === 'Escape') {
     sortMenuOpen.value = false
+    closeFamilyDropdown()
+  } else if (!(event.target instanceof Node) ||
+    (!sortMenu.value?.contains(event.target) && !familyDropdown.value?.contains(event.target))) {
+    sortMenuOpen.value = false
+    closeFamilyDropdown()
   }
 }
 
@@ -179,6 +272,78 @@ const filteredSpecies = computed(() => {
                 :placeholder="t('species.searchPlaceholder')"
               />
             </label>
+          </div>
+
+          <div class="family-controls">
+            <div ref="familyDropdown" class="family-dropdown">
+              <span class="filter-control-label">{{ t('species.filterByFamily') }}</span>
+              <button
+                ref="familyFilterTrigger"
+                type="button"
+                class="family-select-trigger"
+                :aria-label="`${t('species.filterByFamily')}: ${selectedFamilyLabel}`"
+                aria-haspopup="listbox"
+                :aria-expanded="familyDropdownOpen"
+                aria-controls="family-options"
+                @click="toggleFamilyDropdown"
+                @keydown="handleFamilyTriggerKeydown"
+              >
+                <span class="family-select-value">{{ selectedFamilyLabel }}</span>
+                <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ open: familyDropdownOpen }">
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+
+              <div v-if="familyDropdownOpen" class="family-dropdown-panel">
+                <label class="family-search-box">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="10.5" cy="10.5" r="6.5" />
+                    <path d="m15.5 15.5 5 5" />
+                  </svg>
+                  <span class="sr-only">{{ t('species.searchFamilies') }}</span>
+                  <input
+                    ref="familySearchInput"
+                    v-model="familySearchQuery"
+                    type="search"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-controls="family-options"
+                    aria-expanded="true"
+                    :aria-label="t('species.searchFamilies')"
+                    :aria-activedescendant="activeFamilyOptionId"
+                    :placeholder="t('species.searchFamilies')"
+                    @keydown="handleFamilySearchKeydown"
+                  />
+                </label>
+                <div id="family-options" class="family-option-list" role="listbox" :aria-label="t('species.filterByFamily')">
+                  <div
+                    v-for="(option, index) in matchingFamilyOptions"
+                    :id="`family-option-${index}`"
+                    :key="option.key || 'all-families'"
+                    class="family-option"
+                    :class="{ selected: activeFamily === option.key, highlighted: activeFamilyOption === index }"
+                    role="option"
+                    :aria-selected="activeFamily === option.key"
+                    @mouseenter="activeFamilyOption = index"
+                    @mousedown.prevent
+                    @click="chooseFamily(option.key)"
+                  >
+                    {{ option.label }}
+                  </div>
+                  <p v-if="!matchingFamilyOptions.length" class="family-options-empty" role="status">
+                    {{ t('species.noFamiliesFound') }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <button class="filter-reset-button" type="button" @click="clearFilters">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 2.64-6.36L3 8" />
+                <path d="M3 3v5h5" />
+              </svg>
+              {{ t('species.reset') }}
+            </button>
 
             <div ref="sortMenu" class="sort-menu">
               <button
@@ -237,21 +402,9 @@ const filteredSpecies = computed(() => {
             </div>
           </div>
 
-          <div class="family-filters" role="group" :aria-label="t('common.family')">
-            <button type="button" :class="{ active: activeFamily === '' }" :aria-pressed="activeFamily === ''" @click="activeFamily = ''">
-              {{ t('common.all') }}
-            </button>
-            <button
-              v-for="[key, label] in families"
-              :key="key"
-              type="button"
-              :class="{ active: activeFamily === key }"
-              :aria-pressed="activeFamily === key"
-              @click="activeFamily = key"
-            >
-              {{ label }}
-            </button>
-          </div>
+          <p class="current-family-filter" aria-live="polite">
+            {{ t('species.currentFilter', { family: selectedFamilyLabel }) }}
+          </p>
         </div>
 
         <p v-if="isLoading" role="status">Loading plant species...</p>
@@ -491,41 +644,190 @@ const filteredSpecies = computed(() => {
   font: inherit;
 }
 
-.family-filters {
+.family-controls {
   display: flex;
+  align-items: flex-end;
   flex-wrap: wrap;
+  gap: 10px;
   min-width: 0;
-  gap: 9px;
 }
 
-.family-filters button {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  min-height: 44px;
-  padding: 13px 20px;
-  border: 0;
-  border-radius: 999px;
-  background: #eeece3;
-  color: #44564e;
+.family-dropdown {
+  position: relative;
+  display: grid;
+  flex: 1 1 260px;
+  gap: 6px;
+  min-width: min(260px, 100%);
+}
+
+.filter-control-label {
+  color: #63766d;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.family-select-trigger,
+.filter-reset-button {
+  box-sizing: border-box;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #d0d9cf;
+  border-radius: 13px;
+  background: #fff;
+  color: #254b42;
+  box-shadow: 0 5px 20px rgba(35, 63, 49, 0.05);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  transition: 0.2s ease;
 }
 
-.family-filters button:focus-visible {
-  outline: 3px solid #35652f;
-  outline-offset: 3px;
+.family-select-trigger {
+  width: 100%;
+  justify-content: space-between;
+  padding: 10px 14px;
+  text-align: left;
 }
 
-.family-filters button:hover {
-  background: #dfe8da;
+.family-select-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.family-filters button.active {
-  background: #35652f;
-  color: #fff;
+.family-select-trigger svg,
+.filter-reset-button svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: #356f5a;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.family-select-trigger svg {
+  transition: transform 0.18s ease;
+}
+
+.family-select-trigger svg.open {
+  transform: rotate(180deg);
+}
+
+.family-select-trigger:hover,
+.filter-reset-button:hover {
+  border-color: #93b6a1;
+  background: #f6f8f1;
+}
+
+.family-select-trigger:focus-visible,
+.filter-reset-button:focus-visible,
+.family-search-box:focus-within {
+  outline: 3px solid rgba(80, 138, 106, 0.24);
+  outline-offset: 2px;
+  border-color: #508a6a;
+}
+
+.family-dropdown-panel {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 7px);
+  right: 0;
+  left: 0;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #d5ded3;
+  border-radius: 14px;
+  background: #fffefa;
+  box-shadow: 0 12px 28px rgba(33, 57, 44, 0.16);
+}
+
+.family-search-box {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 1px solid #d9d9cf;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.family-search-box svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: #356f5a;
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+
+.family-search-box input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #254b42;
+  font: inherit;
+  font-size: 13px;
+}
+
+.family-option-list {
+  max-height: min(280px, 45vh);
+  margin-top: 7px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.family-option {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: #40584e;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.family-option:hover,
+.family-option.highlighted {
+  background: #edf3e9;
+}
+
+.family-option.selected {
+  background: #dceadf;
+  color: #245643;
+  font-weight: 700;
+}
+
+.family-options-empty {
+  margin: 0;
+  padding: 12px 10px;
+  color: #687970;
+  font-size: 12px;
+}
+
+.filter-reset-button {
+  justify-content: center;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.current-family-filter {
+  margin: -10px 0 0;
+  color: #687970;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .sort-menu {
@@ -534,9 +836,14 @@ const filteredSpecies = computed(() => {
 }
 
 .sort-button {
-  height: 100%;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  height: 46px;
+  min-height: 46px;
+  min-width: 96px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 0 18px;
   border: 1px solid #d9d9cf;
@@ -552,6 +859,7 @@ const filteredSpecies = computed(() => {
 
 .sort-button svg {
   width: 18px;
+  height: 18px;
   fill: none;
   stroke: #254b42;
   stroke-linecap: round;
@@ -989,13 +1297,8 @@ const filteredSpecies = computed(() => {
 }
 
 @media (max-width: 950px) {
-  .family-filters {
-    overflow-x: auto;
-    padding-bottom: 4px;
-  }
-
-  .family-filters button {
-    flex: 0 0 auto;
+  .family-controls {
+    align-items: flex-end;
   }
 
   .plant-grid {
@@ -1095,7 +1398,9 @@ const filteredSpecies = computed(() => {
   }
 
   .sort-button {
+    height: 42px;
     min-height: 42px;
+    min-width: 88px;
     padding: 0 12px;
     border-radius: 11px;
     font-size: 12px;
@@ -1110,17 +1415,50 @@ const filteredSpecies = computed(() => {
     min-width: 0;
   }
 
-  .family-filters {
-    gap: 6px;
-    scrollbar-width: none;
+  .family-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: end;
+    gap: 8px;
   }
 
-  .family-filters::-webkit-scrollbar {
-    display: none;
+  .family-dropdown {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 
-  .family-filters button {
-    padding: 8px 13px;
+  .family-select-trigger,
+  .filter-reset-button {
+    min-height: 42px;
+    border-radius: 11px;
+    font-size: 12px;
+  }
+
+  .family-select-trigger {
+    padding: 8px 12px;
+  }
+
+  .filter-reset-button {
+    padding: 0 11px;
+  }
+
+  .filter-reset-button svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .sort-button {
+    min-height: 42px;
+  }
+
+  .family-dropdown-panel {
+    right: 0;
+    left: 0;
+    width: auto;
+  }
+
+  .current-family-filter {
+    margin-top: -5px;
     font-size: 11px;
   }
 

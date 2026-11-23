@@ -10,6 +10,7 @@ import ReviewSubmissionsView from '../views/conservation/ReviewSubmissionsView.v
 import AdminUserManagementView from '../views/AdminUserManagementView.vue'
 import AdminModuleView from '../views/AdminModuleView.vue'
 import AdminOperationsView from '../views/AdminOperationsView.vue'
+import GlobalSearchView from '../views/GlobalSearchView.vue'
 import { verifySession, sessionVerificationCurrent, sessionSnapshot, logout } from '../services/auth'
 
 const router = createRouter({
@@ -35,6 +36,11 @@ const router = createRouter({
       path: '/species',
       name: 'species',
       component: PlantsView,
+    },
+    {
+      path: '/search',
+      name: 'global-search',
+      component: GlobalSearchView,
     },
     {
       path: '/species/:slug',
@@ -143,6 +149,12 @@ const router = createRouter({
             title: 'Plant Species',
             section: 'KNOWLEDGE BASE',
           },
+        },
+        {
+          path: 'plants',
+          name: 'conservation-plants',
+          component: () => import('../views/conservation/PlantsView.vue'),
+          meta: { titleKey: 'officerPlants.title' },
         },
         {
           path: 'observations',

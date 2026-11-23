@@ -57,6 +57,7 @@ function harness(component, language = 'en', width = 1440) {
     window: { addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:(name)=>listeners.delete(name), matchMedia: () => ({ matches: currentWidth.value <= 920 }), scrollTo() {} },
     fetch: () => { throw Error('Header layout checks must not send API requests') },
     require(name) {
+      if (name === '../styles/officer-page-polish.css') return {}
       if (name === 'vue') return { ...vue, onMounted() {}, withDirectives: node => node, onBeforeUnmount: fn => cleanup.push(fn), resolveComponent: name => ({ name }) }
       if (name === 'vue-router') return { useRouter: () => router, useRoute: () => route }
       if (name === 'vue-i18n') return { useI18n: () => ({ t, te: key => typeof lookup(key) === 'string', locale: vue.ref(language) }) }
@@ -89,6 +90,9 @@ test('the shared header has a single identity/actions group across every real Of
         h.route.name = name
         h.route.meta = page === 'profile' ? { titleKey: 'nav.profileSettings', title: 'Profile Settings' } : {}
         const tree = nodes(h.render())
+        const layoutRoot = tree.find(node => node.type === 'div' && String(node.props?.class).includes('officer-layout'))
+        assert.ok(layoutRoot)
+        assert.equal(layoutRoot.props['data-officer-standard'], page === 'dashboard' ? undefined : '')
         const header = tree.find(node => node.type === 'header' && node.props?.class === 'topbar')
         const content = nodes(header)
         assert.equal(content.filter(node => node.props?.class === 'officer-header-content').length, 1)

@@ -125,7 +125,7 @@ test('summary palette, icons and responsive layout match Review Submissions with
   const declarations=rule=>Object.fromEntries(rule.nodes.filter(node=>node.type==='decl').map(node=>[node.prop,node.value]))
   for(const status of summaryStates){
     const actual=declarations(own.find(rule=>rule.selector.endsWith(`[data-status="${status}"]`)))
-    const theme=status==='Approved'?'approved-today':status.toLowerCase().replaceAll(' ','-')
+    const theme=status.toLowerCase().replaceAll(' ','-')
     const expected=declarations(review.find(rule=>rule.selector===`.review-summary-${theme}`))
     assert.equal(actual['--observation-summary-background'],expected['--review-summary-background']);assert.equal(actual['--observation-summary-ink'],expected['--review-summary-ink'])
   }
@@ -150,7 +150,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
   let session = { user: initialUser, pending }
   const sessionListeners = new Set()
   const scope = vue.effectScope()
-  const calls = [], unmount = []
+  const calls = [], unmount = [], mounted = []
   const route = vue.reactive({ query: options.query || {} })
   const t = (key, params = {}) => {
     const found = key.split('.').reduce((entry, part) => entry?.[part], messages)
@@ -166,7 +166,9 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
     AbortSignal,
     AbortController,
     console,
-    window: { setTimeout, clearTimeout, ...options.window },
+    window: { setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {}, ...options.window },
+    document: options.document || { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
+    Date: options.Date || Date,
     navigator: { clipboard: options.clipboard },
     fetch: async (url, requestOptions) => {
       if (url.startsWith('/api/observations?') && requestOptions?.cache === 'no-store') {
@@ -191,7 +193,7 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
       if (name.endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {} }
       if (name === 'vue') return {
         ...vue,
-        onMounted() {},
+        onMounted(callback) { mounted.push(callback) },
         onBeforeUnmount(callback) { unmount.push(callback) },
         resolveComponent: (component) => component,
         withDirectives: (node) => node,
@@ -208,12 +210,15 @@ function harness(fetchHandler, initialUser = officer, pending = false, queueHand
       throw Error(`Unexpected import: ${name}`)
     },
   }
-  vm.runInNewContext(`(function () { ${transpile(script.content)} })()`, context)
+  const testableScript = script.content.replaceAll('void refreshSummary()', 'exports.summaryTask = refreshSummary()')
+  vm.runInNewContext(`(function () { ${transpile(testableScript)} })()`, context)
   const state = scope.run(() => exports.default.setup({}, { expose() {} }))
+  Object.defineProperty(state, 'summaryTask', { get: () => exports.summaryTask })
   // The child queue is stubbed here; emulate its completed empty state by default.
   state.receiveProposalState({rows:[],names:{},loading:false,error:''})
   vm.runInNewContext(`(function () { ${transpile(template.code)} })()`, context)
-  return { state, calls, summaryCalls, route, changeSession(user, pending = false) { session = { user, pending }; for (const fn of sessionListeners) fn(user, pending) }, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => { unmount.forEach(callback => callback()); scope.stop() } }
+  let didMount = false
+  return { state, calls, summaryCalls, route, mount() { if (!didMount) { didMount = true; mounted.forEach(callback => callback()) } }, changeSession(user, pending = false) { session = { user, pending }; for (const fn of sessionListeners) fn(user, pending) }, render: () => exports.render({}, [], {}, vue.proxyRefs(state), {}, {}), stop: () => { unmount.forEach(callback => callback()); scope.stop() } }
 }
 function nodes(root) {
   const result = []
@@ -265,7 +270,7 @@ test('list keeps raw IDs, sorts valid timestamps and opens local review without 
     h.state.search.value = 'shorea actualis'
     assert.equal(h.state.filtered.value.length, 2)
     const links = nodes(h.render()).filter((node) => node.props?.to?.name === 'conservation-reviews')
-    const reviewButtons = nodes(h.render()).filter(node => node.type === 'button' && node.props?.class === 'action-button' && node.children === 'Review')
+    const reviewButtons = nodes(h.render()).filter(node => node.type === 'button' && String(node.props?.class).split(/\s+/).includes('observation-icon-action') && node.props?.['aria-label'] === messages.conservationPages.observations.review)
     assert.ok(reviewButtons.length > 0)
     assert.equal(links.length, 0)
     await reviewButtons[0].props.onClick()
@@ -422,7 +427,7 @@ test('View stays read-only; Review opens the same modal and uses actual status t
   }
 })
 
-test('review requires feedback for non-approval decisions and denies self-review, invalid revisions and unresolved dependencies', async () => {
+test('review comments are optional for approval and required for non-approval decisions; eligibility checks remain enforced', async () => {
   const { h } = reviewHarness()
   try {
     await h.state.open(h.state.mapObservation(fixture()), true)
@@ -432,11 +437,36 @@ test('review requires feedback for non-approval decisions and denies self-review
       assert.ok(!h.calls.some(c => c.options?.method === 'POST'))
     }
   } finally { h.stop() }
+  {
+    const { h } = reviewHarness()
+    try {
+      await h.state.open(h.state.mapObservation(fixture()), true)
+      h.state.reviewComment.value = ''
+      await h.state.decide('Approved')
+      assert.ok(h.calls.some(c => c.options?.method === 'POST' && JSON.parse(c.options.body).comment === ''))
+    } finally { h.stop() }
+  }
   for (const changes of [{ revision: 0 }, { revision: null }, { owner_subject: 'staff:officer' }, { species_request_id: '12' }, { species_request_id: '12', species_request: { request_id: '12', request_status: 'Pending Review' } }]) {
     const { h } = reviewHarness(fixture(changes))
     try { await h.state.open(h.state.mapObservation(fixture(changes)), true); assert.equal(h.state.reviewAllowed.value, false); await h.state.decide('Approved'); assert.ok(!h.calls.some(c => c.options?.method === 'POST')) }
     finally { h.stop() }
   }
+})
+
+test('Observation review comment label is concise and localized without changing the shared optional suffix', async () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const h = harness(identityHandler([fixture()]), officer, false, null, language)
+    try {
+      await h.state.loadObservations()
+      await h.state.open(h.state.observations.value[0], true)
+      const field = nodes(h.render()).find(node => node.props?.id === 'observation-review-comment')
+      const dictionary = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
+      assert.equal(field.props.label, dictionary.conservationPages.observations.reviewComment)
+      assert.ok(!field.props.label.includes('required for rejection'))
+    } finally { h.stop() }
+  }
+  const sharedField = readFileSync(new URL('../src/components/conservation/ReviewCommentField.vue', import.meta.url), 'utf8')
+  assert.match(sharedField, /t\('reviewComments\.optionalForApproval'\)/)
 })
 
 test('modal-wide bottom-right decision footer follows history and preserves all four submission handlers', async () => {
@@ -482,8 +512,8 @@ test('missing comments focus one inline validation message without a duplicate t
       const rendered = nodes(h.render())
       const field = rendered.find(node => node.props?.id === 'observation-review-comment')
       assert.equal(field.props.placeholder, 'Record the observation decision or required action')
-      assert.equal(field.props['aria-invalid'], true)
-      assert.equal(field.props['aria-describedby'], 'observation-review-comment-error')
+      assert.equal(field.props.invalid, true)
+      assert.match(readFileSync(filename, 'utf8'), /:described-by="reviewCommentError \? 'observation-review-comment-error' : undefined"/)
       const error = rendered.find(node => node.props?.id === 'observation-review-comment-error')
       assert.equal(error.props.role, 'alert')
       assert.ok(!rendered.some(node => node.props?.variant === 'error' && node.props?.message === h.state.rt('feedback.commentRequired')))
@@ -785,9 +815,9 @@ test('primary field action respects status, self-review, session, revision and s
     const h = harness(async () => Response.json({ observation: row }), user, pending)
     try {
       h.state.isLoading.value = false; h.state.observations.value = [h.state.mapObservation(row)]
-      const buttons = nodes(h.render()).filter(n => n.type === 'button' && ['Review', 'View Details', 'View'].includes(n.children))
+      const buttons = nodes(h.render()).filter(n => n.type === 'button' && [messages.conservationPages.observations.review, messages.common.viewDetails].includes(n.props?.['aria-label']) && String(n.props?.class).split(/\s+/).includes('observation-icon-action'))
       assert.equal(buttons.length, 1, JSON.stringify(changes))
-      assert.equal(buttons[0].children, eligible ? 'Review' : 'View Details')
+      assert.equal(buttons[0].props['aria-label'], eligible ? messages.conservationPages.observations.review : messages.common.viewDetails)
       await buttons[0].props.onClick(); await flush()
       assert.equal(h.state.selected.value.id, uuid)
       assert.equal(h.state.reviewMode.value, eligible)
@@ -820,7 +850,7 @@ test('primary action labels reuse English, Malay and Chinese translations', () =
       for (const status of ['Pending Review', 'Approved']) {
         h.state.observations.value = [h.state.mapObservation(fixture({ status }))]
         const expected = status === 'Approved' ? labels.common.viewDetails : labels.conservationPages.observations.review
-        assert.ok(nodes(h.render()).some(n => n.type === 'button' && n.children === expected))
+        assert.ok(nodes(h.render()).some(n => n.type === 'button' && n.props?.['aria-label'] === expected))
       }
     } finally { h.stop() }
   }
@@ -979,8 +1009,9 @@ test('copy honors Officer session state, suppresses duplicate pending operations
 test('compact identifier UI keeps bounded columns, touch/focus targets and complete translations', async () => {
   const css = descriptor.styles[0].content
   assert.match(css, /\.identity-cell\s*\{[^}]*white-space: normal/)
-  assert.match(css, /\.observations-table \.observation-column\s*\{ width: 11rem/)
-  assert.match(css, /\.observations-table \.submitter-column\s*\{ width: 13rem/)
+  assert.match(css, /\.observations-table \.observation-column\s*\{ width: 24%/)
+  assert.match(css, /\.observations-table \.plant-column\s*\{ width: 14%/)
+  assert.match(css, /\.observations-table \.submitter-column\s*\{ width: 13%/)
   assert.match(css, /\.identifier-line\s*\{[^}]*display: inline-flex; align-items: center; justify-content: flex-start; flex-wrap: nowrap; gap: 7px/)
   assert.match(css, /\.identifier-copy\s*\{[^}]*width: 44px; height: 44px/)
   assert.match(css, /\.identifier-copy:focus-visible\s*\{[^}]*outline:/)
@@ -1039,37 +1070,45 @@ test('only an exact current-Officer subject match can use the authenticated sess
 
 const mainObservationTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'observations-table')
 const observationCells = row => nodes(row).filter(node => node.type === 'td')
+const renderedText = node => typeof node === 'string' ? node : typeof node?.children === 'string' ? node.children : Array.isArray(node?.children) ? node.children.map(renderedText).join('') : ''
 
-test('main table has eight matching columns with one Status, full action access and no duplicate Review State', async () => {
+test('main table has seven columns and keeps Plant identity in its own column, with existing action access', async () => {
   const longName = 'Long species name '.repeat(35) + 'UnbrokenName'.repeat(40)
-  const rows = ['Draft', 'Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged'].map((status, index) => fixture({ id: String(index + 1), status, scientific_name: longName }))
+  const rows = ['Draft', 'Pending Review', 'Approved', 'Rejected', 'Correction Required', 'Flagged'].map((status, index) => fixture({ id: String(index + 1), status, scientific_name: longName, plant_scientific_name: 'Yellow Simpoh Air' }))
   const h = harness(identityHandler(rows))
   try {
     await h.state.loadObservations()
     const table = mainObservationTable(h), headers = nodes(table).filter(node => node.type === 'th')
-    assert.deepEqual(headers.map(node => node.children), ['Submission ID', 'Submission Type', 'Plant ID', 'Species', 'Submitted By', 'Status', 'Created', 'Actions'])
+    assert.deepEqual(headers.map(node => node.children), ['Submission ID', 'Plant ID', 'Species', 'Submitted By', 'Status', 'Created', 'Actions'])
     assert.equal(headers.filter(node => node.children === 'Status').length, 1)
     assert.ok(!headers.some(node => node.children === 'Review State'))
     assert.ok(headers.every(node => node.props.scope === 'col'))
-    assert.equal(nodes(table).filter(node => node.type === 'col').length, 8)
+    assert.equal(nodes(table).filter(node => node.type === 'col').length, 7)
     const dataRows = nodes(table).filter(node => node.type === 'tr' && observationCells(node).length)
     assert.equal(dataRows.length, rows.length)
     dataRows.forEach((row, index) => {
       const cells = observationCells(row), item = h.state.observations.value[index]
       assert.equal(cells.length, headers.length)
       assert.ok(nodes(cells[0]).some(node => node.children === h.state.observationLabel(item.id)))
-      assert.equal(cells[2].children, item.plantDisplayId)
-      assert.ok(nodes(cells[3]).some(node => node.children === longName))
-      assert.ok(nodes(cells[4]).some(node => node.children === h.state.submitterLabel(item.ownerSubject)))
-      assert.ok(nodes(cells[5]).some(node => String(node.props?.class).split(/\s+/).includes('badge') && node.children === h.state.label(item.status)))
-      assert.equal(cells[6].children, h.state.formatDate(item.createdAt))
-      const actions = nodes(cells[7])
-      assert.ok(actions.some(node => node.type === 'button' && ['Review', 'View Details'].includes(node.children)))
+      const identityNodes = nodes(cells[0]), typeIndex = identityNodes.findIndex(node => node.props?.class === 'submission-type-badge submission-type-original')
+      assert.ok(typeIndex >= 0, 'submission type remains below the submission ID')
+      const plantNodes = nodes(cells[1])
+      assert.ok(renderedText(cells[1]).includes(item.plantDisplayId))
+      assert.ok(plantNodes.some(node => node.type === 'strong' && node.children === item.plantDisplayId))
+      assert.ok(plantNodes.some(node => node.type === 'em' && node.children === item.plantScientificName))
+      assert.ok(plantNodes.some(node => node.props?.class === 'plant-id-value'))
+      assert.ok(nodes(cells[2]).some(node => node.type === 'em'))
+      assert.ok(nodes(cells[3]).some(node => node.children === h.state.submitterLabel(item.ownerSubject)))
+      assert.ok(nodes(cells[4]).some(node => String(node.props?.class).split(/\s+/).includes('badge') && node.children === h.state.label(item.status)))
+      assert.ok(renderedText(cells[5]).length > 0)
+      assert.ok(nodes(cells[0]).some(node => node.props?.class === 'observation-cell-label'))
+      const actions = nodes(cells[6])
+      assert.ok(actions.some(node => node.type === 'button' && ['Review', 'View Details'].includes(node.props?.['aria-label'])))
       assert.ok(actions.some(node => node.props?.to === '/plant/PL007'))
-      assert.ok(actions.some(node => node.type === 'button' && node.children === 'History'))
-      assert.ok(actions.some(node => node.props?.to?.name === 'conservation-map' && node.props.to.query.plant === '7'))
+      assert.ok(actions.some(node => node.type === 'button' && node.props?.['aria-label'] === 'History'))
+      assert.ok(!actions.some(node => node.props?.to?.name === 'conservation-map'))
       assert.equal(nodes(cells[0]).filter(node => node.props?.class === 'identifier-copy').length, 1)
-      assert.equal(nodes(cells[4]).filter(node => node.props?.class === 'identifier-copy').length, 1)
+      assert.equal(nodes(cells[3]).filter(node => node.props?.class === 'identifier-copy').length, 1)
     })
     assert.equal(h.calls.filter(call=>call.url.startsWith('/api/observations')).length, 1)
   assertReadOnlyObservationSources(h)
@@ -1081,7 +1120,7 @@ test('review details use the dedicated history section and Observation History s
   const h = harness(identityHandler([row]))
   try {
     await h.state.loadObservations()
-    const view = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.children === 'View Details')
+    const view = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.props?.['aria-label'] === messages.common.viewDetails)
     await view.props.onClick()
     assert.equal(h.state.selected.value.reviewedAt, row.reviewed_at)
     assert.equal(h.state.selected.value.reviewComment, row.review_comment)
@@ -1091,7 +1130,7 @@ test('review details use the dedicated history section and Observation History s
     assert.equal(historySection.props['observation-id'], uuid)
     assert.ok(!nodes(details).some(node => node.type === 'dt' && node.children === messages.conservationPages.observations.reviewComments))
     h.state.closeModal()
-    const history = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.children === 'History')
+    const history = nodes(mainObservationTable(h)).find(node => node.type === 'button' && node.props?.['aria-label'] === messages.conservationPages.observations.history)
     history.props.onClick(); await flush()
     assert.equal(h.state.historyModal.value, true)
     assert.equal(h.state.history.value[0].id, uuid)
@@ -1129,35 +1168,40 @@ test('Observation modal opts into accessibility and its own two-column theme wit
     assert.match(style, /scroll-padding-block-start/)
     const source = readFileSync(filename, 'utf8')
     const observationHistoryModal = source.slice(source.indexOf('<AppModal v-if="selected && historyModal"'))
-    assert.doesNotMatch(observationHistoryModal.split('</AppModal>')[0], /\baccessible\b|observation-dialog/)
+    assert.match(observationHistoryModal.split('</AppModal>')[0], /\baccessible\b/)
+    assert.doesNotMatch(observationHistoryModal.split('</AppModal>')[0], /observation-dialog/)
   } finally { h.stop() }
 })
 
-test('loading, unavailable and empty main-table states span the eight retained columns', async () => {
+test('loading, unavailable and empty main-table states span the seven retained columns', async () => {
   for (const fail of [false, true]) {
     const h = harness(async () => fail ? Response.json({ error: 'Unavailable' }, { status: 503 }) : Response.json({ observations: [] }))
     try {
       const loading = nodes(mainObservationTable(h)).filter(node => node.type === 'td')
-      assert.equal(loading.length, 1); assert.equal(loading[0].props.colspan, '8')
+      assert.equal(loading.length, 1); assert.equal(loading[0].props.colspan, '7')
       await h.state.loadObservations()
       const cells = nodes(mainObservationTable(h)).filter(node => node.type === 'td')
-      assert.equal(cells.length, 1); assert.equal(cells[0].props.colspan, '8')
+      assert.equal(cells.length, 1); assert.equal(cells[0].props.colspan, '7')
     } finally { h.stop() }
   }
 })
 
-test('table layout reserves intrinsic status/action widths, consistent padding and internal horizontal scrolling', async () => {
+test('table layout uses consistent spacing, compact actions and a responsive mobile card layout', async () => {
   const css = descriptor.styles[0].content
-  assert.match(css, /\.observations-table\s*\{[^}]*width: 100%; min-width: 92rem; table-layout: auto; white-space: normal/)
-  assert.match(css, /\.observations-table th, \.observations-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)
-  assert.match(css, /\.observations-table \.status-column\s*\{ width: 10rem/)
-  assert.match(css, /\.observations-table \.species-column\s*\{ width: 15rem/)
-  assert.match(css, /\.observations-table \.plant-column\s*\{ width: 6rem/)
+  assert.match(css, /\.officer-layout\.officer-layout\.officer-layout \.observations-scroll \.observations-table\s*\{[^}]*width: 100%; min-width: 78rem; table-layout: fixed; white-space: normal/)
+  assert.match(css, /\.observations-table th, \.observations-table td\s*\{ padding: 10px; text-align: center; vertical-align: middle/)
+  assert.match(css, /\.observations-table \.status-column\s*\{ width: 11%/)
+  assert.match(css, /\.observations-table \.observation-column\s*\{ width: 24%/)
+  assert.match(css, /\.submission-identity-stack\s*\{ display: grid/)
+  assert.match(css, /\.observations-table \.plant-id-value\s*\{ display: flex; flex-direction: column/)
+  assert.match(css, /\.observations-table \.plant-id-value\s*\{[^}]*flex-direction: column/)
   assert.match(css, /\.identifier-line\s*\{[^}]*display: inline-flex;[^}]*justify-content: flex-start;[^}]*gap: 7px/)
   assert.doesNotMatch(/\.identifier-line\s*\{([^}]+)\}/.exec(css)[1], /width: 180px/)
-  assert.match(css, /\.observations-scroll \.observations-table \.action-group\s*\{[^}]*flex-wrap: nowrap;[^}]*gap: 7px; width: max-content; min-width: max-content/)
-  assert.match(css, /\.observations-table \.action-group > \.action-button\s*\{[^}]*max-width: none; height: auto;[^}]*white-space: nowrap/)
-  assert.match(css, /@media \(max-width: 767px\)[^\n]*min-height: 44px/)
+  assert.match(css, /\.observations-scroll \.observations-table \.action-group\s*\{[^}]*flex-wrap: wrap;[^}]*justify-content: center/)
+  assert.match(css, /\.observations-table \.action-group > \.action-button\.observation-icon-action\s*\{[^}]*width: 36px;[^}]*height: 36px/)
+  assert.match(css, /@container \(max-width: 1248px\)[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/)
+  assert.match(css, /nth-child\(2\).*nth-child\(5\).*display: flex; align-items: center/)
+  assert.match(css, /content: attr\(aria-label\)/)
   const compiled = compileStyle({ source: css, id: 'data-v-observation-table', scoped: true })
   assert.equal(compiled.errors.length, 0)
   assert.match(compiled.code, /\.observations-scroll \.observations-table \.action-group\[data-v-observation-table\]/)
@@ -1169,6 +1213,22 @@ test('table layout reserves intrinsic status/action widths, consistent padding a
     assert.equal(scroll.props.role, 'region'); assert.equal(scroll.props.tabindex, '0')
     assert.equal(scroll.props['aria-label'], messages.conservationPages.observations.title)
     assert.ok(!nodes(mainObservationTable(h)).some(node => node.props?.class?.includes('review-state')))
+  } finally { h.stop() }
+})
+
+test('mobile Observation cards match the Plant Species identity, field-row and action-strip pattern', async () => {
+  const h = harness(identityHandler([fixture({ status: 'Cancelled' })]))
+  try {
+    await h.state.loadObservations()
+    const table = mainObservationTable(h)
+    assert.ok(nodes(table).some(node => node.props?.class === 'observation-card-emblem'))
+    const css = descriptor.styles[0].content
+    assert.match(css, /\.observation-card-emblem\s*\{[^}]*width: 52px; height: 52px/)
+    assert.match(css, /tbody tr > td:first-child \{ display: flex; align-items: center; gap: 14px/)
+    assert.match(css, /tbody tr > td:nth-child\(2\), \.observations-table tbody tr > td:nth-child\(3\), \.observations-table tbody tr > td:nth-child\(4\), \.observations-table tbody tr > td:nth-child\(5\) \{ display: flex; align-items: center/)
+    assert.match(css, /\.observations-table \.terminal-read-only > td, \.observations-table tr\.terminal-read-only > td, \.observations-table tr\.superseded > td \{ background: #fff/)
+    assert.match(css, /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/)
+    assert.match(css, /observation-icon-action:hover:not\(:disabled\).*background: #33745d; color: #fff/)
   } finally { h.stop() }
 })
 
@@ -1186,7 +1246,7 @@ test('main observation header is continuous forest green and row content is vert
   assert.match(identifiers, /align-items: center/)
   assert.match(identifiers, /vertical-align: middle/)
   assert.match(css, /\.observations-table \.badge\s*\{[^}]*align-items: center;[^}]*vertical-align: middle/)
-  assert.match(css, /\.observations-table \.submitter-column\s*\{ width: 13rem/)
+  assert.match(css, /\.observations-table \.submitter-column\s*\{ width: 13%/)
   assert.doesNotMatch(css, /(?:^|\n)\s*(?:thead|th)\s*\{/, 'header styling stays scoped to the main table')
 })
 
@@ -1198,12 +1258,12 @@ test('status badges and action rows retain intrinsic single-line widths without 
   assert.match(badge, /font-size: 11px/)
   assert.doesNotMatch(badge, /overflow: hidden|text-overflow|background:|color:|border-radius:|padding:/)
   const actions = /\.observations-scroll \.observations-table \.action-group\s*\{([^}]+)\}/.exec(css)[1]
-  assert.match(actions, /display: flex; flex-wrap: nowrap; align-items: center/)
-  assert.match(actions, /gap: 7px; width: max-content; min-width: max-content/)
-  const buttons = /\.observations-table \.action-group > \.action-button\s*\{([^}]+)\}/.exec(css)[1]
-  assert.match(buttons, /flex: 0 0 auto; width: max-content; min-width: max-content; max-width: none/)
-  assert.match(buttons, /white-space: nowrap/)
-  assert.doesNotMatch(buttons, /overflow: hidden|text-overflow|font-size: [0-9]px/)
+  assert.match(actions, /display: flex; flex-wrap: wrap; align-items: center/)
+  assert.match(actions, /justify-content: center; gap: 6px; width: 100%; min-width: 0/)
+  const buttons = /\.observations-table \.action-group > \.action-button\.observation-icon-action\s*\{([^}]+)\}/.exec(css)[1]
+  assert.match(buttons, /flex: 0 0 36px; width: 36px; min-width: 36px; height: 36px/)
+  assert.match(css, /\.observations-table \.observation-icon-action:hover::after, \.observations-table \.observation-icon-action:focus-visible::after/)
+  assert.doesNotMatch(buttons, /overflow: hidden|text-overflow/)
   assert.match(css, /\.observations-scroll\s*\{ min-width: 0; max-width: 100%; overflow-x: auto/)
   assert.doesNotMatch(/\.observations-table\s*\{([^}]+)\}/.exec(css)[1], /overflow:/)
 })
@@ -1220,12 +1280,12 @@ test('pending and completed observations keep every action and full localized st
         assert.equal(badge.children, h.state.label(status))
         const cell = nodes(table).find(node => node.props?.class === 'actions-cell')
         const group = nodes(cell).find(node => node.props?.class === 'action-group')
-        const actions = nodes(group).filter(node => node.props?.class === 'action-button')
-        assert.equal(actions.length, origin === 'initial_registration' && status === 'Pending Review' ? 5 : 4)
-        assert.ok(actions.every(node => nodes(node).some(child => typeof child.children === 'string' && child.children.trim())))
+        const actions = nodes(group).filter(node => String(node.props?.class).split(/\s+/).includes('observation-icon-action'))
+        assert.equal(actions.length, 3)
+        assert.ok(actions.every(node => node.props?.['aria-label'] && node.props?.title))
         assert.ok(actions.some(node => node.props?.to === '/plant/PL007'))
-        assert.ok(actions.some(node => node.props?.to?.name === 'conservation-map'))
-        assert.equal(nodes(table).filter(node => node.type === 'th').length, 8)
+        assert.ok(!actions.some(node => node.props?.to?.name === 'conservation-map'))
+        assert.equal(nodes(table).filter(node => node.type === 'th').length, 7)
         const scroll = nodes(h.render()).find(node => String(node.props?.class).includes('observations-scroll'))
         assert.equal(scroll.props.tabindex, '0')
         assert.equal(nodes(scroll).filter(node => String(node.props?.class).includes('table-scroll')).length, 1, 'only one table scroll container')
@@ -1471,7 +1531,7 @@ test('one Submission Type filter has exactly the three subsequent-workflow choic
    assert.equal(h.state.queueOrigin.value,'subsequent_observation');assert.ok(!tree.some(n=>n.props?.class==='field observation-type-field'));
    const select=tree.find(n=>n.type==='select'&&nodes(n).some(o=>o.type==='option'&&o.props?.value==='original'));
    assert.deepEqual(nodes(select).filter(n=>n.type==='option').map(n=>n.children),[dictionary.finalOfficerWorkflow.all,dictionary.finalOfficerWorkflow.original,dictionary.finalOfficerWorkflow.edit]);
-   assert.equal(nodes(mainObservationTable(h)).filter(n=>n.type==='th').length,8);
+   assert.equal(nodes(mainObservationTable(h)).filter(n=>n.type==='th').length,7);
   }finally{h.stop()}
  }
 })
@@ -1483,9 +1543,9 @@ test('registration and unclassified originals never enter the normal queue, even
  }finally{h.stop()}
 })
 
-test('Created uses real Malaysia date and time, including next-day rollover, and headers cannot wrap into characters',()=>{
+test('Created formatter remains available for details and the compact table uses seven columns',()=>{
  const h=harness(identityHandler([]));try{assert.equal(h.state.formatDate('2026-11-03T20:30:00Z'),'4 November 2026, 04:30');assert.equal(h.state.formatDate('invalid'),'\u2014');}finally{h.stop()}
- const css=descriptor.styles.map(s=>s.content).join('\n');assert.match(css,/th:nth-child\(6\).*th:nth-child\(8\)[^{]*\{[^}]*white-space: nowrap; overflow-wrap: normal/);assert.ok(!css.includes('status-column, .observations-table .actions-column { width: 1%'));
+ const h2=harness(identityHandler([fixture()]));try{assert.equal(nodes(mainObservationTable(h2)).filter(n=>n.type==='th').length,7)}finally{h2.stop()}
 })
 
 async function unifiedProposal(status='Pending Review',origin='subsequent_observation') {
@@ -1493,13 +1553,23 @@ async function unifiedProposal(status='Pending Review',origin='subsequent_observ
  return mapObservationEdit({id:uuid,observation_id:uuid,owner_subject:baseline.owner_subject,status,revision:7,base_revision:3,created_at:'2026-11-17T00:00:00Z',base_snapshot:{content:baseline.content},proposed_content:{...baseline.content,notes:'Proposal draft'},retained_photo_ids:[],added_photo_count:0},async()=>({observation:baseline}))
 }
 test('unified Observation table renders both distinct submission identities and accurate original counts',async()=>{
- const canonical=[fixture({status:'Approved'}),fixture({id:'pending-original'})],h=harness(identityHandler(canonical))
+ const canonical=[fixture({status:'Approved',plant_scientific_name:'Yellow Simpoh Air'}),fixture({id:'pending-original'})],h=harness(identityHandler(canonical))
  try{await h.state.loadObservations();const edit=await unifiedProposal();h.state.receiveProposalState({rows:[edit],names:{'real-botanist-subject':'Botanist Aina'},loading:false,error:''});await flush()
  assert.equal(h.state.displayedRows.value.length,3);assert.equal(new Set(h.state.displayedRows.value.map(row=>row.key)).size,3)
  assert.ok(h.state.displayedRows.value.some(row=>row.key==='observation:'+uuid));assert.ok(h.state.displayedRows.value.some(row=>row.key==='observation-edit:'+uuid))
  assert.equal(h.state.observations.value.length,2);assert.equal(h.state.summaryCounts.value.find(card=>card.status==='Pending Review').count,2)
- const table=mainObservationTable(h),headers=nodes(table).filter(n=>n.type==='th');assert.equal(headers.length,8);assert.equal(headers[1].children,'Submission Type');assert.equal(headers[3].children,'Species')
- const rows=nodes(table).filter(n=>n.type==='tr'&&observationCells(n).length===8);assert.equal(rows.length,3)
+ const table=mainObservationTable(h),headers=nodes(table).filter(n=>n.type==='th');assert.deepEqual(headers.map(n=>n.children),['Submission ID','Plant ID','Species','Submitted By','Status','Created','Actions'])
+ const rows=nodes(table).filter(n=>n.type==='tr'&&observationCells(n).length===7);assert.equal(rows.length,3)
+ const originalRow=rows.find(n=>nodes(observationCells(n)[0]).some(x=>x.props?.class==='submission-type-badge submission-type-original'))
+ const editRow=rows.find(n=>nodes(observationCells(n)[0]).some(x=>x.props?.class==='submission-type-badge submission-type-edit'))
+ assert.ok(originalRow && editRow);assert.ok(renderedText(observationCells(originalRow)[1]).includes('PL007'));assert.ok(renderedText(observationCells(editRow)[1]).includes('PL007'))
+ const originalIdentity=observationCells(originalRow)[0]
+ assert.deepEqual(nodes(originalIdentity).filter(n=>n.props?.class==='submission-type-badge submission-type-original').map(n=>n.children),[messages.finalOfficerWorkflow.original])
+ const proposalIdentity=observationCells(editRow)[0]
+ assert.deepEqual(nodes(proposalIdentity).filter(n=>n.props?.class==='submission-type-badge submission-type-edit').map(n=>n.children),[messages.finalOfficerWorkflow.edit])
+ const plantIdentity=observationCells(originalRow)[1]
+ assert.ok(nodes(plantIdentity).some(n=>n.type==='strong'&&n.children==='PL007'))
+ assert.ok(nodes(plantIdentity).some(n=>n.type==='em'&&n.children===h.state.observations.value[0].plantScientificName))
  assert.ok(nodes(table).some(n=>n.children===messages.finalOfficerWorkflow.edit));assert.ok(nodes(table).some(n=>n.children===messages.finalOfficerWorkflow.original))
  assert.equal(h.state.proposalItems.value[0].proposal.revision,7);assert.equal(h.state.proposalItems.value[0].baseline.status,'Approved')
  assert.ok(!nodes(h.render()).some(n=>n.type==='section'&&n.props?.class==='panel observation-edit-queue'))
@@ -1522,8 +1592,8 @@ test('unified proposal actions preserve exact identity and terminal grey/read-on
  for(const status of ['Pending Review','Cancelled','Withdrawn','Superseded']){
  const h=harness(identityHandler([]));try{await h.state.loadObservations();const edit=await unifiedProposal(status),opened=[];h.state.proposalQueue.value={view:row=>opened.push(row)}
  h.state.receiveProposalState({rows:[edit],names:{},loading:false,error:''});await flush()
- const row=nodes(mainObservationTable(h)).find(n=>n.type==='tr'&&observationCells(n).length===8),cells=observationCells(row),button=nodes(cells[7]).find(n=>n.type==='button')
- assert.equal(h.state.proposalReviewable(edit),status==='Pending Review');assert.equal(button.children,status==='Pending Review'?messages.dashboardObservationEdits.review:messages.common.viewDetails)
+ const row=nodes(mainObservationTable(h)).find(n=>n.type==='tr'&&observationCells(n).length===7),cells=observationCells(row),button=nodes(cells[6]).find(n=>n.type==='button')
+ assert.equal(h.state.proposalReviewable(edit),status==='Pending Review');assert.equal(button.props['aria-label'],status==='Pending Review'?messages.dashboardObservationEdits.review:messages.common.viewDetails)
  if(status!=='Pending Review')assert.ok(row.props.class.includes(status==='Superseded'?'superseded':'terminal-read-only'))
  button.props.onClick();assert.equal(opened[0].id,uuid);assert.equal(opened[0].revision,7);assert.equal(h.state.selected.value,null);assert.equal(h.calls.filter(c=>c.options?.method==='POST').length,0)
  }finally{h.stop()}
@@ -1570,12 +1640,12 @@ test('edit submission IDs reuse canonical row markup, copy the full request ID a
  const writes=[],h=harness(identityHandler([fixture()]),officer,false,null,'en',{clipboard:{writeText:async value=>writes.push(value)}})
  try{await h.state.loadObservations();const edit=await unifiedProposal();edit.id='535b4db9-a9b4-42fc-9739-1d093d1ed957';let opened
  h.state.proposalQueue.value={view:row=>{opened=row}};h.state.receiveProposalState({rows:[edit],names:{},loading:false,error:''});await flush()
- const rows=nodes(mainObservationTable(h)).filter(n=>n.type==='tr'&&observationCells(n).length===8)
- for(const row of rows){const cell=observationCells(row)[0];assert.ok(nodes(cell).some(n=>n.props?.class==='identifier-line'));assert.equal(nodes(cell).filter(n=>n.type==='strong').length,1);assert.equal(nodes(cell).filter(n=>n.type==='small').length,0);assert.ok(nodes(cell).some(n=>n.props?.class==='identifier-copy'))}
+ const rows=nodes(mainObservationTable(h)).filter(n=>n.type==='tr'&&observationCells(n).length===7)
+ for(const row of rows){const cell=observationCells(row)[0];assert.ok(nodes(cell).some(n=>n.props?.class==='identifier-line'));assert.ok(nodes(cell).filter(n=>n.type==='strong').length>=1);assert.equal(nodes(cell).filter(n=>n.type==='small').length,0);assert.ok(nodes(cell).some(n=>n.props?.class==='identifier-copy'))}
  const row=rows.find(r=>nodes(observationCells(r)[0]).some(n=>n.type==='strong'&&n.props?.title===edit.id));assert.ok(row)
  const cell=observationCells(row)[0];assert.ok(nodes(cell).some(n=>n.type==='strong'&&n.children===h.state.proposalLabels.value.get(edit.id)))
  await nodes(cell).find(n=>n.props?.class==='identifier-copy').props.onClick();assert.deepEqual(writes,[edit.id]);assert.notEqual(writes[0],edit.observation_edit.observation_id)
- nodes(observationCells(row)[7]).find(n=>n.type==='button').props.onClick();assert.equal(opened.id,edit.id);assert.equal(opened.observation_edit.observation_id,edit.observation_edit.observation_id)
+ nodes(observationCells(row)[6]).find(n=>n.type==='button').props.onClick();assert.equal(opened.id,edit.id);assert.equal(opened.observation_edit.observation_id,edit.observation_edit.observation_id)
  }finally{h.stop()}
 })
 
@@ -1800,4 +1870,211 @@ test('terminal help belongs to a separate full-width status strip above details,
    const css=readFileSync(new URL('../src/styles/observation-dialog.css',import.meta.url),'utf8');assert.match(css,/observation-title-layout[^}]*max-width: none/);assert.match(css,/grid-template-columns: minmax\(0, 1fr\) 36px/);assert.match(css,/observation-refresh-control::after[^}]*border-right/)
   }finally{h.stop()}
  }
+})
+
+function fakeRefreshClock() {
+  let now = 1_000_000, sequence = 0, visibility = 'visible'
+  const intervals = new Map(), listeners = new Map()
+  const window = {
+    setInterval(fn, delay) { const id = ++sequence; intervals.set(id, { fn, delay, due: now + delay }); return id },
+    clearInterval(id) { intervals.delete(id) },
+    addEventListener() {}, removeEventListener() {},
+  }
+  const document = {
+    get visibilityState() { return visibility },
+    addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn) },
+    removeEventListener(type, fn) { listeners.get(type)?.delete(fn) },
+  }
+  const ClockDate = class extends Date { static now() { return now } }
+  return {
+    window, document, Date: ClockDate, intervals,
+    advance(ms) {
+      now += ms
+      for (const timer of intervals.values()) if (timer.due <= now) {
+        timer.due += (Math.floor((now - timer.due) / timer.delay) + 1) * timer.delay
+        timer.fn()
+      }
+    },
+    setVisibility(value) { visibility = value; for (const fn of listeners.get('visibilitychange') || []) fn() },
+  }
+}
+const observationListCalls = h => h.calls.filter(call => call.url.startsWith('/api/observations?'))
+
+test('Observations mount loads normally and refreshes one minute later without hiding verified rows', async () => {
+  const clock = fakeRefreshClock(), oldRow = fixture({ id: 'before-refresh' }), newRow = fixture({ id: 'after-refresh', status: 'Approved' })
+  let release
+  const h = harness(async () => Response.json({}), officer, false, async (url, options) => {
+    if (options.cache === 'reload') return new Promise(resolve => { release = resolve })
+    return queueResponse([oldRow])
+  }, 'en', { ...clock })
+  try {
+    h.mount(); await flush()
+    assert.equal(observationListCalls(h).length, 1, 'mount preserves the single initial list load')
+    assert.equal(clock.intervals.size, 1, 'only one periodic timer is active')
+    clock.advance(59_999); await flush(); assert.equal(observationListCalls(h).length, 1)
+    clock.advance(1); await flush()
+    assert.equal(observationListCalls(h).length, 2)
+    assert.equal(h.state.isRefreshing.value, true)
+    assert.deepEqual(Array.from(h.state.observations.value, row => row.id), ['before-refresh'])
+    assert.ok(nodes(h.render()).some(node => node.props?.role === 'status' && node.children === messages.conservationPages.observations.autoRefreshing))
+    release(queueResponse([newRow]))
+    await flush()
+    assert.equal(h.state.isRefreshing.value, false)
+    assert.deepEqual(Array.from(h.state.observations.value, row => row.id), ['after-refresh'])
+  } finally { h.stop(); assert.equal(clock.intervals.size, 0, 'unmount clears the timer') }
+})
+
+test('hidden tabs skip polling and visibility recovery refreshes stale data once without duplicate timers', async () => {
+  const clock = fakeRefreshClock(), h = harness(async () => Response.json({}), officer, false,
+    async () => queueResponse([fixture()]), 'en', { ...clock })
+  try {
+    h.mount(); await flush(); h.changeSession(officer, false); h.changeSession(officer, false)
+    assert.equal(clock.intervals.size, 1)
+    clock.setVisibility('hidden'); clock.advance(60_000); await flush()
+    assert.equal(observationListCalls(h).length, 1)
+    clock.setVisibility('visible'); await flush()
+    assert.equal(observationListCalls(h).length, 2)
+    assert.equal(clock.intervals.size, 1)
+    clock.advance(60_000); await flush()
+    assert.equal(observationListCalls(h).length, 3, 'the timer does not duplicate the visibility-triggered refresh')
+    h.changeSession(null); assert.equal(clock.intervals.size, 0)
+  } finally { h.stop(); assert.equal(clock.intervals.size, 0) }
+})
+
+test('background refresh preserves local filters and pagination, removes status-moved rows and defers during review drafts', async () => {
+  const clock = fakeRefreshClock(), first = fixture({ id: 'pending-first' }), second = fixture({ id: 'pending-second' })
+  const newest = fixture({ id: 'pending-new' }), older = fixture({ id: 'pending-older', created_at: '2026-10-02T10:00:00Z' })
+  let queueNumber = 0, refreshPage = 0
+  const h = harness(async () => Response.json({}), officer, false, async (url, options) => {
+    if (options.cache === 'reload') return ++refreshPage === 1
+      ? queueResponse([newest], 'refresh-next')
+      : queueResponse([older], null)
+    if (++queueNumber === 1) return queueResponse([first], 'older')
+    return queueResponse([second], null)
+  }, 'en', { ...clock })
+  try {
+    h.state.status.value = 'Pending Review'; h.state.search.value = 'pending'
+    h.state.species.value = '3'; h.state.owner.value = 'staff:real-botanist-subject'; h.state.date.value = '2026-11-02'
+    h.mount(); await flush(); await h.state.loadObservations(true)
+    h.state.selected.value = h.state.observations.value[0]; h.state.reviewMode.value = true; h.state.reviewComment.value = 'Unsaved reviewer note'
+    clock.advance(60_000); await flush()
+    assert.equal(observationListCalls(h).length, 2, 'an open review dialog defers refresh')
+    assert.equal(h.state.reviewComment.value, 'Unsaved reviewer note')
+    h.state.selected.value = null; h.state.reviewMode.value = false
+    clock.advance(60_000); await flush()
+    assert.equal(observationListCalls(h).length, 4, 'refresh rebuilds the same two-page window')
+    assert.deepEqual(Array.from(h.state.observations.value, row => row.id), ['pending-new', 'pending-older'])
+    assert.deepEqual([h.state.status.value, h.state.search.value, h.state.species.value, h.state.owner.value, h.state.date.value],
+      ['Pending Review', 'pending', '3', 'staff:real-botanist-subject', '2026-11-02'])
+    assert.equal(h.state.hasMore.value, false)
+    assert.equal(h.state.filtered.value.length, 1)
+    assert.ok(observationListCalls(h).slice(2).every(call => new URL(call.url, 'https://fixture.invalid').searchParams.get('status') === 'Pending Review'))
+  } finally { h.stop() }
+})
+
+test('background refresh failure retains rows, exposes retry, and successful retry recovers with authorized reads', async () => {
+  const clock = fakeRefreshClock(), original = fixture({ id: 'verified-old' }), recovered = fixture({ id: 'verified-new' })
+  let attempts = 0
+  const h = harness(async () => Response.json({}), officer, false, async (_url, options) => {
+    if (options.cache === 'reload' && ++attempts === 1) return Response.json({ error: 'Temporary failure' }, { status: 503 })
+    return queueResponse([options.cache === 'reload' ? recovered : original])
+  }, 'en', { ...clock })
+  try {
+    h.mount(); await flush(); clock.advance(60_000); await flush()
+    assert.deepEqual(Array.from(h.state.observations.value, row => row.id), ['verified-old'])
+    assert.ok(h.state.automaticRefreshError.value)
+    assert.equal(h.state.summaryCounts.value.every(item => item.count === null), true)
+    const retry = nodes(h.render()).find(node => node.type === 'button' && node.children === messages.conservationPages.observations.retry)
+    assert.ok(retry); retry.props.onClick(); await flush()
+    assert.equal(h.state.automaticRefreshError.value, '')
+    assert.deepEqual(Array.from(h.state.observations.value, row => row.id), ['verified-new'])
+    assert.ok(observationListCalls(h).every(call => (!call.options.method || call.options.method === 'GET') && call.options.credentials === 'same-origin'))
+  } finally { h.stop() }
+})
+
+test('a user status change supersedes an in-flight automatic refresh and a late old page cannot overwrite it', async () => {
+  const clock = fakeRefreshClock(), waiting = fixture({ id: 'still-pending' }), approved = fixture({ id: 'new-approved', status: 'Approved' })
+  let release, oldSignal
+  const h = harness(async () => Response.json({}), officer, false, async (url, options) => {
+    if (options.cache === 'reload') { oldSignal = options.signal; return new Promise(resolve => { release = resolve }) }
+    const query = new URL(url, 'https://fixture.invalid').searchParams
+    if (query.get('status') === 'Approved') return queueResponse([approved])
+    return queueResponse([waiting], 'pending-next')
+  }, 'en', { ...clock })
+  try {
+    h.mount(); await flush(); clock.advance(60_000); await flush()
+    assert.equal(h.state.isRefreshing.value, true)
+    h.state.status.value = 'Approved'; await h.state.loadObservations()
+    assert.equal(oldSignal.aborted, true)
+    release(queueResponse([waiting]))
+    await flush()
+    assert.deepEqual(Array.from(h.state.observations.value, row => row.id), ['new-approved'])
+    assert.equal(h.state.status.value, 'Approved')
+    assert.equal(h.state.isRefreshing.value, false)
+  } finally { h.stop() }
+})
+
+test('logout, account switch and permission revocation stop polling and clear private records during an in-flight refresh', async () => {
+  for (const change of ['logout', 'account', 'permission']) {
+    const clock = fakeRefreshClock(), original = fixture(), h = harness(async () => Response.json({}), officer, false, async (_url, options) => {
+      if (options.cache === 'reload') return new Promise(resolve => { release = resolve })
+      return queueResponse([original])
+    }, 'en', { ...clock })
+    let release
+    try {
+      h.mount(); await flush(); clock.advance(60_000); await flush()
+      const pending = release
+      if (change === 'logout') h.changeSession(null)
+      else if (change === 'account') h.changeSession({ ...officer, id: 'other-officer' })
+      else h.changeSession({ ...officer, role: 'Botanist' })
+      assert.equal(h.state.observations.value.length, 0)
+      assert.equal(clock.intervals.size, change === 'account' ? 1 : 0)
+      pending(queueResponse([fixture({ id: 'private-stale' })])); await flush()
+      assert.equal(h.state.observations.value.length, 0)
+      assert.equal(observationListCalls(h).length, 2)
+    } finally { h.stop() }
+  }
+})
+
+test('automatic refresh is bounded to 20 loaded pages and offers an explicit full-window refresh', async () => {
+  let page = 0, refreshed = 0
+  const h = harness(async () => Response.json({}), officer, false, async (_url, options) => {
+    if (options.cache === 'reload') {
+      refreshed++
+      return queueResponse([fixture({ id: `refresh-${refreshed}` })], refreshed < 21 ? `refresh-cursor-${refreshed}` : null)
+    }
+    page++
+    return queueResponse([fixture({ id: `loaded-${page}` })], `loaded-cursor-${page}`)
+  })
+  try {
+    await h.state.loadObservations()
+    for (let index = 0; index < 20; index++) await h.state.loadObservations(true)
+    assert.equal(observationListCalls(h).length, 21)
+    await h.state.refreshObservations()
+    assert.equal(observationListCalls(h).length, 21, 'automatic refresh does not issue an expensive partial page-window request')
+    assert.equal(h.state.automaticRefreshDeferred.value, true)
+    assert.ok(nodes(h.render()).some(node => node.children === messages.conservationPages.observations.autoRefreshDeferred))
+    await h.state.refreshObservations(true)
+    assert.equal(refreshed, 21, 'explicit refresh verifies the entire loaded page window')
+    assert.deepEqual(Array.from(h.state.observations.value, row => row.id), Array.from({ length: 21 }, (_, index) => `refresh-${index + 1}`))
+    assert.equal(h.state.automaticRefreshDeferred.value, false)
+  } finally { h.stop() }
+})
+
+test('automatic refresh status, failure and deferred messages are translated in EN/MS/ZH', () => {
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const dictionary = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
+    const labels = dictionary.conservationPages.observations
+    for (const key of ['autoRefreshing', 'autoRefreshFailed', 'autoRefreshDeferred', 'refreshNow'])
+      assert.ok(typeof labels[key] === 'string' && labels[key].length > 0, `${language} provides ${key}`)
+    const h = harness(async () => Response.json({}), officer, false, null, language)
+    try {
+      h.state.isRefreshing.value = true
+      assert.ok(nodes(h.render()).some(node => node.props?.role === 'status' && node.children === labels.autoRefreshing))
+      h.state.isRefreshing.value = false; h.state.automaticRefreshError.value = 'Unavailable'
+      assert.ok(nodes(h.render()).some(node => node.props?.role === 'alert' && nodes(node).some(child => child.children === labels.autoRefreshFailed)))
+      h.state.automaticRefreshError.value = ''; h.state.automaticRefreshDeferred.value = true
+      assert.ok(nodes(h.render()).some(node => nodes(node).some(child => child.children === labels.autoRefreshDeferred)))
+    } finally { h.stop() }
+  }
 })

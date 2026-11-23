@@ -1,5 +1,6 @@
+import PreviewableImage, { confirmPhotoRemoval } from "../components/PreviewableImage";
 import React, { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
@@ -18,6 +19,7 @@ import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import { fieldFormStyles } from "../components/fieldFormStyles";
+import { inspectPickedImages, imageSizeAlert, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 
 const fields = ["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "notes", "zone", "latitude", "longitude", "accuracy_m", "altitudeM"];
 const requiredFields = new Set(["scientific_name", "heightCm", "healthStatus", "lifeStage", "morphology", "latitude", "longitude"]);
@@ -450,7 +452,11 @@ export default function EditPlantRecord({ route, navigation }) {
       if (!permission.granted) return Alert.alert(t("addPlant.permissionRequired"), camera ? t("addPlant.cameraPermissionIsRequired") : t("addPlant.galleryPermissionIsRequired"));
       const result = camera ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8 })
         : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, selectionLimit: 8, quality: 0.8 });
-      if (!result.canceled) addPicked(result.assets);
+      if (!result.canceled) {
+        const checked = await inspectPickedImages(result.assets, result.assets.map((_, index) => `${t("imageSizeAlert.plantPhoto")} ${newPhotos.length + index + 1}`), FileSystem.getInfoAsync);
+        if (checked.rejected.length) { const alert = imageSizeAlert(t, checked.rejected); Alert.alert(alert.title, alert.message); }
+        if (checked.accepted.length) addPicked(checked.accepted);
+      }
     } catch { Alert.alert(t("common.error"), camera ? t("addPlant.unableToOpenTheCamera") : t("addPlant.unableToOpenTheGallery")); }
   }
   function validate() {
@@ -572,8 +578,14 @@ export default function EditPlantRecord({ route, navigation }) {
           ? selectedOriginalPhotos
           : originalPhotoIds;
         proposed.photos = [];
-        for (const uri of newPhotos) proposed.photos.push({ content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg",
-          base64: await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 }) });
+        const oversizedPhotos = [];
+        for (const [index, uri] of newPhotos.entries()) {
+          const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+          const bytes = base64Bytes(base64);
+          if (bytes > MAX_IMAGE_BYTES) { oversizedPhotos.push({ label: `${t("imageSizeAlert.plantPhoto")} ${index + 1}`, bytes }); continue; }
+          proposed.photos.push({ content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg", base64 });
+        }
+        if (oversizedPhotos.length) { const error = Error("Image too large"); error.imageAlert = imageSizeAlert(t, oversizedPhotos); throw error; }
       }
       if (state.correctionChange) {
         await plantApi(`/record-changes/${encodeURIComponent(state.correctionChange.id)}`, { method: "PATCH", expectedAccountId: accountId,
@@ -600,6 +612,7 @@ export default function EditPlantRecord({ route, navigation }) {
         botanist: route.params?.botanist, openTarget: { kind: "plant", recordId: plantId },
       }) }]);
     } catch (error) {
+      if (error.imageAlert) { Alert.alert(error.imageAlert.title, error.imageAlert.message); return; }
       if (error.code === "SUBMISSION_REJECTED") {
         setState(old => ({ ...old, plant: { ...old.plant, status: "Rejected" } }));
         Alert.alert(t("common.error"), t("recordEdits.finalRejected"));
@@ -625,7 +638,7 @@ export default function EditPlantRecord({ route, navigation }) {
   const submitHint = validate() || (state.plant.status === "Approved" && !state.correctionChange && !hasMeaningfulChanges
     ? t("recordEdits.noEditChanges") : "");
   const submitDisabled = Boolean(saving || submitted || state.offlineDraft || draftConflict || submitHint);
-  return <DiscoverableScrollView scrollEnabled={!mapInteracting} style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <DiscoverableScrollView scrollEnabled={!mapInteracting} style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <View style={styles.titleRow}>
       <Text style={styles.title}>{t(isCorrectionPage ? "recordEdits.correctPlantRegistration" : "recordEdits.editPlant")}</Text>
       {isCorrectionPage && <TouchableOpacity testID="plant-correction-refresh" style={styles.correctionRefreshButton} onPress={() => { void refreshCorrectionRecord(); }}
@@ -721,7 +734,7 @@ export default function EditPlantRecord({ route, navigation }) {
       </OriginalUpdatedField>
     </View>
     <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.plantPhotos")}</Text>
-      {state.correctionPhotos.length > 0 && <View style={styles.updatedPhotoGrid}>{state.correctionPhotos.map((source, index) => <View key={`proposal-photo-${index}`} style={styles.originalPhotoChoice}><Image source={source} style={styles.photo} resizeMode="cover" /></View>)}</View>}
+      {state.correctionPhotos.length > 0 && <View style={styles.updatedPhotoGrid}>{state.correctionPhotos.map((source, index) => <View key={`proposal-photo-${index}`} style={styles.originalPhotoChoice}><PreviewableImage source={source} style={styles.photo} resizeMode="cover" /></View>)}</View>}
       <OriginalUpdatedField label={t("recordEdits.plantPhotos")}
         originalContent={originalPhotoAssets.length > 0
           ? <View>
@@ -732,7 +745,7 @@ export default function EditPlantRecord({ route, navigation }) {
               return <View key={asset.id} style={styles.originalPhotoChoice} accessibilityLabel={`${t("recordEdits.originalPhoto")} ${index + 1}`}>
                 <View style={styles.photoThumbFrame}>
                   {state.originalPhotoSources?.[String(asset.id)] && !unavailable ? <>
-                    <Image key={`${asset.id}:${originalPhotoRetry}`} source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover"
+                    <PreviewableImage key={`${asset.id}:${originalPhotoRetry}`} source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover"
                       onLoadStart={() => setLoadingOriginalPhotos((current) => current.includes(asset.id) ? current : [...current, asset.id])}
                       onLoadEnd={() => setLoadingOriginalPhotos((current) => current.filter((id) => id !== asset.id))}
                       onError={() => setUnavailableOriginalPhotos((current) => current.includes(asset.id) ? current : [...current, asset.id])} />
@@ -746,17 +759,17 @@ export default function EditPlantRecord({ route, navigation }) {
           </View>
           : null}>
       <View style={styles.updatedPhotoGrid}>{originalPhotoAssets.map((asset) => !retainedPhotoIds.includes(asset.id) ? null :
-        <View key={asset.id} style={styles.updatedPhotoTile}>{state.originalPhotoSources?.[String(asset.id)] && <Image source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" />}
-          <TouchableOpacity style={styles.removePhoto} onPress={() => reusePhoto(asset.id)} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
+        <View key={asset.id} style={styles.updatedPhotoTile}>{state.originalPhotoSources?.[String(asset.id)] && <PreviewableImage source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" />}
+          <TouchableOpacity style={styles.removePhoto} onPress={() => confirmPhotoRemoval(t, () => reusePhoto(asset.id))} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
             <Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity></View>)}
-        {newPhotos.map((uri, index) => <View key={`${uri}-${index}`} style={styles.updatedPhotoTile}><Image source={{ uri }} style={styles.photo} resizeMode="cover" />
-          <TouchableOpacity style={styles.removePhoto} onPress={() => { formMutationRef.current += 1; setNewPhotos((current) => current.filter((_, item) => item !== index)); }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
+        {newPhotos.map((uri, index) => <View key={`${uri}-${index}`} style={styles.updatedPhotoTile}><PreviewableImage source={{ uri }} style={styles.photo} resizeMode="cover" />
+          <TouchableOpacity style={styles.removePhoto} onPress={() => confirmPhotoRemoval(t, () => { formMutationRef.current += 1; setNewPhotos((current) => current.filter((_, item) => item !== index)); })} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
             <Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity></View>)}</View>
       {photoSelectionTouched && originalPhotoAssets.some((asset) => !retainedPhotoIds.includes(asset.id)) &&
         <View style={styles.photoGrid}>{originalPhotoAssets.map((asset, index) => !retainedPhotoIds.includes(asset.id) ?
           <TouchableOpacity key={`restore-${asset.id}`} style={styles.originalPhotoChoice} onPress={() => reusePhoto(asset.id)} accessibilityRole="button"
             accessibilityLabel={`${t("recordEdits.originalPhoto")} ${index + 1}`}>
-            <View style={styles.photoThumbFrame}>{state.originalPhotoSources?.[String(asset.id)] ? <Image source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" /> :
+            <View style={styles.photoThumbFrame}>{state.originalPhotoSources?.[String(asset.id)] ? <PreviewableImage source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" /> :
               <View style={styles.photoUnavailable}><Text style={styles.photoUnavailableText}>{t("recordEdits.originalPhotoUnavailable")}</Text></View>}
               <View style={styles.photoSelectedOverlay}><Ionicons name="add-circle" size={25} color="#FFFFFF" /></View></View>
           </TouchableOpacity> : null)}</View>}

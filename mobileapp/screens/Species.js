@@ -1,3 +1,4 @@
+import PreviewableImage from "../components/PreviewableImage";
 import { t, translateLabel, translateUIMessage, useAppTranslation } from "../translations/i18n";
 // screens/Plant.js
 import LanguageSelector from "../components/LanguageSelector";
@@ -12,7 +13,6 @@ import {
   TouchableOpacity,
   FlatList,
   ScrollView,
-  Image,
   Dimensions,
   Alert,
 } from "react-native";
@@ -45,7 +45,7 @@ function SpeciesCardImage({ species }) {
       </View>
     );
   }
-  return <Image source={source} style={styles.cardImage} resizeMode="cover" onError={() => setFailedImageKey(key)} />;
+  return <PreviewableImage source={source} style={styles.cardImage} resizeMode="cover" onError={() => setFailedImageKey(key)} />;
 }
 
 export default function Species({ navigation, user }) {

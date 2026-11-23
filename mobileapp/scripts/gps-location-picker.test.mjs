@@ -23,7 +23,7 @@ function picker(initial = { latitude: "4.5", longitude: "113.7" }, os = "ios") {
     compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
   }).outputText;
   const module = { exports: {} };
-  new Function("require", "module", "exports", "setTimeout", "clearTimeout", code)((name) => { if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true }; if (name === "./ScaledText") return { default: "Text", __esModule: true }; assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" }; }, module, module.exports,
+  new Function("require", "module", "exports", "setTimeout", "clearTimeout", code)((name) => { if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true }; if (name === "./ScaledText") return { default: "Text", __esModule: true }; if (name === "../components/PreviewableImage" || name === "./PreviewableImage") return { default: "Image", confirmPhotoRemoval: (_translate, remove) => remove(), __esModule: true }; assert.ok(name in deps, name); return { ...deps[name], __esModule: name !== "react" }; }, module, module.exports,
     (fn) => { timers.add(fn); return fn; }, (fn) => timers.delete(fn));
   const render = (next = location, inputActive = false) => {
     location = next; refIndex = 0; effectIndex = 0; stateIndex = 0; pending = [];
@@ -160,7 +160,8 @@ test("active Observation GPS inputs are editable, remain optional, and preserve 
     "../translations/i18n": { useAppTranslation() {}, t: (key, options) => options?.field ? `${key}:${options.field}` : key,
       translateLabel: (value) => value, translateUIMessage: (value) => value, translateFieldLabel: (field) => field },
     "../utils/rbac": { canCollectDrafts: () => true }, "@expo/vector-icons/Ionicons": { default: "Icon" },
-    "expo-location": {}, "expo-image-picker": {}, "../utils/plantApi": {}, "../utils/faceSession": {},
+    "expo-location": {}, "expo-image-picker": {}, "expo-file-system/legacy": {}, "../utils/plantApi": {}, "../utils/faceSession": {},
+    "../utils/imageSelection": { imageSizeAlert: () => ({}), inspectPickedImages: async (assets) => ({ accepted: assets, rejected: [] }), base64Bytes: () => 5, MAX_IMAGE_BYTES: 4194304 },
     "../utils/fieldStorage": { saveDraft: async (_id, draft) => drafts.push(draft), readDrafts: async () => [] },
     "../utils/fieldSync": {}, "../utils/fieldCapture": { createFieldCapture: () => ({}) },
     "../utils/botanistDraftAutosave": { useBotanistDraftAutosave: (options) => { autosave = options; return {}; } },
@@ -170,7 +171,7 @@ test("active Observation GPS inputs are editable, remain optional, and preserve 
   };
   const compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
-  new Function("require", "module", "exports", compiled)((key) => { if (key === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true }; if (key === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true }; assert.ok(key in deps, key); return { ...deps[key], __esModule: key !== "react" }; }, module, module.exports);
+  new Function("require", "module", "exports", compiled)((key) => { if (key === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true }; if (key === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true }; if (key === "../components/PreviewableImage") return { default: "Image", confirmPhotoRemoval: (_translate, remove) => remove(), __esModule: true }; assert.ok(key in deps, key); return { ...deps[key], __esModule: key !== "react" }; }, module, module.exports);
   const walk = (root) => root && typeof root === "object" ? [root, ...React.Children.toArray(root.props?.children).flatMap(walk)] : [];
   const render = () => { stateIndex = 0; refIndex = 0; return walk(module.exports.default({ route: { name: "AddObservation", params: { plantId: "8" } }, navigation: {} })); };
   let nodes = render();

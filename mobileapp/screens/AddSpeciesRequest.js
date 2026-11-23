@@ -1,5 +1,6 @@
+import PreviewableImage, { confirmPhotoRemoval } from "../components/PreviewableImage";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -11,6 +12,7 @@ import { deleteBotanistFormDraft, findBotanistFormDraft, getBotanistFormDraft, s
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import SpeciesDictionary from "../components/SpeciesDictionary";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
+import { inspectPickedImages, imageSizeAlert, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 
 const conservationStatuses = ["Not Assessed", "Least Concern", "Near Threatened", "Vulnerable", "Endangered", "Critically Endangered"];
 const makeKey = () => `species-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -74,7 +76,11 @@ export default function AddSpeciesRequest({ route, navigation }) {
       if (!permission.granted) return Alert.alert(t("addPlant.permissionRequired"), camera ? t("addPlant.cameraPermissionIsRequiredToTakeASpeciesPhoto") : t("addPlant.galleryPermissionIsRequiredToSelectSpeciesPhotos"));
       const result = camera ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8 })
         : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
-      if (!result.canceled && result.assets?.[0]?.uri) setPhoto(result.assets[0].uri);
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        const checked = await inspectPickedImages(result.assets, [t("imageSizeAlert.speciesPhoto")], FileSystem.getInfoAsync);
+        if (checked.rejected.length) { const alert = imageSizeAlert(t, checked.rejected); Alert.alert(alert.title, alert.message); }
+        if (checked.accepted[0]) setPhoto(checked.accepted[0].uri);
+      }
     } catch { Alert.alert(t("common.error"), camera ? t("addPlant.unableToOpenTheCamera") : t("addPlant.unableToOpenTheGallery")); }
   }
 
@@ -86,7 +92,11 @@ export default function AddSpeciesRequest({ route, navigation }) {
     busy.current = true; setSaving(true); setError("");
     try {
       const base64 = await FileSystem.readAsStringAsync(photo, { encoding: FileSystem.EncodingType.Base64 });
-      if (base64.length > 5592408) throw Error(t("addPlantWorkflow.speciesPhotoTooLarge"));
+      if (base64Bytes(base64) > MAX_IMAGE_BYTES) {
+        const alert = imageSizeAlert(t, [{ label: t("imageSizeAlert.speciesPhoto"), bytes: base64Bytes(base64) }]);
+        Alert.alert(alert.title, alert.message);
+        return;
+      }
       const body = {
         ...Object.fromEntries(Object.entries(form).map(([key, value]) => [key, value.trim()])),
         photo: { base64, content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg" },
@@ -121,7 +131,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
         ["scientific_name", "scientificName", "eGNepenthesMirabilis"], ["common_name", "commonName", "eGSwampPitcherPlant"],
     ["genus_name", "genus", "eGNepenthes"], ["family_name", "family", "eGNepenthaceae"],
   ];
-  return <DiscoverableScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <DiscoverableScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <Text style={styles.title}>{t("speciesRequestForm.title")}</Text>
     <Text style={styles.note}>{t("speciesRequestForm.description")}</Text>
     <View style={styles.card}>
@@ -153,8 +163,8 @@ export default function AddSpeciesRequest({ route, navigation }) {
         <TouchableOpacity style={styles.secondary} onPress={() => choosePhoto(false)} disabled={saving} accessibilityRole="button"><Ionicons name="images-outline" size={18} color="#2F6B4F" /><Text style={styles.secondaryText}>{t("addPlant.gallery")}</Text></TouchableOpacity>
       </View>
       {photo && <View style={styles.photoPreview}>
-        <Image source={{ uri: photo }} style={styles.photo} resizeMode="cover" />
-        <TouchableOpacity style={styles.removePhoto} onPress={() => setPhoto(null)} disabled={saving} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
+        <PreviewableImage source={{ uri: photo }} style={styles.photo} resizeMode="cover" />
+        <TouchableOpacity style={styles.removePhoto} onPress={() => confirmPhotoRemoval(t, () => setPhoto(null))} disabled={saving} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
       </View>}
       <View style={styles.approvalInfo}><Text style={styles.approvalTitle}>{t("addPlant.speciesApprovalRequired")}</Text><Text style={styles.note}>{t("speciesRequestForm.approvalNotice")}</Text></View>
     </View>

@@ -1,25 +1,27 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 defineProps<{ id: string; modelValue: string; disabled?: boolean; required?: boolean; invalid?: boolean; error?: string; validationField?: string; horizontal?: boolean }>()
+const { t } = useI18n()
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const options = [
-  { value: 'public', name: 'Public', description: 'Visible in the visitor catalogue.', icon: 'globe' },
-  { value: 'internal', name: 'Internal', description: 'Visible to authorized Botanists and Conservation Officers.', icon: 'users' },
-  { value: 'protected', name: 'Protected', description: 'Restricted general scientific access to Conservation Officers.', icon: 'lock-keyhole' },
+  { value: 'public', nameKey: 'visibilityPublic', descriptionKey: 'visibilityPublicDescription', icon: 'globe' },
+  { value: 'internal', nameKey: 'visibilityInternal', descriptionKey: 'visibilityInternalDescription', icon: 'users' },
+  { value: 'protected', nameKey: 'visibilityProtected', descriptionKey: 'visibilityProtectedDescription', icon: 'lock-keyhole' },
 ]
 </script>
 
 <template>
   <fieldset class="visibility-selector" data-validation-group :class="{ 'visibility-selector-horizontal': horizontal }" :disabled="disabled" :aria-describedby="`${id}-help${error ? ` ${id}-error` : ''}`" :aria-invalid="Boolean(invalid)">
-    <legend class="visibility-accessible-label">Visibility{{ required ? ' *' : '' }}</legend>
+    <legend class="visibility-accessible-label">{{ t('conservationPages.species.visibility') }}{{ required ? ' *' : '' }}</legend>
     <div class="visibility-intro">
-      <div class="visibility-title" aria-hidden="true"><svg v-if="horizontal" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 12s4-8 10-8 10 8 10 8-4 8-10 8S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>VISIBILITY{{ required ? ' *' : '' }}</div>
-      <p :id="`${id}-help`">Choose who can view this species after approval.</p>
+      <div class="visibility-title" aria-hidden="true"><svg v-if="horizontal" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 12s4-8 10-8 10 8 10 8-4 8-10 8S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>{{ t('conservationPages.species.visibility') }}{{ required ? ' *' : '' }}</div>
+      <p :id="`${id}-help`">{{ t('conservationPages.species.visibilityHelp') }}</p>
     </div>
     <div class="visibility-options">
       <label v-for="option in options" :key="option.value" class="visibility-option" :class="{ 'visibility-option-selected': modelValue === option.value }">
         <input type="radio" :name="id" :value="option.value" :checked="modelValue === option.value" :disabled="disabled" :required="required" :data-validation-field="validationField" :aria-invalid="Boolean(invalid)" :aria-describedby="`${id}-${option.value}-description${error ? ` ${id}-error` : ''}`" @change="emit('update:modelValue', option.value)" />
-        <span class="visibility-option-heading"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" :data-icon="option.icon"><template v-if="option.icon === 'globe'"><circle cx="12" cy="12" r="10"/><path d="M2 12h20 M12 2a18 18 0 0 1 0 20 18 18 0 0 1 0-20Z"/></template><template v-else-if="option.icon === 'users'"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M22 21v-2a4 4 0 0 0-3-3.87 M16 3a4 4 0 0 1 0 8"/><circle cx="9" cy="7" r="4"/></template><template v-else><rect x="4" y="11" width="16" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4 M12 15v3"/></template></svg><strong>{{ option.name }}</strong><svg v-if="modelValue === option.value" class="visibility-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></span>
-        <span class="visibility-description" :id="`${id}-${option.value}-description`">{{ option.description }}</span>
+        <span class="visibility-option-heading"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" :data-icon="option.icon"><template v-if="option.icon === 'globe'"><circle cx="12" cy="12" r="10"/><path d="M2 12h20 M12 2a18 18 0 0 1 0 20 18 18 0 0 1 0-20Z"/></template><template v-else-if="option.icon === 'users'"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M22 21v-2a4 4 0 0 0-3-3.87 M16 3a4 4 0 0 1 0 8"/><circle cx="9" cy="7" r="4"/></template><template v-else><rect x="4" y="11" width="16" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4 M12 15v3"/></template></svg><strong>{{ t(`conservationPages.species.${option.nameKey}`) }}</strong><svg v-if="modelValue === option.value" class="visibility-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></span>
+        <span class="visibility-description" :id="`${id}-${option.value}-description`">{{ t(`conservationPages.species.${option.descriptionKey}`) }}</span>
       </label>
     </div>
     <small v-if="error" :id="`${id}-error`" class="visibility-error">{{ error }}</small>
