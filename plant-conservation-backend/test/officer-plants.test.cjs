@@ -11,7 +11,7 @@ test('Officer registry paginates the full dataset, filters safely, and never wri
     INSERT INTO plant_record(plant_id,species_id,registered_subject,rbac_status,qr_token)
       SELECT n,CASE WHEN n=4 THEN 2 ELSE 1 END,'staff:bot',CASE WHEN n%4=1 THEN 'Withdrawn' WHEN n%4=2 THEN 'Rejected' WHEN n%4=3 THEN 'Pending Review' ELSE 'Approved' END,'token-'||n FROM generate_series(1,620) n;
     UPDATE plant_record SET scientific_name='Plant name '||plant_id;
-    INSERT INTO qr_code VALUES(42,4,'token-4','assigned');`);
+    INSERT INTO qr_code(qr_id,plant_id,qr_code,status) VALUES(42,4,'token-4','assigned');`);
   const auth = { session: async token => ({ id:'tester',role: token==='a'.repeat(64)?'Conservation Officer':'Botanist',status:'Active',mustChangePassword:false }), event:async()=>{} };
   const server = createPlantApp({pool,auth,origins:new Set()}).listen(0,'127.0.0.1');await once(server,'listening');
   t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve)}));
@@ -21,8 +21,8 @@ test('Officer registry paginates the full dataset, filters safely, and never wri
   const ids=[];let page=first;
   while(true){ids.push(...page.data.plants.map(row=>row.id));if(!page.data.page.has_more)break;page=await call('?cursor='+encodeURIComponent(page.data.page.next_cursor));}
   assert.equal(ids.length,155);assert.equal(new Set(ids).size,155);
-  for(const query of ['?q=PL004','?q=QR-0042']) {const p=await call(query);assert.equal(p.status,200);assert.ok(p.data.plants.every(row=>row.status==='Approved'));}
-  assert.equal((await call('?q=QR-0042')).data.plants[0].id,'4');
+  const qrSearch=await call('?q=QR-0042');assert.equal(qrSearch.status,200);assert.equal(qrSearch.data.plants.length,1);assert.equal(qrSearch.data.plants[0].id,'4');assert.equal(qrSearch.data.plants[0].status,'Approved');
+  const plantSearch=await call('?q=PL004');assert.equal(plantSearch.status,200);assert.deepEqual(plantSearch.data.plants.map(row=>row.id),['4']);
   assert.equal((await call('?q=PL001')).data.plants.length,0);
   assert.equal((await call('?species=2')).data.plants[0].id,'4');
   assert.equal((await call('?q=absent')).data.plants.length,0);

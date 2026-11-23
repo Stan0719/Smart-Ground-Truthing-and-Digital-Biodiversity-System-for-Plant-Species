@@ -140,7 +140,8 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
     assert.equal(whilePendingBotanist.data.plant.latitude, content.latitude);
     assert.equal(whilePendingBotanist.data.plant.longitude, content.longitude);
     assert.equal(whilePendingBotanist.data.plant.zone, content.zone);
-    assert.equal((await call(`/record-changes/${response.data.change.id}/review`, "officer", "POST", { decision: "Approved", comment: "Verified" })).status, 200);
+    assert.equal((await call(`/record-changes/${response.data.change.id}/review`, "officer", "POST", { decision: "Rejected", comment: "" })).status, 400);
+    assert.equal((await call(`/record-changes/${response.data.change.id}/review`, "officer", "POST", { decision: "Approved", comment: "" })).status, 200);
     assert.equal((await pool.query("SELECT scientific_name,rbac_status FROM plant_record WHERE plant_id=$1", [approvedPlant])).rows[0].scientific_name, "Plant Approved Edit");
     assert.equal((await pool.query("SELECT content->>'morphology' AS morphology FROM plant_observation WHERE id='approved-observation'")).rows[0].morphology, "Changed");
     assert.equal((await pool.query("SELECT content->>'taxonomy' AS taxonomy FROM plant_observation WHERE id='approved-observation'")).rows[0].taxonomy, "Existing taxonomy");

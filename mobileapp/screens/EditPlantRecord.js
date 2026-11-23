@@ -1,5 +1,6 @@
+import PreviewableImage, { confirmPhotoRemoval } from "../components/PreviewableImage";
 import React, { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
@@ -649,7 +650,7 @@ export default function EditPlantRecord({ route, navigation }) {
   const submitHint = validate() || (state.plant.status === "Approved" && !state.correctionChange && !hasMeaningfulChanges
     ? t("recordEdits.noEditChanges") : "");
   const submitDisabled = Boolean(saving || submitted || state.offlineDraft || draftConflict || submitHint);
-  return <DiscoverableScrollView scrollEnabled={!mapInteracting} style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <DiscoverableScrollView scrollEnabled={!mapInteracting} style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <View style={styles.titleRow}>
       <Text style={styles.title}>{t(isCorrectionPage ? "recordEdits.correctPlantRegistration" : "recordEdits.editPlant")}</Text>
       {isCorrectionPage && <TouchableOpacity testID="plant-correction-refresh" style={styles.correctionRefreshButton} onPress={() => { void refreshCorrectionRecord(); }}
@@ -746,7 +747,7 @@ export default function EditPlantRecord({ route, navigation }) {
       </OriginalUpdatedField>
     </View>
     <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.plantPhotos")}</Text>
-      {state.correctionPhotos.length > 0 && <View style={styles.updatedPhotoGrid}>{state.correctionPhotos.map((source, index) => <View key={`proposal-photo-${index}`} style={styles.originalPhotoChoice}><Image source={source} style={styles.photo} resizeMode="cover" /></View>)}</View>}
+      {state.correctionPhotos.length > 0 && <View style={styles.updatedPhotoGrid}>{state.correctionPhotos.map((source, index) => <View key={`proposal-photo-${index}`} style={styles.originalPhotoChoice}><PreviewableImage source={source} style={styles.photo} resizeMode="cover" /></View>)}</View>}
       <OriginalUpdatedField label={t("recordEdits.plantPhotos")}
         originalContent={originalPhotoAssets.length > 0
           ? <View>
@@ -757,7 +758,7 @@ export default function EditPlantRecord({ route, navigation }) {
               return <View key={asset.id} style={styles.originalPhotoChoice} accessibilityLabel={`${t("recordEdits.originalPhoto")} ${index + 1}`}>
                 <View style={styles.photoThumbFrame}>
                   {state.originalPhotoSources?.[String(asset.id)] && !unavailable ? <>
-                    <Image key={`${asset.id}:${originalPhotoRetry}`} source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover"
+                    <PreviewableImage key={`${asset.id}:${originalPhotoRetry}`} source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover"
                       onLoadStart={() => setLoadingOriginalPhotos((current) => current.includes(asset.id) ? current : [...current, asset.id])}
                       onLoadEnd={() => setLoadingOriginalPhotos((current) => current.filter((id) => id !== asset.id))}
                       onError={() => setUnavailableOriginalPhotos((current) => current.includes(asset.id) ? current : [...current, asset.id])} />
@@ -771,17 +772,17 @@ export default function EditPlantRecord({ route, navigation }) {
           </View>
           : null}>
       <View style={styles.updatedPhotoGrid}>{originalPhotoAssets.map((asset) => !retainedPhotoIds.includes(asset.id) ? null :
-        <View key={asset.id} style={styles.updatedPhotoTile}>{state.originalPhotoSources?.[String(asset.id)] && <Image source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" />}
-          <TouchableOpacity style={styles.removePhoto} onPress={() => reusePhoto(asset.id)} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
+        <View key={asset.id} style={styles.updatedPhotoTile}>{state.originalPhotoSources?.[String(asset.id)] && <PreviewableImage source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" />}
+          <TouchableOpacity style={styles.removePhoto} onPress={() => confirmPhotoRemoval(t, () => reusePhoto(asset.id))} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
             <Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity></View>)}
-        {newPhotos.map((uri, index) => <View key={`${uri}-${index}`} style={styles.updatedPhotoTile}><Image source={{ uri }} style={styles.photo} resizeMode="cover" />
-          <TouchableOpacity style={styles.removePhoto} onPress={() => { formMutationRef.current += 1; setNewPhotos((current) => current.filter((_, item) => item !== index)); }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
+        {newPhotos.map((uri, index) => <View key={`${uri}-${index}`} style={styles.updatedPhotoTile}><PreviewableImage source={{ uri }} style={styles.photo} resizeMode="cover" />
+          <TouchableOpacity style={styles.removePhoto} onPress={() => confirmPhotoRemoval(t, () => { formMutationRef.current += 1; setNewPhotos((current) => current.filter((_, item) => item !== index)); })} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}>
             <Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity></View>)}</View>
       {photoSelectionTouched && originalPhotoAssets.some((asset) => !retainedPhotoIds.includes(asset.id)) &&
         <View style={styles.photoGrid}>{originalPhotoAssets.map((asset, index) => !retainedPhotoIds.includes(asset.id) ?
           <TouchableOpacity key={`restore-${asset.id}`} style={styles.originalPhotoChoice} onPress={() => reusePhoto(asset.id)} accessibilityRole="button"
             accessibilityLabel={`${t("recordEdits.originalPhoto")} ${index + 1}`}>
-            <View style={styles.photoThumbFrame}>{state.originalPhotoSources?.[String(asset.id)] ? <Image source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" /> :
+            <View style={styles.photoThumbFrame}>{state.originalPhotoSources?.[String(asset.id)] ? <PreviewableImage source={state.originalPhotoSources[String(asset.id)]} style={styles.photo} resizeMode="cover" /> :
               <View style={styles.photoUnavailable}><Text style={styles.photoUnavailableText}>{t("recordEdits.originalPhotoUnavailable")}</Text></View>}
               <View style={styles.photoSelectedOverlay}><Ionicons name="add-circle" size={25} color="#FFFFFF" /></View></View>
           </TouchableOpacity> : null)}</View>}

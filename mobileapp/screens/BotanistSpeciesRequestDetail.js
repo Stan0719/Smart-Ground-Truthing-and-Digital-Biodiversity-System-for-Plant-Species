@@ -1,5 +1,6 @@
+import PreviewableImage from "../components/PreviewableImage";
 import React, { useCallback, useRef, useState } from "react";
-import { AppState, ActivityIndicator, View, Image, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
+import { AppState, ActivityIndicator, View, StyleSheet, TouchableOpacity, RefreshControl, Alert } from "react-native";
 import Text from "../components/ScaledText";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
@@ -210,7 +211,7 @@ export default function BotanistSpeciesRequestDetailScreen({ route, navigation }
         {request.cultural_significance && <View style={styles.field}><Text style={styles.label}>{t("speciesDetail.traditionalAndCulturalImportance")}</Text><Text style={styles.value}>{request.cultural_significance}</Text></View>}
       </View>
       <View style={styles.section}><View style={styles.sectionHeader}><View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>02</Text></View><View style={styles.sectionHeading}><Text style={styles.heading}>{t("submissions.speciesPhoto")}</Text><Text style={styles.sectionSubtitle}>{t("submissions.speciesPhotoSubtitle")}</Text></View></View>
-        {request.photo ? <Image source={request.photo} style={styles.photo} resizeMode="contain" accessibilityLabel={t("submissions.photo")} />
+        {request.photo ? <PreviewableImage source={request.photo} style={styles.photo} resizeMode="contain" accessibilityLabel={t("submissions.photo")} />
           : <Text style={styles.missingPhoto}>{t("recordEdits.noPhotos")}</Text>}
       </View>
       <View style={styles.section}><View style={styles.sectionHeader}><View style={styles.sectionNumber}><Text style={styles.sectionNumberText}>03</Text></View><View style={styles.sectionHeading}><Text style={styles.heading}>{t("submissions.reviewInformation")}</Text></View></View>

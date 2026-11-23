@@ -16,6 +16,7 @@ function screen(file, dependencies) {
     if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
     if (name === "../components/BackButton") return { default: "TouchableOpacity", __esModule: true };
     if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
+    if (name === "../components/PreviewableImage" || name === "./PreviewableImage") return { default: "Image", confirmPhotoRemoval: (_translate, remove) => remove(), __esModule: true };
     assert.ok(name in dependencies, `Missing mock: ${name}`);
     return { ...dependencies[name], __esModule: name !== "react" };
   }, module, module.exports);

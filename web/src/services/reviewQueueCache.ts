@@ -2,6 +2,8 @@ import { sessionSnapshot, subscribeSession } from './auth.ts'
 
 type Session = ReturnType<typeof sessionSnapshot>
 export const REVIEW_QUEUE_TTL = 45_000
+// Stale navigation data is display-only while a complete verified refresh runs.
+export const REVIEW_QUEUE_NAVIGATION_STALE_TTL = 10 * 60_000
 // One session, one complete queue, one shared request. Never persisted.
 export function createReviewQueueCache(readSession: () => Session, listen: (fn: () => void) => unknown, now = Date.now) {
   const identity = () => {
@@ -25,6 +27,17 @@ export function createReviewQueueCache(readSession: () => Session, listen: (fn: 
       if (!synchronize()) return null
       if (entry && now() - entry.at < REVIEW_QUEUE_TTL) return structuredClone(entry.data) as T
       entry = null; return null
+    },
+    readForNavigation<T>(): { data: T; fresh: boolean } | null {
+      if (!synchronize() || !entry) return null
+      const age = now() - entry.at
+      if (age < 0 || age >= REVIEW_QUEUE_NAVIGATION_STALE_TTL) { entry = null; return null }
+      return { data: structuredClone(entry.data) as T, fresh: age < REVIEW_QUEUE_TTL }
+    },
+    store<T>(data: T) {
+      if (!synchronize()) return
+      evidence++
+      entry = { data: structuredClone(data), at: now() }
     },
     load<T>(load: (current: () => boolean, signal: AbortSignal) => Promise<T>): Promise<T> {
       const actor = synchronize(), token = epoch, revision = evidence

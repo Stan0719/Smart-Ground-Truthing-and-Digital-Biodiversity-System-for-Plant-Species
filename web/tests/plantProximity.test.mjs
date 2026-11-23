@@ -9,8 +9,8 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import { readProximity, requestPlantProximity, requestPlantPreview } from '../src/services/plantProximity.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
 import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
-const config={very_close_m:2,close_m:5,nearby_m:10,radius_m:30,accuracy_warning_m:10,candidate_limit:20}
-const candidate=(id='2',distance=0)=>({plant_id:id,status:'Approved',plant_name:'Separate individual Plant',species_name:'Species A',accuracy_m:null,distance_m:distance,category:distance<=2?'very_close':distance<=5?'close':distance<=10?'nearby':'additional',location_source:'approved_observation'})
+const config={very_close_m:2,close_m:5,nearby_m:10,grouping_radius_m:5,radius_m:30,accuracy_warning_m:10,candidate_limit:20}
+const candidate=(id='2',distance=0,extra={})=>({plant_id:id,status:'Approved',plant_name:'Representative Plant group',species_name:'Species A',accuracy_m:2,distance_m:distance,category:distance<=2?'very_close':distance<=5?'close':distance<=10?'nearby':'additional',location_source:'approved_observation',match_status:'same_species_zone',within_grouping_radius:distance<=5,...extra})
 const result=(extra={})=>({contract_version:1,observation_id:'1',plant_id:'1000',revision:1,checked_at:'2026-11-20T00:00:00Z',state:'complete',accuracy_m:2,config,candidates:[candidate()],eligible_count:2,unlocated_count:0,total_nearby:1,...extra})
 const filename=new URL('../src/components/conservation/PlantProximityPanel.vue',import.meta.url)
 const {descriptor}=parse(readFileSync(filename,'utf8')),script=compileScript(descriptor,{id:'plant-proximity'})
@@ -40,9 +40,11 @@ function text(root){if(root?.type===vue.Comment)return '';if(typeof root==='stri
 const flush=async()=>{await new Promise(resolve=>setTimeout(resolve,0));await vue.nextTick()}
 test('response contract validates identity, all raw distance boundaries, completeness, accuracy and bounded unique candidates',()=>{
  for(const distance of [0,2,2.001,5,5.001,10,10.001,30])assert.equal(readProximity(result({candidates:[candidate('2',distance)]}),'1',1).candidates[0].distance_m,distance)
- for(const r of [result({revision:2}),result({plant_id:'0'}),result({candidates:[candidate('1000')]}),result({candidates:[candidate(),candidate()]}),result({candidates:[candidate('2',31)]}),result({accuracy_m:NaN}),result({candidates:[{...candidate(),category:'close'}]}),result({total_nearby:2}),result({state:'incomplete'})])assert.throws(()=>readProximity(r,'1',1))
+ for(const r of [result({revision:2}),result({plant_id:'0'}),result({candidates:[candidate('1000')]}),result({candidates:[candidate(),candidate()]}),result({candidates:[candidate('2',31)]}),result({accuracy_m:NaN}),result({candidates:[{...candidate(),category:'close'}]}),result({candidates:[{...candidate(),within_grouping_radius:false}]}),result({total_nearby:2}),result({state:'incomplete'})])assert.throws(()=>readProximity(r,'1',1))
  assert.equal(readProximity(result({state:'incomplete',unlocated_count:1,eligible_count:3}),'1',1).state,'incomplete')
  assert.equal(readProximity(result({state:'unavailable',candidates:[],reason:'invalid_coordinates'}),'1',1).state,'unavailable')
+ const legacy=result();delete legacy.config.grouping_radius_m;delete legacy.candidates[0].match_status;delete legacy.candidates[0].within_grouping_radius
+ const legacyParsed=readProximity(legacy,'1',1);assert.equal(legacyParsed.candidates[0].match_status,'uncertain_match');assert.equal(legacyParsed.config.grouping_radius_m,5)
 })
 test('browser request is GET-only, same-origin, no-store and validates the actual response',async()=>{
  const original=globalThis.fetch,calls=[]
@@ -53,10 +55,34 @@ test('browser request is GET-only, same-origin, no-store and validates the actua
 })
 test('shared drawer keeps authorized candidates, photos, names, distances and inspection links in every locale',async()=>{
  for(const language of ['en','ms','zh-CN']){
-  const rows=[candidate('2',0),candidate('3',3),candidate('4',7),candidate('5',25)],h=harness(result({candidates:rows,total_nearby:4,eligible_count:4,accuracy_m:25}),language)
+  const rows=[candidate('2',0,{accuracy_m:null}),candidate('3',3),candidate('4',7),candidate('5',25)],h=harness(result({candidates:rows,total_nearby:4,eligible_count:4,accuracy_m:25}),language)
   try{await flush();assert.equal(nodes(h.render()).filter(n=>n.type==='li'&&n.key).length,0);await h.open();const tree=nodes(h.render()),visible=text(h.render());assert.ok(visible.includes(h.labels.plantProximity.accuracyUnknown));assert.ok(visible.includes(h.labels.plantProximity.drawerGpsWarning));assert.equal(tree.filter(n=>n.type==='li'&&n.key).length,4)
    for(const row of rows){assert.ok(visible.includes(formatPlantId(row.plant_id)));assert.ok(visible.includes(h.labels.plantProximity['short_'+row.category]));assert.ok(tree.some(n=>n.type==='a'&&n.props.href==='/plant/'+row.plant_id&&n.props.target==='_blank'&&n.props.rel==='noopener noreferrer'))}
    assert.equal(h.calls.length,0,'drawer never repeats the proximity API request');assert.doesNotMatch(visible,/100% duplicate|high probability|definitely different/i)
+  }finally{h.stop()}
+ }
+})
+
+test('drawer keeps unavailable species/zone match information compact in the risk panel',async()=>{
+ for(const language of ['en','ms','zh-CN']){
+  const uncertainCandidate=candidate('8',0.33,{match_status:'uncertain_zone',within_grouping_radius:null}),h=harness(result({candidates:[uncertainCandidate],total_nearby:1,eligible_count:1}),language)
+  try{
+   await h.open();const tree=nodes(h.render()),riskPanel=tree.find(node=>node.type==='aside'&&String(node.props?.class||'').includes('candidate-risk')),match=tree.find(node=>String(node.props?.class||'').includes('candidate-match'))
+   assert.ok(riskPanel);assert.ok(match);assert.ok(nodes(riskPanel).includes(match));assert.equal(h.state.candidateScore(uncertainCandidate),null)
+   assert.ok(text(match).length>0)
+  }finally{h.stop()}
+ }
+})
+
+test('drawer labels pending-name comparisons as provisional in every locale without assigning a score',async()=>{
+ for(const language of ['en','ms','zh-CN']){
+  const row=candidate('23',0.33,{match_status:'provisional_species',species_match_status:'provisional_different_name',zone_match_status:'same',within_grouping_radius:true})
+  const h=harness(result({candidates:[row],total_nearby:1,eligible_count:1}),language)
+  try{
+   await h.open();const tree=nodes(h.render()),match=tree.find(node=>String(node.props?.class||'').includes('candidate-match'))
+   assert.ok(match);assert.ok(text(match).includes(h.labels.plantProximity.matchProvisionalDifferentNameSameZone))
+   assert.equal(h.state.candidateScore(row),null)
+   assert.ok(!text(match).includes(h.labels.plantProximity.matchDifferentSpecies))
   }finally{h.stop()}
  }
 })
@@ -80,7 +106,7 @@ test('one shared drawer shows only the nearest five real Plants and keeps native
    let restored=false;h.state.closeDrawer();await h.state.openDrawer({currentTarget:{isConnected:true,focus(options){restored=options.preventScroll}}});assert.equal(h.previewCalls.length,Math.min(5,count));const dialog=nodes(h.render()).find(n=>n.type==='dialog');dialog.props.onCancel({preventDefault(){},stopPropagation(){}});assert.equal(h.state.drawerOpen.value,false);assert.equal(restored,true)
   }finally{h.stop()}
  }
- const css=descriptor.styles[0].content;assert.match(css,/width: min\(760px, 100vw\)/);assert.match(css,/overflow-y: auto/);assert.match(descriptor.template.content,/<Teleport to="body">/);assert.match(descriptor.scriptSetup.content,/showModal\(\)/);assert.doesNotMatch(descriptor.template.content,/plant-proximity-panel|proximity-summary-row/)
+ const css=descriptor.styles[0].content;assert.match(css,/width: min\(700px, 100vw\)/);assert.match(css,/overflow-y: auto/);assert.match(css,/background: #15563f/);assert.match(descriptor.template.content,/<Teleport to="body">/);assert.match(descriptor.scriptSetup.content,/showModal\(\)/);assert.doesNotMatch(descriptor.template.content,/plant-proximity-panel|proximity-summary-row/)
 })
 
 test('authorized catalogue preview uses only its official main photo and safely handles missing, denied or mismatched records',async()=>{
@@ -105,12 +131,21 @@ test('thumbnail keeps one proportionate authorized image and uses the catalogue 
 })
 
 
-test('drawer uses the approved shared score for cards without a nearest-summary panel and keeps uncertainty visible without changing it',async()=>{
+test('only confirmed same-Species same-zone candidates with reliable GPS receive the shared distance score',async()=>{
  for(const language of ['en','ms','zh-CN'])for(const accuracy of [2,null,25]){
   const rows=[{...candidate('21',0.43),accuracy_m:accuracy},{...candidate('8',2.42),accuracy_m:2},{...candidate('31',15.29),accuracy_m:2}],h=harness(result({candidates:rows,total_nearby:3,eligible_count:3,accuracy_m:accuracy}),language)
-  try{await h.open();const visible=text(h.render());assert.equal(h.state.candidateScore(0.43),96);assert.ok(!nodes(h.render()).some(n=>n.props?.class==='nearest-risk-summary'));assert.equal(h.state.candidateScore(2.42),76);assert.equal(h.state.candidateScore(15.29),15);assert.ok(visible.includes(proximityScore.formatProximityScore(96,language)));assert.ok(!nodes(h.render()).some(n=>n.props?.class==='score-help'));assert.ok(!visible.includes(h.labels.plantProximity.scoreAbout));assert.ok(!visible.includes(h.labels.plantProximity.unverifiedLocation));assert.ok(visible.includes(h.labels.plantProximity.accuracyHeading));assert.ok(visible.includes(h.labels.plantProximity.newPlantAccuracy));assert.ok(visible.includes(h.labels.plantProximity.existingPlantAccuracy));assert.equal(visible.includes(h.labels.plantProximity.drawerGpsWarning),accuracy!==2);assert.ok(visible.includes('0.43'));assert.equal(nodes(h.render()).filter(n=>n.type==='li'&&n.key).length,3)}finally{h.stop()}
+  try{await h.open();const visible=text(h.render());assert.equal(h.state.candidateScore(rows[0]),accuracy===2?96:null);assert.ok(!nodes(h.render()).some(n=>n.props?.class==='nearest-risk-summary'));assert.equal(h.state.candidateScore(rows[1]),accuracy===2?76:null);assert.equal(h.state.candidateScore(rows[2]),accuracy===2?15:null);assert.equal(visible.includes(proximityScore.formatProximityScore(96,language)),accuracy===2);assert.ok(!nodes(h.render()).some(n=>n.props?.class==='score-help'));assert.ok(!visible.includes(h.labels.plantProximity.scoreAbout));assert.ok(!visible.includes(h.labels.plantProximity.unverifiedLocation));assert.ok(visible.includes(h.labels.plantProximity.accuracyHeading));assert.ok(visible.includes(h.labels.plantProximity.newPlantAccuracy));assert.ok(visible.includes(h.labels.plantProximity.existingPlantAccuracy));assert.equal(visible.includes(h.labels.plantProximity.drawerGpsWarning),accuracy!==2);assert.ok(visible.includes('0.43'));assert.equal(nodes(h.render()).filter(n=>n.type==='li'&&n.key).length,3)}finally{h.stop()}
  }
- const h=harness(result({state:'incomplete',unlocated_count:1,eligible_count:3,candidates:[candidate('21',0.43)]}));try{await h.open();assert.equal(h.state.candidateScore(0.43),null);assert.equal(h.state.scoreText(0.43),h.labels.plantProximity.tableIncomplete);assert.ok(!text(h.render()).includes('96%'))}finally{h.stop()}
+ const h=harness(result({state:'incomplete',unlocated_count:1,eligible_count:3,candidates:[candidate('21',0.43)]}));try{await h.open();assert.equal(h.state.candidateScore(candidate('21',0.43)),null);assert.equal(h.state.scoreText(candidate('21',0.43)),h.labels.plantProximity.tableIncomplete);assert.ok(!text(h.render()).includes('96%'))}finally{h.stop()}
+})
+
+test('different Species and zones receive no risk score; unresolved match or accuracy stays explicitly uncertain',()=>{
+ const known=result(), candidateRows=[candidate('2',1,{match_status:'different_species'}),candidate('3',1,{match_status:'different_zone'}),candidate('4',1,{match_status:'uncertain_species'}),candidate('5',1,{match_status:'uncertain_zone'}),candidate('6',1,{accuracy_m:null})]
+ for(const row of candidateRows)assert.equal(proximityScore.groupRiskScore(row,known),null)
+ assert.equal(proximityScore.nearestGroupCandidate(candidateRows).plant_id,'6');assert.equal(proximityScore.hasUncertainGroupCandidate(candidateRows),true)
+ assert.equal(proximityScore.nearestGroupCandidate([candidate('8',1),candidate('7',8)]).plant_id,'8')
+ assert.deepEqual([1,4,8,25].map(distance=>proximityScore.groupRiskScore(candidate('9',distance),known)),[90,60,32,5])
+ assert.equal(proximityScore.gpsProximityScore(1,config),90)
 })
 
 

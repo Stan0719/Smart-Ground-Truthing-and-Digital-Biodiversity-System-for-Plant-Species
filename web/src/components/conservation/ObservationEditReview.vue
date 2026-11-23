@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import ActionFeedback from '../ActionFeedback.vue'
 import { officerActionError, officerSaveUncertain } from '../../services/officerActionFeedback'
 import AppModal from './AppModal.vue'
+import ReviewCommentField from './ReviewCommentField.vue'
 import MonitoringIdentifier from './MonitoringIdentifier.vue'
 import PlantPhotoLightbox from '../PlantPhotoLightbox.vue'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
@@ -26,7 +27,7 @@ const ready = computed(() => !session.value.pending && session.value.user?.role 
 const identifiers = computed(() => new Map(selected.value ? [[selected.value.id,'CHANGE-'+selected.value.id.slice(0,8)],[selected.value.observation_edit.observation_id,'OBS-'+selected.value.observation_edit.observation_id.slice(0,8)]] : []))
 const comment = ref(''), busy = ref(false), blocked = ref(true), message = ref('')
 const actionText = (key: string) => t('officerFeedback.' + key)
-const commentError = ref(''), commentInput = ref<HTMLTextAreaElement | null>(null)
+const commentError = ref(''), commentInput = ref<{ focus: () => void } | null>(null)
 const successNotice = ref(false), successSequence = ref(0), outcomeUncertain = ref(false), conflictNotice = ref(false)
 const inspectable = ref(false)
 const readbackUnverified = ref(false)
@@ -72,7 +73,7 @@ const photoChanges = computed(() => {
   return base.length !== retained.length || base.some(id => !retained.includes(id))
 })
 const photoPanels = computed(() => [
-  { title: label('baselinePhotos'), urls: basePhotos.value, empty: baselinePhotosKnown.value && !(selected.value?.base_snapshot.photo_ids as string[]).length ? label('noPhotos') : label('baselinePhotosUnavailable') },
+  { title: label('baselinePhotos'), urls: basePhotos.value, empty: baselinePhotosKnown.value && (selected.value?.base_snapshot.photo_ids as string[] | undefined)?.length === 0 ? label('noPhotos') : label('baselinePhotosUnavailable') },
   { title: label('proposedPhotos'), urls: proposedPhotos.value, empty: selected.value && (selected.value.observation_edit.retained_photo_ids.length || selected.value.proposal_photo_count) ? label('photosUnavailable') : label('noPhotos') },
 ])
 function enlarge(items: string[], index: number, event: Event, title: string) {
@@ -125,7 +126,7 @@ async function loadDetails(id: string, preserve = false) {
 async function decide(decision: 'Approved'|'Rejected'|'Correction Required') {
   if (!eligible.value || !selected.value) return
   commentError.value = ''
-  if (!comment.value.trim() || comment.value.length>4000) { commentError.value=actionText('commentRequired'); await nextTick(); commentInput.value?.focus(); return }
+  if (comment.value.length>4000 || (decision !== 'Approved' && !comment.value.trim())) { commentError.value=actionText('commentRequired'); await nextTick(); commentInput.value?.focus(); return }
   const row=selected.value, token=generation, actor=session.value.user?.id
   busy.value=true;message.value='';successNotice.value=false
   try {
@@ -226,7 +227,7 @@ defineExpose({open})
       <section v-if="selected.status==='Pending Review'" class="review-decision"><h3>{{ sharedLabel('reviewDecision') }}</h3>
         <p v-if="selected.observation_edit.current.status!=='Approved'" class="review-alert" role="status">{{ label('currentStatus') }}: {{ t('observationEdits.statuses.'+selected.observation_edit.current.status) }}</p>
         <label v-if="blocked && inspectable" class="inspection-check"><input type="checkbox" :disabled="busy || !ready" @change="blocked=!($event.target as HTMLInputElement).checked" />{{ label('inspect') }}</label>
-        <label for="observation-edit-comment">{{ label('comment') }}</label><textarea id="observation-edit-comment" ref="commentInput" v-model="comment" :aria-invalid="Boolean(commentError)" :aria-describedby="commentError ? 'edit-comment-error' : undefined" maxlength="4000" rows="3" :disabled="!ready || busy || selected.status!=='Pending Review'" />
+        <ReviewCommentField ref="commentInput" id="observation-edit-comment" v-model="comment" :label="label('comment')" :invalid="Boolean(commentError)" :described-by="commentError ? 'edit-comment-error' : undefined" :disabled="!ready || busy || selected.status!=='Pending Review'" :rows="3" />
         <p v-if="commentError" id="edit-comment-error" class="comment-error" role="alert">{{ commentError }}</p>
       </section>
       </template>

@@ -5,7 +5,7 @@ import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import { requestPlantPreview, type PlantPreview, type ProximityResult } from '../../services/plantProximity'
 import { formatPlantId } from '../../utils/plantId'
 import PlantProximityImage from './PlantProximityImage.vue'
-import { gpsProximityScore, proximityScoreTone, formatProximityScore, gpsAccuracyUncertain } from '../../services/plantProximityScore'
+import { proximityScoreTone, formatProximityScore, gpsAccuracyUncertain, groupRiskScore, matchStatusKey } from '../../services/plantProximityScore'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
 const props = defineProps<{ observationId?: string; revision?: number; value?: ProximityResult | null; loading?: boolean; failed?: boolean; context?: string }>()
 const emit = defineEmits<{ retry: [] }>()
@@ -15,8 +15,32 @@ const authorized = computed(() => !session.value.pending && session.value.user?.
 const drawer = ref<HTMLDialogElement | null>(null), drawerOpen = ref(false)
 const previews = ref<Record<string, PlantPreview>>({})
 const nearby = computed(() => result.value?.candidates.slice(0, 5) || [])
-const candidateScore = (distance: number) => result.value?.state === 'complete' ? gpsProximityScore(distance, result.value.config) : null
-const scoreText = (distance: number) => result.value?.state === 'incomplete' ? text('tableIncomplete') : formatProximityScore(candidateScore(distance), locale.value)
+const candidateScore = (candidate: ProximityResult['candidates'][number]) => result.value?.state === 'complete' ? groupRiskScore(candidate, result.value) : null
+const scoreText = (candidate: ProximityResult['candidates'][number]) => {
+  if (result.value?.state === 'incomplete') return text('tableIncomplete')
+  const score = candidateScore(candidate)
+  if (score !== null) return formatProximityScore(score, locale.value)
+  return candidate.match_status === 'same_species_zone' ? text('tableUncertainMatch') : text(matchStatusKey(candidate.match_status))
+}
+const matchText = (candidate: ProximityResult['candidates'][number]) => {
+  const speciesStatus = candidate.species_match_status
+  const zoneStatus = candidate.zone_match_status
+  if (speciesStatus === 'provisional_same_name' || speciesStatus === 'provisional_different_name') {
+    const key = speciesStatus === 'provisional_same_name'
+      ? zoneStatus === 'same' ? 'matchProvisionalSameNameSameZone' : zoneStatus === 'different' ? 'matchProvisionalSameNameDifferentZone' : 'matchProvisionalSameNameUnknownZone'
+      : zoneStatus === 'same' ? 'matchProvisionalDifferentNameSameZone' : zoneStatus === 'different' ? 'matchProvisionalDifferentNameDifferentZone' : 'matchProvisionalDifferentNameUnknownZone'
+    return text(key)
+  }
+  if (speciesStatus === 'unknown') return text(zoneStatus === 'unknown' ? 'matchSpeciesAndZoneUnknown' : 'matchUncertainSpecies')
+  if (speciesStatus === 'confirmed_different') return text('matchDifferentSpecies')
+  if (candidate.match_status === 'same_species_zone' && result.value &&
+      (gpsAccuracyUncertain(result.value.accuracy_m, result.value.config.accuracy_warning_m) || gpsAccuracyUncertain(candidate.accuracy_m, result.value.config.accuracy_warning_m))) return text('matchGpsUncertain')
+  if (zoneStatus === 'unknown') return text('matchUncertainZone')
+  if (zoneStatus === 'different') return text('matchDifferentZone')
+  return candidate.match_status === 'same_species_zone'
+    ? text(candidate.within_grouping_radius ? 'matchWithinGroupingRadius' : 'matchBeyondGroupingRadius', { radius: number(result.value?.config.grouping_radius_m ?? 5) })
+    : text(matchStatusKey(candidate.match_status))
+}
 let drawerGeneration = 0, generation = 0, disposed = false
 let trigger: HTMLElement | null = null, previewController: AbortController | null = null
 function closeDrawer() {
@@ -81,12 +105,12 @@ defineExpose({ openDrawer, closeDrawer })
             <p v-if="result.state === 'complete' && !nearby.length" role="status">{{ text('none', { radius: number(result.config.radius_m) }) }} {{ text('noScore') }}</p>
             <p v-if="result.state === 'incomplete'" class="proximity-incomplete" role="status">{{ text('incomplete') }}</p>
             <ol class="proximity-candidates">
-              <li v-for="candidate in nearby" :key="candidate.plant_id" :class="proximityScoreTone(candidateScore(candidate.distance_m))">
+              <li v-for="candidate in nearby" :key="candidate.plant_id" :class="proximityScoreTone(candidateScore(candidate))">
                 <PlantProximityImage :src="previews[candidate.plant_id]?.image || ''" :alt="text('photo', { plant: formatPlantId(candidate.plant_id) })" :unavailable="text('photoUnavailable')" />
                 <div class="nearby-plant-copy">
                   <div class="proximity-candidate-heading">
                     <div class="nearby-names"><strong class="nearby-plant-id">{{ formatPlantId(candidate.plant_id) }}</strong><p><em>{{ previews[candidate.plant_id]?.scientificName || candidate.plant_name || candidate.species_name || text('unnamed') }}</em></p><p v-if="previews[candidate.plant_id]?.commonName">{{ previews[candidate.plant_id]?.commonName }}</p><span class="proximity-status" :style="workflowBadgeStyle(candidate.status)">{{ t('dashboardValues.' + (candidate.status === 'Approved' ? 'approved' : 'pendingreview')) }}</span></div>
-                    <div class="candidate-risk" :class="proximityScoreTone(candidateScore(candidate.distance_m))"><span>{{ text('scoreHeading') }}</span><strong>{{ scoreText(candidate.distance_m) }}</strong></div>
+                    <aside class="candidate-risk" :class="proximityScoreTone(candidateScore(candidate))" :aria-label="text('scoreHeading')"><span>{{ text('scoreHeading') }}</span><strong v-if="candidateScore(candidate) !== null">{{ scoreText(candidate) }}</strong><span v-else class="candidate-match" :class="candidate.match_status">{{ matchText(candidate) }}</span></aside>
                   </div>
                   <div class="candidate-distance"><span>{{ text('distanceLabel') }}: <strong>{{ number(candidate.distance_m) }} m</strong></span><span class="proximity-category" :class="candidate.category">{{ text('short_' + candidate.category) }}</span></div>
                   <div class="nearby-plant-footer"><div class="gps-accuracy"><strong>{{ text('accuracyHeading') }}</strong><dl><div><dt>{{ text('newPlantAccuracy') }}:</dt><dd>{{ accuracyText(result.accuracy_m) }}</dd></div><div><dt>{{ text('existingPlantAccuracy') }}:</dt><dd>{{ accuracyText(candidate.accuracy_m) }}</dd></div></dl></div><a :href="'/plant/' + candidate.plant_id" target="_blank" rel="noopener noreferrer" :aria-label="text('inspect', { plant: formatPlantId(candidate.plant_id) })">{{ text('viewDetails') }} ↗</a></div>
@@ -104,26 +128,30 @@ defineExpose({ openDrawer, closeDrawer })
 
 <style scoped>
 .proximity-retry { padding: 7px 12px; border: 1px solid #afc8b7; border-radius: 6px; background: #fff; color: #245a46; cursor: pointer; }
-.nearby-drawer { position: fixed; inset: 0 0 0 auto; box-sizing: border-box; width: min(760px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; padding: 0; border: 0; border-left: 1px solid #d5dfd8; background: #fff; color: #173f34; box-shadow: -12px 0 40px #102b2529; overflow: hidden; }
+.nearby-drawer { position: fixed; inset: 0 0 0 auto; box-sizing: border-box; width: min(700px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; padding: 0; border: 0; border-left: 1px solid #d5dfd8; background: #fff; color: #173f34; box-shadow: -12px 0 40px #102b2529; overflow: hidden; }
 .nearby-drawer[open] { display: flex; flex-direction: column; animation: nearby-enter 180ms ease-out; }
 .nearby-drawer::backdrop { background: rgb(0 0 0 / 38%); }
-.nearby-drawer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 24px; border-bottom: 1px solid #e1e9e3; }
-.nearby-drawer-header h2 svg { width: 30px; height: 30px; flex-shrink: 0; }
-.nearby-drawer-header h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 26px; }
-.nearby-drawer-header p { margin: 7px 0 0 40px; font-size: 13px; }
+.nearby-drawer-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 22px; border-bottom: 1px solid #e1e9e3; background: #15563f; color: #fff; }
+.nearby-drawer-header h2 svg { width: 26px; height: 26px; flex-shrink: 0; }
+.nearby-drawer-header h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 22px; }
+.nearby-drawer-header p { margin: 5px 0 0 36px; font-size: 12px; color: #e2eee8; }
 .nearby-close { flex: 0 0 40px; height: 40px; border: 1px solid #d6e2da; border-radius: 50%; background: #fff; color: #244b3d; font-size: 26px; cursor: pointer; }
 .nearby-drawer-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 22px 28px; }
 .proximity-candidates { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
-.proximity-candidates li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 16px; padding: 14px; border: 1px solid #dce5de; border-radius: 12px; background: #fff; }
+.proximity-candidates li { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; padding: 13px; border: 1px solid #dce5de; border-radius: 12px; background: #fff; }
 .proximity-candidates li.high { border-color: #e5aaa4; background: #fff8f7; }
 .nearby-plant-copy { min-width: 0; overflow-wrap: anywhere; }
-.proximity-candidate-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.proximity-candidate-heading { display: grid; grid-template-columns: minmax(0, 1fr) 126px; align-items: start; gap: 12px; }
 .nearby-names { min-width: 0; }
 .nearby-plant-id { font-size: 18px; }
+.candidate-match { display: block; margin-top: 5px; color: inherit; font-size: 10px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+.candidate-match.same_species_zone { color: #245a46; font-weight: 700; }
+.candidate-match.different_species, .candidate-match.different_zone { color: #526a5e; }
+.candidate-match.uncertain_species, .candidate-match.uncertain_zone, .candidate-match.uncertain_match { color: #815f1e; }
 .nearby-names p { margin: 4px 0; font-size: 13px; line-height: 1.45; }
-.candidate-risk { flex-shrink: 0; max-width: 120px; padding: 8px 10px; border-radius: 12px; text-align: center; }
-.candidate-risk span { display: block; font-size: 11px; font-weight: 600; }
-.candidate-risk strong { display: block; font-size: 28px; line-height: 1.3; }
+.candidate-risk { min-width: 0; padding: 9px 10px; border: 1px solid #e2eae4; border-radius: 10px; background: #f2f6f3; text-align: center; }
+.candidate-risk > span:first-child { display: block; font-size: 10px; font-weight: 700; line-height: 1.3; }
+.candidate-risk strong { display: block; margin-top: 3px; font-size: 23px; line-height: 1.2; }
 .candidate-risk.high { background: #fde2df; color: #973831; }
 .candidate-risk.raised { background: #fff0c5; color: #79580e; }
 .candidate-risk.moderate { background: #e6f0e7; color: #315c48; }
@@ -146,12 +174,12 @@ button:focus-visible, a:focus-visible { outline: 3px solid #33745d; outline-offs
 @keyframes nearby-enter { from { transform: translateX(100%); } to { transform: translateX(0); } }
 @media (prefers-reduced-motion: reduce) { .nearby-drawer[open] { animation: none; } }
 @media (max-width: 580px) {
-  .nearby-drawer-header { padding: 18px 14px; } .nearby-drawer-header h2 { font-size: 22px; }
+  .nearby-drawer-header { padding: 14px 12px; } .nearby-drawer-header h2 { font-size: 19px; } .nearby-drawer-header h2 svg { width: 22px; height: 22px; } .nearby-drawer-header p { margin-left: 32px; }
   .nearby-drawer-content { padding: 14px 10px 24px; }
   .proximity-candidates li { grid-template-columns: 76px minmax(0, 1fr); gap: 10px; padding: 10px; }
-  .proximity-candidate-heading { gap: 6px; } .nearby-plant-id { font-size: 15px; }
-  .candidate-risk { max-width: 82px; padding: 6px; } .candidate-risk span { font-size: 10px; } .candidate-risk strong { font-size: 22px; }
+  .proximity-candidate-heading { grid-template-columns: minmax(0, 1fr) 96px; gap: 6px; } .nearby-plant-id { font-size: 15px; }
+  .candidate-risk { padding: 6px; } .candidate-risk strong { font-size: 19px; } .candidate-match { font-size: 9px; }
   .candidate-distance { margin-top: 10px; }
 }
-@media (max-width: 360px) { .proximity-candidate-heading { flex-wrap: wrap; } }
+@media (max-width: 360px) { .proximity-candidate-heading { grid-template-columns: minmax(0, 1fr); } .candidate-risk { justify-self: stretch; } }
 </style>

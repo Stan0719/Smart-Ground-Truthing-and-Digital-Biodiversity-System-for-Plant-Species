@@ -1,3 +1,4 @@
+import PreviewableImage from "../components/PreviewableImage";
 import { t, translateLabel, translateUIMessage, useAppTranslation, translateFieldValue } from "../translations/i18n";
 // screens/Species.js
 import LanguageSelector from "../components/LanguageSelector";
@@ -12,7 +13,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Image,
   RefreshControl,
   ActivityIndicator,
 } from "react-native";
@@ -813,7 +813,7 @@ function PlantCard({
       <View style={styles.cardImage}>
 
         {imageSource ? (
-          <Image
+          <PreviewableImage
             source={imageSource}
             style={styles.plantImage}
             resizeMode="cover"

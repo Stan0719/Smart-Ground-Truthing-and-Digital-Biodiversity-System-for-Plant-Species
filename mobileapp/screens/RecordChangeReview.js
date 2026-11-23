@@ -1,5 +1,6 @@
+import PreviewableImage from "../components/PreviewableImage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { useFocusEffect } from "@react-navigation/native";
@@ -118,15 +119,15 @@ export default function RecordChangeReview() {
         {Number(selected.proposal_photo_count) > 0 && <Text style={styles.value}>{t("recordEdits.photoReplacementProposed")}</Text>}
       </View>
       <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.originalPhotos")}</Text>
-        <View style={styles.photoRow}>{images.original.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View>
+        <View style={styles.photoRow}>{images.original.map((source, index) => <PreviewableImage key={index} source={source} style={styles.photo} />)}</View>
         <Text style={styles.heading}>{t("recordEdits.proposedPhotos")}</Text>
-        {images.proposed.length ? <View style={styles.photoRow}>{images.proposed.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View>
+        {images.proposed.length ? <View style={styles.photoRow}>{images.proposed.map((source, index) => <PreviewableImage key={index} source={source} style={styles.photo} />)}</View>
           : <Text style={styles.muted}>{t("recordEdits.keepExistingPhotos")}</Text>}
       </View>
       {selected.plant_id && (images.removed.length > 0 || images.added.length > 0) && <View style={styles.card}>
         <Text style={styles.heading}>{t("recordEdits.photosChanged", { removed: images.removed.length, added: images.added.length })}</Text>
-        {!!images.removed.length && <><Text style={styles.label}>{t("recordEdits.removedPhotos")}</Text><View style={styles.photoRow}>{images.removed.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View></>}
-        {!!images.added.length && <><Text style={styles.label}>{t("recordEdits.addedPhotos")}</Text><View style={styles.photoRow}>{images.added.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View></>}
+        {!!images.removed.length && <><Text style={styles.label}>{t("recordEdits.removedPhotos")}</Text><View style={styles.photoRow}>{images.removed.map((source, index) => <PreviewableImage key={index} source={source} style={styles.photo} />)}</View></>}
+        {!!images.added.length && <><Text style={styles.label}>{t("recordEdits.addedPhotos")}</Text><View style={styles.photoRow}>{images.added.map((source, index) => <PreviewableImage key={index} source={source} style={styles.photo} />)}</View></>}
       </View>}
       {!!selected.review_comment && <Text style={styles.muted}>{selected.review_comment}</Text>}
       {selected.status === "Pending Review" && <View style={styles.card}>

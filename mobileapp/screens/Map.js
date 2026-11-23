@@ -1,7 +1,8 @@
+import PreviewableImage from "../components/PreviewableImage";
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { AppState, ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { AppState, ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import PlantExplorerMap from "../components/PlantExplorerMap";
 import { t, translateLabel, useAppTranslation } from "../translations/i18n";
@@ -32,7 +33,7 @@ function PlantCard({ plant, onPress, onMapPress }) {
         accessibilityLabel={`${plant.plantScientificName || t("plant.notRecorded")}, ${t("plantDetail.plantId")} ${plant.plantId}`}>
         <View style={styles.imageWrap}>
           {plant.plantImage && !imageFailed ? (
-            <Image source={plant.plantImage} style={styles.image} resizeMode="cover" onError={() => setImageFailed(true)} />
+            <PreviewableImage source={plant.plantImage} style={styles.image} resizeMode="cover" onError={() => setImageFailed(true)} />
           ) : (
             <View style={styles.imagePlaceholder}><Ionicons name="leaf-outline" size={34} color="#5C9B70" /></View>
           )}

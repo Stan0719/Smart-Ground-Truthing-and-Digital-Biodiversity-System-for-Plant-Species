@@ -1,5 +1,6 @@
+import PreviewableImage from "../components/PreviewableImage";
 import React, { useState } from "react";
-import { FlatList, Image, RefreshControl, StyleSheet, TouchableOpacity, View } from "react-native";
+import { FlatList, RefreshControl, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -65,7 +66,7 @@ export default function FavouritePlantsScreen({ navigation, user }) {
                 <TouchableOpacity accessibilityRole="button" style={styles.cardMain} activeOpacity={0.8} onPress={() => openItem(item)}>
                   <View style={styles.imageFrame}>
                     {item.image && (isSpecies || !failedPlantImageUris.has(item.image.uri))
-                      ? <Image
+                      ? <PreviewableImage
                         source={item.image}
                         style={styles.image}
                         resizeMode="cover"

@@ -1,5 +1,6 @@
+import PreviewableImage, { confirmPhotoRemoval } from "../components/PreviewableImage";
 import React, { useCallback, useRef, useState } from "react";
-import { Alert, Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
@@ -341,7 +342,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
     <TouchableOpacity style={styles.secondary} onPress={() => { setState((old) => ({ ...old, loading: true, error: "" })); setReload((old) => old + 1); }}>
       <Text style={styles.secondaryText}>{t("common.tryAgain")}</Text></TouchableOpacity></View>;
   if (state.request.request_status === "Rejected") return <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{t("recordEdits.finalRejected")}</Text><TouchableOpacity style={styles.secondary} onPress={() => navigation.goBack()}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></TouchableOpacity></View>;
-  return <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <ScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <Text style={styles.title}>{t(state.correctionChange || (route.params?.correction && state.request?.request_status === "Correction Required") ? "recordEdits.correctSpeciesRequest" : "recordEdits.editSpecies")}</Text>
     {(state.correctionChange?.review_comment || (route.params?.correction && state.request?.request_status === "Correction Required" && state.request.review_comment)) ? <Text style={styles.note}>{state.correctionChange?.review_comment || state.request.review_comment}</Text> : null}
     {(versionConflict || (draftConflict && state.request.request_status !== "Approved")) && <View style={styles.conflict} accessibilityRole="alert" accessibilityLiveRegion="assertive">
@@ -369,15 +370,15 @@ export default function EditSpeciesRequest({ route, navigation }) {
         originalContent={state.request.photo ? <View style={styles.photoCard}>
           <TouchableOpacity style={[styles.photoFrame, reuseOriginalPhoto && styles.photoFrameSelected]} onPress={() => { if (!reuseOriginalPhoto) { setReuseOriginalPhoto(true); setPhoto(null); } }}
             accessibilityRole="checkbox" accessibilityLabel={t("recordEdits.originalPhoto")} accessibilityState={{ checked: reuseOriginalPhoto }}>
-            <Image source={state.request.photo} style={styles.photo} resizeMode="cover" onError={() => setOriginalPhotoUnavailable(true)} />
+            <PreviewableImage source={state.request.photo} style={styles.photo} resizeMode="cover" onError={() => setOriginalPhotoUnavailable(true)} />
             {reuseOriginalPhoto && <View style={styles.photoSelectionMark}><Text style={styles.photoSelectionCheck}>✓</Text></View>}
           </TouchableOpacity>
           {originalPhotoUnavailable && <Text style={styles.error}>{t("recordEdits.originalPhotoUnavailable")}</Text>}
         </View> : <Text style={styles.secondaryText}>{t("recordEdits.informationNotAvailable")}</Text>}>
         {(photo || state.correctionPhoto || state.request.photo) && <View style={styles.photoCard}><View style={[styles.photoFrame, reuseOriginalPhoto && !photo && styles.photoFrameSelected]}>
-          <Image source={photo ? { uri: photo } : reuseOriginalPhoto ? state.request.photo : state.correctionPhoto || state.request.photo} style={styles.photo} resizeMode="cover" /></View>
+          <PreviewableImage source={photo ? { uri: photo } : reuseOriginalPhoto ? state.request.photo : state.correctionPhoto || state.request.photo} style={styles.photo} resizeMode="cover" /></View>
           <TouchableOpacity style={styles.removeSelection} onPress={() => {
-            if (photo) { setPhoto(null); setReuseOriginalPhoto(Boolean(state.request.photo) && !state.correctionPhoto && state.request.request_status !== "Correction Required"); }
+            if (photo) confirmPhotoRemoval(t, () => { setPhoto(null); setReuseOriginalPhoto(Boolean(state.request.photo) && !state.correctionPhoto && state.request.request_status !== "Correction Required"); });
             else Alert.alert(t("common.error"), t("recordEdits.speciesPhotoRemovalUnsupported"));
           }} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
         </View>}

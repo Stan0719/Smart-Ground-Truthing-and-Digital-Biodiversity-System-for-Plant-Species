@@ -131,16 +131,19 @@ for (const pgWire of [false, true]) test(`Observation edit proposals preserve ap
   assert.equal((await call(`/observation-edits/${editId}/review`, 'officer', 'POST',
     { decision: 'Approved', comment: 'Stale decision.', revision: 1 })).status, 409);
   assert.equal((await call(`/observation-edits/${editId}`, 'bob')).data.edit.status, 'Pending Review');
-  const approved = await call(`/observation-edits/${editId}/review`, 'officer', 'POST', { decision: 'Approved', comment: 'Accepted.', revision: 2 });
+  const tooLong = await call(`/observation-edits/${editId}/review`, 'officer', 'POST', { decision: 'Approved', comment: 'x'.repeat(4001), revision: 2 });
+  assert.equal(tooLong.status, 400);
+  assert.equal((await call(`/observation-edits/${editId}/review`, 'officer', 'POST', { decision: 'Rejected', comment: '', revision: 2 })).status, 400);
+  const approved = await call(`/observation-edits/${editId}/review`, 'officer', 'POST', { decision: 'Approved', comment: '', revision: 2 });
   assert.equal(approved.status, 200, JSON.stringify(approved.data));
   const current = (await call(`/observations/${observationId}`, 'bob')).data.observation;
   assert.equal(current.id, observationId);
   assert.equal(current.content.morphology, 'Edited leaves');
   assert.equal(current.content.notes, 'Clarified note');
-  assert.equal(current.review_comment, 'Accepted.');
+  assert.equal(current.review_comment, '');
   assert.equal(current.review_decision, 'Approved');
   assert.ok(current.reviewed_at);
-  assert.equal((await call(`/observations/${observationId}`, 'alice')).data.observation.review_comment, 'Accepted.');
+  assert.equal((await call(`/observations/${observationId}`, 'alice')).data.observation.review_comment, '');
   const currentPhotos = (await pool.query('SELECT id FROM plant_asset WHERE observation_id=$1 AND approved=TRUE', [observationId])).rows;
   assert.equal(currentPhotos.length, 1);
   assert.notEqual(currentPhotos[0].id, '22222222-2222-4222-8222-222222222222');
@@ -169,7 +172,7 @@ for (const pgWire of [false, true]) test(`Observation edit proposals preserve ap
   assert.deepEqual((await call(`/observations/${observationId}`, 'bob')).data.observation.content,current.content);
   const afterRejectedEdit = (await call(`/observations/${observationId}`, 'bob')).data.observation;
   assert.equal(afterRejectedEdit.content.morphology, 'Edited leaves');
-  assert.equal(afterRejectedEdit.review_comment, 'Accepted.');
+  assert.equal(afterRejectedEdit.review_comment, '');
   assert.equal((await call('/observation-edits', 'bob', 'POST', { ...proposal, client_key: 'edit-bob-3' })).status, 201);
   const initialId = '33333333-3333-4333-8333-333333333333';
   const initialPayload = { observation_id: initialId, client_key: 'initial-plant-edit',

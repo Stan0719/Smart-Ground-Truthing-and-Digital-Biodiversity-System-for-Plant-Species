@@ -1,5 +1,6 @@
+import PreviewableImage from "../components/PreviewableImage";
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, FlatList, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
@@ -215,7 +216,7 @@ function AccountScanHistory({ navigation, accountId }) {
           >
             <View style={styles.imageFrame}>
               {scan.plant?.image?.uri && !failedImageUris.has(scan.plant.image.uri) ? (
-                <Image
+                <PreviewableImage
                   source={scan.plant.image}
                   style={styles.image}
                   resizeMode="cover"

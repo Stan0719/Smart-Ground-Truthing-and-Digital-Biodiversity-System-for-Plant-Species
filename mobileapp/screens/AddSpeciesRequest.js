@@ -1,5 +1,6 @@
+import PreviewableImage, { confirmPhotoRemoval } from "../components/PreviewableImage";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -133,7 +134,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
         ["scientific_name", "scientificName", "eGNepenthesMirabilis"], ["common_name", "commonName", "eGSwampPitcherPlant"],
     ["genus_name", "genus", "eGNepenthes"], ["family_name", "family", "eGNepenthaceae"],
   ];
-  return <DiscoverableScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <DiscoverableScrollView style={styles.page} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <Text style={styles.title}>{t("speciesRequestForm.title")}</Text>
     <Text style={styles.note}>{t("speciesRequestForm.description")}</Text>
     <View style={styles.card}>
@@ -166,8 +167,8 @@ export default function AddSpeciesRequest({ route, navigation }) {
         <TouchableOpacity style={styles.secondary} onPress={() => choosePhoto(false)} disabled={saving} accessibilityRole="button"><Ionicons name="images-outline" size={18} color="#2F6B4F" /><Text style={styles.secondaryText}>{t("addPlant.gallery")}</Text></TouchableOpacity>
       </View>
       {photo && <View style={styles.photoPreview}>
-        <Image source={{ uri: photo }} style={styles.photo} resizeMode="cover" />
-        <TouchableOpacity style={styles.removePhoto} onPress={() => setPhoto(null)} disabled={saving} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
+        <PreviewableImage source={{ uri: photo }} style={styles.photo} resizeMode="cover" />
+        <TouchableOpacity style={styles.removePhoto} onPress={() => confirmPhotoRemoval(t, () => setPhoto(null))} disabled={saving} accessibilityRole="button" accessibilityLabel={t("recordEdits.removePhoto")}><Ionicons name="trash-outline" size={21} color="#B42318" /></TouchableOpacity>
       </View>}
       <View style={styles.approvalInfo}><Text style={styles.approvalTitle}>{t("addPlant.speciesApprovalRequired")}</Text><Text style={styles.note}>{t("speciesRequestForm.approvalNotice")}</Text></View>
     </View>

@@ -76,6 +76,7 @@ function makeScreen({ language = "en", species = null, fetchSpeciesDetail = asyn
   new Function("require", "module", "exports", compiled)((name) => {
     if (name === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     if (name === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
+    if (name === "../components/PreviewableImage" || name === "./PreviewableImage") return { default: "Image", confirmPhotoRemoval: (_translate, remove) => remove(), __esModule: true };
     assert.ok(name in dependencies, `Unexpected import ${name}`);
     const dependency = dependencies[name];
     return name === "react" ? dependency : { ...dependency, __esModule: true };

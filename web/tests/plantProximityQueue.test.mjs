@@ -9,11 +9,12 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import { createPlantProximityQueue, proximityKey } from '../src/services/plantProximityQueue.ts'
 import { formatPlantId } from '../src/utils/plantId.ts'
 const row=(id,revision=1,stamp='gps-a')=>({id:String(id),revision,stamp})
-const result=(target,extra={})=>({contract_version:1,observation_id:target.id,revision:target.revision,plant_id:'1000',checked_at:'2026-11-20T00:00:00Z',state:'complete',accuracy_m:2,config:{very_close_m:2,close_m:5,nearby_m:10,radius_m:30,accuracy_warning_m:10,candidate_limit:20},candidates:[],eligible_count:0,unlocated_count:0,total_nearby:0,...extra})
+const result=(target,extra={})=>({contract_version:1,observation_id:target.id,revision:target.revision,plant_id:'1000',checked_at:'2026-11-20T00:00:00Z',state:'complete',accuracy_m:2,config:{very_close_m:2,close_m:5,nearby_m:10,grouping_radius_m:5,radius_m:30,accuracy_warning_m:10,candidate_limit:20},candidates:[],eligible_count:0,unlocated_count:0,total_nearby:0,...extra})
+
 const flush=async()=>{await new Promise(setImmediate);await vue.nextTick()}
 test('large table is lazy and visible-row requests never exceed two concurrent checks',async()=>{
  const pending=[],rows=Array.from({length:1000},(_,i)=>row(i+1));let active=0,maximum=0,reads=0
- const q=createPlantProximityQueue((id,revision,signal)=>{reads++;active++;maximum=Math.max(maximum,active);return new Promise(resolve=>pending.push(()=>{active--;resolve(result(row(id,revision)))}))},()=>{})
+ const q=createPlantProximityQueue((id,revision)=>{reads++;active++;maximum=Math.max(maximum,active);return new Promise(resolve=>pending.push(()=>{active--;resolve(result(row(id,revision)))}))},()=>{})
  try{q.setRows(rows);await flush();assert.equal(reads,0);for(const target of rows.slice(0,6))q.visibility(target,true);await flush();assert.equal(reads,2)
   while(pending.length){pending.shift()();await flush()}assert.equal(reads,6);assert.equal(maximum,2);assert.equal(q.entries.get('7:1').state,'idle')
  }finally{q.dispose()}
@@ -46,7 +47,7 @@ test('cache retains at most 100 results and rejects identity mismatches',async()
  try{q.setRows(rows);rows.forEach(r=>q.visibility(r,true));await flush();assert.equal(reads,101);q.setRows([row(1)]);await flush();assert.equal(reads,102)}finally{q.dispose()}
  const mismatch=createPlantProximityQueue(async()=>result(row(999)),()=>{});try{mismatch.setRows([row(1)]);mismatch.visibility(row(1),true);await flush();assert.equal(mismatch.entries.get(proximityKey(row(1))).state,'failed')}finally{mismatch.dispose()}
 })
-
+
 const file=new URL('../src/components/conservation/PlantProximityCell.vue',import.meta.url),{descriptor}=parse(readFileSync(file,'utf8')),script=compileScript(descriptor,{id:'proximity-cell'}),template=compileTemplate({source:descriptor.template.content,filename:file.pathname,id:'proximity-cell',compilerOptions:{bindingMetadata:script.bindings}})
 const js=code=>ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
 function cell(entry,language='en'){
@@ -57,8 +58,9 @@ function cell(entry,language='en'){
 }
 test('table badge displays the nearest risk percentage and distinguishes no score, incomplete, unavailable and not eligible in every locale',()=>{
  for(const lang of ['en','ms','zh-CN']){
-  const candidate={plant_id:'21',distance_m:0.43,category:'very_close'},entry={target:row(1),state:'ready',result:result(row(1),{candidates:[candidate,{...candidate,plant_id:'35',distance_m:0.88}]})},h=cell(entry,lang)
-  try{assert.equal(h.state.label.value,proximityScore.formatProximityScore(96,lang));assert.equal(h.state.score.value,96);assert.ok(String(h.render().children[0].props.class).includes('high'));assert.ok(!h.state.label.value.includes('PL021'));assert.ok(h.state.tooltip.value.includes(h.labels.plantProximity.scoreUncertain));h.props.entry={...entry,result:result(row(1))};assert.equal(h.state.label.value,'—');assert.ok(h.state.tooltip.value.includes(h.labels.plantProximity.noScore))
+   const candidate={plant_id:'21',status:'Approved',plant_name:'Plant group',species_name:'Species',accuracy_m:4,distance_m:0.43,category:'very_close',location_source:'approved_observation',match_status:'same_species_zone',within_grouping_radius:true},entry={target:row(1),state:'ready',result:result(row(1),{candidates:[candidate,{...candidate,plant_id:'35',distance_m:0.88}]})},h=cell(entry,lang)
+   try{assert.equal(h.state.label.value,proximityScore.formatProximityScore(96,lang));assert.equal(h.state.score.value,96);assert.ok(String(h.render().children[0].props.class).includes('high'));assert.ok(!h.state.label.value.includes('PL021'));assert.ok(h.state.tooltip.value.includes(h.labels.plantProximity.scoreDisclaimer));assert.ok(!h.state.tooltip.value.includes(h.labels.plantProximity.scoreUncertain));h.props.entry={...entry,result:result(row(1))};assert.equal(h.state.label.value,'—');assert.ok(h.state.tooltip.value.includes(h.labels.plantProximity.noScore))
+
    h.props.entry={...entry,result:result(row(1),{state:'incomplete',candidates:[candidate]})};assert.equal(h.state.label.value,h.labels.plantProximity.tableIncomplete);assert.equal(h.state.score.value,null);h.props.entry={...entry,state:'failed',result:null};assert.equal(h.state.label.value,h.labels.plantProximity.tableUnavailable)
    h.props.entry={...entry,result:result(row(1),{state:'not_eligible'})};assert.equal(h.state.label.value,'—');h.props.entry={...entry,state:'loading'};assert.equal(h.state.label.value,h.labels.plantProximity.tableLoading)
   }finally{h.stop()}

@@ -709,7 +709,11 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
       (!Number.isSafeInteger(req.body.revision) || req.body.revision < 1))
       fail(400, "Invalid review decision.");
     const versioning = await versioningAvailable(pool);
-    const comment = text(req.body.comment);
+    if (req.body.comment !== undefined && (typeof req.body.comment !== "string" || req.body.comment.length > 4000))
+      fail(400, "Invalid review comment.");
+    const comment = typeof req.body.comment === "string" ? req.body.comment.trim() : "";
+    if (req.body.decision !== "Approved" && !comment)
+      fail(400, "Officer feedback is required for this decision.");
     if (versioning) {
       const parent = await initialParentChange(pool, req.params.id, req.user);
       if (parent) {

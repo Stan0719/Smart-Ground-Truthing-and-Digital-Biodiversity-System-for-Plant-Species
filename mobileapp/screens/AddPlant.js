@@ -1,3 +1,4 @@
+import PreviewableImage, { confirmPhotoRemoval } from "../components/PreviewableImage";
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -11,7 +12,6 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  Image,
 } from "react-native";
 
 import * as Location from "expo-location";
@@ -1084,6 +1084,7 @@ function handleRemoveSpeciesPhoto(index) {
           styles.scrollContent
         }
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator
       >
 
@@ -1565,7 +1566,7 @@ function handleRemoveSpeciesPhoto(index) {
                       key={`${photo}-${index}`}
                       style={styles.speciesPhotoItem}
                     >
-                      <Image
+                      <PreviewableImage
                         source={{ uri: photo }}
                         style={styles.speciesPhotoPreview}
                         resizeMode="cover"
@@ -1574,7 +1575,7 @@ function handleRemoveSpeciesPhoto(index) {
                       <TouchableOpacity
                         style={styles.removeSpeciesPhotoButton}
                         disabled={submitting}
-                        onPress={() => handleRemoveSpeciesPhoto(index)}
+                        onPress={() => confirmPhotoRemoval(t, () => handleRemoveSpeciesPhoto(index))}
                         activeOpacity={0.8}
                         accessibilityRole="button"
                         accessibilityLabel={t("recordEdits.removePhoto")}
@@ -1932,7 +1933,7 @@ function handleRemoveSpeciesPhoto(index) {
                 </Text>
 
                 {photo && (
-                  <Image
+                  <PreviewableImage
                     source={{ uri: photo }}
                     style={styles.guidedPhotoPreview}
                     resizeMode="cover"
@@ -1964,7 +1965,7 @@ function handleRemoveSpeciesPhoto(index) {
                 {photo && (
                   <TouchableOpacity
                     style={styles.removeGuidedPhotoButton}
-                    onPress={() => handleRemoveGuidedPhoto(item.key)}
+                    onPress={() => confirmPhotoRemoval(t, () => handleRemoveGuidedPhoto(item.key))}
                     activeOpacity={0.8}
                     accessibilityRole="button"
                     accessibilityLabel={t("recordEdits.removePhoto")}
@@ -2038,7 +2039,7 @@ function handleRemoveSpeciesPhoto(index) {
                     }
                   >
 
-                    <Image
+                    <PreviewableImage
                       source={{ uri: photo }}
                       style={styles.additionalPhotoPreview}
                       resizeMode="cover"
@@ -2057,11 +2058,7 @@ function handleRemoveSpeciesPhoto(index) {
                       style={styles.removeAdditionalPhotoButton}
                       accessibilityRole="button"
                       accessibilityLabel={t("recordEdits.removePhoto")}
-                      onPress={() =>
-                        handleRemovePhoto(
-                          index
-                        )
-                      }
+                      onPress={() => confirmPhotoRemoval(t, () => handleRemovePhoto(index))}
                     >
 
                       <Ionicons name="trash-outline" size={21} color="#B42318" />

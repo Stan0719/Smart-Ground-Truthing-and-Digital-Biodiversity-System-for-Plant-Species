@@ -1,8 +1,9 @@
+import PreviewableImage from "../components/PreviewableImage";
 import { t, translateLabel, translateUIMessage, useAppTranslation } from "../translations/i18n";
 import { can } from "../utils/rbac";
 import React, { useEffect, useState } from "react";
 import {
-  ScrollView, TouchableOpacity, View, Image } from "react-native";
+  ScrollView, TouchableOpacity, View} from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import PersistentKnowledgeMap from "./PersistentKnowledgeMap";
 import { plantApi } from "../utils/plantApi";
@@ -219,7 +220,7 @@ function AuthenticatedImage({ id, userId }) {
   }, [id, userId]);
   if (error) return <Text accessibilityRole="alert">{translateUIMessage(error)}</Text>;
   return source ? (
-    <Image
+    <PreviewableImage
       source={source}
       onError={() => {
         setSource(null);
