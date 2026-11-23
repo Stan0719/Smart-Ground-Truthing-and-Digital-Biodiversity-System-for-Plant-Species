@@ -211,6 +211,7 @@ function screenFixture(name, app, stateValues = [], notificationItems = [], reco
     if (dependency === "../utils/imageSelection") return { inspectPickedImages: async (assets) => ({ accepted: assets, rejected: [] }), imageSizeAlert: () => ({}), base64Bytes: () => 5, MAX_IMAGE_BYTES: 4194304, __esModule: true };
     if (dependency === "../components/DiscoverableScrollView") return { default: "ScrollView", __esModule: true };
     if (dependency === "../components/ScaledText") return { default: "Text", ScaledTextInput: "TextInput", __esModule: true };
+    if (dependency === "../components/PreviewableImage") return { default: "Image", confirmPhotoRemoval: (_translate, remove) => remove(), __esModule: true };
     if (dependency === "../components/TextSizeContext") return { useTextSize: () => ({ percent: 100 }), __esModule: true };
     assert.ok(dependency in deps, `Unexpected screen dependency: ${dependency}`);
     return { ...deps[dependency], __esModule: dependency !== "react" };

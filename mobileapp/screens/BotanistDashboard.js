@@ -1,8 +1,9 @@
+import PreviewableImage from "../components/PreviewableImage";
 import LanguageSelector from "../components/LanguageSelector";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { View, TouchableOpacity, ScrollView, StyleSheet, Image, ActivityIndicator, Alert, useWindowDimensions, RefreshControl } from "react-native";
+import { View, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert, useWindowDimensions, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { submissionStatus, fetchBotanistRecordChange } from "../utils/botanistRecords";
@@ -748,7 +749,7 @@ export function BotanistSubmissionsScreen({ route, navigation }) {
         accessibilityHint={t("submissions.viewVersions")}
         onPress={() => toggleGroup(group.key)}>
         <View style={styles.groupTop}>
-          {thumbnail ? <Image source={thumbnail} style={styles.thumbnail} accessibilityLabel={t("submissions.photo")} />
+          {thumbnail ? <PreviewableImage source={thumbnail} style={styles.thumbnail} accessibilityLabel={t("submissions.photo")} />
             : <View style={styles.thumbnailPlaceholder}><Ionicons name={isPlant ? "leaf-outline" : "flask-outline"} size={25} color="#2F6B4F" /></View>}
           <View style={styles.plantInfo}>
             <Text style={styles.recordType}>{t(isPlant ? "submissions.plantId" : "submissions.requestId")} {identifier}</Text>

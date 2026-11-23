@@ -128,7 +128,7 @@ function renderListCard(user, language = "en", status = "Approved", overrides = 
     getPlantCardZoneLabel: () => t("map.locationRestricted"), isOwnedPendingPlant: () => false,
     StyleSheet: { create: (styles) => styles },
   };
-  for (const name of ["View", "Text", "TouchableOpacity", "Image", "FavouriteHeart"]) scope[name] = name;
+  for (const name of ["View", "Text", "TouchableOpacity", "PreviewableImage", "FavouriteHeart"]) scope[name] = name;
   const compiled = ts.transpileModule(`${cardSource}\nmodule.exports = { PlantCard, styles };`, {
     compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -157,7 +157,7 @@ test("Visitor and Guest cards omit all badges and Location Zone in EN/MS/ZH whil
       }
       assert.ok(all.some((node) => node.props.label === t("botanistPlantDetail.growthStage") && node.props.value === "Mature"));
       assert.equal(all.some((node) => node.props.label === t("plant.lifeStage2")), false);
-      assert.equal(all.find((node) => node.type === "Image").props.source, plant.plantImage);
+      assert.equal(all.find((node) => node.type === "PreviewableImage").props.source, plant.plantImage);
       assert.ok(all.some((node) => node.props.children === plant.plantScientificName));
       assert.ok(all.some((node) => node.props.children === t("plant.viewPlantRecord")));
       all.find((node) => node.type === "TouchableOpacity").props.onPress();

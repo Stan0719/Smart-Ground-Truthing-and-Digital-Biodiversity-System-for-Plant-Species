@@ -50,6 +50,7 @@ function renderCard({ user, language, tablet, speciesDetailCard = true, status =
   const module = { exports: {} };
   new Function("require", "module", "exports", compiled)((name) => {
     if (name === "./ScaledText") return { default: "Text", __esModule: true };
+    if (name === "../components/PreviewableImage" || name === "./PreviewableImage") return { default: "Image", confirmPhotoRemoval: (_translate, remove) => remove(), __esModule: true };
     assert.ok(name in dependencies, name);
     return { ...dependencies[name], __esModule: name !== "react" };
   }, module, module.exports);

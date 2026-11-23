@@ -46,7 +46,7 @@ test('Plant Detail selection, viewer navigation and plant-change reset use the s
   const { functions: galleryFunctions } = loadGallery()
   assert.match(source, /setSelectedPhotoUri\(null\)/)
   assert.match(source, /setFailedPhotoUris\(\[\]\)/)
-  assert.match(source, /onPress=\{\(\) => setSelectedPhotoUri\(photo\.uri\)\}/)
+  assert.match(source, /onPress=\{\(\) => \{ setSelectedPhotoUri\(photo\.uri\); setImageViewerVisible\(true\); \}\}/)
   assert.match(source, /activePhotoIndex \+ 1\} \/ \{displayablePhotos\.length/)
   assert.match(source, /<Modal visible=\{imageViewerVisible && Boolean\(selectedPhoto\)\}/)
   assert.match(source, /onRequestClose=\{\(\) => setImageViewerVisible\(false\)\}/)
@@ -160,6 +160,7 @@ test('Plant Detail thumbnail taps select a distinct image and the viewer navigat
   new Function('require', 'module', 'exports', compiled)((name) => {
     if (name === '../components/ScaledText') return { default: 'Text', ScaledTextInput: 'TextInput', __esModule: true };
     if (name === '../components/DiscoverableScrollView') return { default: 'ScrollView', __esModule: true }
+    if (name === '../components/PreviewableImage') return { default: 'Image', __esModule: true }
     assert.ok(name in dependencies, name)
     const dependency = dependencies[name]
     return name === 'react' ? dependency : { ...dependency, __esModule: true }
