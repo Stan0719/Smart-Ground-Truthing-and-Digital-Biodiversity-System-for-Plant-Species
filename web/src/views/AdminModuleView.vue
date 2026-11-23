@@ -12,6 +12,45 @@ import { plantApi } from '../services/plantApi'
 type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity' | 'settings'
 const props = defineProps<{ section: Section }>()
 const { t, te, locale } = useI18n()
+const activityActionLabels: Record<string, string> = {
+  login_attempt: 'loginAttempt',
+  authenticated: 'authenticated',
+  invalid_credentials: 'invalidCredentials',
+  account_blocked: 'accountBlocked',
+  throttled: 'throttled',
+  face_attempt: 'faceAttempt',
+  face_authenticated: 'faceAuthenticated',
+  face_account_blocked: 'faceAccountBlocked',
+  account_created: 'accountCreated',
+  invitation_created: 'invitationCreated',
+  account_archived: 'accountArchived',
+  account_reactivated: 'accountReactivated',
+  security_settings_changed: 'securitySettingsChanged',
+}
+const activityActionLabel = (reason: string) => {
+  const labelKey = activityActionLabels[reason]
+  if (labelKey) return t(`adminModules.activity.actions.${labelKey}`)
+  return reason.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+const activityEventTone = (reason: string) => {
+  if (reason === 'authenticated' || reason === 'face_authenticated') return 'is-success'
+  if (reason === 'invalid_credentials' || reason === 'account_blocked' || reason === 'face_account_blocked') return 'is-failure'
+  return 'is-neutral'
+}
+const activityTimestampParts = (value: number) => {
+  const date = new Date(Number(value))
+  if (Number.isNaN(date.getTime())) return { iso: '', date: '—', time: '—' }
+  const formattingLocale = locale.value === 'zh-CN' ? 'zh-CN' : locale.value === 'ms' ? 'ms-MY' : 'en-MY'
+  return {
+    iso: date.toISOString(),
+    date: new Intl.DateTimeFormat(formattingLocale, { dateStyle: 'medium' }).format(date),
+    time: new Intl.DateTimeFormat(formattingLocale, { hour: 'numeric', minute: '2-digit' }).format(date),
+  }
+}
+const activityTableRows = computed(() => persistedEvents.value.map((event) => ({
+  ...event,
+  formattedTime: activityTimestampParts(event.created_at),
+})))
 const dataLabel = (value: string) => {
   const key = `adminModules.values.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
   return te(key) ? t(key) : value
@@ -1282,7 +1321,28 @@ const confirmDeleteSensor = () => {
     </div>
   </section>
 </template>
-<template v-if="section==='activity'&&!serverLoading&&!serverError"><p v-if="!persistedEvents.length">No account activity recorded.</p><div v-else class="admin-table-scroll" tabindex="0" role="region" aria-label="Account activity"><table class="admin-data-table admin-activity-table"><thead><tr><th>Time</th><th>Account</th><th>Actor</th><th>Action</th></tr></thead><tbody><tr v-for="event in persistedEvents" :key="event.id"><td>{{new Date(Number(event.created_at)).toLocaleString()}}</td><td><AdminTableIdentifier :value="event.user_id||'Anonymous'" /></td><td><AdminTableIdentifier :value="event.actor_id||'Self'" /></td><td>{{event.reason}}</td></tr></tbody></table></div></template>
+<template v-if="section==='activity'&&!serverLoading&&!serverError">
+  <p v-if="!persistedEvents.length" class="activity-empty">{{ t('adminModules.activity.noRecords') }}</p>
+  <div v-else class="admin-table-scroll activity-table-region" tabindex="0" role="region" :aria-label="t('adminModules.activity.tableLabel')">
+    <table class="admin-data-table admin-activity-table">
+      <colgroup><col class="activity-time-column" /><col class="activity-account-column" /><col class="activity-actor-column" /><col class="activity-action-column" /></colgroup>
+      <thead><tr>
+        <th scope="col">{{ t('adminModules.activity.time') }}</th>
+        <th scope="col">{{ t('adminModules.activity.account') }}</th>
+        <th scope="col">{{ t('adminModules.activity.actor') }}</th>
+        <th scope="col">{{ t('adminModules.activity.action') }}</th>
+      </tr></thead>
+      <tbody>
+        <tr v-for="event in activityTableRows" :key="event.id">
+          <td><time class="activity-timestamp" :datetime="event.formattedTime.iso || undefined"><span>{{ event.formattedTime.date }}</span><span>{{ event.formattedTime.time }}</span></time></td>
+          <td><AdminTableIdentifier :value="event.user_id || t('adminModules.activity.anonymous')" /></td>
+          <td><AdminTableIdentifier :value="event.actor_id || t('adminModules.activity.actorUnavailable')" /></td>
+          <td><span class="activity-action-badge" :class="activityEventTone(event.reason)" :title="event.reason">{{ activityActionLabel(event.reason) }}</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</template>
 </template><template v-else>
 
     <section class="page-intro">
@@ -3123,6 +3183,79 @@ td i {
   border-radius: 16px;
   background: #fff;
   box-shadow: 0 7px 22px rgba(35, 70, 53, 0.045);
+}
+.activity-table-region {
+  border: 1px solid #e0e9e1;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(25, 67, 51, 0.06);
+  scrollbar-color: #9bb9a7 #f2f6f2;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table) {
+  width: 100%;
+  min-width: 680px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #fff;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-time-column) { width: 20%; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-account-column) { width: 24%; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-actor-column) { width: 24%; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-action-column) { width: 32%; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table thead th) {
+  padding: 14px 16px;
+  border-bottom: 0;
+  background: #245443;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.055em;
+  text-align: left;
+  text-transform: uppercase;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table thead th:first-child) { border-top-left-radius: 13px; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table thead th:last-child) { border-top-right-radius: 13px; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table tbody td) {
+  padding: 12px 16px;
+  border-bottom: 1px solid #edf1ed;
+  color: #3d564b;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table tbody tr:last-child td) { border-bottom: 0; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table tbody tr:hover td) { background: #f6faf6; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table td:last-child) { min-width: 0; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .admin-table-id) { max-width: 100%; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-timestamp) {
+  display: grid;
+  gap: 3px;
+  color: #52695f;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-timestamp span:last-child) { color: #829188; font-size: 0.8125rem; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-action-badge) {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-action-badge.is-success) { border-color: #c8e7d2; background: #eaf7ee; color: #21643d; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-action-badge.is-neutral) { border-color: #e0e7e2; background: #f2f5f3; color: #52675d; }
+:global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table .activity-action-badge.is-failure) { border-color: #f0cbc6; background: #fff0ee; color: #a33e36; }
+.activity-empty { margin: 0; padding: 24px; border: 1px solid #e0e9e1; border-radius: 14px; background: #fff; color: #64776d; text-align: center; }
+@media (max-width: 640px) {
+  .activity-table-region { border-radius: 12px; }
+  :global(.admin-shell.admin-shell.admin-shell .admin-activity-table.admin-activity-table) { min-width: 680px; }
 }
 .network-metrics {
   display: grid;

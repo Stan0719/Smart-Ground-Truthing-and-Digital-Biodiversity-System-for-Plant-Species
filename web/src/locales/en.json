@@ -1296,7 +1296,30 @@
       "noCriticalIncidents": "No critical incidents",
       "auditEyebrow": "Administrative Audit Trail",
       "recentActivity": "Recent System Activity",
-      "searchPlaceholder": "Search actor, action, module or IP..."
+      "searchPlaceholder": "Search actor, action, module or IP...",
+      "tableLabel": "System activity records",
+      "time": "Time",
+      "account": "Account",
+      "actor": "Actor",
+      "action": "Action",
+      "anonymous": "Anonymous",
+      "actorUnavailable": "Not recorded",
+      "noRecords": "No account activity recorded.",
+      "actions": {
+        "loginAttempt": "Login attempt",
+        "authenticated": "Successful sign-in",
+        "invalidCredentials": "Sign-in failed",
+        "accountBlocked": "Account sign-in blocked",
+        "throttled": "Sign-in rate limited",
+        "faceAttempt": "Face ID attempt",
+        "faceAuthenticated": "Successful Face ID sign-in",
+        "faceAccountBlocked": "Face ID sign-in blocked",
+        "accountCreated": "Account created",
+        "invitationCreated": "Invitation created",
+        "accountArchived": "Account archived",
+        "accountReactivated": "Account reactivated",
+        "securitySettingsChanged": "Security settings changed"
+      }
     },
     "export": {
       "eyebrow": "Activity Export",
