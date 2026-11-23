@@ -185,6 +185,7 @@ export interface SpeciesForm {
   visibility: SpeciesVisibility | ''
   description: string
   habitat: string
+  culturalSignificance: string
 }
 
 export interface SpeciesPayload {
@@ -195,6 +196,8 @@ export interface SpeciesPayload {
   genus_id: number | null
   conservation_status: string
   habitat: string
+  culturalSignificance: string
+  source_languages?: { description?: string; habitat?: string; culturalSignificance?: string }
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -262,6 +265,7 @@ export const validateSpeciesForm = (
   )
     errors.conservationStatus = 'Select a conservation status from the loaded species data.'
   if (form.habitat.length > 4000) errors.habitat = 'Text must not exceed 4000 characters.'
+  if (form.culturalSignificance.length > 4000) errors.culturalSignificance = 'Text must not exceed 4000 characters.'
   return errors
 }
 
@@ -273,6 +277,7 @@ export const speciesPayload = (form: SpeciesForm): SpeciesPayload => ({
   genus_id: form.genusId ? Number(form.genusId) : null,
   conservation_status: form.conservationStatus.trim(),
   habitat: form.habitat.trim(),
+  culturalSignificance: form.culturalSignificance.trim(),
 })
 
 export class SpeciesApiError extends Error {
@@ -290,7 +295,7 @@ export class SpeciesApiError extends Error {
 
 export async function requestSpeciesApi(
   url: string,
-  options: { method?: 'POST' | 'PATCH' | 'DELETE'; body?: SpeciesPayload } = {},
+  options: { method?: 'POST' | 'PATCH' | 'DELETE'; body?: Record<string, unknown> } = {},
 ): Promise<Record<string, unknown>> {
   const body = options.body ?? (options.method === 'DELETE' ? {} : undefined)
   let response: Response

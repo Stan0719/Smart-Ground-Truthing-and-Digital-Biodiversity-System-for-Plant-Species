@@ -9,6 +9,7 @@ const { transaction, audit, subject, fail, text, id, fieldContent, assertNewSpec
 const { normalizeSpeciesName, sqlSpeciesName } = require("./species-name.cjs");
 const { assertQrAssignmentAllowed, normalizeQrPlantSchema } = require("./qr-plant-mode.cjs");
 const { initialVersionAvailable, appendInitialVersion, plantPhotoRefs } = require("./record-version-history.cjs");
+const { normalizeSourceLanguages, syncSourceLanguages } = require("./translation-source-language.cjs");
 const speciesFields = ["scientific_name", "common_name", "genus_name", "family_name", "conservation_status", "description", "habitat"];
 const canonical = (value) => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
@@ -140,8 +141,13 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
   app.post("/api/plant-submissions", allow("plants.create"), async (req, res) => {
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b) || Object.keys(b).some((key) =>
-      !["species_id", "species_request_id", "new_species", "scientific_name", "content", "latitude", "longitude", "accuracy_m", "qr_id", "client_key", "photos"].includes(key)))
+      !["species_id", "species_request_id", "new_species", "scientific_name", "content", "latitude", "longitude", "accuracy_m", "qr_id", "client_key", "photos", "source_languages"].includes(key)))
       fail(400, "Invalid plant submission fields.");
+    const sourceLanguages = b.source_languages === undefined ? {} : b.source_languages;
+    if (!sourceLanguages || typeof sourceLanguages !== "object" || Array.isArray(sourceLanguages) ||
+        Object.keys(sourceLanguages).some((key) => !["species", "observation"].includes(key))) fail(400, "Invalid source-language selections.");
+    const speciesLanguages = normalizeSourceLanguages(sourceLanguages.species, ["description", "habitat"]);
+    const observationLanguages = normalizeSourceLanguages(sourceLanguages.observation, ["morphology", "notes"]);
     if ([b.species_id, b.species_request_id, b.new_species].filter((value) => value !== undefined).length !== 1)
       fail(400, "Select one existing, pending, or new species source.");
     const clientKey = text(b.client_key, 100), name = text(b.scientific_name, 200);
@@ -202,6 +208,12 @@ function mountPlantSubmissions(app, { pool, allow, officerNotifications = null, 
       const observationId = randomUUID();
       const withOrigin = await originColumnAvailable(c);
       await c.query(`INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key${withOrigin ? ",origin_type" : ""}) VALUES($1,$2,$3,'Pending Review',$4,$5${withOrigin ? ",'initial_registration'" : ""})`, [observationId, plant.plant_id, subject(req.user), content, clientKey]);
+      if (speciesData) await syncSourceLanguages(c, { recordType: "species", recordId: speciesId,
+        values: { description: speciesData.description, habitat: speciesData.habitat }, selections: speciesLanguages,
+        fieldMap: { description: "description", habitat: "habitat" } });
+      await syncSourceLanguages(c, { recordType: "observation", recordId: observationId,
+        values: { morphology: content.morphology, notes: content.notes }, selections: observationLanguages,
+        fieldMap: { morphology: "morphology", notes: "notes" } });
       let wholePlantAsset = null;
       const photoIds = [];
       for (const [index, bytes] of photos.entries()) {

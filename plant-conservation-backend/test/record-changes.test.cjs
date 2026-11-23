@@ -21,6 +21,7 @@ test("owned pending edits and reviewed approved proposals preserve record IDs an
   // This isolated test schema is disposable. No production migration is run.
   await pool.query(migration("008-record-change-submissions.sql"));
   await pool.query(migration("009-record-version-history.sql"));
+  await pool.query(migration("032-translation-storage.sql"));
   await installRecordChangeNotifications(pool);
   const photo = await sharp({ create: { width: 4, height: 4, channels: 3, background: "green" } }).jpeg().toBuffer();
   const species = (await pool.query("INSERT INTO species(scientific_name,common_name,description,rbac_data) VALUES('Species A','Common A','Original description',$1) RETURNING species_id",

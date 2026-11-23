@@ -11,6 +11,7 @@ const observationVersions = require("./observation-submission-versions.cjs");
 const { canModifyPendingObservation } = require("./status-permissions.cjs");
 const { queueOptions, queuePage } = require("./observation-queue.cjs");
 const { publicPlantPageOptions, publicPlantPageMetadata, readPlantSpeciesCounts } = require("./plant-list-page.cjs");
+const { normalizeSourceLanguages, syncSourceLanguages, syncSourceLanguage } = require("./translation-source-language.cjs");
 const {
   permitted,
   canReadScientificCatalogue,
@@ -1055,6 +1056,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     allow("observations.create"),
     async (req, res) => {
       const b = req.body;
+      const sourceLanguages = normalizeSourceLanguages(b?.source_languages, ["morphology", "notes"]);
       fieldContent(b.content);
       text(b.client_key, 100);
       const result = await transaction(pool, async (c) => {
@@ -1080,6 +1082,8 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           )
         ).rows[0];
         if (row) {
+          await syncSourceLanguages(c, { recordType: "observation", recordId: row.id, values: row.content,
+            selections: sourceLanguages, fieldMap: { morphology: "morphology", notes: "notes" } });
           await audit(c, req.user, "observation_submitted", row.id);
           return row;
         }
@@ -1210,6 +1214,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     "/api/observations/:id",
     allow("observations.edit.own"),
     async (req, res) => {
+      const sourceLanguages = normalizeSourceLanguages(req.body?.source_languages, ["morphology", "notes"]);
       fieldContent(req.body.content);
       if (!Number.isInteger(req.body.revision))
         fail(400, "Revision is required.");
@@ -1273,6 +1278,8 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             [req.body.content, row.id, keepPending ? "Pending Review" : "Draft"],
           )
         ).rows[0];
+        await syncSourceLanguages(c, { recordType: "observation", recordId: row.id, values: updated.content,
+          selections: sourceLanguages, fieldMap: { morphology: "morphology", notes: "notes" } });
         if (pendingSource) {
           const photoRefs = await submittedObservationPhotos(c, updated);
           await observationVersions.insertVersion(c, {
@@ -1291,6 +1298,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     "/api/observations/:id/review",
     allow("observations.review"),
     async (req, res) => {
+      const reviewSourceLanguages = normalizeSourceLanguages(req.body?.source_languages, ["comment"]);
       const result = await transaction(pool, async (c) => {
         const row = (
           await c.query(
@@ -1347,6 +1355,9 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             ...(submittedVersion ? [submittedVersion.id] : legacyReview ? [req.body.revision] : []),
           ],
         )).rows[0];
+        if (Object.hasOwn(reviewSourceLanguages, "comment"))
+          await syncSourceLanguage(c, { recordType: "review", recordId: review.id, fieldName: "comment",
+            sourceText: review.comment, sourceLocale: reviewSourceLanguages.comment });
         if (submittedVersion) {
           const transitioned = await c.query(`UPDATE observation_submission_version v
             SET status=$1,reviewed_by=r.reviewer_subject,reviewed_at=r.created_at,review_comment=r.comment
@@ -1709,6 +1720,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b))
       fail(400, "Species details must be an object.");
+    const sourceLanguages = normalizeSourceLanguages(b.source_languages, ["description", "habitat", "culturalSignificance"]);
     b.scientific_name = text(b.scientific_name, 200);
     b.common_name = text(b.common_name, 200);
     b.description = text(b.description);
@@ -1744,6 +1756,10 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
         row.species_id,
         b.visibility,
       ]);
+      await syncSourceLanguages(c, { recordType: "species", recordId: row.species_id,
+        values: { description: b.description, habitat: b.habitat || "", culturalSignificance: b.culturalSignificance || "" },
+        selections: sourceLanguages,
+        fieldMap: { description: "description", habitat: "habitat", culturalSignificance: "culturalSignificance" } });
       await audit(c, req.user, "species_created", row.species_id);
       return row;
     });
@@ -1753,6 +1769,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b))
       fail(400, "Species details must be an object.");
+    const sourceLanguages = normalizeSourceLanguages(b.source_languages, ["description", "habitat", "culturalSignificance"]);
     b.scientific_name = text(b.scientific_name, 200);
     b.common_name = text(b.common_name, 200);
     b.description = text(b.description);
@@ -1786,6 +1803,11 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
         ],
       );
       if (!changed.rows.length) fail(404, "Species not found.");
+      await syncSourceLanguages(c, { recordType: "species", recordId: req.params.id,
+        values: { description: b.description, habitat: Object.hasOwn(b, "habitat") ? b.habitat : undefined,
+          culturalSignificance: Object.hasOwn(b, "culturalSignificance") ? b.culturalSignificance : undefined },
+        selections: sourceLanguages,
+        fieldMap: { description: "description", habitat: "habitat", culturalSignificance: "culturalSignificance" } });
       await c.query(
         "INSERT INTO rbac_species_visibility VALUES($1,$2) ON CONFLICT(species_id) DO UPDATE SET visibility=EXCLUDED.visibility",
         [req.params.id, b.visibility],

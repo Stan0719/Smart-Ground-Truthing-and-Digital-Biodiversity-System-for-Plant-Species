@@ -1,4 +1,5 @@
 {
+  "textLanguage": { "label": "Text language", "english": "English", "malay": "Bahasa Melayu", "chinese": "Simplified Chinese", "unknown": "Unknown / Skip translation" },
   "officerPlantEdit": {
     "latest": "Latest saved name",
     "title": "Edit Plant",

@@ -10,6 +10,7 @@ import { plantApi } from "../utils/plantApi";
 import { deleteBotanistFormDraft, findBotanistFormDraft, getBotanistFormDraft, saveBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import SpeciesDictionary from "../components/SpeciesDictionary";
+import TextLanguageSelect from "../components/TextLanguageSelect";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { inspectPickedImages, imageSizeAlert, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 
@@ -28,6 +29,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
   const attemptedPayload = useRef(null);
   const busy = useRef(false);
   const [form, setForm] = useState({ scientific_name: "", common_name: "", genus_name: "", family_name: "", conservation_status: "Not Assessed", description: "", habitat: "" });
+  const [sourceLanguages, setSourceLanguages] = useState({ description: "unknown", habitat: "unknown" });
   const [photo, setPhoto] = useState(null);
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -98,6 +100,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
       }
       const body = {
         ...Object.fromEntries(Object.entries(form).map(([key, value]) => [key, value.trim()])),
+        source_languages: sourceLanguages,
         photo: { base64, content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg" },
       };
       const signature = JSON.stringify(body);
@@ -152,6 +155,7 @@ export default function AddSpeciesRequest({ route, navigation }) {
         <Text style={styles.label}>{requiredLabel(t(`addPlant.${label}`))}</Text>
         <TextInput style={[styles.input, styles.multiline]} value={form[field]} onChangeText={(value) => change(field, value)} editable={!saving}
           multiline maxLength={4000} textAlignVertical="top" placeholder={t(`addPlant.${placeholder}`)} placeholderTextColor="#89978D" />
+        <TextLanguageSelect value={sourceLanguages[field]} disabled={saving} onChange={(locale) => setSourceLanguages((old) => ({ ...old, [field]: locale }))} />
       </View>)}
     </View>
     <View style={styles.card}>

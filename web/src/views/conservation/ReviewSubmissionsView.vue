@@ -70,6 +70,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import { ReviewApiError, createReviewRequest, readReviewQueueSource, reviewQueueFailureDiagnostic, performObservationReview, observationReviewSnapshot, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions as transitions, type ReviewDecision } from '../../services/observationReview'
 import ActionFeedback from '../../components/ActionFeedback.vue'
+import TextLanguageSelect from '../../components/conservation/TextLanguageSelect.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import PlantProximityPanel from '../../components/conservation/PlantProximityPanel.vue'
 import PlantProximityCell from '../../components/conservation/PlantProximityCell.vue'
@@ -180,6 +181,7 @@ const historicalSelectionActive = ref(false)
 watch(() => selected.value?.id, () => { historicalSelectionActive.value = false })
 const standaloneRequest = ref<LinkedSpeciesRequest | null>(null)
 const comment = ref('')
+const commentSourceLocale = ref('unknown')
 const observations = computed({ get: () => queueSnapshot.value.observations, set: observations => { queueSnapshot.value = { ...queueSnapshot.value, observations } } })
 const queueOrigin = ref<'initial_registration' | 'unknown'>('initial_registration')
 const hasMore = ref(false)
@@ -1284,7 +1286,7 @@ async function decide(decision: ReviewDecision) {
       if (!disposed && token === selectionRequest) { needsReload.value = true; showFeedback(error instanceof Error ? error.message : rt('feedback.loadFailed')) }
       return
     }
-    const result = await performObservationReview({ id, revision, decision, comment: typedComment, request, read: fetchObservation,
+    const result = await performObservationReview({ id, revision, decision, comment: typedComment, sourceLocale: commentSourceLocale.value, request, read: fetchObservation,
       current: () => !disposed && token === selectionRequest && officerSessionReady.value && selected.value?.id === id && route.query.review === id, invalidResponse: rt('feedback.invalidResponse') })
     if (!result) return
     const speciesDraft = speciesReviewComment.value
@@ -1960,6 +1962,7 @@ onBeforeUnmount(() => {
               :placeholder="ct('Record the observation decision or required action')"
             ></textarea>
           </label>
+          <TextLanguageSelect v-model="commentSourceLocale" :disabled="reviewBusy || selectionLoading" />
           <p
             v-if="reviewMessage"
             :role="reviewMessage.variant === 'error' ? 'alert' : 'status'"

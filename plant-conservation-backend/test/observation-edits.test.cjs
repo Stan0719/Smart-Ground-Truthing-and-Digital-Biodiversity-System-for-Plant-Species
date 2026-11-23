@@ -28,6 +28,7 @@ for (const pgWire of [false, true]) test(`Observation edit proposals preserve ap
     const file = number === '016' ? '016-species-request-content-revision.sql' : require('node:fs').readdirSync(join(__dirname, '../migrations')).find(name => name.startsWith(number + '-'));
     await pool.query(readFileSync(join(__dirname, '../migrations', file), 'utf8'));
   }
+  await pool.query(readFileSync(join(__dirname, '../migrations/032-translation-storage.sql'), 'utf8'));
   await pool.query(`
     CREATE TABLE botanist_notification(
       id TEXT PRIMARY KEY,recipient_subject TEXT NOT NULL,type TEXT NOT NULL,source_key TEXT NOT NULL,

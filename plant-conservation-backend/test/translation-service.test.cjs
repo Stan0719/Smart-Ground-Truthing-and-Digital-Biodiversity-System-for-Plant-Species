@@ -16,7 +16,7 @@ const {
 const source = "Nepenthes ampullaria grows 1.5 m near https://example.test/plant.jpg (PL001).";
 const sourceHash = require("node:crypto").createHash("sha256").update(source, "utf8").digest("hex");
 
-function fakePool({ metadata = true, cache = null, sourceText = source } = {}) {
+function fakePool({ metadata = true, cache = null, sourceText = source, sourceVisibility = "public" } = {}) {
   const hash = require("node:crypto").createHash("sha256").update(sourceText, "utf8").digest("hex");
   const state = { cache, writes: [], queries: [] };
   return {
@@ -24,7 +24,8 @@ function fakePool({ metadata = true, cache = null, sourceText = source } = {}) {
     async query(sql, values = []) {
       state.queries.push(sql);
       if (sql.includes("SELECT scientific_name AS name")) return { rows: [{ name: "Nepenthes ampullaria" }] };
-      if (sql.includes("FROM species s LEFT JOIN")) return { rows: [{ id: "12", source_text: sourceText }] };
+      if (sql.includes("FROM species s LEFT JOIN"))
+        return { rows: values[1]?.includes(sourceVisibility) ? [{ id: "12", source_text: sourceText }] : [] };
       if (sql.includes("FROM plant_observation o")) return { rows: [{ id: values[0], source_text: sourceText }] };
       if (sql.includes("FROM plant_translation_source_language")) {
         return { rows: metadata && values[3] === hash ? [{ record_type: "species", source_locale: "en" }] : [] };
@@ -352,6 +353,51 @@ test("mobile translation endpoint accepts only native Botanist/Visitor or public
   assert.equal(admin.status, 403);
   assert.equal(ollama.prompts.length, 0, "valid shared cache hit must not call Ollama");
   assert.equal(pool.state.writes.length, 0, "existing cache rows are read-only during this test");
+});
+
+test("website and mobile translation routes never serve cached protected species text to Botanists, Visitors, or Guests", async (context) => {
+  const cachedText = "Nepenthes ampullaria grows in a protected forest 1.5 m from https://example.test/plant.jpg (PL001).";
+  const cache = { record_type: "species", record_id: "12", field_name: "description", target_locale: "ms",
+    source_locale: "en", source_hash: sourceHash, translated_text: cachedText,
+    model_name: "translategemma:4b", prompt_version: "translategemma-prompt-v2" };
+  const pool = fakePool({ cache, sourceVisibility: "protected" });
+  const ollama = fakeOllama();
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    const role = req.headers["x-test-role"];
+    req.user = role ? { id: "test-user", role, status: "Active", mustChangePassword: false } : null;
+    next();
+  });
+  mountWebsiteTranslations(app, { pool, allow: () => (_req, _res, next) => next(), origins: new Set(["http://localhost:5173"]) });
+  const server = createServer(app);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const entry = { recordType: "species", recordId: "12", fieldName: "description" };
+  const website = async (role) => {
+    const response = await fetch(`${base}/api/website/translations`, { method: "POST", headers: {
+      Origin: "http://localhost:5173", "Content-Type": "application/json", ...(role ? { "X-Test-Role": role } : {}),
+    }, body: JSON.stringify({ locale: "ms", entries: [entry] }) });
+    return { status: response.status, body: await response.json() };
+  };
+  const mobile = async (role) => {
+    const response = await fetch(`${base}/api/mobile/translations`, { method: "POST", headers: {
+      "Content-Type": "application/json", ...(role ? { Authorization: `Bearer ${"a".repeat(64)}`, "X-Test-Role": role } : {}),
+    }, body: JSON.stringify({ locale: "ms", entries: [entry] }) });
+    return { status: response.status, body: await response.json() };
+  };
+
+  for (const role of ["Botanist", "Visitor"]) {
+    assert.deepEqual(await website(role), { status: 200, body: { locale: "ms", translations: [] } });
+    assert.deepEqual(await mobile(role), { status: 200, body: { locale: "ms", translations: [] } });
+  }
+  assert.deepEqual(await mobile(null), { status: 200, body: { locale: "ms", translations: [] } });
+  assert.deepEqual(await website("Conservation Officer"), { status: 200,
+    body: { locale: "ms", translations: [{ ...entry, text: cachedText }] } });
+  assert.equal(ollama.prompts.length, 0, "all results came from access-filtered sources/cache; Ollama was not called");
+  const cacheQueries = pool.state.queries.filter((sql) => sql.includes("FROM plant_translation_cache"));
+  assert.equal(cacheQueries.length, 1, "only the authorized Conservation Officer may reach the cache lookup");
 });
 
 test("browser boundary permits only the exact anonymous mobile translation POST path", async (context) => {

@@ -55,6 +55,12 @@ export async function requestMobileDatabaseTranslations(locale, entries, { publi
   if (!response.ok) throw Object.assign(Error(result.error || `Translation request failed (HTTP ${response.status}).`), { status: response.status });
   return result;
 }
+export async function requestMobileSourceLanguages(entries) {
+  const result = await plantApi("/mobile/translations/source-languages", {
+    method: "POST", body: { entries }, timeoutMs: 15000,
+  });
+  return Array.isArray(result.sourceLanguages) ? result.sourceLanguages : [];
+}
 async function getJson(path, { accountId, publicOnly = false } = {}) {
   const API_URL = mobileApiUrl("plant");
   if (publicOnly && !/^\/api\/(?:species(?:\/[1-9][0-9]*)?|plants(?:\?(?:summary=species-counts|species_id=[1-9]\d*&page_size=\d+(?:&before_plant_id=[1-9]\d*)?))?)$/.test(path))

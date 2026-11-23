@@ -30,6 +30,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft, hasMeaningfulAddPlantDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave, stopBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
 import SpeciesDictionary from "../components/SpeciesDictionary";
+import TextLanguageSelect from "../components/TextLanguageSelect";
 import DiscoverableScrollView from "../components/DiscoverableScrollView";
 import { inspectPickedImages, imageSizeAlert, base64Bytes, MAX_IMAGE_BYTES } from "../utils/imageSelection";
 
@@ -391,6 +392,7 @@ export function AddPlantForm({
 
   const [speciesDescription, setSpeciesDescription] = useState("");
   const [speciesHabitat, setSpeciesHabitat] = useState("");
+  const [sourceLanguages, setSourceLanguages] = useState({ speciesDescription: "unknown", speciesHabitat: "unknown", morphology: "unknown", notes: "unknown" });
   const [speciesImages, setSpeciesImages] = useState([]);
   const [autoSaveState, setAutoSaveState] = useState("");
 
@@ -971,6 +973,10 @@ function handleRemoveSpeciesPhoto(index) {
           scientific_name: plantScientificName.trim(), latitude: latitudeValue, longitude: longitudeValue,
           ...(accuracyValue === undefined ? {} : { accuracy_m: accuracyValue }),
           content, photos, client_key: clientKeyRef.current, qr_id: selectedQRCode.qr_id,
+          source_languages: {
+            ...(newSpecies ? { species: { description: sourceLanguages.speciesDescription, habitat: sourceLanguages.speciesHabitat } } : {}),
+            observation: { morphology: sourceLanguages.morphology, notes: sourceLanguages.notes },
+          },
         },
       });
       const plantId = String(created.plant_id ?? "");
@@ -1502,6 +1508,8 @@ function handleRemoveSpeciesPhoto(index) {
                 multiline
                 textAlignVertical="top"
               />
+              <TextLanguageSelect value={sourceLanguages.speciesDescription} disabled={submitting}
+                onChange={(locale) => setSourceLanguages((old) => ({ ...old, speciesDescription: locale }))} />
 
               {/* Habitat / Ecological Information */}
 
@@ -1517,6 +1525,8 @@ function handleRemoveSpeciesPhoto(index) {
                 multiline
                 textAlignVertical="top"
               />
+              <TextLanguageSelect value={sourceLanguages.speciesHabitat} disabled={submitting}
+                onChange={(locale) => setSourceLanguages((old) => ({ ...old, speciesHabitat: locale }))} />
 
               
               {/* Species Photos */}
@@ -1669,6 +1679,8 @@ function handleRemoveSpeciesPhoto(index) {
             multiline
             textAlignVertical="top"
           />
+          <TextLanguageSelect value={sourceLanguages.morphology} disabled={submitting}
+            onChange={(locale) => setSourceLanguages((old) => ({ ...old, morphology: locale }))} />
 
           {/* Location Zone */}
 

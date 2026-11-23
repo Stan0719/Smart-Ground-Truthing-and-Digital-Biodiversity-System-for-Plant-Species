@@ -1,4 +1,5 @@
 {
+  "textLanguage": { "label": "Bahasa teks", "english": "Bahasa Inggeris", "malay": "Bahasa Melayu", "chinese": "Bahasa Cina ringkas", "unknown": "Tidak diketahui / Langkau terjemahan" },
   "officerPlantEdit": {
     "latest": "Nama terkini yang disimpan",
     "title": "Edit Tumbuhan",

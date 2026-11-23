@@ -11,6 +11,7 @@ const { initialVersionAvailable, appendInitialVersion } = require("./record-vers
 const { requireReviewCycle } = require("./species-review-cycle.cjs");
 const { rejectLinkedRegistration } = require("./linked-species-rejection.cjs");
 const { normalizeSpeciesName, sqlSpeciesName } = require("./species-name.cjs");
+const { normalizeSourceLanguages, stageSourceLanguages, promoteSourceLanguages } = require("./translation-source-language.cjs");
 const fields = ["scientific_name", "common_name", "genus_name", "family_name",
   "conservation_status", "description", "habitat"];
 const columns = "request_id,owner_subject AS requested_by,scientific_name,common_name,common_name AS suggested_common_name,genus_name,family_name,conservation_status,description,habitat,request_status,review_comment,reviewed_by,submitted_at,reviewed_at,approved_species_id,proposed_species_id,(to_jsonb(species_request_submission)->>'content_revision')::integer AS content_revision,to_jsonb(species_request_submission)->>'content_updated_at' AS content_updated_at,(to_jsonb(species_request_submission)->>'review_cycle')::integer AS review_cycle,to_jsonb(species_request_submission)->>'withdrawn_by' AS withdrawn_by,to_jsonb(species_request_submission)->>'withdrawn_at' AS withdrawn_at";
@@ -188,8 +189,9 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
   app.post("/api/species-requests", allow("plants.create"), async (req, res) => {
     const b = req.body;
     if (!b || typeof b !== "object" || Array.isArray(b) ||
-      Object.keys(b).some((key) => ![...fields, "photo", "client_key"].includes(key)))
+      Object.keys(b).some((key) => ![...fields, "photo", "client_key", "source_languages"].includes(key)))
       fail(400, "Invalid species request fields.");
+    const sourceLanguages = normalizeSourceLanguages(b.source_languages, ["description", "habitat"]);
     const data = Object.fromEntries(fields.map((key) => [key, text(b[key],
       ["description", "habitat"].includes(key) ? 4000 : 200)]));
     const clientKey = text(b.client_key, 100);
@@ -200,7 +202,7 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       fail(400, "A JPEG or PNG species photo is required (maximum 4 MB).");
     const original = Buffer.from(photo.base64, "base64");
     if (!original.length || original.length > 4194304) fail(413, "Species photo exceeds 4 MB.");
-    const payloadHash = createHash("sha256").update(JSON.stringify(data)).update(original).digest("hex");
+    const payloadHash = createHash("sha256").update(JSON.stringify({ data, sourceLanguages })).update(original).digest("hex");
     let bytes;
     try {
       bytes = await sharp(original, { limitInputPixels: 24000000, failOn: "warning" })
@@ -242,6 +244,8 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
       const row = (await c.query(`INSERT INTO species_request_submission(owner_subject,client_key,payload_hash,${fields.join(",")},photo)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${columns}`,
         [subject(req.user), clientKey, payloadHash, ...fields.map((key) => data[key]), bytes])).rows[0];
+      await stageSourceLanguages(c, { submissionType: "species_request", submissionId: row.request_id,
+        values: data, selections: sourceLanguages, fieldMap: { description: "description", habitat: "habitat" } });
       if (await initialVersionAvailable(c))
         await appendInitialVersion(c, { kind: "species", targetId: row.request_id, owner: subject(req.user),
           snapshot: { request_id: row.request_id, species_id: row.proposed_species_id ?? null,
@@ -373,6 +377,10 @@ function mountSpeciesRequests(app, { pool, allow, transaction, audit, subject, f
           [photoId, speciesId, row.owner_subject, `species-request:${row.request_id}`, row.photo]);
         await setPointer(c,row.request_id,photoId);
       }
+      if (b.decision === "Approved") await promoteSourceLanguages(c, { submissionType: "species_request", submissionId: row.request_id,
+        recordType: "species", recordId: speciesId,
+        values: { description: row.description, habitat: row.habitat },
+        fieldMap: { description: "description", habitat: "habitat" } });
       const reviewed = (await c.query(`UPDATE species_request_submission SET request_status=$1,review_comment=$2,reviewed_by=$3,reviewed_at=CURRENT_TIMESTAMP,approved_species_id=$4,review_decision_id=$6 WHERE request_id=$5 RETURNING ${columns}`,
         [b.decision, comment, subject(req.user), speciesId, row.request_id, decisionId])).rows[0];
       if (reviewedVersionId) {

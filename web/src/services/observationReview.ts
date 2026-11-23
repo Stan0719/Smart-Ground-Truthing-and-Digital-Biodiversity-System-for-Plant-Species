@@ -72,7 +72,7 @@ export function reviewQueueFailureDiagnostic(failure: unknown) {
   return { source, status, category }
 }
 export interface ReviewRequestOptions { signal?: AbortSignal; retry?: boolean }
-export type ReviewRequest = (url: string, body?: { decision: ReviewDecision; comment: string; revision?: number; expected_revision?: number; expected_review_cycle?: number }, options?: ReviewRequestOptions) => Promise<Record<string, unknown>>
+export type ReviewRequest = (url: string, body?: { decision: ReviewDecision; comment: string; revision?: number; expected_revision?: number; expected_review_cycle?: number; source_languages?: { comment: string } }, options?: ReviewRequestOptions) => Promise<Record<string, unknown>>
 function transportFailureKind(cause: unknown, signal: AbortSignal): 'timeout' | 'cancelled' | 'network' {
   const name = (signal.aborted ? signal.reason : cause) as { name?: unknown } | null
   return name?.name === 'TimeoutError' ? 'timeout' : name?.name === 'AbortError' ? 'cancelled' : 'network'
@@ -125,12 +125,13 @@ export function createReviewRequest(message: (key: string, params?: Record<strin
 }
 // Shared transaction/readback outcome handling. Callers own presentation and invalidate stale selections.
 export async function performObservationReview<T>(options: {
-  id: string; revision: number; decision: ReviewDecision; comment: string; request: ReviewRequest;
+  id: string; revision: number; decision: ReviewDecision; comment: string; sourceLocale?: string; request: ReviewRequest;
   read: (id: string) => Promise<T>; current: () => boolean; invalidResponse: string;
 }) {
   let committed = false
   try {
-    const result = await options.request('/api/observations/' + encodeURIComponent(options.id) + '/review', { decision: options.decision, comment: options.comment, revision: options.revision })
+    const result = await options.request('/api/observations/' + encodeURIComponent(options.id) + '/review', { decision: options.decision, comment: options.comment, revision: options.revision,
+      ...(options.sourceLocale ? { source_languages: { comment: options.sourceLocale } } : {}) })
     if (result.reviewed !== true) throw new ReviewApiError(options.invalidResponse)
     committed = true
     if (!options.current()) return null

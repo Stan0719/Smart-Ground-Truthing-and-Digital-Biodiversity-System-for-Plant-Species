@@ -9,6 +9,7 @@ import ActionFeedback from '../../components/ActionFeedback.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import SpeciesPhotoManager from '../../components/conservation/SpeciesPhotoManager.vue'
 import SpeciesViewImages from '../../components/conservation/SpeciesViewImages.vue'
+import TextLanguageSelect from '../../components/conservation/TextLanguageSelect.vue'
 import { conservationBadgeStyle } from '../../utils/conservationBadge'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import {
@@ -77,8 +78,10 @@ const blankForm = (): SpeciesForm => ({
   visibility: 'protected',
   description: '',
   habitat: '',
+  culturalSignificance: '',
 })
 const form = reactive<SpeciesForm>(blankForm())
+const sourceLanguages = reactive({ description: 'unknown', habitat: 'unknown', culturalSignificance: 'unknown' })
 const formErrors = ref<Partial<Record<keyof SpeciesForm, string>>>({})
 const speciesForm = ref<HTMLFormElement | null>(null)
 const validationAttempted = ref(false)
@@ -237,7 +240,9 @@ function assignForm(item?: ManagedSpecies) {
     visibility: item.visibility || 'protected',
     description: item.description,
     habitat: item.habitat,
+    culturalSignificance: item.culturalSignificance,
   } : blankForm())
+  Object.assign(sourceLanguages, { description: 'unknown', habitat: 'unknown', culturalSignificance: 'unknown' })
   resetValidation()
   mutationError.value = ''; speciesConflict.value = false
 }
@@ -263,7 +268,16 @@ async function loadForModal(item: ManagedSpecies, mode: 'view' | 'form') {
     const detail = await fetchSpeciesDetail(item.id)
     if (requestId !== detailRequest) return
     selected.value = detail
-    if (mode === 'form') assignForm(detail)
+    if (mode === 'form') {
+      assignForm(detail)
+      const result = await requestSpeciesApi('/api/website/translations/source-languages', { method: 'POST', body: {
+        entries: ['description', 'habitat', 'culturalSignificance'].map((fieldName) => ({ recordType: 'species', recordId: detail.id, fieldName })),
+      } })
+      if (requestId !== detailRequest) return
+      for (const row of (Array.isArray(result.sourceLanguages) ? result.sourceLanguages : []))
+        if (Object.hasOwn(sourceLanguages, row.fieldName) && ['en', 'ms', 'zh-CN'].includes(row.sourceLocale))
+          sourceLanguages[row.fieldName as keyof typeof sourceLanguages] = row.sourceLocale
+    }
   } catch (error) {
     if (requestId === detailRequest) mutationError.value = errorMessage(error, st('errors.detail'))
   } finally {
@@ -297,7 +311,7 @@ async function save() {
   mutationError.value = ''
   let committed = false
   try {
-    const payload = speciesPayload(form)
+    const payload = { ...speciesPayload(form), source_languages: { ...sourceLanguages } }
     const savedId = editing.value ? selected.value?.id : createdSpeciesId.value
     const result = savedId
       ? await requestSpeciesApi(`/api/species/${encodeURIComponent(savedId)}`, { method: 'PATCH', body: payload })
@@ -453,7 +467,11 @@ onMounted(async () => {
       <section class="create-form-section create-details-section">
         <h3 class="create-form-section-title"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.8 3.2C12.1 3.4 5.1 5.3 4 12.2c-.7 4.2 2.7 6.8 6.1 5.6 4.5-1.5 7.4-6.4 10.7-14.6ZM3.4 21c2.8-5.2 6.1-8.5 11.2-11.2"/></svg>{{ st('speciesDetails') }}</h3>
       <label class="form-field full"><span>{{ st('description') }} *</span><textarea v-model="form.description" :placeholder="st('placeholders.description')" data-validation-field="description" aria-required="true" :aria-invalid="Boolean(formErrors.description)" :aria-describedby="formErrors.description ? 'species-description-error' : undefined" :disabled="detailLoading || Boolean(mutation)"></textarea><small id="species-description-error" v-if="formErrors.description" class="field-error">{{ formErrors.description }}</small></label>
+      <TextLanguageSelect v-model="sourceLanguages.description" class="full" :disabled="detailLoading || Boolean(mutation)" />
       <label class="form-field full"><span>{{ st('habitat') }}</span><textarea v-model="form.habitat" :placeholder="st('placeholders.habitat')" data-validation-field="habitat" :aria-invalid="Boolean(formErrors.habitat)" :aria-describedby="formErrors.habitat ? 'species-habitat-error' : undefined" maxlength="4000" :disabled="detailLoading || Boolean(mutation)"></textarea><small id="species-habitat-error" v-if="formErrors.habitat" class="field-error">{{ formErrors.habitat }}</small></label>
+      <TextLanguageSelect v-model="sourceLanguages.habitat" class="full" :disabled="detailLoading || Boolean(mutation)" />
+      <label class="form-field full"><span>{{ st('culturalSignificance') }}</span><textarea v-model="form.culturalSignificance" maxlength="4000" :disabled="detailLoading || Boolean(mutation)"></textarea><small v-if="formErrors.culturalSignificance" class="field-error">{{ formErrors.culturalSignificance }}</small></label>
+      <TextLanguageSelect v-model="sourceLanguages.culturalSignificance" class="full" :disabled="detailLoading || Boolean(mutation)" />
       </section>
       <section v-if="canManagePhotos && !detailLoading" class="create-form-section create-photos-section">
         <SpeciesPhotoManager ref="photoEditor" class="form-field full" embedded :species="editing ? selected : null" :busy="Boolean(mutation)" @retry="save" />

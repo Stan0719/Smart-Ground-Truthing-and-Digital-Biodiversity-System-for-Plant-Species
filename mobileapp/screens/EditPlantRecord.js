@@ -8,10 +8,11 @@ import * as Location from "expo-location";
 import * as FileSystem from "expo-file-system/legacy";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { fetchBotanistPlant, fetchBotanistRecordChangeStatus, fetchBotanistRecordChange } from "../utils/botanistRecords";
-import { fetchSpeciesCatalog, plantApi, plantAssetSources, recordChangePhotoSource } from "../utils/plantApi";
+import { fetchSpeciesCatalog, plantApi, plantAssetSources, recordChangePhotoSource, requestMobileSourceLanguages } from "../utils/plantApi";
 import { normalizeQRCodes } from "../utils/qrInventory";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
+import TextLanguageSelect from "../components/TextLanguageSelect";
 import GpsLocationPicker from "../components/GpsLocationPicker";
 import { validGpsPoint, readGpsLocation } from "../utils/gpsLocation";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
@@ -86,6 +87,8 @@ export default function EditPlantRecord({ route, navigation }) {
   const plantId = String(route.params?.plantId || ""), accountId = route.params?.botanist?.id;
   const [state, setState] = useState({ loading: true, error: "", plant: null, species: [], available: false, correctionChange: null, correctionPhotos: [] });
   const [form, setForm] = useState(null), [selectedOriginalPhotos, setSelectedOriginalPhotos] = useState([]), [photoSelectionTouched, setPhotoSelectionTouched] = useState(false), [newPhotos, setNewPhotos] = useState([]), [unavailableOriginalPhotos, setUnavailableOriginalPhotos] = useState([]);
+  const [sourceLanguages, setSourceLanguages] = useState({ morphology: "unknown", notes: "unknown" });
+  const initialSourceLanguagesRef = useRef({ morphology: "unknown", notes: "unknown" });
   const [loadingOriginalPhotos, setLoadingOriginalPhotos] = useState([]);
   const [qrList, setQrList] = useState([]), [qrError, setQrError] = useState(""), [qrLoading, setQrLoading] = useState(false);
   const [saving, setSaving] = useState(false), [locating, setLocating] = useState(false), [draftSaving, setDraftSaving] = useState(false);
@@ -128,6 +131,7 @@ export default function EditPlantRecord({ route, navigation }) {
     setSpeciesRequestId(draft.species_request_id || null);
     clientKey.current = draft.submission_client_key || clientKey.current;
     setForm(Object.fromEntries([...fields, "species_id", "qr_id"].map((field) => [field, str(draft.form[field])])));
+    setSourceLanguages(draft.form.sourceLanguages || { morphology: "unknown", notes: "unknown" });
     setSelectedOriginalPhotos(draft.form.selectedOriginalPhotos || []);
     setPhotoSelectionTouched(Boolean(draft.form.photoSelectionTouched));
     setNewPhotos((draft.photo_refs || []).filter((photo) => photo.slot?.startsWith("new:")).sort((a, b) => a.slot.localeCompare(b.slot)).map((photo) => photo.uri));
@@ -255,6 +259,13 @@ export default function EditPlantRecord({ route, navigation }) {
         if (!active) return;
         if (plant.status === "Approved" && plant.registrationState !== "available") throw Error(t("recordEdits.registrationUnavailable"));
         const content = plant.status === "Approved" ? plant.registration : plant.latestObservation?.content || plant.latest_submission || {};
+        const canonicalObservationId = plant.status === "Approved" ? plant.current_registration?.observation_id : null;
+        const verified = canonicalObservationId ? await requestMobileSourceLanguages(["morphology", "notes"].map(fieldName => ({
+          recordType: "observation", recordId: String(canonicalObservationId), fieldName,
+        }))).catch(() => []) : [];
+        const verifiedLanguageMap = Object.fromEntries(["morphology", "notes"].map(field => [field, verified.find(row => row.fieldName === field)?.sourceLocale || "unknown"]));
+        initialSourceLanguagesRef.current = verifiedLanguageMap;
+        if (!restoredDraftRef.current) setSourceLanguages(verifiedLanguageMap);
         const correctionChange = route.params?.correctionChangeId ? await fetchBotanistRecordChange(accountId, route.params.correctionChangeId, { kind: "plant", targetId: plantId }) : null;
         const correctionWorkflow = Boolean(correctionChange || route.params?.correction);
         const proposal = correctionChange?.proposed_snapshot || {};
@@ -496,15 +507,15 @@ export default function EditPlantRecord({ route, navigation }) {
       auto_saved: autoSaved, base_signature: restoredDraftRef.current?.base_signature || plantSignature(plant),
       base_revision: baseSnapshot(plant).revision, baseline, submission_client_key: clientKey.current,
       species_request_id: speciesRequestId || route.params?.speciesRequestId || restoredDraftRef.current?.species_request_id || null,
-      form: { ...form, selectedOriginalPhotos, photoSelectionTouched },
+      form: { ...form, sourceLanguages, selectedOriginalPhotos, photoSelectionTouched },
       photos: newPhotos.map((uri, index) => ({ slot: `new:${String(index).padStart(2, "0")}`, uri, content_type: /\.png(?:$|[?#])/i.test(uri) ? "image/png" : "image/jpeg" })) };
   };
-  const autoSaveSignature = JSON.stringify({ form, selectedOriginalPhotos, photoSelectionTouched, newPhotos });
+  const autoSaveSignature = JSON.stringify({ form, sourceLanguages, selectedOriginalPhotos, photoSelectionTouched, newPhotos });
   const hasFieldChanges = Boolean(form && initialFormRef.current &&
     [...fields, "species_id", "qr_id"].some((field) => str(form[field]).trim() !== str(initialFormRef.current[field]).trim()));
   const hasPhotoChanges = newPhotos.length > 0 || (photoSelectionTouched &&
     JSON.stringify(selectedOriginalPhotos.map(String)) !== JSON.stringify(originalPhotoIds.map(String)));
-  const hasMeaningfulChanges = hasFieldChanges || hasPhotoChanges;
+  const hasMeaningfulChanges = hasFieldChanges || hasPhotoChanges || JSON.stringify(sourceLanguages) !== JSON.stringify(initialSourceLanguagesRef.current);
   const autosave = useBotanistDraftAutosave({ enabled: Boolean(accountId && form && state.plant && recoveryResolved && !submitted && hasMeaningfulChanges),
     signature: autoSaveSignature, navigation, accountId, errorKey: accountId && route.key ? `${accountId}:${route.key}` : undefined,
     onSaving: () => setAutoSaveState("saving"),
@@ -571,6 +582,7 @@ export default function EditPlantRecord({ route, navigation }) {
         zone: form.zone.trim() || null, accuracy_m: form.accuracy_m.trim() ? Number(form.accuracy_m) : null,
         altitudeM: form.altitudeM.trim() ? Number(form.altitudeM) : null };
       const proposed = { species_id: Number(form.species_id), scientific_name: form.scientific_name.trim(), content };
+      const selectedSourceLanguages = { morphology: sourceLanguages.morphology, notes: sourceLanguages.notes };
       if (form.qr_id !== str(state.plant.qrId)) proposed.qr_id = Number(form.qr_id);
       if (photoSelectionTouched || newPhotos.length) {
         proposed.photo_ids = photoSelectionTouched
@@ -588,16 +600,16 @@ export default function EditPlantRecord({ route, navigation }) {
       }
       if (state.correctionChange) {
         await plantApi(`/record-changes/${encodeURIComponent(state.correctionChange.id)}`, { method: "PATCH", expectedAccountId: accountId,
-          body: { revision: state.correctionChange.revision, proposed } });
+          body: { revision: state.correctionChange.revision, proposed, source_languages: selectedSourceLanguages } });
       } else if (state.plant.status === "Approved") {
         const response = await plantApi("/record-changes", { method: "POST", expectedAccountId: accountId,
-          body: { kind: "plant", target_id: Number(plantId), proposed, client_key: clientKey.current } });
+          body: { kind: "plant", target_id: Number(plantId), proposed, client_key: clientKey.current, source_languages: selectedSourceLanguages } });
         const receipt = response?.change;
         if (!receipt || typeof receipt.id !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(receipt.id) ||
           (receipt.status !== undefined && receipt.status !== "Pending Review"))
           throw Error("The server did not confirm a pending change proposal. Refresh your submissions before trying again.");
       } else await plantApi(`/my-plants/${encodeURIComponent(plantId)}`, { method: "PATCH", expectedAccountId: accountId,
-        body: { ...proposed, expected_revision: state.plant.latestObservation?.revision } });
+        body: { ...proposed, expected_revision: state.plant.latestObservation?.revision, source_languages: selectedSourceLanguages } });
       await autosave.stop();
       if (restoredDraftRef.current) {
         try {
@@ -695,10 +707,11 @@ export default function EditPlantRecord({ route, navigation }) {
     </DiscoverableScrollView>
       </OriginalUpdatedField>}
       <Text style={styles.note}>{t("recordEdits.associatedSpeciesName")}: {state.plant.speciesScientificName || state.plant.speciesDetails?.scientificName || t("recordEdits.informationNotAvailable")}</Text>
-      {fields.filter((field) => !["latitude", "longitude", "altitudeM", "accuracy_m"].includes(field)).map((field) => <OriginalUpdatedField key={field} label={`${t(field === "scientific_name" ? "recordEdits.plantScientificName" : `recordEdits.${field}`)}${requiredFields.has(field) ? " *" : ""}`} originalValue={originalFieldValue(field)}>
+      {fields.filter((field) => !["latitude", "longitude", "altitudeM", "accuracy_m"].includes(field)).map((field) => <View key={field}><OriginalUpdatedField label={`${t(field === "scientific_name" ? "recordEdits.plantScientificName" : `recordEdits.${field}`)}${requiredFields.has(field) ? " *" : ""}`} originalValue={originalFieldValue(field)}>
         <TextInput style={[styles.input, ["morphology", "notes"].includes(field) && styles.multiline]} value={form[field]} onChangeText={(next) => change(field, next)}
           multiline={["morphology", "notes"].includes(field)} keyboardType={numeric.has(field) ? "decimal-pad" : "default"} />
-      </OriginalUpdatedField>)}
+      </OriginalUpdatedField>{["morphology", "notes"].includes(field) && <TextLanguageSelect value={sourceLanguages[field]} disabled={saving}
+        onChange={(locale) => setSourceLanguages(old => ({ ...old, [field]: locale }))} />}</View>)}
       {["latitude", "longitude", "altitudeM", "accuracy_m"].map((field) => {
         const label = `${t(`recordEdits.${field}`)}${requiredFields.has(field) ? " *" : ""}`;
         return <OriginalUpdatedField key={field} label={label} originalValue={originalFieldValue(field)}>

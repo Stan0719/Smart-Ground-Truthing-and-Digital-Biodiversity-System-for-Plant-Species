@@ -72,7 +72,7 @@ function browserBoundary(origins) {
       !origin &&
       !/^Bearer [a-f0-9]{64}$/.test(req.headers.authorization || "") &&
       !req.path.startsWith("/api/device/") &&
-      !(req.method === "POST" && req.path === "/api/mobile/translations")
+      !(req.method === "POST" && ["/api/mobile/translations", "/api/mobile/translations/source-languages"].includes(req.path))
     )
       return res.status(403).json({ error: "Request rejected." });
     next();

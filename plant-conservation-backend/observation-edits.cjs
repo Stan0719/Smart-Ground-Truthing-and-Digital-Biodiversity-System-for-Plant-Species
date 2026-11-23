@@ -3,6 +3,7 @@ const { canCancelEdit } = require("./status-permissions.cjs");
 const { randomUUID, createHash } = require("node:crypto");
 const sharp = require("sharp");
 const { permitted } = require("../shared/rbac.cjs");
+const { normalizeSourceLanguages, stageSourceLanguages, promoteSourceLanguages } = require("./translation-source-language.cjs");
 const { audit, subject, fail, text, fieldContent, speciesRow } = require("./domain.cjs");
 const versions = require("./observation-submission-versions.cjs");
 const { classifyObservations } = require("./observation-origin.cjs");
@@ -306,9 +307,12 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
   }));
   app.post("/api/observation-edits", allow("observations.create"), async (req, res) => {
     const { observation_id: observationId, client_key: clientKey, ...input } = req.body || {};
+    const sourceLanguages = normalizeSourceLanguages(input.source_languages, ["morphology", "notes"]);
+    delete input.source_languages;
     if (!validId(observationId) || typeof clientKey !== "string" || !clientKey.trim() || clientKey.length > 100) fail(400, "Invalid observation edit reference.");
     const proposed = await proposal(input);
-    const payloadHash = hash({ observationId, proposed });
+    const payloadHash = hash({ observationId, proposed,
+      ...(Object.hasOwn(req.body || {}, "source_languages") ? { sourceLanguages } : {}) });
     const result = await versions.withVersionTransaction(pool, async (c) => {
       await requireAvailable(c);
       const observation = await ownedObservation(c, observationId, req.user, true);
@@ -337,6 +341,8 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [id, observationId, subject(req.user), number, observation.revision, hash(base), base, proposed.content, JSON.stringify(photos.retained),
         JSON.stringify(proposed.photos), clientKey, payloadHash])).rows[0];
+      await stageSourceLanguages(c, { submissionType: "observation_edit", submissionId: row.id,
+        values: proposed.content, selections: sourceLanguages, fieldMap: { morphology: "morphology", notes: "notes" } });
       if (versioned) {
         const approved = await ensureApprovedBaseline(c, observation, row, photos.current, req.user);
         await insertEditSnapshot(c, observation, row, photos.retained, proposed.photos, approved.id, req.user);
@@ -577,13 +583,15 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
     res.type(asset.content_type).send(asset.content);
   });
   app.patch("/api/observation-edits/:id", allow("observations.create"), async (req, res) => {
-    const { revision, ...input } = req.body || {};
+    const { revision, source_languages: rawSourceLanguages, ...input } = req.body || {};
+    const sourceLanguages = normalizeSourceLanguages(rawSourceLanguages, ["morphology", "notes"]);
     if (!Number.isInteger(revision)) fail(400, "Edit revision is required.");
     if (await versioningAvailable(pool)) {
       const parent = await initialParentChange(pool, req.params.id, req.user);
       if (parent) {
         await proposal(input);
-        await resubmitInitialObservationEdit(pool, { user: req.user, changeId: parent.id, revision, ...input });
+        await resubmitInitialObservationEdit(pool, { user: req.user, changeId: parent.id, revision, ...input,
+          source_languages: sourceLanguages });
         const updated = (await pool.query("SELECT * FROM record_change_submission WHERE id=$1", [parent.id])).rows[0];
         return res.json({ edit: await initialChangeEdit(pool, updated) });
       }
@@ -610,6 +618,8 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
             updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND revision=$5 AND status='Correction Required' RETURNING *`,
           [proposed.content, JSON.stringify(added), nextRevision, row.id, row.revision])).rows[0];
           if (!updated) fail(409, "Reload the correction request before resubmitting.");
+          await stageSourceLanguages(c, { submissionType: "observation_edit", submissionId: row.id,
+            values: proposed.content, selections: sourceLanguages, fieldMap: { morphology: "morphology", notes: "notes" } });
           const notificationEventId = randomUUID();
           await c.query("INSERT INTO observation_edit_event(id,request_id,observation_id,actor_subject,event_type) VALUES($1,$2,$3,$4,'resubmitted')",
             [notificationEventId, row.id, row.observation_id, subject(req.user)]);
@@ -639,6 +649,8 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
       const updated = (await c.query(`UPDATE observation_edit_request SET proposed_content=$1,retained_photo_ids=$2,added_photos=$3,
         revision=revision+1,status='Pending Review',review_comment=NULL,reviewed_by=NULL,reviewed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$4 RETURNING *`,
       [proposed.content, JSON.stringify(selected.retained), JSON.stringify(additions), row.id])).rows[0];
+      await stageSourceLanguages(c, { submissionType: "observation_edit", submissionId: row.id,
+        values: proposed.content, selections: sourceLanguages, fieldMap: { morphology: "morphology", notes: "notes" } });
       if (versioning) {
         await versions.transitionVersion(c, { observationId: observation.id, versionId: sourceVersion.id,
           status: "Superseded", actorSubject: subject(req.user) });
@@ -693,7 +705,7 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
   });
   app.post("/api/observation-edits/:id/review", allow("observations.review"), async (req, res) => {
     if (!req.body || !["Approved", "Rejected", "Correction Required"].includes(req.body.decision) ||
-      Object.keys(req.body).some((key) => !["decision", "comment", "revision"].includes(key)) ||
+      Object.keys(req.body).some((key) => !["decision", "comment", "revision", "source_languages"].includes(key)) ||
       (!Number.isSafeInteger(req.body.revision) || req.body.revision < 1))
       fail(400, "Invalid review decision.");
     const versioning = await versioningAvailable(pool);
@@ -762,6 +774,9 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
             WHERE id=$2 AND plant_id=$3 AND owner_subject=$4 AND status='Approved' AND revision=$5`,
           [edit.proposed_content, observation.id, observation.plant_id, edit.owner_subject, edit.base_revision]);
           if (changed.rowCount !== 1) fail(409, "The approved initial Observation changed before this edit was applied.");
+          await promoteSourceLanguages(c, { submissionType: "observation_edit", submissionId: edit.id,
+            recordType: "observation", recordId: observation.id, values: edit.proposed_content,
+            fieldMap: { morphology: "morphology", notes: "notes" } });
           if (edit.proposed_content.latitude !== undefined)
             await c.query("INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES($1,$2,$3,$4)",
               [observation.plant_id, edit.proposed_content.latitude, edit.proposed_content.longitude, edit.proposed_content.accuracy_m ?? null]);
@@ -829,6 +844,9 @@ function mountObservationEdits(app, { pool, allow, officerNotifications = null }
           [addedIds, observation.id, edit.owner_subject]);
         await c.query("UPDATE plant_observation SET content=$1,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=$2",
           [edit.proposed_content, observation.id]);
+        await promoteSourceLanguages(c, { submissionType: "observation_edit", submissionId: edit.id,
+          recordType: "observation", recordId: observation.id, values: edit.proposed_content,
+          fieldMap: { morphology: "morphology", notes: "notes" } });
         if (edit.proposed_content.latitude !== undefined)
           await c.query("INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES($1,$2,$3,$4)",
             [observation.plant_id, edit.proposed_content.latitude, edit.proposed_content.longitude,

@@ -6,10 +6,11 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { fetchBotanistSpeciesRequest, fetchBotanistRecordChangeStatus, fetchBotanistRecordChange } from "../utils/botanistRecords";
-import { plantApi, recordChangePhotoSource } from "../utils/plantApi";
+import { plantApi, recordChangePhotoSource, requestMobileSourceLanguages } from "../utils/plantApi";
 import { downloadPhotoForReuse } from "../utils/photoReuse";
 import { useAppTranslation, t, translateUIMessage } from "../translations/i18n";
 import OriginalUpdatedField from "../components/OriginalUpdatedField";
+import TextLanguageSelect from "../components/TextLanguageSelect";
 import { DetailSkeletonContent } from "../components/BotanicalSkeleton";
 import { saveBotanistFormDraft, getBotanistFormDraft, findBotanistFormDraft, deleteBotanistFormDraft } from "../utils/botanistFormDrafts";
 import { useBotanistDraftAutosave } from "../utils/botanistDraftAutosave";
@@ -23,6 +24,8 @@ export default function EditSpeciesRequest({ route, navigation }) {
   const requestId = String(route.params?.requestId || ""), accountId = route.params?.botanist?.id;
   const [state, setState] = useState({ loading: true, error: "", request: null, available: false, correctionChange: null, correctionPhoto: null });
   const [form, setForm] = useState(null), [photo, setPhoto] = useState(null), [reuseOriginalPhoto, setReuseOriginalPhoto] = useState(false), [originalPhotoUnavailable, setOriginalPhotoUnavailable] = useState(false), [saving, setSaving] = useState(false);
+  const [sourceLanguages, setSourceLanguages] = useState({ description: "unknown", habitat: "unknown" });
+  const initialSourceLanguagesRef = useRef({ description: "unknown", habitat: "unknown" });
   const [submitted, setSubmitted] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false), [draftMessage, setDraftMessage] = useState(""), [draftError, setDraftError] = useState(""), [draftConflict, setDraftConflict] = useState(false), [offlineDraft, setOfflineDraft] = useState(false);
   const [versionConflict, setVersionConflict] = useState(false);
@@ -38,7 +41,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
   const restoreDraft = (draft) => {
     restoredDraftRef.current = draft; clientKey.current = draft.submission_client_key || clientKey.current;
     const savedPhoto = draft.photo_refs?.find((item) => item.slot === "new:photo")?.uri || null;
-    setForm(draft.form); setReuseOriginalPhoto(typeof draft.form.reuseOriginalPhoto === "boolean" ? draft.form.reuseOriginalPhoto : !savedPhoto);
+    setForm(draft.form); setSourceLanguages(draft.form.sourceLanguages || { description: "unknown", habitat: "unknown" }); setReuseOriginalPhoto(typeof draft.form.reuseOriginalPhoto === "boolean" ? draft.form.reuseOriginalPhoto : !savedPhoto);
     setPhoto(savedPhoto);
   };
   useFocusEffect(useCallback(() => {
@@ -49,6 +52,12 @@ export default function EditSpeciesRequest({ route, navigation }) {
         const [request, capabilities] = await Promise.all([fetchBotanistSpeciesRequest(accountId, requestId),
           plantApi("/record-changes/capabilities", { expectedAccountId: accountId })]);
         if (!active) return;
+        const sourceId = request.approved_species_id || request.proposed_species_id || request.species_id;
+        const verified = request.request_status === "Approved" && sourceId
+          ? await requestMobileSourceLanguages(["description", "habitat"].map(fieldName => ({ recordType: "species", recordId: String(sourceId), fieldName }))).catch(() => []) : [];
+        const verifiedLanguageMap = Object.fromEntries(["description", "habitat"].map(field => [field, verified.find(row => row.fieldName === field)?.sourceLocale || "unknown"]));
+        initialSourceLanguagesRef.current = verifiedLanguageMap;
+        if (!restoredDraftRef.current) setSourceLanguages(verifiedLanguageMap);
         const correctionChange = route.params?.correctionChangeId ? await fetchBotanistRecordChange(accountId, route.params.correctionChangeId,
           { kind: "species", targetId: requestId }) : null;
         const correctionWorkflow = Boolean(correctionChange || (route.params?.correction && request.request_status === "Correction Required"));
@@ -168,7 +177,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
         ...Object.fromEntries(fields.map((field) => [field, request[field] ?? ""])) } };
       const draft = await saveBotanistFormDraft(accountId, { client_key: activeFormDraftKey, form_type: "edit-species", target_id: requestId, correction_change_id: state.correctionChange?.id || restoredDraftRef.current?.correction_change_id || null,
         title: form.scientific_name || request.scientific_name || "", base_signature: restoredDraftRef.current?.base_signature || signature(request), baseline,
-        submission_client_key: clientKey.current, auto_saved: false, form: { ...form, reuseOriginalPhoto },
+        submission_client_key: clientKey.current, auto_saved: false, form: { ...form, sourceLanguages, reuseOriginalPhoto },
         photos: photo ? [{ slot: "new:photo", uri: photo, content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg" }] : [] });
       restoredDraftRef.current = draft;
       await autosave.stop();
@@ -185,12 +194,12 @@ export default function EditSpeciesRequest({ route, navigation }) {
       ...Object.fromEntries(fields.map((field) => [field, request[field] ?? ""])) } };
     return { client_key: activeFormDraftKey, form_type: "edit-species", target_id: requestId, correction_change_id: state.correctionChange?.id || restoredDraftRef.current?.correction_change_id || null, title: form.scientific_name || request.scientific_name || "",
       base_signature: restoredDraftRef.current?.base_signature || signature(request), baseline, submission_client_key: clientKey.current,
-      auto_saved: autoSaved, form: { ...form, reuseOriginalPhoto },
+      auto_saved: autoSaved, form: { ...form, sourceLanguages, reuseOriginalPhoto },
       photos: photo ? [{ slot: "new:photo", uri: photo, content_type: /\.png(?:$|[?#])/i.test(photo) ? "image/png" : "image/jpeg" }] : [] };
   };
-  const hasMeaningfulChanges = Boolean(form && initialFormRef.current && JSON.stringify(form) !== JSON.stringify(initialFormRef.current)) || Boolean(photo) || Boolean((state.correctionPhoto || state.request?.request_status === "Correction Required") && reuseOriginalPhoto);
+  const hasMeaningfulChanges = Boolean(form && initialFormRef.current && JSON.stringify(form) !== JSON.stringify(initialFormRef.current)) || JSON.stringify(sourceLanguages) !== JSON.stringify(initialSourceLanguagesRef.current) || Boolean(photo) || Boolean((state.correctionPhoto || state.request?.request_status === "Correction Required") && reuseOriginalPhoto);
   const autosave = useBotanistDraftAutosave({ enabled: Boolean(accountId && form && state.request && recoveryResolved && !submitted && hasMeaningfulChanges),
-    signature: JSON.stringify({ form, photo, reuseOriginalPhoto }), navigation, accountId, errorKey: accountId && route.key ? `${accountId}:${route.key}` : undefined,
+    signature: JSON.stringify({ form, sourceLanguages, photo, reuseOriginalPhoto }), navigation, accountId, errorKey: accountId && route.key ? `${accountId}:${route.key}` : undefined,
     onSaving: () => setAutoSaveState("saving"),
     save: async ({ isMounted } = {}) => { const draft = await saveBotanistFormDraft(accountId, makeDraftInput(true)); restoredDraftRef.current = draft; if (isMounted?.()) setAutoSaveState("saved"); return draft; },
     onError: (error) => { setAutoSaveState("error"); setDraftError(translateUIMessage(error.message) || t("botanistDrafts.autoSaveFailed")); } });
@@ -272,6 +281,7 @@ export default function EditSpeciesRequest({ route, navigation }) {
         }
       }
       const proposed = Object.fromEntries(fields.map((field) => [field, form[field].trim()]));
+      const selectedSourceLanguages = { description: sourceLanguages.description, habitat: sourceLanguages.habitat };
       if (photo) {
         const base64 = await FileSystem.readAsStringAsync(photo, { encoding: FileSystem.EncodingType.Base64 });
         if (base64Bytes(base64) > MAX_IMAGE_BYTES) { const error = Error("Image too large"); error.imageAlert = imageSizeAlert(t, [{ label: t("imageSizeAlert.speciesPhoto"), bytes: base64Bytes(base64) }]); throw error; }
@@ -283,16 +293,16 @@ export default function EditSpeciesRequest({ route, navigation }) {
       }
       if (state.correctionChange) {
         await plantApi(`/record-changes/${encodeURIComponent(state.correctionChange.id)}`, { method: "PATCH", expectedAccountId: accountId,
-          body: { revision: state.correctionChange.revision, proposed } });
+          body: { revision: state.correctionChange.revision, proposed, source_languages: selectedSourceLanguages } });
       } else if (state.request.request_status === "Approved") {
         const response = await plantApi("/record-changes", { method: "POST", expectedAccountId: accountId,
-          body: { kind: "species", target_id: Number(requestId), proposed, client_key: clientKey.current } });
+          body: { kind: "species", target_id: Number(requestId), proposed, client_key: clientKey.current, source_languages: selectedSourceLanguages } });
         const receipt = response?.change;
         if (!receipt || typeof receipt.id !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(receipt.id) ||
           (receipt.status !== undefined && receipt.status !== "Pending Review"))
           throw Error("The server did not confirm a pending change proposal. Refresh your submissions before trying again.");
       } else await plantApi(`/my-species-requests/${encodeURIComponent(requestId)}`, { method: "PATCH", expectedAccountId: accountId,
-        body: { ...proposed, expected_revision: state.request.content_revision } });
+        body: { ...proposed, expected_revision: state.request.content_revision, source_languages: selectedSourceLanguages } });
       await autosave.stop();
       if (restoredDraftRef.current) {
         try {
@@ -350,10 +360,11 @@ export default function EditSpeciesRequest({ route, navigation }) {
     {autoSaveState === "saving" ? <Text style={styles.note}>{t("botanistDrafts.autoSaving")}</Text> : null}{autoSaveState === "saved" ? <Text style={styles.note}>{t("botanistDrafts.autoSaved")}</Text> : null}{draftMessage ? <Text style={styles.draftSuccess}>{draftMessage}</Text> : null}{draftError ? <Text style={styles.error}>{draftError}</Text> : null}
     {autoSaveState === "error" ? <TouchableOpacity onPress={() => { setDraftError(""); void autosave.retry().catch(() => {}); }} style={{ minHeight: 44, alignSelf: "flex-start", justifyContent: "center", paddingHorizontal: 4 }} accessibilityRole="button"><Text style={styles.secondaryText}>{t("common.tryAgain")}</Text></TouchableOpacity> : null}
     {state.request.request_status === "Approved" && !state.available && <Text style={styles.error}>{t("recordEdits.migrationRequired")}</Text>}
-    <View style={styles.card}>{fields.map((field) => <OriginalUpdatedField key={field} label={["scientific_name", "common_name"].includes(field) ? t(field === "scientific_name" ? "addPlant.scientificName" : "addPlant.commonName") : `${t(`recordEdits.${field}`)} *`} originalValue={state.request[field]}>
+    <View style={styles.card}>{fields.map((field) => <View key={field}><OriginalUpdatedField label={["scientific_name", "common_name"].includes(field) ? t(field === "scientific_name" ? "addPlant.scientificName" : "addPlant.commonName") : `${t(`recordEdits.${field}`)} *`} originalValue={state.request[field]}>
       <TextInput style={[styles.input, ["description", "habitat"].includes(field) && styles.multiline]} value={form[field]}
         onChangeText={(next) => setForm((old) => ({ ...old, [field]: next }))} multiline={["description", "habitat"].includes(field)} />
-    </OriginalUpdatedField>)}
+    </OriginalUpdatedField>{["description", "habitat"].includes(field) && <TextLanguageSelect value={sourceLanguages[field]} disabled={saving}
+      onChange={(locale) => setSourceLanguages((old) => ({ ...old, [field]: locale }))} />}</View>)}
       <OriginalUpdatedField label={t("recordEdits.speciesPhoto")}
         originalContent={state.request.photo ? <View style={styles.photoCard}>
           <TouchableOpacity style={[styles.photoFrame, reuseOriginalPhoto && styles.photoFrameSelected]} onPress={() => { if (!reuseOriginalPhoto) { setReuseOriginalPhoto(true); setPhoto(null); } }}

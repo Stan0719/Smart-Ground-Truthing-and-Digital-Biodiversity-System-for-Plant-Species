@@ -377,15 +377,9 @@ function createTranslationService({
         diagnostic("translation-suppressed", targetLocale, entry, { reason: "recent_failure_cooldown" });
         return null;
       }
-      const cachedValue = await cached(storedEntry, source.source_text, targetLocale, sourceHash);
-      if (cachedValue.text) {
-        diagnostic("cache-hit", targetLocale, entry, { model: MODEL });
-        return cachedValue.text;
-      }
-      if (cachedValue.invalid) {
-        diagnostic("cache-invalidated", targetLocale, entry, { reason: cachedValue.reason || "cache_validation_failed" });
-      }
-      diagnostic("cache-miss", targetLocale, entry);
+      // The metadata binding is part of the cache authorization decision: a
+      // previous English translation must never be returned after the same
+      // record/field is reclassified as Malay, Chinese, or unknown.
       const sourceInfo = await sourceLocale(storedEntry, sourceHash);
       if (!sourceInfo) {
         diagnostic("metadata-skip", targetLocale, entry, { reason: "missing_or_source_hash_mismatch" });
@@ -395,6 +389,15 @@ function createTranslationService({
         diagnostic("metadata-skip", targetLocale, entry, { reason: "unsupported_source_locale", sourceLocale: sourceInfo.locale });
         return null;
       }
+      const cachedValue = await cached(storedEntry, source.source_text, targetLocale, sourceHash);
+      if (cachedValue.text) {
+        diagnostic("cache-hit", targetLocale, entry, { model: MODEL });
+        return cachedValue.text;
+      }
+      if (cachedValue.invalid) {
+        diagnostic("cache-invalidated", targetLocale, entry, { reason: cachedValue.reason || "cache_validation_failed" });
+      }
+      diagnostic("cache-miss", targetLocale, entry);
       if (!hasEnoughNarrativeContext(source.source_text, entry.fieldName)) {
         suppressRetry(key);
         diagnostic("source-skip", targetLocale, entry, { reason: "insufficient_narrative_context" });
@@ -475,7 +478,29 @@ function createTranslationService({
     return results;
   }
 
-  return { translateEntries, verifyModel, digest };
+  async function sourceLanguagesForEntries(entries, user) {
+    if (!Array.isArray(entries) || entries.length > MAX_ENTRIES) throw Error("Invalid source-language request.");
+    const results = [];
+    for (const entry of entries) {
+      if (!entry || !Object.keys(entry).every((key) => ["recordType", "recordId", "fieldName"].includes(key)) ||
+          typeof entry.recordType !== "string" || typeof entry.recordId !== "string" ||
+          typeof entry.fieldName !== "string" || !FIELD_ALLOWLIST[entry.recordType]?.has(entry.fieldName))
+        throw Error("Unsupported source-language field.");
+      const source = await resolveSource(entry, user);
+      if (!source || typeof source.source_text !== "string") {
+        results.push({ ...entry, sourceLocale: "unknown" });
+        continue;
+      }
+      const storedEntry = entry.recordType === "review-comment"
+        ? { recordType: "review", recordId: String(source.id), fieldName: entry.fieldName }
+        : { ...entry, recordId: String(source.id ?? entry.recordId) };
+      const info = await sourceLocale(storedEntry, digest(source.source_text));
+      results.push({ ...entry, sourceLocale: info?.locale || "unknown" });
+    }
+    return results;
+  }
+
+  return { translateEntries, sourceLanguagesForEntries, verifyModel, digest };
 }
 
 function mountWebsiteTranslations(app, { pool, allow, origins }) {
@@ -499,6 +524,13 @@ function mountWebsiteTranslations(app, { pool, allow, origins }) {
       diagnostic("request-failure", locale, undefined, code ? { code } : { reason: "processing_failed" });
       return res.json({ locale, translations: [] });
     }
+  });
+  app.post("/api/website/translations/source-languages", allow("plants.catalogue.read"), async (req, res) => {
+    const origin = req.headers.origin;
+    if (!origin || !origins?.has(origin) || req.headers.authorization)
+      return res.status(403).json({ error: "Website translation request rejected." });
+    try { return res.json({ sourceLanguages: await service.sourceLanguagesForEntries(req.body?.entries, req.user) }); }
+    catch { return res.status(400).json({ error: "Invalid source-language request." }); }
   });
   // Native mobile requests use their existing bearer session and role grants.
   // Keep this additive path separate: the website route above continues to
@@ -530,6 +562,16 @@ function mountWebsiteTranslations(app, { pool, allow, origins }) {
       diagnostic("mobile-request-failure", locale, undefined, code ? { code } : { reason: "processing_failed" });
       return res.json({ locale: requestedLocale, translations: [] });
     }
+  });
+  app.post("/api/mobile/translations/source-languages", allow("plants.catalogue.read"), async (req, res) => {
+    const authorization = req.headers.authorization || "";
+    const anonymousGuest = !authorization && !req.user;
+    const authenticatedMobile = /^Bearer [a-f0-9]{64}$/.test(authorization) &&
+      ["Botanist", "Visitor"].includes(req.user?.role);
+    if (req.headers.origin || req.headers.cookie || !(anonymousGuest || authenticatedMobile))
+      return res.status(403).json({ error: "Mobile translation request rejected." });
+    try { return res.json({ sourceLanguages: await service.sourceLanguagesForEntries(req.body?.entries, req.user) }); }
+    catch { return res.status(400).json({ error: "Invalid source-language request." }); }
   });
   return service;
 }

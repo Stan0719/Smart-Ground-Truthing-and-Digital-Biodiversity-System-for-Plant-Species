@@ -10,6 +10,7 @@ const { classifyObservations } = require("./observation-origin.cjs");
 const { replaceRequestPhoto } = require("./species-photo-provenance.cjs");
 const { assertSpeciesReassignment } = require("./species-requests.cjs");
 const { assertQrAssignmentAllowed, normalizeQrPlantSchema } = require("./qr-plant-mode.cjs");
+const { normalizeSourceLanguages, stageSourceLanguages, promoteSourceLanguages } = require("./translation-source-language.cjs");
 
 const { requireReviewCycle } = require("./species-review-cycle.cjs");
 const { finalRejection } = require("./final-rejection.cjs");
@@ -299,9 +300,10 @@ async function submitInitialObservationEdit(pool, input) {
 }
 async function resubmitInitialObservationEdit(pool, input) {
   if (!input || typeof input !== "object" || Array.isArray(input) ||
-      Object.keys(input).some(key => !["user", "changeId", "revision", "content", "photo_ids", "photos"].includes(key)))
+      Object.keys(input).some(key => !["user", "changeId", "revision", "content", "photo_ids", "photos", "source_languages"].includes(key)))
     fail(400, "Initial Observation corrections may change only Observation fields and photos.");
   const { user, changeId, revision, content, photo_ids, photos } = input;
+  const sourceLanguages = normalizeSourceLanguages(input.source_languages, ["morphology", "notes"]);
   requireInitialChangePermission(user, "observations.create");
   if (!Number.isInteger(revision) || revision < 1) fail(400, "Correction revision is required.");
   const coordinates = await readInitialChange(pool, changeId);
@@ -326,6 +328,9 @@ async function resubmitInitialObservationEdit(pool, input) {
       status='Pending Review',reviewed_by=NULL,reviewed_at=NULL,review_comment=NULL,cancelled_by=NULL,cancelled_at=NULL,
       updated_at=CURRENT_TIMESTAMP WHERE id=$4 RETURNING id,status,revision,review_comment,updated_at`,
     [snapshots.request, payloadHash, nextRevision, change.id])).rows[0];
+    await stageSourceLanguages(c, { submissionType: "record_change", submissionId: change.id,
+      values: snapshots.request.content, selections: sourceLanguages,
+      fieldMap: { morphology: "morphology", notes: "notes" } });
     await appendVersion(c, { kind: "plant", targetId: plant.plant_id, owner: change.owner_subject, editor: change.owner_subject,
       base: change.base_snapshot, proposed: snapshots.version, changeId: change.id, changeRevision: nextRevision,
       plantPhotoSet: { plantId: plant.plant_id, observationId: observation.id, assetIds: snapshots.assetIds, stagedAssets } });
@@ -569,7 +574,8 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
   });
 
   app.patch("/api/my-species-requests/:id", allow("plants.create"), async (req, res) => {
-    const { expected_revision: expectedRevision, ...edit } = req.body || {};
+    const { expected_revision: expectedRevision, source_languages: rawSourceLanguages, ...edit } = req.body || {};
+    const sourceLanguages = normalizeSourceLanguages(rawSourceLanguages, ["description", "habitat"]);
     const proposal = await normalized(speciesProposal(edit), "species");
     const result = await transaction(pool, async (c) => {
       const row = await ownedSpeciesRequest(c, numericId(req.params.id), req.user, true);
@@ -612,6 +618,8 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
       await c.query(`UPDATE species_request_submission SET ${speciesFields.map((field, index) => `${field}=$${index + 1}`).join(",")},
         photo=COALESCE($8,photo),request_status='Pending Review' WHERE request_id=$9`,
       [...values, proposal.photo ? Buffer.from(proposal.photo.base64, "base64") : null, row.request_id]);
+      await stageSourceLanguages(c, { submissionType: "species_request", submissionId: row.request_id,
+        values: proposal, selections: sourceLanguages, fieldMap: { description: "description", habitat: "habitat" } });
       await appendVersion(c, { kind: "species", targetId: row.request_id, owner: subject(req.user), editor: subject(req.user),
         base: before, baseStatus: row.request_status, basePhoto: row.photo,
         proposed: { request_id: row.request_id, species_id: row.proposed_species_id, ...speciesSnapshot(proposal) },
@@ -635,11 +643,14 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
   app.post("/api/record-changes", allow("plants.create"), async (req, res) => {
     const body = req.body;
     if (!body || typeof body !== "object" || Array.isArray(body) ||
-      Object.keys(body).some((key) => !["kind", "target_id", "proposed", "client_key"].includes(key)) ||
+      Object.keys(body).some((key) => !["kind", "target_id", "proposed", "client_key", "source_languages"].includes(key)) ||
       !["plant", "species"].includes(body.kind)) fail(400, "Invalid change submission.");
+    const sourceLanguages = normalizeSourceLanguages(body.source_languages,
+      body.kind === "plant" ? ["morphology", "notes"] : ["description", "habitat"]);
     const targetId = numericId(body.target_id), clientKey = text(body.client_key, 100);
     const proposal = await normalized(body.kind === "plant" ? plantProposal(body.proposed) : speciesProposal(body.proposed), body.kind);
-    const payloadHash = digest({ kind: body.kind, targetId, proposal });
+    const payloadHash = digest({ kind: body.kind, targetId, proposal,
+      ...(Object.hasOwn(body, "source_languages") ? { sourceLanguages } : {}) });
     const result = await transaction(pool, async (c) => {
       const old = (await c.query("SELECT id,payload_hash,status,revision FROM record_change_submission WHERE owner_subject=$1 AND client_key=$2",
         [subject(req.user), clientKey])).rows[0];
@@ -682,6 +693,9 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
       const changeId = randomUUID();
       await c.query("INSERT INTO record_change_submission(id,plant_id,species_id,owner_subject,base_snapshot,proposed_snapshot,base_fingerprint,client_key,payload_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
         [changeId, plantId, speciesId, subject(req.user), base, proposal, digest(base), clientKey, payloadHash]);
+      await stageSourceLanguages(c, { submissionType: "record_change", submissionId: changeId,
+        values: body.kind === "plant" ? proposal.content : proposal, selections: sourceLanguages,
+        fieldMap: body.kind === "plant" ? { morphology: "morphology", notes: "notes" } : { description: "description", habitat: "habitat" } });
       if (plantId) {
         const proposedQr = proposal.qr_id === undefined || String(proposal.qr_id) === String(base.qr_id)
           ? base.qr_token : (await c.query("SELECT qr_code FROM plant_app.qr_code WHERE qr_id=$1", [proposal.qr_id])).rows[0]?.qr_code;
@@ -706,7 +720,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
   app.patch("/api/record-changes/:id", allow("plants.create"), async (req, res) => {
     const body = req.body || {};
     if (!Number.isInteger(body.revision) || body.revision < 1 || !body.proposed || typeof body.proposed !== "object" || Array.isArray(body.proposed) ||
-      Object.keys(body).some((key) => !["revision", "proposed"].includes(key))) fail(400, "Invalid correction submission.");
+      Object.keys(body).some((key) => !["revision", "proposed", "source_languages"].includes(key))) fail(400, "Invalid correction submission.");
     const coordinates = await readInitialChange(pool, req.params.id).catch(error => {
       if (error.status === 404) return null;
       throw error;
@@ -714,6 +728,7 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
     if (coordinates) {
       const updated = await resubmitInitialObservationEdit(pool, {
         user: req.user, changeId: coordinates.id, revision: body.revision, ...body.proposed,
+        source_languages: body.source_languages,
       });
       return res.json({ change: updated });
     }
@@ -722,6 +737,8 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
       if (!change || change.owner_subject !== subject(req.user)) fail(404, "Owned edit proposal unavailable.");
       if (change.status !== "Correction Required" || change.revision !== body.revision) fail(409, "Reload this correction request before resubmitting.");
       const kind = change.plant_id ? "plant" : "species";
+      const sourceLanguages = normalizeSourceLanguages(body.source_languages,
+        kind === "plant" ? ["morphology", "notes"] : ["description", "habitat"]);
       const proposal = await normalized(kind === "plant" ? plantProposal(body.proposed) : speciesProposal(body.proposed), kind);
       if (kind === "plant" && proposal.photos === undefined && proposal.photo_ids === undefined) {
         if (change.proposed_snapshot.photos !== undefined) proposal.photos = change.proposed_snapshot.photos;
@@ -747,6 +764,9 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
       const row = (await c.query(`UPDATE record_change_submission SET proposed_snapshot=$1,payload_hash=$2,revision=$3,status='Pending Review',
         reviewed_by=NULL,reviewed_at=NULL,review_comment=NULL,cancelled_by=NULL,cancelled_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$4 RETURNING id,status,revision,review_comment,updated_at`,
       [proposal, payloadHash, nextRevision, change.id])).rows[0];
+      await stageSourceLanguages(c, { submissionType: "record_change", submissionId: change.id,
+        values: kind === "plant" ? proposal.content : proposal, selections: sourceLanguages,
+        fieldMap: kind === "plant" ? { morphology: "morphology", notes: "notes" } : { description: "description", habitat: "habitat" } });
       await requireVersionHistory(c, { revisions: true });
       {
         const proposedSnapshot = kind === "plant"
@@ -870,6 +890,9 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
           await applyQrChange(c, plant, proposal.qr_id, qrPlantSchema);
           await c.query("UPDATE plant_observation SET content=$1,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=$2",
             [{ ...base.content, ...proposal.content }, base.observation_id]);
+          await promoteSourceLanguages(c, { submissionType: "record_change", submissionId: change.id,
+            recordType: "observation", recordId: base.observation_id, values: proposal.content,
+            fieldMap: { morphology: "morphology", notes: "notes" } });
           await c.query("INSERT INTO plant_location(plant_id,latitude,longitude,accuracy_m) VALUES($1,$2,$3,$4)",
             [plant.plant_id, proposal.content.latitude, proposal.content.longitude, proposal.content.accuracy_m ?? null]);
           await applyPlantPhotos(c, { plantId: plant.plant_id, observationId: base.observation_id, owner: change.owner_subject,
@@ -887,6 +910,9 @@ function mountRecordChanges(app, { pool, allow, officerNotifications = null, qrP
           const refs = await taxonomy(c, proposal);
           await c.query("UPDATE species SET scientific_name=$1,common_name=$2,genus_id=$3,status_id=$4,description=$5,rbac_data=rbac_data || $6::jsonb WHERE species_id=$7",
             [proposal.scientific_name, proposal.common_name, refs.genusId, refs.statusId, proposal.description, { habitat: proposal.habitat }, change.species_id]);
+          await promoteSourceLanguages(c, { submissionType: "record_change", submissionId: change.id,
+            recordType: "species", recordId: change.species_id, values: proposal,
+            fieldMap: { description: "description", habitat: "habitat" } });
           const values = speciesFields.map((field) => proposal[field]);
           await c.query(`UPDATE species_request_submission SET ${speciesFields.map((field, index) => `${field}=$${index + 1}`).join(",")},photo=COALESCE($8,photo) WHERE request_id=$9`,
             [...values, proposal.photo ? Buffer.from(proposal.photo.base64, "base64") : null, request.request_id]);
