@@ -34,6 +34,7 @@ async function harness(language='en', overrides={}, fetchHandler=async()=>Respon
     if(name==='vue-i18n')return {useI18n:()=>({t:translate,te:key=>translate(key)!==key})}
     if(name.endsWith('ActionFeedback.vue'))return {props:['message'],setup(props){return ()=>vue.h('div',{role:'status'},props.message)}}
     if(name.endsWith('workflowBadge'))return {workflowBadgeStyle}
+    if(name.endsWith('ReviewCommentField.vue'))return {props:['id','modelValue','label','placeholder','disabled','invalid','describedBy','rows'],emits:['update:modelValue'],setup(props,{emit,expose}){const input=vue.h('textarea',{id:props.id,disabled:props.disabled,maxlength:4000,'aria-invalid':props.invalid||undefined,'aria-describedby':props.describedBy,'onUpdate:modelValue':value=>emit('update:modelValue',value)});expose({focus(){input.focused=true}});return ()=>vue.h('div',{class:'review-comment-field'},[vue.h('label',{for:props.id},props.label),input,vue.h('small',{},`${props.modelValue.length}/4000`)])}}
     if(name.endsWith('MonitoringIdentifier.vue'))return {props:['value','labels'],setup(props){return ()=>vue.h('span',{},props.labels?.get(props.value)||String(props.value))}}
     if(name.endsWith('PlantPhotoLightbox.vue'))return {setup(_props,{expose}){expose({open(){},close(){}});return ()=>null}}
     if(name.endsWith('officerMonitoringDisplay'))return {reviewDateTime:value=>value}
@@ -63,8 +64,6 @@ test('shared proposal dialog preserves comparisons and photos; conflict blocks d
     assert.match(text(h.root),/Approved name/);assert.match(text(h.root),/Proposed name/)
     const sources=nodes(h.root,n=>n.tag==='img').map(n=>n.props.src)
     assert.ok(sources.includes('/api/data/assets/fixture-asset'));assert.ok(sources.includes('/api/data/record-changes/'+id+'/photos/0'))
-    await h.button('Approve Change').props.onClick();await flush()
-    assert.match(text(h.root),/Enter a review comment/);assert.equal(h.calls.some(c=>c.body),false)
     const textarea=nodes(h.root,n=>n.tag==='textarea')[0];textarea.props['onUpdate:modelValue']('Keep this comment');await flush()
     h.setConflict();await h.button('Approve Change').props.onClick();await flush()
     assert.equal(h.button('Approve Change').props.disabled,true);assert.match(text(h.root),/Refresh/)
@@ -73,6 +72,30 @@ test('shared proposal dialog preserves comparisons and photos; conflict blocks d
     assert.equal(h.calls.filter(c=>c.body).length,1,'no automatic retry')
     h.expire();await flush();assert.doesNotMatch(text(h.root),/Approved name|Proposed name/)
   } finally {h.app.unmount()}
+})
+
+test('approved-record approval accepts an empty review comment',async()=>{
+ const h=await harness()
+ try{
+  h.route.query={change:id};await flush()
+  await h.button('Approve Change').props.onClick();await flush()
+  assert.equal(h.calls.filter(c=>c.body).length,1)
+  assert.equal(h.calls.find(c=>c.body).body.comment,'')
+ }finally{h.app.unmount()}
+})
+
+test('approved-record rejection still requires feedback and overlong approval comments are rejected',async()=>{
+ const h=await harness()
+ try{
+  h.route.query={change:id};await flush()
+  await h.button('Reject Change').props.onClick();await flush()
+  assert.match(text(h.root),/Enter a review comment/);assert.equal(h.calls.some(c=>c.body),false)
+  const textarea=nodes(h.root,n=>n.tag==='textarea')[0]
+  textarea.props['onUpdate:modelValue']('x'.repeat(4001));await flush()
+  await h.button('Approve Change').props.onClick();await flush()
+  assert.equal(h.calls.some(c=>c.body),false)
+  assert.match(text(h.root),/Enter a review comment/)
+ }finally{h.app.unmount()}
 })
 
 test('complete queues reject repeated cursors and failed later pages instead of reporting partial results',async()=>{
@@ -309,7 +332,7 @@ test('edit reviews distinguish validation, permissions, conflict and uncertain t
    assert.equal(state.successNotice,false)
    assert.equal(state.comment,'Draft')
    assert.doesNotMatch(text(h.root),/Private server details/)
-   if(status===400){assert.ok(state.commentError);assert.equal(nodes(h.root,n=>n.tag==='textarea')[0].focused,true)}
+   if(status===400){assert.ok(state.commentError);const source=readFileSync(new URL('../src/components/conservation/ApprovedRecordChanges.vue',import.meta.url),'utf8');assert.match(source,/:invalid="Boolean\(commentError\)"/);assert.match(source,/commentInput\.value\?\.focus\(\)/)}
    if(status===403)assert.match(text(h.root),/permission/)
    if(status===0||status===500){assert.match(text(h.root),/outcome is uncertain/);assert.equal(h.button('Approve Change').props.disabled,true)}
    assert.equal(h.calls.filter(c=>c.body).length,1)

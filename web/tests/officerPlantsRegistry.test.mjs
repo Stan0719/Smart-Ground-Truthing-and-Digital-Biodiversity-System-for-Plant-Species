@@ -16,6 +16,8 @@ test('Officer Plants uses four localized columns, Plant and Species names, and n
     assert.ok(translations.officerPlants.species)
     assert.ok(translations.officerPlants.registered)
     assert.ok(translations.officerPlants.actions)
+    assert.ok(translations.officerPlants.updatingPrevious)
+    assert.ok(translations.officerPlants.updateFailedPrevious)
   }
   // The registry intentionally switches to cards through tablet widths too.
   assert.match(view, /@container \(max-width: 900px\)/)
@@ -27,6 +29,7 @@ test('mobile Plant cards stay within their viewport and align identity, details 
   assert.match(mobile, /\.registry-table, tbody\s*\{[^}]*width:100%;min-width:0;max-width:100%/)
   assert.match(mobile, /tbody tr\s*\{[^}]*width:100%;min-width:0;max-width:100%/)
   assert.match(mobile, /\.plant-identity\s*\{[^}]*padding:0 0 14px 62px/)
+  assert.match(mobile, /td:nth-child\(2\)\s*\{[^}]*padding:0 0 14px;/)
   assert.match(mobile, /\.plant-identity \.plant-emblem\s*\{[^}]*position:absolute/)
   assert.match(mobile, /\.registry-actions\s*\{[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/)
   assert.match(mobile, /\.icon-action\s*\{[^}]*min-width:0/)

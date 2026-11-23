@@ -9,31 +9,45 @@ import OfficerPlantDelete from '../../components/conservation/OfficerPlantDelete
 import OfficerPlantEdit from '../../components/conservation/OfficerPlantEdit.vue'
 import OfficerPlantView from '../../components/conservation/OfficerPlantView.vue'
 const editing=ref<string|null>(null),deleting=ref<string|null>(null),viewing=ref<string|null>(null),deleteFeedback=ref('')
-async function afterDelete(){ await load();deleteFeedback.value=t('officerPlantDelete.'+(error.value?'savedRefresh':'saved')) }
 const { t } = useI18n()
 const text = (key: string) => t('officerPlants.' + key)
 const q = ref(''), species = ref('')
 const rows = ref<RegistryPlant[]>([]), choices = ref<{ id: string; name: string }[]>([])
 const loading = ref(false), error = ref(false), cursor = ref<string | null>(null), next = ref<string | null>(null)
 const previous = ref<(string | null)[]>([]), session = ref(sessionSnapshot())
+type RegistryContext = { q: string; species: string; cursor: string | null; previous: (string | null)[] }
+let appliedContext: RegistryContext = { q: '', species: '', cursor: null, previous: [] }, pendingContext: RegistryContext | null = null
+const showingPrevious = ref(false)
 let controller: AbortController | null = null, generation = 0, timer: ReturnType<typeof setTimeout> | undefined, refreshAfterPending = false
 const ready = () => !session.value.pending && session.value.user?.role === 'Conservation Officer' && session.value.user.status === 'Active' && !session.value.user.mustChangePassword
-async function load({ preserveRows = false }: { preserveRows?: boolean } = {}) {
+async function load({ preserveRows = false, target }: { preserveRows?: boolean; target?: RegistryContext } = {}) {
   clearTimeout(timer); controller?.abort(); const token = ++generation
-  if (!preserveRows) { rows.value = []; next.value = null }
+  const context = target || pendingContext || { ...appliedContext, previous: [...appliedContext.previous] }
+  if (!preserveRows) { rows.value = []; cursor.value = null; next.value = null; previous.value = []; showingPrevious.value = false }
+  else if (rows.value.length) showingPrevious.value = true
   error.value = false
   if (!ready()) { loading.value = false; return }
   const abort = new AbortController(); controller = abort; loading.value = true
   try {
-    const result = await readOfficerPlants({ q: q.value.trim(), species: species.value }, cursor.value, abort.signal)
+    const result = await readOfficerPlants({ q: context.q, species: context.species }, context.cursor, abort.signal)
     if (token !== generation || abort.signal.aborted || !ready()) return
-    rows.value = result.plants; choices.value = result.species; next.value = result.page.next_cursor
+    rows.value = result.plants; choices.value = result.species
+    cursor.value = context.cursor; previous.value = [...context.previous]; next.value = result.page.next_cursor
+    appliedContext = { ...context, previous: [...context.previous] }; pendingContext = null; showingPrevious.value = false
   } catch { if (token === generation && !abort.signal.aborted) error.value = true }
   finally { if (token === generation) { loading.value = false; if (controller === abort) controller = null } }
 }
 function reset() {
-  controller?.abort(); generation++; rows.value = []; next.value = null; cursor.value = null; previous.value = []; error.value = false
-  clearTimeout(timer); loading.value = ready(); timer = setTimeout(() => { void load() }, 300)
+  clearTimeout(timer); controller?.abort(); generation++; error.value = false
+  const context: RegistryContext = { q: q.value.trim(), species: species.value, cursor: null, previous: [] }
+  pendingContext = context
+  showingPrevious.value = rows.value.length > 0
+  if (context.q === appliedContext.q && context.species === appliedContext.species) {
+    pendingContext = null; showingPrevious.value = false; loading.value = false
+    return
+  }
+  loading.value = ready()
+  timer = setTimeout(() => { void load({ preserveRows: true, target: context }) }, 300)
 }
 watch([q, species], reset, { flush: 'sync' })
 const unsubscribe = subscribeSession((user, pending) => {
@@ -47,7 +61,7 @@ const unsubscribe = subscribeSession((user, pending) => {
   const wasPending = session.value.pending
   session.value = { user, pending }
   if (authority(user) === previousAuthority) {
-    if (pending && !wasPending && controller) refreshAfterPending = true
+    if (pending && !wasPending && (controller || timer || pendingContext)) refreshAfterPending = true
     else if (!pending && wasPending && refreshAfterPending && ready()) {
       refreshAfterPending = false
       void load({ preserveRows: rows.value.length > 0 })
@@ -56,12 +70,35 @@ const unsubscribe = subscribeSession((user, pending) => {
   }
   refreshAfterPending = false
   controller?.abort(); generation++; choices.value = []; rows.value = []; cursor.value = null; next.value = null; previous.value = []; error.value = false
+  appliedContext = { q: '', species: '', cursor: null, previous: [] }; pendingContext = null; showingPrevious.value = false
   editing.value = null; deleting.value = null; viewing.value = null; deleteFeedback.value = ''
   void load()
 })
 void load()
-function forward() { if (!next.value || loading.value || error.value) return; previous.value.push(cursor.value); cursor.value = next.value; void load() }
-function back() { if (!previous.value.length || loading.value) return; cursor.value = previous.value.pop() ?? null; void load() }
+function forward() {
+  if (!next.value || loading.value || error.value || pendingContext) return
+  const target = { ...appliedContext, cursor: next.value, previous: [...previous.value, cursor.value] }
+  pendingContext = target; showingPrevious.value = rows.value.length > 0
+  void load({ preserveRows: true, target })
+}
+function back() {
+  if (!previous.value.length || loading.value || pendingContext) return
+  const target = { ...appliedContext, cursor: previous.value[previous.value.length - 1] ?? null, previous: previous.value.slice(0, -1) }
+  pendingContext = target; showingPrevious.value = rows.value.length > 0
+  void load({ preserveRows: true, target })
+}
+async function afterDelete() {
+  const deletedId = deleting.value
+  if (deletedId) rows.value = rows.value.filter(plant => plant.id !== deletedId)
+  let target = pendingContext || { ...appliedContext, previous: [...appliedContext.previous] }
+  if (!rows.value.length && target.cursor !== null && target.previous.length) {
+    target = { ...target, cursor: target.previous[target.previous.length - 1] ?? null, previous: target.previous.slice(0, -1) }
+  }
+  pendingContext = target; showingPrevious.value = rows.value.length > 0
+  await load({ preserveRows: true, target })
+  deleteFeedback.value = t('officerPlantDelete.' + (error.value ? 'savedRefresh' : 'saved'))
+}
+function afterEdit() { void load({ preserveRows: true }) }
 onBeforeUnmount(() => { generation++; controller?.abort(); clearTimeout(timer); unsubscribe() })
 </script>
 
@@ -77,8 +114,8 @@ onBeforeUnmount(() => { generation++; controller?.abort(); clearTimeout(timer); 
       <p v-if="!ready()" class="registry-state" role="status">{{ text('session') }}</p>
       <p v-else-if="loading && !rows.length" class="registry-state" role="status">{{ text('loading') }}</p>
       <div v-else-if="error && !rows.length" class="registry-state" role="alert"><p>{{ text('error') }}</p><button class="secondary-button" @click="load()">{{ text('retry') }}</button></div>
-      <p v-if="ready() && loading && rows.length" class="registry-refresh" role="status">{{ text('loading') }}</p>
-      <div v-if="ready() && error && rows.length" class="registry-refresh registry-refresh-error" role="alert"><span>{{ text('error') }}</span><button class="secondary-button" @click="load({ preserveRows: true })">{{ text('retry') }}</button></div>
+      <p v-if="ready() && loading && rows.length" class="registry-refresh" role="status">{{ text('updatingPrevious') }}</p>
+      <div v-if="ready() && error && rows.length" class="registry-refresh registry-refresh-error" role="alert"><span>{{ text('updateFailedPrevious') }}</span><button class="secondary-button" @click="load({ preserveRows: true })">{{ text('retry') }}</button></div>
       <p v-if="ready() && !loading && !error && !rows.length" class="registry-state">{{ text('empty') }}</p>
       <div v-if="ready() && rows.length" class="registry-scroll"><table class="registry-table" role="table">
         <thead role="rowgroup"><tr role="row"><th v-for="key in ['plantId','species','registered','actions']" :key="key" scope="col" role="columnheader">{{ text(key) }}</th></tr></thead>
@@ -93,11 +130,11 @@ onBeforeUnmount(() => { generation++; controller?.abort(); clearTimeout(timer); 
           </div></td>
         </tr></tbody>
       </table></div>
-      <nav class="registry-pagination" :aria-label="text('pagination')"><button class="secondary-button" :disabled="!previous.length || loading" @click="back">{{ text('previous') }}</button><span>{{ text('page') }} {{ previous.length + 1 }}</span><button class="secondary-button" :disabled="!next || loading || error" @click="forward">{{ text('next') }}</button></nav>
+      <nav class="registry-pagination" :aria-label="text('pagination')"><button class="secondary-button" :disabled="!previous.length || loading || showingPrevious" @click="back">{{ text('previous') }}</button><span>{{ text('page') }} {{ previous.length + 1 }}</span><button class="secondary-button" :disabled="!next || loading || error || showingPrevious" @click="forward">{{ text('next') }}</button></nav>
     </section>
   </section>
   <OfficerPlantDelete :plant-id="deleting" @close="deleting=null" @deleted="afterDelete" />
-  <OfficerPlantEdit :plant-id="editing" @close="editing=null" @saved="load" />
+  <OfficerPlantEdit :plant-id="editing" @close="editing=null" @saved="afterEdit" />
   <OfficerPlantView :plant-id="viewing" @close="viewing=null" />
 </template>
 
@@ -160,7 +197,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px s
   .cell-value em { color: #245443; font-weight: 500; }
   .cell-value small { font-size: 14px; line-height: 1.5; margin-top: 3px; }
   .badge { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; padding: 4px 10px; border-radius: 99px; line-height: 1.4; }
-  td:nth-child(2) { display:block;min-width:0;padding:0 0 14px 62px;border-bottom:1px solid #d7e0db; }
+  td:nth-child(2) { display:block;min-width:0;padding:0 0 14px;border-bottom:1px solid #d7e0db; }
   td:nth-child(2) .cell-label { display:none; }
   td:nth-child(2) .cell-value { display:grid;gap:3px; }
   td:nth-child(2) .species-name { color:#174c38;font-size:16px;line-height:1.45;overflow-wrap:anywhere; }

@@ -13,6 +13,7 @@ const { descriptor } = parse(source), script = compileScript(descriptor,{id:'reg
 const template = compileTemplate({source:descriptor.template.content,filename:'PlantsView.vue',id:'registry-test',compilerOptions:{bindingMetadata:script.bindings}})
 const transpile = code => ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
 const flush = async()=>{for(let i=0;i<4;i++){await vue.nextTick();await new Promise(setImmediate)}}
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 const nodes = root => { const found=[]; const visit=node=>{ if(Array.isArray(node)) return node.forEach(visit); if(!node||typeof node!=='object') return; found.push(node); if(Array.isArray(node.children)) visit(node.children) }; visit(root); return found }
 const plant = {id:'620',species_id:'1',scientific_name:'Shorea',common_name:'Meranti',status:'Approved',registered_at:'2026-11-01T00:00:00Z',registration_id:'obs-1',has_location:true,qr_id:'42',qr_status:'active'}
 function harness(read) {
@@ -40,11 +41,75 @@ test('registry paginates, retries errors, and ignores abandoned work after filte
  const h=harness(async()=>{if(mode==='fail')throw Error('offline');if(mode==='delay')return new Promise(resolve=>{release=resolve});return page([plant],'next')})
  try {
   await flush();assert.equal(h.state.rows.value[0].id,'620');h.state.forward();await flush();assert.equal(h.calls[1][1],'next')
-  mode='fail';await h.state.load();assert.equal(h.state.error.value,true);assert.equal(h.state.rows.value.length,0)
-  mode='success';await h.state.load();assert.equal(h.state.error.value,false)
-  mode='delay';const pending=h.state.load();const signal=h.calls.at(-1)[2]
-  h.state.q.value='Other';assert.equal(signal.aborted,true);assert.equal(h.state.previous.value.length,0)
-  h.session();release(page());await pending;assert.equal(h.state.rows.value.length,0)
+  mode='fail';await h.state.load({preserveRows:true});assert.equal(h.state.error.value,true);assert.equal(h.state.rows.value.length,1)
+  mode='success';await h.state.load({preserveRows:true});assert.equal(h.state.error.value,false)
+  mode='delay';const pending=h.state.load({preserveRows:true});const signal=h.calls.at(-1)[2], oldRows=h.state.rows.value
+  h.state.q.value='Other';assert.equal(signal.aborted,true);assert.deepEqual(h.state.rows.value,oldRows);assert.equal(h.state.loading.value,true)
+  release(page([{...plant,scientific_name:'Stale response'}]));await pending;assert.equal(h.state.rows.value[0].scientific_name,plant.scientific_name)
+ }finally{h.stop()}
+})
+
+test('search and Species changes keep clearly labelled previous rows until the latest debounced request succeeds',async()=>{
+ const calls=[];let release
+ const h=harness(async(filters,cursor,signal)=>{calls.push({filters,cursor,signal});if(calls.length===1)return page([plant]);return new Promise(resolve=>{release=resolve})})
+ try{
+  await flush();assert.equal(h.state.rows.value[0].id,plant.id)
+  h.state.q.value='Meranti';h.state.species.value='1';await flush()
+  assert.equal(h.state.rows.value[0].id,plant.id);assert.equal(h.state.loading.value,true)
+  const indicator=nodes(h.render()).find(node=>node.type==='p'&&node.props?.class==='registry-refresh')
+  assert.equal(indicator.children,'officerPlants.updatingPrevious')
+  await wait(320);await flush();assert.equal(calls.length,2)
+  assert.equal(calls[1].filters.q,'Meranti');assert.equal(calls[1].filters.species,'1');assert.equal(calls[1].cursor,null)
+  release(page([{...plant,id:'621',scientific_name:'Filtered plant'}]));await flush()
+  assert.equal(h.state.rows.value[0].id,'621');assert.equal(h.state.showingPrevious.value,false)
+ }finally{h.stop()}
+})
+
+test('failed filter keeps old results marked as previous and Retry repeats the pending filter',async()=>{
+ let calls=0,fail=true
+ const h=harness(async()=>{calls++;if(calls===1)return page([plant]);if(fail)throw Error('offline');return page([{...plant,id:'621'}])})
+ try{
+  await flush();h.state.q.value='new name';await wait(320);await flush()
+  assert.equal(h.state.rows.value[0].id,plant.id);assert.equal(h.state.error.value,true);assert.equal(h.state.showingPrevious.value,true)
+  fail=false;await h.state.load({preserveRows:true})
+  assert.equal(calls,3);assert.equal(h.state.rows.value[0].id,'621');assert.equal(h.state.error.value,false)
+ }finally{h.stop()}
+})
+
+test('pagination keeps the displayed page and cursor until the requested page succeeds',async()=>{
+ let calls=0,release,fail=false
+ const h=harness(async(_filters,cursor)=>{if(++calls===1)return page([{...plant,id:'620'}],'next');if(fail)throw Error('offline');if(cursor==='next')return new Promise(resolve=>{release=resolve});return page([{...plant,id:'620'}],'next')})
+ try{
+  await flush();const oldRows=h.state.rows.value;h.state.forward();await flush()
+  assert.deepEqual(h.state.rows.value,oldRows);assert.equal(h.state.cursor.value,null);assert.equal(h.state.previous.value.length,0)
+  release(page([{...plant,id:'619'}]));await flush()
+  assert.equal(h.state.rows.value[0].id,'619');assert.equal(h.state.cursor.value,'next');assert.equal(h.state.previous.value.length,1)
+  fail=true;h.state.back();await flush()
+  assert.equal(h.state.error.value,true);assert.equal(h.state.rows.value[0].id,'619');assert.equal(h.state.cursor.value,'next');assert.equal(h.state.previous.value.length,1)
+ }finally{h.stop()}
+})
+
+test('Edit refresh preserves rows and page context, while deletion removes the row before refreshing',async()=>{
+ let calls=0,release,releaseDelete
+ const h=harness(async(_filters,cursor)=>{
+  calls++
+  if(calls===3)return new Promise(resolve=>{release=resolve})
+  if(calls===4)return new Promise(resolve=>{releaseDelete=resolve})
+  if(cursor===null&&calls===1)return page([{...plant,id:'620'}],'next')
+  if(cursor==='next')return page([{...plant,id:'619'}])
+  return page([{...plant,id:'620'}])
+ })
+ try{
+  await flush();h.state.forward();await flush();assert.equal(h.state.cursor.value,'next')
+  const current=h.state.rows.value;h.state.afterEdit();await flush()
+  assert.deepEqual(h.state.rows.value,current);assert.equal(h.state.cursor.value,'next')
+  release(page([{...plant,id:'619',scientific_name:'Edited name'}]));await flush()
+  assert.equal(h.state.rows.value[0].scientific_name,'Edited name');assert.equal(h.state.cursor.value,'next')
+  h.state.deleting.value='619';const deletion=h.state.afterDelete();await flush()
+  assert.equal(h.state.rows.value.some(row=>row.id==='619'),false)
+  assert.equal(h.calls.at(-1)[1],null,'an empty last page falls back to the previous page')
+  assert.equal(h.state.loading.value,true);releaseDelete(page([{...plant,id:'620'}]));await deletion
+  assert.equal(h.state.rows.value.some(row=>row.id==='619'),false);assert.equal(h.state.rows.value[0].id,'620')
  }finally{h.stop()}
 })
 
@@ -125,7 +190,7 @@ test('registry opens the selected Plant in its details modal and retains scoped 
 test('confirmed deletion followed by list failure retains success and exposes the existing Retry state',async()=>{
  let fail=false
  const h=harness(async()=>{if(fail)throw Error('offline');return page()})
- try{await flush();fail=true;await h.state.afterDelete();assert.equal(h.state.error.value,true);assert.equal(h.state.deleteFeedback.value,'officerPlantDelete.savedRefresh');fail=false;await h.state.load();assert.equal(h.state.error.value,false)}finally{h.stop()}
+ try{await flush();h.state.deleting.value=plant.id;fail=true;await h.state.afterDelete();assert.equal(h.state.error.value,true);assert.equal(h.state.rows.value.some(row=>row.id===plant.id),false);assert.equal(h.state.deleteFeedback.value,'officerPlantDelete.savedRefresh');fail=false;await h.state.load({preserveRows:true});assert.equal(h.state.error.value,false)}finally{h.stop()}
 })
 
 test('mobile registry cards show identity, aligned detail rows and labelled touch actions without duplicating workflows',async()=>{

@@ -11,6 +11,8 @@ const { t } = useI18n()
 const label = (key: string) => t('observationVersions.' + key)
 const title = computed(() => label(props.origin === 'initial_registration' ? 'registrationTitle' : 'title'))
 const versionLabel = (row: ObservationHistoricalVersion) => row.ordinal == null ? label('snapshot') : t('observationVersions.version', { number: row.ordinal })
+const cycleLabel = (row: ObservationHistoricalVersion) => row.ordinal === 1 ? label('originalSubmission')
+  : row.ordinal != null && row.ordinal > 1 ? label('correctedResubmission') : label('snapshot')
 const versions = ref<ObservationHistoricalVersion[]>([]), selected = ref<ObservationHistoricalVersion | null>(null)
 const available = ref(false), loading = ref(false), failed = ref(false), failedPhotos = ref(new Set<string>())
 const helpOpen = ref(false), historyOpen = ref(false)
@@ -79,14 +81,15 @@ onBeforeUnmount(() => { generation++; preview.value?.close(); emit('active', fal
     <div class="history-heading"><h3>{{ title }}</h3><span class="history-info" @mouseenter="helpOpen = true" @mouseleave="helpOpen = false" @keydown.esc.stop="helpOpen = false"><button ref="helpButton" type="button" class="history-help-button" :aria-label="label('historyHelp')" :aria-expanded="helpOpen" @focus="helpOpen = true" @blur="helpOpen = false" @click="helpOpen = true">?</button><span v-if="helpOpen" ref="helpTooltip" popover="manual" class="history-tooltip" role="tooltip">{{ label('historyHelp') }}</span></span></div>
     <p v-if="loading" role="status">{{ label('loading') }}</p>
     <p v-else-if="failed" role="alert">{{ label('unavailable') }} <button type="button" class="secondary-button" :disabled="!enabled" @click="load">{{ label('retry') }}</button></p>
-    <p v-else-if="!available || !versions.length" role="status">{{ label('unavailable') }}</p>
+    <p v-else-if="!available" role="status">{{ label('unavailable') }}</p>
+    <p v-else-if="!versions.length" role="status">{{ label('noSnapshots') }}</p>
     <template v-else>
       <details :open="historyOpen" class="history-disclosure" @toggle="historyOpen = ($event.target as HTMLDetailsElement).open" @keydown.esc.stop="select(null)"><summary>{{ label('savedSnapshots') }} ({{ versions.length }})</summary>
       <div class="registration-history-scroll"><table class="registration-history-table">
         <colgroup><col class="version-column" /><col class="status-column" /><col class="action-column" /></colgroup>
         <thead><tr><th scope="col">{{ label('versionHeading') }}</th><th scope="col">{{ label('snapshotStatus') }}</th><th scope="col">{{ label('action') }}</th></tr></thead>
         <tbody><tr v-for="row in versions" :key="row.key" :class="{ superseded: row.status === 'Superseded' }">
-          <td><strong>{{ versionLabel(row) }}</strong><small>{{ row.createdAt ? reviewDateTime(row.createdAt) : label('unavailable') }}</small><small v-if="isApprovedSource(row)" class="approved-source-label">{{ label('approvedSource') }}</small></td>
+          <td><strong>{{ versionLabel(row) }}</strong><small class="submission-cycle-label">{{ cycleLabel(row) }}</small><small>{{ row.createdAt ? reviewDateTime(row.createdAt) : label('unavailable') }}</small><small v-if="isApprovedSource(row)" class="approved-source-label">{{ label('approvedSource') }}</small></td>
           <td>{{ t('observationVersions.statuses.' + row.status) }}</td>
           <td><span v-if="isCurrent(row) && !isApprovedSource(row)" class="currently-viewing" role="status">{{ label('currentlyViewing') }}</span><button v-else :ref="element => { if (element) historyButtons.set(row.id, element as HTMLElement); else historyButtons.delete(row.id) }" type="button" class="secondary-button" :disabled="!enabled" @click="select(row)">{{ label(isApprovedSource(row) ? 'viewSubmission' : 'viewDetails') }}</button></td>
         </tr></tbody>

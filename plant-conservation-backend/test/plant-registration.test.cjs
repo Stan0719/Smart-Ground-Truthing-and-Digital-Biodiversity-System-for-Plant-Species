@@ -206,13 +206,43 @@ test("Registration projections stay independent of subsequent Observations", asy
     const fresh=await create();
     assertOk(await call('/observations/'+fresh.id+'/review','POST',{decision:'Correction Required',comment:'Correct height',revision:1},'officer'));
     assertOk(await call('/my-plants/'+fresh.plant_id,'PATCH',{expected_revision:2,species_id:1,scientific_name:'Corrected individual',content:{...content,heightCm:30}}));
-    await approve(fresh.id,3);
+    const retry=await call('/my-plants/'+fresh.plant_id,'PATCH',{expected_revision:2,species_id:1,scientific_name:'Corrected individual',content:{...content,heightCm:30}},'bot');
+    assert.equal(retry.status,409,'retry with a stale revision cannot append a duplicate submission snapshot');
+    let history=assertOk(await call(`/observations/${fresh.id}/registration-history`,'GET',undefined,'officer'));
+    assert.deepEqual(history.versions.map(version=>version.version_number),[2,1]);
+    assert.deepEqual(history.versions.map(version=>version.status),['Pending Review','Superseded']);
+    assert.equal(history.versions[0].snapshot.content.heightCm,30);
+    assert.ok(history.versions.every(version=>!version.snapshot.review_provenance));
+    assert.equal((await call(`/observations/${fresh.id}/registration-history`,'GET',undefined,'bot')).status,403,
+      'registration history read access is limited to authorized reviewers');
+
+    assertOk(await call('/observations/'+fresh.id+'/review','POST',{decision:'Correction Required',comment:'Add the corrected field measurement',revision:3},'officer'));
+    const resubmission={expected_revision:4,species_id:1,scientific_name:'Corrected individual',content:{...content,heightCm:35}};
+    const concurrent=await Promise.all([
+      call('/my-plants/'+fresh.plant_id,'PATCH',resubmission,'bot'),
+      call('/my-plants/'+fresh.plant_id,'PATCH',resubmission,'bot'),
+    ]);
+    assert.deepEqual(concurrent.map(result=>result.status).sort(),[200,409],
+      'only one concurrent request for a correction revision can append a snapshot');
+    history=assertOk(await call(`/observations/${fresh.id}/registration-history`,'GET',undefined,'officer'));
+    assert.deepEqual(history.versions.map(version=>version.version_number),[3,2,1]);
+    assert.deepEqual(history.versions.map(version=>version.snapshot.content.heightCm),[35,30,20]);
+    assert.equal(history.versions[1].status,'Superseded');
+    await approve(fresh.id,5);
     const result=assertOk(await call('/observations/'+fresh.id,'GET',undefined,'officer')).observation;
-    assert.equal(result.historical_review.fields.content.heightCm,30);
-    const versions=(await pool.query("SELECT status,snapshot FROM record_version_history WHERE plant_id=$1 ORDER BY version_number",[fresh.plant_id])).rows;
-    assert.equal(versions[0].status,'Superseded');assert.equal(versions[0].snapshot.content.heightCm,20);
-    assert.equal(versions.at(-1).snapshot.content.heightCm,30);
-    assert.equal(versions.at(-1).snapshot.review_provenance.submission_id,fresh.id);
+    assert.equal(result.historical_review.fields.content.heightCm,35);
+    const versions=(await pool.query("SELECT id,status,snapshot,reviewed_by,reviewed_at,review_comment FROM record_version_history WHERE plant_id=$1 ORDER BY version_number",[fresh.plant_id])).rows;
+    assert.equal(versions.length,4);
+    assert.deepEqual(versions.slice(0,3).map(version=>version.status),['Superseded','Superseded','Approved']);
+    assert.deepEqual(versions.slice(0,3).map(version=>version.snapshot.content.heightCm),[20,30,35]);
+    assert.equal(versions[2].reviewed_by,'staff:officer');assert.ok(versions[2].reviewed_at);assert.equal(versions[2].review_comment,'Verified');
+    assert.equal(versions[3].status,'Approved');
+    assert.equal(versions[3].snapshot.review_provenance.submission_id,fresh.id);
+    assert.equal(versions[3].snapshot.review_provenance.source_submitted_history_id,versions[2].id,
+      'approval capture links to the exact corrected submission version');
+    history=assertOk(await call(`/observations/${fresh.id}/registration-history`,'GET',undefined,'officer'));
+    assert.deepEqual(history.versions.map(version=>version.version_number),[3,2,1],
+      'approval does not add a registration submission snapshot');
     assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM record_change_submission WHERE plant_id=$1',[fresh.plant_id])).rows[0].n,0);
   });
   await t.test('ambiguous legacy data stays in lists but cannot become a registration or edit base', async () => {

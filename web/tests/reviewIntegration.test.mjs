@@ -1,5 +1,5 @@
 import * as plantProximityQueue from '../src/services/plantProximityQueue.ts'
-import { createReviewQueueCache } from '../src/services/reviewQueueCache.ts'
+import { createReviewQueueCache, REVIEW_QUEUE_TTL, REVIEW_QUEUE_NAVIGATION_STALE_TTL } from '../src/services/reviewQueueCache.ts'
 import { loadObservationEditQueue, ObservationEditQueueLimitError } from '../src/services/observationEdits.ts'
 import { useOfficerCopyConfirmation } from '../src/composables/useOfficerCopyConfirmation.ts'
 import { workflowBadgeStyle } from '../src/utils/workflowBadge.ts'
@@ -136,6 +136,9 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
   const messages = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
   const scope = vue.effectScope()
   const cleanup = []
+  const mounted = []
+  const intervals = [], clearedIntervals = []
+  const documentState = options.document || { activeElement: null, hidden: false, addEventListener() {}, removeEventListener() {} }
   let sessionListener
   let session = { user: { id: 'verified-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }, pending: false }
   const queueCache = options.queueCache || createReviewQueueCache(() => session, fn => { cacheListener = fn })
@@ -154,15 +157,15 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
     Error,
     AbortSignal,
     AbortController,
-    window: { setTimeout, clearTimeout, innerWidth: 1024, innerHeight: 768, ...options.window },
-    document: options.document || { activeElement: null },
+    window: { setTimeout, clearTimeout, setInterval(fn, ms) { intervals.push({ fn, ms }); return intervals.length }, clearInterval(id) { clearedIntervals.push(id) }, innerWidth: 1024, innerHeight: 768, ...options.window },
+    document: documentState,
     console: options.console || console,
     navigator: { clipboard: options.clipboard },
     HTMLElement: options.HTMLElement || class {},
     URLSearchParams,
     fetch: async (url, options) => {
       calls.push({ url, options })
-      if (url === '/api/species-requests') return speciesQueueHandler ? speciesQueueHandler(url, options) : Response.json({ species_requests: [] })
+      if (url === '/api/species-requests' || url.startsWith('/api/species-requests?')) return speciesQueueHandler ? speciesQueueHandler(url, options) : Response.json({ species_requests: [] })
       if (url.startsWith('/api/data/record-changes?')) return changeQueueHandler ? changeQueueHandler(url) : Response.json({ changes: [], page: { has_more: false, next_cursor: null } })
       if (url.startsWith('/api/plants/')) return plantHandler(url, options)
       if (url.startsWith('/api/observations?')) {
@@ -187,7 +190,7 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
       // DOM directives are not mounted by this VNode-only render harness.
       if (name.endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {} }
       if (name === 'vue')
-        return { ...vue, onMounted() {}, onBeforeUnmount(fn) { cleanup.push(fn) }, resolveComponent: name => name, withDirectives: (node) => node }
+        return { ...vue, onMounted(fn) { mounted.push(fn) }, onBeforeUnmount(fn) { cleanup.push(fn) }, resolveComponent: name => name, withDirectives: (node) => node }
       if (name === 'vue-router')
         return {
           useRoute: () => route,
@@ -224,6 +227,10 @@ function harness(fetchHandler, query = {}, language = 'en', plantHandler = async
     state,
     route,
     calls,
+    document: documentState,
+    intervals,
+    clearedIntervals,
+    mount: () => mounted.forEach(fn => fn()),
     emitSession(user, pending = false) { session = { user, pending }; cacheListener?.(); sessionListener?.(user, pending) },
     stop: () => { cleanup.forEach(fn => fn()); scope.stop() },
     routes,
@@ -242,6 +249,299 @@ function nodes(root) {
   walk(root)
   return result
 }
+function renderedText(root) {
+  if (typeof root === 'string' || typeof root === 'number') return String(root)
+  if (Array.isArray(root)) return root.map(renderedText).join('')
+  if (!root || typeof root !== 'object') return ''
+  return renderedText(root.children)
+}
+
+test('Phase 1 recent-page polling is bounded, merges only returned rows and retains verified summary counts', async () => {
+  const recentId = 'cc3bd8be-988f-40a7-b4ea-59408b85dbb3'
+  let polling = false
+  const original = fixture({ id: firstId }), older = fixture({ id: secondId, plant_id: 2, created_at: '2026-09-01T10:00:00Z' })
+  const verifiedApproved = fixture({ id: 'dd3bd8be-988f-40a7-b4ea-59408b85dbb4', plant_id: 4, status: 'Approved', review_decision: 'Approved', reviewed_at: '2020-01-01T00:00:00Z' })
+  const changed = fixture({ id: firstId, status: 'Approved', review_decision: 'Approved', reviewed_at: '2026-11-23T01:00:00Z' })
+  const recent = fixture({ id: recentId, plant_id: 3, created_at: '2026-11-23T02:00:00Z' })
+  const page = { has_more: false, next_cursor: null }
+  const h = harness(async () => Response.json({}), {}, 'en', undefined, () => Response.json({
+    observations: polling ? [changed, recent] : [original, older, verifiedApproved], page,
+  }), {
+    recordChangesHandler: () => Response.json({ changes: [], page }),
+    speciesQueueHandler: () => Response.json({ species_requests: [], page }),
+  })
+  try {
+    await h.state.loadObservations()
+    assert.equal(h.state.countRecords.value.filter(row => row.status === 'Pending Review').length, 2)
+    assert.equal(h.state.counts.value[4][1], 1, 'an older approved record is in the verified summary')
+    const visibleLimit = h.state.visibleLimit.value
+    polling = true
+    h.calls.length = 0
+    await h.state.pollRecentQueue()
+    assert.equal(h.calls.length, 3)
+    assert.ok(h.calls.some(call => call.url === '/api/observations?limit=100'))
+    assert.ok(h.calls.some(call => call.url === '/api/data/record-changes?limit=100'))
+    assert.ok(h.calls.some(call => call.url === '/api/species-requests?limit=100'))
+    assert.ok(h.calls.every(call => !call.url.includes('cursor=')))
+    assert.equal(h.state.observations.value.filter(row => row.id === firstId).length, 1)
+    assert.equal(h.state.observations.value.find(row => row.id === firstId).status, 'Approved')
+    assert.ok(h.state.observations.value.some(row => row.id === recentId))
+    assert.ok(h.state.observations.value.some(row => row.id === secondId), 'absence from the recent page does not imply deletion')
+    assert.equal(h.state.visibleLimit.value, visibleLimit)
+    assert.equal(h.state.countRecords.value.filter(row => row.status === 'Pending Review').length, 2,
+      'partial results do not replace complete verified summary data')
+    assert.equal(h.state.counts.value[4][1], 1, 'a partial page cannot replace the verified Approved count')
+    assert.equal(h.state.queueCountsStale.value, true)
+    assert.ok(nodes(h.render()).some(node => node.props?.class === 'review-queue-stale'))
+  } finally { h.stop() }
+})
+
+test('Phase 1 polling defers for hidden tabs and active review, and failed checks publish no partial rows', async () => {
+  let polling = false
+  const page = { has_more: false, next_cursor: null }
+  const original = fixture({ id: firstId }), recent = fixture({ id: secondId, plant_id: 2 })
+  const h = harness(async () => Response.json({}), {}, 'en', undefined, () => Response.json({ observations: polling ? [recent] : [original], page }), {
+    recordChangesHandler: () => polling ? Response.json({ error: 'unavailable' }, { status: 503 }) : Response.json({ changes: [], page }),
+    speciesQueueHandler: () => Response.json({ species_requests: [], page }),
+  })
+  try {
+    await h.state.loadObservations()
+    h.calls.length = 0
+    h.document.hidden = true
+    await h.state.pollRecentQueue()
+    assert.equal(h.calls.length, 0)
+    h.document.hidden = false
+    h.route.query.review = firstId
+    await h.state.pollRecentQueue()
+    assert.equal(h.calls.filter(call => call.url.includes('limit=100')).length, 0)
+    h.route.query.review = undefined
+    h.state.closeReview()
+    await flush()
+    polling = true
+    const before = Array.from(h.state.observations.value, row => row.id)
+    await h.state.pollRecentQueue()
+    assert.equal(h.state.queuePollError.value, true)
+    assert.deepEqual(Array.from(h.state.observations.value, row => row.id), before)
+    assert.ok(nodes(h.render()).some(node => node.props?.class === 'review-queue-stale'))
+  } finally { h.stop() }
+})
+
+test('Phase 1 polling timer is single-instance and is cleaned up', async () => {
+  const h = harness(async url => fixtureResponse(url, [fixture()]))
+  try {
+    await h.state.loadObservations()
+    h.state.scheduleQueuePolling()
+    h.state.scheduleQueuePolling()
+    assert.equal(h.intervals.length, 1)
+    assert.equal(h.intervals[0].ms, 60_000)
+    h.state.stopQueuePolling()
+    assert.deepEqual(h.clearedIntervals, [1])
+  } finally { h.stop() }
+})
+
+test('Phase 2 complete verification is scheduled every ten minutes and atomically refreshes all summary categories', async () => {
+  const page = { has_more: false, next_cursor: null }
+  let observationRows = [fixture()], changeRows = [], speciesRows = [], holdObservation = false, releaseObservation
+  const h = harness(async url => fixtureResponse(url, []), {}, 'en', undefined, () => {
+    if (holdObservation) return new Promise(resolve => { releaseObservation = resolve })
+    return Response.json({ observations: observationRows, page })
+  }, {
+    recordChangesHandler: () => Response.json({ changes: changeRows, page }),
+    speciesQueueHandler: () => Response.json({ species_requests: speciesRows, page }),
+  })
+  const summary = () => reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children)
+  try {
+    await h.state.loadObservations()
+    assert.deepEqual(summary(), ['1', '0', '0', '0', '0'])
+    h.state.status.value = 'Rejected'
+    await flush()
+    h.state.visibleLimit.value = 7
+    const priorSnapshot = h.state.verifiedQueueSnapshot.value
+    observationRows = [
+      fixture({ id: firstId, species_request: requestFixture({ request_id: 40, request_status: 'Pending Review' }) }),
+      fixture({ id: secondId, plant_id: 2, status: 'Correction Required' }),
+      fixture({ id: 'cc3bd8be-988f-40a7-b4ea-59408b85dbb3', plant_id: 3, status: 'Flagged' }),
+      fixture({ id: 'dd3bd8be-988f-40a7-b4ea-59408b85dbb4', plant_id: 4, status: 'Rejected' }),
+      fixture({ id: 'ee3bd8be-988f-40a7-b4ea-59408b85dbb5', plant_id: 5, status: 'Approved', reviewed_at: '2020-03-04T08:00:00Z' }),
+    ]
+    changeRows = [changeFixture({ status: 'Pending Review' })]
+    speciesRows = [queueSpecies(40, { request_status: 'Pending Review' }), queueSpecies(41, { request_status: 'Approved', approved_species_id: 8, reviewed_at: '2019-01-01T00:00:00Z' })]
+    holdObservation = true
+    h.calls.length = 0
+    h.state.scheduleAutomaticQueueVerification()
+    h.state.scheduleAutomaticQueueVerification()
+    assert.equal(h.intervals.filter(timer => timer.ms === 10 * 60_000).length, 1)
+    const verification = h.state.verifyQueueAutomatically()
+    await flush()
+    assert.equal(h.state.automaticQueueVerificationBusy.value, true)
+    assert.equal(h.state.queueRefreshing.value, false)
+    assert.equal(h.state.isLoading.value, false)
+    assert.strictEqual(h.state.verifiedQueueSnapshot.value, priorSnapshot)
+    assert.deepEqual(summary(), ['1', '0', '0', '0', '0'], 'previous verified counts remain visible while the background fetch runs')
+    holdObservation = false
+    releaseObservation(Response.json({ observations: observationRows, page }))
+    await verification
+    assert.deepEqual(summary(), ['2', '1', '1', '1', '2'])
+    assert.equal(h.state.status.value, 'Rejected')
+    assert.equal(h.state.visibleLimit.value, 7)
+    assert.equal(h.state.queueCountsStale.value, false)
+    assert.equal(h.state.automaticQueueVerificationError.value, false)
+    assert.equal(h.calls.filter(call => call.url.startsWith('/api/observations?')).length, 1)
+    assert.equal(h.calls.filter(call => call.url.startsWith('/api/data/record-changes?')).length, 1)
+    assert.equal(h.calls.filter(call => call.url.startsWith('/api/species-requests')).length, 1)
+    assert.ok(h.calls.some(call => call.url.startsWith('/api/conservation/submitter-names?')), 'optional bounded reviewer-name enrichment may add one non-page request')
+  } finally { h.stop() }
+})
+
+test('Phase 2 enforces a shared twelve-request budget and preserves the last verified snapshot on exhaustion', async () => {
+  const page = { has_more: false, next_cursor: null }
+  let pageMode = false, pageCounts = { observations: 5, changes: 4, species: 4 }
+  const sourcePages = new Map()
+  const continued = (source, url, field) => {
+    if (!pageMode) return Response.json({ [field]: [], page })
+    const count = (sourcePages.get(source) || 0) + 1
+    sourcePages.set(source, count)
+    const pageCount = pageCounts[source]
+    return Response.json({ [field]: [], page: { has_more: count < pageCount, next_cursor: count < pageCount ? `${source}-${count}` : null } })
+  }
+  const h = harness(async url => fixtureResponse(url, [fixture()]), {}, 'en', undefined,
+    (url) => continued('observations', url, 'observations'), {
+      recordChangesHandler: url => continued('changes', url, 'changes'),
+      speciesQueueHandler: url => continued('species', url, 'species_requests'),
+    })
+  const summary = () => reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children)
+  try {
+    await h.state.loadObservations()
+    const originalSnapshot = h.state.verifiedQueueSnapshot.value
+    const originalCounts = summary()
+    pageMode = true; sourcePages.clear(); h.calls.length = 0
+    await h.state.verifyQueueAutomatically()
+    const queueCalls = h.calls.filter(call => call.url.startsWith('/api/observations?') || call.url.startsWith('/api/data/record-changes?') || call.url.startsWith('/api/species-requests'))
+    assert.equal(queueCalls.length, 12, 'only requests actually dispatched count against the cap')
+    assert.equal(sourcePages.get('observations'), 5)
+    assert.equal(sourcePages.get('changes'), 4)
+    assert.equal(sourcePages.get('species'), 3, 'the thirteenth request is rejected before dispatch')
+    assert.strictEqual(h.state.verifiedQueueSnapshot.value, originalSnapshot)
+    assert.deepEqual(summary(), originalCounts)
+    assert.equal(h.state.queueCountsStale.value, true)
+    assert.equal(h.state.automaticQueueVerificationError.value, true)
+    assert.equal(h.state.automaticQueueVerificationBusy.value, false)
+    pageCounts = { observations: 4, changes: 4, species: 4 }
+    sourcePages.clear(); h.calls.length = 0
+    await h.state.verifyQueueAutomatically()
+    assert.equal(h.calls.filter(call => call.url.startsWith('/api/observations?') || call.url.startsWith('/api/data/record-changes?') || call.url.startsWith('/api/species-requests')).length, 12)
+    assert.deepEqual(summary(), ['0', '0', '0', '0', '0'], 'a complete final page on request twelve is accepted')
+    assert.equal(h.state.queueCountsStale.value, false)
+    assert.equal(h.state.automaticQueueVerificationError.value, false)
+  } finally { h.stop() }
+})
+
+test('Phase 2 defers for hidden tabs, active reviews and unsaved comments, then cleans up its timer', async () => {
+  const page = { has_more: false, next_cursor: null }
+  const h = harness(async url => fixtureResponse(url, [fixture()]), {}, 'en', undefined,
+    () => Response.json({ observations: [fixture()], page }), {
+      recordChangesHandler: () => Response.json({ changes: [], page }),
+      speciesQueueHandler: () => Response.json({ species_requests: [], page }),
+    })
+  try {
+    await h.state.loadObservations()
+    h.calls.length = 0
+    h.state.scheduleQueuePolling()
+    h.state.scheduleAutomaticQueueVerification()
+    assert.equal(h.intervals.find(timer => timer.ms === 10 * 60_000)?.ms, 10 * 60_000)
+    h.document.hidden = true
+    h.state.handleQueueVisibility()
+    await h.state.verifyQueueAutomatically()
+    assert.equal(h.calls.length, 0)
+    h.document.hidden = false
+    h.state.handleQueueVisibility()
+    await flush()
+    assert.equal(h.calls.length, 0, 'returning to the visible tab does not trigger a Phase 2 catch-up request')
+    h.state.selected.value = h.state.observations.value[0]
+    await h.state.verifyQueueAutomatically()
+    assert.equal(h.calls.length, 0)
+    h.state.selected.value = null
+    h.state.comment.value = 'Unsaved draft'
+    await h.state.verifyQueueAutomatically()
+    assert.equal(h.calls.length, 0)
+    h.state.comment.value = ''
+    h.stop()
+    assert.ok(h.clearedIntervals.includes(3) && h.clearedIntervals.includes(4), 'unmount clears the rescheduled Phase 1 and Phase 2 timers')
+  } finally { h.stop() }
+})
+
+test('Phase 2 source failure keeps the prior snapshot and reports stale state until a later complete retry', async () => {
+  const page = { has_more: false, next_cursor: null }
+  let failChanges = false, observationRows = [fixture()]
+  const h = harness(async url => fixtureResponse(url, []), {}, 'en', undefined,
+    () => Response.json({ observations: observationRows, page }), {
+      recordChangesHandler: () => failChanges ? Response.json({ error: 'offline' }, { status: 503 }) : Response.json({ changes: [], page }),
+      speciesQueueHandler: () => Response.json({ species_requests: [], page }),
+    })
+  const summary = () => reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children)
+  try {
+    await h.state.loadObservations()
+    const previous = h.state.verifiedQueueSnapshot.value
+    const counts = summary()
+    observationRows = [fixture(), fixture({ id: secondId, plant_id: 2 })]
+    failChanges = true; h.calls.length = 0
+    await h.state.verifyQueueAutomatically()
+    assert.strictEqual(h.state.verifiedQueueSnapshot.value, previous)
+    assert.deepEqual(summary(), counts)
+    assert.equal(h.state.observations.value.length, 1, 'a successfully read source is not published alone')
+    assert.equal(h.state.queueCountsStale.value, true)
+    assert.equal(h.state.automaticQueueVerificationError.value, true)
+    assert.equal(h.calls.filter(call => call.url.startsWith('/api/data/record-changes?')).length, 1, 'automatic failures are not retried immediately')
+    failChanges = false
+    await h.state.verifyQueueAutomatically()
+    assert.equal(h.state.observations.value.length, 2)
+    assert.deepEqual(summary(), ['2', '0', '0', '0', '0'])
+    assert.equal(h.state.queueCountsStale.value, false)
+    assert.equal(h.state.automaticQueueVerificationError.value, false)
+  } finally { h.stop() }
+})
+
+test('Phase 2 does not overlap Phase 1 or manual refresh and discards results after an account switch', async () => {
+  const page = { has_more: false, next_cursor: null }
+  let holdNext = false, observationRows = [fixture()]
+  const h = harness(async url => fixtureResponse(url, []), {}, 'en', undefined, (url, options) => {
+    if (holdNext) return new Promise((resolve, reject) => {
+      const abort = () => reject(new DOMException('cancelled', 'AbortError'))
+      options.signal.addEventListener('abort', abort, { once: true })
+    })
+    return Response.json({ observations: observationRows, page })
+  }, {
+    recordChangesHandler: () => Response.json({ changes: [], page }),
+    speciesQueueHandler: () => Response.json({ species_requests: [], page }),
+  })
+  try {
+    await h.state.loadObservations()
+    const oldSnapshot = h.state.verifiedQueueSnapshot.value
+    h.calls.length = 0
+    holdNext = true
+    const automatic = h.state.verifyQueueAutomatically()
+    await flush()
+    assert.equal(h.calls.filter(call => call.url.startsWith('/api/observations?')).length, 1)
+    await h.state.pollRecentQueue()
+    assert.equal(h.calls.length, 1, 'Phase 1 cannot overlap a full verification')
+    holdNext = false
+    const manual = h.state.loadObservations()
+    await manual
+    await automatic
+    assert.equal(h.state.automaticQueueVerificationBusy.value, false)
+    assert.equal(h.state.queueRefreshing.value, false)
+    assert.equal(h.state.queueReady.value, true)
+
+    holdNext = true
+    const switched = h.state.verifyQueueAutomatically()
+    await flush()
+    h.emitSession({ id: 'different-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false })
+    await switched
+    assert.equal(h.state.verifiedQueueSnapshot.value, null)
+    assert.equal(h.state.queueSnapshot.value.observations.length, 0, 'logout or account change clears prior private rows immediately')
+    assert.notStrictEqual(h.state.verifiedQueueSnapshot.value, oldSnapshot)
+  } finally { h.stop() }
+})
 
 test('UUID list, nested evidence, zero GPS, safe malformed rows, gallery', async () => {
   const row = fixture()
@@ -645,10 +945,10 @@ test('species comment feedback is attempt-driven, field-associated and clears vi
     const row = fixture({ species_request: requestFixture({ review_comment: '' }) }), h = harness(url => fixtureResponse(url, [row]))
     try {
       await h.state.open(h.state.mapObservation(row)); await flush()
-      const field = () => nodes(reviewModal(h)).find(n => n.type === 'textarea' && n.props.maxlength === '4000')
+      const field = () => nodes(reviewModal(h)).find(n => n.type?.name?.endsWith('ReviewCommentField.vue'))
       const error = () => nodes(reviewModal(h)).filter(n => n.props?.id === 'species-request-comment-error')
       assert.equal(error().length, 0)
-      assert.equal(field().props['aria-invalid'], undefined)
+      assert.equal(field().props.invalid, false)
       assert.ok(!nodes(reviewModal(h)).some(n => n.props?.id === 'species-request-comment-help'))
       await h.state.decideSpecies(decision)
       assert.equal(error().length, 1)
@@ -656,12 +956,12 @@ test('species comment feedback is attempt-driven, field-associated and clears vi
       assert.ok(nodes(error()[0]).some(n => n.type === 'span' && n.children === 'Enter a review comment for rejection or correction.'))
       const icon = nodes(error()[0]).find(n => n.type === 'svg')
       assert.equal(icon.props.width, '18'); assert.equal(icon.props['aria-hidden'], 'true')
-      assert.equal(field().props['aria-invalid'], 'true')
-      assert.equal(field().props['aria-describedby'], 'species-request-comment-error')
+      assert.equal(field().props.invalid, true)
+      assert.match(readFileSync(filename, 'utf8'), /:described-by="speciesCommentError \? 'species-request-comment-error' : undefined"/)
       assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 0)
       field().props['onUpdate:modelValue']('Valid review reason')
       assert.equal(error().length, 0)
-      assert.equal(field().props['aria-invalid'], undefined)
+      assert.equal(field().props.invalid, false)
       assert.equal(h.state.speciesVisibility.value, '')
       h.state.speciesReviewComment.value = 'x'.repeat(4001)
       await h.state.decideSpecies(decision)
@@ -678,6 +978,17 @@ test('species comment feedback is attempt-driven, field-associated and clears vi
       assert.equal(error().length, 0)
       assert.ok(nodes(reviewModal(h)).some(n => n.type === 'p' && n.children === 'Unrelated backend failure'))
     } finally { h.stop() }
+  }
+})
+
+test('shared review comment field keeps its live 4000-character counter, focus API and localized approval marker', () => {
+  const source = readFileSync(new URL('../src/components/conservation/ReviewCommentField.vue', import.meta.url), 'utf8')
+  assert.match(source, /:maxlength="4000"/)
+  assert.ok(source.includes('aria-live="polite">{{ modelValue.length }}/4000</small>'))
+  assert.match(source, /defineExpose\(\{ focus:/)
+  for (const language of ['en', 'ms', 'zh-CN']) {
+    const locale = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
+    assert.ok(locale.reviewComments.optionalForApproval, `${language} has the optional approval marker`)
   }
 })
 
@@ -766,7 +1077,9 @@ test('only backend-approved request with matching resulting species and real nam
         )
         assert.equal(h.state.speciesResolved.value, true)
         const all = nodes(h.render())
-        assert.ok(all.some(n => n.props?.class === 'form-field species-review-comment'))
+        const reviewComment = all.find(n => n.type?.name?.endsWith('ReviewCommentField.vue') && n.props?.id === 'species-review-comment')
+        assert.ok(reviewComment)
+        assert.equal(reviewComment.props.required ?? false, false, 'approval comments default to optional')
         assert.ok(all.some(n => String(n.props?.class || '').includes('species-request-badge') && n.children === messages.conservationPages.reviews.speciesRequest.states.verified))
         const lower = all.find(n => n.props?.class === 'review-observation-evidence')
         assert.ok(nodes(lower).some(n => n.type === 'dd' && n.children === h.state.selected.value.speciesId))
@@ -1561,18 +1874,18 @@ test('legacy deep links select the explicit fallback; all queue labels render in
 const reviewTable = h => nodes(h.render()).find(node => node.type === 'table' && node.props?.class === 'reviews-table')
 const reviewCopyButtons = h => nodes(reviewTable(h)).filter(node => node.type === 'button' && node.props?.class === 'identifier-copy')
 
-test('review queue retains the requested eleven headers, compact observation/subject labels and raw review identifiers', async () => {
+test('review queue retains the requested nine desktop headers, compact card fields and raw review identifiers', async () => {
   const row = fixture({ owner_subject: 'staff:2ace382f-1111-4111-8111-111111111111' })
   const h = harness(url => fixtureResponse(url, [row]))
   try {
     await h.state.loadObservations()
     const headers = nodes(reviewTable(h)).filter(node => node.type === 'th')
-    assert.deepEqual(headers.map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', messages.plantProximity.scoreColumn, 'Actions'])
+    assert.deepEqual(headers.map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, messages.conservationPages.reviews.recordCreated, 'Status', messages.plantProximity.scoreColumn, 'Actions'])
     assert.ok(headers.every(node => node.props.scope === 'col'))
     assert.equal(h.state.observationLabel(row.id), 'OBS-AA3BD8BE')
     assert.equal(h.state.submitterLabel(row.owner_subject), 'Staff \u00b7 2ACE382F')
     assert.equal(reviewCopyButtons(h).length, 2)
-    const review = nodes(reviewTable(h)).find(node => node.type === 'button' && node.children.trim?.() === 'Review')
+    const review = nodes(reviewTable(h)).find(node => node.type === 'button' && String(node.props?.class).includes('action-button'))
     await review.props.onClick(); await flush()
     assert.equal(h.state.selected.value.id, row.id)
     assert.equal(h.state.selected.value.recordedBy, row.owner_subject)
@@ -1679,13 +1992,13 @@ test('review table preserves alignment/header and uses shared workflow colors wi
   const shared = readFileSync(new URL('../src/styles/conservation.css', import.meta.url), 'utf8')
   const observationSource = readFileSync(new URL('../src/views/conservation/ObservationsView.vue', import.meta.url), 'utf8')
   assert.match(css, /\.reviews-table th, \.reviews-table td\s*\{ padding: 12px 14px; text-align: left; vertical-align: middle/)
-  assert.match(css, /\.reviews-table \.species-column\s*\{ width: 11rem/)
+  assert.match(css, /\.reviews-table \.species-column\s*\{ width: 10rem/)
   const header = /\.reviews-table th\s*\{([^}]+)\}/.exec(css)[1]
   assert.equal(header.replace('font-size: 12px', 'font-size: 10px'), /\.observations-table th\s*\{([^}]+)\}/.exec(observationSource)[1])
   const sharedHeader = /th\s*\{([^}]+)\}/.exec(shared)[1]
   assert.match(sharedHeader, /text-transform: uppercase/)
   assert.match(sharedHeader, /letter-spacing: 0.6px/)
-  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 108rem; table-layout: fixed;[^}]*border-collapse: separate; border-spacing: 0/)
+  assert.match(css, /\.reviews-table\s*\{[^}]*min-width: 92rem; table-layout: fixed;[^}]*border-collapse: separate; border-spacing: 0/)
   assert.match(css, /\.reviews-scroll\s*\{ min-width: 0; max-width: 100%; overflow-x: auto/)
   assert.match(css, /\.reviews-table \.badge\s*\{[^}]*display: inline-flex; align-items: center;[^}]*white-space: nowrap/)
   assert.match(css, /\.reviews-scroll \.reviews-table \.action-group\s*\{[^}]*flex-wrap: wrap; align-items: center;[^}]*gap: 7px; width: 100%; min-width: 0/)
@@ -1713,10 +2026,14 @@ const reviewSummaryCards = h => nodes(h.render()).filter(node => node.type === '
 
 test('review summary omits loaded-submission notices from cards and table in every locale', async () => {
   for (const language of ['en', 'ms', 'zh-CN']) {
-    const h = harness(url => fixtureResponse(url, [fixture()]), {}, language)
+    const dictionary = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8'))
+    const h = harness(url => fixtureResponse(url, [fixture()]), {}, language, undefined, null, {
+      ct: value => value === 'Approved' ? dictionary.conservationPages.observations.values.approved : String(value),
+    })
     try {
       await h.state.loadObservations()
-      const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews.queues
+      const labels = dictionary.conservationPages.reviews.queues
+      const approvedLabel = dictionary.conservationPages.observations.values.approved
       assert.equal(typeof labels.summaryScope, 'string')
       const scope = nodes(h.render()).filter(node => node.props?.id === 'review-summary-scope')
       assert.equal(scope.length, 0)
@@ -1725,15 +2042,16 @@ test('review summary omits loaded-submission notices from cards and table in eve
       const summary = nodes(h.render()).find(node => String(node.props?.class).includes('review-summary-grid'))
       assert.equal(summary.props['aria-describedby'], undefined)
       assert.equal(reviewSummaryCards(h).length, 5)
+      assert.equal(nodes(reviewSummaryCards(h)[4]).find(node => node.type === 'p').children, approvedLabel)
       assert.ok(reviewSummaryCards(h).every(card => !nodes(card).some(node => node.type === 'small')))
-      assert.equal(nodes(reviewTable(h)).filter(node => node.type === 'th').length, 11)
+      assert.equal(nodes(reviewTable(h)).filter(node => node.type === 'th').length, 9)
       assert.equal(reviewCopyButtons(h).length, 2)
       assert.ok(h.calls.every(call => !call.options?.method || call.options.method === 'GET'))
     } finally { h.stop() }
   }
 })
 
-test('summary titles and counts retain loaded data, loading, unavailable and empty behavior', async () => {
+test('summary counts follow non-status filters across all loaded pages and preserve status categories', async () => {
   const rows = [
     ...Array.from({ length: 12 }, (_, index) => fixture({ id: index + 1 })),
     fixture({ id: 13, status: 'Correction Required' }), fixture({ id: 14, status: 'Flagged' }),
@@ -1746,15 +2064,103 @@ test('summary titles and counts retain loaded data, loading, unavailable and emp
   try {
     assert.ok(values().every(value => value === messages.conservationPages.reviews.unavailable))
     await h.state.loadObservations()
-    assert.deepEqual(values(), ['12', '1', '1', '2', '1'])
-    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'p').children), ['Pending Review', 'Correction Required', 'Flagged', 'Rejected', 'Approved Today'])
+    assert.deepEqual(values(), ['12', '1', '1', '2', '2'])
+    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'p').children), ['Pending Review', 'Correction Required', 'Flagged', 'Rejected', 'Approved'])
     h.state.search.value = 'no matching result'
     assert.equal(h.state.filtered.value.length, 0)
-    assert.deepEqual(values(), ['12', '1', '1', '2', '1'], 'counters keep their existing loaded-record semantics')
+    assert.deepEqual(values(), ['0', '0', '0', '0', '0'], 'counts follow search without counting only visible page rows')
+    h.state.search.value = ''
+    h.state.status.value = 'Rejected'
+    assert.equal(h.state.allReviewRows.value.length, 2)
+    assert.deepEqual(values(), ['12', '1', '1', '2', '2'], 'selected status does not remove other summary categories')
+    h.state.status.value = ''
+    h.state.visibleLimit.value = 1
+    assert.equal(h.state.reviewRows.value.length, 1)
+    assert.deepEqual(values(), ['12', '1', '1', '2', '2'], 'summary counts do not depend on visible pagination')
     h.state.loadError.value = 'Offline failure'
     assert.ok(values().every(value => value === messages.conservationPages.reviews.unavailable))
     h.state.loadError.value = ''; h.state.observations.value = []
-    assert.deepEqual(values(), ['0', '0', '0', '0', '0'])
+    assert.deepEqual(values(), ['12', '1', '1', '2', '2'], 'partial displayed rows do not replace the last complete verified summary source')
+  } finally { h.stop() }
+})
+
+test('summary counts use Species and Zone search filters, combined filters, and reset to all records', async () => {
+  const rows = [
+    fixture({ id: firstId, species_id: 8, status: 'Pending Review', content: { ...fixture().content, zone: 'North Zone' } }),
+    fixture({ id: secondId, plant_id: 2, species_id: 9, status: 'Rejected', content: { ...fixture().content, zone: 'South Zone' } }),
+    fixture({ id: 'cc3bd8be-988f-40a7-b4ea-59408b85dbb3', plant_id: 3, species_id: 8, status: 'Correction Required', content: { ...fixture().content, zone: 'North Zone' } }),
+  ]
+  rows.push({ ...rows[0] }) // A duplicate API row must not inflate a status aggregate.
+  const h = harness(url => fixtureResponse(url, rows))
+  try {
+    await h.state.loadObservations()
+    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children), ['1', '1', '0', '1', '0'])
+    h.state.species.value = '8'
+    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children), ['1', '1', '0', '0', '0'])
+    h.state.search.value = 'North Zone'
+    assert.equal(h.state.allReviewRows.value.length, 2)
+    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children), ['1', '1', '0', '0', '0'])
+    h.state.search.value = 'no such zone'
+    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children), ['0', '0', '0', '0', '0'])
+    h.state.clearFilters()
+    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children), ['1', '1', '0', '1', '0'])
+  } finally { h.stop() }
+})
+
+test('Approved summary counts every verified approval regardless of review date or timestamp', async () => {
+  const today = new Date().toISOString()
+  const yesterday = new Date(Date.now() - 86400000).toISOString()
+  const older = '2020-03-04T08:00:00.000Z'
+  const rows = [
+    fixture({ id: firstId, status: 'Approved', review_decision: 'Approved', created_at: yesterday, reviewed_at: today }),
+    fixture({ id: secondId, plant_id: 2, status: 'Approved', review_decision: 'Approved', created_at: today, reviewed_at: yesterday }),
+    fixture({ id: 'cc3bd8be-988f-40a7-b4ea-59408b85dbb3', plant_id: 3, status: 'Approved', review_decision: 'Approved', reviewed_at: older }),
+    fixture({ id: 'dd3bd8be-988f-40a7-b4ea-59408b85dbb4', plant_id: 4, status: 'Approved', review_decision: 'Approved', reviewed_at: null }),
+    fixture({ id: 'ee3bd8be-988f-40a7-b4ea-59408b85dbb5', plant_id: 5, status: 'Approved', review_decision: 'Approved', reviewed_at: older,
+      species_request: requestFixture({ request_id: 42, request_status: 'Approved', approved_species_id: '8', reviewed_at: older }) }),
+    fixture({ id: 'ff3bd8be-988f-40a7-b4ea-59408b85dbb6', plant_id: 6, origin_type: 'unknown', status: 'Approved', review_decision: 'Approved', reviewed_at: older }),
+    fixture({ id: 'aa3bd8be-988f-40a7-b4ea-59408b85dbb7', plant_id: 7, origin_type: 'subsequent_observation', status: 'Approved', review_decision: 'Approved', reviewed_at: older }),
+  ]
+  const edits = [
+    changeFixture({ id: '12345678-1234-1234-1234-123456789abd', status: 'Approved', reviewed_at: older }),
+    changeFixture({ id: '12345678-1234-1234-1234-123456789abe', plant_id: null, species_id: 8, status: 'Approved', reviewed_at: null }),
+  ]
+  const h = harness(url => fixtureResponse(url, rows), {}, 'en', undefined, null, {
+    speciesQueueHandler: async () => Response.json({ species_requests: [
+      queueSpecies(42, { request_status: 'Approved', approved_species_id: '8', reviewed_at: older }),
+      queueSpecies(43, { request_status: 'Approved', approved_species_id: '8', reviewed_at: null }),
+    ] }),
+    recordChangesHandler: () => changesResponse(edits),
+  })
+  try {
+    await h.state.loadObservations()
+    assert.deepEqual(reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children), ['0', '0', '0', '0', '8'])
+    h.state.queueOrigin.value = 'unknown'
+    assert.equal(h.state.counts.value[4][1], 5, 'unknown origin switches the observation classification and retains independent requests/changes')
+  } finally { h.stop() }
+})
+
+test('summary values are unavailable during a refresh and after a failed refresh instead of showing stale counts', async () => {
+  let observationReads = 0, release
+  const h = harness(async url => {
+    if (url !== '/api/observations') return fixtureResponse(url, [])
+    observationReads++
+    if (observationReads === 1) return fixtureResponse(url, [fixture()])
+    if (observationReads === 2) return new Promise(resolve => { release = resolve })
+    return Response.json({}, { status: 503 })
+  })
+  const values = () => reviewSummaryCards(h).map(card => nodes(card).find(node => node.type === 'strong').children)
+  try {
+    await h.state.loadObservations()
+    assert.equal(values()[0], '1')
+    const refreshing = h.state.loadObservations()
+    await flush()
+    assert.ok(values().every(value => value === messages.conservationPages.reviews.unavailable))
+    release(fixtureResponse('/api/observations', [fixture(), fixture({ id: secondId, plant_id: 2 })]))
+    await refreshing
+    assert.equal(values()[0], '2')
+    await h.state.loadObservations()
+    assert.ok(values().every(value => value === messages.conservationPages.reviews.unavailable))
   } finally { h.stop() }
 })
 
@@ -1766,7 +2172,7 @@ test('summary palette has readable contrast and five/three/two/one-column layout
     'correction-required': ['#fff1db', '#926119'],
     flagged: ['#f0eaf8', '#69459a'],
     rejected: ['#fbe8e5', '#a33f35'],
-    'approved-today': ['#e7f3e9', '#287347'],
+    approved: ['#e7f3e9', '#287347'],
   }
   const luminance = hex => {
     const channels = hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
@@ -1789,17 +2195,31 @@ test('summary palette has readable contrast and five/three/two/one-column layout
   assert.equal(compileStyle({ source: css, id: 'data-v-review-summary', scoped: true }).errors.length, 0)
 })
 
-test('registration introduction is localized and concise with queue details in the accessible tooltip', async () => {
+test('registration introduction stays concise and queue refresh states are localized and accessible', async () => {
   for (const language of ['en', 'ms', 'zh-CN']) {
-    const labels = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews.queues
+    const reviewMessages = JSON.parse(readFileSync(new URL(`../src/locales/${language}.json`, import.meta.url), 'utf8')).conservationPages.reviews
+    const labels = reviewMessages.queues
     const h = harness(url => fixtureResponse(url, []), {}, language)
     try {
       await h.state.loadObservations()
       const intro = nodes(h.render()).find(node => node.type === 'section' && String(node.props?.class).split(' ').includes('page-intro'))
       const text = nodes(intro).filter(node => typeof node.children === 'string').map(node => node.children)
-      for (const value of [labels.registrationEyebrow, labels.registrations, labels.registrationIntro]) assert.ok(text.includes(value)); const help=nodes(intro).find(node=>node.props?.id==='registration-queue-help'); assert.equal(help.props.role,'tooltip'); assert.equal(help.props.popover,'auto'); assert.ok(nodes(help).some(node=>node.children===labels.includedText)); assert.ok(nodes(help).some(node=>node.children===labels.countsText))
-      assert.ok(text.includes(labels.countsText))
+      for (const value of [labels.registrationEyebrow, labels.registrations, labels.registrationIntro]) assert.ok(text.includes(value))
       assert.ok(!labels.registrationIntro.includes(labels.legacy))
+      assert.equal(h.state.queueReady.value, true)
+      assert.equal(h.state.queueUnverified.value, false)
+      assert.equal(h.state.queueCountsStale.value, false)
+      assert.ok(!nodes(h.render()).some(node=>node.props?.id==='registration-queue-help'))
+      h.state.queueCountsStale.value = true
+      let freshness = nodes(h.render()).find(node=>node.props?.class==='review-queue-stale')
+      assert.equal(freshness.props.role, 'status')
+      assert.ok(nodes(freshness).some(node=>node.type==='button'))
+      for (const key of ['refreshing','unverified','countsAwaitingVerification','pollFailed','verifyQueue']) assert.ok(reviewMessages.queueRefresh[key].trim(), `${language} ${key}`)
+      h.state.queuePollError.value = true
+      freshness = nodes(h.render()).find(node=>node.props?.class==='review-queue-stale')
+      assert.equal(freshness.props.role, 'status')
+      h.state.queueUnverified.value = true
+      assert.ok(nodes(h.render()).some(node=>node.props?.role==='alert'))
       assert.ok(!nodes(h.render()).some(node => node.type === 'option' && node.props?.value === 'unknown'))
       assert.equal(h.state.submissionType.value, '')
       assert.equal(nodes(h.render()).filter(node => node.props?.id === 'review-summary-scope').length, 0)
@@ -1807,6 +2227,7 @@ test('registration introduction is localized and concise with queue details in t
       assert.ok(nodes(reviewSummaryCards(h)[3]).some(node => node.type === 'svg' && node.props?.['aria-hidden'] === 'true'))
     } finally { h.stop() }
   }
+  for (const key of ['queueCountsStale','queueUnverified','queuePollError']) assert.ok(descriptor.template.content.includes(key))
   const labels = messages.conservationPages.reviews.queues
   assert.equal(labels.registrationEyebrow, 'Verification Workflow')
   assert.equal(labels.registrations, 'New Plant Registrations')
@@ -1918,8 +2339,8 @@ test('review typography uses a readable hierarchy without squeezing identifiers,
   }
   assert.match(css, /\.reviews-filters > \.field > input, \.reviews-filters > \.field > select\s*\{[^}]*height: 44px;[^}]*font-size: 14px; line-height: 1.4/)
   assert.match(css, /\.identifier-line > strong, \.identifier-line > span\s*\{[^}]*font-size: 14px; line-height: 1.5/)
-  assert.match(css, /\.reviews-table \.observation-column\s*\{ width: 12rem/)
-  assert.match(css, /\.reviews-table \.created-column\s*\{ width: 12rem/)
+  assert.match(css, /\.reviews-table \.observation-column\s*\{ width: 10rem/)
+  assert.match(css, /\.reviews-table \.created-column\s*\{ width: 9rem/)
   assert.match(css, /\.reviews-table \.badge\s*\{[^}]*white-space: nowrap/)
   assert.match(css, /\.reviews-table \.action-group > \.action-button\s*\{[^}]*min-width: 0; max-width: 100%;[^}]*white-space: normal/)
   assert.match(css, /\.review-summary-title p\s*\{[^}]*line-height: 1.5/)
@@ -2017,9 +2438,9 @@ test('whole decision panel keeps comment and feedback together for registration 
       assert.equal(panel.props['aria-labelledby'], 'review-decision-heading')
       assert.ok(nodes(panel).some(node => node.props?.id === 'review-decision-heading'))
       assert.ok(nodes(panel).some(node => node.children === 'Existing validation feedback'))
-      const textarea = nodes(panel).filter(node => node.type === 'textarea')
-      assert.equal(textarea.length, 1)
-      textarea[0].props['onUpdate:modelValue']('Officer comment retained while scrolling')
+      const comment = nodes(panel).find(node => node.type?.name?.endsWith('ReviewCommentField.vue'))
+      assert.ok(comment)
+      comment.props['onUpdate:modelValue']('Officer comment retained while scrolling')
       h.render(); h.render()
       assert.equal(h.state.comment.value, 'Officer comment retained while scrolling')
       const footer = all.filter(node => node.props?.class === 'modal-actions plant-review-actions')
@@ -2050,8 +2471,8 @@ test('major review section headings use eight themed outline icons without decor
       await h.state.open(h.state.mapObservation(row)); await flush()
       const modal = reviewModal(h), all = nodes(modal)
       const headings = all.filter(node => String(node.props?.class || '').split(' ').includes('review-section-heading'))
-      assert.equal(headings.length, 8)
-      assert.deepEqual(headings.map(heading => nodes(heading).find(node => node.type === 'svg').props['data-section-icon']), ['leaf', 'sprout', 'pin', 'qr', 'image', 'file', 'clipboard', 'comment'])
+      assert.equal(headings.length, 7)
+      assert.deepEqual(headings.map(heading => nodes(heading).find(node => node.type === 'svg').props['data-section-icon']), ['leaf', 'sprout', 'pin', 'qr', 'image', 'file', 'clipboard'])
       for (const heading of headings) {
         const icons = nodes(heading).filter(node => node.type === 'svg')
         assert.equal(icons.length, 1)
@@ -2067,7 +2488,7 @@ test('major review section headings use eight themed outline icons without decor
       for (const label of nodes(section).filter(node => node.type === 'dt')) assert.equal(nodes(label).filter(node => node.type === 'svg').length, 0)
       const panel = all.find(node => node.props?.class === 'review-decision-panel')
       assert.ok(nodes(panel).some(node => node.props?.id === 'review-decision-heading'))
-      assert.equal(nodes(panel).filter(node => node.type === 'textarea').length, 1)
+      assert.ok(nodes(panel).some(node => node.type?.name?.endsWith('ReviewCommentField.vue')))
     } finally { h.stop() }
   }
   const css = descriptor.styles[0].content
@@ -2238,23 +2659,29 @@ test('redundant decision heading is absent while localized accessible group, com
   } finally { h.stop() }
 })
 
-test('Review Submissions retains exactly eleven aligned columns while full observation copying stays authoritative', async () => {
+test('Review Submissions has nine desktop columns, keeps mobile-only fields, and preserves full observation copying', async () => {
   const row = fixture({ plant_id: 18 }), copied = []
   const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
   try {
     await h.state.loadObservations()
     const table = reviewTable(h)
-    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['observation-column', 'plant-column', 'type-column', 'species-column', 'submitter-column', 'reviewer-column', 'zone-column', 'created-column', 'status-column', 'proximity-column', 'actions-column'])
-    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, messages.approvedChanges.submissionType, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, 'Location Zone', messages.conservationPages.reviews.recordCreated, 'Status', messages.plantProximity.scoreColumn, 'Actions'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['observation-column', 'plant-column', 'species-column', 'submitter-column', 'reviewer-column', 'created-column', 'status-column', 'proximity-column', 'actions-column'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, messages.conservationPages.reviews.recordCreated, 'Status', messages.plantProximity.scoreColumn, 'Actions'])
     const renderedRow = nodes(table).find(node => node.type === 'tr' && node.key === 'observation:' + row.id)
     const cells = nodes(renderedRow).filter(node => node.type === 'td')
     assert.equal(cells.length, 11)
+    assert.equal(cells[2].props.class, 'submission-type-cell mobile-submission-type-cell')
+    assert.equal(cells[6].props.class, 'mobile-location-cell')
     assert.equal(cells[1].props.class, 'plant-id-cell')
     assert.equal(cells[1].children.at(-1).children, 'PL018')
     assert.equal(cells[0].props.class, 'identity-cell')
     assert.match(descriptor.styles[0].content, /\.reviews-table \.plant-id-cell\s*\{ color: #315749; font-weight: 700/)
     assert.match(descriptor.styles[0].content, /\.reviews-table \.identity-cell strong\s*\{ color: inherit; font-weight: 700/)
     assert.equal(nodes(cells[0]).find(node => node.type === 'strong').children, 'OBS-AA3BD8BE')
+    assert.ok(nodes(cells[0]).some(node => String(node.props?.class).includes('desktop-submission-type')))
+    assert.ok(nodes(cells[0]).some(node => String(node.props?.class).includes('species-request-badge')))
+    assert.match(descriptor.styles[0].content, /tbody td\.mobile-submission-type-cell, \.reviews-table tbody td\.mobile-location-cell\s*\{ display: none; \}/)
+    assert.match(descriptor.styles[0].content, /\.desktop-submission-type\s*\{ display: block; margin-top: 5px; \}/)
     const copy = nodes(cells[0]).find(node => node.type === 'button')
     await copy.props.onClick()
     assert.deepEqual(copied, [row.id])
@@ -2264,7 +2691,7 @@ test('Review Submissions retains exactly eleven aligned columns while full obser
   } finally { h.stop() }
 })
 
-test('initial registration modal omits the history section while retaining current submission evidence, comment and review actions', async () => {
+test('initial registration modal includes saved submission history while retaining current evidence, comment and review actions', async () => {
   for (const language of ['en', 'ms', 'zh-CN']) {
     const row = fixture({ content: { ...fixture().content, zone: 'Submitted site', altitudeM: 0 } })
     const h = harness(url => fixtureResponse(url, [row, fixture({ id: secondId })]), {}, language)
@@ -2273,6 +2700,7 @@ test('initial registration modal omits the history section while retaining curre
       await h.state.loadObservations(); await h.state.open(h.state.observations.value[0]); await flush()
       const modal = reviewModal(h), all = nodes(modal)
       assert.equal(h.state.selected.value.origin, 'initial_registration')
+      assert.ok(all.some(node => node.type?.name?.endsWith('ObservationVersionHistory.vue')))
       assert.ok(!all.some(node => node.props?.class === 'history-item' || node.props?.class === 'history-date' || node.props?.class === 'history-details'))
       assert.ok(!renderText(h).includes(labels.loadedHistory))
       assert.ok(!renderText(h).includes(labels.historyLimit))
@@ -2280,10 +2708,10 @@ test('initial registration modal omits the history section while retaining curre
       for (const value of ['12 cm', 'Healthy', 'Submitted morphology', 'Submitted notes', 'Submitted site', '0', '0 m']) assert.ok(details.includes(value), value)
       assert.ok(all.some(node => node.type === 'img' && node.props.src === '/api/data/assets/image-one'))
       assert.equal(h.state.selected.value.assets.length, 3)
-      assert.equal(h.state.observations.value.length, 2, 'only history presentation is removed')
-      const comment = all.find(node => node.type === 'label' && node.props?.class === 'form-field officer-comment')
+      assert.equal(h.state.observations.value.length, 2, 'showing submission snapshots does not replace loaded Observation rows')
+      const comment = all.find(node => node.type?.name?.endsWith('ReviewCommentField.vue') && node.props?.id === 'plant-review-comment')
       assert.ok(comment)
-      nodes(comment).find(node => node.type === 'textarea').props['onUpdate:modelValue']('Retained review comment')
+      comment.props['onUpdate:modelValue']('Retained review comment')
       assert.equal(h.state.comment.value, 'Retained review comment')
       const group = all.find(node => node.props?.class === 'modal-actions plant-review-actions')
       assert.equal(nodes(group).filter(node => node.type === 'button').length, 4)
@@ -2476,8 +2904,9 @@ test('species field validation focuses and scrolls only the modal and clears on 
     })
     try {
       await h.state.open(h.state.mapObservation(row)); await flush()
+      assert.equal(h.state.canReviewSpecies.value, true, `validation fixture must be eligible for ${decision}`)
       if (decision === 'Approved') h.state.speciesVisibilityField.value = field
-      else h.state.speciesCommentField.value = field
+      else h.state.speciesCommentField.value = { $el: field, focus: control.focus }
       const before = h.calls.length
       await h.state.decideSpecies(decision)
       assert.equal(h.calls.length, before, 'validation performs no HTTP request')
@@ -2593,13 +3022,13 @@ test('one original table integrates registration, linked species, plant edits an
       await h.state.loadObservations();assert.equal(h.state.loadError.value,'')
       const table=reviewTable(h),text=renderText(h)
       assert.equal(nodes(h.render()).filter(n=>n.type==='table'&&n.props?.class==='reviews-table').length,1)
-      assert.equal(nodes(table).filter(n=>n.type==='th').length,11)
+      assert.equal(nodes(table).filter(n=>n.type==='th').length,9)
       assert.equal(nodes(table).find(n=>n.type==='th').children,labels.submissionId)
       assert.equal(nodes(table).filter(n=>n.type==='th')[1].children,labels.plantId)
       for (const rendered of nodes(table).filter(n=>n.type==='tr' && n.key)) {
         const cells=nodes(rendered).filter(n=>n.type==='td')
         const expected=rendered.key === 'change:' + plant.id ? 'PL024' : rendered.key === 'change:' + speciesChange.id ? '\u2014' : 'PL001'
-        assert.equal(cells[1].children,expected)
+        assert.ok(nodes(cells[1]).some(node => node.children === expected), `missing Plant ID ${expected}`)
       }
       assert.equal(nodes(table).filter(n=>n.type==='td').length,33)
       assert.ok(text.includes(labels.plantEdit));assert.ok(text.includes(labels.speciesEdit))
@@ -2669,10 +3098,12 @@ test('submission type owns all four badges, leaving Species with scientific name
   try {
     await h.state.loadObservations();
     const table=reviewTable(h), headers=nodes(table).filter(n=>n.type==='th');
-    assert.equal(headers.length,11);assert.equal(headers[2].children,messages.approvedChanges.submissionType);
+    assert.equal(headers.length,9);assert.ok(!headers.some(header=>header.children===messages.approvedChanges.submissionType));
     for (const row of nodes(table).filter(n=>n.type==='tr'&&n.key)) {
       const cells=nodes(row).filter(n=>n.type==='td');assert.equal(cells.length,11);
       assert.equal(nodes(cells[2]).filter(n=>String(n.props?.class).includes('species-request-badge')).length,1);
+      assert.ok(nodes(cells[0]).some(n=>String(n.props?.class).includes('desktop-submission-type')));
+      assert.ok(nodes(cells[0]).some(n=>String(n.props?.class).includes('species-request-badge')));
       assert.equal(nodes(cells[3]).filter(n=>String(n.props?.class).includes('badge')).length,0);
       assert.ok(nodes(cells[3]).some(n=>n.type==='em'));
     }
@@ -3436,10 +3867,10 @@ test('Reviewed By resolves the actual completed decision for every existing tabl
     await flush()
     const cells=nodes(reviewTable(h)).filter(n=>n.type==='td'&&n.props?.class==='reviewer-cell')
     assert.equal(cells.length,4)
-    assert.ok(cells.every(n=>n.children==='Officer Aina'))
+    assert.ok(cells.every(n=>renderedText(n).includes('Officer Aina')))
     h.state.queueOrigin.value='unknown'
     const legacyCells=nodes(reviewTable(h)).filter(n=>n.type==='td'&&n.props?.class==='reviewer-cell')
-    assert.equal(legacyCells.length,3); assert.ok(legacyCells.every(n=>n.children==='Officer Aina'))
+    assert.equal(legacyCells.length,3); assert.ok(legacyCells.every(n=>renderedText(n).includes('Officer Aina')))
     const lookup=h.calls.find(c=>c.url.startsWith('/api/conservation/submitter-names?'))
     assert.ok(new URL(lookup.url,'https://fixture.invalid').searchParams.get('ids').split(',').includes('latest'))
   }finally{h.stop()}
@@ -3454,7 +3885,7 @@ test('Reviewed By hides previous-cycle reviews on Pending Review rows and uses a
     {},'en',undefined,null,{recordChangesHandler:()=>changesResponse([changeFixture({reviewed_by:'staff:earlier',reviewed_at:stamp})])})
   try{
     await h.state.loadObservations()
-    assert.ok(nodes(reviewTable(h)).filter(n=>n.type==='td'&&n.props?.class==='reviewer-cell').every(n=>n.children==='\u2014'))
+    assert.ok(nodes(reviewTable(h)).filter(n=>n.type==='td'&&n.props?.class==='reviewer-cell').every(n=>renderedText(n).includes('\u2014')))
     assert.equal(h.state.reviewerName('staff:missing'),'\u2014')
     assert.equal(h.state.reviewerName('visitor:earlier'),'\u2014')
   }finally{h.stop()}
@@ -3798,11 +4229,18 @@ test('shared Species queue deduplicates linked requests, keeps Plant IDs absent,
   h.state.submissionType.value='linked_species_request';h.state.search.value='SPECIES-100';assert.deepEqual(Array.from(h.state.allReviewRows.value,row=>row.key),['species-request:100'])
  }finally{h.stop()}
 })
-test('capped Species source is disclosed and unavailable required source blocks initial publication',async()=>{
- for(const fail of [false,true]){
- const h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{speciesQueueHandler:async()=>fail?Response.json({}, {status:503}):Response.json({species_requests:Array.from({length:500},(_,i)=>queueSpecies(100+i))})})
- try{await h.state.loadObservations();assert.equal(h.state.speciesQueueCapped.value,!fail);assert.equal(h.state.speciesQueueError.value,fail);assert.equal(h.state.allReviewRows.value.some(row=>row.key==='observation:'+firstId),!fail);assert.equal(h.state.queueUnverified.value,fail);assert.equal(h.state.queueReady.value,!fail);assert.match(renderText(h),/Counts reflect loaded submissions before filters are applied/);assert.match(renderText(h),fail?/could not be loaded/:/incomplete/)}finally{h.stop()}
- }
+test('Species queue continuation loads every page and source errors prevent incomplete summary publication',async()=>{
+ const rows=Array.from({length:501},(_,i)=>queueSpecies(100+i))
+ let page=0
+ const h=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{speciesQueueHandler:async(url)=>{
+   page++
+   if(url==='/api/species-requests')return Response.json({species_requests:rows.slice(0,500),page:{limit:500,has_more:true,next_cursor:'next-page'}})
+   assert.equal(url,'/api/species-requests?limit=500&cursor=next-page')
+   return Response.json({species_requests:rows.slice(500),page:{limit:500,has_more:false,next_cursor:null}})
+ }})
+ try{await h.state.loadObservations();assert.equal(page,2);assert.equal(h.state.speciesQueueCapped.value,false);assert.equal(h.state.speciesQueueError.value,false);assert.equal(h.state.standaloneRows.value.length,501);assert.equal(h.state.counts.value[0][1],502)}finally{h.stop()}
+ const failed=harness(url=>fixtureResponse(url,[fixture()]),{},'en',undefined,null,{speciesQueueHandler:async()=>Response.json({}, {status:503})})
+ try{await failed.state.loadObservations();assert.equal(failed.state.speciesQueueError.value,true);assert.equal(failed.state.queueUnverified.value,true);assert.equal(failed.state.countValue(0),messages.conservationPages.reviews.unavailable)}finally{failed.stop()}
 })
 for(const decision of ['Approved','Rejected','Correction Required'])test('standalone '+decision+' readback synchronizes the shared queue and active status filter once',async()=>{
  let current=queueSpecies(42),posts=0
@@ -3932,11 +4370,91 @@ test('BUG-004 cached revisit renders promptly, coalesces refresh, and preserves 
   } finally { h.stop() }
 })
 
-test('BUG-004 table retains eleven explicit columns, loaded-only notice and bounded optional-name lookup', () => {
-  assert.equal((descriptor.template.content.match(/<col class=/g) || []).length, 11)
+test('fresh navigation cache restores verified rows and counts without another full queue read', async () => {
+  const session = { user: { id: 'verified-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }, pending: false }
+  let now = 100
+  const cache = createReviewQueueCache(() => session, () => {}, () => now)
+  const first = harness(url => fixtureResponse(url, [fixture()]), {}, 'en', undefined, null, { queueCache: cache })
+  await first.state.loadObservations(); first.stop()
+  now += REVIEW_QUEUE_TTL - 1
+
+  const returned = harness(url => url.startsWith('/api/conservation/submitter-names')
+    ? Response.json({ names: {} }) : fixtureResponse(url, [fixture()]), {}, 'en', undefined, null, { queueCache: cache })
+  try {
+    returned.mount(); await flush()
+    assert.equal(returned.state.queueReady.value, true)
+    assert.equal(returned.state.queueUnverified.value, false)
+    assert.equal(returned.state.counts.value[0][1], 1)
+    assert.equal(returned.state.reviewRows.value.length, 1)
+    assert.equal(returned.calls.filter(call => call.url.startsWith('/api/observations?') || call.url.startsWith('/api/data/record-changes?') || call.url.startsWith('/api/species-requests')).length, 0)
+    assert.deepEqual(returned.intervals.map(timer => timer.ms).sort((a, b) => a - b), [60_000, 10 * 60_000])
+  } finally { returned.stop() }
+  assert.equal(returned.clearedIntervals.length, 2)
+
+  const repeated = harness(url => url.startsWith('/api/conservation/submitter-names')
+    ? Response.json({ names: {} }) : fixtureResponse(url, [fixture()]), {}, 'en', undefined, null, { queueCache: cache })
+  try {
+    repeated.mount(); await flush()
+    assert.equal(repeated.state.reviewRows.value.length, 1)
+    assert.equal(repeated.calls.filter(call => call.url.startsWith('/api/observations?') || call.url.startsWith('/api/data/record-changes?') || call.url.startsWith('/api/species-requests')).length, 0)
+    assert.equal(repeated.intervals.filter(timer => timer.ms === 60_000).length, 1)
+    assert.equal(repeated.intervals.filter(timer => timer.ms === 10 * 60_000).length, 1)
+  } finally { repeated.stop() }
+})
+
+test('stale navigation cache displays rows read-only while a complete background refresh runs', async () => {
+  const session = { user: { id: 'verified-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }, pending: false }
+  let now = 100, releaseObservation
+  const cache = createReviewQueueCache(() => session, () => {}, () => now)
+  const first = harness(url => fixtureResponse(url, [fixture()]), {}, 'en', undefined, null, { queueCache: cache })
+  await first.state.loadObservations(); first.stop()
+  now += REVIEW_QUEUE_TTL + 1
+
+  const updated = fixture({ id: secondId, plant_id: 2 })
+  const returned = harness(url => fixtureResponse(url, [updated]), {}, 'en', undefined,
+    () => new Promise(resolve => { releaseObservation = resolve }), { queueCache: cache })
+  try {
+    returned.mount(); await flush()
+    assert.equal(returned.state.queueReady.value, true)
+    assert.equal(returned.state.isLoading.value, false)
+    assert.equal(returned.state.queueRefreshing.value, false)
+    assert.equal(returned.state.automaticQueueVerificationBusy.value, true)
+    assert.equal(returned.state.queueUnverified.value, true)
+    assert.equal(returned.state.verifiedQueueSnapshot.value, null)
+    assert.equal(returned.state.reviewRows.value[0].observation.id, firstId)
+    assert.equal(returned.calls.filter(call => call.url.startsWith('/api/observations?') || call.url.startsWith('/api/data/record-changes?') || call.url.startsWith('/api/species-requests')).length, 1, 'bounded refresh reads sources sequentially')
+    releaseObservation(Response.json({ observations: [updated], page: { has_more: false, next_cursor: null } }))
+    await flush()
+    assert.equal(returned.calls.filter(call => call.url.startsWith('/api/observations?') || call.url.startsWith('/api/data/record-changes?') || call.url.startsWith('/api/species-requests')).length, 3)
+    assert.equal(returned.state.automaticQueueVerificationBusy.value, false)
+    assert.equal(returned.state.queueUnverified.value, false)
+    assert.equal(returned.state.reviewRows.value[0].observation.id, secondId)
+    assert.equal(returned.state.verifiedQueueSnapshot.value.observations[0].id, secondId)
+  } finally { returned.stop() }
+})
+
+test('navigation cache rejects a previous officer and expires stale display data after ten minutes', async () => {
+  const session = { user: { id: 'verified-officer', role: 'Conservation Officer', status: 'Active', mustChangePassword: false }, pending: false }
+  let now = 100
+  const cache = createReviewQueueCache(() => session, () => {}, () => now)
+  const first = harness(url => fixtureResponse(url, [fixture()]), {}, 'en', undefined, null, { queueCache: cache })
+  await first.state.loadObservations(); first.stop()
+  now += REVIEW_QUEUE_NAVIGATION_STALE_TTL + 1
+  assert.equal(cache.readForNavigation(), null)
+  const privateCache = createReviewQueueCache(() => session, () => {}, () => now)
+  privateCache.store({ observations: [fixture()] })
+  session.user = { ...session.user, id: 'another-officer' }
+  assert.equal(privateCache.readForNavigation(), null)
+})
+
+test('BUG-004 table retains nine desktop columns, loaded-only notice and bounded optional-name lookup', () => {
+  assert.equal((descriptor.template.content.match(/<col class=/g) || []).length, 9)
   assert.match(descriptor.styles.map(x => x.content).join(''), /table-layout: fixed/)
-  assert.match(descriptor.styles.map(x => x.content).join(''), /actions-column \{ width: 16rem/)
-  assert.match(descriptor.template.content, /queues.countsText/); assert.match(descriptor.template.content, /id="registration-queue-help"[^>]*popover="auto"/)
+  assert.match(descriptor.styles.map(x => x.content).join(''), /actions-column \{ width: 10rem/)
+  assert.match(descriptor.template.content, /queueCountsStale/)
+  assert.match(descriptor.template.content, /queuePollError \|\| automaticQueueVerificationError \? 'queueRefresh\.pollFailed' : 'queueRefresh\.countsAwaitingVerification'/)
+  assert.match(descriptor.template.content, /queueUnverified/)
+  assert.match(descriptor.template.content, /queueRefresh\.verifyQueue/)
   assert.match(script.content, /AbortSignal.timeout\(5000\)/)
   assert.match(script.content, /void resolveQueueNames/)
 })
@@ -4066,7 +4584,7 @@ test('historical-row badge follows coherent cached and refreshed snapshots witho
   assert.equal(h.state.queueRefreshing.value,false);assert.equal(h.state.observations.value[0].historicalVersion,false);assert.equal(nodes(reviewTable(h)).filter(n=>String(n.props?.class).includes('historical-version-badge')).length,0)
   assert.equal(cache.read().observations[0].historicalVersion,false)
  }finally{h.stop()}
- const css=descriptor.styles[0].content;assert.match(css,/has-historical-version \{ flex-direction: column; align-items: flex-start/);assert.match(css,/has-historical-version \.badge \{ max-width: 100%; white-space: normal/);assert.match(css,/status-column \{ width: 12rem/);assert.match(css,/actions-column \{ width: 16rem/)
+  const css=descriptor.styles[0].content;assert.match(css,/has-historical-version \{ flex-direction: column; align-items: flex-start/);assert.match(css,/has-historical-version \.badge \{ max-width: 100%; white-space: normal/);assert.match(css,/status-column \{ width: 10rem/);assert.match(css,/actions-column \{ width: 10rem/)
 })
 
 
@@ -4140,7 +4658,7 @@ test('one transient queue GET retries safely and publishes complete counts witho
 })
 
 
-const proximityFixture=(id,revision,plant='21')=>({contract_version:1,observation_id:id,revision,plant_id:'1000',checked_at:'2026-11-20T00:00:00Z',state:'complete',accuracy_m:2,config:{very_close_m:2,close_m:5,nearby_m:10,radius_m:30,accuracy_warning_m:10,candidate_limit:20},candidates:[{plant_id:plant,status:'Approved',plant_name:'Existing Plant',species_name:'Species',accuracy_m:4,distance_m:0.43,category:'very_close',location_source:'approved_observation'}],eligible_count:1,unlocated_count:0,total_nearby:1})
+const proximityFixture=(id,revision,plant='21')=>({contract_version:1,observation_id:id,revision,plant_id:'1000',checked_at:'2026-11-20T00:00:00Z',state:'complete',accuracy_m:2,config:{very_close_m:2,close_m:5,nearby_m:10,grouping_radius_m:5,radius_m:30,accuracy_warning_m:10,candidate_limit:20},candidates:[{plant_id:plant,status:'Approved',plant_name:'Existing Plant',species_name:'Species',accuracy_m:4,distance_m:0.43,category:'very_close',location_source:'approved_observation',match_status:'same_species_zone',within_grouping_radius:true}],eligible_count:1,unlocated_count:0,total_nearby:1})
 test('visible table checks select the exact shared drawer result and leave queue counts/actions independent',async()=>{
  const reads=[],rows=[fixture(),fixture({id:secondId}),fixture({id:'3',status:'Rejected'})]
  const h=harness(url=>fixtureResponse(url,rows),{},'en',undefined,null,{proximityRead:async(id,revision)=>{reads.push(id);return proximityFixture(id,revision,id===firstId?'21':'35')}})

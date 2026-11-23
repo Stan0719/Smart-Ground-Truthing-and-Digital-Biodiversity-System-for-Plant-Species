@@ -1299,11 +1299,14 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
           )
         ).rows[0];
         if (!row) fail(404, "Observation not found.");
+        const reviewComment = req.body.comment === undefined && req.body.decision === "Approved" ? "" : req.body.comment;
+        if (typeof reviewComment !== "string" || reviewComment.length > 4000)
+          fail(400, "Invalid review comment.");
         const denied = assertReview(
           req.user,
           row,
           req.body.decision,
-          req.body.comment,
+          reviewComment,
         );
         if (denied)
           fail(denied, "Review is not permitted or feedback is missing.");
@@ -1343,7 +1346,7 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             row.id,
             subject(req.user),
             req.body.decision,
-            req.body.comment || "Verified.",
+            reviewComment.trim(),
             ...(submittedVersion ? [submittedVersion.id] : legacyReview ? [req.body.revision] : []),
           ],
         )).rows[0];

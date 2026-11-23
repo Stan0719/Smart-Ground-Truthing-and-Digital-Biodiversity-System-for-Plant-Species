@@ -16,6 +16,7 @@ import type { ObservationEdit, ObservationEditQueueState } from '../../services/
 import MonitoringIdentifier from '../../components/conservation/MonitoringIdentifier.vue'
 import ObservationEditQueue from '../../components/conservation/ObservationEditQueue.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
+import ReviewCommentField from '../../components/conservation/ReviewCommentField.vue'
 import PlantPhotoLightbox from '../../components/PlantPhotoLightbox.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import ObservationReviewHistory from '../../components/conservation/ObservationReviewHistory.vue'
@@ -86,9 +87,17 @@ const seenCursors = new Set<string>()
 // Inclusive of the first request: at most 5 sequential 100-row scans per action.
 // Stop on new queue matches, not on local search/species/owner/date matches.
 const AUTO_SCAN_PAGE_LIMIT = 5
+const AUTO_REFRESH_PAGE_LIMIT = 20
+const AUTO_REFRESH_INTERVAL = 60_000
+let loadedPageDepth = 0
+let refreshTimer: number | undefined
+let lastListRefreshAt = 0
 const autoScanLimited = ref(false)
 const scannedPages = ref(0)
 const isLoading = ref(true)
+const isRefreshing = ref(false)
+const automaticRefreshError = ref('')
+const automaticRefreshDeferred = ref(false)
 const loadError = ref('')
 const skippedRecords = ref(0)
 const summaryRows = ref<ObservationView[]>([])
@@ -96,7 +105,6 @@ const summaryComplete = ref(false), summaryLoading = ref(false)
 const summaryError = ref<'unavailable' | 'incomplete' | ''>('')
 let summaryRequest = 0
 let summaryAbort: AbortController | null = null
-let summaryTask: Promise<void> | null = null
 const SUMMARY_PAGE_LIMIT = 20
 function invalidateSummary() {
   summaryRequest++; summaryAbort?.abort(); summaryAbort = null
@@ -173,7 +181,7 @@ const reviewSuccess = ref(false)
 const successNotice = ref(false), successSequence = ref(0)
 const reviewInfo = ref(false)
 const reviewFeedbackVariant = computed(() => reviewInfo.value ? 'info' : reviewSuccess.value ? 'success' : 'error')
-const reviewCommentInput = ref<HTMLTextAreaElement | null>(null)
+const reviewCommentInput = ref<{ focus: () => void } | null>(null)
 const reviewCommentError = computed(() => !reviewSuccess.value && reviewFeedback.value === rt('feedback.commentRequired'))
 const rt = (key: string, params?: Record<string, string | number>) => t('conservationPages.reviews.' + key, params || {})
 const reviewRequest = createReviewRequest(rt, (...args) => fetch(...args))
@@ -184,6 +192,9 @@ const authorizedOfficer = computed(() => !session.value.pending && session.value
 const unsubscribeSession = subscribeSession((user, pending) => {
   const previousId = session.value.user?.id
   session.value = { user, pending }
+  if (previousId !== user?.id) lastListRefreshAt = 0
+  if (pending || !authorizedOfficer.value) stopAutomaticRefresh()
+  else startAutomaticRefresh()
   if (pending && user && previousId === user.id) {
     if (reviewSaving.value || detailLoading.value) reviewNeedsReload.value = true
     detailRequest++; detailLoading.value = false
@@ -218,8 +229,8 @@ const canonicalStatus = (value: unknown) => {
 }
 const summaryStatuses = ['Pending Review', 'Correction Required', 'Flagged', 'Rejected', 'Approved']
 const summaryHasFilters = computed(() => !!(search.value.trim() || status.value || species.value || owner.value || date.value || submissionType.value !== 'all'))
-const summaryBusy = computed(() => (submissionType.value !== 'edit' && (isLoading.value || summaryLoading.value)) || (submissionType.value !== 'original' && proposalState.value.loading))
-const summaryUnavailable = computed(() => !authorizedOfficer.value || (submissionType.value !== 'edit' && (!!loadError.value || summaryError.value === 'unavailable')) || (submissionType.value !== 'original' && !!proposalState.value.error))
+const summaryBusy = computed(() => (submissionType.value !== 'edit' && (isLoading.value || isRefreshing.value || summaryLoading.value)) || (submissionType.value !== 'original' && proposalState.value.loading))
+const summaryUnavailable = computed(() => !authorizedOfficer.value || (submissionType.value !== 'edit' && (!!loadError.value || !!automaticRefreshError.value || summaryError.value === 'unavailable')) || (submissionType.value !== 'original' && !!proposalState.value.error))
 const summaryIncomplete = computed(() => submissionType.value !== 'edit' && (!summaryComplete.value || summaryError.value === 'incomplete'))
 const summaryCounts = computed(() => {
   const available = !summaryBusy.value && !summaryUnavailable.value && !summaryIncomplete.value
@@ -333,11 +344,11 @@ const mapObservation = (value: unknown): ObservationView | null => {
 class ObservationApiError extends Error {
   constructor(message: string, readonly status = 0) { super(message) }
 }
-async function request(url: string, signal?: AbortSignal, fresh = false): Promise<Record<string, unknown>> {
+async function request(url: string, signal?: AbortSignal, fresh: boolean | 'reload' = false): Promise<Record<string, unknown>> {
   let response: Response
   try {
     const timeout = AbortSignal.timeout(15000)
-    response = await fetch(url, { credentials: 'same-origin', signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(fresh ? { cache: 'no-store' as const } : {}) })
+    response = await fetch(url, { credentials: 'same-origin', signal: signal ? AbortSignal.any([signal, timeout]) : timeout, ...(fresh ? { cache: fresh === true ? 'no-store' as const : fresh } : {}) })
   } catch {
     throw new ObservationApiError(t('conservationPages.observations.errors.network'))
   }
@@ -362,6 +373,7 @@ function invalidateList() {
   invalidateSummary()
   listRequest++; listAbort?.abort(); listAbort = null
   hasMore.value = false; nextCursor.value = null; seenCursors.clear()
+  loadedPageDepth = 0; isRefreshing.value = false; automaticRefreshError.value = ''; automaticRefreshDeferred.value = false
   isLoading.value = false; autoScanLimited.value = false; scannedPages.value = 0
 }
 // Invalidate immediately, including changes made while an empty page is scanning.
@@ -371,12 +383,13 @@ async function loadObservations(append = false) {
   if (append && (isLoading.value || !hasMore.value)) return
   invalidateSummary()
   listAbort?.abort()
+  isRefreshing.value = false; automaticRefreshError.value = ''; automaticRefreshDeferred.value = false
   const token = ++listRequest
   const controller = new AbortController(); listAbort = controller
   const origin = 'subsequent_observation', selectedStatus = canonicalStatuses.includes(status.value) ? status.value : ''
   const current = () => !disposed && token === listRequest && !controller.signal.aborted && authorizedOfficer.value
   let cursor = append ? nextCursor.value : null
-  if (!append) { clearCopyState(); observations.value = []; nextCursor.value = null; hasMore.value = false; skippedRecords.value = 0; seenCursors.clear() }
+  if (!append) { clearCopyState(); observations.value = []; nextCursor.value = null; hasMore.value = false; skippedRecords.value = 0; seenCursors.clear(); loadedPageDepth = 0 }
   isLoading.value = true
   loadError.value = ''; autoScanLimited.value = false; scannedPages.value = 0
   try {
@@ -407,6 +420,7 @@ async function loadObservations(append = false) {
       hasMore.value = page.hasMore; nextCursor.value = page.cursor
       if (page.cursor !== null) seenCursors.add(page.cursor)
       scannedPages.value++
+      loadedPageDepth++
       if (found || !page.hasMore) return
       cursor = page.cursor
     }
@@ -415,14 +429,108 @@ async function loadObservations(append = false) {
     if (!current()) return
     // Keep successful pages and their continuation when a later request fails.
     loadError.value = error instanceof Error ? error.message : t('conservationPages.observations.errors.invalidResponse')
-  } finally { if (current()) { isLoading.value = false; listAbort = null; summaryTask = refreshSummary() } }
+  } finally { if (current()) { isLoading.value = false; listAbort = null; if (!loadError.value) lastListRefreshAt = Date.now(); void refreshSummary() } }
+}
+
+function automaticRefreshBlocked() {
+  return disposed || !authorizedOfficer.value || isLoading.value || isRefreshing.value || Boolean(listAbort) ||
+    Boolean(selected.value) || historyModal.value || detailLoading.value || reviewSaving.value || copyPending.value ||
+    statusHelpOpen.value || proposalState.value.loading || typeof route.query.observationEdit === 'string'
+}
+
+async function refreshObservations(manual = false) {
+  if (automaticRefreshBlocked() || !loadedPageDepth) return
+  if (!manual && loadedPageDepth > AUTO_REFRESH_PAGE_LIMIT) {
+    automaticRefreshDeferred.value = true
+    return
+  }
+  const actor = session.value.user?.id
+  const depth = loadedPageDepth
+  const origin = 'subsequent_observation'
+  const selectedStatus = canonicalStatuses.includes(status.value) ? status.value : ''
+  const controller = new AbortController()
+  listAbort?.abort()
+  const token = ++listRequest
+  listAbort = controller
+  const current = () => !disposed && token === listRequest && !controller.signal.aborted && authorizedOfficer.value && session.value.user?.id === actor
+  invalidateSummary()
+  automaticRefreshError.value = ''; automaticRefreshDeferred.value = false
+  isRefreshing.value = true
+  let cursor: string | null = null
+  let latestPage: ReturnType<typeof readQueuePage> = null
+  let pagesRead = 0, skipped = 0
+  const visited = new Set<string>()
+  const rows = new Map<string, ObservationView>()
+  try {
+    for (let index = 0; index < depth; index++) {
+      const result = await request(observationQueueUrl(origin, selectedStatus, cursor), controller.signal, 'reload')
+      if (!current()) return
+      const page = readQueuePage(result.page)
+      if (!Array.isArray(result.observations) || !page) throw new ObservationApiError(t('conservationPages.observations.errors.invalidResponse'))
+      if (page.cursor !== null && (page.cursor === cursor || visited.has(page.cursor))) throw new ObservationApiError(t('conservationPages.observations.paginationInvalid'))
+      if (page.cursor !== null) visited.add(page.cursor)
+      const mapped = result.observations.map(mapObservation)
+      skipped += mapped.length - mapped.filter((item): item is ObservationView => item !== null).length
+      for (const item of mapped) if (item) rows.set(item.id, item)
+      latestPage = page
+      pagesRead++
+      cursor = page.cursor
+      if (!page.hasMore) break
+    }
+    if (!current() || !latestPage || pagesRead !== depth && latestPage.hasMore) return
+    const staffIds = [...new Set([...rows.values()].map(item => item.ownerSubject).filter(subject => subject.startsWith('staff:')).map(subject => subject.slice(6)))]
+      .filter(id => !submitterNames.value[id]).slice(0, 100)
+    if (staffIds.length) {
+      try {
+        const directory = await request(`/api/conservation/submitter-names?ids=${encodeURIComponent(staffIds.join(','))}`, controller.signal)
+        if (!current()) return
+        if (directory.names && typeof directory.names === 'object' && !Array.isArray(directory.names))
+          submitterNames.value = { ...submitterNames.value, ...directory.names as Record<string, string> }
+      } catch { if (!current()) return /* Retain the existing abbreviated-name fallback. */ }
+    }
+    if (!current()) return
+    observations.value = [...rows.values()].sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt))
+    skippedRecords.value = skipped
+    hasMore.value = latestPage.hasMore
+    nextCursor.value = latestPage.cursor
+    loadedPageDepth = pagesRead
+    seenCursors.clear(); for (const value of visited) seenCursors.add(value)
+    if (!latestPage.hasMore) autoScanLimited.value = false
+    lastListRefreshAt = Date.now()
+  } catch (error) {
+    if (current()) automaticRefreshError.value = error instanceof Error ? error.message : t('conservationPages.observations.errors.invalidResponse')
+  } finally {
+    if (current()) {
+      isRefreshing.value = false
+      listAbort = null
+      if (!automaticRefreshError.value) {
+        void refreshSummary()
+        // The separate edit queue has expensive per-row evidence reads; it is
+        // intentionally left to its existing manual/session refresh behavior.
+      }
+    }
+  }
+}
+
+function startAutomaticRefresh() {
+  if (refreshTimer !== undefined || !authorizedOfficer.value || disposed) return
+  refreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible' && Date.now() - lastListRefreshAt >= AUTO_REFRESH_INTERVAL) void refreshObservations()
+  }, AUTO_REFRESH_INTERVAL)
+}
+function stopAutomaticRefresh() {
+  if (refreshTimer === undefined) return
+  window.clearInterval(refreshTimer); refreshTimer = undefined
+}
+function refreshWhenVisible() {
+  if (document.visibilityState === 'visible' && Date.now() - lastListRefreshAt >= AUTO_REFRESH_INTERVAL) void refreshObservations()
 }
 
 async function refreshSummary() {
   const token = ++summaryRequest
   summaryAbort?.abort(); summaryAbort = null
   summaryComplete.value = false; summaryLoading.value = false; summaryError.value = ''
-  if (disposed || !authorizedOfficer.value || isLoading.value || loadError.value) return
+  if (disposed || !authorizedOfficer.value || isLoading.value || isRefreshing.value || loadError.value) return
   summaryRows.value = [...observations.value]
   if (skippedRecords.value) { summaryError.value = 'unavailable'; return }
   if (!hasMore.value) { summaryComplete.value = true; return }
@@ -464,7 +572,7 @@ async function refreshSummary() {
 }
 
 function retrySummary() {
-  summaryTask = refreshSummary()
+  void refreshSummary()
 }
 
 async function open(item: ObservationView, reviewing = false, expectedOrigin?: ObservationOrigin) {
@@ -760,7 +868,11 @@ watch(() => [route.query.observation, authorizedOfficer.value, session.value.use
   void resolveObservationQuery()
 }, { immediate: true })
 
-onMounted(loadObservations)
+onMounted(() => {
+  startAutomaticRefresh()
+  void loadObservations()
+  document.addEventListener('visibilitychange', refreshWhenVisible)
+})
 const observationPhotos = computed(() => authorizedOfficer.value && !reviewNeedsReload.value ? (selected.value?.assets || [])
   .filter(asset => asset.contentType.startsWith('image/') && !failedAssets.value.has(asset.id))
   .map(asset => ({ id: asset.id, url: assetUrl(asset.id) })) : [])
@@ -771,7 +883,7 @@ function openObservationPhoto(id: string, event: Event) {
 }
 watch(() => session.value.pending, pending => {
   if (pending) invalidateSummary()
-  else if (authorizedOfficer.value && !isLoading.value && !loadError.value) summaryTask = refreshSummary()
+  else if (authorizedOfficer.value && !isLoading.value && !loadError.value) void refreshSummary()
 }, { flush: 'sync' })
 const statusHelpContent = computed(() => {
   if (selected.value?.status === 'Rejected') return { title: modalText('aboutRejected'), description: t('submissionChanges.finalRejected'), note: '' }
@@ -810,6 +922,8 @@ onMounted(() => {
   window.addEventListener('resize', closeStatusHelp)
 })
 onBeforeUnmount(() => {
+  stopAutomaticRefresh()
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', refreshWhenVisible)
   closeStatusHelp()
   if (typeof document !== 'undefined') {
     document.removeEventListener('pointerdown', dismissOutsideStatusHelp)
@@ -867,6 +981,15 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
   </div>
 
   <section class="panel">
+    <p v-if="isRefreshing" class="observation-auto-refresh-note" role="status" aria-live="polite">{{ t('conservationPages.observations.autoRefreshing') }}</p>
+    <p v-else-if="automaticRefreshError" class="observation-auto-refresh-note error-state" role="alert">
+      <span>{{ t('conservationPages.observations.autoRefreshFailed') }}</span>
+      <button class="action-button" type="button" :disabled="!authorizedOfficer" @click="refreshObservations(true)">{{ t('conservationPages.observations.retry') }}</button>
+    </p>
+    <p v-else-if="automaticRefreshDeferred" class="observation-auto-refresh-note" role="status">
+      <span>{{ t('conservationPages.observations.autoRefreshDeferred') }}</span>
+      <button class="action-button" type="button" :disabled="!authorizedOfficer" @click="refreshObservations(true)">{{ t('conservationPages.observations.refreshNow') }}</button>
+    </p>
     <p v-if="proposalState.error" class="proposal-warning" role="alert">{{ proposalState.error }} <button type="button" class="action-button" :disabled="!authorizedOfficer || proposalState.loading" @click="proposalQueue?.load()">{{ t('unifiedObservations.retry') }}</button></p>
     <p v-else-if="proposalState.loading" class="proposal-loading-note" role="status">{{ t('dashboardObservationEdits.loading') }}</p>
     <p v-if="!isLoading && filtersHideLoaded" class="dataset-note" role="status">{{ t(hasMore ? 'conservationPages.observations.filteredMore' : 'conservationPages.observations.filteredLoaded') }}</p>
@@ -874,12 +997,13 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
     <p v-if="skippedRecords" class="dataset-note" role="status">{{ t('conservationPages.observations.skipped', { count: skippedRecords }) }}</p>
     <p class="copy-feedback" :class="{ warning: copyFailed }" role="status" aria-live="polite" aria-atomic="true">{{ copyFeedback }}</p>
     <div class="table-scroll observations-scroll" role="region" :aria-label="t('conservationPages.observations.title')" tabindex="0"><table class="observations-table">
-      <colgroup><col class="observation-column" /><col class="submission-column" /><col class="plant-column" /><col class="species-column" /><col class="submitter-column" /><col class="status-column" /><col class="created-column" /><col class="actions-column" /></colgroup>
-      <thead><tr><th scope="col">{{ t('unifiedObservations.submissionId') }}</th><th scope="col">{{ t('unifiedObservations.submissionType') }}</th><th scope="col">{{ t('conservationPages.observations.plantId') }}</th><th scope="col">{{ t('conservationPages.observations.species') }}</th><th scope="col">{{ t('conservationPages.observations.submittedBy') }}</th><th scope="col">{{ t('conservationPages.observations.status') }}</th><th scope="col">{{ t('conservationPages.observations.created') }}</th><th scope="col">{{ t('conservationPages.observations.actions') }}</th></tr></thead>
+      <colgroup><col class="observation-column" /><col class="plant-column" /><col class="species-column" /><col class="submitter-column" /><col class="status-column" /><col class="created-column" /><col class="actions-column" /></colgroup>
+      <thead><tr><th scope="col">{{ t('unifiedObservations.submissionId') }}</th><th scope="col">{{ t('conservationPages.observations.plantId') }}</th><th scope="col">{{ t('conservationPages.observations.species') }}</th><th scope="col">{{ t('conservationPages.observations.submittedBy') }}</th><th scope="col">{{ t('conservationPages.observations.status') }}</th><th scope="col">{{ t('conservationPages.observations.created') }}</th><th scope="col">{{ t('conservationPages.observations.actions') }}</th></tr></thead>
       <tbody>
         <tr v-for="row in displayedRows" :key="row.key" :class="{ 'terminal-read-only': ['Withdrawn','Cancelled'].includes(row.kind === 'original' ? row.observation.status : row.proposal.status), superseded: (row.kind === 'original' ? row.observation.status : String(row.proposal.status)) === 'Superseded' }">
           <template v-if="row.kind === 'original'"><template v-for="item in [row.observation]" :key="item.id">
-          <td class="identity-cell"><span class="observation-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 3C9 3 3 7 5 14s13 7 15-11ZM4 21 16 9" /></svg></span><span class="observation-cell-label">{{ t('unifiedObservations.submissionId') }}</span><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation', false, `observation-icon-0:${item.id}`)"><svg v-if="!controlCopied[`observation-icon-0:${item.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-0:${item.id}`" :key="`observation-icon-0:${item.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></td><td class="submission-type-cell"><span class="observation-cell-label">{{ t('unifiedObservations.submissionType') }}</span><span class="submission-type-badge submission-type-original">{{ t('finalOfficerWorkflow.original') }}</span></td><td class="plant-id-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.plantId') }}</span><span class="plant-id-value"><strong>{{ item.plantDisplayId }}</strong><em v-if="item.plantScientificName" class="observation-plant-name">{{ item.plantScientificName }}</em></span></td>
+          <td class="identity-cell submission-identity-cell"><span class="observation-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 3C9 3 3 7 5 14s13 7 15-11ZM4 21 16 9" /></svg></span><div class="submission-identity-stack"><span class="observation-cell-label">{{ t('unifiedObservations.submissionId') }}</span><div class="identifier-line"><strong :title="item.id">{{ observationLabel(item.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(item.id) })" @click="copyIdentifier(item.id, 'observation', false, `observation-icon-0:${item.id}`)"><svg v-if="!controlCopied[`observation-icon-0:${item.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-0:${item.id}`" :key="`observation-icon-0:${item.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><span class="observation-cell-label">{{ t('unifiedObservations.submissionType') }}</span><span class="submission-type-badge submission-type-original">{{ t('finalOfficerWorkflow.original') }}</span><small v-if="item.origin === 'unknown'">{{ rt('queues.originUnverified') }}</small></div></td>
+          <td class="plant-identity-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.plantId') }}</span><span class="plant-id-value"><strong>{{ item.plantDisplayId }}</strong><em v-if="item.plantScientificName" class="observation-plant-name">{{ item.plantScientificName }}</em></span></td>
           <td><span class="observation-cell-label">{{ t('conservationPages.observations.species') }}</span><em>{{ speciesName(item) }}</em><small v-if="item.commonName && item.scientificName">{{ item.commonName }}</small><small v-if="item.hasSpeciesRequest">{{ t('conservationPages.observations.newSpeciesRequest') }}</small></td>
           <td class="identity-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.submittedBy') }}</span><div class="identifier-line"><span :title="item.ownerSubject">{{ submitterLabel(item.ownerSubject) }}</span><template v-if="item.ownerSubject"><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" :title="t('conservationPages.observations.copySubject', { id: submitterLabel(item.ownerSubject) })" @click="copyIdentifier(item.ownerSubject, 'subject', false, `observation-icon-1:${item.id}:${item.ownerSubject}`)"><svg v-if="!controlCopied[`observation-icon-1:${item.id}:${item.ownerSubject}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `observation-icon-1:${item.id}:${item.ownerSubject}`" :key="`observation-icon-1:${item.id}:${item.ownerSubject}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></template></div></td><td class="status-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.status') }}</span><span class="review-status-group"><span class="badge" :style="workflowBadgeStyle(item.status)" :class="keyFor(item.status)">{{ label(item.status) }}</span><span v-if="item.status === 'Pending Review' && item.isCorrectionResubmission" class="badge resubmission-tag">{{ t('conservationPages.observations.resubmitted') }}</span></span></td>
           <td class="created-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.created') }}</span>{{ formatDate(item.createdAt) }}</td>
@@ -892,8 +1016,8 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
           </div></td>
         </template></template>
           <template v-else>
-            <td class="identity-cell"><span class="observation-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 3C9 3 3 7 5 14s13 7 15-11ZM4 21 16 9" /></svg></span><span class="observation-cell-label">{{ t('unifiedObservations.submissionId') }}</span><div class="identifier-line"><strong :title="row.proposal.id">{{ proposalLabels.get(row.proposal.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" :title="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" @click="copyIdentifier(row.proposal.id, 'submission', false, `submission-icon:${row.proposal.id}`)"><svg v-if="!controlCopied[`submission-icon:${row.proposal.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `submission-icon:${row.proposal.id}`" :key="`submission-icon:${row.proposal.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div></td>
-            <td class="submission-type-cell"><span class="observation-cell-label">{{ t('unifiedObservations.submissionType') }}</span><span class="submission-type-badge submission-type-edit">{{ t('finalOfficerWorkflow.edit') }}</span></td><td class="plant-id-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.plantId') }}</span><span class="plant-id-value"><strong>{{ row.baseline.plantDisplayId }}</strong><em v-if="row.baseline.plantScientificName" class="observation-plant-name">{{ row.baseline.plantScientificName }}</em></span></td>
+            <td class="identity-cell submission-identity-cell"><span class="observation-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 3C9 3 3 7 5 14s13 7 15-11ZM4 21 16 9" /></svg></span><div class="submission-identity-stack"><span class="observation-cell-label">{{ t('unifiedObservations.submissionId') }}</span><div class="identifier-line"><strong :title="row.proposal.id">{{ proposalLabels.get(row.proposal.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!authorizedOfficer || copyPending" :aria-label="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" :title="t('monitoringDisplay.copy', { id: proposalLabels.get(row.proposal.id) })" @click="copyIdentifier(row.proposal.id, 'submission', false, `submission-icon:${row.proposal.id}`)"><svg v-if="!controlCopied[`submission-icon:${row.proposal.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `submission-icon:${row.proposal.id}`" :key="`submission-icon:${row.proposal.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><span class="observation-cell-label">{{ t('unifiedObservations.submissionType') }}</span><span class="submission-type-badge submission-type-edit">{{ t('finalOfficerWorkflow.edit') }}</span></div></td>
+            <td class="plant-identity-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.plantId') }}</span><span class="plant-id-value"><strong>{{ row.baseline.plantDisplayId }}</strong><em v-if="row.baseline.plantScientificName" class="observation-plant-name">{{ row.baseline.plantScientificName }}</em></span></td>
             <td><span class="observation-cell-label">{{ t('conservationPages.observations.species') }}</span><em>{{ speciesName(row.baseline) }}</em></td>
             <td class="identity-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.submittedBy') }}</span><MonitoringIdentifier :value="row.proposal.owner_subject" :labels="new Map([[row.proposal.owner_subject,submitterLabel(row.proposal.owner_subject)]])" /></td>
             <td class="status-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.status') }}</span><span class="badge" :style="workflowBadgeStyle(row.proposal.status)">{{ label(row.proposal.status) }}</span></td>
@@ -901,9 +1025,9 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
             <td class="actions-cell"><span class="observation-cell-label">{{ t('conservationPages.observations.actions') }}</span><div class="action-group"><button type="button" class="action-button observation-icon-action" :disabled="!authorizedOfficer || reviewSaving" :aria-label="proposalReviewable(row.proposal) ? t('dashboardObservationEdits.review') : t('common.viewDetails')" :title="proposalReviewable(row.proposal) ? t('dashboardObservationEdits.review') : t('common.viewDetails')" @click="openProposal(row.proposal)"><svg v-if="proposalReviewable(row.proposal)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M8 4H5v16h14V4h-3M9 2h6v4H9z" /><path d="m8 13 2.5 2.5L16 10" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg></button></div></td>
           </template>
         </tr>
-        <tr v-if="isLoading"><td colspan="8" class="state-cell">{{ t(scannedPages > 0 ? 'conservationPages.observations.scanning' : 'conservationPages.observations.loading') }}</td></tr>
-        <tr v-else-if="loadError"><td colspan="8" class="state-cell error-state"><strong>{{ t('conservationPages.observations.loadFailed') }}</strong><span>{{ loadError }}</span><button class="action-button" @click="loadObservations(Boolean(nextCursor))">{{ t('conservationPages.observations.retry') }}</button></td></tr>
-        <tr v-else-if="!displayedRows.length && !proposalState.loading"><td colspan="8" class="state-cell">{{ proposalState.error ? t('unifiedObservations.partial') : hasMore ? t('conservationPages.observations.emptyMore') : t('unifiedObservations.empty') }}</td></tr>
+        <tr v-if="isLoading"><td colspan="7" class="state-cell">{{ t(scannedPages > 0 ? 'conservationPages.observations.scanning' : 'conservationPages.observations.loading') }}</td></tr>
+        <tr v-else-if="loadError"><td colspan="7" class="state-cell error-state"><strong>{{ t('conservationPages.observations.loadFailed') }}</strong><span>{{ loadError }}</span><button class="action-button" @click="loadObservations(Boolean(nextCursor))">{{ t('conservationPages.observations.retry') }}</button></td></tr>
+        <tr v-else-if="!displayedRows.length && !proposalState.loading"><td colspan="7" class="state-cell">{{ proposalState.error ? t('unifiedObservations.partial') : hasMore ? t('conservationPages.observations.emptyMore') : t('unifiedObservations.empty') }}</td></tr>
       </tbody>
     </table></div>
     <button v-if="hasMore || loadError" class="action-button" :disabled="isLoading" @click="loadObservations(Boolean(nextCursor))">{{ rt('queues.loadMore') }}</button>
@@ -992,7 +1116,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
             <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="17" rx="2" /><rect x="9" y="2" width="6" height="5" rx="1" /><path d="m9 14 2 2 4-4" /></svg>{{ modalText('officerReview') }}</h3>
             <div class="observation-section-content">
       <p v-if="!reviewAllowed && !detailLoading && !reviewSaving && !reviewNeedsReload" role="status">{{ rt('reviewUnavailable') }}</p>
-      <label class="field" for="observation-review-comment"><span>{{ rt('reviewComment') }}</span><textarea id="observation-review-comment" ref="reviewCommentInput" v-model="reviewComment" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :aria-invalid="reviewCommentError || undefined" :aria-describedby="reviewCommentError ? 'observation-review-comment-error' : undefined" maxlength="4000" rows="5" :disabled="reviewSaving || detailLoading" /></label>
+      <ReviewCommentField ref="reviewCommentInput" id="observation-review-comment" v-model="reviewComment" :label="t('conservationPages.observations.reviewComment')" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :invalid="reviewCommentError" :described-by="reviewCommentError ? 'observation-review-comment-error' : undefined" :disabled="reviewSaving || detailLoading" :rows="5" />
       <p v-if="reviewFeedback && !reviewSuccess" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewInfo || reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="[reviewFeedbackVariant, { 'observation-comment-validation': reviewCommentError }]"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
       <label v-if="!reviewAcknowledged && !reviewNeedsReload"><input v-model="reviewAcknowledged" type="checkbox" :disabled="reviewSaving" /> {{ rt('acknowledgeLatest') }}</label>
       <p v-if="reviewSaving" role="status">{{ rt('saving') }}</p>
@@ -1031,6 +1155,8 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
 
 <style scoped>
 .observation-summary-definition { margin: 10px 0 0; color: #536b60; font-size: 13px; line-height: 1.5; }
+.observation-auto-refresh-note { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; margin:0 0 12px; color:#536b60; font-size:13px; line-height:1.5; }
+.observation-auto-refresh-note.error-state { color:#8b2f26; }
 .proposal-loading-note { color:#52685d; font-size:13px; line-height:1.5; }
 .proposal-warning { display:flex; align-items:center; flex-wrap:wrap; gap:10px; padding:10px 14px; background:#fff7ed; color:#7c2d12; border-radius:8px; }
 .superseded > td { background:#f3f4f6; color:#4b5563; }
@@ -1068,39 +1194,40 @@ a.action-button { text-decoration: none; }
 .error-state .action-button { margin-top: 12px; }
 .observations-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; container-type: inline-size; }
 .observations-scroll:focus-visible { outline: 3px solid #315b49; outline-offset: -3px; }
-.officer-layout.officer-layout.officer-layout .observations-scroll .observations-table { width: 100%; min-width: 92rem; table-layout: auto; white-space: normal; border-collapse: separate; border-spacing: 0; }
-.observations-table .observation-column { width: 15%; }
-.observations-table .submission-column { width: 15%; }
-.observations-table .plant-column { width: 12%; }
+.officer-layout.officer-layout.officer-layout .observations-scroll .observations-table { width: 100%; min-width: 78rem; table-layout: fixed; white-space: normal; border-collapse: separate; border-spacing: 0; }
+.observations-table .observation-column { width: 24%; }
+.observations-table .plant-column { width: 14%; }
 .observations-table .species-column { width: 17%; }
-.observations-table .submitter-column { width: 15%; }
-.observations-table .status-column { width: 10%; }
-.observations-table .created-column { width: 11%; }
-.observations-table .actions-column { width: 10%; }
-.observations-table th, .observations-table td { padding: 12px 14px; text-align: left; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
-.observations-table th:nth-child(1), .observations-table td:nth-child(1) { min-width: 12rem; }
-.observations-table th:nth-child(2), .observations-table td:nth-child(2) { min-width: 11rem; }
-.observations-table th:nth-child(3), .observations-table td:nth-child(3) { min-width: 7rem; }
-.observations-table th:nth-child(4), .observations-table td:nth-child(4) { min-width: 12rem; }
-.observations-table th:nth-child(5), .observations-table td:nth-child(5) { min-width: 10rem; }
-.observations-table th:nth-child(6), .observations-table td:nth-child(6) { min-width: 10rem; }
+.observations-table .submitter-column { width: 13%; }
+.observations-table .status-column { width: 11%; }
+.observations-table .created-column { width: 12%; }
+.observations-table .actions-column { width: 9%; }
+.observations-table th, .observations-table td { padding: 10px; text-align: center; vertical-align: middle; white-space: normal; overflow-wrap: anywhere; }
+.observations-table th:nth-child(1), .observations-table td:nth-child(1) { min-width: 16rem; }
+.observations-table th:nth-child(2), .observations-table td:nth-child(2) { min-width: 10rem; }
+.observations-table th:nth-child(3), .observations-table td:nth-child(3) { min-width: 12rem; }
+.observations-table th:nth-child(4), .observations-table td:nth-child(4) { min-width: 10rem; }
+.observations-table th:nth-child(5), .observations-table td:nth-child(5) { min-width: 9rem; }
+.observations-table th:nth-child(6), .observations-table td:nth-child(6) { min-width: 11rem; }
 .observations-table th:nth-child(7), .observations-table td:nth-child(7) { min-width: 10rem; }
-.observations-table th:nth-child(8), .observations-table td:nth-child(8) { min-width: 10rem; }
 .observations-table td:first-child .identifier-line { flex-wrap: wrap; max-width: 100%; }
 .observations-table td:first-child .identifier-line strong { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
-.observations-table td:nth-child(5) .identifier-line { flex-wrap: wrap; align-items: center; }
-.observations-table td:nth-child(5) .identifier-line > span:first-child { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.observations-table td:nth-child(4) .identifier-line { flex-wrap: wrap; align-items: center; }
+.observations-table td:nth-child(4) .identifier-line > span:first-child { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .observation-cell-label, .observation-card-emblem { display: none; }
+.submission-identity-stack { display: grid; justify-items: center; min-width: 0; gap: 3px; }
+.observations-table .plant-id-value { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.observations-table .plant-id-value strong { color: #174c38; font-weight: 700; }
+.observations-table .observation-plant-name { color: #53695e; font-style: italic; overflow-wrap: anywhere; }
 .observations-table th { background: #245443; color: #fff; border-bottom-color: #245443; font-size: 10px; font-weight: 700; line-height: 1.4; }
 .observations-table thead th:first-child { border-top-left-radius: 10px; }
 .observations-table thead th:last-child { border-top-right-radius: 10px; }
 .observations-table td { font-size: 12px; line-height: 1.5; }
-.observations-table th:nth-child(5), .observations-table th:nth-child(6), .observations-table th:nth-child(8) { white-space: nowrap; overflow-wrap: normal; }
+.observations-table th:nth-child(2), .observations-table th:nth-child(5), .observations-table th:nth-child(7) { white-space: nowrap; overflow-wrap: normal; }
 .observations-table .status-cell { white-space: normal; }
-.observations-table .actions-cell { text-align: right; white-space: nowrap; }
-.observations-table th:nth-child(8) { text-align: right; }
+.observations-table .actions-cell { text-align: center; white-space: nowrap; }
 .observations-table .badge { display: inline-flex; align-items: center; width: max-content; max-width: none; box-sizing: border-box; white-space: nowrap; overflow-wrap: normal; font-size: 11px; line-height: 1.4; vertical-align: middle; }
-.observations-scroll .observations-table .action-group { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; width: 100%; min-width: 0; }
+.observations-scroll .observations-table .action-group { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; width: 100%; min-width: 0; }
 .observations-table .action-group > .action-button.observation-icon-action { display: inline-grid; place-items: center; flex: 0 0 36px; width: 36px; min-width: 36px; height: 36px; min-height: 36px; max-width: 36px; padding: 0; border-radius: 8px; }
 .officer-layout.officer-layout.officer-layout .observations-table .observation-icon-action:hover:not(:disabled), .officer-layout.officer-layout.officer-layout .observations-table .observation-icon-action:focus-visible:not(:disabled) { border-color: #245443; background: #33745d; color: #fff; }
 .observations-table .observation-icon-action { position: relative; }
@@ -1110,32 +1237,31 @@ a.action-button { text-decoration: none; }
 .observations-table .observation-icon-action:focus-visible { outline: 3px solid #315b49; outline-offset: 2px; }
 .observations-scroll .observations-table .identifier-copy { flex: 0 0 44px; width: 44px; min-width: 44px; max-width: 44px; height: 44px; }
 .observations-table .state-cell { padding: 30px 14px; text-align: center; }
-@container (max-width: 767px) {
+@container (max-width: 1248px) {
   .officer-layout.officer-layout.officer-layout .observations-scroll .observations-table { display: block; width: 100%; min-width: 0; }
   .observations-table colgroup { display: none; }
   .observations-table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
   .observations-table tbody { display: grid; gap: 12px; }
   .observations-table tbody tr { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;padding:16px;border:1px solid #d7e0db;border-radius:16px;background:#fff; }
   .observations-table tbody tr > td { display: block; min-width: 0 !important; padding: 0; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
-  .observations-table tbody tr > td:first-child, .observations-table tbody tr > td:nth-child(2), .observations-table tbody tr > td:nth-child(7), .observations-table tbody tr > td:nth-child(8) { grid-column: 1 / -1; }
+  .observations-table tbody tr > td:first-child, .observations-table tbody tr > td:nth-child(6), .observations-table tbody tr > td:nth-child(7) { grid-column: 1 / -1; }
   .observations-table tbody tr > td:first-child { display: flex; align-items: center; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid #d7e0db; }
   .observations-table .observation-card-emblem { display: grid; place-items: center; flex: 0 0 52px; width: 52px; height: 52px; border-radius: 11px; background: #dcebd8; color: #245443; }
   .observations-table .observation-card-emblem svg { width: 34px; height: 34px; }
+  .observations-table tbody tr > td:first-child .submission-identity-stack { flex: 1 1 auto; display: grid; align-items: start; justify-items: start; gap: 4px; min-width: 0; }
   .observations-table tbody tr > td:first-child .identifier-line { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; }
   .officer-layout.officer-layout.officer-layout .observations-table tbody tr > td:first-child .identifier-line > strong { color:#174c38;font-family:inherit;font-size:18px;font-weight:700;line-height:24px;overflow-wrap:anywhere; }
   .observations-table tbody tr > td:first-child .identifier-copy { flex: 0 0 40px; width: 40px; min-width: 40px; max-width: 40px; height: 40px; }
-  .observations-table tbody tr > td:nth-child(2) { display:flex;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:6px 8px;margin-top:-8px;padding:0 0 12px;border-bottom:1px solid #d7e0db; }
-  .observations-table tbody tr > td:nth-child(3), .observations-table tbody tr > td:nth-child(4), .observations-table tbody tr > td:nth-child(5), .observations-table tbody tr > td:nth-child(6) { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+  .observations-table tbody tr > td:nth-child(2), .observations-table tbody tr > td:nth-child(3), .observations-table tbody tr > td:nth-child(4), .observations-table tbody tr > td:nth-child(5) { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
   .observations-table .observation-cell-label { display:inline-flex;flex:0 0 auto;align-items:center;margin:0;color:#315848;font-size:14px;font-weight:600;line-height:20px; }
   .observations-table .observation-cell-label::after { content: ':'; }
-  .observations-table tbody tr > td:first-child > .observation-cell-label { display:none; }
-  .observations-table .submission-type-cell .observation-cell-label { flex:0 0 auto; }
+  .observations-table .submission-identity-stack > .observation-cell-label { display: inline-flex; flex: 0 0 auto; }
   .observations-table .plant-id-cell, .observations-table .status-cell, .observations-table .identity-cell { font-size:14px;line-height:20px; }
-  .observations-table .plant-id-value { display:flex;flex:1 1 50%;min-width:0;align-items:baseline;flex-wrap:wrap;gap:4px 7px; }
+  .observations-table .plant-id-value { display:flex;flex:1 1 50%;min-width:0;align-items:flex-start;flex-direction:column;flex-wrap:wrap;gap:2px; }
   .observations-table .plant-id-value strong { color:#174c38;font-size:14px;font-weight:700;line-height:20px; }
   .observations-table .observation-plant-name { color:#53695e;font-size:14px;font-style:italic;line-height:20px;overflow-wrap:anywhere; }
   .observations-table .identity-cell .identifier-line > span:first-child { font-size:14px;line-height:20px; }
-  .observations-table tbody tr > td:nth-child(7) { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+  .observations-table tbody tr > td:nth-child(6) { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
   .observations-table .identity-cell .identifier-line { display: flex; width: auto; align-items: center; flex-wrap: wrap; }
   .observations-table .identity-cell > .identifier-line,
   .observations-table .identity-cell > div.identifier-line { flex:1 1 48%;min-width:0; }
@@ -1143,7 +1269,7 @@ a.action-button { text-decoration: none; }
   .observations-table .identity-cell > .identifier-line > span:first-child { min-width:0;overflow-wrap:anywhere; }
   .observations-table .terminal-read-only > td, .observations-table tr.terminal-read-only > td, .observations-table tr.superseded > td { background: #fff; color: inherit; }
   .observations-table .status-cell .review-status-group { justify-content:flex-start;flex-wrap:wrap;white-space:normal; }
-  .observations-table tbody tr > td:nth-child(8) { padding-top: 12px; border-top: 1px solid #d7e0db; }
+  .observations-table tbody tr > td:nth-child(7) { padding-top: 12px; border-top: 1px solid #d7e0db; }
   .observations-table .actions-cell > .observation-cell-label { display: none; }
   .officer-layout.officer-layout.officer-layout .observations-scroll .observations-table .action-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 0; width: 100%; min-width: 0; }
   .officer-layout.officer-layout.officer-layout .observations-table .action-group > .action-button.observation-icon-action { display: flex; flex: 1 1 0; width: 100%; min-width: 0; max-width: none; height: auto; min-height: 56px; align-items: center; justify-content: center; flex-direction: column; gap: 6px; padding: 6px 4px; border: 0; border-radius: 6px; background: transparent; color: #2b6b50; white-space: normal; }
