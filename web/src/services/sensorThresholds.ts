@@ -1,5 +1,12 @@
 export interface SensorLimits { min?: number; max?: number }
 export type SensorThresholds = Record<string, number | SensorLimits>
+export const DEFAULT_SENSOR_THRESHOLDS: Record<string, SensorLimits> = {
+  temperature: { min: 26, max: 40 },
+  humidity: { min: 40, max: 80 },
+  soilMoisture: { min: 2300, max: 2700 },
+  // Lower raw readings indicate a wet surface; dry readings need no upper limit.
+  rainfall: { min: 2200 },
+}
 export function sensorLimits(value: unknown): SensorLimits | null {
   if (typeof value === 'number' && Number.isFinite(value)) return { max: value }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -21,4 +28,12 @@ export function thresholdLabel(configured: unknown) {
   const limits = sensorLimits(configured)
   if (!limits) return ''
   return [limits.min === undefined ? '' : `≥ ${limits.min}`, limits.max === undefined ? '' : `≤ ${limits.max}`].filter(Boolean).join(' · ')
+}
+export function thresholdRangeLabel(configured: unknown, unit = '') {
+  const limits = sensorLimits(configured)
+  if (!limits) return ''
+  const range = limits.min !== undefined && limits.max !== undefined
+    ? `${limits.min}–${limits.max}`
+    : limits.min !== undefined ? `≥ ${limits.min}` : `≤ ${limits.max}`
+  return unit ? `${range} ${unit}` : range
 }

@@ -1508,6 +1508,8 @@
     "minimum": "Minimum",
     "maximum": "Maximum",
     "configuredlimits": "Configured limits",
+    "range": "Range",
+    "defaultrange": "Default range",
     "belowminimum": "Below minimum",
     "abovemaximum": "Above maximum",
     "withinrange": "Within range",

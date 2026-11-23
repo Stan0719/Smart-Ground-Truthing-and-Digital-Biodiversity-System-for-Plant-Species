@@ -53,22 +53,131 @@ function nodes(root) {
 const plant = (id, status = 'Approved') => ({ plant_id: id, rbac_status: status, scientific_name: `Plant ${id}` })
 const device = (extra = {}) => ({ id: 'device', name: 'Camera-looking name', status: 'Inactive', thresholds: { temperature: 31 }, last_seen: null, ...extra })
 
-test('Admin saves only the selected metric range, preserves optional zero limits and rejects reversed limits', async () => {
-  const calls = [], sensor = device({ device_type: 'Sensor', thresholds: { temperature: 31, humidity: { min: 40, max: 80 } } })
+test('Admin edits all metric ranges together and saves them in one request with units and optional zero limits', async () => {
+  const calls = [], sensor = device({ device_type: 'Sensor', thresholds: { temperature: 31, humidity: { min: 40, max: 80 }, movement: { max: 0 } } })
   const h = harness('views/AdminOperationsView.vue', async (...args) => {
     calls.push(args)
     return args[0] === '/devices' ? { devices: [sensor] } : args[0] === '/readings' ? { readings: [] } : {}
   })
   try {
     h.state.open('threshold', sensor)
-    assert.equal(h.state.form.value.minimum, ''); assert.equal(h.state.form.value.maximum, '31')
-    h.state.form.value.minimum = 0; h.state.form.value.maximum = '35'
+    assert.deepEqual(plain(h.state.metrics), ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall'])
+    assert.equal(h.state.measurement({ movement: 1 }), 'movement: 1')
+    assert.equal(h.state.configuredThresholds({ sound: 50 }), '')
+    assert.equal(h.state.measurement({ temperature: 25, sound: 50 }), 'temperature: 25 °C')
+    h.state.thresholdRows.value.push({ metric: 'sound', minimum: '', maximum: '50' }); await h.state.saveDevice()
+    assert.equal(calls.length, 0)
+    h.state.open('threshold', sensor)
+    h.state.thresholdRows.value.push({ metric: 'movement', minimum: '', maximum: '0' }); await h.state.saveDevice()
+    assert.equal(calls.length, 0)
+    h.state.open('threshold', sensor)
+    const rows = h.state.thresholdRows.value
+    assert.deepEqual(plain(rows.map(row => row.metric)), ['temperature', 'humidity', 'soilMoisture', 'rainfall'])
+    assert.deepEqual(plain(rows[0]), { metric: 'temperature', minimum: '', maximum: '31' })
+    assert.deepEqual(plain(rows[1]), { metric: 'humidity', minimum: '40', maximum: '80' })
+    assert.deepEqual(plain(rows[2]), { metric: 'soilMoisture', minimum: '2300', maximum: '2700' })
+    assert.deepEqual(plain(rows[3]), { metric: 'rainfall', minimum: '2200', maximum: '' })
+    const tree = nodes(nodes(h.render()).find(n => n.type?.name?.endsWith('StaffDialog.vue')))
+    assert.equal(tree.filter(n => n.type === 'fieldset').length, 4)
+    assert.equal(tree.filter(n => n.type === 'input' && n.props?.type === 'number').length, 8)
+    assert.equal(tree.filter(n => n.props?.role === 'switch').length, 0)
+    assert.equal(tree.find(n => n.props?.['aria-label'] === 'Soil moisture minimum (raw ADC)').props.disabled, false)
+    assert.ok(!tree.some(n => n.type === 'legend' && n.children === 'Movement'))
+    assert.ok(!tree.some(n => n.type === 'select'))
+    for (const name of ['Temperature minimum (°C)', 'Humidity maximum (%)', 'Soil moisture minimum (raw ADC)', 'Rainfall maximum (raw ADC)'])
+      assert.ok(tree.some(n => n.props?.['aria-label'] === name), name)
+    rows[0].minimum = '0'; rows[0].maximum = '35'
+    rows[1].minimum = ''; rows[1].maximum = ''
+    rows[2].minimum = '100'; rows[2].maximum = ''
+    rows[3].minimum = ''; rows[3].maximum = '0'
     await h.state.saveDevice()
-    assert.deepEqual(plain(calls.find(call => call[1] === 'PATCH')[2]), { thresholds: { temperature: { min: 0, max: 35 } } })
-    h.state.open('threshold', sensor); h.state.form.value.minimum = '40'; h.state.form.value.maximum = '30'
-    const count = calls.length; await h.state.saveDevice(); assert.equal(calls.length, count); assert.equal(h.state.modal.value, 'threshold')
-    h.state.form.value.minimum = ''; h.state.form.value.maximum = ''; await h.state.saveDevice()
-    assert.deepEqual(plain(calls.filter(call => call[1] === 'PATCH').at(-1)[2]), { thresholds: { temperature: null } })
+    assert.equal(calls.filter(call => call[1] === 'PATCH').length, 1)
+    assert.deepEqual(plain(calls.find(call => call[1] === 'PATCH')[2]), { thresholds: {
+      temperature: { min: 0, max: 35 }, humidity: null, soilMoisture: { min: 100 }, rainfall: { max: 0 },
+    } })
+    assert.equal(h.state.modal.value, null)
+    h.state.open('threshold', sensor)
+    assert.equal(h.state.thresholdRows.value[2].minimum, '2300', 'Opening resets drafts from the selected device')
+    h.state.thresholdRows.value[0].maximum = '34'
+    h.state.thresholdRows.value[3].minimum = '40'; h.state.thresholdRows.value[3].maximum = '30'
+    const count = calls.length; await h.state.saveDevice()
+    assert.equal(calls.length, count, 'Validate every metric before sending any changes')
+    assert.equal(h.state.modal.value, 'threshold')
+    assert.match(h.state.error.value, /^Rainfall:/)
+    assert.equal(h.state.thresholdRows.value[0].maximum, '34')
+    h.state.thresholdRows.value[3].minimum = ''; h.state.thresholdRows.value[3].maximum = 'not a number'
+    await h.state.saveDevice(); assert.equal(calls.length, count)
+    h.state.thresholdRows.value[3].maximum = ''
+    await h.state.saveDevice()
+    assert.equal(calls.filter(call => call[1] === 'PATCH').at(-1)[2].thresholds.rainfall, null, 'Clearing both fields disables alerts')
+  } finally { h.stop() }
+})
+
+test('sensor cards apply individual or all defaults to drafts and save the ranges together', async () => {
+  const calls = [], h = harness('views/AdminOperationsView.vue', async (...args) => {
+    calls.push(args)
+    return args[0] === '/devices' ? { devices: [] } : args[0] === '/readings' ? { readings: [] } : {}
+  })
+  try {
+    h.state.open('threshold', device({ device_type: 'Sensor', thresholds: { temperature: { min: 26, max: 40 }, humidity: { max: 90 } } }))
+    const tree = nodes(h.render())
+    const grid = tree.find(n => n.props?.class === 'threshold-grid')
+    assert.deepEqual(nodes(grid).filter(n => n.type === 'fieldset').map(n => n.props['aria-label']), ['Temperature', 'Humidity', 'Soil moisture', 'Rainfall'])
+    const names = ['temperature', 'humidity', 'soil moisture', 'rainfall']
+    for (const [index, name] of names.entries()) {
+      const rows = h.state.thresholdRows.value
+      for (const row of rows) { row.minimum = '1'; row.maximum = '99' }
+      const before = plain(rows)
+      const button = tree.find(n => n.props?.['aria-label'] === `Use default ${name} thresholds`)
+      assert.equal(button.props.type, 'button')
+      button.props.onClick()
+      for (const [i, row] of rows.entries()) {
+        if (i === index) {
+          assert.equal(row.minimum, sensorThresholds.DEFAULT_SENSOR_THRESHOLDS[row.metric].min?.toString() ?? '')
+          assert.equal(row.maximum, sensorThresholds.DEFAULT_SENSOR_THRESHOLDS[row.metric].max?.toString() ?? '')
+        } else assert.deepEqual(plain(row), before[i], 'Other sensor drafts stay unchanged')
+      }
+      assert.equal(calls.length, 0)
+    }
+    h.state.thresholdRows.value[0].minimum = '10'; h.state.error.value = 'Old error'
+    tree.find(n => n.type === 'button' && n.children === 'Use all defaults').props.onClick()
+    assert.deepEqual(plain(h.state.thresholdRows.value), [
+      { metric: 'temperature', minimum: '26', maximum: '40' },
+      { metric: 'humidity', minimum: '40', maximum: '80' },
+      { metric: 'soilMoisture', minimum: '2300', maximum: '2700' },
+      { metric: 'rainfall', minimum: '2200', maximum: '' },
+    ])
+    assert.equal(h.state.error.value, '')
+    assert.equal(calls.length, 0)
+    await h.state.saveDevice()
+    assert.deepEqual(plain(calls.find(call => call[1] === 'PATCH')[2]), { thresholds: {
+      temperature: { min: 26, max: 40 }, humidity: { min: 40, max: 80 },
+      soilMoisture: { min: 2300, max: 2700 }, rainfall: { min: 2200 },
+    } })
+  } finally { h.stop() }
+})
+
+test('failed batch threshold saves retain all drafts and can be retried with one request', async () => {
+  let rejectSave = true
+  const calls = [], sensor = device({ device_type: 'Sensor' })
+  const h = harness('views/AdminOperationsView.vue', async (...args) => {
+    calls.push(args)
+    if (args[1] === 'PATCH' && rejectSave) throw Error('Save unavailable')
+    return args[0] === '/devices' ? { devices: [sensor] } : args[0] === '/readings' ? { readings: [] } : {}
+  })
+  try {
+    h.state.open('threshold', sensor)
+    h.state.thresholdRows.value[0].maximum = '35'
+    h.state.thresholdRows.value[1].minimum = '25'
+    const draft = plain(h.state.thresholdRows.value)
+    await h.state.saveDevice()
+    assert.equal(h.state.modal.value, 'threshold'); assert.equal(h.state.operationBusy.value, false)
+    assert.equal(h.state.error.value, 'Save unavailable')
+    assert.deepEqual(plain(h.state.thresholdRows.value), draft)
+    assert.equal(calls.length, 1)
+    rejectSave = false; await h.state.saveDevice()
+    assert.deepEqual(plain(calls[1]), plain(calls[0]))
+    assert.equal(h.state.modal.value, null)
   } finally { h.stop() }
 })
 const key = value => ({ key: value, preventDefault() {}, stopPropagation() {} })

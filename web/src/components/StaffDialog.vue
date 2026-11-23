@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-const props = defineProps<{ title: string; busy?: boolean }>()
+const props = defineProps<{ title: string; busy?: boolean; variant?: 'thresholds' }>()
 const emit = defineEmits<{ close: [] }>()
 const card = ref<HTMLElement | null>(null)
 let previous: HTMLElement | null = null
@@ -57,6 +57,7 @@ onBeforeUnmount(() => {
       <section
         ref="card"
         class="staff-dialog-card"
+        :class="{ 'staff-dialog-card--thresholds': variant === 'thresholds' }"
         role="dialog"
         aria-modal="true"
         :aria-label="title"
@@ -114,6 +115,32 @@ header button {
   font-size: 24px;
   cursor: pointer;
 }
+.staff-dialog-card--thresholds {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 760px);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 24px;
+}
+.staff-dialog-card--thresholds > header {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 28px 30px 20px;
+}
+.staff-dialog-card--thresholds h2 {
+  font-size: clamp(21px, 3vw, 28px);
+  line-height: 1.25;
+}
+.staff-dialog-card--thresholds header button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  padding: 0;
+  color: #7d8981;
+}
 @media (max-width: 500px) {
   .staff-dialog-mask {
     padding: 12px;
@@ -121,6 +148,13 @@ header button {
   .staff-dialog-card {
     padding: 18px;
     max-height: calc(100dvh - 24px);
+  }
+  .staff-dialog-card--thresholds {
+    padding: 0;
+    border-radius: 18px;
+  }
+  .staff-dialog-card--thresholds > header {
+    padding: 20px 18px 16px;
   }
 }
 </style>

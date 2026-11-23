@@ -1643,6 +1643,8 @@
     "minimum": "最低值",
     "maximum": "最高值",
     "configuredlimits": "已配置限值",
+    "range": "范围",
+    "defaultrange": "默认范围",
     "belowminimum": "低于最低值",
     "abovemaximum": "高于最高值",
     "withinrange": "在范围内",

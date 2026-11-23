@@ -1642,6 +1642,8 @@
     "minimum": "Minimum",
     "maximum": "Maksimum",
     "configuredlimits": "Had ditetapkan",
+    "range": "Julat",
+    "defaultrange": "Julat lalai",
     "belowminimum": "Di bawah minimum",
     "abovemaximum": "Melebihi maksimum",
     "withinrange": "Dalam julat",

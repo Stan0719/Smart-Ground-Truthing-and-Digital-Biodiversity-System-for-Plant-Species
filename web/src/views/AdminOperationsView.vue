@@ -9,7 +9,7 @@ import AdminTableIdentifier from '../components/AdminTableIdentifier.vue'
 import StaffDialog from '../components/StaffDialog.vue'
 import { api, logout, type AuthUser } from '../services/auth'
 import { plantApi, type Device } from '../services/plantApi'
-import { sensorLimits, thresholdLabel, type SensorThresholds } from '../services/sensorThresholds'
+import { DEFAULT_SENSOR_THRESHOLDS, sensorLimits, thresholdLabel, type SensorThresholds } from '../services/sensorThresholds'
 const { t } = useI18n()
 const da = (key: string) => t('adminDeviceAssignment.' + key)
 const assignmentLabel = (device: Device) => { const a = currentAssignment(device); return a.state === 'assigned' ? plantLabel(a.id) : da(a.state) }
@@ -71,9 +71,31 @@ const settings = ref({ session_hours: 8, login_limit: 30 }),
 const modal = ref<'register' | 'edit' | 'threshold' | 'settings' | null>(null),
   selected = ref<Device | null>(null),
   key = ref('')
-const form = ref({ name: '', status: 'Active', metric: 'temperature', minimum: '', maximum: '', plant: '' })
+const form = ref({ name: '', status: 'Active', plant: '' })
+const thresholdRows = ref<{ metric: string; minimum: string; maximum: string }[]>([])
 const roles = ['Administrator', 'Conservation Officer', 'Botanist', 'Visitor', 'Guest']
-const metrics = ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall', 'sound']
+const metrics = ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall']
+const thresholdMetrics = metrics.filter(metric => metric !== 'movement')
+const metricUnits: Record<string, string> = {
+  temperature: '°C',
+  humidity: '%',
+  soilMoisture: 'raw ADC',
+  rainfall: 'raw ADC',
+}
+const metricLabels: Record<string, string> = {
+  temperature: 'Temperature',
+  humidity: 'Humidity',
+  soilMoisture: 'Soil moisture',
+  rainfall: 'Rainfall',
+}
+// Starting values for unconfigured metrics; changes apply when the form is saved.
+const thresholdDefaults = DEFAULT_SENSOR_THRESHOLDS
+const metricIcons: Record<string, string[]> = {
+  temperature: ['M14 14.8V5a3 3 0 0 0-6 0v9.8a5 5 0 1 0 6 0Z', 'M11 8v9', 'M9 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0'],
+  humidity: ['M12 3C9 7 5 11 5 15a7 7 0 0 0 14 0c0-4-4-8-7-12Z'],
+  soilMoisture: ['M12 21v-8', 'M12 15C5 15 3 11 3 7c6 0 9 2 9 8Z', 'M12 12c0-6 3-9 9-9 0 6-3 9-9 9Z'],
+  rainfall: ['M6 15a5 5 0 0 1-1-10 6 6 0 0 1 11-1 5 5 0 1 1 2 11H6Z', 'm8 18-1 3m6-3-1 3m6-3-1 3'],
+}
 const date = (value: string | number | null | undefined) => {
   if (value == null) return 'No report received'
   const d = new Date(value)
@@ -82,12 +104,13 @@ const date = (value: string | number | null | undefined) => {
 const label = (value: string) => value.replaceAll('_', ' ').replaceAll('.', ' · ')
 const measurement = (values: Record<string, number>) =>
   Object.entries(values)
+    .filter(([metric]) => metrics.includes(metric))
     .map(
       ([metric, value]) =>
         `${metric}: ${value}${metric === 'temperature' ? ' °C' : metric === 'humidity' ? ' %' : ''}`,
     )
     .join(' · ')
-const configuredThresholds = (values: SensorThresholds) => Object.entries(values).map(([metric, limits]) => `${metric}: ${thresholdLabel(limits)}`).join(' · ')
+const configuredThresholds = (values: SensorThresholds) => Object.entries(values).filter(([metric]) => metrics.includes(metric)).map(([metric, limits]) => `${metric}: ${thresholdLabel(limits)}`).join(' · ')
 const filteredDevices = computed(() =>
   devices.value.filter(
     (d) =>
@@ -171,22 +194,30 @@ function open(kind: 'register' | 'edit' | 'threshold', device?: Device) {
   form.value = {
     name: device?.name || '',
     status: device?.status || 'Active',
-    metric: 'temperature',
     plant: kind === 'edit' ? KEEP_ASSIGNMENT : '',
-    minimum: sensorLimits(device?.thresholds.temperature)?.min?.toString() ?? '',
-    maximum: sensorLimits(device?.thresholds.temperature)?.max?.toString() ?? '',
   }
+  thresholdRows.value = thresholdMetrics.map(metric => {
+    const limits = sensorLimits(device?.thresholds[metric])
+    const defaults = thresholdDefaults[metric]!
+    return {
+      metric,
+      minimum: (limits || defaults).min?.toString() ?? '',
+      maximum: (limits || defaults).max?.toString() ?? '',
+    }
+  })
   error.value = ''
   modal.value = kind
 }
-watch(
-  () => form.value.metric,
-  (metric) => {
-    const limits = sensorLimits(selected.value?.thresholds[metric])
-    form.value.minimum = limits?.min?.toString() ?? ''
-    form.value.maximum = limits?.max?.toString() ?? ''
-  },
-)
+function resetThresholds(metric?: string) {
+  if (operationBusy.value) return
+  for (const row of thresholdRows.value) {
+    if (metric && row.metric !== metric) continue
+    const defaults = thresholdDefaults[row.metric]!
+    row.minimum = defaults.min?.toString() ?? ''
+    row.maximum = defaults.max?.toString() ?? ''
+  }
+  error.value = ''
+}
 async function saveDevice() {
   if (operationBusy.value) return
   operationBusy.value = true
@@ -208,13 +239,19 @@ async function saveDevice() {
       message.value = 'Sensor updated.'
     } else if (modal.value === 'threshold' && selected.value) {
       if (deviceType(selected.value) !== 'Sensor') throw Error(da('thresholdUnavailable'))
-      const minimum = String(form.value.minimum).trim(), maximum = String(form.value.maximum).trim()
-      const limits = { ...(minimum ? { min: Number(minimum) } : {}), ...(maximum ? { max: Number(maximum) } : {}) }
-      if ((minimum || maximum) && !sensorLimits(limits)) throw Error('Enter finite limits with minimum no greater than maximum.')
+      const thresholds: Record<string, SensorThresholds[string] | null> = {}
+      for (const row of thresholdRows.value) {
+        if (!thresholdMetrics.includes(row.metric)) throw Error('Select a supported threshold metric.')
+        const minimum = String(row.minimum).trim(), maximum = String(row.maximum).trim()
+        const limits = { ...(minimum ? { min: Number(minimum) } : {}), ...(maximum ? { max: Number(maximum) } : {}) }
+        if ((minimum || maximum) && !sensorLimits(limits))
+          throw Error(`${metricLabels[row.metric]}: enter finite limits with minimum no greater than maximum.`)
+        thresholds[row.metric] = minimum || maximum ? limits : null
+      }
       await plantApi(`/devices/${selected.value.id}/thresholds`, 'PATCH', {
-        thresholds: { [form.value.metric]: minimum || maximum ? limits : null },
+        thresholds,
       })
-      message.value = 'Alert threshold saved.'
+      message.value = 'Alert thresholds saved.'
     }
     modal.value = null
     await load()
@@ -371,9 +408,7 @@ watch(section, () => {
                 <td v-if="deviceType(d) !== 'Sensor'">{{ da(deviceType(d) === 'Camera' ? 'cameraRules' : 'thresholdUnavailable') }}</td>
                 <td v-else>
                   {{
-                    Object.keys(d.thresholds).length
-                      ? configuredThresholds(d.thresholds)
-                      : 'No thresholds configured'
+                    configuredThresholds(d.thresholds) || 'No thresholds configured'
                   }}
                 </td>
                 <td v-if="section === 'sensors'">
@@ -431,7 +466,7 @@ watch(section, () => {
             </table>
           </div>
           <p class="muted">
-            Temperature is Celsius; humidity is percent. Soil, rain and sound values are raw sensor
+            Temperature is Celsius; humidity is percent. Soil and rain values are raw sensor
             readings until calibrated.
           </p>
         </section>
@@ -506,13 +541,14 @@ watch(section, () => {
             : modal === 'edit'
               ? 'Edit Sensor'
               : modal === 'threshold'
-                ? 'Configure Alert Threshold'
+                ? 'Configure Alert Thresholds'
                 : 'Confirm Security Changes'
         "
         :busy="operationBusy"
+        :variant="modal === 'threshold' ? 'thresholds' : undefined"
         @close="modal = null"
       >
-        <div class="staff-form">
+        <div class="staff-form" :class="{ 'threshold-dialog-content': modal === 'threshold' }">
           <p v-if="error" role="alert">{{ error }}</p>
           <template v-if="modal === 'settings'"
             ><p>
@@ -526,7 +562,7 @@ watch(section, () => {
               </button>
             </div></template
           >
-          <form v-else class="staff-form" @submit.prevent="saveDevice">
+          <form v-else class="staff-form" :class="{ 'threshold-form': modal === 'threshold' }" @submit.prevent="saveDevice">
             <template v-if="modal !== 'threshold'"
               ><label>Device name<input v-model="form.name" required maxlength="100" /></label
               ><label v-if="modal === 'edit'"
@@ -537,21 +573,33 @@ watch(section, () => {
               >
               <AdminPlantAssignment v-if="modal === 'register' || modal === 'edit'" v-model="form.plant" :editing="modal === 'edit'" :device="selected" :disabled="operationBusy" />
               </template
-            ><template v-else
-              ><p>{{ selected?.name }}</p>
-              <label
-                >Alert metric<select v-model="form.metric">
-                  <option v-for="metric in metrics" :key="metric">{{ metric }}</option>
-                </select></label
-              ><label
-                >Minimum<input v-model="form.minimum" type="number" step="any"
-              /></label>
-              <label>Maximum<input v-model="form.maximum" type="number" step="any" /></label>
-              <p>
-                An alert is generated below the minimum or above the maximum. Either limit is optional; leave both blank to disable this metric's alerts.
-              </p></template
-            >
-            <div class="actions">
+            ><div v-else class="threshold-editor">
+              <div class="threshold-device">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="9" width="12" height="10" rx="3" /><path d="M7 19v3m4-3v3M7 12v3h4v-3M16 3a7 7 0 0 1 6 6m-7-2a3 3 0 0 1 3 3" /></svg>
+                <span>{{ selected?.name }}</span>
+              </div>
+              <p class="threshold-intro">
+                Receive alerts when sensor readings drop below the minimum or exceed the maximum.
+              </p>
+              <div class="threshold-grid">
+              <fieldset v-for="row in thresholdRows" :key="row.metric" class="threshold-metric" :class="row.metric" :disabled="operationBusy" :aria-label="metricLabels[row.metric]">
+                <div class="threshold-metric-heading">
+                  <div class="threshold-metric-name">
+                    <span class="threshold-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path v-for="(path, index) in metricIcons[row.metric]" :key="index" :d="path" /></svg></span>
+                    <h3>{{ metricLabels[row.metric] }}</h3>
+                  </div>
+                  <button type="button" class="threshold-default" :aria-label="`Use default ${metricLabels[row.metric]?.toLowerCase()} thresholds`" :disabled="operationBusy" @click="resetThresholds(row.metric)">Use default</button>
+                </div>
+                <div class="threshold-range">
+                  <label>Min<span class="threshold-input"><input v-model="row.minimum" type="number" step="any" :disabled="operationBusy" :aria-label="`${metricLabels[row.metric]} minimum (${metricUnits[row.metric]})`" /><span aria-hidden="true">{{ metricUnits[row.metric] }}</span></span></label>
+                  <label>Max<span class="threshold-input"><input v-model="row.maximum" type="number" step="any" :disabled="operationBusy" :aria-label="`${metricLabels[row.metric]} maximum (${metricUnits[row.metric]})`" /><span aria-hidden="true">{{ metricUnits[row.metric] }}</span></span></label>
+                </div>
+              </fieldset>
+              </div>
+              <p class="threshold-hint">Leave both limits blank to disable a metric's alerts. Save changes to apply all thresholds.</p>
+            </div>
+            <div class="actions" :class="{ 'threshold-footer': modal === 'threshold' }">
+              <button v-if="modal === 'threshold'" class="threshold-reset" type="button" :disabled="operationBusy" @click="resetThresholds()">Use all defaults</button>
               <button type="button" :disabled="operationBusy" @click="modal = null">Cancel</button
               ><button class="primary" :disabled="operationBusy">
                 {{
@@ -570,3 +618,163 @@ watch(section, () => {
   </AdminPageShell>
 </template>
 <style src="../styles/staff-workspace.css"></style>
+<style scoped>
+.threshold-dialog-content,
+.threshold-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0;
+}
+.threshold-dialog-content > [role='alert'] {
+  flex-shrink: 0;
+  margin: 0 30px 12px;
+}
+.threshold-editor {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 30px 22px;
+}
+.threshold-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  padding: 7px 13px;
+  border: 1px solid #c4d9cd;
+  border-radius: 24px;
+  background: #e4f0e8;
+  color: #446d59;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.threshold-device svg { width: 22px; height: 22px; flex-shrink: 0; }
+.threshold-editor .threshold-intro {
+  margin: 14px 0 18px;
+  font-size: 14px;
+  color: #293c33;
+}
+.threshold-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.threshold-metric {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #c8d1ca;
+  border-radius: 14px;
+  background: #fff;
+  --metric-color: #b97926;
+  --metric-tint: #fff0df;
+}
+.threshold-metric.humidity { --metric-color: #5973a7; --metric-tint: #e4eaf7; }
+.threshold-metric.soilMoisture { --metric-color: #4e7e54; --metric-tint: #dfeedd; }
+.threshold-metric.rainfall { --metric-color: #535e85; --metric-tint: #e1e4f0; }
+.threshold-metric-heading,
+.threshold-metric-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.threshold-metric-heading { justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.threshold-metric-name h3 { margin: 0; font-size: 16px; line-height: 1.3; color: #243d30; }
+.threshold-form .threshold-default {
+  padding: 5px 7px;
+  border-color: #d7e2d9;
+  border-radius: 6px;
+  background: #f4f8f4;
+  color: #38634f;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.threshold-form .threshold-default:hover { background: #e8f0e9; }
+.threshold-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  color: var(--metric-color);
+  background: var(--metric-tint);
+}
+.threshold-icon svg { width: 21px; height: 21px; }
+.threshold-range label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #34483b;
+}
+.threshold-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.threshold-input {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid #c5cfc6;
+  border-radius: 10px;
+  background: #fff;
+}
+.threshold-input:focus-within { outline: 2px solid #33745d; outline-offset: 1px; }
+.threshold-form .threshold-input input {
+  min-width: 0;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: 10px;
+  outline: 0;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 400;
+  color: #263d30;
+  appearance: textfield;
+}
+.threshold-input input::-webkit-inner-spin-button,
+.threshold-input input::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
+.threshold-input > span { padding-right: 8px; white-space: nowrap; font-size: 11px; font-weight: 400; color: #7c857e; }
+.threshold-form .threshold-input input:disabled { color: #7e897f; opacity: 1; -webkit-text-fill-color: #7e897f; }
+.threshold-editor .threshold-hint { margin-top: 14px; font-size: 12px; }
+.threshold-form .threshold-footer {
+  flex-shrink: 0;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 10px;
+  padding: 18px 30px;
+  border-top: 1px solid #d7dfd8;
+  background: #fff;
+}
+.threshold-footer > button { padding: 11px 18px; }
+.threshold-footer > button:not(.primary):not(.threshold-reset) { border-color: #38634f; color: #315b47; }
+.threshold-footer .primary { background: #285c46; }
+.threshold-footer .threshold-reset {
+  margin-right: auto;
+  padding-left: 0;
+  border-color: transparent;
+  background: transparent;
+  color: #6e7c70;
+}
+@media (max-width: 600px) {
+  .threshold-grid { grid-template-columns: 1fr; gap: 12px; }
+}
+@media (max-width: 500px) {
+  .threshold-editor { padding: 0 18px 16px; }
+  .threshold-dialog-content > [role='alert'] { margin-inline: 18px; }
+  .threshold-metric { padding: 14px 12px; }
+  .threshold-metric-name h3 { font-size: 16px; }
+  .threshold-range { gap: 10px; }
+  .threshold-form .threshold-input input { padding: 10px 8px; }
+  .threshold-form .threshold-footer { padding: 14px 18px; flex-wrap: wrap; gap: 8px; }
+  .threshold-footer > button { padding: 10px 12px; }
+}
+@media (max-width: 350px) {
+  .threshold-range { grid-template-columns: 1fr; }
+  .threshold-footer .threshold-reset {
+    flex-basis: 100%;
+    text-align: left;
+  }
+}
+</style>
