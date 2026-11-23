@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { AppState, View, StyleSheet, ScrollView, TouchableOpacity, Image, RefreshControl, Modal } from "react-native";
 import Text from "../components/ScaledText";
+import PreviewableImage from "../components/PreviewableImage";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -344,7 +345,7 @@ export default function PlantDetail({
                 accessibilityRole="button"
                 accessibilityLabel={`${t("plantDetail.photoNumber", { value0: index + 1 })}, ${index + 1} / ${displayablePhotos.length}`}
                 accessibilityState={{ selected: index === activePhotoIndex }}
-                onPress={() => setSelectedPhotoUri(photo.uri)}
+                onPress={() => { setSelectedPhotoUri(photo.uri); setImageViewerVisible(true); }}
                 style={[styles.thumbnailButton, index === activePhotoIndex && styles.thumbnailSelected]}
               >
                 <Image source={{ uri: photo.uri, ...(photo.headers ? { headers: photo.headers } : {}) }} style={styles.thumbnailImage} resizeMode="cover" onError={() => failPhoto(photo.uri)} />
@@ -962,7 +963,7 @@ function ObservationPhotos({ photos }) {
       <Text style={styles.historyLabel}>{t("plantDetail.observationPhotos")}</Text>
       <View style={styles.observationPhotosRow}>
         {photos.map((photo, index) => (
-          <Image
+          <PreviewableImage
             key={photo.id}
             source={{ uri: photo.uri, ...(photo.headers ? { headers: photo.headers } : {}) }}
             style={styles.observationPhoto}

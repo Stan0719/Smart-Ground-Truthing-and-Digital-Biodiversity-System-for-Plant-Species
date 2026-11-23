@@ -1452,7 +1452,30 @@
       "noCriticalIncidents": "Tiada insiden kritikal",
       "auditEyebrow": "Jejak Audit Pentadbiran",
       "recentActivity": "Aktiviti Sistem Terkini",
-      "searchPlaceholder": "Cari pelaku, tindakan, modul atau IP..."
+      "searchPlaceholder": "Cari pelaku, tindakan, modul atau IP...",
+      "tableLabel": "Rekod aktiviti sistem",
+      "time": "Masa",
+      "account": "Akaun",
+      "actor": "Pelaku",
+      "action": "Tindakan",
+      "anonymous": "Tanpa nama",
+      "actorUnavailable": "Tidak direkodkan",
+      "noRecords": "Tiada aktiviti akaun direkodkan.",
+      "actions": {
+        "loginAttempt": "Cubaan log masuk",
+        "authenticated": "Log masuk berjaya",
+        "invalidCredentials": "Log masuk gagal",
+        "accountBlocked": "Log masuk akaun disekat",
+        "throttled": "Cubaan log masuk dihadkan",
+        "faceAttempt": "Cubaan Face ID",
+        "faceAuthenticated": "Log masuk Face ID berjaya",
+        "faceAccountBlocked": "Log masuk Face ID disekat",
+        "accountCreated": "Akaun dicipta",
+        "invitationCreated": "Jemputan dicipta",
+        "accountArchived": "Akaun diarkibkan",
+        "accountReactivated": "Akaun diaktifkan semula",
+        "securitySettingsChanged": "Tetapan keselamatan diubah"
+      }
     },
     "export": {
       "eyebrow": "Eksport Aktiviti",

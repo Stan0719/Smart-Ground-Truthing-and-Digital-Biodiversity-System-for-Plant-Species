@@ -1,5 +1,6 @@
+import PreviewableImage from "../components/PreviewableImage";
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import Text from "../components/ScaledText";
 import { useFocusEffect } from "@react-navigation/native";
 import BackButton from "../components/BackButton";
@@ -137,7 +138,7 @@ export default function RecordVersionHistory({ route, navigation }) {
             : <Text style={styles.muted}>{t("recordEdits.originalSnapshotUnavailable")}</Text>}
         </View>
         <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.versionPhotos")}</Text>
-          {photos.length ? <View style={styles.photoRow}>{photos.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View>
+          {photos.length ? <View style={styles.photoRow}>{photos.map((source, index) => <PreviewableImage key={index} source={source} style={styles.photo} />)}</View>
             : <Text style={styles.muted}>{t("recordEdits.noPhotos")}</Text>}
         </View>
       </>}
@@ -186,11 +187,11 @@ export default function RecordVersionHistory({ route, navigation }) {
           : <Text style={styles.muted}>{t("recordEdits.noFieldChanges")}</Text>}
         {selected.record_type === "plant" && (photoDiff.added.length || photoDiff.removed.length) > 0 && <Text style={styles.value}>
           {t("recordEdits.photosChanged", { removed: photoDiff.removed.length, added: photoDiff.added.length })}</Text>}
-        {!!removedImages.length && <><Text style={styles.label}>{t("recordEdits.removedPhotos")}</Text><View style={styles.photoRow}>{removedImages.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View></>}
-        {!!addedImages.length && <><Text style={styles.label}>{t("recordEdits.addedPhotos")}</Text><View style={styles.photoRow}>{addedImages.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View></>}
+        {!!removedImages.length && <><Text style={styles.label}>{t("recordEdits.removedPhotos")}</Text><View style={styles.photoRow}>{removedImages.map((source, index) => <PreviewableImage key={index} source={source} style={styles.photo} />)}</View></>}
+        {!!addedImages.length && <><Text style={styles.label}>{t("recordEdits.addedPhotos")}</Text><View style={styles.photoRow}>{addedImages.map((source, index) => <PreviewableImage key={index} source={source} style={styles.photo} />)}</View></>}
       </View>}
       <View style={styles.card}><Text style={styles.heading}>{t("recordEdits.versionPhotos")}</Text>
-        {photos.length ? <View style={styles.photoRow}>{photos.map((source, index) => <Image key={index} source={source} style={styles.photo} />)}</View>
+        {photos.length ? <View style={styles.photoRow}>{photos.map((source, index) => <PreviewableImage key={index} source={source} style={styles.photo} />)}</View>
           : <Text style={styles.muted}>{t("recordEdits.noPhotos")}</Text>}
       </View>
     </>}

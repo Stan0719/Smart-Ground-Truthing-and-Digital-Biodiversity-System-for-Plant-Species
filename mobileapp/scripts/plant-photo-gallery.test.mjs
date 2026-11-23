@@ -46,7 +46,7 @@ test('Plant Detail selection, viewer navigation and plant-change reset use the s
   const { functions: galleryFunctions } = loadGallery()
   assert.match(source, /setSelectedPhotoUri\(null\)/)
   assert.match(source, /setFailedPhotoUris\(\[\]\)/)
-  assert.match(source, /onPress=\{\(\) => setSelectedPhotoUri\(photo\.uri\)\}/)
+  assert.match(source, /onPress=\{\(\) => \{ setSelectedPhotoUri\(photo\.uri\); setImageViewerVisible\(true\); \}\}/)
   assert.match(source, /activePhotoIndex \+ 1\} \/ \{displayablePhotos\.length/)
   assert.match(source, /<Modal visible=\{imageViewerVisible && Boolean\(selectedPhoto\)\}/)
   assert.match(source, /onRequestClose=\{\(\) => setImageViewerVisible\(false\)\}/)
@@ -154,11 +154,13 @@ test('Plant Detail thumbnail taps select a distinct image and the viewer navigat
     '../components/BotanicalSkeleton': { DetailSkeletonContent: 'DetailSkeletonContent' },
     '@react-navigation/native': { useFocusEffect: () => {} },
     '../utils/plantPhotoGallery': galleryFunctions,
+    '../hooks/useDatabaseTranslations': { default: () => (field) => field.sourceText },
   }
   const module = { exports: {} }
   new Function('require', 'module', 'exports', compiled)((name) => {
     if (name === '../components/ScaledText') return { default: 'Text', ScaledTextInput: 'TextInput', __esModule: true };
     if (name === '../components/DiscoverableScrollView') return { default: 'ScrollView', __esModule: true }
+    if (name === '../components/PreviewableImage') return { default: 'Image', __esModule: true }
     assert.ok(name in dependencies, name)
     const dependency = dependencies[name]
     return name === 'react' ? dependency : { ...dependency, __esModule: true }
@@ -283,7 +285,7 @@ test('Plant Detail title uses scientific name then localized Plant ID for Botani
   const title = source.slice(start, source.indexOf('<View style={styles.heroBadges}>', start))
   const roleLogic = source.match(/const useScientificHeading = .*;/)[0]
   const styleSource = source.slice(source.indexOf('const styles = StyleSheet.create('))
-  const compiled = ts.transpileModule(`${styleSource}\nmodule.exports = (user, plant, selectedSpecies) => { ${roleLogic} return <>${title}</>; };`, {
+  const compiled = ts.transpileModule(`${styleSource}\nmodule.exports = (user, plant, selectedSpecies) => { const translatedSpeciesCommonName = selectedSpecies.name; ${roleLogic} return <>${title}</>; };`, {
     compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
   }).outputText
   for (const language of ['en', 'ms', 'zh']) {

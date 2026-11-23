@@ -1,6 +1,7 @@
+import PreviewableImage from "../components/PreviewableImage";
 import { useAppTranslation, t, translateLabel, translateUIMessage, formatDateTime } from "../translations/i18n";
 import React, { useCallback, useRef, useState } from "react";
-import { FlatList, Image, RefreshControl, StyleSheet, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { FlatList, RefreshControl, StyleSheet, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import Text, { ScaledTextInput as TextInput } from "../components/ScaledText";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
@@ -23,7 +24,7 @@ function ObservationThumbnail({ sources }) {
   useAppTranslation();
   const [photoIndex, setPhotoIndex] = useState(0);
   const source = sources?.[photoIndex];
-  return source ? <Image source={source} style={styles.thumbnail} resizeMode="cover"
+  return source ? <PreviewableImage source={source} style={styles.thumbnail} resizeMode="cover"
     accessibilityLabel={t("submissions.photo")} onError={() => setPhotoIndex((index) => index + 1)} />
     : <View style={styles.thumbnailPlaceholder}><Ionicons name="leaf-outline" size={25} color="#2F6B4F" /></View>;
 }

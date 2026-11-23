@@ -83,6 +83,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   min-height: 39px;
   border-radius: 11px;
   background: #fff;
+  color: #245443;
 }
 .profile-wrap {
   position: relative;
@@ -169,7 +170,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleOutsideClick))
   .dashboard-language :deep(.language-trigger) {
     min-height: 35px;
     padding-inline: 9px;
-    color: #3f7777;
+    color: #245443;
   }
   .dashboard-language :deep(.language-full) {
     display: none;

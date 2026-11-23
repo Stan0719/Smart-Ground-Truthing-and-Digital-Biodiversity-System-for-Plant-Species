@@ -1,3 +1,4 @@
+import PreviewableImage from "../components/PreviewableImage";
 import { useAppTranslation, t, translateLabel, translateUIMessage } from "../translations/i18n";
 // Home.js
 import LanguageSelector from "../components/LanguageSelector";
@@ -10,7 +11,6 @@ import {
   View,
   StyleSheet,
   ImageBackground,
-  Image,
   ScrollView,
   TouchableOpacity,
   Dimensions,
@@ -88,7 +88,7 @@ export function SpeciesCardImage({ species }) {
     );
   }
 
-  return <Image source={source} style={styles.plantImageActual} resizeMode="cover" onError={() => setFailedSource(source)} />;
+  return <PreviewableImage source={source} style={styles.plantImageActual} resizeMode="cover" onError={() => setFailedSource(source)} />;
 }
 
 
@@ -288,7 +288,7 @@ const AboutImageStack = () => {
                 }}
                 style={styles.aboutStackCardPressable}
               >
-                <Image
+                <PreviewableImage
                   source={image.source}
                   style={styles.aboutStackImage}
                   resizeMode="cover"
