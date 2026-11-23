@@ -24,8 +24,8 @@ test("complete persisted operational reports: statuses, boundaries, no double-co
   assert.equal(observations.statistics[0].value, 505);
   assert.deepEqual(observations.statistics.slice(1).map(s => s.value), [101,101,101,101,101]);
   assert.equal(observations.chart.series.reduce((sum, series) => sum + series.values.reduce((a,b) => a+b,0),0), 505);
-  assert.equal(observations.bucket, 'week'); assert.equal(observations.rows[0][0], '2026-10-26');
-  assert.equal((await generate(pool, 'observations', {})).bucket, 'month');
+  assert.equal(observations.bucket, 'day'); assert.equal(observations.rows[0][0], '2026-11-01');
+  assert.equal((await generate(pool, 'observations', {})).bucket, 'day');
   assert.equal((await generate(pool, 'observations', {})).statistics[0].value, 507);
   await pool.query("INSERT INTO iot_device(id,name,plant_id,key_hash) VALUES('sensor','Sensor one',1,'secret-key'),('sensor2','Sensor two',NULL,'secret-key2')");
   for (const [id, timestamp, value] of [['a','2026-10-31T16:00:00Z',{temperature:0,humidity:80,soilMoisture:300}],['b','2026-10-31T17:00:00Z',{humidity:70}],['c','2026-10-31T18:00:00Z',{temperature:20}],['d','2026-11-01T16:00:00Z',{temperature:999}]]) await pool.query('INSERT INTO sensor_reading(id,device_id,"values",created_at) VALUES($1,\'sensor\',$2,$3)', [id, JSON.stringify(value), timestamp]);

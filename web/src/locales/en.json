@@ -2448,7 +2448,7 @@
         "observationStorySingle": "Across {periodCount} reporting periods, {total} observations were recorded. In the latest shown period ({latestPeriod}), {latestTotal} were created; {topStatus} is the largest current status ({statusCount}).",
         "observationStoryChange": "In {latestPeriod}, {latestTotal} observations were created, {changeDirection} by {changeAmount} from the previous shown period, {previousPeriod} ({previousTotal}). {topStatus} is the most common current status ({statusCount}).",
         "observationStoryNoChange": "In {latestPeriod}, {latestTotal} observations were created, unchanged from the previous shown period, {previousPeriod}. {topStatus} is the most common current status ({statusCount}).",
-        "observationStoryNote": "Periods follow their weekly or monthly grouping. Records are grouped by creation date, while statuses show their current review state; drafts are excluded.",
+        "observationStoryNote": "Periods use daily, weekly or monthly grouping based on the data span. Records are grouped by creation date, while statuses show their current review state; drafts are excluded.",
         "observationView": "Observation report view",
         "selectedObservationPeriod": "Selected period",
         "clearObservationPeriod": "Clear period selection",
