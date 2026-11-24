@@ -81,7 +81,11 @@ test('latest and historical tables derive conditions from each row without chang
       for (const tableClass of ['iot-reading-table', 'iot-history-table']) {
         const table = h.render().find(n => n.type === 'table' && n.props.class.includes(tableClass))
         const cells = flat(table).filter(n => n.type === 'td')
-        const cellValue = cell => Array.isArray(cell.children) ? cell.children[0].children : cell.children
+        const cellValue = cell => {
+          const metric = flat(cell).find(n => n.type?.name === 'SensorThresholdStatus.vue')
+          return metric ? metric.props.value == null ? '\u2014' : String(metric.props.value)
+            : Array.isArray(cell.children) ? cell.children[0].children : cell.children
+        }
         assert.equal(cellValue(cells[5]), soil === null ? '\u2014' : String(soil))
         assert.equal(cells[6].children, expectedSoil)
         assert.equal(cellValue(cells[7]), rain === null ? '\u2014' : String(rain))
@@ -624,8 +628,9 @@ test('raw ADC presentation preserves motion mapping and inventory actions', asyn
   try {
     await h.state.loadDevices()
     const nodes = h.render()
-    assert.ok(nodes.some(n => n.children === '4095'))
-    assert.ok(nodes.some(n => n.children === '123'))
+    assert.ok(nodes.some(n => n.type?.name === 'SensorThresholdStatus.vue' && n.props.metric === 'soilMoisture' && n.props.value === 4095 && n.props.unit === 'raw ADC'))
+    assert.ok(nodes.some(n => n.type?.name === 'SensorThresholdStatus.vue' && n.props.metric === 'rainfall' && n.props.value === 123 && n.props.unit === 'raw ADC'))
+    assert.equal(nodes.filter(n => n.type?.name === 'SensorThresholdStatus.vue').length, 4, 'Only environmental readings have threshold summaries')
     assert.ok(nodes.some(n => n.children === 'No motion'))
     assert.ok(nodes.some(n => n.children === 'Dry'))
     assert.ok(nodes.some(n => n.children === 'Wet surface'))

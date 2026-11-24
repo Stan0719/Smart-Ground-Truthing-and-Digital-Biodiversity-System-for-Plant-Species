@@ -20,7 +20,13 @@ async function generateOperationalReport(pool, category, query) {
   if (category === "observations") {
     // Current review status of non-draft records CREATED in the period. No joins
     // to reviews/receipts: initial, subsequent and legacy origins count once.
-    const bucket = scope.startDate && (Date.parse(scope.endDate) - Date.parse(scope.startDate)) / 86400000 <= 120 ? "week" : "month";
+    const spanResult = await pool.query(`SELECT min(created_at) AS first_at, max(created_at) AS last_at
+      FROM plant_observation WHERE status <> 'Draft' AND ($1::timestamptz IS NULL OR created_at >= $1::timestamptz) AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)`, args);
+    const firstAt = spanResult.rows[0]?.first_at, lastAt = spanResult.rows[0]?.last_at;
+    const observedSpan = firstAt && lastAt ? (Date.parse(lastAt) - Date.parse(firstAt)) / 86400000 : null;
+    const requestedSpan = scope.startDate ? (Date.parse(scope.endDate) - Date.parse(scope.startDate)) / 86400000 : Infinity;
+    const spanDays = observedSpan ?? requestedSpan;
+    const bucket = spanDays <= 30 ? "day" : spanDays <= 120 ? "week" : "month";
     const result = await pool.query(`SELECT to_char(date_trunc($3::text,created_at AT TIME ZONE 'Asia/Kuala_Lumpur'),'YYYY-MM-DD') AS period,status,count(*) AS count
       FROM plant_observation WHERE status <> 'Draft' AND ($1::timestamptz IS NULL OR created_at >= $1::timestamptz) AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
       GROUP BY 1,status ORDER BY 1,status`, [...args, bucket]);

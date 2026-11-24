@@ -476,17 +476,16 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
               </td>
               <td><MonitoringIdentifier :value="item.device.sensor_id" :labels="deviceLabels" /></td>
               <td>{{ plantDisplayId(item.reading) }}</td>
-              <td>{{ valueOrDash(item.reading.temperature_c, ' °C') }}<SensorThresholdStatus :value="item.reading.temperature_c" :configured="item.device.thresholds?.temperature" /></td>
-              <td>{{ valueOrDash(item.reading.humidity, '%') }}<SensorThresholdStatus :value="item.reading.humidity" :configured="item.device.thresholds?.humidity" /></td>
-              <td>{{ valueOrDash(item.reading.soil_moisture) }}<SensorThresholdStatus :value="item.reading.soil_moisture" :configured="item.device.thresholds?.soilMoisture" /></td>
+              <td><SensorThresholdStatus :value="item.reading.temperature_c" :configured="item.device.thresholds?.temperature" metric="temperature" unit="°C" /></td>
+              <td><SensorThresholdStatus :value="item.reading.humidity" :configured="item.device.thresholds?.humidity" metric="humidity" unit="%" /></td>
+              <td><SensorThresholdStatus :value="item.reading.soil_moisture" :configured="item.device.thresholds?.soilMoisture" metric="soilMoisture" unit="raw ADC" /></td>
               <td>{{ soilCondition(item.reading.soil_moisture) }}</td>
-              <td>{{ valueOrDash(item.reading.rainfall_mm) }}<SensorThresholdStatus :value="item.reading.rainfall_mm" :configured="item.device.thresholds?.rainfall" /></td>
+              <td><SensorThresholdStatus :value="item.reading.rainfall_mm" :configured="item.device.thresholds?.rainfall" metric="rainfall" unit="raw ADC" /></td>
               <td>{{ surfaceCondition(item.reading.rainfall_mm) }}</td>
               <td>
                 <span class="badge" :class="item.reading.motion_detected ? 'high' : 'approved'">{{
                   motionValue(item.reading)
                 }}</span>
-                <SensorThresholdStatus :value="item.reading.motion_detected == null ? null : Number(item.reading.motion_detected)" :configured="item.device.thresholds?.movement" />
               </td>
               <td><span class="badge sensor-health" :class="sensorHealthClass(item.reading.dht_status)">{{ dhtStatusValue(item.reading) }}</span></td>
               <td><span class="badge sensor-health" :class="sensorHealthClass(item.reading.mpu_connected)">{{ mpuStatusValue(item.reading) }}</span></td>

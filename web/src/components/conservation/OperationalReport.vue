@@ -150,7 +150,7 @@ defineExpose({ load, exportFile, exportDocument, reportView, selectedPeriodIndex
           </strong>
         </div>
       </div>
-      <aside v-if="category === 'observations' && observationStory" class="observation-story" aria-live="polite"><h3>{{ text('observationStoryTitle') }}</h3><p>{{ observationStory }}</p><p class="story-note">{{ text('observationStoryNote') }}</p></aside>
+      <aside v-if="category === 'observations' && observationStory && report?.chart.labels.length > 1" class="observation-story" aria-live="polite"><h3>{{ text('observationStoryTitle') }}</h3><p>{{ observationStory }}</p><p class="story-note">{{ text('observationStoryNote') }}</p></aside>
       <div v-if="category === 'observations'" class="observation-view-switch" role="group" :aria-label="rt('reportView')"><button type="button" :class="{ active: reportView === 'graph' }" :aria-pressed="reportView === 'graph'" @click="reportView = 'graph'">{{ rt('graphView') }}</button><button type="button" :class="{ active: reportView === 'table' }" :aria-pressed="reportView === 'table'" @click="reportView = 'table'">{{ rt('tableView') }}</button></div>
       <p v-if="category === 'observations' && selectedPeriodLabel" class="period-selection" role="status"><strong>{{ text('selectedObservationPeriod') }}:</strong> {{ selectedPeriodLabel }} <button type="button" class="clear-period-selection" @click="selectedPeriodIndex = null">{{ text('clearObservationPeriod') }}</button></p>
       <p v-if="category === 'observations' && reportView === 'graph'" class="chart-interaction-note">{{ text('observationChartInteraction') }}</p>
