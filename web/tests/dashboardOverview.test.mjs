@@ -13,6 +13,9 @@ import * as reviewRules from '../src/services/observationReview.ts'
 import * as speciesRequestRules from '../src/services/reviewSpeciesRequest.ts'
 import { observationOrigin, readQueuePage } from '../src/services/observationQueue.ts'
 import { formatObservationId } from '../src/utils/observationId.ts'
+import * as threatAlertService from '../src/services/threatAlerts.ts'
+import { alertSource, alertStatusLabel, alertTypeLabel } from '../src/utils/threatAlertDisplay.ts'
+import { threatAlertBadgeStyle } from '../src/utils/workflowBadge.ts'
 const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'utf8')
 const source = read('views/conservation/ConservationDashboardView.vue')
 const { descriptor } = parse(source)
@@ -30,7 +33,10 @@ const seed = () => ({
     {plant_id:21,species_id:4,rbac_status:'Approved',registered_at:'2026-11-03T03:00:00Z',latitude:4,longitude:114,observed_at:'2026-11-04T12:00:00+08:00'},
     {plant_id:22,species_id:5,rbac_status:'Rejected',registered_at:'2026-11-02T03:00:00Z'},
   ],
-  alerts:[{alert_id:1,plant_id:18,alert_type:'Temperature',severity:'high',status:'New',created_at:'2026-11-05T00:00:00Z'},{alert_id:2,plant_id:21,alert_type:'Movement',severity:'medium',status:'Resolved',created_at:'2026-11-04T00:00:00Z'}],
+  alerts:[
+    {id:'alert-1',device_id:'sensor-1',reading_id:'reading-1',camera_id:null,metric:'temperature',value:42.1,status:'New',detected_at:'2026-11-05T00:00:00Z',created_at:'2026-11-05T00:00:00Z',video_path:null},
+    {id:'alert-2',device_id:'camera-2',reading_id:null,camera_id:'camera-2',metric:'human_detected',value:1,status:'Resolved',detected_at:'2026-11-04T00:00:00Z',created_at:'2026-11-04T00:00:00Z',video_path:null},
+  ], responses:[],
 })
 function nodes(root) { const all=[];const walk=node=>{if(Array.isArray(node))return node.forEach(walk);if(!node||typeof node!=='object')return;all.push(node);if(Array.isArray(node.children))walk(node.children);else if(node.children?.default)walk(node.children.default())};walk(root);return all }
 const text = root => nodes(root).filter(node=>node.type!==vue.Comment).map(node=>typeof node.children==='string'?node.children:'').join(' ')
@@ -38,7 +44,8 @@ function harness(language='en',data=seed(),transport=null) {
   const messages=JSON.parse(read(`locales/${language}.json`)),locale=vue.ref(language),calls=[],routes=[],cleanups=[]
   const resolve=key=>key.split('.').reduce((value,part)=>value?.[part],messages)
   let listener,unsubscribed=false,session={pending:false,user:{id:owner,name:'Authorized Officer',role:'Conservation Officer',status:'Active',mustChangePassword:false}}
-  const context={exports:{},Error,AbortSignal,AbortController,URLSearchParams,console,fetch:async(url,options)=>{calls.push({url,options});if(transport){const supplied=await transport(url,options);if(supplied)return supplied}const key=url.includes('/iot/')?'alerts':url.includes('/observations')?'observations':url.includes('/plants')?'plants':'species';if(url.includes('view=dashboard-counts'))return Response.json({totals:{total:data.observations.length,pending:data.observations.filter(row=>['Pending Review','Flagged','Correction Required'].includes(row.status)).length}});if(url.includes('view=dashboard')){const q=new URL(url,'http://localhost').searchParams;return Response.json({observations:data.observations.filter(row=>row.origin_type===q.get('origin_type')&&row.status==='Pending Review'),page:{has_more:false,next_cursor:null}})}return Response.json({[key]:data[key]})},require(name){
+  const translate=value=>{const key=String(value).toLowerCase().replace(/[^a-z0-9]+/g,'');return resolve(`conservationText.${key}`)||resolve(`dashboardValues.${key}`)||value}
+  const context={exports:{},Error,AbortSignal,AbortController,URLSearchParams,console,fetch:async(url,options)=>{calls.push({url,options});if(transport){const supplied=await transport(url,options);if(supplied)return supplied}const key=url.includes('/api/data/alerts')?'alerts':url.includes('/iot/')?'alerts':url.includes('/observations')?'observations':url.includes('/plants')?'plants':'species';if(url.includes('/api/data/alerts'))return Response.json({alerts:data.alerts,responses:data.responses||[]});if(url.includes('view=dashboard-counts'))return Response.json({totals:{total:data.observations.length,pending:data.observations.filter(row=>['Pending Review','Flagged','Correction Required'].includes(row.status)).length}});if(url.includes('view=dashboard')){const q=new URL(url,'http://localhost').searchParams;return Response.json({observations:data.observations.filter(row=>row.origin_type===q.get('origin_type')&&row.status==='Pending Review'),page:{has_more:false,next_cursor:null}})}return Response.json({[key]:data[key]})},require(name){
     if(name==='vue')return{...vue,onMounted(){},onBeforeUnmount:fn=>cleanups.push(fn),resolveComponent:name=>name}
     if(name==='vue-router')return{useRouter:()=>({push:value=>routes.push(value)})}
     if(name==='vue-i18n')return{useI18n:()=>({locale,te:key=>typeof resolve(key)==='string',t:(key,params={})=>Object.entries(params).reduce((value,[key,item])=>value.replaceAll('{'+key+'}',String(item)),resolve(key)||key)})}
@@ -49,6 +56,16 @@ function harness(language='en',data=seed(),transport=null) {
     if(name.endsWith('officerMonitoringDisplay'))return{monitoringDate,monitoringLabels}
     if(name.endsWith('plantId'))return{formatPlantId}
     if(name.endsWith('observationId'))return{formatObservationId}
+    if(name.endsWith('/threatAlerts'))return{...threatAlertService,loadCanonicalAlertQueue:async signal=>{
+      const response=await context.fetch('/api/data/alerts',{signal}),body=await response.json()
+      if(!response.ok||!Array.isArray(body.alerts)||!Array.isArray(body.responses))throw Error('invalid canonical alert response')
+      const alerts=body.alerts.map(item=>({...item,id:item.id,deviceId:item.device_id,readingId:item.reading_id,cameraId:item.camera_id,metric:item.metric,value:item.value,status:item.status,detectedAt:item.detected_at||item.created_at,createdAt:item.created_at,videoPath:item.video_path,responses:body.responses.filter(row=>row.alert_id===item.id).map(row=>({id:row.id,alertId:row.alert_id,officerSubject:row.officer_subject,note:row.note,status:row.status,createdAt:row.created_at}))}))
+      return{alerts,alertsCapped:false,historyCapped:false}
+    }}
+    if(name.endsWith('/threatAlertRefresh'))return{createThreatAlertRefresh:()=>({start(){},stop(){},refresh(){}})}
+    if(name.endsWith('/threatAlertDisplay'))return{alertSource,alertStatusLabel,alertTypeLabel}
+    if(name.endsWith('/workflowBadge'))return{threatAlertBadgeStyle}
+    if(name.endsWith('/useConservationText'))return{useConservationText:()=>({ct:translate})}
     if(name.endsWith('.vue'))return{__esModule:true,default:{name:name.split('/').at(-1).replace('.vue','')}}
     throw Error(name)
   }}
@@ -58,7 +75,7 @@ function harness(language='en',data=seed(),transport=null) {
   return{state,calls,routes,render:()=>context.exports.render({},[],{},vue.proxyRefs(state),{},{}),async load(){await Promise.all([state.loadObservations(),state.loadRegistrations(),state.loadFieldObservations(),state.loadPlants(),state.loadSpecies(),state.loadAlerts()]);await vue.nextTick()},session(user,pending=false){session={user,pending};listener(user,pending)},stop(){cleanups.forEach(fn=>fn());scope.stop();assert.ok(unsubscribed)}}
 }
 
-test('Overview keeps all six loaded count sources, removes per-card explanations and the two requested visible scope notes',async()=>{
+test('Overview keeps all six loaded count sources and removes visible count scope notes',async()=>{
   assert.deepEqual(template.errors,[])
   const h=harness();try{
     await h.load();assert.deepEqual(Array.from(h.state.summaries.value,card=>card[1]),[6,5,5,2,1,8])
@@ -67,8 +84,8 @@ test('Overview keeps all six loaded count sources, removes per-card explanations
     assert.equal(cards.length,6);assert.ok(cards.every(card=>!nodes(card).some(node=>node.type==='small')))
     assert.ok(cards.some(card=>text(card).includes('Observations')));assert.ok(!text(h.render()).includes('Loaded Observations'))
     assert.equal(tree.filter(node=>node.props?.class==='summary-scope').length,0)
-    assert.equal(text(h.render()).split('Observation counts cover all accessible records; other counts reflect loaded records.').length-1,1);assert.ok(!text(h.render()).includes('Approved plants with valid coordinates'))
-    assert.deepEqual(h.calls.filter(call=>!call.url.startsWith('/api/conservation/submitter-names?')).map(call=>call.url).sort(),['/api/iot/alerts','/api/observations?view=dashboard-counts','/api/observations?view=dashboard&origin_type=initial_registration&status=Pending+Review&limit=10','/api/observations?view=dashboard&origin_type=subsequent_observation&status=Pending+Review&limit=10','/api/plants','/api/species?scope=scientific'].sort())
+    assert.ok(!text(h.render()).includes('Observation counts cover all accessible records; other counts reflect loaded records.'));assert.ok(!text(h.render()).includes('Approved plants with valid coordinates'))
+    assert.deepEqual(h.calls.filter(call=>!call.url.startsWith('/api/conservation/submitter-names?')).map(call=>call.url).sort(),['/api/data/alerts','/api/observations?view=dashboard-counts','/api/observations?view=dashboard&origin_type=initial_registration&status=Pending+Review&limit=10','/api/observations?view=dashboard&origin_type=subsequent_observation&status=Pending+Review&limit=10','/api/plants','/api/species?scope=scientific'].sort())
     assert.ok(h.calls.every(call=>!call.options.method||call.options.method==='GET'))
   }finally{h.stop()}
 })
@@ -121,7 +138,88 @@ test('map, health breakdown, alerts and all navigation shortcuts retain actual s
     assert.ok(!map.props.plants.some(plant=>plant.id==='PL019'))
     for(const button of tree.filter(node=>node.type==='button'&&node.props?.onClick))button.props.onClick()
     for(const destination of ['conservation-species','conservation-reviews','conservation-observations','conservation-reports','conservation-map','conservation-alerts'])assert.ok(h.routes.some(route=>route.name===destination))
-    assert.ok(tree.some(node=>String(node.props?.class).includes('alert-severity-badge high')))
+    assert.ok(text(h.render()).includes('Temperature Threshold'))
+  }finally{h.stop()}
+})
+
+test('Conservation Alerts uses canonical alerts, sorts the newest three, and opens detail with the raw ID',async()=>{
+  const data=seed()
+  data.alerts.push(
+    {id:'alert-older',device_id:'sensor-3',reading_id:null,camera_id:null,metric:'humidity',value:81,status:'Reviewing',created_at:'2026-11-03T00:00:00Z'},
+    {id:'alert-newest',device_id:'camera-4',reading_id:null,camera_id:'camera-4',metric:'animal_detected',value:1,status:'New',created_at:'2026-11-06T00:00:00Z'},
+  )
+  const h=harness('en',data);try{
+    await h.load()
+    assert.deepEqual(h.calls.filter(call=>call.url.includes('alerts')).map(call=>call.url),['/api/data/alerts'])
+    assert.deepEqual(Array.from(h.state.recentAlerts.value,item=>item.id),['alert-newest','alert-1','alert-2'])
+    assert.equal(h.state.activeAlertCount.value,3)
+    const alertButton=nodes(h.render()).find(node=>node.type==='button'&&node.props?.class==='alert-preview')
+    alertButton.props.onClick()
+    assert.deepEqual(JSON.parse(JSON.stringify(h.routes[0])),{name:'conservation-alerts',query:{alert:'alert-newest'}})
+    const all=nodes(h.render()).find(node=>node.type==='button'&&text(node).includes('View All Alerts'))
+    all.props.onClick();assert.equal(h.routes[1].name,'conservation-alerts');assert.equal(h.routes[1].query,undefined)
+  }finally{h.stop()}
+})
+
+test('Active Threats counts only New and Reviewing canonical statuses, including saved response status changes',async()=>{
+  const data=seed();const h=harness('en',data);try{
+    await h.load();assert.equal(h.state.activeAlertCount.value,1)
+    data.alerts[0].status='Reviewing'
+    data.responses=[{id:'response-1',alert_id:'alert-1',officer_subject:'staff:officer',note:'Review started',status:'Reviewing',created_at:'2026-11-06T00:00:00Z'}]
+    await h.state.loadAlerts();assert.equal(h.state.activeAlertCount.value,1)
+    assert.equal(h.state.alerts.value[0].responses[0].status,'Reviewing')
+    data.alerts[0].status='Resolved'
+    data.responses=[{...data.responses[0],status:'Resolved',note:'Resolved'}]
+    await h.state.loadAlerts();assert.equal(h.state.activeAlertCount.value,0)
+  }finally{h.stop()}
+})
+
+test('background alert refresh retains the visible rows and KPI until canonical results arrive',async()=>{
+  const data=seed();let release=null,deferred=false
+  const h=harness('en',data,async url=>url==='/api/data/alerts'&&deferred?new Promise(resolve=>{release=()=>resolve(Response.json({alerts:data.alerts,responses:[]}))}):undefined);try{
+    await h.load();const prior=h.state.alerts.value
+    deferred=true;data.alerts[0].status='Resolved'
+    const pending=h.state.loadAlerts();await new Promise(resolve=>setImmediate(resolve))
+    assert.equal(h.state.alertsLoading.value,false);assert.equal(h.state.alerts.value,prior);assert.equal(h.state.activeAlertCount.value,1)
+    release();await pending;assert.equal(h.state.activeAlertCount.value,0)
+  }finally{h.stop()}
+})
+
+test('canonical empty, API failure and malformed responses stay distinct and a background failure preserves loaded data',async()=>{
+  const empty=harness('en',{...seed(),alerts:[],responses:[]});try{
+    await empty.load();assert.equal(empty.state.alertsLoaded.value,true);assert.equal(empty.state.alertsError.value,'')
+    assert.ok(text(empty.render()).includes('No threat alerts found.'))
+  }finally{empty.stop()}
+  let fail=false
+  const failed=harness('en',seed(),async url=>url==='/api/data/alerts'&&fail?Response.json({error:'private backend detail'},{status:500}):undefined);try{
+    await failed.load();assert.equal(failed.state.alertsLoaded.value,true)
+    fail=true;await failed.state.loadAlerts()
+    assert.equal(failed.state.alerts.value.length,2);assert.equal(failed.state.activeAlertCount.value,1)
+    assert.equal(failed.state.alertsError.value,'Unable to retrieve threat alerts.')
+    assert.ok(text(failed.render()).includes('Unable to retrieve threat alerts.'))
+    assert.ok(!text(failed.render()).includes('private backend detail'))
+  }finally{failed.stop()}
+  const malformed=harness('en',seed(),async url=>url==='/api/data/alerts'?Response.json({alerts:{},responses:[]}):undefined);try{
+    await malformed.load();assert.equal(malformed.state.alertsLoaded.value,false)
+    assert.equal(malformed.state.alertsError.value,'Unable to retrieve threat alerts.')
+    assert.equal(malformed.state.summaries.value.find(card=>card[0]==='activeThreats')[1],'—')
+    assert.ok(!text(malformed.render()).includes('No threat alerts found.'))
+  }finally{malformed.stop()}
+})
+
+test('alert identifiers that cannot be safely used by detail lookup cannot navigate',async()=>{
+  const data=seed();data.alerts[0].id='bad/id'
+  const h=harness('en',data);try{
+    await h.load();const button=nodes(h.render()).find(node=>node.type==='button'&&node.props?.class==='alert-preview')
+    assert.equal(button.props.disabled,true);button.props.onClick();assert.equal(h.routes.length,0)
+  }finally{h.stop()}
+})
+
+test('non-Officer sessions do not request canonical conservation alerts',async()=>{
+  const h=harness();try{
+    h.session({id:'botanist',name:'Botanist',role:'Botanist',status:'Active',mustChangePassword:false})
+    await h.state.loadAlerts();assert.equal(h.calls.some(call=>call.url==='/api/data/alerts'),false)
+    assert.equal(h.state.alerts.value.length,0)
   }finally{h.stop()}
 })
 
@@ -137,7 +235,9 @@ test('Overview labels, table headings and shortcuts localize consistently in Eng
   for(const language of ['en','ms','zh-CN']){
     const h=harness(language);try{
       await h.load();const data=JSON.parse(read(`locales/${language}.json`)).conservationDashboard
-      assert.ok(text(h.render()).includes(data.summary.recentObservations));assert.equal(text(h.render()).split(data.countScope).length-1,1);assert.ok(!text(h.render()).includes(data.approvedMapRecords))
+      assert.ok(text(h.render()).includes(data.summary.recentObservations));assert.ok(!text(h.render()).includes(data.countScope));assert.ok(!text(h.render()).includes(data.approvedMapRecords))
+      const messages=JSON.parse(read(`locales/${language}.json`)),alertMessages=messages.conservationText
+      assert.ok(text(h.render()).includes(alertMessages.temperaturethreshold));assert.ok(text(h.render()).includes(messages.dashboardValues.new))
       for(const key of ['pendingPlantRegistrations','pendingObservations','fieldRecords'])assert.ok(text(h.render()).includes(data[key]))
       assert.ok(text(h.render()).includes(data.actions.searchObservations));assert.ok(!text(h.render()).includes('conservationDashboard.'))
     }finally{h.stop()}
@@ -292,14 +392,14 @@ test('preview eligibility rejects self-review, missing evidence, unresolved depe
   for(const user of [null,{id:owner,role:'Botanist',status:'Active',mustChangePassword:false},{id:owner,role:'Conservation Officer',status:'Inactive',mustChangePassword:false},{id:owner,role:'Conservation Officer',status:'Active',mustChangePassword:true}]){h.session(user);assert.equal(h.state.pendingRegistrations.value.length,0)}
  }finally{h.stop()}
 })
-test('every eligible row action preserves its full authoritative ID and the scope note appears only once outside the cards',async()=>{
+test('every eligible row action preserves its full authoritative ID and no count scope note is rendered',async()=>{
  const h=harness();try{
   await h.load();const tree=nodes(h.render()),tables=tree.filter(n=>n.type==='table')
   for(const table of tables)for(const row of nodes(table).filter(n=>n.type==='tr'&&n.key)){
    nodes(row).find(n=>n.type==='button').props.onClick();const target=h.routes.at(-1)
    if(table.props.class.includes('field-observations-table')){assert.equal(target.name,'conservation-observations');assert.equal(target.query.observation,row.key)}else{assert.equal(target.name,'conservation-reviews');assert.equal(target.query.review,row.key)}
   }
-  assert.equal(tree.filter(n=>n.props?.class==='statistics-scope').length,1)
+  assert.equal(tree.filter(n=>n.props?.class==='statistics-scope').length,0)
   const cards=tree.filter(n=>n.type==='article'&&n.props?.class==='summary-card');assert.equal(cards.length,6)
   assert.ok(cards.every(card=>!text(card).includes('loaded records')&&!nodes(card).some(n=>n.type==='small')))
   assert.equal(h.calls.length,6)

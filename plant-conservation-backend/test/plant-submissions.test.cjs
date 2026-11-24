@@ -19,7 +19,7 @@ test("one atomic submission supports existing and pending species without partia
       return c.query(sql, args);
     } };
   } };
-  const roles = { bot: "Botanist", other: "Botanist", officer: "Conservation Officer", visitor: "Visitor" };
+  const roles = { bot: "Botanist", other: "Botanist", officer: "Conservation Officer", visitor: "Visitor", admin: "Administrator" };
   const tokens = Object.fromEntries(Object.keys(roles).map((key, i) => [key, String(i + 1).repeat(64)]));
   const auth = { session: async (token) => { const key = Object.keys(tokens).find((key) => tokens[key] === token); return key ? { id: key, role: roles[key], status: "Active", mustChangePassword: false } : null; }, event: async () => {} };
   const server = createPlantApp({ pool, auth }).listen(0, "127.0.0.1"); await once(server, "listening");
@@ -84,16 +84,12 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(p.scientific_name, plant.scientific_name); assert.equal(Number(p.species_id), Number(s.species_id)); assert.equal(p.rbac_status, "Pending Review");
     assert.equal((await call("/species?scope=scientific")).data.species.length, 1);
     assert.equal((await call(`/species/${combined.species_id}`)).status, 404);
-    for (const role of ["guest", "visitor"]) {
-      const scan = await call(`/qr/${combined.qr_token}`, role);
-      assert.equal(scan.status, 200);
-      assert.deepEqual(scan.data, { assigned: false, status: "unavailable_yet" });
-    }
-    for (const role of ["bot", "other"]) {
-      const scan = await call(`/qr/${combined.qr_token}`, role);
-      assert.equal(scan.status, 200);
-      assert.deepEqual(scan.data, { assigned: false, status: "pending_review" });
-    }
+    for (const role of ["guest", "visitor", "bot", "other"])
+      assert.equal((await call(`/qr/${combined.qr_token}`, role)).status, 404,
+        `${role} cannot read a QR whose unclassified proposed species defaults to protected`);
+    assert.deepEqual((await call(`/qr/${combined.qr_token}`, "officer")).data,
+      { assigned: false, status: "unavailable_yet" });
+    assert.equal((await call(`/qr/${combined.qr_token}`, "admin")).status, 403);
   });
   await t.test("submitter can read their pending plant, observation, request and photos; other users cannot", async () => {
     const own = await call(`/plants/${combined.plant_id}`);
@@ -229,7 +225,7 @@ test("one atomic submission supports existing and pending species without partia
     assert.equal(original.data.observation.species_request_id, String(combined.species_request_id));
   });
 
-  await t.test("own history survives protected classification at every plant status without exposing the protected catalogue", async () => {
+  await t.test("own history survives protected classification and QR visibility follows current classification", async () => {
     await database.query("UPDATE rbac_species_visibility SET visibility='protected' WHERE species_id=$1", [combined.species_id]);
     const asset = (await database.query("SELECT id FROM plant_asset WHERE plant_id=$1 LIMIT 1", [combined.plant_id])).rows[0];
     for (const status of ["Pending Review", "Approved", "Rejected"]) {
@@ -251,11 +247,40 @@ test("one atomic submission supports existing and pending species without partia
       assert.equal((await call(`/assets/${asset.id}?scope=mine`)).status, status === "Approved" ? 404 : 200, `plant status ${status}`);
       assert.equal((await call(`/assets/${asset.id}?scope=mine`, "other")).status, 404);
     }
-    // Rejected assignments return the established non-disclosing QR marker;
-    // detailed plant/species data remains unavailable to the public.
-    assert.deepEqual(await call(`/qr/${combined.qr_token}`, "guest"),
-      { status: 200, data: { assigned: false, status: "record_unavailable" } });
+    // Current protected classification takes precedence over generic status
+    // markers, so unauthenticated QR reads fail closed without revealing state.
+    const protectedRejectedQr = await call(`/qr/${combined.qr_token}`, "guest");
+    assert.equal(protectedRejectedQr.status, 404);
+    assert.ok(!JSON.stringify(protectedRejectedQr.data).includes(species.scientific_name));
     assert.equal((await call(`/plants/${combined.plant_id}/qr`)).status, 404);
+
+    for (const [status, qrStatus] of [["Pending Review", "assigned"], ["Approved", "active"], ["Rejected", "active"]]) {
+      await database.query("UPDATE plant_record SET rbac_status=$1 WHERE plant_id=$2", [status, combined.plant_id]);
+      await database.query("UPDATE plant_app.qr_code SET status=$1 WHERE plant_id=$2", [qrStatus, combined.plant_id]);
+      for (const role of ["guest", "visitor", "bot", "other"]) {
+        const result = await call(`/qr/${combined.qr_token}`, role);
+        assert.equal(result.status, 404, `${role} cannot read a protected QR while Plant is ${status}`);
+        assert.ok(!JSON.stringify(result.data).includes(species.scientific_name), "denial does not disclose protected species data");
+      }
+      assert.equal((await call(`/qr/${combined.qr_token}`, "admin")).status, 403,
+        "Administrator remains excluded by the existing public QR route permission");
+      const officer = await call(`/qr/${combined.qr_token}`, "officer");
+      assert.equal(officer.status, 200, `Officer retains protected QR access while Plant is ${status}`);
+      if (status === "Pending Review") assert.equal(officer.data.status, "unavailable_yet");
+      if (status === "Rejected") assert.equal(officer.data.status, "record_unavailable");
+      if (status === "Approved") assert.equal(officer.data.assigned, true);
+    }
+
+    await database.query("UPDATE rbac_species_visibility SET visibility='public' WHERE species_id=$1", [combined.species_id]);
+    await database.query("UPDATE plant_record SET rbac_status='Rejected' WHERE plant_id=$1", [combined.plant_id]);
+    await database.query("UPDATE plant_app.qr_code SET status='active' WHERE plant_id=$1", [combined.plant_id]);
+    for (const role of ["guest", "visitor", "officer"])
+      assert.deepEqual((await call(`/qr/${combined.qr_token}`, role)).data,
+        { assigned: false, status: "record_unavailable" }, `${role} keeps the unavailable response for public Rejected Plants`);
+    for (const role of ["bot", "other"])
+      assert.deepEqual((await call(`/qr/${combined.qr_token}`, role)).data,
+        { assigned: false, status: "invalid_record" }, "Botanist status semantics remain for public Rejected Plants");
+    assert.equal((await call(`/qr/${combined.qr_token}`, "admin")).status, 403);
   });
   await t.test("Botanists can read approved observations on visible plants without seeing another Botanist's pending observations", async () => {
     await database.query("UPDATE rbac_species_visibility SET visibility='internal' WHERE species_id=$1", [combined.species_id]);

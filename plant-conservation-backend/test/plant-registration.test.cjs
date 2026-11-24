@@ -9,7 +9,7 @@ test("Registration projections stay independent of subsequent Observations", asy
   // In-memory PGlite only; never opens an application database connection.
   const pool = await createPlantDatabase();
   t.after(() => pool.end());
-  for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql", "016-species-request-content-revision.sql", "017-species-review-cycle.sql", "022-cancel-edit-requests.sql"])
+  for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql", "016-species-request-content-revision.sql", "017-species-review-cycle.sql", "022-cancel-edit-requests.sql", "024-record-change-review-events.sql", "032-translation-storage.sql"])
     await pool.query(readFileSync(join(__dirname, "../migrations", name), "utf8"));
   await installRecordChangeNotifications(pool);
   await pool.query(`CREATE TABLE plant_app.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

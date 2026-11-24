@@ -2,6 +2,8 @@
 const test = require("node:test"), assert = require("node:assert/strict");
 const { once } = require("node:events");
 const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
 const { generateOperationalReport: generate, options, mountOperationalReports } = require("../operational-reports.cjs");
 const { createPlantApp } = require("../server.js");
 
@@ -12,6 +14,10 @@ test("strict report dispatch and period/device/measurement validation", () => {
 
 test("complete persisted operational reports: statuses, boundaries, no double-counts, units, gaps and privacy", async t => {
   const pool = await createPlantDatabase(); t.after(() => pool.end());
+  await pool.query(readFileSync(join(__dirname, "../migrations/031-iot-live-reading-aggregates.sql"), "utf8"));
+  // The base schema contains the pre-031 aggregate table; migration 031 uses
+  // CREATE TABLE IF NOT EXISTS, so upgrade this disposable fixture explicitly.
+  await pool.query("ALTER TABLE iot_reading_aggregate ADD COLUMN IF NOT EXISTS metrics JSONB NOT NULL DEFAULT '{}'::jsonb");
   await pool.query("INSERT INTO species(scientific_name,rbac_data) VALUES('Test species','{\"private\":\"secret-evidence\"}')");
   await pool.query("INSERT INTO plant_record(species_id,registered_subject,qr_token) VALUES(1,'private-owner','private-qr')");
   const statuses = ['Pending Review','Approved','Rejected','Correction Required','Flagged'];

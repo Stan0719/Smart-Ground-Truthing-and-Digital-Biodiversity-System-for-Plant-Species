@@ -48,6 +48,18 @@ async function apiLogin(context, role) {
   })
   expect(r.status()).toBe(200)
 }
+async function mobileLogin(context, role) {
+  const r = await context.request.fetch(origin + '/api/mobile/password', {
+    method: 'POST', data: { email: `${role}@example.invalid`, password }, timeout: 10000,
+  })
+  expect(r.status()).toBe(200)
+  return (await r.json()).token
+}
+async function nativeCall(context, token, path, method = 'GET', data) {
+  return context.request.fetch(origin + path, {
+    method, data, timeout: 10000, headers: { Authorization: `Bearer ${token}` },
+  })
+}
 async function uiLogin(page, role) {
   await page.goto(origin)
   await page.getByRole('button', { name: 'Login', exact: true }).first().click()
@@ -267,37 +279,33 @@ test('Officer species entry, Botanist submission, review and public image displa
   context,
 }) => {
   monitor(page)
+  await prepareResponsiveFixtureSchema()
   await uiLogin(page, 'officer')
   await page.goto(origin + '/conservation/species')
-  await page.getByRole('button', { name: 'Add Species', exact: true }).click()
-  await page.getByLabel('Scientific name', { exact: true }).fill('Synthetic browser species')
-  await page.getByLabel('Common name', { exact: true }).fill('Browser fixture')
-  await page
-    .getByLabel('Description', { exact: true })
-    .fill('Synthetic fixture in a temporary database only.')
-  await page.getByLabel('Conservation status (verified name)').fill('Synthetic test status')
-  await page.getByLabel('Publication classification').selectOption('public')
-  await page.getByRole('button', { name: 'Save official species', exact: true }).click()
-  await expect(page.getByText('Official species saved.')).toBeVisible()
+  await page.getByRole('button', { name: /Create Species/ }).click()
+  await page.getByLabel(/Scientific Name/).fill('Synthetic browser species')
+  await page.getByLabel(/Common Name/).fill('Browser fixture')
+  await page.getByLabel(/Description/).fill('Synthetic fixture in a temporary database only.')
+  await page.getByRole('radio', { name: /Public/ }).check()
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Species created and verified from persisted backend data.')).toBeVisible()
   const catalog = await (await call(context, '/api/data/species?scope=scientific')).json()
-  const species = catalog.species[0]
-  expect(species.conservation_status).toBe('Synthetic test status')
-  const officialPng = await sharp({
-    create: { width: 2, height: 2, channels: 3, background: '#00ff00' },
-  })
-    .png()
-    .toBuffer()
-  await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
-  await page
-    .getByLabel('Official photo or PDF')
-    .setInputFiles({ name: 'fixture.png', mimeType: 'image/png', buffer: officialPng })
-  await expect(page.getByText('Official attachment uploaded.')).toBeVisible()
+  const species = catalog.species.find((entry) => entry.scientific_name === 'Synthetic browser species')
+  expect(species).toBeDefined()
+  expect(species.conservation_status).toBeNull()
   const bot = await browser.newContext(),
     guest = await browser.newContext()
   try {
-    await apiLogin(bot, 'botanist')
+    const qrId = (await pool.query(
+      "INSERT INTO plant_app.qr_code(qr_code,status) VALUES($1,'generated') RETURNING qr_id",
+      [`browser-only-${randomUUID()}`],
+    )).rows[0].qr_id
+    const botanistToken = await mobileLogin(bot, 'botanist')
+    const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#00ff00' } }).png().toBuffer()
     const body = {
       species_id: species.species_id,
+      scientific_name: 'Synthetic browser plant',
+      qr_id: qrId,
       latitude: 1,
       longitude: 2,
       client_key: 'browser-only',
@@ -309,33 +317,31 @@ test('Officer species entry, Botanist submission, review and public image displa
         latitude: 1,
         longitude: 2,
       },
+      photos: Array.from({ length: 3 }, () => ({ content_type: 'image/png', base64: png.toString('base64') })),
     }
-    const created = await call(bot, '/api/data/plants', 'POST', body)
+    const created = await nativeCall(bot, botanistToken, '/api/data/plant-submissions', 'POST', body)
     expect(created.status()).toBe(201)
     const observation = await created.json()
-    const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#00ff00' } })
-      .png()
-      .toBuffer()
-    const upload = await call(bot, '/api/data/assets', 'POST', {
-      plant_id: observation.plant_id,
-      observation_id: observation.id,
-      client_key: 'browser-photo',
-      content_type: 'image/png',
-      base64: png.toString('base64'),
-    })
-    expect(upload.status()).toBe(201)
-    const asset = await upload.json()
+    expect(observation.status).toBe('Pending Review')
+    const assetId = (await pool.query('SELECT id FROM plant_asset WHERE plant_id=$1 AND observation_id=$2 ORDER BY created_at,id LIMIT 1', [observation.plant_id, observation.id])).rows[0].id
     expect((await (await call(guest, '/api/data/plants')).json()).plants).toEqual([])
-    expect((await call(guest, `/api/data/assets/${asset.id}`)).status()).toBe(404)
-    await call(bot, `/api/data/observations/${observation.id}/submit`, 'POST', {})
+    expect((await call(guest, `/api/data/assets/${assetId}`)).status()).toBe(404)
+    const reviewQueue = await call(context, '/api/data/observations?limit=100')
+    expect(reviewQueue.status()).toBe(200)
+    expect((await reviewQueue.json()).observations.some((row) => row.id === observation.id)).toBe(true)
+    const detailResponse = await call(context, `/api/data/observations/${observation.id}`)
+    expect(detailResponse.status()).toBe(200)
+    const detail = await detailResponse.json()
+    expect(detail.observation.assets).toHaveLength(3)
+    expect((await call(context, `/api/data/assets/${detail.observation.assets[0].id}`)).status()).toBe(200)
     await page.goto(origin + '/conservation/reviews')
     // Navigate away from the species editor; review actions belong to its dialog.
     await page.getByRole('button', { name: 'Review', exact: true }).first().click()
-    await expect(page.getByRole('img',{name:'Observation photo',exact:true})).toBeVisible()
+    await expect(page.locator('.submitted-image-preview img').first()).toBeVisible()
     await page.getByRole('button', { name: 'Approve', exact: true }).click()
-    await expect(page.getByText('Decision saved.')).toBeVisible()
+    await expect.poll(async () => (await (await call(context, `/api/data/observations/${observation.id}`)).json()).observation.status).toBe('Approved')
     expect((await (await call(guest, '/api/data/plants')).json()).plants).toHaveLength(1)
-    expect((await call(guest, `/api/data/assets/${asset.id}`)).status()).toBe(200)
+    expect((await call(guest, `/api/data/assets/${assetId}`)).status()).toBe(200)
     const publicPage = await guest.newPage()
     monitor(publicPage)
     await publicPage.goto(origin + '/species')
@@ -358,8 +364,8 @@ test('Officer species entry, Botanist submission, review and public image displa
     ).toBeVisible()
     await page.goto(origin + '/conservation/reports')
     for (const [label, prefix] of [
-      ['Download biodiversity CSV', null],
-      ['Download biodiversity PDF', '%PDF-'],
+      ['Export CSV', null],
+      ['Export PDF', '%PDF-'],
     ]) {
       const downloading = page.waitForEvent('download')
       await page.getByRole('button', { name: label, exact: true }).click()
@@ -523,6 +529,14 @@ test('Add New User opens only in a focused dialog and never sends on open or can
   context,
 }) => {
   monitor(page)
+  // The modal test does not exercise dashboard data; keep unrelated shell
+  // widgets independent from the isolated Plant API fixture schema.
+  await context.route(/\/api\/data\/plants(?:\?.*)?$/, (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ plants: [], species: [], page: { has_more: false, next_cursor: null } }),
+  }))
+  await context.route(/\/api\/data\/staff-notifications(?:\/unread-count)?(?:\?.*)?$/, (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ notifications: [], unread_count: 0 }),
+  }))
   await apiLogin(context, 'admin')
   await page.goto(origin + '/admin/users')
   let posts = 0
@@ -734,7 +748,7 @@ test('Conservation Officer pages render safely on desktop and phone with modal s
         await expect(page.getByRole('dialog')).toHaveCount(0)
       }
       if (path === 'reports')
-        await expect(page.getByRole('button', { name: 'Download biodiversity CSV' })).toBeVisible()
+        await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible()
       if (width === 1366 && path === 'species')
         await page.screenshot({
           path: test.info().outputPath('officer-species-desktop.png'),
@@ -911,7 +925,7 @@ const adminPaths=['/admin','/admin/users','/admin/profile','/admin/roles','/admi
 const officerPaths=['/conservation/dashboard','/conservation/profile','/conservation/species','/conservation/observations','/conservation/reviews','/conservation/map','/conservation/reports'];
 for(const role of ['admin','officer','botanist','guest']){
  test('RBAC route matrix '+role,async({page,context})=>{
-  if(role!=='guest')await apiLogin(context,role);
+  if(role==='admin'||role==='officer')await apiLogin(context,role);
   for(const path of [...adminPaths,...officerPaths]){
    await page.goto(origin+path);
    const allowed=role==='admin'?adminPaths.includes(path):role==='officer'?officerPaths.includes(path):false;
@@ -919,14 +933,17 @@ for(const role of ['admin','officer','botanist','guest']){
   }
  });
  test('RBAC API matrix '+role,async({context})=>{
-  if(role!=='guest')await apiLogin(context,role);
+  let botanistToken
+  if(role==='admin'||role==='officer')await apiLogin(context,role)
+  else if(role==='botanist')botanistToken=await mobileLogin(context,role)
   for(const [path,allowed] of [
    ['/api/admin/users',['admin']],['/api/admin/permissions',['admin']],['/api/admin/audit',['admin']],
-   ['/api/data/species',['officer','botanist','guest']],['/api/data/observations',['officer','botanist']],
+   ['/api/data/species',['admin','officer','botanist','guest']],['/api/data/observations',['officer','botanist']],
    ['/api/data/reports',['officer']],['/api/data/audit',['admin']]
   ]){
-   const response=await call(context,path);
-   expect(response.status(),role+' '+path).toBe(allowed.includes(role)?200:role==='guest'?401:403);
+   const response=botanistToken?await nativeCall(context,botanistToken,path):await call(context,path);
+   const expected = role === 'botanist' && path.startsWith('/api/admin/') ? 401 : allowed.includes(role) ? 200 : role === 'guest' ? 401 : 403;
+   expect(response.status(),role+' '+path).toBe(expected);
   }
  });
 }
@@ -976,6 +993,7 @@ async function prepareResponsiveFixtureSchema() {
     '013-staff-notification-foundation.sql',
     '016-species-request-content-revision.sql',
     '017-species-review-cycle.sql',
+    '032-translation-storage.sql',
   ]) {
     const path = resolve(repositoryRoot, 'plant-conservation-backend', 'migrations', name)
     await pool.query(readFileSync(path, 'utf8'))
@@ -1266,9 +1284,17 @@ test.describe('Officer responsive browser checks', () => {
     await page.keyboard.press('Tab')
     await expect(page.locator('.registry-actions button').nth(1)).toBeFocused()
     expect(await page.locator('.registry-actions button').nth(1).evaluate((element) => element.matches(':focus-visible'))).toBe(true)
+    const selectedRow = page.locator('.registry-table tbody tr').first()
+    const selectedPlantId = (await selectedRow.locator('.plant-identity strong').innerText()).trim()
+    const selectedPlantRecordId = selectedPlantId.replace(/^PL0*/, '') || '0'
+    const selectedPlantName = (await selectedRow.locator('.plant-identity em').innerText()).trim()
     await viewButton.click()
-    const dialog = page.getByRole('dialog', { name: 'Plant Information' })
+    const dialog = page.getByRole('dialog').filter({
+      has: page.getByRole('heading', { name: 'Plant Information', exact: true }),
+    })
     await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText(selectedPlantRecordId)
+    await expect(dialog).toContainText(selectedPlantName)
     for (let index = 0; index < 3; index++) {
       await page.keyboard.press('Tab')
       await expect(dialog.locator(':focus')).toHaveCount(1)
@@ -1573,7 +1599,7 @@ for(const [role,paths] of [['admin',adminPaths],['officer',officerPaths]])for(co
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin+path);await expect(page).toHaveURL(origin+path);
   await expect.poll(()=>pending.size,{timeout:10000}).toBe(0);
-  const expected={'/admin/users':'/api/admin/users','/admin/roles':'/api/admin/permissions','/admin/activity':'/api/admin/audit','/conservation/species':'/api/data/species','/conservation/reports':'/api/data/reports'}[path];
+  const expected={'/admin/users':'/api/admin/users','/admin/roles':'/api/admin/permissions','/admin/activity':'/api/admin/audit','/conservation/species':'/api/species','/conservation/reports':'/api/data/reports'}[path];
   if(expected)expect(requested,'Page must load its data from the authenticated API').toContain(expected);
   if(path.endsWith('/profile'))await expect(page.getByLabel('Full Name',{exact:true})).toHaveValue(role);
   expect(errors,'Page requests must reach permitted existing endpoints').toEqual([]);

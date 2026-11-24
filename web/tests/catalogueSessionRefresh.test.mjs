@@ -25,6 +25,7 @@ function authHarness() {
     if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x, locale: vue.ref('en') }) }
     if (name.endsWith('/globalSearch')) return { searchGlobalWebsite: async () => { throw Error('Unexpected search in session test') } }
     if (name.endsWith('/auth')) return auth
+    if (name.endsWith('/globalSearch')) return { searchGlobalWebsite: async () => ({ results: {}, counts: {}, hasMore: {} }) }
     if (name.includes('usePrototypeSession')) return prototype
     if (name.endsWith('.vue')) return {}
     throw Error(name)

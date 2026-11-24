@@ -1680,9 +1680,6 @@ function handleRemoveSpeciesPhoto(index) {
             multiline
             textAlignVertical="top"
           />
-          <TextLanguageSelect value={sourceLanguages.morphology} disabled={submitting}
-            onChange={(locale) => setSourceLanguages((old) => ({ ...old, morphology: locale }))} />
-
           {/* Location Zone */}
 
           <Text style={styles.label}>{t("addPlant.locationZone")}</Text>

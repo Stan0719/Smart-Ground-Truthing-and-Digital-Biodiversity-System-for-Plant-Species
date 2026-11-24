@@ -55,6 +55,12 @@ test('HTTP API enforces status, role, cookies, origin and revocation', async () 
       assert.match(response.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/)
       return response.headers.get('set-cookie').split(';')[0]
     }
+    const retiredActivation = await request('/auth/activate', 'POST', {
+      token: 'synthetic-retired-link',
+      password: 'synthetic-bypass-attempt',
+    })
+    assert.equal(retiredActivation.status, 410)
+    assert.match((await retiredActivation.json()).error, /created by an administrator/i)
     const codespacesLogin = await request(
       '/auth/login',
       'POST',

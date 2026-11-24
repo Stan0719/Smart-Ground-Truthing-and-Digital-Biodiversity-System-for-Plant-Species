@@ -2383,118 +2383,57 @@ const confirmDeleteSensor = () => {
 
     <div
       v-if="sensorModal === 'view' && selectedSensor"
-      class="sensor-modal-backdrop"
+      class="sensor-modal-backdrop sensor-view-backdrop"
       @click.self="closeSensorDetails"
     >
       <section
-        class="sensor-modal"
+        class="sensor-modal sensor-view-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="sensor-details-title"
         tabindex="-1"
         @keydown="trapModalFocus"
       >
-        <header class="sensor-modal-head">
-          <div>
-            <p>SENSOR DETAILS</p>
+        <header class="sensor-modal-head sensor-view-head">
+          <span class="sensor-view-device-icon" aria-hidden="true">
+            <svg v-if="selectedSensor.deviceType === 'Camera'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5v14M9 5v14M13 5v14M17 5v14M21 5v14"/></svg>
+          </span>
+          <div class="sensor-view-title">
+            <p>{{ selectedSensor.deviceType === 'Camera' ? 'CAMERA DETAILS' : 'SENSOR DETAILS' }}</p>
             <h2 id="sensor-details-title">{{ selectedSensor.deviceName }}</h2>
           </div>
-          <button type="button" aria-label="Close sensor details" @click="closeSensorDetails">
-            ×
-          </button>
+          <button type="button" aria-label="Close sensor details" @click="closeSensorDetails">×</button>
         </header>
-        <div class="detail-section">
-          <h3>DEVICE INFORMATION</h3>
-          <dl>
-            <div>
-              <dt>Sensor ID</dt>
-              <dd>{{ selectedSensor.id }}</dd>
-            </div>
-            <div>
-              <dt>Device Name</dt>
-              <dd>{{ selectedSensor.deviceName }}</dd>
-            </div>
-            <div>
-              <dt>Device Type</dt>
-              <dd>{{ selectedSensor.deviceType }}</dd>
-            </div>
-            <div>
-              <dt>Serial Number</dt>
-              <dd>{{ selectedSensor.serialNumber }}</dd>
-            </div>
-            <div class="detail-wide">
-              <dt>Location Description</dt>
-              <dd>{{ selectedSensor.locationDescription }}</dd>
-            </div>
-            <div>
-              <dt>Status</dt>
-              <dd>
-                <em class="badge" :class="selectedSensor.status.toLowerCase()">{{
-                  selectedSensor.status
-                }}</em>
-              </dd>
-            </div>
-            <div>
-              <dt>Installed At</dt>
-              <dd>{{ selectedSensor.installedAt }}</dd>
-            </div>
+        <section class="sensor-view-section" aria-labelledby="device-information-title">
+          <h3 id="device-information-title"><span aria-hidden="true">ⓘ</span> DEVICE INFORMATION</h3>
+          <dl class="sensor-view-grid">
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">▥</span><div><dt>{{ selectedSensor.deviceType === 'Camera' ? 'Camera ID' : 'Sensor ID' }}</dt><dd>{{ selectedSensor.id }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">◇</span><div><dt>Device Name</dt><dd>{{ selectedSensor.deviceName }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">◉</span><div><dt>Device Type</dt><dd>{{ selectedSensor.deviceType }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">▦</span><div><dt>Serial Number</dt><dd>{{ selectedSensor.serialNumber }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">⌖</span><div><dt>Location Description</dt><dd>{{ selectedSensor.locationDescription }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">∿</span><div><dt>Status</dt><dd><em class="badge" :class="selectedSensor.status.toLowerCase()">{{ selectedSensor.status }}</em></dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">▣</span><div><dt>Installed At</dt><dd>{{ selectedSensor.installedAt }}</dd></div></div>
           </dl>
-        </div>
-        <div v-if="selectedSensor.readingId !== '—'" class="detail-section">
-          <h3>LATEST READING</h3>
-          <dl>
-            <div>
-              <dt>Reading ID</dt>
-              <dd>{{ selectedSensor.readingId }}</dd>
-            </div>
-            <div>
-              <dt>Plant ID</dt>
-              <dd>{{ selectedSensor.plant }}</dd>
-            </div>
-            <div>
-              <dt>Temperature</dt>
-              <dd>{{ selectedSensor.temperature }}</dd>
-            </div>
-            <div>
-              <dt>Humidity</dt>
-              <dd>{{ selectedSensor.humidity }}</dd>
-            </div>
-            <div>
-              <dt>Soil Moisture</dt>
-              <dd>{{ selectedSensor.soilMoisture }}</dd>
-            </div>
-            <div>
-              <dt>Rainfall Detected</dt>
-              <dd>{{ selectedSensor.rainfall }}</dd>
-            </div>
-            <div>
-              <dt>Motion Detected</dt>
-              <dd>{{ selectedSensor.movement }}</dd>
-            </div>
-            <div>
-              <dt>Recorded At</dt>
-              <dd>{{ selectedSensor.recordedAt }}</dd>
-            </div>
-          </dl>
-        </div>
-        <div v-if="selectedSensor.readingId !== '—'" class="detail-section">
-          <h3>SENSOR READING GPS POSITION</h3>
-          <dl>
-            <div>
-              <dt>Latitude</dt>
-              <dd>{{ selectedSensor.gpsLatitude }}</dd>
-            </div>
-            <div>
-              <dt>Longitude</dt>
-              <dd>{{ selectedSensor.gpsLongitude }}</dd>
-            </div>
-          </dl>
-        </div>
-        <div v-else class="detail-section">
-          <h3>LATEST READING</h3>
-          <p class="empty-evidence">No sensor readings available yet.</p>
-        </div>
-        <div class="sensor-modal-actions">
+        </section>
+        <section class="sensor-view-section" aria-labelledby="latest-reading-title">
+          <h3 id="latest-reading-title"><span aria-hidden="true">▥</span> LATEST READING</h3>
+          <div v-if="selectedSensor.readingId !== '—'" class="sensor-view-grid sensor-view-reading-grid">
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">▥</span><div><dt>Reading ID</dt><dd>{{ selectedSensor.readingId }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">◇</span><div><dt>Plant ID</dt><dd>{{ selectedSensor.plant }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">℃</span><div><dt>Temperature</dt><dd>{{ selectedSensor.temperature }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">◌</span><div><dt>Humidity</dt><dd>{{ selectedSensor.humidity }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">◒</span><div><dt>Soil Moisture</dt><dd>{{ selectedSensor.soilMoisture }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">⌁</span><div><dt>Rainfall Detected</dt><dd>{{ selectedSensor.rainfall }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">⌁</span><div><dt>Motion Detected</dt><dd>{{ selectedSensor.movement }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">◷</span><div><dt>Recorded At</dt><dd>{{ selectedSensor.recordedAt }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">⌖</span><div><dt>Latitude</dt><dd>{{ selectedSensor.gpsLatitude }}</dd></div></div>
+            <div class="sensor-view-field"><span class="sensor-view-field-icon" aria-hidden="true">⌖</span><div><dt>Longitude</dt><dd>{{ selectedSensor.gpsLongitude }}</dd></div></div>
+          </div>
+          <div v-else class="sensor-view-empty"><span aria-hidden="true">⌁</span><p>No sensor readings available yet.</p></div>
+        </section>
+        <div class="sensor-modal-actions sensor-view-actions">
           <button class="primary" type="button" @click="closeSensorDetails">Close</button>
         </div>
       </section>
@@ -3314,6 +3253,174 @@ td i {
   background: #fff;
   box-shadow: 0 25px 70px rgba(16, 49, 37, 0.24);
 }
+.sensor-view-backdrop {
+  align-content: safe center;
+  justify-items: center;
+}
+.sensor-view-modal {
+  width: min(940px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 28px;
+}
+.sensor-view-head {
+  align-items: center;
+  margin-bottom: 24px;
+}
+.sensor-view-device-icon,
+.sensor-view-field-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  background: #e8f3e9;
+  color: #14573f;
+}
+.sensor-view-device-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+.sensor-view-device-icon svg {
+  width: 34px;
+  height: 34px;
+}
+.sensor-view-title {
+  min-width: 0;
+  flex: 1;
+}
+.sensor-view-modal .sensor-view-head .sensor-view-title p {
+  margin: 0 0 4px;
+  color: #287556;
+  font-size: 12px;
+  letter-spacing: 1.2px;
+}
+.sensor-view-modal .sensor-view-head h2 {
+  color: #123f31;
+  font-size: 26px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.sensor-view-modal .sensor-view-head > button {
+  width: 48px;
+  height: 48px;
+  border: 1px solid #d6e3d9;
+  border-radius: 12px;
+  background: #fff;
+  color: #174f3c;
+  font-size: 25px;
+}
+.sensor-view-section {
+  overflow: hidden;
+  margin-top: 20px;
+  border: 1px solid #d5e3d9;
+  border-radius: 16px;
+}
+.sensor-view-section > h3 {
+  min-height: 54px;
+  margin: 0;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #14543e;
+  color: #fff;
+  font-size: 18px;
+  letter-spacing: .3px;
+}
+.sensor-view-section > h3 span {
+  font-size: 23px;
+  line-height: 1;
+}
+.sensor-view-grid {
+  margin: 0;
+  padding: 8px 20px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 36px;
+}
+.sensor-view-field {
+  min-width: 0;
+  min-height: 82px;
+  padding: 14px 8px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid #e4ebe6;
+}
+.sensor-view-field:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+.sensor-view-field-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  font-size: 22px;
+}
+.sensor-view-field > div {
+  min-width: 0;
+}
+.sensor-view-field dt {
+  color: #536b60;
+  font-size: 13px;
+  font-weight: 700;
+}
+.sensor-view-field dd {
+  margin: 5px 0 0;
+  color: #1c3029;
+  font-size: 15px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.sensor-view-field .badge {
+  display: inline-flex;
+  padding: 7px 13px;
+  background: #e1f1e6;
+  color: #216b49;
+  font-size: 14px;
+  line-height: 1.2;
+}
+.sensor-view-modal button:focus-visible {
+  outline: 3px solid #48876e;
+  outline-offset: 3px;
+}
+.sensor-view-empty {
+  min-height: 180px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #64776e;
+  text-align: center;
+}
+.sensor-view-empty > span {
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8f3e9;
+  color: #14573f;
+  font-size: 36px;
+}
+.sensor-view-empty p {
+  margin: 0;
+  font-size: 15px;
+  font-style: italic;
+}
+.sensor-view-actions {
+  margin-top: 20px;
+}
+.sensor-view-actions button {
+  min-width: 120px;
+  min-height: 44px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  background: #167557;
+  font-size: 14px;
+}
 .sensor-modal-head {
   margin-bottom: 20px;
   display: flex;
@@ -3612,6 +3719,74 @@ td i {
   .network-overview,
   .sensor-modal {
     padding: 17px;
+  }
+  .sensor-view-modal {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+    padding: 16px;
+  }
+  .sensor-view-head {
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .sensor-view-device-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+  }
+  .sensor-view-device-icon svg {
+    width: 27px;
+    height: 27px;
+  }
+  .sensor-view-modal .sensor-view-head h2 {
+    font-size: 20px;
+  }
+  .sensor-view-modal .sensor-view-head > button {
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+  }
+  .sensor-view-section {
+    margin-top: 14px;
+    border-radius: 12px;
+  }
+  .sensor-view-section > h3 {
+    min-height: 46px;
+    padding: 11px 14px;
+    font-size: 15px;
+  }
+  .sensor-view-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 4px 12px;
+  }
+  .sensor-view-field {
+    min-height: 68px;
+    gap: 11px;
+    padding: 10px 4px;
+    border-bottom: 1px solid #e4ebe6 !important;
+  }
+  .sensor-view-field:last-child {
+    border-bottom: 0 !important;
+  }
+  .sensor-view-field-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+    font-size: 19px;
+  }
+  .sensor-view-field dd {
+    font-size: 14px;
+  }
+  .sensor-view-empty {
+    min-height: 140px;
+  }
+  .sensor-view-empty > span {
+    width: 60px;
+    height: 60px;
+    font-size: 28px;
+  }
+  .sensor-view-actions button {
+    width: 100%;
   }
   .network-metrics,
   .detail-section dl,

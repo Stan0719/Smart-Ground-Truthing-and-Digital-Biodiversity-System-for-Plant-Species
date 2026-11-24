@@ -5,6 +5,7 @@ import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import { requestPlantPreview, type PlantPreview, type ProximityResult } from '../../services/plantProximity'
 import { formatPlantId } from '../../utils/plantId'
 import PlantProximityImage from './PlantProximityImage.vue'
+import ReviewLocationMap from './ReviewLocationMap.vue'
 import { proximityScoreTone, formatProximityScore, gpsAccuracyUncertain, groupRiskScore, matchStatusKey } from '../../services/plantProximityScore'
 import { workflowBadgeStyle } from '../../utils/workflowBadge'
 const props = defineProps<{ observationId?: string; revision?: number; value?: ProximityResult | null; loading?: boolean; failed?: boolean; context?: string }>()
@@ -14,6 +15,8 @@ const session = ref(sessionSnapshot()), result = computed(() => props.value || n
 const authorized = computed(() => !session.value.pending && session.value.user?.role === 'Conservation Officer' && session.value.user.status === 'Active' && !session.value.user.mustChangePassword)
 const drawer = ref<HTMLDialogElement | null>(null), drawerOpen = ref(false)
 const previews = ref<Record<string, PlantPreview>>({})
+const previewTokens = new Map<string, symbol>()
+const mapRemoved = ref(false)
 const nearby = computed(() => result.value?.candidates.slice(0, 5) || [])
 const candidateScore = (candidate: ProximityResult['candidates'][number]) => result.value?.state === 'complete' ? groupRiskScore(candidate, result.value) : null
 const scoreText = (candidate: ProximityResult['candidates'][number]) => {
@@ -43,7 +46,9 @@ const matchText = (candidate: ProximityResult['candidates'][number]) => {
 }
 let drawerGeneration = 0, generation = 0, disposed = false
 let trigger: HTMLElement | null = null, previewController: AbortController | null = null
+const mapCandidate = ref<ProximityResult['candidates'][number] | null>(null)
 function closeDrawer() {
+  mapCandidate.value = null
   drawerGeneration++; drawerOpen.value = false
   if (drawer.value?.open) drawer.value.close()
   const target = trigger; trigger = null
@@ -69,9 +74,10 @@ async function loadPreviews() {
     if (previews.value[candidate.plant_id]) return
     // Reserve each entry before fetching: reopening cannot duplicate requests.
     previews.value[candidate.plant_id] = { image: '', scientificName: '', commonName: '' }
+    const requestToken = Symbol(); previewTokens.set(candidate.plant_id, requestToken)
     try {
       const preview = await requestPlantPreview(candidate.plant_id, signal)
-      if (token === generation && authorized.value && !disposed) previews.value[candidate.plant_id] = preview
+      if (token === generation && previewTokens.get(candidate.plant_id) === requestToken && authorized.value && !disposed) previews.value[candidate.plant_id] = preview
     } catch { /* Keep the authorized placeholder; proximity remains usable. */ }
   }))
 }
@@ -80,11 +86,30 @@ function backdrop(event: MouseEvent) {
   const box = drawer.value.getBoundingClientRect()
   if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) closeDrawer()
 }
-function clearPreviews() { generation++; previewController?.abort(); previewController = null; previews.value = {} }
+function clearPreviews() { mapCandidate.value = null; mapRemoved.value = false; previewTokens.clear(); generation++; previewController?.abort(); previewController = null; previews.value = {} }
 function reset() { closeDrawer(); clearPreviews() }
 const unsubscribe = subscribeSession(() => { reset(); session.value = sessionSnapshot() })
 watch(() => [props.observationId, props.revision], reset)
-watch(() => props.value, () => { clearPreviews(); void loadPreviews() })
+watch(() => props.value, (value, previous) => {
+  if (!value || value.observation_id !== previous?.observation_id || value.revision !== previous?.revision) {
+    clearPreviews(); void loadPreviews(); return
+  }
+  const candidates = new Map(value.candidates.map(candidate => [candidate.plant_id, candidate]))
+  for (const id of Object.keys(previews.value)) {
+    const candidate = candidates.get(id), old = previous?.candidates.find(item => item.plant_id === id)
+    if (!candidate || candidate.status !== old?.status || candidate.plant_name !== old?.plant_name || candidate.species_name !== old?.species_name) {
+      delete previews.value[id]; previewTokens.delete(id)
+    }
+  }
+  if (mapCandidate.value) {
+    const next = candidates.get(mapCandidate.value.plant_id)
+    if (!next) {
+      mapCandidate.value = null; mapRemoved.value = true
+      void nextTick(() => { if (drawerOpen.value && authorized.value && mapRemoved.value) drawer.value?.focus({ preventScroll: true }) })
+    } else if (JSON.stringify(next) !== JSON.stringify(mapCandidate.value)) mapCandidate.value = next
+  }
+  void loadPreviews()
+}, { flush: 'sync' })
 onBeforeUnmount(() => { disposed = true; reset(); unsubscribe() })
 const number = (value: number) => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 2 }).format(value)
 const accuracyText = (value: number | null | undefined) => value == null ? text('accuracyUnknown') : `${number(value)} m`
@@ -98,9 +123,10 @@ defineExpose({ openDrawer, closeDrawer })
       <template v-if="drawerOpen && authorized">
         <header class="nearby-drawer-header"><div><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>{{ text('nearbyTitle') }}</h2><p v-if="context">{{ context }}</p><p v-if="result">{{ text('showing', { count: nearby.length, radius: number(result.config.radius_m) }) }}</p></div><button type="button" class="nearby-close" autofocus :aria-label="text('closeDrawer')" @click="closeDrawer">×</button></header>
         <div class="nearby-drawer-content">
-          <p v-if="loading" role="status">{{ text('loading') }}</p>
+          <p v-if="loading && !result" role="status">{{ text('loading') }}</p>
           <p v-else-if="failed || result?.state === 'unavailable'" role="status">{{ text('unavailable') }}</p>
-          <template v-else-if="result">
+          <p v-if="mapRemoved" role="status">{{ text('mapCandidateRemoved') }}</p>
+          <template v-if="result">
             <p v-if="result.state === 'not_eligible'">{{ text('tableNotEligible') }}</p>
             <p v-if="result.state === 'complete' && !nearby.length" role="status">{{ text('none', { radius: number(result.config.radius_m) }) }} {{ text('noScore') }}</p>
             <p v-if="result.state === 'incomplete'" class="proximity-incomplete" role="status">{{ text('incomplete') }}</p>
@@ -113,7 +139,7 @@ defineExpose({ openDrawer, closeDrawer })
                     <aside class="candidate-risk" :class="proximityScoreTone(candidateScore(candidate))" :aria-label="text('scoreHeading')"><span>{{ text('scoreHeading') }}</span><strong v-if="candidateScore(candidate) !== null">{{ scoreText(candidate) }}</strong><span v-else class="candidate-match" :class="candidate.match_status">{{ matchText(candidate) }}</span></aside>
                   </div>
                   <div class="candidate-distance"><span>{{ text('distanceLabel') }}: <strong>{{ number(candidate.distance_m) }} m</strong></span><span class="proximity-category" :class="candidate.category">{{ text('short_' + candidate.category) }}</span></div>
-                  <div class="nearby-plant-footer"><div class="gps-accuracy"><strong>{{ text('accuracyHeading') }}</strong><dl><div><dt>{{ text('newPlantAccuracy') }}:</dt><dd>{{ accuracyText(result.accuracy_m) }}</dd></div><div><dt>{{ text('existingPlantAccuracy') }}:</dt><dd>{{ accuracyText(candidate.accuracy_m) }}</dd></div></dl></div><a :href="'/plant/' + candidate.plant_id" target="_blank" rel="noopener noreferrer" :aria-label="text('inspect', { plant: formatPlantId(candidate.plant_id) })">{{ text('viewDetails') }} ↗</a></div>
+                  <div class="nearby-plant-footer"><div class="gps-accuracy"><strong>{{ text('accuracyHeading') }}</strong><dl><div><dt>{{ text('newPlantAccuracy') }}:</dt><dd>{{ accuracyText(result.accuracy_m) }}</dd></div><div><dt>{{ text('existingPlantAccuracy') }}:</dt><dd>{{ accuracyText(candidate.accuracy_m) }}</dd></div></dl></div><button type="button" class="nearby-map-button" @click="mapRemoved = false; mapCandidate = candidate">{{ text('viewOnMap') }}</button></div>
                   <p v-if="uncertain(result.accuracy_m) || uncertain(candidate.accuracy_m)" class="score-uncertainty"><span aria-hidden="true">ⓘ</span><span>{{ text('drawerGpsWarning') }}</span></p>
                 </div>
               </li>
@@ -123,6 +149,9 @@ defineExpose({ openDrawer, closeDrawer })
         </div>
       </template>
     </dialog>
+    <ReviewLocationMap v-if="mapCandidate && result && authorized" :key="observationId + ':' + revision + ':' + mapCandidate.plant_id"
+      :target="{ plantId: result.plant_id, status: result.target_location?.status || '', latitude: result.target_location?.latitude, longitude: result.target_location?.longitude, accuracy: result.accuracy_m, source: result.target_location?.source || '' }"
+      :candidate="{ plantId: mapCandidate.plant_id, status: mapCandidate.status, latitude: mapCandidate.latitude, longitude: mapCandidate.longitude, accuracy: mapCandidate.accuracy_m, source: mapCandidate.location_source }" @close="mapCandidate = null" />
   </Teleport>
 </template>
 
@@ -167,7 +196,7 @@ defineExpose({ openDrawer, closeDrawer })
 .gps-accuracy dl { display: grid; gap: 2px; margin: 4px 0 0; }
 .gps-accuracy dl div { display: flex; flex-wrap: wrap; gap: 4px; }
 .gps-accuracy dd { margin: 0; }
-.nearby-plant-footer a { padding: 8px 10px; border: 1px solid #91b5a1; border-radius: 6px; color: #245a46; text-decoration: none; font-size: 12px; font-weight: 600; }
+.nearby-plant-footer a, .nearby-map-button { padding: 8px 10px; border: 1px solid #91b5a1; border-radius: 6px; color: #245a46; text-decoration: none; font-size: 12px; font-weight: 600; }
 .score-uncertainty { display: flex; align-items: flex-start; gap: 6px; color: #78561c; font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
 .proximity-incomplete { color: #815f1e; font-size: 12px; line-height: 1.5; }
 button:focus-visible, a:focus-visible { outline: 3px solid #33745d; outline-offset: 3px; }

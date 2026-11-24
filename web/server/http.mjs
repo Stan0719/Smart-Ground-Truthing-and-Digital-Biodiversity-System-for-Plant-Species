@@ -111,6 +111,10 @@ export function createAuthServer({ auth, recovery, staff, adminNotifications, di
         const { status, ...result } = await recovery.confirm(body, ip, {roles:WEBSITE_ROLES})
         return send(status, result)
       }
+      if (path === '/api/auth/activate' && req.method === 'POST')
+        return send(410, {
+          error: 'Staff accounts are created by an administrator. Sign in with your temporary password, then change it.',
+        })
       if (path === '/api/auth/login' && req.method === 'POST') {
         if (
           typeof body.email !== 'string' ||

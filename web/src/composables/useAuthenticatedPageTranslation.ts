@@ -351,7 +351,9 @@ const zhTerms: Record<string, string> = {
 }
 
 const originals = new WeakMap<Node, string>()
+const lastWritten = new WeakMap<Node, string>()
 const attrOriginals = new WeakMap<Element, Map<string, string>>()
+const lastWrittenAttrs = new WeakMap<Element, Map<string, string>>()
 
 export function useAuthenticatedPageTranslation(rootSelector: string) {
   const { locale } = useI18n()
@@ -376,28 +378,42 @@ export function useAuthenticatedPageTranslation(rootSelector: string) {
     const root = document.querySelector(rootSelector)
     if (!root) return
     const target = locale.value as SupportedLocale
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        // Vue owns translated content and attribute labels. Keep fallback translation
+        // away from explicit localization bindings and their descendants.
+        if (node.parentElement?.closest('[data-i18n-managed]')) return NodeFilter.FILTER_REJECT
+        return NodeFilter.FILTER_ACCEPT
+      },
+    })
     let node: Node | null
     while ((node = walker.nextNode())) {
       const current = node.textContent || ''
       if (!current.trim()) continue
-      if (!originals.has(node)) originals.set(node, current)
+      // Vue may replace this node with text rendered for the newly selected locale.
+      // Adopt that value when it differs from our last fallback write.
+      if (!originals.has(node) || (lastWritten.has(node) && current !== lastWritten.get(node))) originals.set(node, current)
       const source = originals.get(node) || current
       const leading = source.match(/^\s*/)?.[0] || ''
       const trailing = source.match(/\s*$/)?.[0] || ''
       const next = `${leading}${translate(source.trim(), target)}${trailing}`
       if (node.textContent !== next) node.textContent = next
+      lastWritten.set(node, next)
     }
     root.querySelectorAll('[placeholder],[title],[aria-label]').forEach((element) => {
+      if (element.closest('[data-i18n-managed]')) return
       const saved = attrOriginals.get(element) || new Map<string, string>()
+      const previous = lastWrittenAttrs.get(element) || new Map<string, string>()
       for (const attr of ['placeholder', 'title', 'aria-label']) {
         const current = element.getAttribute(attr)
         if (!current) continue
-        if (!saved.has(attr)) saved.set(attr, current)
+        if (!saved.has(attr) || (previous.has(attr) && current !== previous.get(attr))) saved.set(attr, current)
         const next = translate(saved.get(attr) || current, target)
         if (current !== next) element.setAttribute(attr, next)
+        previous.set(attr, next)
       }
       attrOriginals.set(element, saved)
+      lastWrittenAttrs.set(element, previous)
     })
   }
   onMounted(async () => {

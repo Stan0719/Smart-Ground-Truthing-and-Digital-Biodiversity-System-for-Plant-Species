@@ -212,6 +212,9 @@ test('accessible modal locks the root without changing body/sticky layout, traps
     const exports = {}, mounted = [], cleanup = [], emitted = [], focused = []
     class Element {
       constructor(name) { this.name = name; this.children = []; this.parentElement = null; this.inert = false; this.style = { overflow: 'visible' }; this.isConnected = true }
+      matches(selector) { return selector.includes('button') && ['close', 'last-action'].includes(this.name) }
+      getClientRects() { return [{ width: 1, height: 1 }] }
+      closest() { return null }
       focus(options) { focused.push({ name: this.name, preventScroll: options?.preventScroll }); document.activeElement = this }
     }
     const body = new Element('body'), root = new Element('html'), layout = new Element('layout'), sidebar = new Element('sidebar'), main = new Element('main'), topbar = new Element('topbar'), page = new Element('page'), background = new Element('background'), backdrop = new Element('backdrop')
@@ -220,14 +223,14 @@ test('accessible modal locks the root without changing body/sticky layout, traps
     const first = new Element('close'), last = new Element('last-action'), opener = new Element('opener')
     const document = { body, documentElement: root, activeElement: opener }
     root.style.overflow = 'auto'
-    const context = { exports, HTMLElement: Element, document, require(name) {
+    const context = { exports, HTMLElement: Element, document, getComputedStyle: () => ({ visibility: 'visible' }), require(name) {
       if (name.endsWith('officerDropdown')) return { vOfficerDropdown: {} }
       if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => cleanup.push(fn) }
       if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key.startsWith('officerFeedback.') ? JSON.parse(readFileSync(new URL('../src/locales/en.json',import.meta.url),'utf8')).officerFeedback[key.split('.').at(-1)] : key }) }
       throw Error(name)
     } }
     vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
-    const state = exports.default.setup({ title: 'Modal', accessible }, { emit: (...args) => emitted.push(args), expose() {} })
+    const state = exports.default.setup({ title: 'Modal', accessible, closeOnEscape: true, closeOnBackdrop: true }, { emit: (...args) => emitted.push(args), expose() {} })
     state.backdrop.value = backdrop
     state.card.value = { querySelectorAll: () => [first, last] }
     await mounted[0]()
@@ -238,9 +241,9 @@ test('accessible modal locks the root without changing body/sticky layout, traps
     if (accessible) {
       assert.equal(focused[0].name, 'close'); assert.equal(focused[0].preventScroll, true)
       document.activeElement = last
-      state.keyboard({ key: 'Tab', shiftKey: false, preventDefault() {} })
+      state.keyboard({ key: 'Tab', shiftKey: false, preventDefault() {}, stopPropagation() {} })
       assert.equal(document.activeElement.name, 'close')
-      state.keyboard({ key: 'Escape', preventDefault() {} })
+      state.keyboard({ key: 'Escape', preventDefault() {}, stopPropagation() {} })
       assert.deepEqual(emitted, [['close']])
     }
     cleanup.forEach(fn => fn())
