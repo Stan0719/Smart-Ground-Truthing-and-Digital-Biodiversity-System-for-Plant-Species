@@ -19,7 +19,6 @@ import AppModal from '../../components/conservation/AppModal.vue'
 import ReviewCommentField from '../../components/conservation/ReviewCommentField.vue'
 import PlantPhotoLightbox from '../../components/PlantPhotoLightbox.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
-import TextLanguageSelect from '../../components/conservation/TextLanguageSelect.vue'
 import ObservationReviewHistory from '../../components/conservation/ObservationReviewHistory.vue'
 import { formatPlantId } from '../../utils/plantId'
 import { observationOrigin, observationQueueUrl, readQueuePage, type ObservationOrigin, type ObservationQueue } from '../../services/observationQueue'
@@ -174,7 +173,6 @@ const vObservationDialog: Directive<HTMLElement, string> = {
 const reviewHistoryRefresh = ref(0)
 const reviewMode = ref(false)
 const reviewComment = ref('')
-const reviewCommentSourceLocale = ref('unknown')
 const reviewSaving = ref(false)
 const reviewNeedsReload = ref(false)
 const reviewAcknowledged = ref(true)
@@ -630,7 +628,6 @@ function closeModal(force = false) {
   observationPhotoPreview.value?.close()
   reviewMode.value = false
   reviewComment.value = ''
-  reviewCommentSourceLocale.value = 'unknown'
   reviewFeedback.value = ''
   reviewInfo.value = false
   reviewNeedsReload.value = false
@@ -708,7 +705,7 @@ async function decide(decision: ReviewDecision) {
       if (!disposed && token === detailRequest) { reviewNeedsReload.value = true; reviewFeedback.value = error instanceof Error ? error.message : rt('feedback.loadFailed') }
       return
     }
-    const result = await performObservationReview({ id, revision, decision, comment: typedComment, sourceLocale: reviewCommentSourceLocale.value, request: reviewRequest, read: readReviewObservation,
+    const result = await performObservationReview({ id, revision, decision, comment: typedComment, request: reviewRequest, read: readReviewObservation,
       current: () => !disposed && token === detailRequest && selected.value?.id === id && authorizedOfficer.value, invalidResponse: rt('feedback.invalidResponse') })
     if (!result) return
     if (result.committed) { reviewHistoryRefresh.value++; successSequence.value++; successNotice.value = true }
@@ -1119,12 +1116,7 @@ onBeforeUnmount(() => { disposed = true; navigationRequest++; clearCopyState(); 
             <h3 class="observation-section-heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="17" rx="2" /><rect x="9" y="2" width="6" height="5" rx="1" /><path d="m9 14 2 2 4-4" /></svg>{{ modalText('officerReview') }}</h3>
             <div class="observation-section-content">
       <p v-if="!reviewAllowed && !detailLoading && !reviewSaving && !reviewNeedsReload" role="status">{{ rt('reviewUnavailable') }}</p>
-<<<<<<< HEAD
-      <label class="field" for="observation-review-comment"><span>{{ rt('reviewComment') }}</span><textarea id="observation-review-comment" ref="reviewCommentInput" v-model="reviewComment" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :aria-invalid="reviewCommentError || undefined" :aria-describedby="reviewCommentError ? 'observation-review-comment-error' : undefined" maxlength="4000" rows="5" :disabled="reviewSaving || detailLoading" /></label>
-      <TextLanguageSelect v-model="reviewCommentSourceLocale" :disabled="reviewSaving || detailLoading" />
-=======
       <ReviewCommentField ref="reviewCommentInput" id="observation-review-comment" v-model="reviewComment" :label="t('conservationPages.observations.reviewComment')" :placeholder="t('conservationText.recordtheobservationdecisionorrequiredaction')" :invalid="reviewCommentError" :described-by="reviewCommentError ? 'observation-review-comment-error' : undefined" :disabled="reviewSaving || detailLoading" :rows="5" />
->>>>>>> ef49798000d35e083afb5dc2556d6596ab1627d4
       <p v-if="reviewFeedback && !reviewSuccess" :id="reviewCommentError ? 'observation-review-comment-error' : undefined" :role="reviewInfo || reviewSuccess ? 'status' : 'alert'" class="observation-review-feedback" :class="[reviewFeedbackVariant, { 'observation-comment-validation': reviewCommentError }]"><svg v-if="reviewCommentError" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" /><path d="M12 8v4 M12 16h.01" /></svg><span>{{ reviewFeedback }}</span></p>
       <label v-if="!reviewAcknowledged && !reviewNeedsReload"><input v-model="reviewAcknowledged" type="checkbox" :disabled="reviewSaving" /> {{ rt('acknowledgeLatest') }}</label>
       <p v-if="reviewSaving" role="status">{{ rt('saving') }}</p>

@@ -67,7 +67,7 @@ function mountPlantDetail(app, { pool, allow, auth }) {
   app.get('/api/plants/:plantId/detail', allow('plants.detail.public.read'), async (req, res) => {
     const result = await snapshot(pool, async c => {
       const p = await detailParent(c, req.params.plantId, req.user);
-      const information = { plant_id: String(p.plant_id),
+      const information = { plant_id: String(p.plant_id), species_id: String(p.species_id),
         ...(permitted(req.user, 'plants.detail.read') ? { plant_scientific_name: p.scientific_name, species_scientific_name: p.species_name } : {}),
         scientific_name: p.scientific_name || p.species_name,
         common_name: p.common_name, genus_name: p.genus_name, family_name: p.family_name, description: p.description,
@@ -84,7 +84,7 @@ function mountPlantDetail(app, { pool, allow, auth }) {
       return { information, staff: { status: p.rbac_status, registered_at: p.registered_at,
         conservation_status: p.conservation_status, habitat: string(p.rbac_data?.habitat),
         approved_location: approved ? location(approved.content) : null,
-        current_registration: approved ? { state: 'available', observation_id: approved.observation_id, version_id: approved.version_id,
+        current_registration: approved ? { state: 'available', observation_id: approved.observation_id, observation_revision: approved.observation_revision, version_id: approved.version_id,
           content: observationContent(approved.content), photo_ids: approved.photo_ids } : { state: 'unavailable' },
         latest_observation: detailObservation(latest), latest_approved_observation: detailObservation(latestApproved) } };
     });
@@ -100,13 +100,14 @@ function mountPlantDetail(app, { pool, allow, auth }) {
           FROM plant_asset a WHERE a.plant_id=o.plant_id AND a.observation_id=o.id AND a.species_id IS NULL
             AND a.content_type IN ('image/jpeg','image/png')), '[]') AS assets,
         (SELECT jsonb_build_object('decision',r.decision,'comment',r.comment,'created_at',r.created_at)
+          || CASE WHEN $5::boolean AND o.status='Approved' THEN jsonb_build_object('id',r.id) ELSE '{}'::jsonb END
           FROM observation_review r WHERE r.observation_id=o.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS review
         FROM plant_observation o WHERE o.plant_id=$1
           AND ($2::timestamptz IS NULL OR (o.created_at,o.id)<($2::timestamptz,$3::text))
-        ORDER BY o.created_at DESC,o.id DESC LIMIT $4`, [id, cursor?.at ?? null, cursor?.id ?? '', limit + 1])).rows;
+        ORDER BY o.created_at DESC,o.id DESC LIMIT $4`, [id, cursor?.at ?? null, cursor?.id ?? '', limit + 1, permitted(req.user, 'observations.review')])).rows;
       const page = rows.slice(0, limit), classified = await classifyObservations(c, page), last = page.at(-1);
       const more = rows.length > limit;
-      return { plant_id: id, observations: classified.map(o => ({ id: o.id, plant_id: id, origin: o.origin_type,
+      return { plant_id: id, observations: classified.map(o => ({ id: o.id, revision: o.revision, plant_id: id, origin: o.origin_type,
         date: o.created_at, status: o.status, recorded_by: null, content: observationContent(o.content),
         assets: o.assets, review: o.review, _owner: o.owner_subject })),
         page: { limit, has_more: more, next_cursor: more ? Buffer.from(JSON.stringify({ v: 1, plant: id, at: last.cursor_at, id: last.id })).toString('base64url') : null } };

@@ -82,6 +82,13 @@ const blankForm = (): SpeciesForm => ({
 })
 const form = reactive<SpeciesForm>(blankForm())
 const sourceLanguages = reactive({ description: 'unknown', habitat: 'unknown', culturalSignificance: 'unknown' })
+const loadedSourceLanguages: Partial<typeof sourceLanguages> = {}
+for (const field of ['description', 'habitat', 'culturalSignificance'] as const) {
+  watch(() => form[field], () => {
+    if (loadedSourceLanguages[field] === sourceLanguages[field]) sourceLanguages[field] = 'unknown'
+    delete loadedSourceLanguages[field]
+  }, { flush: 'sync' })
+}
 const formErrors = ref<Partial<Record<keyof SpeciesForm, string>>>({})
 const speciesForm = ref<HTMLFormElement | null>(null)
 const validationAttempted = ref(false)
@@ -243,6 +250,7 @@ function assignForm(item?: ManagedSpecies) {
     culturalSignificance: item.culturalSignificance,
   } : blankForm())
   Object.assign(sourceLanguages, { description: 'unknown', habitat: 'unknown', culturalSignificance: 'unknown' })
+  for (const field of ['description', 'habitat', 'culturalSignificance'] as const) delete loadedSourceLanguages[field]
   resetValidation()
   mutationError.value = ''; speciesConflict.value = false
 }
@@ -275,8 +283,10 @@ async function loadForModal(item: ManagedSpecies, mode: 'view' | 'form') {
       } })
       if (requestId !== detailRequest) return
       for (const row of (Array.isArray(result.sourceLanguages) ? result.sourceLanguages : []))
-        if (Object.hasOwn(sourceLanguages, row.fieldName) && ['en', 'ms', 'zh-CN'].includes(row.sourceLocale))
-          sourceLanguages[row.fieldName as keyof typeof sourceLanguages] = row.sourceLocale
+        if (Object.hasOwn(sourceLanguages, row.fieldName) && ['en', 'ms', 'zh-CN'].includes(row.sourceLocale)) {
+          const field = row.fieldName as keyof typeof sourceLanguages
+          sourceLanguages[field] = loadedSourceLanguages[field] = row.sourceLocale
+        }
     }
   } catch (error) {
     if (requestId === detailRequest) mutationError.value = errorMessage(error, st('errors.detail'))

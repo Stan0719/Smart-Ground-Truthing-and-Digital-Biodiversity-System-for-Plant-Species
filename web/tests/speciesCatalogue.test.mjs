@@ -176,13 +176,14 @@ test('layout declares 4/3/2 columns, wrapping long text and original mobile acti
   } finally { h.stop() }
 })
 
- test('species previews omit descriptions but retain both actions and searchable descriptions', () => {
+ test('species previews omit descriptions and habitats but retain both actions and searchable descriptions', () => {
   const h = harness()
   try {
     h.state.isLoading.value = false
-    h.state.species.value = [{ ...fixture('preview', 'Family'), description: 'Unique description retained in data' }]
+    h.state.species.value = [{ ...fixture('preview', 'Family'), description: 'Unique description retained in data', habitat: 'Shaded forest' }]
     const nodes = flat(h.render())
-    assert.ok(!nodes.some(n => n.props?.class === 'plant-description' || n.children === 'Unique description retained in data'))
+    assert.ok(!nodes.some(n => n.props?.class === 'plant-description' ||
+      ['Unique description retained in data', 'Shaded forest'].includes(n.children)))
     const actions = nodes.find(n => n.props?.class === 'card-actions')
     assert.deepEqual(flat(actions).filter(n => n.props?.to).map(n => n.props.to), ['/species/preview', '/species/preview/plants'])
     h.state.searchQuery.value = 'Unique description'

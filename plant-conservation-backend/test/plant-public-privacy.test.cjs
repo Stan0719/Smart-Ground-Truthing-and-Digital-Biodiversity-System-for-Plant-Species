@@ -107,7 +107,7 @@ test('public plant, species, QR and assets use safe projections while staff/owne
   for(const id of [2,3,4,5,6,7])assert.equal((await call('/plants/'+id+'/detail')).status,404);
   for(const route of ['/plants/1/detail/gallery','/plants/1/detail/history','/plants/1/detail/assets/current-a'])assert.equal((await call(route)).status,401);
   const detail=(await call('/plants/1/detail')).data;
-  assert.deepEqual(Object.keys(detail.information).sort(),['common_name','description','family_name','genus_name','habitat','plant_id','scientific_name']);assert.equal(detail.staff,null);
+  assert.deepEqual(Object.keys(detail.information).sort(),['common_name','description','family_name','genus_name','habitat','plant_id','scientific_name','species_id']);assert.equal(detail.staff,null);
   assert.equal(detail.information.habitat,'Habitat');
   const summary=(await call('/plants?scope=public-web')).data.plants[0];
   assert.deepEqual(Object.keys(summary).sort(),['plant_id','plant_image_asset_id','species_id']);

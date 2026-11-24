@@ -220,9 +220,11 @@ function registerField(entry: Entry, targetValue: Record<string, unknown>, targe
   const target = reactive(targetValue)
   const existing = [...fields].some((field) => field.target.deref() === target && field.targetField === targetField)
   if (!existing) {
-    fields.add({ ...entry, target: weakTarget(target), targetField, source })
-    const cached = localizedByEntry.get(fieldKey({ ...entry, target: weakTarget(target), targetField, source }))
+    const field = { ...entry, target: weakTarget(target), targetField, source }
+    fields.add(field)
+    const cached = localizedByEntry.get(fieldKey(field))
     if (language.value !== 'en' && cached?.source === source) target[targetField] = cached.text
+    return field
   }
 }
 
@@ -253,16 +255,26 @@ export function trackDatabaseTranslationResponse<T>(value: T, options: { histori
 export function trackDatabaseTranslationFields(
   fieldsToTrack: Array<{ recordType: RecordType; recordId: string | number; fieldName: FieldName; target: object; targetField?: string; sourceVersion?: string; historical?: boolean }>,
 ) {
+  const registered: TrackedField[] = []
   for (const item of fieldsToTrack) {
     if (item.historical) continue
     const targetField = item.targetField || item.fieldName
     const target = item.target as Record<string, unknown>
     const source = target[targetField]
     if (typeof source !== 'string' || !source.trim()) continue
-    registerField({ recordType: item.recordType, recordId: String(item.recordId), fieldName: item.fieldName, ...(item.sourceVersion ? { sourceVersion: item.sourceVersion } : {}) }, target, targetField, source)
+    const field = registerField({ recordType: item.recordType, recordId: String(item.recordId), fieldName: item.fieldName, ...(item.sourceVersion ? { sourceVersion: item.sourceVersion } : {}) }, target, targetField, source)
+    if (field) registered.push(field)
   }
   while (fields.size > maxTrackedFields) fields.delete(fields.values().next().value!)
   if (language.value !== 'en') scheduleRefresh()
+  return () => {
+    for (const field of registered) {
+      if (!fields.delete(field)) continue
+      const target = field.target.deref()
+      if (target && target[field.targetField] === localizedByEntry.get(fieldKey(field))?.text)
+        target[field.targetField] = field.source
+    }
+  }
 }
 
 export function clearDatabaseTranslationTargets() {

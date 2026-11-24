@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -114,9 +114,16 @@ const navItems = computed(() => {
 })
 
 const navTrack = ref<HTMLElement | null>(null)
+const navLogo = ref<{ $el: HTMLElement } | null>(null)
+const authArea = ref<HTMLElement | null>(null)
+const compactNav = ref(typeof window !== 'undefined' && window.innerWidth <= 900)
 
 const thumbLeft = ref(0)
 const thumbWidth = ref(0)
+const thumbHeight = ref(0)
+const thumbTop = ref(0)
+const animateThumb = ref(false)
+let navResizeObserver: ResizeObserver | undefined
 
 const activeNavIndex = computed(() => {
   const index = navItems.value.findIndex((item) => {
@@ -134,57 +141,72 @@ const activeNavIndex = computed(() => {
   return index === -1 ? 0 : index
 })
 
-const updateNavThumb = async () => {
-  await nextTick()
-
-  const track = navTrack.value
-
-  if (!track) {
-    return
-  }
-
-  const links = track.querySelectorAll<HTMLElement>('.nav-link')
-
-  const activeLink = links[activeNavIndex.value]
-
-  if (!activeLink) {
-    return
-  }
-
-  const trackRect = track.getBoundingClientRect()
-
-  const linkRect = activeLink.getBoundingClientRect()
-
-  thumbLeft.value = linkRect.left - trackRect.left
-
-  thumbWidth.value = linkRect.width
+const updateNavThumb = (animate = false) => {
+  const activeLink = navTrack.value?.querySelectorAll<HTMLElement>('.nav-link')[activeNavIndex.value]
+  const width = activeLink?.offsetWidth ?? 0
+  const height = activeLink?.offsetHeight ?? 0
+  const left = activeLink?.offsetLeft ?? 0
+  const top = activeLink?.offsetTop ?? 0
+  if (width === thumbWidth.value && height === thumbHeight.value &&
+      left === thumbLeft.value && top === thumbTop.value) return
+  animateThumb.value = animate && thumbWidth.value > 0 && width > 0
+  thumbWidth.value = width
+  thumbHeight.value = height
+  thumbLeft.value = left
+  thumbTop.value = top
 }
 
 const navThumbStyle = computed(() => ({
-  transform: `translateX(${thumbLeft.value}px)`,
+  transform: `translate(${thumbLeft.value}px, ${thumbTop.value}px)`,
   width: `${thumbWidth.value}px`,
+  height: `${thumbHeight.value}px`,
+  visibility: thumbWidth.value ? undefined : 'hidden' as const,
 }))
 
 const handleResize = () => {
+  const track = navTrack.value
+  const logo = navLogo.value?.$el
+  const auth = authArea.value
+  const container = track?.closest<HTMLElement>('.navbar-container')
+  if (track && logo && auth && container) {
+    const input = track.querySelector('input')
+    const login = auth.querySelector<HTMLElement>('.login-button')
+    // Reserve room for the existing expanded search and login controls.
+    const searchRoom = input ? Math.max(0, 185 - input.offsetWidth) : 0
+    const loginRoom = login ? Math.max(0, 104 - login.offsetWidth) : 0
+    const requiredWidth = logo.offsetWidth + track.offsetWidth + auth.offsetWidth + 80 + searchRoom + loginRoom
+    compactNav.value = window.innerWidth <= 900 || requiredWidth > container.clientWidth
+  }
   updateNavThumb()
 }
+const observeNavSizes = () => {
+  navResizeObserver?.disconnect()
+  const track = navTrack.value
+  if (track && navResizeObserver) {
+    navResizeObserver.observe(track)
+    if (navLogo.value?.$el) navResizeObserver.observe(navLogo.value.$el)
+    if (authArea.value) navResizeObserver.observe(authArea.value)
+    for (const link of track.querySelectorAll('.nav-link')) navResizeObserver.observe(link)
+  }
+  handleResize()
+}
 
-onMounted(async () => {
+onMounted(() => {
   void verifySession()
-  updateNavThumb()
-
+  if (typeof ResizeObserver !== 'undefined') navResizeObserver = new ResizeObserver(handleResize)
+  observeNavSizes()
   window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
+  navResizeObserver?.disconnect()
   window.removeEventListener('resize', handleResize)
   window.clearTimeout(searchTimer)
   searchController?.abort()
 })
 
-watch([() => route.path, isLoggedIn, userRole, canUseProtectedSession], () => {
-  updateNavThumb()
-})
+watch(() => route.path, () => updateNavThumb(true), { flush: 'post' })
+watch([navItems, locale], observeNavSizes, { flush: 'post' })
 watch(() => route.fullPath, () => { searchOpen.value = false })
 
 const mobileMenuOpen = ref(false)
@@ -199,6 +221,10 @@ const closeMobileMenu = () => {
   mobileSearchOpen.value = false
 
 }
+
+watch(compactNav, (compact) => {
+  if (!compact) closeMobileMenu()
+})
 
 const submitMobileSearch = () => {
   submitNavSearch()
@@ -263,10 +289,10 @@ const logout = async () => {
 </script>
 
 <template>
-  <header class="navbar">
+  <header class="navbar" :class="{ 'is-compact': compactNav }">
     <div class="navbar-container">
       <!-- Logo -->
-      <RouterLink to="/" class="logo" @click="handleLogoClick">
+      <RouterLink ref="navLogo" to="/" class="logo" @click="handleLogoClick">
         <img src="/images/logo2.png" alt="Niah Biodiversity Logo" class="logo-image" />
 
         <div class="logo-text">
@@ -276,13 +302,14 @@ const logout = async () => {
       </RouterLink>
 
       <!-- Desktop Navigation -->
-      <nav class="desktop-nav" :aria-label="t('nav.main')">
+      <nav class="desktop-nav" :aria-label="t('nav.main')" :inert="compactNav">
         <div
           ref="navTrack"
           class="nav-track"
         >
           <div
             class="nav-thumb"
+            :class="{ 'nav-thumb-animated': animateThumb }"
             :style="navThumbStyle"
             aria-hidden="true"
           ></div>
@@ -361,7 +388,7 @@ const logout = async () => {
            Authentication
            ========================= -->
 
-      <div class="auth-area">
+      <div ref="authArea" class="auth-area" :inert="compactNav">
         <LanguageSwitcher />
         <!-- Logged Out -->
 
@@ -791,10 +818,8 @@ const logout = async () => {
 .nav-thumb {
   position: absolute;
 
-  top: 4px;
+  top: 0;
   left: 0;
-
-  height: 36px;
 
   border-radius: 10px;
 
@@ -804,17 +829,20 @@ const logout = async () => {
 
   pointer-events: none;
 
+  z-index: 0;
+}
+
+.nav-thumb-animated {
   transition:
     transform 280ms cubic-bezier(0.23, 1, 0.32, 1),
     width 280ms cubic-bezier(0.23, 1, 0.32, 1);
-
-  z-index: 0;
 }
 
 .nav-link {
   position: relative;
 
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
 
@@ -1096,7 +1124,7 @@ const logout = async () => {
    Responsive
    ========================= */
 
-@media (max-width: 900px) {
+.navbar.is-compact {
   .navbar-container {
     display: flex;
     flex-wrap: wrap;
@@ -1110,7 +1138,12 @@ const logout = async () => {
 
   .desktop-nav,
   .auth-area {
-    display: none;
+    /* Measure the same controls while the drawer is active. */
+    position: absolute;
+    right: 100%;
+    width: max-content;
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .menu-button {
@@ -1381,6 +1414,11 @@ const logout = async () => {
   }
 
   :deep(.mobile-nav .language-trigger) {
+    width: 100%;
+    min-height: 44px;
+    justify-content: flex-start;
+    padding: 0 14px;
+    border-radius: 10px;
     border-color: rgba(255, 255, 255, 0.2);
     background: rgba(255, 255, 255, 0.08);
     color: #bfd7cd;
@@ -1393,9 +1431,18 @@ const logout = async () => {
   }
 
   :deep(.mobile-nav .language-menu) {
+    position: static;
+    width: 100%;
+    margin-top: 7px;
+    box-shadow: none;
     border-color: rgba(255, 255, 255, 0.16);
     background: #173f34;
   }
+
+  :deep(.mobile-nav .language-switcher) { width: 100%; }
+  :deep(.mobile-nav .language-full) { display: inline; }
+  :deep(.mobile-nav .language-short) { display: none; }
+  :deep(.mobile-nav .language-chevron) { margin-left: auto; }
 
   :deep(.mobile-nav .language-menu button) {
     color: #bfd7cd;
@@ -1782,11 +1829,4 @@ const logout = async () => {
   transform: translateY(-1px);
 }
 
-/* Keep desktop authentication out of the mobile header. This rule is placed
-   after the desktop auth styles so it wins the cascade. */
-@media (max-width: 900px) {
-  .auth-area {
-    display: none;
-  }
-}
 </style>

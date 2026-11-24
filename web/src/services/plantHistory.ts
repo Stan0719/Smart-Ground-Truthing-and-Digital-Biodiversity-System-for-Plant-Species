@@ -7,9 +7,10 @@ export interface HistoryContent {
   latitude: number | null; longitude: number | null; accuracy_m: number | null; altitude_m: number | null; zone: string | null
 }
 export interface HistoryObservation {
+  revision?: number
   id: string; plant_id: string; origin: 'initial_registration' | 'subsequent_observation' | 'unknown'
   date: string; status: string; recorded_by: string | null; content: HistoryContent; assets: HistoryPhoto[]
-  review: { decision: string; comment: string; created_at: string } | null
+  review: { id?: string; decision: string; comment: string; created_at: string } | null
 }
 const object = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const validId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(v)
@@ -29,13 +30,16 @@ function mapObservation(value: unknown, plantId: string): HistoryObservation {
     (typeof c.longitude === 'number' && Math.abs(c.longitude) > 180) || (typeof c.accuracy_m === 'number' && c.accuracy_m < 0)) return invalid()
   const review = o.review === null ? null : object(o.review)
   if (o.review !== null && (!review || !statuses.filter(status => status !== 'Withdrawn').includes(String(review.decision)) || typeof review.comment !== 'string' || !validDate(review.created_at))) return invalid()
+  if (review?.id !== undefined && !validId(review.id)) return invalid()
+  const revision = o.revision
+  if (revision !== undefined && (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1)) return invalid()
   const seen = new Set<string>()
   const assets = o.assets.map(value => {
     const a = object(value)
     if (!a || !validId(a.id) || seen.has(a.id) || !['image/jpeg', 'image/png'].includes(String(a.content_type))) return invalid()
     seen.add(a.id); return { id: a.id, url: detailPhotoUrl(plantId, a.id) }
   })
-  return { id: o.id, plant_id: plantId, origin: o.origin as HistoryObservation['origin'], date: o.date, status: String(o.status),
+  return { id: o.id, ...(typeof revision === 'number' ? { revision } : {}), plant_id: plantId, origin: o.origin as HistoryObservation['origin'], date: o.date, status: String(o.status),
     recorded_by: o.recorded_by as string | null, content: c as unknown as HistoryContent, assets,
     review: review as HistoryObservation['review'] }
 }

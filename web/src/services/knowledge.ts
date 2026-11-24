@@ -68,7 +68,7 @@ async function loadKnowledge(verifiedUser?: AuthUser | null) {
     if (user && (user.mustChangePassword || user.status !== 'Active')) return
     const scientific = ['Botanist', 'Conservation Officer', 'Administrator'].includes(user?.role || '')
     const [catalog, records] = await Promise.all([
-      plantApi<{ species: Species[] }>(`/species?scope=${scientific ? 'scientific' : 'public'}`),
+      plantApi<{ species: Species[] }>(`/species?scope=${scientific ? 'scientific' : 'public'}`, 'GET', undefined, false),
       plantApi<{ plants: RecordRow[] }>(user ? '/plants' : '/plants?scope=public-web'),
     ])
     if (attempt !== generation) return
@@ -93,12 +93,6 @@ async function loadKnowledge(verifiedUser?: AuthUser | null) {
         sensitivityLevel: s.sensitivity,
         images: [],
       }))
-    trackDatabaseTranslationFields(nextPlants.flatMap((item) => [
-      { recordType: 'species' as const, recordId: item.speciesId, fieldName: 'description' as const, target: item, targetField: 'description' },
-      { recordType: 'species' as const, recordId: item.speciesId, fieldName: 'description' as const, target: item, targetField: 'overview' },
-      { recordType: 'species' as const, recordId: item.speciesId, fieldName: 'habitat' as const, target: item, targetField: 'habitat' },
-      ...(item.culturalSignificance ? [{ recordType: 'species' as const, recordId: item.speciesId, fieldName: 'culturalSignificance' as const, target: item, targetField: 'culturalSignificance' }] : []),
-    ]))
     const nextRecords = records.plants.map((r) => {
         const s = nextPlants.find((v) => v.speciesId === String(r.species_id))
         return {

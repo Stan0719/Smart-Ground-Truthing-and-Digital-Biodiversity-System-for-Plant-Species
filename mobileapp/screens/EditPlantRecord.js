@@ -413,7 +413,13 @@ export default function EditPlantRecord({ route, navigation }) {
     return () => { active = false; };
   // `reload` intentionally changes the focus callback when the user presses Retry.
   }, [accountId, plantId, reload, route.params?.formDraftKey, route.params?.speciesRequestId, route.params?.correctionChangeId, refreshQr])); // eslint-disable-line react-hooks/exhaustive-deps
-  const change = (field, value) => { formMutationRef.current += 1; setForm((old) => ({ ...old, [field]: value })); };
+  const change = (field, value) => {
+    formMutationRef.current += 1;
+    setForm((old) => ({ ...old, [field]: value }));
+    if (field === "morphology" || field === "notes")
+      setSourceLanguages(old => old[field] === initialSourceLanguagesRef.current[field] && old[field] !== "unknown"
+        ? { ...old, [field]: "unknown" } : old);
+  };
   async function retryOriginalPhotos() {
     setUnavailableOriginalPhotos([]);
     setLoadingOriginalPhotos([]);

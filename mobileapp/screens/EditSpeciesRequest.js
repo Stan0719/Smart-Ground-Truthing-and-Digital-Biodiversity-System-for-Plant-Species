@@ -363,7 +363,12 @@ export default function EditSpeciesRequest({ route, navigation }) {
     {state.request.request_status === "Approved" && !state.available && <Text style={styles.error}>{t("recordEdits.migrationRequired")}</Text>}
     <View style={styles.card}>{fields.map((field) => <View key={field}><OriginalUpdatedField label={["scientific_name", "common_name"].includes(field) ? t(field === "scientific_name" ? "addPlant.scientificName" : "addPlant.commonName") : `${t(`recordEdits.${field}`)} *`} originalValue={state.request[field]}>
       <TextInput style={[styles.input, ["description", "habitat"].includes(field) && styles.multiline]} value={form[field]}
-        onChangeText={(next) => setForm((old) => ({ ...old, [field]: next }))} multiline={["description", "habitat"].includes(field)} />
+        onChangeText={(next) => {
+          setForm((old) => ({ ...old, [field]: next }));
+          if (field === "description" || field === "habitat")
+            setSourceLanguages(old => old[field] === initialSourceLanguagesRef.current[field] && old[field] !== "unknown"
+              ? { ...old, [field]: "unknown" } : old);
+        }} multiline={["description", "habitat"].includes(field)} />
     </OriginalUpdatedField>{["description", "habitat"].includes(field) && <TextLanguageSelect value={sourceLanguages[field]} disabled={saving}
       onChange={(locale) => setSourceLanguages((old) => ({ ...old, [field]: locale }))} />}</View>)}
       <OriginalUpdatedField label={t("recordEdits.speciesPhoto")}

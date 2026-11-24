@@ -100,7 +100,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { sessionSnapshot, subscribeSession } from '../../services/auth'
 import { ReviewApiError, createReviewRequest, readReviewQueueSource, reviewQueueFailureDiagnostic, performObservationReview, observationReviewSnapshot, reviewCommentValid, positiveRevision, reviewEligible, reviewTransitions as transitions, type ReviewDecision } from '../../services/observationReview'
 import ActionFeedback from '../../components/ActionFeedback.vue'
-import TextLanguageSelect from '../../components/conservation/TextLanguageSelect.vue'
 import AppModal from '../../components/conservation/AppModal.vue'
 import ReviewCommentField from '../../components/conservation/ReviewCommentField.vue'
 import PlantProximityPanel from '../../components/conservation/PlantProximityPanel.vue'
@@ -212,7 +211,6 @@ const historicalSelectionActive = ref(false)
 watch(() => selected.value?.id, () => { historicalSelectionActive.value = false })
 const standaloneRequest = ref<LinkedSpeciesRequest | null>(null)
 const comment = ref('')
-const commentSourceLocale = ref('unknown')
 const observations = computed({ get: () => queueSnapshot.value.observations, set: observations => { queueSnapshot.value = { ...queueSnapshot.value, observations } } })
 const queueOrigin = ref<'initial_registration' | 'unknown'>('initial_registration')
 const hasMore = ref(false)
@@ -1500,7 +1498,7 @@ async function decide(decision: ReviewDecision) {
       if (!disposed && token === selectionRequest) { needsReload.value = true; showFeedback(error instanceof Error ? error.message : rt('feedback.loadFailed')) }
       return
     }
-    const result = await performObservationReview({ id, revision, decision, comment: typedComment, sourceLocale: commentSourceLocale.value, request, read: fetchObservation,
+    const result = await performObservationReview({ id, revision, decision, comment: typedComment, request, read: fetchObservation,
       current: () => !disposed && token === selectionRequest && officerSessionReady.value && selected.value?.id === id && route.query.review === id, invalidResponse: rt('feedback.invalidResponse') })
     if (!result) return
     const speciesDraft = speciesReviewComment.value
@@ -1853,7 +1851,7 @@ onBeforeUnmount(() => {
             <th scope="col">{{ t('approvedChanges.reviewedByColumn') }}</th>
             <th scope="col">{{ rt('recordCreated') }}</th>
             <th scope="col">{{ ct('Status') }}</th>
-            <th scope="col">{{ t('plantProximity.scoreColumn') }}</th>
+            <th scope="col" :aria-label="t('plantProximity.scoreColumn')"><span class="desktop-risk-heading">{{ t('plantProximity.scoreColumnLine1') }}<br />{{ t('plantProximity.scoreColumnLine2') }}</span></th>
             <th scope="col">{{ ct('Actions') }}</th>
           </tr>
         </thead>
@@ -1862,7 +1860,7 @@ onBeforeUnmount(() => {
           <StandaloneSpeciesRows v-if="'speciesRequest' in row" :row="row.speciesRequest" :submitter="submitterLabel(row.speciesRequest.requestedBy)" :reviewer="row.speciesRequest.state === 'pending' || !row.speciesRequest.reviewedAt ? '—' : reviewerName(row.speciesRequest.reviewedBy || '')" :zone-label="ct('Location Zone')" :authorized="officerSessionReady" @open="router.push({ name: 'conservation-reviews', query: { speciesRequest: $event } })" />
           <template v-else-if="'observation' in row"><template v-for="observation in [row.observation]" :key="observation.id">
           <td class="identity-cell"><span class="review-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 3C8 3 3 7 4 15s12 6 16-12ZM3 22 16 9" /></svg></span><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.submissionId') }}</span><div class="identifier-line"><strong :title="observation.id">{{ observationLabel(observation.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" :title="t('conservationPages.observations.copyObservationId', { id: observationLabel(observation.id) })" @click="copyIdentifier(observation.id, 'observation', `review-icon-0:${observation.id}`)"><svg v-if="!controlCopied[`review-icon-0:${observation.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `review-icon-0:${observation.id}`" :key="`review-icon-0:${observation.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><div class="desktop-submission-type"><div class="species-request-list"><span class="species-request-badge">{{ observation.origin === 'unknown' ? rt('queues.unverifiedOriginSubmissions') : observation.speciesRequest ? rt('speciesRequest.title') : t('approvedChanges.originalRegistration') }}</span><span v-if="observation.speciesRequest?.updated" class="badge species-updated-badge">{{ rt('speciesRequest.updated') }}</span></div></div></td>
-            <td class="plant-id-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.plantId') }}</span>{{ observation.plantId }}</td>
+            <td class="plant-id-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.plantId') }}</span><span class="plant-identity"><strong>{{ observation.plantId }}</strong><span v-if="observation.plantScientificName" class="plant-display-name">{{ observation.plantScientificName }}</span></span></td>
             <td class="submission-type-cell mobile-submission-type-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.submissionType') }}</span><div class="species-request-list">
               <span class="species-request-badge">{{ observation.origin === 'unknown' ? rt('queues.unverifiedOriginSubmissions') : observation.speciesRequest ? rt('speciesRequest.title') : t('approvedChanges.originalRegistration') }}</span>
               <span v-if="observation.speciesRequest?.updated" class="badge species-updated-badge">{{ rt('speciesRequest.updated') }}</span>
@@ -1890,7 +1888,7 @@ onBeforeUnmount(() => {
           </template></template>
           <template v-else>
              <td class="identity-cell edit-identity"><span class="review-card-emblem" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 3C8 3 3 7 4 15s12 6 16-12ZM3 22 16 9" /></svg></span><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.submissionId') }}</span><div class="identifier-line"><strong :title="row.change.id" :aria-label="row.change.id">{{ proposalLabel(row.change.id) }}</strong><span class="officer-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || copyPending" :aria-label="t('approvedChanges.copyProposal')" @click="copyIdentifier(row.change.id, 'change', `review-icon-1:${row.change.id}`)"><svg v-if="!controlCopied[`review-icon-1:${row.change.id}`]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="controlToastKey === `review-icon-1:${row.change.id}`" :key="`review-icon-1:${row.change.id}`" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ t('conservationPages.reviews.copiedToast') }}</span></span></span></div><small v-if="row.change.plant_id == null">{{ t('approvedChanges.speciesId') + ': ' + row.change.species_id }}</small><div class="desktop-submission-type"><div class="species-request-list"><span class="species-request-badge edit-type-badge" :class="row.kind === 'approved_plant_change' ? 'plant-edit' : 'species-edit'">{{ typeLabel(row.kind) }}</span></div></div></td>
-            <td class="plant-id-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.plantId') }}</span>{{ row.change.plant_id != null ? formatPlantId(row.change.plant_id) || row.change.plant_id : '\u2014' }}</td>
+            <td class="plant-id-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.plantId') }}</span><span class="plant-identity"><strong>{{ row.change.plant_id != null ? formatPlantId(row.change.plant_id) || row.change.plant_id : '\u2014' }}</strong><span v-if="row.change.plant_id != null && typeof row.change.base_snapshot.scientific_name === 'string' && row.change.base_snapshot.scientific_name" class="plant-display-name">{{ row.change.base_snapshot.scientific_name }}</span></span></td>
              <td class="submission-type-cell mobile-submission-type-cell"><span class="review-cell-label" aria-hidden="true">{{ t('approvedChanges.submissionType') }}</span><div class="species-request-list"><span class="species-request-badge edit-type-badge" :class="row.kind === 'approved_plant_change' ? 'plant-edit' : 'species-edit'">{{ typeLabel(row.kind) }}</span></div></td>
             <td><span class="review-cell-label" aria-hidden="true">{{ ct('Species') }}</span><em>{{ row.change.proposed_snapshot.scientific_name || rt('notRecorded') }}</em></td>
             <td class="identity-cell"><span class="review-cell-label" aria-hidden="true">{{ ct('Submitted By') }}</span><div class="identifier-line"><span :title="row.change.owner_subject">{{ submitterLabel(row.change.owner_subject) }}</span><span class="submitter-copy-anchor"><button type="button" class="identifier-copy" :disabled="!officerSessionReady || submitterPending[row.key]" :aria-label="t('conservationPages.observations.copySubject', { id: submitterLabel(row.change.owner_subject) })" @click="copySubmitter(row)" :data-submitter-copy="row.key"><svg v-if="!submitterCopied[row.key]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4H4v12h4" /></svg><svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 4 4 10-10" /></svg></button><span v-if="copiedToastRow === row.key" class="officer-copy-toast" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4 10-10" /></svg><span>{{ rt('copiedToast') }}</span></span></span></div></td>
@@ -2295,19 +2293,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-<<<<<<< HEAD
-          <label class="form-field officer-comment"
-            ><span class="review-section-heading"><svg class="review-section-icon" data-section-icon="comment" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8Z" /></svg><span>{{ ct('Observation Review Comment') }}</span></span
-            ><textarea
-              v-model="comment"
-              :disabled="reviewBusy || selectionLoading"
-              :placeholder="ct('Record the observation decision or required action')"
-            ></textarea>
-          </label>
-          <TextLanguageSelect v-model="commentSourceLocale" :disabled="reviewBusy || selectionLoading" />
-=======
           <ReviewCommentField id="plant-review-comment" v-model="comment" :label="ct('Observation Review Comment')" :disabled="reviewBusy || selectionLoading" :placeholder="ct('Record the observation decision or required action')" />
->>>>>>> ef49798000d35e083afb5dc2556d6596ab1627d4
           <p
             v-if="reviewMessage"
             :role="reviewMessage.variant === 'error' ? 'alert' : 'status'"
@@ -2486,6 +2472,24 @@ onBeforeUnmount(() => {
 .reviews-table thead th:last-child { border-top-right-radius: 10px; }
 .reviews-table td { font-size: 14px; line-height: 1.5; }
 .reviews-table .plant-id-cell { color: #315749; font-weight: 700; }
+.reviews-table .plant-identity { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: inherit; }
+.reviews-table .plant-identity strong { font-size: inherit; font-weight: 700; white-space: nowrap; }
+.reviews-table .plant-display-name { color: #60776c; font-size: inherit; font-weight: 400; }
+@container (min-width: 768px) {
+  :is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) .reviews-scroll .reviews-table { min-width: 84rem; }
+  :is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) .reviews-scroll .reviews-table .observation-column { width: 10.5rem; }
+  :is(.officer-layout.officer-layout.officer-layout, .officer-type-layer.officer-type-layer.officer-type-layer) .reviews-scroll .reviews-table .created-column { width: 10.5rem; }
+  .reviews-table .plant-column { width: 9rem; }
+  .reviews-table .submitter-column, .reviews-table .reviewer-column { width: 9rem; }
+  .reviews-table .proximity-column { width: 9rem; }
+  .reviews-table th, .reviews-table td { padding-left: 10px; padding-right: 10px; }
+  .reviews-table thead th { text-align: center; }
+  .reviews-scroll .reviews-table tbody td { text-align: center; }
+  .reviews-scroll .reviews-table tbody td .action-group, .reviews-scroll .reviews-table .species-request-list { justify-content: center; }
+  .reviews-scroll .reviews-table .review-status-group.has-historical-version { align-items: center; }
+  .reviews-table .plant-identity { flex-direction: column; align-items: center; gap: 2px; line-height: 1.35; }
+  .desktop-risk-heading { display: inline-block; white-space: nowrap; }
+}
 .reviews-table .identity-cell strong { color: inherit; font-weight: 700; }
 .reviews-table .edit-identity strong { color: #315749; font-weight: 700; }
 .reviews-table .edit-identity small { display: block; color: #60776c; margin-top: 3px; }

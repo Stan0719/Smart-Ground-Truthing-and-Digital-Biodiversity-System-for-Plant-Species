@@ -1358,9 +1358,8 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
             ...(submittedVersion ? [submittedVersion.id] : legacyReview ? [req.body.revision] : []),
           ],
         )).rows[0];
-        if (Object.hasOwn(reviewSourceLanguages, "comment"))
-          await syncSourceLanguage(c, { recordType: "review", recordId: review.id, fieldName: "comment",
-            sourceText: review.comment, sourceLocale: reviewSourceLanguages.comment });
+        await syncSourceLanguage(c, { recordType: "review", recordId: review.id, fieldName: "comment",
+          sourceText: review.comment, sourceLocale: reviewSourceLanguages.comment });
         if (submittedVersion) {
           const transitioned = await c.query(`UPDATE observation_submission_version v
             SET status=$1,reviewed_by=r.reviewer_subject,reviewed_at=r.created_at,review_comment=r.comment

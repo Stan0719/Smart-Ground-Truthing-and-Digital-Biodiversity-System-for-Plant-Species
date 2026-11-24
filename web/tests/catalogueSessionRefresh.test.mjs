@@ -22,7 +22,8 @@ function authHarness() {
     if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
     if (name === 'vue') return { ...vue, onMounted() {}, onBeforeUnmount() {} }
     if (name === 'vue-router') return { useRoute: () => route, useRouter: () => ({ push() {} }) }
-    if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x }) }
+    if (name === 'vue-i18n') return { useI18n: () => ({ t: x => x, locale: vue.ref('en') }) }
+    if (name.endsWith('/globalSearch')) return { searchGlobalWebsite: async () => { throw Error('Unexpected search in session test') } }
     if (name.endsWith('/auth')) return auth
     if (name.includes('usePrototypeSession')) return prototype
     if (name.endsWith('.vue')) return {}

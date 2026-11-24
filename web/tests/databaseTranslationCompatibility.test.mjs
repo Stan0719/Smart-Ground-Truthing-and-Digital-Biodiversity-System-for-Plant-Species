@@ -24,6 +24,7 @@ function fixture(source = 'Current leaf', revision = '2', responseOverride) {
       if (/^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql)) { writes++; throw Error('No writes allowed') }
       if (sql.includes('FROM observation_review r')) return { rows: [{ id: values[0], source_text: source, source_version: values[0] }] }
       if (sql.includes('FROM plant_observation o')) return { rows: [{ id, source_text: source, source_version: revision }] }
+      if (sql.includes('FROM plant_translation_source_language')) return { rows: values[3] === hash(source) ? [{ record_type: values[4], source_locale: 'en' }] : [] }
       if (sql.includes('FROM plant_translation_cache')) return { rows: [{ translated_text: 'Daun diterjemah', source_locale: 'en', source_hash: hash(source) }] }
       if (sql.includes('SELECT scientific_name AS name')) return { rows: [] }
       throw Error('Unexpected synthetic query')

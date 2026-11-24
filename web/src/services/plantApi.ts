@@ -44,7 +44,7 @@ export interface Device {
   device_type?: string | null
   plant_id?: string | number | null
 }
-export async function plantApi<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+export async function plantApi<T>(path: string, method = 'GET', body?: unknown, trackTranslations = true): Promise<T> {
   if (!path.startsWith('/') || path.startsWith('//')) throw Error('Invalid API path.')
   let response: Response
   try {
@@ -60,7 +60,7 @@ export async function plantApi<T>(path: string, method = 'GET', body?: unknown):
   }
   try {
     const result = await readApiResponse<T>(response, 'The plant data service is unavailable. Please try again later.')
-    return trackDatabaseTranslationResponse(result)
+    return trackTranslations ? trackDatabaseTranslationResponse(result) : result
   } catch (error) {
     if (!response.ok && error instanceof Error) Object.assign(error, { status: response.status })
     throw error

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+import { createHash, webcrypto } from 'node:crypto'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vue from 'vue'
@@ -24,13 +25,13 @@ const staff = { status: 'Approved', registered_at: '2026-11-01', conservation_st
 const flush = async () => { for (let i = 0; i < 8; i++) { await vue.nextTick(); await new Promise(setImmediate) } }
 function nodes(value) { const out = []; function walk(n) { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; out.push(n); if (Array.isArray(n.children)) walk(n.children) } walk(value); return out }
 function text(value) { return typeof value === 'string' ? value : Array.isArray(value) ? value.map(text).join('') : value && typeof value === 'object' ? text(value.children) : '' }
-function harness(initial = null, handler = null, photoHandler = null, historyHandler = null, previous = '/species') {
+function harness(initial = null, handler = null, photoHandler = null, historyHandler = null, previous = '/species', translation = null, lookup = async () => null) {
   const scope = vue.effectScope(), route = vue.reactive({ params: { plantId: '1' } }), listeners = new Set(), calls = [], photoCalls = [], historyCalls = []
   let verified = initial, pending = false, unavailable = false
   let verificationFailure = 0
   const mounted = [], events = {}, timers = []
   const exports = {}, context = { exports, console, window: { addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, document: { visibilityState: 'visible', addEventListener: (name, fn) => { events[name] = fn }, removeEventListener() {} }, setInterval: (fn, delay) => { timers.push({ fn, delay }); return 1 }, clearInterval() {}, require(name) {
-    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return { trackDatabaseTranslationFields() {}, configureDatabaseTranslation() {}, clearDatabaseTranslationTargets() {} }
+    if (name.replace(/\.ts$/, '').endsWith('databaseTranslation')) return translation || { trackDatabaseTranslationFields: () => () => {} }
     if (name.endsWith('workflowBadge')) return { workflowBadgeStyle }
     if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount() {}, resolveComponent: name => name }
     if (name === 'vue-router') return { useRoute: () => route, useRouter: () => ({ options: { history: { state: { back: previous } } }, resolve(path) { return { name: path.startsWith('/conservation/') ? 'conservation-map' : path === '/species' ? 'species' : undefined, fullPath: path } } }) }
@@ -40,7 +41,7 @@ function harness(initial = null, handler = null, photoHandler = null, historyHan
     if (name.endsWith('plantIntegration')) return integration
     if (name.endsWith('plantId')) return { formatPlantId }
     if (name.endsWith('plantDateTime')) return { formatPlantDateTime }
-    if (name.endsWith('plantDetail')) return { ...detailService, readPlantDetail: (id, allowed) => detailService.readPlantDetail(id, allowed, async url => { calls.push(url); return handler ? handler(url) : { information: { ...information, plant_id: id }, staff: detailService.canReadPlantDetail(verified) ? staff : null } }) }
+    if (name.endsWith('plantDetail')) return { ...detailService, readPlantLinkedSpecies: lookup, readPlantDetail: (id, allowed) => detailService.readPlantDetail(id, allowed, async url => { calls.push(url); return handler ? handler(url) : { information: { ...information, plant_id: id }, staff: detailService.canReadPlantDetail(verified) ? staff : null } }) }
     if (name.endsWith('plantGallery')) return { ...galleryService, createPlantGallery: options => galleryService.createPlantGallery({ ...options, transport: async (url, options) => { photoCalls.push(url); return photoHandler ? photoHandler(url, options) : url.includes('/assets?') ? Response.json({ assets: [] }) : Response.json({ plant_id: url.match(/plants\/(\d+)/)[1], assets: [], page: { limit: 20, has_more: false, next_cursor: null } }) } }) }
     if (name.endsWith('plantHistory')) return { ...historyService, createPlantHistory: () => historyService.createPlantHistory({ transport: async (url, options) => { historyCalls.push(url); return historyHandler ? historyHandler(url, options) : Response.json({ plant_id: url.match(/plants\/(\d+)/)[1], observations: [], page: { limit: 20, has_more: false, next_cursor: null } }) } }) }
     if (name.endsWith('conservationBadge')) return { conservationBadgeStyle }
@@ -52,6 +53,94 @@ function harness(initial = null, handler = null, photoHandler = null, historyHan
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)
   return { state, calls, photoCalls, historyCalls, route, events, timers, failVerification: status => { verificationFailure = status }, mount: () => mounted.forEach(fn => fn()), change(user, checking = false, outage = false) { verified = user; pending = checking; unavailable = outage; for (const fn of listeners) fn(user, checking) }, render: () => nodes(exports.render({}, [], {}, vue.proxyRefs(state), {}, {})), stop() { state.clearRecord(); scope.stop() } }
 }
+
+test('legacy link lookup verifies the plant ID, uses authorized scopes, and disables generic tracking', async () => {
+  for (const guest of [true, false]) {
+    const calls = []
+    const request = async (url, options) => {
+      calls.push([url, options])
+      return { plant: { plant_id: 52, species_id: '31' } }
+    }
+    assert.equal(await detailService.readPlantLinkedSpecies('52', guest, request), '31')
+    assert.deepEqual(calls, [[`/api/data/plants/52${guest ? '?scope=public-web' : ''}`, { trackTranslations: false }]])
+  }
+  assert.equal(await detailService.readPlantLinkedSpecies('52', true, async () => ({ plant: { plant_id: '51', species_id: '31' } })), null)
+  assert.equal(await detailService.readPlantLinkedSpecies('52', false, async () => ({ plant: { plant_id: '52', species_id: '31/other' } })), null)
+})
+
+test('Plant Detail translates existing species and approved evidence with exact IDs and restores the source', async () => {
+  const locale = vue.ref('zh-CN'), translation = {}, requests = []
+  const registrationId = '00000000-0000-4000-8000-000000000001', observationId = '00000000-0000-4000-8000-000000000002'
+  const source = '  Green leaves with branching stems.  '
+  const hash = value => createHash('sha256').update(value).digest('hex')
+  const settle = async predicate => {
+    for (let i = 0; i < 100; i++) {
+      if (predicate()) return
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    assert.fail('Translation did not settle')
+  }
+  let releaseMalay
+  const staleMalay = new Promise(resolve => { releaseMalay = resolve })
+  const translatorCode = readFileSync(new URL('../src/services/databaseTranslation.ts', import.meta.url), 'utf8')
+  vm.runInNewContext(js(translatorCode), {
+    exports: translation, require: () => vue, crypto: webcrypto, TextEncoder, WeakRef, AbortController, AbortSignal,
+    window: { setTimeout, clearTimeout }, console: { info() {} },
+    async fetch(url, options) {
+      assert.equal(url, '/api/data/website/translations')
+      const body = JSON.parse(options.body)
+      requests.push(body)
+      if (body.locale === 'ms' && body.entries.some(entry => entry.recordId === '7')) await staleMalay
+      return Response.json({ locale: body.locale, translations: body.entries.map(entry => ({ ...entry, text: `${body.locale}:${entry.recordId}:${entry.fieldName}` })) })
+    },
+  })
+  const scope = vue.effectScope()
+  scope.run(() => translation.configureDatabaseTranslation(locale))
+  let resolveHistory
+  const delayed = new Promise(resolve => { resolveHistory = resolve })
+  const historyRow = { id: observationId, revision: 6, plant_id: '1', origin: 'subsequent_observation', status: 'Approved',
+    date: '2026-11-02', recorded_by: null, content: detailObservation.content, assets: [],
+    review: { id: 'review-9', decision: 'Approved', comment: 'Leaves confirmed.', created_at: '2026-11-02' } }
+  const h = harness(officer, async url => {
+    const id = url.match(/plants\/(\d+)/)[1]
+    return { information: { ...information, plant_id: id, ...(id === '1' ? {} : { species_id: '8' }), description: source },
+      staff: { ...staff, habitat: ' ', current_registration: { state: 'available', observation_id: registrationId,
+        observation_revision: 3, content: structuredClone(detailObservation.content) } } }
+  }, null, url => url.includes('/plants/1/') ? delayed : Response.json({
+    plant_id: '2', observations: [], page: { limit: 20, has_more: false, next_cursor: null },
+  }), '/species', translation, async (id, guest) => {
+    assert.equal(id, '1')
+    assert.equal(guest, false)
+    return '7'
+  })
+  try {
+    await settle(() => h.state.plant.value?.information.description === 'zh-CN:7:description')
+    assert.equal(h.state.plant.value.information.scientific_name, information.scientific_name)
+    assert.equal(h.state.plant.value.staff.current_registration.content.heightCm, 21)
+    resolveHistory(Response.json({ plant_id: '1', observations: [historyRow,
+      { ...historyRow, id: 'pending-1', status: 'Pending Review' },
+      { ...historyRow, id: 'initial-1', origin: 'initial_registration' },
+    ], page: { limit: 20, has_more: false, next_cursor: null } }))
+    await settle(() => h.state.history.state.observations[0]?.review?.comment === 'zh-CN:review-9:comment')
+    const entries = requests.flatMap(request => request.entries)
+    assert.ok(entries.some(entry => entry.recordId === '7' && entry.fieldName === 'description' && entry.sourceHash === hash(source)))
+    assert.ok(entries.some(entry => entry.recordId === registrationId && entry.fieldName === 'morphology' && entry.sourceVersion === '3'))
+    assert.ok(entries.some(entry => entry.recordId === observationId && entry.fieldName === 'notes' && entry.sourceVersion === '6'))
+    assert.ok(entries.some(entry => entry.recordType === 'review' && entry.recordId === 'review-9' && entry.sourceVersion === 'review-9'))
+    assert.ok(entries.every(entry => !['1', 'pending-1', 'initial-1'].includes(entry.recordId) && entry.fieldName !== 'habitat'))
+    locale.value = 'ms'
+    await settle(() => requests.some(request => request.locale === 'ms'))
+    locale.value = 'en'
+    assert.equal(h.state.plant.value.information.description, source)
+    assert.equal(h.state.history.state.observations[0].content.notes, detailObservation.content.notes)
+    h.route.params.plantId = '2'
+    await settle(() => h.state.plant.value?.information.plant_id === '2')
+    releaseMalay()
+    locale.value = 'ms'
+    await settle(() => h.state.plant.value?.information.description === 'ms:8:description')
+    assert.equal(h.state.history.state.observations.length, 0)
+  } finally { releaseMalay(); h.stop(); translation.clearDatabaseTranslationTargets(); scope.stop() }
+})
 test('Guest adds only public photos to the existing upper layout; authenticated Visitor/Botanist behavior stays unchanged', async () => {
   for (const user of [null, { ...officer, role: 'Visitor' }, { ...officer, role: 'Botanist' }]) {
     const h = harness(user)

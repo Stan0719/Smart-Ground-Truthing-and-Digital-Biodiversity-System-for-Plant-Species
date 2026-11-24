@@ -1,9 +1,6 @@
 {
-<<<<<<< HEAD
   "textLanguage": { "label": "文本语言", "english": "英语", "malay": "马来语", "chinese": "简体中文", "unknown": "未知 / 跳过翻译" },
-=======
   "imagePreview": { "open": "全屏查看{{label}}", "zoomIn": "放大", "zoomOut": "缩小", "removeTitle": "移除照片？", "removeMessage": "要从当前表单中移除这张照片吗？" },
->>>>>>> ef49798000d35e083afb5dc2556d6596ab1627d4
   "imageSizeAlert": { "title": "图片过大", "pluralTitle": "图片过大", "unknownTitle": "无法检查图片", "intro": "以下图片超过 4 MB 限制，无法上传。", "pluralIntro": "以下图片超过 4 MB 限制，无法上传。", "photo": "照片", "plantPhoto": "植物照片", "wholePlantPhoto": "整株植物照片", "leafPhoto": "叶片照片", "stemBarkPhoto": "茎／树皮照片", "flowerFruitPhoto": "花／果实照片", "speciesPhoto": "物种照片", "observationPhoto": "观察照片", "filename": "文件名", "imageSize": "图片大小", "maximum": "每张图片最大允许：4 MB", "action": "请选择较小的图片或缩小图片后重试。", "unknownSize": "无法确认图片大小，请重新选择。" },
   "textSize": { "title": "语言与无障碍", "size": "文字大小", "normal": "正常", "maximum": "最大", "preview": "预览", "saveFailed": "本次使用的文字大小已更改，但无法保存。请重试。" },
   "correctionBadge": { "plant": "植物", "species": "物种", "observation": "观察", "original": "{{type}}原始版本", "edit": "{{type}}编辑 {{number}}", "editWithoutNumber": "{{type}}编辑" },

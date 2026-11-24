@@ -1,7 +1,8 @@
 "use strict";
 
-const { createHash } = require("node:crypto");
 const { permitted } = require("../shared/rbac.cjs");
+const { FIELDS, digest, detectedRecordType, saveDetectedSource } = require("./translation-source-language.cjs");
+const { detectSourceLanguage } = require("./translation-language-detection.cjs");
 
 const MODEL = "translategemma:4b";
 const PROMPT_VERSION = "translategemma-prompt-v2";
@@ -25,7 +26,14 @@ const RECORD_TYPE_ALIASES = Object.freeze({
   "review-comment": ["review-comment"],
 });
 
-const digest = (text) => createHash("sha256").update(text, "utf8").digest("hex");
+const detectionResults = new Map();
+function detectOnce(source, hash) {
+  if (!detectionResults.has(hash)) {
+    if (detectionResults.size >= 4096) detectionResults.delete(detectionResults.keys().next().value);
+    detectionResults.set(hash, detectSourceLanguage(source));
+  }
+  return detectionResults.get(hash);
+}
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function diagnostic(event, locale, entry, details = {}) {
   console.info(JSON.stringify({
@@ -343,14 +351,16 @@ function createTranslationService({
     return { text: validation.text, invalid: false };
   }
 
-  async function sourceLocale(entry, sourceHash) {
+  async function sourceLocale(entry, sourceHash, includeDetected = false) {
+    const types = typeAliases(entry);
+    const detectedType = detectedRecordType(entry.recordType);
     const result = await pool.query(`SELECT record_type,source_locale FROM plant_translation_source_language
       WHERE record_type=ANY($1::text[]) AND record_id=$2 AND field_name=$3 AND source_hash=$4
-      ORDER BY CASE WHEN record_type=$5 THEN 0 ELSE 1 END LIMIT 1`,
-    [typeAliases(entry), entry.recordId, entry.fieldName, sourceHash, entry.recordType]);
+      ORDER BY CASE WHEN record_type=$5 THEN 0 WHEN record_type=$6 THEN 2 ELSE 1 END LIMIT 1`,
+    [includeDetected ? [...types, detectedType] : types, entry.recordId, entry.fieldName, sourceHash, entry.recordType, detectedType]);
     const row = result.rows[0];
     return row && ["en", "ms", "zh-CN"].includes(row.source_locale)
-      ? { locale: row.source_locale, recordType: row.record_type }
+      ? { locale: row.source_locale, recordType: row.record_type === detectedType ? entry.recordType : row.record_type }
       : null;
   }
 
@@ -380,7 +390,17 @@ function createTranslationService({
       // The metadata binding is part of the cache authorization decision: a
       // previous English translation must never be returned after the same
       // record/field is reclassified as Malay, Chinese, or unknown.
-      const sourceInfo = await sourceLocale(storedEntry, sourceHash);
+      let sourceInfo = await sourceLocale(storedEntry, sourceHash, true);
+      if (!sourceInfo && FIELDS[storedEntry.recordType]?.has(storedEntry.fieldName)) {
+        const locale = detectOnce(source.source_text, sourceHash);
+        if (locale) {
+          const latest = await resolveSource(entry, user);
+          if (latest?.source_text !== source.source_text || latest.source_version !== source.source_version) return null;
+          await saveDetectedSource(pool, { ...storedEntry, sourceHash, locale });
+          sourceInfo = await sourceLocale(storedEntry, sourceHash, true);
+          diagnostic("source-language-detected", targetLocale, entry, { sourceLocale: locale });
+        }
+      }
       if (!sourceInfo) {
         diagnostic("metadata-skip", targetLocale, entry, { reason: "missing_or_source_hash_mismatch" });
         return null;

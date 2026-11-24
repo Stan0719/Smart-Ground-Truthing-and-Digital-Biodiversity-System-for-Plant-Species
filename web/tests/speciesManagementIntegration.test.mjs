@@ -154,6 +154,9 @@ function nodes(root) {
   walk(root)
   return result
 }
+const isReadOnlySpeciesRequest = call => call.options.method === 'GET' ||
+  (call.url === '/api/website/translations/source-languages' && call.options.method === 'POST' &&
+    Array.isArray(JSON.parse(call.options.body || '{}').entries))
 
 test('Create Species uses compact bottom-aligned sizing and keeps its existing workflow', () => {
   const css = descriptor.styles[0].content
@@ -250,7 +253,7 @@ test('taxonomy failure disables only Genus; retry restores it without changing s
     assert.equal(formSelect('Genus').props.disabled, false)
     assert.equal(h.state.form.genusId, '7')
     assert.equal(h.state.form.conservationStatus, 'Vulnerable')
-    assert.ok(h.calls.every(call => call.options.method === 'GET' && call.options.credentials === 'same-origin'))
+    assert.ok(h.calls.every(call => isReadOnlySpeciesRequest(call) && call.options.credentials === 'same-origin'))
   } finally { h.stop() }
 })
 
@@ -267,6 +270,8 @@ test('create sends exact supported payload then refetches detail and list', asyn
         genus_id: 7,
         conservation_status: 'Vulnerable',
         habitat: 'Limestone forest',
+        culturalSignificance: 'Local conservation knowledge',
+        source_languages: { description: 'en', habitat: 'en', culturalSignificance: 'en' },
       })
       list = [...list, speciesFixture({ species_id: 9, scientific_name: 'Hopea durable', common_name: 'Durable hopea', sensitivity: 'internal' })]
       return Response.json({ species_id: 9 }, { status: 201 })
@@ -280,8 +285,13 @@ test('create sends exact supported payload then refetches detail and list', asyn
     Object.assign(h.state.form, {
       scientificName: '  Hopea durable ', commonName: ' Durable hopea ', genusId: '7',
       conservationStatus: 'Vulnerable', visibility: 'internal', description: ' Persisted description ',
-      habitat: ' Limestone forest ',
+      habitat: ' Limestone forest ', culturalSignificance: ' Local conservation knowledge ',
     })
+    const languageSelectors = nodes(h.render()).filter(node => node.type?.name?.endsWith('TextLanguageSelect.vue'))
+    assert.equal(languageSelectors.length, 3, 'description, habitat, and cultural significance each have a language selector')
+    languageSelectors[0].props['onUpdate:modelValue']('en')
+    languageSelectors[1].props['onUpdate:modelValue']('en')
+    languageSelectors[2].props['onUpdate:modelValue']('en')
     await h.state.save()
     assert.equal(h.state.modal.value, null)
     assert.equal(h.state.species.value.length, 2)
@@ -315,9 +325,10 @@ test('edit loads authoritative detail, sends exact PATCH and verifies persisted 
     if (url === '/api/taxonomy') return Response.json({ genera: taxonomyFixture })
     if (url === '/api/species/3' && options.method === 'PATCH') {
       const body = JSON.parse(options.body)
-      assert.deepEqual(Object.keys(body).sort(), ['common_name','conservation_status','description','genus_id','habitat','scientific_name','visibility'].sort())
+      assert.deepEqual(Object.keys(body).sort(), ['common_name','conservation_status','culturalSignificance','description','genus_id','habitat','scientific_name','source_languages','visibility'].sort())
       assert.equal(body.scientific_name, 'Shorea updated')
       assert.equal(body.visibility, 'public')
+      assert.deepEqual(body.source_languages, { description: 'unknown', habitat: 'unknown', culturalSignificance: 'unknown' })
       stored = speciesFixture({ scientific_name: 'Shorea updated', sensitivity: 'public' })
       return Response.json({ updated: true })
     }
@@ -478,7 +489,7 @@ test('teammate text limits and trimmed bounded search survive the merge', () => 
   const valid = {
     scientificName: 'Shorea real', commonName: 'Meranti', genusId: '7',
     conservationStatus: 'Vulnerable', visibility: 'internal', description: 'Details',
-    habitat: '',
+    habitat: '', culturalSignificance: '',
   }
   const taxonomy = [{ id: '7', name: 'Shorea', family: 'Dipterocarpaceae' }]
   for (const [field, limit] of [['scientificName', 200], ['commonName', 200], ['description', 4000], ['habitat', 4000]]) {
@@ -611,7 +622,7 @@ test('Create and Edit failures scroll only the modal, focus first invalid field 
       assert.equal(input.props['aria-describedby'], 'species-scientificName-error')
       assert.ok(nodes(h.render()).some(node => node.props?.id === input.props['aria-describedby']))
       assert.equal(photoWrites, 0)
-      assert.ok(h.calls.every(call => call.options.method === 'GET'))
+      assert.ok(h.calls.every(isReadOnlySpeciesRequest))
       assert.equal(h.timers.size, 1)
       await h.state.save()
       assert.equal(h.timers.size, 1, 'repeated Save replaces the pulse timer')
@@ -682,7 +693,7 @@ test('unavailable taxonomy retains its meaningful error and focuses recovery wit
     assert.match(h.state.formErrors.value.genusId, /Taxonomy selection is unavailable: You do not have permission/)
     assert.equal(h.state.formErrors.value.conservationStatus, undefined)
     assert.equal(dom.focused[0].name, 'genusId-recovery')
-    assert.ok(h.calls.every(call => call.options.method === 'GET'))
+    assert.ok(h.calls.every(isReadOnlySpeciesRequest))
     unavailable = false; await h.state.loadTaxonomy(); await flush()
     assert.equal(h.state.invalidFields.value.length, 0)
     assert.equal(h.state.form.genusId, '7'); assert.equal(h.state.form.conservationStatus, 'Vulnerable')
@@ -703,7 +714,7 @@ test('photo selection errors and pending validation block text and photo writes 
     assert.equal(dom.focused[0].name, 'photos')
     photoState.invalid = false; photoState.pending = true; await flush()
     await h.state.save(); assert.equal(photoWrites, 0)
-    assert.ok(h.calls.every(call => call.options.method === 'GET'))
+    assert.ok(h.calls.every(isReadOnlySpeciesRequest))
     photoState.pending = false; await flush()
     assert.equal(h.state.invalidFields.value.length, 0)
     assert.equal(summaryNode(h).children, '')
@@ -758,7 +769,7 @@ test('localized placeholders appear in shared Create/Edit fields without becomin
         assert.equal(h.state.form.commonName, 'Persisted meranti')
         assert.equal(h.state.form.description, 'Persisted description')
       }
-      assert.ok(h.calls.every(call => call.options.method === 'GET'))
+      assert.ok(h.calls.every(isReadOnlySpeciesRequest))
     } finally { h.stop() }
   }
 })
@@ -795,7 +806,7 @@ test('dropdown hints preserve optional unassigned selections, visibility default
     assert.equal(payload.genus_id, null); assert.equal(payload.conservation_status, '')
     const errors = integration.validateSpeciesForm(h.state.form, h.state.taxonomy.value, h.state.knownStatuses.value)
     assert.equal(errors.genusId, undefined); assert.equal(errors.conservationStatus, undefined)
-    assert.ok(h.calls.every(call => call.options.method === 'GET'))
+    assert.ok(h.calls.every(isReadOnlySpeciesRequest))
   } finally { h.stop() }
 })
 
@@ -809,27 +820,32 @@ test('every supported locale has complete nonempty form placeholder translations
   }
 })
 
-test('Create/Edit omit Cultural Significance controls and payloads while keeping stored read metadata and required Description', async () => {
+test('Create/Edit expose Cultural Significance and source-language selectors while retaining required Description', async () => {
   for (const mode of ['create', 'edit']) {
     const h = harness(validationHandler)
     try {
       await Promise.all([h.state.loadSpecies(), h.state.loadTaxonomy()])
       if (mode === 'edit') await h.state.openEdit(h.state.species.value[0])
       else h.state.openCreate()
-      const controls = nodes(h.render()).filter(node => node.props?.['data-validation-field'])
-      assert.ok(!controls.some(node => node.props['data-validation-field'] === 'culturalSignificance'))
+      const rendered = nodes(h.render())
+      const controls = rendered.filter(node => node.props?.['data-validation-field'])
       assert.deepEqual(controls.filter(node => node.type === 'textarea').map(node => node.props['data-validation-field']), ['description', 'habitat'])
-      assert.equal(Object.hasOwn(h.state.form, 'culturalSignificance'), false)
+      assert.equal(rendered.filter(node => node.type === 'textarea').length, 3, 'description, habitat, and cultural significance have text inputs')
+      assert.equal(Object.hasOwn(h.state.form, 'culturalSignificance'), true)
+      assert.equal(h.state.sourceLanguages.description, 'unknown')
+      assert.equal(h.state.sourceLanguages.habitat, 'unknown')
+      assert.equal(h.state.sourceLanguages.culturalSignificance, 'unknown')
+      assert.equal(rendered.filter(node => node.type?.name?.endsWith('TextLanguageSelect.vue')).length, 3)
       if (mode === 'edit') {
         assert.equal(h.state.selected.value.culturalSignificance, 'Persisted cultural value', 'read mapping remains compatible')
         assert.equal(h.state.form.habitat, 'Persisted habitat')
       }
       const payload = integration.speciesPayload(h.state.form)
-      assert.equal(Object.hasOwn(payload, 'culturalSignificance'), false)
-      assert.equal(Object.hasOwn(integration.speciesPayload({ ...h.state.form, culturalSignificance: 'legacy hidden value' }), 'culturalSignificance'), false)
+      assert.equal(Object.hasOwn(payload, 'culturalSignificance'), true)
+      assert.equal(payload.culturalSignificance, mode === 'edit' ? 'Persisted cultural value' : '')
       const errors = integration.validateSpeciesForm({ ...h.state.form, description: '', culturalSignificance: 'x'.repeat(5000) }, h.state.taxonomy.value, h.state.knownStatuses.value)
-      assert.ok(errors.description); assert.equal(errors.culturalSignificance, undefined)
-      assert.ok(h.calls.every(call => call.options.method === 'GET'))
+      assert.ok(errors.description); assert.ok(errors.culturalSignificance)
+      assert.ok(h.calls.every(isReadOnlySpeciesRequest))
     } finally { h.stop() }
   }
 })
@@ -864,7 +880,7 @@ test('Plant Species keeps six aligned columns, intact names and accessible icon 
     actions[2].props.onClick(); assert.equal(h.state.modal.value,'delete')
     h.state.search.value=row.genus_name; assert.equal(h.state.filtered.value.length,1)
     h.state.search.value=row.family_name; assert.equal(h.state.filtered.value.length,1)
-    assert.ok(h.calls.every(call => call.options.method === 'GET'))
+    assert.ok(h.calls.every(isReadOnlySpeciesRequest))
   } finally { h.stop() }
 })
 
@@ -886,7 +902,7 @@ test('loaded-limit paragraph is removed visually while accessible scope, skipped
     assert.ok(warning); assert.equal(warning.props.role, 'status')
     assert.ok(!String(warning.children).includes(messages.conservationPages.species.loadedLimit))
     assert.equal(h.calls[0].url, '/api/species?scope=scientific')
-    assert.ok(h.calls.every(call => call.options.method === 'GET'))
+    assert.ok(h.calls.every(isReadOnlySpeciesRequest))
   } finally { h.stop() }
 })
 

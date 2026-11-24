@@ -802,7 +802,7 @@ test('profile password form verifies current credentials and changes only the is
   ).toBe(200)
 })
 
-test('recovery restores original card and handles both steps without email delivery', async ({ page }) => {
+test('recovery shares the login modal and handles both steps without email delivery', async ({ page }) => {
   monitor(page)
   const recoveryId = 'a'.repeat(32)
   let confirmations = 0
@@ -812,17 +812,25 @@ test('recovery restores original card and handles both steps without email deliv
   })
   await page.route('**/api/auth/recovery/confirm', async route => {
     confirmations++
-    expect(route.request().postDataJSON()).toEqual({ recoveryId, code: '123456', password: 'A secure recovery password!', confirmation: 'A secure recovery password!' })
+    expect(route.request().postDataJSON()).toEqual({ recoveryId, code: '123456', password: 'A secure recovery password!' })
     await route.fulfill(confirmations === 1 ? { status: 400, json: { error: 'Recovery code is invalid or expired.' } } : { status: 200, json: { ok: true } })
   })
-  for (const width of [1366, 390]) {
+  for (const width of [1366, 768, 390]) {
     await page.setViewportSize({ width, height: 900 })
-    await page.goto(origin + '/forgot-password')
-    const card = page.locator('.recovery-card')
-    await expect(card).toHaveCSS('background-color', 'rgb(255, 255, 255)')
-    await expect(card).toHaveCSS('border-radius', '18px')
+    await page.goto(origin + '/species')
+    if (width <= 900) await page.locator('.menu-button').click()
+    await page.getByRole('button', { name: 'Login', exact: true }).click()
+    const card = page.getByRole('dialog')
+    await card.getByRole('button', { name: 'Forgot password?' }).click()
+    await expect(card).toHaveAccessibleName('Forgot Password?')
+    await expect(page).toHaveURL(origin + '/species')
+    await expect(page.locator('.modal-backdrop')).toHaveCSS('backdrop-filter', 'blur(7px)')
+    await expect(card).toHaveCSS('border-radius', '22px')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
+  await page.getByLabel('Account email').fill('invalid')
+  await page.getByRole('button', { name: 'Request recovery code', exact: true }).click()
+  await expect(page.getByRole('dialog').getByRole('alert')).toHaveText('Enter a valid email.')
   await page.getByLabel('Account email').fill('Recovery@Example.invalid')
   await page.screenshot({ path: 'test-results/recovery-email-mobile.png', fullPage: true })
   await page.getByRole('button', { name: 'Request recovery code', exact: true }).click()
@@ -840,8 +848,11 @@ test('recovery restores original card and handles both steps without email deliv
   await page.getByRole('button', { name: 'Reset password', exact: true }).click()
   await expect(page.getByRole('status')).toHaveText('Password updated. Return to sign in.')
   await expect(page.getByLabel('New password', { exact: true })).toHaveCount(0)
-  await page.getByRole('link', { name: 'Return to sign in' }).click()
-  await expect(page).toHaveURL(origin + '/')
+  await page.getByRole('button', { name: 'Return to sign in' }).click()
+  await expect(page.getByRole('dialog')).toHaveAccessibleName('Welcome Back')
+  await expect(page).toHaveURL(origin + '/species')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
 test('recovery request errors and restart retain styled email form', async ({ page }) => {
@@ -854,12 +865,14 @@ test('recovery request errors and restart retain styled email form', async ({ pa
   await page.goto(origin + '/forgot-password')
   await page.getByLabel('Account email').fill('recovery@example.invalid')
   await page.getByRole('button', { name: 'Request recovery code', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('Too many requests')
+  await expect(page.getByRole('alert')).toContainText('Too many recovery requests')
   await page.getByRole('button', { name: 'Request recovery code', exact: true }).click()
   await page.getByRole('button', { name: 'Request a new code' }).click()
   await expect(page.getByLabel('Account email')).toBeVisible()
   await expect(page.getByLabel('Recovery code', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL(origin + '/')
 })
 
 test('homepage does not request forbidden plant data for staff awaiting password change', async ({ page }) => {

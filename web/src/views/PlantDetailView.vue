@@ -9,11 +9,12 @@ import { createPlantGallery, groupGallery } from '../services/plantGallery'
 import PlantObservationHistory from '../components/PlantObservationHistory.vue'
 import PlantRegistrationRecord from '../components/PlantRegistrationRecord.vue'
 import { createPlantHistory } from '../services/plantHistory'
-import { readPlantDetail, canReadPlantDetail, type PlantDetail } from '../services/plantDetail'
+import { readPlantDetail, readPlantLinkedSpecies, canReadPlantDetail, type PlantDetail } from '../services/plantDetail'
 import { formatPlantId } from '../utils/plantId'
 import { conservationBadgeStyle } from '../utils/conservationBadge'
 import { useConservationText } from '../composables/useConservationText'
 import { rawPlantIdFromRoute } from '../services/plantIntegration'
+import { trackDatabaseTranslationFields } from '../services/databaseTranslation'
 
 import { api, sessionSnapshot, subscribeSession, type AuthUser } from '../services/auth'
 
@@ -136,6 +137,43 @@ const display = (value: string | null | undefined) => value || ct('Unavailable')
 const habitat = computed(() => canReadStaff.value ? plant.value?.staff?.habitat : isGuest.value ? plant.value?.information.habitat : null)
 const badgeKey = (value: string | null | undefined) => (value || '').toLowerCase().replace(/[^a-z]/g, '')
 
+type TranslationField = Parameters<typeof trackDatabaseTranslationFields>[0][number]
+const observationFields = (recordId: string, target: object, revision?: number): TranslationField[] =>
+  (['morphology', 'notes'] as const).map(fieldName => ({
+    recordType: 'observation', recordId, fieldName, target,
+    sourceVersion: Number.isSafeInteger(revision) && revision! > 0 ? String(revision) : undefined,
+  }))
+watch([plant, canReadStaff, isGuest, () => plant.value?.information.species_id], ([detail, staffAllowed, guest, speciesId], _previous, onCleanup) => {
+  if (!detail) return
+  const fields: TranslationField[] = []
+  const { information, staff } = detail
+  if (speciesId) {
+    fields.push({ recordType: 'species', recordId: speciesId, fieldName: 'description', target: information })
+    if (staffAllowed && staff)
+      fields.push({ recordType: 'species', recordId: speciesId, fieldName: 'habitat', target: staff })
+    else if (guest)
+      fields.push({ recordType: 'species', recordId: speciesId, fieldName: 'habitat', target: information })
+  }
+  const registration = staff?.current_registration
+  if (staffAllowed && staff?.status === 'Approved' && registration?.state === 'available' &&
+    typeof registration.observation_id === 'string' && registration.content && typeof registration.content === 'object')
+    fields.push(...observationFields(registration.observation_id, registration.content, registration.observation_revision))
+  onCleanup(trackDatabaseTranslationFields(fields))
+})
+watch([canReadStaff, () => plant.value?.information.plant_id, () => history.state.observations],
+  ([staffAllowed, id, observations], _previous, onCleanup) => {
+    if (!staffAllowed || !id) return
+    const fields: TranslationField[] = []
+    for (const observation of observations) {
+      if (observation.plant_id !== id || observation.status !== 'Approved' || observation.origin === 'initial_registration') continue
+      fields.push(...observationFields(observation.id, observation.content, observation.revision))
+      const review = observation.review
+      if (review?.id && user.value?.role === 'Conservation Officer')
+        fields.push({ recordType: 'review', recordId: review.id, fieldName: 'comment', target: review, sourceVersion: review.id })
+    }
+    onCleanup(trackDatabaseTranslationFields(fields))
+  })
+
 async function loadPlant(background = false) {
   const requestId = ++loadRequest
   if (!background) { gallery.reset(); publicGallery.reset(); history.reset(); plant.value = null }
@@ -156,6 +194,15 @@ async function loadPlant(background = false) {
     const historyScopeChanged = plant.value?.staff?.status !== detail.staff?.status || Boolean(plant.value?.staff) !== Boolean(detail.staff)
     if (background && historyScopeChanged) history.reset()
     if (JSON.stringify(plant.value) !== JSON.stringify(detail)) plant.value = detail
+    if (!detail.information.species_id) {
+      const target = plant.value
+      // Older running APIs omit the link in Detail, but may provide it in the
+      // authorized plant projection. Keep the original detail prose and hash.
+      void readPlantLinkedSpecies(rawId, isGuest.value).then((speciesId) => {
+        if (speciesId && !disposed && requestId === loadRequest && target && plant.value === target)
+          target.information.species_id = speciesId
+      }).catch(() => { /* The untranslated detail remains available. */ })
+    }
     if (background) {
       if (canReadStaff.value) {
         if (historyScopeChanged) await history.load(rawId)

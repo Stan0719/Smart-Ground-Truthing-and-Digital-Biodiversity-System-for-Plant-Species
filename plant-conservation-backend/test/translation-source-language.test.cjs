@@ -14,7 +14,9 @@ function metadataClient() {
       return { rowCount: 1, rows: [] };
     }
     if (sql.startsWith("DELETE FROM plant_translation_source_language")) {
-      rows.delete(`${values[0]}:${values[1]}:${values[2]}`); return { rowCount: 1, rows: [] };
+      const key = `${values[0]}:${values[1]}:${values[2]}`;
+      if (!values[3] || rows.get(key)?.sourceHash !== values[3]) rows.delete(key);
+      return { rowCount: 1, rows: [] };
     }
     if (sql.startsWith("SELECT source_hash,source_locale")) {
       const row = rows.get(`${values[0]}:${values[1]}:${values[2]}`);
@@ -40,7 +42,7 @@ test("creation metadata stores the canonical hash for English, Malay, and Chines
   assert.deepEqual(client.rows.get("species:19:description"), { sourceHash: sha("绿叶"), sourceLocale: "zh-CN" });
 });
 
-test("different prose fields retain different language selections and Unknown deletes metadata", async () => {
+test("automatic mode preserves matching explicit metadata", async () => {
   const client = metadataClient();
   await syncSourceLanguages(client, { recordType: "species", recordId: 19,
     values: { description: "Green leaves", habitat: "Hutan tropika" },
@@ -49,7 +51,7 @@ test("different prose fields retain different language selections and Unknown de
   assert.equal(client.rows.get("species:19:description").sourceLocale, "en");
   assert.equal(client.rows.get("species:19:habitat").sourceLocale, "ms");
   await syncSourceLanguage(client, { recordType: "species", recordId: 19, fieldName: "habitat", sourceText: "Hutan tropika", sourceLocale: "unknown" });
-  assert.equal(client.rows.has("species:19:habitat"), false);
+  assert.equal(client.rows.get("species:19:habitat").sourceLocale, "ms");
 });
 
 test("approved submissions promote only exact staged text and discard stale selections", async () => {

@@ -1,9 +1,6 @@
 {
-<<<<<<< HEAD
   "textLanguage": { "label": "Bahasa teks", "english": "Bahasa Inggeris", "malay": "Bahasa Melayu", "chinese": "Bahasa Cina Ringkas", "unknown": "Tidak diketahui / Jangan terjemah" },
-=======
   "imagePreview": { "open": "Lihat {{label}} pada skrin penuh", "zoomIn": "Zum masuk", "zoomOut": "Zum keluar", "removeTitle": "Alih keluar foto?", "removeMessage": "Alih keluar foto ini daripada borang semasa?" },
->>>>>>> ef49798000d35e083afb5dc2556d6596ab1627d4
   "imageSizeAlert": { "title": "Imej Terlalu Besar", "pluralTitle": "Imej Terlalu Besar", "unknownTitle": "Imej Tidak Dapat Diperiksa", "intro": "Imej berikut tidak dapat dimuat naik kerana melebihi had 4 MB.", "pluralIntro": "Imej berikut tidak dapat dimuat naik kerana melebihi had 4 MB.", "photo": "Foto", "plantPhoto": "Foto Tumbuhan", "wholePlantPhoto": "Foto Keseluruhan Tumbuhan", "leafPhoto": "Foto Daun", "stemBarkPhoto": "Foto Batang / Kulit Kayu", "flowerFruitPhoto": "Foto Bunga / Buah", "speciesPhoto": "Foto Spesies", "observationPhoto": "Foto Pemerhatian", "filename": "Nama fail", "imageSize": "Saiz imej", "maximum": "Maksimum dibenarkan: 4 MB setiap imej", "action": "Sila pilih imej yang lebih kecil atau kurangkan saiznya sebelum mencuba lagi.", "unknownSize": "Saiz imej tidak dapat diperiksa. Sila pilih semula." },
   "textSize": { "title": "Bahasa & Kebolehcapaian", "size": "Saiz Teks", "normal": "Biasa", "maximum": "Maksimum", "preview": "Pratonton", "saveFailed": "Saiz teks berubah untuk sesi ini tetapi tidak dapat disimpan. Sila cuba lagi." },
   "correctionBadge": { "plant": "Tumbuhan", "species": "Spesies", "observation": "Pemerhatian", "original": "{{type}} Asal", "edit": "Edit {{type}} {{number}}", "editWithoutNumber": "Edit {{type}}" },

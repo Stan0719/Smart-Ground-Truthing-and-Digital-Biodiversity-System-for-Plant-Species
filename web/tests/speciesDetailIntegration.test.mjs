@@ -138,9 +138,10 @@ test('API asset ID fallback and authorized gallery fallback are supported; unsaf
   }
 })
 
-test('profile layout stacks below 900px, preserves stacked 4:3 portrait and removes duplicated unsupported sections', () => {
+test('profile layout stacks below 900px, preserves the portrait, and limits cultural text to scientific staff', () => {
   const css = descriptor.styles[0].content
-  for (const name of ['prototypeSpecies', 'refreshKnowledge', 'speciesText', 'quick-facts', 'explore-more', 'plant-information', 'culturalSignificance', 'selectedSpecies.category']) assert.ok(!source.includes(name), name)
+  for (const name of ['prototypeSpecies', 'refreshKnowledge', 'speciesText', 'quick-facts', 'explore-more', 'plant-information', 'selectedSpecies.category']) assert.ok(!source.includes(name), name)
+  assert.match(source, /scientific && selectedSpecies\.culturalSignificance/)
   assert.match(css, /\.main-image-frame\s*\{[^}]*aspect-ratio: 4 \/ 3/)
   assert.match(css, /@media \(max-width: 899px\)[\s\S]*?\.hero-grid\s*\{[^}]*grid-template-columns: 1fr/)
   assert.doesNotMatch(css, /\.plant-image\s*\{[^}]*height: \d+px/)

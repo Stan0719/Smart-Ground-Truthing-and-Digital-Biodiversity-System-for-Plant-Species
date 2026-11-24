@@ -15,7 +15,7 @@ import { api, sessionSnapshot, subscribeSession, type AuthUser } from '../servic
 
 interface SpeciesProfile {
   id: string; commonName: string; scientificName: string; genus: string; family: string
-  description: string; habitat: string; conservationStatus: string; image: string
+  description: string; habitat: string; culturalSignificance: string; conservationStatus: string; image: string
 }
 const route = useRoute()
 const { t } = useI18n()
@@ -33,6 +33,7 @@ const user = ref<AuthUser | null>(null)
 const scientific = computed(() => Boolean(user.value && user.value.status === 'Active' && !user.value.mustChangePassword &&
   ['Botanist', 'Conservation Officer', 'Administrator'].includes(user.value.role)))
 const text = (v: unknown) => typeof v === 'string' ? v.trim() : ''
+const prose = (v: unknown) => typeof v === 'string' && v.trim() ? v : ''
 const object = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const validId = (v: unknown) => /^(?:[1-9][0-9]*)$/.test(String(v ?? '')) && BigInt(String(v)) <= 2147483647n
 const generatedSlug = (v: Record<string, unknown>) => `${text(v.common_name) || text(v.scientific_name)}-${v.species_id}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -145,13 +146,15 @@ async function loadSpecies(background = false) {
       throw Error(t('species.detail.unresolvedSlug'))
     const nextProfile: SpeciesProfile = {
       id, commonName: text(item.common_name), scientificName: text(item.scientific_name), genus: text(item.genus_name), family: text(item.family_name),
-      description: text(item.description), habitat: scientific.value || user.value === null ? text(item.habitat) : '',
+      description: prose(item.description), habitat: scientific.value || user.value === null ? prose(item.habitat) : '',
+      culturalSignificance: scientific.value ? prose(item.culturalSignificance) : '',
       conservationStatus: scientific.value ? text(item.conservation_status) : '',
       image: webAssetUrl(item.image_url) || assetUrlFromId(item.image_asset_id),
     }
     trackDatabaseTranslationFields([
       { recordType: 'species', recordId: id, fieldName: 'description', target: nextProfile, targetField: 'description' },
       { recordType: 'species', recordId: id, fieldName: 'habitat', target: nextProfile, targetField: 'habitat' },
+      ...(scientific.value ? [{ recordType: 'species' as const, recordId: id, fieldName: 'culturalSignificance' as const, target: nextProfile, targetField: 'culturalSignificance' as const }] : []),
     ])
     const profile = nextProfile
     if (!background) { selectedSpecies.value = nextProfile; isLoading.value = false; plantsLoading.value = true }
@@ -348,6 +351,10 @@ onBeforeUnmount(() => {
             <section v-if="selectedSpecies.description" class="profile-description" aria-labelledby="species-description-title">
               <h2 id="species-description-title">{{ t('conservationText.description') }}</h2>
               <p class="summary">{{ selectedSpecies.description }}</p>
+            </section>
+            <section v-if="scientific && selectedSpecies.culturalSignificance" class="profile-description" aria-labelledby="species-culture-title">
+              <h2 id="species-culture-title">{{ t('speciesLabels.culture') }}</h2>
+              <p class="summary">{{ selectedSpecies.culturalSignificance }}</p>
             </section>
           </div>
         </div>

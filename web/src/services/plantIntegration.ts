@@ -199,7 +199,7 @@ export class PlantApiError extends Error {
   }
 }
 
-export async function requestPlantApi(url: string): Promise<Record<string, unknown>> {
+export async function requestPlantApi(url: string, { trackTranslations = true } = {}): Promise<Record<string, unknown>> {
   let response: Response
   try {
     response = await fetch(url, {
@@ -229,5 +229,5 @@ export async function requestPlantApi(url: string): Promise<Record<string, unkno
     throw new PlantApiError(backendMessage || fallback, response.status)
   }
   if (!result) throw new PlantApiError('The plant service returned an invalid response.', response.status, 'invalid')
-  return trackDatabaseTranslationResponse(result)
+  return trackTranslations ? trackDatabaseTranslationResponse(result) : result
 }
