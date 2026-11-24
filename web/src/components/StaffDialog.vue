@@ -52,7 +52,7 @@ onMounted(async () => {
     if (current === document.body) break
   }
   await nextTick()
-  ;(focusables()[0] || card.value)?.focus({ preventScroll: true })
+  ;(card.value?.querySelector<HTMLElement>('[data-initial-focus]') || focusables()[0] || card.value)?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
   for (const [node, inert] of inertNodes) node.inert = inert

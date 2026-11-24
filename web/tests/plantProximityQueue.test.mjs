@@ -29,7 +29,7 @@ test('filter/revision changes abort obsolete work and late old results cannot re
 test('memory cache is keyed by ID/revision/stamp, expires after 30 seconds and clears at session boundaries',async()=>{
  let now=0,reads=0;const q=createPlantProximityQueue(async(id,revision)=>{reads++;return result(row(id,revision))},()=>{},()=>now)
  try{q.setRows([row(1)]);q.visibility(row(1),true);await flush();assert.equal(reads,1);q.setRows([]);q.setRows([row(1)]);q.visibility(row(1),true);await flush();assert.equal(reads,1)
-  now=30001;q.setRows([row(1)]);await flush();assert.equal(reads,2);q.setRows([row(1,1,'gps-b')]);await flush();assert.equal(reads,3);q.clear();q.setRows([row(1,1,'gps-b')]);q.visibility(row(1),true);await flush();assert.equal(reads,4)
+  now=60001;q.setRows([row(1)]);await flush();assert.equal(reads,2);q.setRows([row(1,1,'gps-b')]);await flush();assert.equal(reads,3);q.clear();q.setRows([row(1,1,'gps-b')]);q.visibility(row(1),true);await flush();assert.equal(reads,4)
  }finally{q.dispose()}
 })
 test('failed and incomplete checks never become empty success; explicit Retry is isolated and no repeated automatic retries occur',async()=>{
@@ -44,7 +44,7 @@ test('quick viewport exit/reentry resumes cancelled work without stale publicati
 })
 test('cache retains at most 100 results and rejects identity mismatches',async()=>{
  let reads=0;const q=createPlantProximityQueue(async(id,revision)=>{reads++;return result(row(id,revision))},()=>{}),rows=Array.from({length:101},(_,i)=>row(i+1))
- try{q.setRows(rows);rows.forEach(r=>q.visibility(r,true));await flush();assert.equal(reads,101);q.setRows([row(1)]);await flush();assert.equal(reads,102)}finally{q.dispose()}
+ try{q.setRows(rows);rows.forEach(r=>q.visibility(r,true));await flush();assert.equal(reads,101);q.setRows([]);q.setRows([row(1)]);q.visibility(row(1),true);await flush();assert.equal(reads,102)}finally{q.dispose()}
  const mismatch=createPlantProximityQueue(async()=>result(row(999)),()=>{});try{mismatch.setRows([row(1)]);mismatch.visibility(row(1),true);await flush();assert.equal(mismatch.entries.get(proximityKey(row(1))).state,'failed')}finally{mismatch.dispose()}
 })
 
@@ -69,3 +69,45 @@ test('table badge displays the nearest risk percentage and distinguishes no scor
 test('row IntersectionObserver drives visibility, button opens its drawer, and unmount stops observer callbacks',()=>{
  const h=cell(undefined);try{assert.equal(h.emits.length,0);assert.equal(h.mount().tag,'TR');h.visible(true);assert.deepEqual(h.emits.at(-1),['visibility',true]);const button=h.render().children[0],event={currentTarget:{}};button.props.onClick(event);assert.equal(h.emits.at(-1)[0],'open');assert.equal(h.emits.at(-1)[1],event);assert.equal(h.stop(),true);const before=h.emits.length;h.visible(true);assert.equal(h.emits.length,before)}finally{h.stop()}
 })
+
+
+test('unchanged 60-second polls and 10-minute verification preserve ready results while refreshing once',async()=>{
+ let now=0,reads=0;const pending=[]
+ const q=createPlantProximityQueue(()=>{reads++;return new Promise(resolve=>pending.push(resolve))},()=>{},()=>now)
+ try{
+  q.setRows([row(1)]);q.visibility(row(1),true);await flush();pending.shift()(result(row(1)));await flush()
+  const first=q.entries.get('1:1').result
+  for(const time of [60000,600000]){
+   now=time;q.setRows([row(1)]);const entry=q.entries.get('1:1');assert.equal(entry.result,first);assert.equal(entry.state,'ready');assert.equal(entry.refreshing,true)
+   await flush();const count=reads;q.setRows([row(1)]);q.visibility(row(1),true);await flush();assert.equal(reads,count)
+   pending.shift()(first);await flush();assert.equal(entry.refreshing,false);assert.equal(entry.state,'ready')
+  }
+  assert.equal(reads,3)
+ }finally{q.dispose()}
+})
+test('expired result updates atomically, target changes invalidate immediately and old completion cannot publish',async()=>{
+ let now=0;const pending=[]
+ const q=createPlantProximityQueue((id,revision,signal)=>new Promise(resolve=>pending.push({resolve,signal,id,revision})),()=>{},()=>now)
+ try{
+  q.setRows([row(1)]);q.visibility(row(1),true);await flush();const first=result(row(1));pending.shift().resolve(first);await flush()
+  now=60000;q.setRows([row(1)]);await flush();assert.equal(q.entries.get('1:1').result,first)  const changed=result(row(1),{checked_at:'2026-11-23T00:00:00Z'});pending.shift().resolve(changed);await flush();assert.equal(q.entries.get('1:1').result,changed)
+  now+=60000;q.setRows([row(1)]);await flush();const obsolete=pending.shift()  q.setRows([row(1,1,'new-content')]);assert.equal(q.entries.get('1:1').result,null);assert.ok(obsolete.signal.aborted)
+  obsolete.resolve(first);await flush();assert.notEqual(q.entries.get('1:1').result,first)
+  q.clear();pending.shift().resolve(changed);await flush();assert.equal(q.entries.size,0)
+ }finally{q.dispose()}
+})
+test('background failure retains previous evidence, and explicit retry never flashes empty',async()=>{ let now=0,fail=false
+ const q=createPlantProximityQueue(async()=>{if(fail)throw Error('offline');return result(row(1))},()=>{},()=>now)
+ try{
+  q.setRows([row(1)]);q.visibility(row(1),true);await flush();const previous=q.entries.get('1:1').result
+  now=60000;fail=true;q.setRows([row(1)]);await flush();assert.equal(q.entries.get('1:1').state,'ready');assert.equal(q.entries.get('1:1').result,previous);assert.equal(q.entries.get('1:1').refreshError,true)  fail=false;q.retry(row(1));assert.equal(q.entries.get('1:1').result,previous);assert.equal(q.entries.get('1:1').state,'ready');await flush();assert.equal(q.entries.get('1:1').state,'ready');assert.equal(q.entries.get('1:1').refreshError,false) }finally{q.dispose()}
+})
+
+
+test('authorization and target conflicts discard previously displayed private results',async()=>{
+ for(const status of [401,403,404,409]){
+  let now=0,denied=false
+  const q=createPlantProximityQueue(async()=>{if(denied)throw Object.assign(Error('denied'),{status});return result(row(1))},()=>{},()=>now)
+  try{q.setRows([row(1)]);q.visibility(row(1),true);await flush();assert.ok(q.entries.get('1:1').result);now=60000;denied=true;q.setRows([row(1)]);await flush();assert.equal(q.entries.get('1:1').result,null)}finally{q.dispose()}
+ }
+})

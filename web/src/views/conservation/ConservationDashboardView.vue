@@ -11,6 +11,11 @@ import { mapLinkedSpeciesRequest, speciesRequestCanDecide } from '../../services
 import { observationOrigin, readQueuePage } from '../../services/observationQueue'
 import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
+import { loadCanonicalAlertQueue, type CanonicalThreatAlert } from '../../services/threatAlerts'
+import { createThreatAlertRefresh } from '../../services/threatAlertRefresh'
+import { alertSource, alertStatusLabel, alertTypeLabel } from '../../utils/threatAlertDisplay'
+import { threatAlertBadgeStyle } from '../../utils/workflowBadge'
+import { useConservationText } from '../../composables/useConservationText'
 
 interface ApiObservation extends Record<string, unknown> {
   origin_type?: unknown
@@ -40,17 +45,9 @@ interface ApiSpecies {
   conservation_status?: string | null
 }
 
-interface ApiAlert {
-  alert_id: string | number
-  plant_id: string | number
-  alert_type: string
-  severity: string
-  status: string
-  created_at: string
-}
-
 const router = useRouter()
 const { t, te, locale } = useI18n()
+const { ct: alertText } = useConservationText()
 const today = new Date()
 const dateLocale = computed(() => locale.value === 'ms' ? 'ms-MY' : locale.value.startsWith('en') ? 'en-GB' : locale.value)
 const currentDate = computed(() =>
@@ -81,7 +78,11 @@ let disposed = false
 onBeforeUnmount(() => { disposed = true; for (const controller of previewControllers.values()) controller.abort() })
 const plants = ref<ApiPlant[]>([])
 const species = ref<ApiSpecies[]>([])
-const alerts = ref<ApiAlert[]>([])
+const alerts = ref<CanonicalThreatAlert[]>([])
+const alertsLoaded = ref(false)
+let alertsSequence = 0
+let alertsController: AbortController | null = null
+let alertsRefresh: ReturnType<typeof createThreatAlertRefresh> | null = null
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i
 const observationDisplayLabels = computed(() => new Map([...monitoringLabels(observations.value.map(item => item.id))].map(([raw, label]) => [raw, formatObservationId(raw) || (uuid.test(raw) ? `OBS-${label.replace(/\u2026$/, '')}` : label)])))
 const observationsLoading = ref(true)
@@ -207,30 +208,58 @@ const loadSpecies = async () => {
   }
 }
 const loadAlerts = async () => {
-  alertsLoading.value = true
+  if (!authorizedOfficer.value || disposed) return
+  const sequence = ++alertsSequence
+  alertsController?.abort()
+  const controller = new AbortController()
+  alertsController = controller
+  const accountId = session.value.user?.id
+  if (!alertsLoaded.value) alertsLoading.value = true
   alertsError.value = ''
   try {
-    alerts.value = await loadJson<ApiAlert>('/api/iot/alerts', 'alerts')
-  } catch (error) {
-    alerts.value = []
-    alertsError.value = error instanceof Error ? error.message : 'Threat alerts unavailable.'
+    const result = await loadCanonicalAlertQueue(controller.signal)
+    if (controller.signal.aborted || disposed || sequence !== alertsSequence || accountId !== session.value.user?.id || !authorizedOfficer.value) return
+    alerts.value = result.alerts
+    alertsLoaded.value = true
+  } catch {
+    if (controller.signal.aborted || disposed || sequence !== alertsSequence || accountId !== session.value.user?.id) return
+    alertsError.value = alertText('Unable to retrieve threat alerts.')
   } finally {
-    alertsLoading.value = false
+    if (!controller.signal.aborted && sequence === alertsSequence && !disposed) alertsLoading.value = false
   }
 }
 
 onMounted(() => {
-  if (authorizedOfficer.value) void Promise.allSettled([loadObservations(), loadRegistrations(), loadFieldObservations(), loadPlants(), loadSpecies(), loadAlerts()])
+  alertsRefresh = createThreatAlertRefresh({ refresh: loadAlerts, ready: () => authorizedOfficer.value && !disposed, window, document })
+  if (authorizedOfficer.value) {
+    void Promise.allSettled([loadObservations(), loadRegistrations(), loadFieldObservations(), loadPlants(), loadSpecies()])
+    alertsRefresh.start()
+  }
+})
+
+onBeforeUnmount(() => {
+  alertsRefresh?.stop()
+  alertsController?.abort()
+  alertsSequence++
 })
 
 watch(() => [authorizedOfficer.value, session.value.user?.id] as const, ([ready, id], previous) => {
   if (!ready || id !== previous?.[1]) {
+    alertsRefresh?.stop()
+    alertsController?.abort()
+    alertsSequence++
+    alerts.value = []; alertsLoaded.value = false
+    alertsLoading.value = true; alertsError.value = ''
     for (const controller of previewControllers.values()) controller.abort()
     registrationRows.value = []; fieldRows.value = []; observations.value = []; observationTotals.value = null
     registrationLoading.value = true; fieldLoading.value = true; observationsLoading.value = true
     registrationError.value = ''; fieldError.value = ''; observationsError.value = ''
   }
-  if (ready) void Promise.allSettled([loadObservations(), loadRegistrations(), loadFieldObservations(), loadPlants(), loadSpecies(), loadAlerts()])
+  if (ready) {
+    void Promise.allSettled([loadObservations(), loadRegistrations(), loadFieldObservations(), loadPlants(), loadSpecies()])
+    if (alertsRefresh) alertsRefresh.start()
+    else void loadAlerts()
+  }
 })
 
 const effectiveObservationStatus = (observation: ApiObservation) =>
@@ -272,9 +301,16 @@ const speciesById = computed(
 const speciesForPlant = (plant: ApiPlant) => speciesById.value.get(String(plant.species_id))
 const recentAlerts = computed(() =>
   [...alerts.value]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() || a.id.localeCompare(b.id))
     .slice(0, 3),
 )
+const alertDisplayLabels = computed(() => monitoringLabels(alerts.value.map(alert => alert.id)))
+const alertId = (id: string) => alertDisplayLabels.value.get(id) || id
+const alertTypeText = (alert: CanonicalThreatAlert) => alertText(alertTypeLabel(alert.metric))
+const alertStatusText = (alert: CanonicalThreatAlert) => alertText(alertStatusLabel(alert.status))
+const alertSourceText = (alert: CanonicalThreatAlert) => alertText(alertSource(alert))
+const alertBadgeStyle = (alert: CanonicalThreatAlert) => threatAlertBadgeStyle(alert.status)
+const alertCanOpen = (alert: CanonicalThreatAlert) => /^[A-Za-z0-9_-]{1,200}$/.test(alert.id)
 const mapPlants = computed(() =>
   plants.value.flatMap((plant) => {
     // This overview represents approved biodiversity records, not the review queue.
@@ -325,7 +361,7 @@ const endangeredSpeciesCount = computed(
       .length,
 )
 const activeAlertCount = computed(
-  () => alerts.value.filter((alert) => normalizeStatus(alert.status) !== 'resolved').length,
+  () => alerts.value.filter((alert) => ['new', 'reviewing'].includes(normalizeStatus(alert.status))).length,
 )
 const summaries = computed(() => [
   [
@@ -354,7 +390,7 @@ const summaries = computed(() => [
   ],
   [
     'activeThreats',
-    alertsLoading.value ? '—' : alertsError.value ? '—' : activeAlertCount.value,
+    alertsLoading.value || !alertsLoaded.value ? '—' : activeAlertCount.value,
     'needsAttention',
   ],
   [
@@ -385,18 +421,10 @@ const dataLabel = (value: string) => {
   const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
   return te(key) ? t(key) : value
 }
-const valueOrDash = (value: string | number | null | undefined) =>
-  value === null || value === undefined || value === '' ? '—' : String(value)
 // Numeric legacy IDs retain their presentation; current UUIDs stay intact, including in links.
 const observationId = (item: ApiObservation) => formatObservationId(item.id) || String(item.id)
 const statusClass = (status?: string | null) => normalizeStatus(status).replaceAll(' ', '-')
 const plantId = (value: string | number) => formatPlantId(value) || '—'
-const alertId = (value: string | number) => {
-  const numeric = Number(value)
-  return Number.isSafeInteger(numeric) && numeric > 0
-    ? `ALT${String(numeric).padStart(3, '0')}`
-    : String(value)
-}
 const previewSpeciesName = (item: ApiObservation) => item.scientific_name || mapLinkedSpeciesRequest(item)?.scientificName || speciesName(item)
 const speciesName = (item?: { scientific_name?: string | null; common_name?: string | null }) =>
   item?.scientific_name || item?.common_name || t('conservationDashboard.speciesUnavailable')
@@ -418,8 +446,6 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
       <strong>{{ card[1] }}</strong>
     </article>
   </section>
-  <p class="statistics-scope">{{ t('conservationDashboard.countScope') }}</p>
-
   <section class="panel pending-review-panel">
       <header class="panel-header">
         <div>
@@ -553,25 +579,27 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
           {{ t('conservationDashboard.viewAllAlerts') }} →
         </button>
       </header>
-      <p v-if="alertsLoading" class="dashboard-state">Loading threat alerts...</p>
-      <p v-else-if="alertsError" class="dashboard-state error-state">{{ alertsError }}</p>
-      <p v-else-if="!recentAlerts.length" class="dashboard-state">No threat alerts available.</p>
+      <p v-if="alertsLoading && !alertsLoaded" class="dashboard-state">{{ alertText('Loading threat alerts...') }}</p>
+      <p v-else-if="alertsError && (!alertsLoaded || !recentAlerts.length)" class="dashboard-state error-state" role="status">{{ alertsError }}</p>
+      <p v-else-if="!recentAlerts.length" class="dashboard-state">{{ alertText('No threat alerts found.') }}</p>
+      <p v-if="alertsError && alertsLoaded && recentAlerts.length" class="dashboard-state error-state" role="status">{{ alertsError }}</p>
       <button
         v-for="alert in recentAlerts"
-        v-else
-        :key="String(alert.alert_id)"
+        :key="alert.id"
         class="alert-preview"
-        @click="go('conservation-alerts', { alert: alertId(alert.alert_id) })"
+        type="button"
+        :disabled="!alertCanOpen(alert)"
+        @click="alertCanOpen(alert) && go('conservation-alerts', { alert: alert.id })"
       >
         <div>
-          <strong>{{ alert.alert_type }}</strong
+          <strong>{{ alertTypeText(alert) }}</strong
           ><small
-            >{{ alertId(alert.alert_id) }} · {{ plantId(alert.plant_id) }} ·
-            {{ dt(alert.created_at) }} · {{ alert.status }}</small
+            >{{ alertId(alert.id) }} · {{ alertSourceText(alert) }} ·
+            {{ alert.deviceId }} · {{ dt(alert.createdAt) }} · {{ alertStatusText(alert) }}</small
           >
         </div>
-        <span class="badge alert-severity-badge" :class="statusClass(alert.severity)">{{
-          valueOrDash(alert.severity)
+        <span class="badge alert-severity-badge" :style="alertBadgeStyle(alert)">{{
+          alertStatusText(alert)
         }}</span>
       </button>
     </section>
@@ -657,7 +685,6 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
 .dashboard-overview .two-column > .panel { margin-top: 0; }
 .dashboard-overview .two-column.overview-medium { grid-template-columns: minmax(0, 1fr) 18rem; align-items: start; gap: 24px; margin-top: 24px; }
 @container (min-width: 1251px) { .dashboard-overview .two-column.overview-medium { align-items: stretch; } }
-.statistics-scope { margin: 0 0 24px; color: #5b7065; font-size: .8125rem; line-height: 1.5; }
 .status-scope { margin: 0 0 12px; color: #5b7065; font-size: .8125rem; }
 .conservation-row { padding-block: 9px; border-bottom: 1px solid #edf0ed; }
 .conservation-row:last-child { border-bottom: 0; }

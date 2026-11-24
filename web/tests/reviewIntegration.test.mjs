@@ -1880,7 +1880,8 @@ test('review queue retains the requested nine desktop headers, compact card fiel
   try {
     await h.state.loadObservations()
     const headers = nodes(reviewTable(h)).filter(node => node.type === 'th')
-    assert.deepEqual(headers.map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, messages.conservationPages.reviews.recordCreated, 'Status', messages.plantProximity.scoreColumn, 'Actions'])
+    const text = node => typeof node === 'string' ? node : node?.type === 'br' ? ' ' : Array.isArray(node?.children) ? node.children.map(text).join('') : typeof node?.children === 'string' ? node.children : ''
+    assert.deepEqual(headers.map(text), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, messages.conservationPages.reviews.recordCreated, 'Status', 'Duplicate Risk Score (%)', 'Actions'])
     assert.ok(headers.every(node => node.props.scope === 'col'))
     assert.equal(h.state.observationLabel(row.id), 'OBS-AA3BD8BE')
     assert.equal(h.state.submitterLabel(row.owner_subject), 'Staff \u00b7 2ACE382F')
@@ -2660,20 +2661,21 @@ test('redundant decision heading is absent while localized accessible group, com
 })
 
 test('Review Submissions has nine desktop columns, keeps mobile-only fields, and preserves full observation copying', async () => {
-  const row = fixture({ plant_id: 18 }), copied = []
+  const row = fixture({ plant_id: 18, plant_scientific_name: 'Mature Perepat' }), copied = []
   const h = harness(url => fixtureResponse(url, [row]), {}, 'en', undefined, null, { clipboard: { writeText: async value => copied.push(value) } })
   try {
     await h.state.loadObservations()
     const table = reviewTable(h)
     assert.deepEqual(nodes(table).filter(node => node.type === 'col').map(node => node.props.class), ['observation-column', 'plant-column', 'species-column', 'submitter-column', 'reviewer-column', 'created-column', 'status-column', 'proximity-column', 'actions-column'])
-    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, messages.conservationPages.reviews.recordCreated, 'Status', messages.plantProximity.scoreColumn, 'Actions'])
+    assert.deepEqual(nodes(table).filter(node => node.type === 'th').map(node => node.props?.['aria-label'] || node.children), [messages.approvedChanges.submissionId, messages.approvedChanges.plantId, 'Species', 'Submitted By', messages.approvedChanges.reviewedByColumn, messages.conservationPages.reviews.recordCreated, 'Status', messages.plantProximity.scoreColumn, 'Actions'])
     const renderedRow = nodes(table).find(node => node.type === 'tr' && node.key === 'observation:' + row.id)
     const cells = nodes(renderedRow).filter(node => node.type === 'td')
     assert.equal(cells.length, 11)
     assert.equal(cells[2].props.class, 'submission-type-cell mobile-submission-type-cell')
     assert.equal(cells[6].props.class, 'mobile-location-cell')
     assert.equal(cells[1].props.class, 'plant-id-cell')
-    assert.equal(cells[1].children.at(-1).children, 'PL018')
+    assert.equal(nodes(cells[1]).find(node => node.type === 'strong').children, 'PL018')
+    assert.equal(nodes(cells[1]).find(node => node.props?.class === 'plant-display-name').children, 'Mature Perepat')
     assert.equal(cells[0].props.class, 'identity-cell')
     assert.match(descriptor.styles[0].content, /\.reviews-table \.plant-id-cell\s*\{ color: #315749; font-weight: 700/)
     assert.match(descriptor.styles[0].content, /\.reviews-table \.identity-cell strong\s*\{ color: inherit; font-weight: 700/)

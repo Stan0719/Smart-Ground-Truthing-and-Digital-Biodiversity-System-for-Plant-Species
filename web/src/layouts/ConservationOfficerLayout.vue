@@ -245,7 +245,7 @@ const closeControl = () =>
           </button>
           <div class="page-heading">
             <p>{{ section }}</p>
-            <h1>{{ title }}</h1>
+            <h1 data-i18n-managed>{{ title }}</h1>
           </div>
           <ConservationTopbarActions />
         </div>

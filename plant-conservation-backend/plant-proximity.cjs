@@ -85,7 +85,7 @@ SELECT jsonb_build_object(
  'unlocated_count',(SELECT count(*) FROM measured WHERE distance_m IS NULL),
  'total_nearby',(SELECT count(*) FROM measured WHERE distance_m<=$5),
  'candidates',COALESCE((SELECT jsonb_agg(to_jsonb(best) ORDER BY distance_m,plant_id) FROM (
-    SELECT plant_id,species_id,species_approval_status,status,plant_name,species_name,zone,accuracy_m,location_source,distance_m
+    SELECT plant_id,species_id,species_approval_status,status,plant_name,species_name,zone,latitude,longitude,accuracy_m,location_source,distance_m
    FROM measured WHERE distance_m<=$5 ORDER BY distance_m,plant_id LIMIT $6
  ) best),'[]'::jsonb)) AS result`;
 function normalizedZone(value) {
@@ -184,6 +184,7 @@ function mountPlantProximity(app,{pool,allow,config:values={}}) {
         checked_at:new Date().toISOString(),state:'not_eligible',candidates:[]};
       if (row.parent_status==='Pending Review' && classified.origin_type==='initial_registration' && ['Pending Review','Correction Required','Flagged'].includes(row.status)) {
         const content=row.content||{};
+        result.target_location = point(content) ? { latitude: content.latitude, longitude: content.longitude, status: row.status, source: 'submission' } : null;
         result={...result,accuracy_m:accuracy(content.accuracy_m),state:'unavailable',reason:'invalid_coordinates'};
         if (point(content)) {
           const data=(await c.query(candidateSql,[row.plant_id,visibilityFor(req.user),content.latitude,content.longitude,config.radius_m,config.candidate_limit])).rows[0].result;
@@ -191,7 +192,7 @@ function mountPlantProximity(app,{pool,allow,config:values={}}) {
           const candidates=data.candidates.map(candidate=>({
             plant_id:String(candidate.plant_id),status:candidate.status,plant_name:candidate.plant_name,species_name:candidate.species_name,
             accuracy_m:accuracy(candidate.accuracy_m),distance_m:candidate.distance_m,category:category(candidate.distance_m,config),
-            location_source:candidate.location_source,
+            latitude:candidate.latitude,longitude:candidate.longitude,location_source:candidate.location_source,
             ...comparePlantIdentity(targetIdentity,content.zone,candidate),
             within_grouping_radius:candidate.distance_m<=config.grouping_radius_m
           }));

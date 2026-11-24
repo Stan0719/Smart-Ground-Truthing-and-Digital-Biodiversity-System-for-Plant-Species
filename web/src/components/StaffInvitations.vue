@@ -40,7 +40,7 @@ async function invite() {
   <form class="staff-account-form" @submit.prevent="invite">
     <p>Within one hour, Botanists must sign in and change the emailed temporary password in the mobile app. Conservation Officers complete this step on the website.</p>
     <label
-      >Full name<input v-model="form.name" required maxlength="100" autocomplete="name"
+      >Full name<input data-initial-focus v-model="form.name" required maxlength="100" autocomplete="name"
     /></label>
     <label
       >Username<input

@@ -100,7 +100,7 @@ test('read-only Officer proximity against more than 500 Plants with authentic re
    INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES('approved-source',1,'staff:owner','Approved','{"latitude":0,"longitude":1,"accuracy_m":25}','approved');`);
   assert.equal((await call()).data.candidates.length,0);
   await pool.query(`UPDATE plant_observation SET content='{"latitude":0,"longitude":0,"accuracy_m":25}' WHERE id='approved-source'`);
-  const r=(await call()).data;assert.equal(r.candidates.length,1);assert.equal(r.candidates[0].location_source,'approved_observation');assert.equal(r.candidates[0].accuracy_m,25);
+  const r=(await call()).data;assert.equal(r.candidates.length,1);assert.equal(r.candidates[0].location_source,'approved_observation');assert.equal(r.candidates[0].accuracy_m,25);assert.equal(r.candidates[0].latitude,0);assert.equal(r.candidates[0].longitude,0);assert.equal(r.target_location.latitude,0);assert.equal(r.target_location.longitude,0);assert.equal(r.target_location.source,'submission');
   await pool.query(`UPDATE plant_observation SET content=content||'{"accuracy_m":"bad legacy value"}'::jsonb WHERE id='approved-source'`);assert.equal((await call()).data.candidates[0].accuracy_m,null);
   await pool.query(`UPDATE plant_observation SET content=content||'{"accuracy_m":25}'::jsonb WHERE id='approved-source'`);
  });
@@ -108,7 +108,7 @@ test('read-only Officer proximity against more than 500 Plants with authentic re
   await pool.query(`INSERT INTO plant_record(plant_id,species_id,registered_subject,qr_token,rbac_status) VALUES(701,1,'staff:other','pending-701','Pending Review');
    INSERT INTO plant_location(plant_id,latitude,longitude) VALUES(701,0,1);
    INSERT INTO plant_observation(id,plant_id,owner_subject,status,content,client_key) VALUES('candidate-pending',701,'staff:other','Pending Review','{"latitude":0,"longitude":0.00001}','pending-701');`);
-  const r=(await call()).data,candidate=r.candidates.find(row=>row.plant_id==='701');assert.ok(candidate);assert.equal(candidate.status,'Pending Review');assert.equal(candidate.location_source,'pending_observation_unverified');assert.equal(candidate.accuracy_m,null);
+  const r=(await call()).data,candidate=r.candidates.find(row=>row.plant_id==='701');assert.ok(candidate);assert.equal(candidate.status,'Pending Review');assert.equal(candidate.location_source,'pending_observation_unverified');assert.equal(candidate.accuracy_m,null);assert.equal(candidate.latitude,0);assert.equal(candidate.longitude,0.00001);
   await pool.query("UPDATE plant_record SET rbac_status='Rejected' WHERE plant_id=701");assert.ok(!(await call()).data.candidates.some(row=>row.plant_id==='701'));
  });
  await t.test('missing or invalid submitted GPS is unavailable; reviewed and subsequent submissions are not eligible',async()=>{

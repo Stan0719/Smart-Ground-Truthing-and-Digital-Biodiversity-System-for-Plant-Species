@@ -28,6 +28,15 @@ const router = createRouter({
       component: HomeView,
     },
     {
+      path: '/activate',
+      name: 'activate-account',
+      component: () => import('../views/ActivateAccountView.vue'),
+    },
+    {
+      path: '/botanist',
+      redirect: '/',
+    },
+    {
       path: '/forgot-password',
       name: 'forgot-password',
       component: () => import('../views/ForgotPasswordView.vue'),

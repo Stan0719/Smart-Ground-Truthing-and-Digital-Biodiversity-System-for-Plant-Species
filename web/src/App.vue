@@ -26,6 +26,7 @@ const session = ref(sessionSnapshot())
 const unsubscribeSession = subscribeSession(() => { session.value = sessionSnapshot() })
 let checkSequence = 0
 let timer: ReturnType<typeof setInterval> | undefined
+let lastKnowledgeRoute: string | null = null
 const checkSession = async () => {
   const path = route.fullPath
   const token = ++checkSequence
@@ -35,10 +36,19 @@ const checkSession = async () => {
     if (result.status === 'unauthenticated') await router.replace('/')
   }
 }
-const loadPublic=(path:string)=>{if(!path.startsWith('/admin')&&!path.startsWith('/conservation')&&path!=='/account'&&path!=='/change-password')void refreshKnowledge()}
-router.afterEach(to=>loadPublic(to.path))
-onMounted(() => {
-  loadPublic(route.path)
+const loadPublic = (path: string, routeKey = path) => {
+  if (path.startsWith('/admin') || path.startsWith('/conservation') || path === '/account' || path === '/change-password') {
+    lastKnowledgeRoute = null
+    return
+  }
+  if (lastKnowledgeRoute === routeKey) return
+  lastKnowledgeRoute = routeKey
+  void refreshKnowledge()
+}
+router.afterEach(to => loadPublic(to.path, to.fullPath))
+onMounted(async () => {
+  await router.isReady()
+  loadPublic(route.path, route.fullPath)
   timer = setInterval(checkSession, 15000)
   window.addEventListener('focus', checkSession)
 })

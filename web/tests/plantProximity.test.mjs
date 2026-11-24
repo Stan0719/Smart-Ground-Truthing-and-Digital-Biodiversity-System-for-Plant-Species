@@ -27,13 +27,14 @@ function harness(value=result(),language='en',user=officer){
   if(name.endsWith('/plantProximityScore'))return proximityScore
   if(name.endsWith('/auth'))return {sessionSnapshot:()=>session,subscribeSession:fn=>{listeners.add(fn);return()=>listeners.delete(fn)}}
   if(name.endsWith('/plantProximity'))return {requestPlantPreview:async(id)=>{previewCalls.push(id);return {image:'/api/data/assets/main-'+id,scientificName:'Scientific '+id,commonName:'Common '+id}}}
+  if(name.endsWith('/ReviewLocationMap.vue'))return {__esModule:true,default:{name:'ReviewLocationMap'}}
   if(name.endsWith('/PlantProximityImage.vue'))return {__esModule:true,default:{name:'PlantProximityImage'}}
   if(name.endsWith('/plantId'))return {formatPlantId}
   if(name.endsWith('/workflowBadge'))return {workflowBadgeStyle}
   throw Error('Unexpected import '+name)
  }}
  vm.runInNewContext(`(function(){${compile(script.content)}})()`,context);const state=scope.run(()=>exports.default.setup(props,{emit(){},expose(){}}));vm.runInNewContext(`(function(){${compile(template.code)}})()`,context)
- return {state,props,calls,previewCalls,labels,async open(){state.drawer.value={open:false,showModal(){this.open=true},close(){this.open=false}};await state.openDrawer({currentTarget:{isConnected:true,focus(){}}})},render:()=>exports.render({},[],vue.proxyRefs(props),vue.proxyRefs(state),{},{}),session(next,pending=false){session={user:next,pending};for(const fn of listeners)fn()},stop(){callbacks.forEach(fn=>fn());scope.stop()}}
+ return {state,props,calls,previewCalls,labels,async open(){state.drawer.value={open:false,showModal(){this.open=true},close(){this.open=false},focus(){}};await state.openDrawer({currentTarget:{isConnected:true,focus(){}}})},render:()=>exports.render({},[],vue.proxyRefs(props),vue.proxyRefs(state),{},{}),session(next,pending=false){session={user:next,pending};for(const fn of listeners)fn()},stop(){callbacks.forEach(fn=>fn());scope.stop()}}
 }
 function nodes(root){const out=[];function walk(n){if(Array.isArray(n))return n.forEach(walk);if(!n||typeof n!=='object')return;out.push(n);if(Array.isArray(n.children))walk(n.children)}walk(root);return out}
 function text(root){if(root?.type===vue.Comment)return '';if(typeof root==='string')return root;if(Array.isArray(root))return root.map(text).join(' ');return root&&typeof root==='object'?text(root.children):''}
@@ -57,7 +58,7 @@ test('shared drawer keeps authorized candidates, photos, names, distances and in
  for(const language of ['en','ms','zh-CN']){
   const rows=[candidate('2',0,{accuracy_m:null}),candidate('3',3),candidate('4',7),candidate('5',25)],h=harness(result({candidates:rows,total_nearby:4,eligible_count:4,accuracy_m:25}),language)
   try{await flush();assert.equal(nodes(h.render()).filter(n=>n.type==='li'&&n.key).length,0);await h.open();const tree=nodes(h.render()),visible=text(h.render());assert.ok(visible.includes(h.labels.plantProximity.accuracyUnknown));assert.ok(visible.includes(h.labels.plantProximity.drawerGpsWarning));assert.equal(tree.filter(n=>n.type==='li'&&n.key).length,4)
-   for(const row of rows){assert.ok(visible.includes(formatPlantId(row.plant_id)));assert.ok(visible.includes(h.labels.plantProximity['short_'+row.category]));assert.ok(tree.some(n=>n.type==='a'&&n.props.href==='/plant/'+row.plant_id&&n.props.target==='_blank'&&n.props.rel==='noopener noreferrer'))}
+   for(const row of rows){assert.ok(visible.includes(formatPlantId(row.plant_id)));assert.ok(visible.includes(h.labels.plantProximity['short_'+row.category]));assert.ok(tree.some(n=>n.type==='button'&&n.children===h.labels.plantProximity.viewOnMap))}
    assert.equal(h.calls.length,0,'drawer never repeats the proximity API request');assert.doesNotMatch(visible,/100% duplicate|high probability|definitely different/i)
   }finally{h.stop()}
  }
@@ -90,12 +91,12 @@ test('drawer labels pending-name comparisons as provisional in every locale with
 test('drawer preserves empty, incomplete, loading and unavailable states without a false None result',async()=>{
  for(const state of ['complete','incomplete','unavailable','failed','loading']){
   const h=harness(result({state:state==='failed'||state==='loading'?'complete':state,candidates:[],total_nearby:0,unlocated_count:state==='incomplete'?1:0}))
-  try{h.props.failed=state==='failed';h.props.loading=state==='loading';await h.open();const visible=text(h.render());assert.equal(visible.includes(h.labels.plantProximity.none.replace('{radius}','30')),state==='complete');assert.equal(visible.includes(h.labels.plantProximity.incomplete),state==='incomplete');assert.equal(visible.includes(h.labels.plantProximity.unavailable),state==='failed'||state==='unavailable');assert.equal(visible.includes(h.labels.plantProximity.loading),state==='loading')}finally{h.stop()}
+  try{h.props.failed=state==='failed';h.props.loading=state==='loading';if(state==='loading'||state==='failed')h.props.value=null;await h.open();const visible=text(h.render());assert.equal(visible.includes(h.labels.plantProximity.none.replace('{radius}','30')),state==='complete');assert.equal(visible.includes(h.labels.plantProximity.incomplete),state==='incomplete');assert.equal(visible.includes(h.labels.plantProximity.unavailable),state==='failed'||state==='unavailable');assert.equal(visible.includes(h.labels.plantProximity.loading),state==='loading')}finally{h.stop()}
  }
 })
 
 test('drawer clears on selection, revision or session boundaries and never runs proximity reads or decisions',async()=>{
- for(const user of [null,{...officer,role:'Botanist'},{...officer,status:'Inactive'},{...officer,mustChangePassword:true}]){const h=harness(result(),'en',user);try{await h.open();assert.equal(h.state.drawer.value.open,false);assert.equal(text(h.render()),'')}finally{h.stop()}}
+ for(const user of [null,{...officer,role:'Botanist'},{...officer,status:'Inactive'},{...officer,mustChangePassword:true}]){const h=harness(result(),'en',user);try{await h.open();assert.equal(h.state.drawer.value.open,false);assert.equal(text(h.render()).trim(),'')}finally{h.stop()}}
  const h=harness();try{await h.open();assert.equal(h.state.drawer.value.open,true);h.props.revision=2;await flush();assert.equal(h.state.drawer.value.open,false);h.props.value=result({revision:2});await h.open();h.session(null);await flush();assert.equal(h.state.drawer.value.open,false);assert.equal(h.calls.length,0);assert.doesNotMatch(descriptor.scriptSetup.content,/requestPlantProximity|decide\(|Flagged|POST|notification/)}finally{h.stop()}
 })
 
@@ -115,7 +116,7 @@ test('authorized catalogue preview uses only its official main photo and safely 
   for(const [row,expected] of [[{plant_id:2,rbac_status:'Approved',plant_image_asset_id:'official-main',scientific_name:'Species',common_name:'Common'},'/api/data/assets/official-main'],[{plant_id:2,rbac_status:'Approved'},''],[{plant_id:2,rbac_status:'Pending Review',plant_image_asset_id:'private-evidence'},''],[{plant_id:2,rbac_status:'Approved',plant_image_asset_id:'https://unsafe/image'},'']]){
    globalThis.fetch=async(url,options)=>{calls.push({url,options});return Response.json({plant:row})};const preview=await requestPlantPreview('2',signal);assert.equal(preview.image,expected)
   }
-  assert.ok(calls.every(c=>c.url==='/api/data/plants/2'&&c.options.method==='GET'&&c.options.credentials==='same-origin'&&c.options.cache==='no-store'))
+  assert.ok(calls.filter(c=>c.url==='/api/data/plants/2').every(c=>c.options.method==='GET'&&c.options.credentials==='same-origin'&&c.options.cache==='no-store'))
   globalThis.fetch=async()=>Response.json({plant:{plant_id:3}});await assert.rejects(requestPlantPreview('2',signal),/Invalid/)
   globalThis.fetch=async()=>Response.json({}, {status:403});await assert.rejects(requestPlantPreview('2',signal),/unavailable/)
   await assert.rejects(requestPlantPreview('../secret',signal),/Invalid/)
@@ -127,7 +128,7 @@ test('thumbnail keeps one proportionate authorized image and uses the catalogue 
  const context={exports:out,require(name){if(name==='vue')return vue;if(name.endsWith('/PlantPhotoLightbox.vue'))return {__esModule:true,default:{name:'PlantPhotoLightbox'}};if(name.endsWith('/assetImages'))return {webAssetUrl:value=>/^\/api\/data\/assets\/[A-Za-z0-9_-]+$/.test(value)?value:''};throw Error(name)}}
  vm.runInNewContext(compile(compiled.content),context)
  const props=vue.reactive({src:'/api/data/assets/main',alt:'Plant photo',unavailable:'Photo unavailable'}),scope=vue.effectScope(),state=scope.run(()=>out.default.setup(props,{expose(){}}))
- try{let opened=[];state.preview.value={open(...args){opened.push(args)},close(){}};const trigger={};state.openPreview({currentTarget:trigger});assert.equal(opened.length,1);assert.equal(opened[0][0][0].url,props.src);assert.equal(opened[0][3],trigger);assert.equal(state.image.value,props.src);state.imageFailed({currentTarget:{getAttribute:()=>props.src}});assert.equal(state.failed.value,props.src);state.openPreview({currentTarget:trigger});assert.equal(opened.length,1);props.src='https://unauthorized/image';assert.equal(state.image.value,'');state.openPreview({currentTarget:trigger});assert.equal(opened.length,1);assert.match(d.template.content,/<PlantPhotoLightbox ref="preview" root-scroll-lock/);assert.match(d.template.content,/aria-haspopup="dialog"/);assert.match(d.template.content,/v-if="image && failed !== image"/);assert.match(d.template.content,/record-placeholder/);assert.equal((d.template.content.match(/<img /g)||[]).length,1);assert.match(d.styles[0].content,/object-fit: contain/)}finally{scope.stop()}
+ try{let opened=[];state.preview.value={open(...args){opened.push(args)},close(){}};const trigger={};state.openPreview({currentTarget:trigger});assert.equal(opened.length,1);assert.equal(opened[0][0][0].url,props.src);assert.equal(opened[0][3],trigger);assert.equal(state.image.value,props.src);props.src='/api/data/plants/2/detail/assets/registration-photo';assert.equal(state.image.value,props.src);state.imageFailed({currentTarget:{getAttribute:()=>props.src}});assert.equal(state.failed.value,props.src);state.openPreview({currentTarget:trigger});assert.equal(opened.length,1);props.src='https://unauthorized/image';assert.equal(state.image.value,'');state.openPreview({currentTarget:trigger});assert.equal(opened.length,1);assert.match(d.template.content,/<PlantPhotoLightbox ref="preview" root-scroll-lock/);assert.match(d.template.content,/aria-haspopup="dialog"/);assert.match(d.template.content,/v-if="image && failed !== image"/);assert.match(d.template.content,/record-placeholder/);assert.equal((d.template.content.match(/<img /g)||[]).length,1);assert.match(d.styles[0].content,/object-fit: contain/)}finally{scope.stop()}
 })
 
 
@@ -151,4 +152,110 @@ test('different Species and zones receive no risk score; unresolved match or acc
 
 test('score heading has no tooltip icon or long explanation',()=>{
  assert.doesNotMatch(descriptor.template.content,/score-help|scoreHelp|risk-explanation/)
+})
+
+test('Officer pending thumbnails use authorized initial registration evidence while catalogue thumbnails stay private',async()=>{
+ const original=globalThis.fetch,signal=new AbortController().signal,calls=[]
+ const asset={asset_id:'registration-photo',content_type:'image/jpeg',observation_id:'original',linkage:'observation',effective_origin:'initial_registration',observation_date:'2026-11-23T00:00:00Z',observation_status:'Pending Review',observation_revision:1,photo_order:'0'}
+ try{
+  for(const scenario of ['photo','empty','denied','invalid','subsequent']){
+   globalThis.fetch=async(url,options)=>{
+    calls.push({url,options})
+    if(url==='/api/data/plants/2')return Response.json({plant:{plant_id:2,rbac_status:'Pending Review',plant_image_asset_id:'not-public'}})
+    assert.equal(url,'/api/data/plants/2/detail/gallery?limit=20');assert.equal(options.credentials,'same-origin')
+    if(scenario==='denied')return Response.json({}, {status:403})
+    if(scenario==='invalid')return Response.json({plant_id:'3',assets:[asset],page:{limit:20,has_more:false,next_cursor:null}})
+    return Response.json({plant_id:'2',assets:scenario==='empty'?[]:[{...asset,effective_origin:scenario==='subsequent'?'subsequent_observation':'initial_registration'}],page:{limit:20,has_more:false,next_cursor:null}})
+   }
+   const preview=await requestPlantPreview('2',signal)
+   assert.equal(preview.image,scenario==='photo'?'/api/data/plants/2/detail/assets/registration-photo':'')
+  }
+  assert.ok(calls.some(c=>c.url.includes('/detail/gallery')))
+ }finally{globalThis.fetch=original}
+})
+
+
+test('map contract retains exact coordinates, rejects malformed pairs and permits unavailable legacy coordinates',()=>{
+ const target={latitude:0,longitude:0,status:'Pending Review',source:'submission'}
+ const r=result({target_location:target,candidates:[candidate('2',0,{latitude:0,longitude:0})]})
+ assert.deepEqual(readProximity(r,'1',1).target_location,target)
+ for(const coords of [{latitude:NaN,longitude:0},{latitude:91,longitude:0},{latitude:0,longitude:181},{latitude:0}]){
+  assert.throws(()=>readProximity({...r,target_location:{...target,...coords,longitude:coords.longitude}},'1',1))
+  assert.throws(()=>readProximity({...r,candidates:[candidate('2',0,coords)]},'1',1))
+ }
+ assert.equal(readProximity(result(),'1',1).target_location,undefined)
+})
+test('map selection preserves drawer, closes on revision/session changes and never navigates',async()=>{
+ const h=harness(result({target_location:{latitude:0,longitude:0,status:'Pending Review',source:'submission'}}))
+ try{
+  await h.open();const trigger=nodes(h.render()).find(n=>n.type==='button'&&n.children===h.labels.plantProximity.viewOnMap)
+  trigger.props.onClick();assert.equal(h.state.drawerOpen.value,true);assert.equal(h.state.mapCandidate.value.plant_id,'2')
+  let modal=nodes(h.render()).find(n=>n.type?.name==='ReviewLocationMap');assert.equal(modal.props.target.plantId,'1000');assert.equal(modal.props.candidate.plantId,'2')
+  modal.props.onClose();assert.equal(h.state.mapCandidate.value,null);assert.equal(h.state.drawerOpen.value,true)
+  trigger.props.onClick();h.props.revision=2;await flush();assert.equal(h.state.mapCandidate.value,null)
+  await h.open();h.state.mapCandidate.value=candidate();h.session(null);assert.equal(h.state.mapCandidate.value,null)
+ }finally{h.stop()}
+})
+test('review map uses native modal lifecycle, pixel-separated icons, text-safe tooltips and no catalogue loading',()=>{
+ const source=readFileSync(new URL('../src/components/conservation/ReviewLocationMap.vue',import.meta.url),'utf8')
+ const {descriptor:d}=parse(source);const compiled=compileScript(d,{id:'review-map'});assert.ok(compiled.content)
+ assert.match(source,/showModal\(\)/);assert.match(source,/@cancel.prevent.stop/);assert.match(source,/preventScroll: true/)
+ assert.match(source,/map\?\.remove\(\)/);assert.match(source,/invalidateSize/);assert.match(source,/fitBounds/)
+ assert.match(source,/#E65B32/);assert.match(source,/#176BD2/);assert.match(source,/tooltip.textContent/);assert.match(source,/border: 4px solid #fff/)
+ assert.doesNotMatch(source,/fetch\(|router|requestPlantApi/)
+ assert.match(source,/locationUnavailable/);assert.match(source,/accuracyUnknown/);assert.match(d.template.content,/conservationText.coordinates/);assert.doesNotMatch(d.template.content,/label\('locationSource'\)|\}\} \? \{\{/)
+ for(const lang of ['en','ms','zh-CN']){
+  const messages=JSON.parse(readFileSync(new URL('../src/locales/'+lang+'.json',import.meta.url),'utf8')).plantProximity
+  for(const key of ['viewOnMap','mapTitle','currentSubmission','nearbyPlant','mapAccuracy','locationSource','locationUnavailable','overlappingLocations'])assert.ok(messages[key])
+ }
+})
+
+
+for (const longitude of [0, 0.000005]) test('review markers retain exact GPS positions at longitude '+longitude+', remain interactive and restore focus',async()=>{
+ const source=readFileSync(new URL('../src/components/conservation/ReviewLocationMap.vue',import.meta.url),'utf8')
+ const {descriptor:d}=parse(source),script=compileScript(d,{id:'map-runtime'}),out={},mounted=[],cleanup=[],positions=[],fits=[],events=[]
+ const handlers={},icons=[],clicks=[];let pixelDistance=0
+ const map={on(name,fn){handlers[name]=fn},latLngToLayerPoint(){return {distanceTo:()=>pixelDistance}},invalidateSize(){},fitBounds(bounds){fits.push(bounds)},setView(){},remove(){events.push('remove')}}
+ const leaflet={map:()=>map,tileLayer:()=>({addTo(){}}),latLngBounds:points=>points,divIcon:options=>options,marker(point){positions.push(point);const marker={getLatLng:()=>point,setLatLng(next){point=next;events.push('move');return marker},setTooltipContent(){return marker},remove(){events.push('marker-remove')},setIcon(icon){icons.push(icon);return marker},on(name,fn){assert.equal(name,'click');clicks.push(fn);return marker},addTo(){return marker},bindTooltip(){return marker},openTooltip(){events.push('tooltip')}};return marker}}
+ const element=()=>({textContent:'',className:'',children:[],style:{setProperty(k,v){this[k]=v}},classList:{add(){}},setAttribute(){},append(...items){this.children.push(...items)}})
+ let frame
+ const props=vue.reactive({target:{plantId:'1',status:'Pending Review',latitude:0,longitude:0,accuracy:null,source:'submission'},candidate:{plantId:'2',status:'Pending Review',latitude:0,longitude,accuracy:2,source:'pending_observation_unverified'}})
+ const scope=vue.effectScope(),opener={isConnected:true,focus(options){assert.equal(options.preventScroll,true);events.push('focus')}}
+ vm.runInNewContext(compile(script.content),{exports:out,document:{activeElement:opener,createElement:element,createElementNS:element},ResizeObserver:class{observe(){}disconnect(){events.push('disconnect')}},requestAnimationFrame(fn){frame=fn;return 1},cancelAnimationFrame(){},require(name){
+  if(name==='leaflet')return leaflet
+  if(name.endsWith('.css'))return {}
+  if(name==='vue')return {...vue,onMounted:fn=>mounted.push(fn),onBeforeUnmount:fn=>cleanup.push(fn)}
+  if(name==='vue-i18n')return {useI18n:()=>({t:key=>key,locale:vue.ref('en')})}
+  if(name.endsWith('/plantId'))return {formatPlantId}
+  throw Error(name)
+ }})
+ const state=scope.run(()=>out.default.setup(props,{expose(){},emit:event=>events.push(event)}))
+ try{
+  state.dialog.value={showModal(){events.push('showModal')},close(){events.push('close')}};state.canvas.value={}
+  await mounted[0]();frame();assert.deepEqual(JSON.parse(JSON.stringify(positions)),[[0,0],[0,longitude]]);assert.equal(fits[0].length,2);assert.equal(clicks.length,2);clicks.forEach(fn=>fn());assert.equal(events.filter(e=>e==='tooltip').length,2)
+  assert.equal(state.separated.value,true);
+  assert.deepEqual(Array.from(state.records.value,p=>p.color),['#E65B32','#176BD2']);
+  for(const [i,icon] of icons.entries()){const badge=icon.html.children.at(-1);assert.equal(badge.children[0].textContent,String(i+1));assert.equal(badge.children[1].textContent,formatPlantId(String(i+1)));assert.ok(badge.style.transform.includes(i===0?'-54px':'54px'))}
+  state.canvas.value.clientWidth=200;pixelDistance=0;handlers.zoomend();assert.equal(state.separated.value,true);assert.ok(icons.at(-1).html.children.at(-1).style.transform.includes('44px'));state.canvas.value.clientWidth=800;pixelDistance=15;handlers.zoomend();assert.equal(state.separated.value,true);pixelDistance=200;handlers.zoomend();assert.equal(state.separated.value,false);assert.ok(icons.at(-1).html.children.at(-1).style.transform.includes('0px'));assert.deepEqual(JSON.parse(JSON.stringify(positions)),[[0,0],[0,longitude]]);
+  assert.equal(state.accuracyLabel({accuracy:9.437513611831253}),'9.44 m');assert.equal(state.accuracyLabel({accuracy:9.26362373692627}),'9.26 m');assert.equal(state.accuracyLabel({accuracy:0}),'0.00 m');assert.equal(state.located({latitude:null,longitude:0}),false);assert.equal(state.located({latitude:91,longitude:0}),false)
+  assert.equal(state.coordinateLabel(props.target),'0, 0');assert.equal(state.coordinateLabel({latitude:null,longitude:0}),'plantProximity.locationUnavailable');props.candidate={...props.candidate,longitude:0.00001};await vue.nextTick();frame();assert.ok(events.includes('move'));assert.equal(events.filter(e=>e==='showModal').length,1);assert.equal(state.accuracyLabel(props.target),'plantProximity.accuracyUnknown');state.focusMarker(1);assert.ok(events.includes('tooltip'))
+  const template=compileTemplate({source:d.template.content,filename:'ReviewLocationMap.vue',id:'map-runtime',compilerOptions:{bindingMetadata:script.bindings}})
+  assert.deepEqual(template.errors,[])
+ }finally{cleanup.forEach(fn=>fn());scope.stop()}
+ assert.ok(events.includes('showModal'));assert.ok(events.includes('remove'));assert.ok(events.includes('disconnect'));assert.ok(events.includes('focus'))
+})
+
+
+test('background results preserve drawer/map selection and previews, reconcile changed candidates and explain removal',async()=>{
+ const first=candidate('2',0,{latitude:0,longitude:0}),h=harness(result({candidates:[first]}))
+ try{
+  await h.open();h.state.mapCandidate.value=first;const preview=h.state.previews.value['2'];const count=h.previewCalls.length
+  const selection=h.state.mapCandidate.value;h.props.loading=true;await flush();assert.equal(h.state.mapCandidate.value,selection)
+  h.props.value=result({candidates:[{...first}],checked_at:'2026-11-23T00:00:00Z'});await flush()
+  assert.equal(h.state.drawerOpen.value,true);assert.equal(h.state.mapCandidate.value,selection);assert.equal(h.state.previews.value['2'],preview);assert.equal(h.previewCalls.length,count)
+  assert.ok(!text(h.render()).includes(h.labels.plantProximity.loading))
+  h.props.value=result({candidates:[{...first,longitude:0.00001}]});await flush();assert.equal(h.state.mapCandidate.value.longitude,0.00001);assert.equal(h.previewCalls.length,count)
+  h.props.value=result({candidates:[],total_nearby:0});await flush();assert.equal(h.state.mapCandidate.value,null);assert.equal(h.state.mapRemoved.value,true);assert.equal(h.state.drawerOpen.value,true)
+  assert.ok(text(h.render()).includes(h.labels.plantProximity.mapCandidateRemoved));assert.equal(h.state.previews.value['2'],undefined)
+ }finally{h.stop()}
 })

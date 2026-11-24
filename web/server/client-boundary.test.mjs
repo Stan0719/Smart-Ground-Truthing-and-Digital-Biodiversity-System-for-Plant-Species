@@ -16,9 +16,10 @@ const {identity}=require('../../plant-conservation-backend/authorization.cjs')
 const {createPlantApp}=require('../../plant-conservation-backend/server.js')
 // In-memory adapter: executes no SQL and opens no database connections.
 function fixture(users){
- const sessions=new Map(), expired=new Set(), activationTokens=[]
+ const sessions=new Map(), expired=new Set(), activationTokens=[];let eventId=0
  const db={close:async()=>{},transaction:async fn=>fn(),prepare(sql){return {
  async get(...args){
+  if(sql.startsWith('INSERT INTO auth_events')&&sql.includes('RETURNING id'))return {id:String(++eventId)}
   if(sql.includes('schema_migrations'))return {version:1}
   if(sql.includes('pg_advisory'))return {}
   if(sql.includes('security_settings'))return {login_limit:1000,session_hours:8}

@@ -304,16 +304,16 @@ const handleLogin = async () => {
               <input id="recovery-email" v-model="recoveryEmail" class="form-input" type="email" maxlength="254" autocomplete="email" required :disabled="recoveryBusy" :aria-invalid="recoveryError === 'invalidEmail' || undefined" />
             </label>
             <template v-else>
-              <label for="recovery-code">
-                {{ t('passwordRecovery.code') }}
+              <div class="recovery-field">
+                <label for="recovery-code">{{ t('passwordRecovery.code') }}</label>
                 <input id="recovery-code" v-model="code" class="form-input" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required :disabled="recoveryBusy" aria-describedby="recovery-code-hint" />
                 <small id="recovery-code-hint">{{ t('passwordRecovery.codeHint') }}</small>
-              </label>
-              <label for="recovery-password">
-                {{ t('passwordRecovery.password') }}
+              </div>
+              <div class="recovery-field">
+                <label for="recovery-password">{{ t('passwordRecovery.password') }}</label>
                 <input id="recovery-password" v-model="newPassword" class="form-input" type="password" autocomplete="new-password" minlength="15" maxlength="128" required :disabled="recoveryBusy" aria-describedby="recovery-password-hint" />
                 <small id="recovery-password-hint">{{ t('passwordRecovery.passwordHint') }}</small>
-              </label>
+              </div>
               <label for="recovery-confirm">
                 {{ t('passwordRecovery.confirm') }}
                 <input id="recovery-confirm" v-model="confirmation" class="form-input" type="password" autocomplete="new-password" maxlength="128" required :disabled="recoveryBusy" />
@@ -372,6 +372,7 @@ const handleLogin = async () => {
   stroke-linejoin: round;
 }
 .recovery-form { gap: 14px; }
+.recovery-field { display: grid; gap: 6px; min-width: 0; }
 .recovery-form label { display: grid; gap: 6px; color: #def9c4; font-size: 13px; }
 .recovery-form .form-input { height: 54px; padding: 0 18px; }
 .recovery-form small, .recovery-status { color: #c9ddd6; }

@@ -117,17 +117,17 @@ test('HTTP rejects invalid emails/types before calling login or registration', a
   }
 })
 
-test('Vue interpolation escapes HTML-like text; reviewed species template uses interpolation', async () => {
+test('Vue interpolation escapes HTML-like text; current species detail field uses interpolation', async () => {
   const payload = '<script>alert("test")</script>'
   const html = await renderToString(createSSRApp({ template: '<p>{{ description }}</p>', data: () => ({ description: payload }) }))
   assert.ok(html.includes('&lt;script&gt;'))
   assert.ok(!html.includes('<script>'))
   const source = readFileSync(new URL('../src/views/conservation/PlantSpeciesView.vue', import.meta.url), 'utf8')
-  const binding = source.match(/<dd>(\{\{ selected\.description[^}]*\}\})<\/dd>/)?.[1]
-  assert.ok(binding, 'current description is still interpolated')
-  const actual = await renderToString(createSSRApp({ template: '<dd>' + binding + '</dd>', data: () => ({ selected: { description: payload } }), methods: { st: () => 'Unavailable' } }))
+  const binding = source.match(/<template v-else>(\{\{ field\.value \|\| st\('unavailable'\) \}\})<\/template>/)?.[1]
+  assert.ok(binding, 'current detail field remains interpolated')
+  const actual = await renderToString(createSSRApp({ template: '<dd>' + binding + '</dd>', data: () => ({ field: { value: payload } }), methods: { st: () => 'Unavailable' } }))
   assert.ok(actual.includes('&lt;script&gt;')); assert.ok(!actual.includes('<script>'))
-  const fallback = await renderToString(createSSRApp({ template: '<dd>' + binding + '</dd>', data: () => ({ selected: { description: '' } }), methods: { st: () => 'Unavailable' } }))
+  const fallback = await renderToString(createSSRApp({ template: '<dd>' + binding + '</dd>', data: () => ({ field: { value: '' } }), methods: { st: () => 'Unavailable' } }))
   assert.ok(fallback.includes('Unavailable'))
   assert.ok(!source.includes('v-html'))
 })

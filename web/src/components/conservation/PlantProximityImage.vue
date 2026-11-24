@@ -3,7 +3,9 @@ import { computed, ref, watch } from 'vue'
 import PlantPhotoLightbox from '../PlantPhotoLightbox.vue'
 import { webAssetUrl } from '../../services/assetImages'
 const props = defineProps<{ src: string; alt: string; unavailable: string }>()
-const image = computed(() => webAssetUrl(props.src)), failed = ref('')
+// Staff detail image references stay local to the Officer review drawer.
+const image = computed(() => webAssetUrl(props.src) ||
+  (/^\/api\/data\/plants\/[1-9][0-9]{0,9}\/detail\/assets\/[A-Za-z0-9_-]{1,200}$/.test(props.src) ? props.src : '')), failed = ref('')
 const preview = ref<InstanceType<typeof PlantPhotoLightbox> | null>(null)
 watch(() => props.src, () => { preview.value?.close(); failed.value = '' })
 function openPreview(event: MouseEvent) {

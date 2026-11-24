@@ -1443,8 +1443,10 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
   app.get("/api/qr/:token", allow("plants.public.read"), async (req, res) => {
     const row = (
       await pool.query(
-        `SELECT q.qr_id,q.plant_id,q.status,p.species_id,p.rbac_status,p.scientific_name
+        `SELECT q.qr_id,q.plant_id,q.status,p.species_id,p.rbac_status,p.scientific_name,
+          COALESCE(v.visibility,'protected') AS species_visibility
          FROM plant_app.qr_code q LEFT JOIN ${qrPlantRecord} p ON p.plant_id=q.plant_id
+         LEFT JOIN rbac_species_visibility v ON v.species_id=p.species_id
          WHERE q.qr_code=$1`,
         [req.params.token],
       )
@@ -1453,6 +1455,9 @@ function mountDomain(app, { pool, auth, allow, officerNotifications = null, qrPl
     if (row.plant_id == null || row.status === "generated" || row.status === "retired")
       return res.json({ assigned: false, status: row.status,
         ...(row.status === "generated" && row.plant_id == null && req.user?.role === "Botanist" ? { qr_id: row.qr_id } : {}) });
+    if ((row.status === "assigned" || row.status === "active") &&
+        !visibilityFor(req.user).includes(row.species_visibility))
+      fail(404, "Plant information is not available.");
     if (row.status === "assigned" && row.rbac_status === "Pending Review")
       return res.json({ assigned: false,
         status: req.user?.role === "Botanist" ? "pending_review" : "unavailable_yet" });

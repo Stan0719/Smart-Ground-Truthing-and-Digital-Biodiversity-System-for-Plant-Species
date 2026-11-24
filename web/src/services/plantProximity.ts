@@ -1,16 +1,19 @@
 import { plantThumbnailImages } from './assetImages.ts'
+import { createPlantGallery } from './plantGallery.ts'
 export type ProximityCategory = 'very_close' | 'close' | 'nearby' | 'additional'
 export type ProximityMatchStatus = 'same_species_zone' | 'different_species' | 'different_zone' | 'provisional_species' | 'uncertain_species' | 'uncertain_zone' | 'uncertain_match'
 export type ProximitySpeciesMatchStatus = 'confirmed_same' | 'confirmed_different' | 'provisional_same_name' | 'provisional_different_name' | 'unknown'
 export type ProximityZoneMatchStatus = 'same' | 'different' | 'unknown'
 export interface ProximityCandidate {
   plant_id: string; status: 'Approved' | 'Pending Review'; plant_name: string | null; species_name: string | null
+  latitude?: number | null; longitude?: number | null
   accuracy_m: number | null; distance_m: number; category: ProximityCategory
   location_source: 'approved_observation' | 'pending_observation_unverified' | 'recorded_location_unverified'
   match_status: ProximityMatchStatus; species_match_status: ProximitySpeciesMatchStatus
   zone_match_status: ProximityZoneMatchStatus; within_grouping_radius: boolean
 }
 export interface ProximityResult {
+  target_location?: { latitude: number; longitude: number; status: string; source: 'submission' } | null
   contract_version: 1; observation_id: string; plant_id: string; revision: number; checked_at: string
   state: 'complete' | 'incomplete' | 'unavailable' | 'not_eligible'; accuracy_m?: number | null
   config: { very_close_m: number; close_m: number; nearby_m: number; grouping_radius_m: number; radius_m: number; accuracy_warning_m: number; candidate_limit: number }
@@ -32,9 +35,16 @@ export function readProximity(value: unknown, id: string, revision: number): Pro
       !((c.very_close_m as number) < (c.close_m as number) && (c.close_m as number) < (c.nearby_m as number) && (c.nearby_m as number) < (c.radius_m as number) && groupingRadius <= (c.radius_m as number) && (c.radius_m as number) <= 100) ||
       !count(c.candidate_limit) || c.candidate_limit < 1 || c.candidate_limit > 50 || !Array.isArray(r.candidates) || r.candidates.length > c.candidate_limit ||
       (r.state !== 'not_eligible' && !validAccuracy(r.accuracy_m))) invalid()
+  const validPair = (lat: unknown, lng: unknown) => finite(lat) && Math.abs(lat) <= 90 && finite(lng) && Math.abs(lng) <= 180
+  if (r.target_location != null) {
+    const target = object(r.target_location)
+    if (!target || !validPair(target.latitude, target.longitude) || target.source !== 'submission' ||
+        !['Pending Review', 'Correction Required', 'Flagged'].includes(String(target.status))) invalid()
+  }
   const ids = new Set<string>()
   for (const value of r.candidates) {
     const row = object(value)
+    if (row && (row.latitude != null || row.longitude != null) && !validPair(row.latitude, row.longitude)) invalid()
     const matchStatus = row?.match_status === undefined ? 'uncertain_match' : row.match_status
     const speciesMatchStatus = row?.species_match_status === undefined
       ? (matchStatus === 'same_species_zone' || matchStatus === 'different_zone' || matchStatus === 'uncertain_zone' ? 'confirmed_same' : matchStatus === 'different_species' ? 'confirmed_different' : 'unknown')
@@ -87,5 +97,16 @@ export async function requestPlantPreview(id: string, signal: AbortSignal): Prom
   const body = object(await response.json()), row = object(body?.plant)
   if (!row || String(row.plant_id) !== id) throw Error('Invalid Plant preview')
   const name = (value: unknown) => typeof value === 'string' ? value.slice(0, 200) : ''
-  return { image: plantThumbnailImages(row)[0]?.path || '', scientificName: name(row.scientific_name), commonName: name(row.common_name) }
+  let image = plantThumbnailImages(row)[0]?.path || ''
+  if (row.rbac_status === 'Pending Review') {
+    const gallery = createPlantGallery({ detail: true, transport: (url, options) => fetch(url, {
+      ...options, signal: AbortSignal.any([signal, options?.signal as AbortSignal, AbortSignal.timeout(15000)]),
+    }) })
+    try {
+      await gallery.load(id, true)
+      if (!signal.aborted && !gallery.state.error) image = gallery.state.assets.find(asset =>
+        asset.origin === 'initial_registration' && asset.status === 'Pending Review')?.url || ''
+    } finally { gallery.reset() }
+  }
+  return { image, scientificName: name(row.scientific_name), commonName: name(row.common_name) }
 }

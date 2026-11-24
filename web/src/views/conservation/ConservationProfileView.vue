@@ -1,16 +1,61 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { conservationProfile as profile } from '../../data/conservationProfile'
+import { useRouter } from 'vue-router'
+import { api, currentUser, sessionSnapshot, subscribeSession, type AuthUser } from '../../services/auth'
 
 const { t } = useI18n({ useScope: 'global' })
+const router = useRouter()
+const account = ref<AuthUser | null>(sessionSnapshot().user)
+const profile = reactive({
+  accountId: account.value?.id || '',
+  fullName: account.value?.name || '',
+  email: account.value?.email || '',
+  role: 'Conservation Officer' as const,
+})
 
 const profileErrors = reactive({ fullName: '', email: '' })
 const profileSuccess = ref('')
+const profileLoadError = ref(false)
 
 const password = reactive({ current: '', next: '', confirm: '' })
 const passwordErrors = reactive({ current: '', next: '', confirm: '' })
-const passwordSuccess = ref('')
+const passwordRequestError = ref('')
+const passwordBusy = ref(false)
+
+const applyAccount = (user: AuthUser | null) => {
+  const next = user?.role === 'Conservation Officer' ? user : null
+  if (account.value?.id !== next?.id) {
+    password.current = ''
+    password.next = ''
+    password.confirm = ''
+    passwordRequestError.value = ''
+  }
+  account.value = next
+  Object.assign(profile, {
+    accountId: next?.id || '',
+    fullName: next?.name || '',
+    email: next?.email || '',
+  })
+  profileLoadError.value = false
+}
+const unsubscribeSession = subscribeSession((user, pending) => {
+  // Login briefly publishes an anonymous pending state before verification.
+  // Retain this form's data during that transition; clear it on confirmed logout.
+  if (pending && !user) return
+  applyAccount(user)
+})
+onBeforeUnmount(unsubscribeSession)
+
+onMounted(async () => {
+  try {
+    const user = await currentUser()
+    if (!user || sessionSnapshot().user?.id !== user.id) throw Error()
+    applyAccount(user)
+  } catch {
+    profileLoadError.value = true
+  }
+})
 
 const saveProfile = () => {
   profileErrors.fullName = profile.fullName.trim() ? '' : 'adminProfile.validation.fullNameRequired'
@@ -24,11 +69,11 @@ const saveProfile = () => {
     profileErrors.fullName || profileErrors.email ? '' : 'officerFeedback.prototypeValidated'
 }
 
-const updatePassword = () => {
+const updatePassword = async () => {
   passwordErrors.current = password.current ? '' : 'adminProfile.validation.currentRequired'
   passwordErrors.next = !password.next
     ? 'adminProfile.validation.newRequired'
-    : password.next.length < 8
+    : password.next.length < 15 || password.next.length > 128
       ? 'adminProfile.validation.minimumLength'
       : ''
   passwordErrors.confirm = !password.confirm
@@ -37,12 +82,31 @@ const updatePassword = () => {
       ? 'adminProfile.validation.passwordMismatch'
       : ''
 
-  if (passwordErrors.current || passwordErrors.next || passwordErrors.confirm) {
-    passwordSuccess.value = ''
+  if (passwordErrors.current || passwordErrors.next || passwordErrors.confirm || !account.value || passwordBusy.value) {
+    passwordRequestError.value = ''
     return
   }
 
-  passwordSuccess.value = 'officerFeedback.prototypeValidated'
+  passwordRequestError.value = ''
+  passwordBusy.value = true
+  try {
+    const verification = await api<{ user: AuthUser }>('/auth/login', 'POST', {
+      email: account.value.email,
+      password: password.current,
+    })
+    if (verification.user.id !== account.value.id) throw Error('Your account changed. Sign in again.')
+    await api('/auth/password', 'POST', { password: password.next, confirmation: password.confirm })
+    password.current = ''
+    password.next = ''
+    password.confirm = ''
+    window.alert(t('officerFeedback.passwordChanged'))
+    await router.replace({ path: '/', query: { passwordChanged: '1' } })
+  } catch (error) {
+    password.current = ''
+    passwordRequestError.value = error instanceof Error ? error.message : t('officerFeedback.failed')
+  } finally {
+    passwordBusy.value = false
+  }
 }
 </script>
 
@@ -54,6 +118,7 @@ const updatePassword = () => {
   </section>
 
   <p role="note">{{ t('officerFeedback.prototype') }}</p>
+  <p v-if="profileLoadError" role="alert">{{ t('officerFeedback.profileLoadFailed') }}</p>
   <div class="profile-settings">
     <form class="settings-card" novalidate @submit.prevent="saveProfile">
       <header>
@@ -121,6 +186,7 @@ const updatePassword = () => {
         <p>{{ t('conservationProfile.passwordDescription') }}</p>
       </header>
 
+      <p v-if="passwordRequestError" role="alert">{{ passwordRequestError }}</p>
       <div class="settings-fields">
         <label class="settings-field">
           <span>{{ t('adminProfile.currentPassword') }}</span>
@@ -142,6 +208,8 @@ const updatePassword = () => {
             v-model="password.next"
             type="password"
             autocomplete="new-password"
+            minlength="15"
+            maxlength="128"
             :aria-invalid="Boolean(passwordErrors.next)"
             aria-describedby="new-password-error"
           />
@@ -156,6 +224,7 @@ const updatePassword = () => {
             v-model="password.confirm"
             type="password"
             autocomplete="new-password"
+            maxlength="128"
             :aria-invalid="Boolean(passwordErrors.confirm)"
             aria-describedby="confirm-password-error"
           />
@@ -167,8 +236,9 @@ const updatePassword = () => {
 
 
       <div class="form-footer">
-        <p v-if="passwordSuccess" class="success-message" role="status">{{ t(passwordSuccess) }}</p>
-        <button class="primary-button" type="submit">{{ t('officerFeedback.validateOnly') }}</button>
+        <button class="primary-button" type="submit" :disabled="passwordBusy || !account">
+          {{ t('adminProfile.updatePassword') }}
+        </button>
       </div>
     </form>
   </div>
