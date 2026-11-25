@@ -32,6 +32,7 @@ function harness(file, api, { picker = false, user = admin } = {}) {
     if (name === 'vue') return { ...vue, useId: () => `assignment-${++idSequence}`, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => cleanup.push(fn), withDirectives: n => n, resolveComponent: name => ({ name }) }
     if (name === 'vue-i18n') return { useI18n: () => ({ t: key => messages[key.replace('adminDeviceAssignment.', '')] || key }) }
     if (name === 'vue-router') return { useRoute: () => ({ path: '/admin/sensors' }), useRouter: () => ({ push: async () => {} }) }
+    if (name.endsWith('/officerDropdown')) return { vOfficerDropdown: {} }
     if (name.endsWith('/auth')) return { api, logout: async () => {}, sessionSnapshot: () => session, subscribeSession: fn => { listener = fn; return () => { listener = null } } }
     if (name.endsWith('plantApi')) return { plantApi: api }
     if (name.endsWith('deviceAssignment')) return policy

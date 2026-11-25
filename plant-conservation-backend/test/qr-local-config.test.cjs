@@ -76,6 +76,7 @@ test("QR lookup joins plant_app QR inventory to plant_app plant records", async 
             species_id: "7",
             rbac_status: "Approved",
             scientific_name: "Local plant",
+            species_visibility: "public",
           }],
         };
       if (sql.includes("species_image_collection"))

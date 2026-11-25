@@ -2,7 +2,7 @@
 const test = require("node:test"), assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs"), { join } = require("node:path"), { once } = require("node:events");
 const sharp = require("sharp");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installTranslationStorage } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 
 test("Phase 2: authoritative observation origin across creation, history and review", async t => {
@@ -11,6 +11,7 @@ test("Phase 2: authoritative observation origin across creation, history and rev
   t.after(() => pool.end());
   for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql", "016-species-request-content-revision.sql", "017-species-review-cycle.sql"])
     await pool.query(readFileSync(join(__dirname, "../migrations", name), "utf8"));
+  await installTranslationStorage(pool);
   await pool.query(`CREATE TABLE plant_app.qr_code(qr_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     plant_id integer UNIQUE,qr_code text UNIQUE,status text,assigned_at timestamptz,activated_at timestamptz,retired_at timestamptz)`);
   await pool.query(`INSERT INTO species(scientific_name,common_name,rbac_data) VALUES

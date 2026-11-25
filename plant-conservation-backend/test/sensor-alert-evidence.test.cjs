@@ -20,6 +20,10 @@ test('threshold ranges preserve legacy maxima, exact boundaries, optional limits
 
 test('registered multi-sensor device saves immutable event-only evidence and independent ranges without changing reports', async t => {
   const db = await createPlantDatabase(); t.after(() => db.end());
+  for (const name of ['004-species-requests.sql','006-atomic-plant-submissions.sql','008-record-change-submissions.sql','009-record-version-history.sql','013-staff-notification-foundation.sql','016-species-request-content-revision.sql','017-species-review-cycle.sql','021-observation-edit-requests.sql','022-cancel-edit-requests.sql','024-record-change-review-events.sql','025-original-plant-withdrawal.sql','026-original-species-withdrawal.sql','027-original-observation-withdrawal.sql','028-immutable-record-version-revisions.sql','029-observation-submission-versions.sql','030-observation-edit-officer-notifications.sql','031-iot-live-reading-aggregates.sql','032-canonical-threat-officer-notifications.sql'])
+    await db.query(readFileSync(join(__dirname, '../migrations', name), 'utf8'));
+  // schema.postgres.sql already created the pre-031 aggregate relation.
+  await db.query("ALTER TABLE iot_reading_aggregate ADD COLUMN IF NOT EXISTS metrics JSONB NOT NULL DEFAULT '{}'::jsonb");
   await db.query(migration); // Disposable PGlite only; never the configured application database.
   await db.query(`INSERT INTO species(scientific_name) VALUES('Evidence fixture');
     INSERT INTO plant_record(plant_id,species_id,registered_subject,rbac_status,qr_token) VALUES

@@ -12,7 +12,7 @@ const js = value => ts.transpileModule(value, { compilerOptions: { module: ts.Mo
 const nodes = root => { const out = []; function walk(n) { if (Array.isArray(n)) return n.forEach(walk); if (!n || typeof n !== 'object') return; out.push(n); if (Array.isArray(n.children)) walk(n.children) } walk(root); return out }
 test('native radio cards preserve raw values, explicit empty state, selection, descriptions and disabled/error access', () => {
   const props = vue.reactive({ id: 'fixture-visibility', modelValue: '', required: true, disabled: false, invalid: false, validationField: 'visibility' })
-  const exports = {}, values = [], context = { exports, require: () => vue }
+  const exports = {}, values = [], context = { exports, require: name => name === 'vue-i18n' ? { useI18n: () => ({ t: key => key }) } : vue }
   vm.runInNewContext(`(function(){${js(script.content)}})()`, context)
   const state = exports.default.setup(props, { expose() {}, emit(name, value) { assert.equal(name, 'update:modelValue'); values.push(value); props.modelValue = value } })
   vm.runInNewContext(`(function(){${js(template.code)}})()`, context)

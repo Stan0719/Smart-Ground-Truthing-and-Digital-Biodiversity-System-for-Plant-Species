@@ -25,6 +25,7 @@ async function fixture(t) {
 test("durable Sensor keys survive exact retries, equal clocks, cutover and another worker without raw writes", async t => {
   const pool = await fixture(t);
   for (const file of ['004-species-requests.sql', '006-atomic-plant-submissions.sql', '008-record-change-submissions.sql', '009-record-version-history.sql', '013-staff-notification-foundation.sql', '016-species-request-content-revision.sql', '017-species-review-cycle.sql', '021-observation-edit-requests.sql', '022-cancel-edit-requests.sql', '024-record-change-review-events.sql', '025-original-plant-withdrawal.sql', '026-original-species-withdrawal.sql', '027-original-observation-withdrawal.sql', '028-immutable-record-version-revisions.sql', '029-observation-submission-versions.sql', '030-observation-edit-officer-notifications.sql', '031-iot-live-reading-aggregates.sql', '032-canonical-threat-officer-notifications.sql', '033-iot-sensor-retry-identity.sql']) await pool.query(readFileSync(join(__dirname, "../migrations", file), "utf8"));
+  await pool.query("ALTER TABLE iot_reading_aggregate ADD COLUMN IF NOT EXISTS metrics JSONB NOT NULL DEFAULT '{}'::jsonb");
   const send = await server(t, pool);
   const realNow = Date.now; let clock = Date.parse("2026-11-18T00:01:00Z"); Date.now = () => clock; t.after(() => { Date.now = realNow; });
   const count = async () => Number((await pool.query("SELECT sample_count FROM iot_reading_checkpoint WHERE device_id='retry-device'")).rows[0].sample_count);

@@ -427,17 +427,17 @@ const submitResponse = async () => {
     <p v-if="isLoading" class="state-message" role="status">{{ ct('Loading threat alerts...') }}</p>
     <div v-else-if="errorMessage" class="state-message error-state" role="alert"><p>{{ errorMessage }}</p><button class="action-button" type="button" @click="loadAlerts()">{{ ct('Try again') }}</button></div>
     <p v-else-if="!filteredAlerts.length" class="state-message">{{ ct('No threat alerts found.') }}</p>
-    <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="ct('Threat Alerts')" tabindex="0">
+    <div v-else class="table-scroll officer-table-scroll threat-alert-scroll" role="region" :aria-label="ct('Threat Alerts')" tabindex="0">
       <table class="officer-data-table threat-alert-table"><colgroup><col class="column-id" /><col class="column-source" /><col class="column-plant" /><col class="column-type" /><col class="column-identifier" /><col class="column-status" /><col class="column-time" /><col class="column-actions" /></colgroup>
         <thead><tr><th scope="col">{{ ct('Alert ID') }}</th><th scope="col">{{ ct('Alert Source') }}</th><th scope="col">{{ ct('Current Assigned Plant') }}</th><th scope="col">{{ ct('Alert Type') }}</th><th scope="col">{{ ct('Device / Camera') }}</th><th scope="col">{{ ct('Status') }}</th><th scope="col">{{ ct('Detected At') }}</th><th scope="col">{{ ct('Actions') }}</th></tr></thead>
         <tbody><tr v-for="alert in filteredAlerts" :key="alert.id">
-          <td><strong><MonitoringIdentifier :value="alert.id" :labels="alertLabels" /></strong></td>
-          <td><span class="source-badge" :class="alertSource(alert).toLowerCase()">{{ sourceText(alert) }}</span></td>
-          <td><RouterLink v-if="assignedPlantLabel(assignmentFor(alert))" :to="`/plant/${assignmentFor(alert).plant_id}`" class="assigned-plant-chip" :aria-label="`${ct('Current Assigned Plant')}: ${assignedPlantLabel(assignmentFor(alert))}`"><svg class="plant-chip-leaf" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19C1 7 11 3 21 3c0 10-4 20-16 16Zm-2 2L17 7" /></svg><span>{{ assignedPlantLabel(assignmentFor(alert)) }}</span><svg class="plant-chip-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h11v11M19 5 5 19" /></svg></RouterLink><span v-else>{{ ct(assignmentFor(alert).state === 'not_linked' ? 'Not linked' : 'Unavailable') }}</span></td>
-          <td>{{ typeText(alert) }}</td>
-          <td><MonitoringIdentifier :value="alertSource(alert) === 'Camera' ? alert.cameraId : alert.deviceId" :labels="alertSource(alert) === 'Camera' ? cameraLabels : deviceLabels" /></td>
-          <td><span class="badge" :style="threatAlertBadgeStyle(alert.status)" :class="alert.status.toLowerCase()">{{ statusText(alert.status) }}</span></td>
-          <td class="alert-time">{{ dt(alert.detectedAt) }}</td><td><button class="action-button" type="button" @click="openAlert(alert)">{{ ct('View') }}</button></td>
+          <td class="alert-id-cell"><span class="threat-alert-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg></span><strong><MonitoringIdentifier :value="alert.id" :labels="alertLabels" /></strong></td>
+          <td><span class="threat-alert-cell-label">{{ ct('Alert Source') }}</span><span class="source-badge" :class="alertSource(alert).toLowerCase()">{{ sourceText(alert) }}</span></td>
+          <td><span class="threat-alert-cell-label">{{ ct('Current Assigned Plant') }}</span><RouterLink v-if="assignedPlantLabel(assignmentFor(alert))" :to="`/plant/${assignmentFor(alert).plant_id}`" class="assigned-plant-chip" :aria-label="`${ct('Current Assigned Plant')}: ${assignedPlantLabel(assignmentFor(alert))}`"><svg class="plant-chip-leaf" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19C1 7 11 3 21 3c0 10-4 20-16 16Zm-2 2L17 7" /></svg><span>{{ assignedPlantLabel(assignmentFor(alert)) }}</span><svg class="plant-chip-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h11v11M19 5 5 19" /></svg></RouterLink><span v-else>{{ ct(assignmentFor(alert).state === 'not_linked' ? 'Not linked' : 'Unavailable') }}</span></td>
+          <td><span class="threat-alert-cell-label">{{ ct('Alert Type') }}</span>{{ typeText(alert) }}</td>
+          <td><span class="threat-alert-cell-label">{{ ct('Device / Camera') }}</span><MonitoringIdentifier :value="alertSource(alert) === 'Camera' ? alert.cameraId : alert.deviceId" :labels="alertSource(alert) === 'Camera' ? cameraLabels : deviceLabels" /></td>
+          <td><span class="threat-alert-cell-label">{{ ct('Status') }}</span><span class="badge" :style="threatAlertBadgeStyle(alert.status)" :class="alert.status.toLowerCase()">{{ statusText(alert.status) }}</span></td>
+          <td class="alert-time"><span class="threat-alert-cell-label">{{ ct('Detected At') }}</span>{{ dt(alert.detectedAt) }}</td><td><button class="action-button" type="button" @click="openAlert(alert)">{{ ct('View') }}</button></td>
         </tr></tbody>
       </table>
     </div>
@@ -532,7 +532,29 @@ const submitResponse = async () => {
 .preview-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .sample-marker { display: block; margin-top: 6px; color: #854d0e; font-weight: 700; overflow-wrap: anywhere; }
 
+.threat-alert-scroll { container-type: inline-size; }
 .officer-layout.officer-layout .officer-table-scroll .threat-alert-table { min-width: 82rem; }
+.threat-alert-card-icon, .threat-alert-cell-label { display: none; }
+@container (max-width: 767px) {
+  .officer-layout.officer-layout.officer-layout .threat-alert-scroll { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; overflow: visible; }
+  .officer-layout.officer-layout .threat-alert-scroll .threat-alert-table { display: block; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; table-layout: auto; }
+  .threat-alert-table colgroup { display: none; }
+  .threat-alert-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+  .threat-alert-table tbody { display: grid; width: 100%; min-width: 0; gap: 14px; }
+  .officer-layout.officer-layout .threat-alert-scroll .threat-alert-table tbody tr { display: grid; box-sizing: border-box; grid-template-columns: minmax(0, 1fr); width: 100%; max-width: 100%; gap: 10px; min-width: 0; padding: 16px; border: 1px solid #d7e0db; border-radius: 16px; background: #fff; }
+  .officer-layout.officer-layout .threat-alert-scroll .threat-alert-table td { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; padding: 0; border: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
+  .threat-alert-card-icon { position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; background: #fce8e5; color: #ae3e34; }
+  .threat-alert-card-icon svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .officer-layout.officer-layout .threat-alert-scroll .threat-alert-table td.alert-id-cell { position: relative; display: block; min-height: 44px; padding-left: 56px; color: #174c38; font-size: 15px; font-weight: 700; }
+  .threat-alert-cell-label { display: block; flex: 0 0 auto; color: #426b56; font-size: 11px; line-height: 1.5; font-weight: 600; white-space: nowrap; }
+  .threat-alert-cell-label::after { content: ':'; }
+  .threat-alert-table td :deep(.monitoring-identifier) { flex: 0 1 auto; min-width: 0; }
+  .threat-alert-table td :deep(.monitoring-id-line) { min-width: 0; white-space: normal; }
+  .threat-alert-table td :deep(.monitoring-id-line > span:first-child) { overflow-wrap: anywhere; }
+  .officer-layout.officer-layout .threat-alert-scroll .threat-alert-table td:nth-child(8) { display: block; margin-top: 3px; padding-top: 12px; border-top: 1px solid #d7e0db; }
+  .officer-layout.officer-layout .threat-alert-scroll .threat-alert-table td:nth-child(8) .action-button { width: 100%; min-height: 44px; justify-content: center; border-radius: 10px; }
+  .officer-layout .threat-alert-scroll .assigned-plant-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+}
 
 .alert-summary-card { --alert-card-background: #e8f0f5; --alert-card-ink: #315d78; padding: 16px; border: 1px solid var(--alert-card-ink); background: var(--alert-card-background); color: var(--alert-card-ink); }
 .alert-summary-card[data-status="Active Alerts"] { --alert-card-background: #fbe8e5; --alert-card-ink: #a33f35; }

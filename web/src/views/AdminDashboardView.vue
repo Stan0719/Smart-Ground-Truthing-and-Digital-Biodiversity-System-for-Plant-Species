@@ -228,7 +228,8 @@ const dataLabel = (value: string) => {
               {{ t('adminDashboard.viewIotMonitoring') }} →
             </button>
           </div>
-          <div class="sensor-status-chart" role="img" :aria-label="t('adminDashboard.sensorStatusChartLabel', { active: shown(active), inactive: shown(inactive), total: shown(overview.devices?.length) })">
+          <p v-if="!loading && !overview.devices" class="sensor-status-error" role="alert">{{ t('adminDashboard.sensorLoadError') }}</p>
+          <div v-else class="sensor-status-chart" role="img" :aria-label="t('adminDashboard.sensorStatusChartLabel', { active: shown(active), inactive: shown(inactive), total: shown(overview.devices?.length) })">
             <div class="sensor-chart-total"><strong>{{ shown(overview.devices?.length) }}</strong><span>{{ t('adminDashboard.totalSensors') }}</span></div>
             <div class="sensor-bars">
               <div v-for="item in sensorStatuses" :key="item.label" class="sensor-bar-row">
@@ -551,6 +552,7 @@ const dataLabel = (value: string) => {
   min-height: 218px; height: calc(100% - 70px); display: grid; grid-template-columns: 120px minmax(0, 1fr);
   align-items: center; gap: 26px;
 }
+.sensor-status-error { margin: 18px 0 0; padding: 12px 14px; border: 1px solid #e3b8b1; border-radius: 10px; background: #fff1ee; color: #982f27; font-size: 13px; }
 .sensor-chart-total {
   min-height: 120px; display: grid; align-content: center; justify-items: center; gap: 5px;
   border-radius: 16px; background: #eff5f0;

@@ -5,7 +5,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { once } = require("node:events");
 const sharp = require("sharp");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installTranslationStorage } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 const { observationHistory, speciesHistory } = require("../historical-reviews.cjs");
 
@@ -13,6 +13,7 @@ test("approval history with Migration 028 in isolated PGlite",async t=>{
   const pool = await createPlantDatabase(); t.after(() => pool.end());
   for (const name of ["004-species-requests.sql","006-atomic-plant-submissions.sql","008-record-change-submissions.sql","009-record-version-history.sql","016-species-request-content-revision.sql","017-species-review-cycle.sql","028-immutable-record-version-revisions.sql"])
     await pool.query(readFileSync(join(__dirname,"../migrations/"+name),"utf8"));
+  await installTranslationStorage(pool);
   const photo = await sharp({create:{width:4,height:4,channels:3,background:"green"}}).jpeg().toBuffer();
   await pool.query(`INSERT INTO species(scientific_name,rbac_data) VALUES('Catalogue original','{"approvalStatus":"Approved"}');
     INSERT INTO rbac_species_visibility VALUES(1,'public');

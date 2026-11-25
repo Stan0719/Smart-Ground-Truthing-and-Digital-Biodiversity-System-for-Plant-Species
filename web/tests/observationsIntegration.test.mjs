@@ -1550,7 +1550,9 @@ test('Created formatter remains available for details and the compact table uses
 
 async function unifiedProposal(status='Pending Review',origin='subsequent_observation') {
  const baseline=fixture({status:'Approved',origin_type:origin,created_at:'2026-10-01T00:00:00Z'})
- return mapObservationEdit({id:uuid,observation_id:uuid,owner_subject:baseline.owner_subject,status,revision:7,base_revision:3,created_at:'2026-11-17T00:00:00Z',base_snapshot:{content:baseline.content},proposed_content:{...baseline.content,notes:'Proposal draft'},retained_photo_ids:[],added_photo_count:0},async()=>({observation:baseline}))
+ // Use midday UTC so this date-only filter fixture stays on the same calendar
+ // date in every host timezone when the broad test files share one process.
+ return mapObservationEdit({id:uuid,observation_id:uuid,owner_subject:baseline.owner_subject,status,revision:7,base_revision:3,created_at:'2026-11-17T12:00:00Z',base_snapshot:{content:baseline.content},proposed_content:{...baseline.content,notes:'Proposal draft'},retained_photo_ids:[],added_photo_count:0},async()=>({observation:baseline}))
 }
 test('unified Observation table renders both distinct submission identities and accurate original counts',async()=>{
  const canonical=[fixture({status:'Approved',plant_scientific_name:'Yellow Simpoh Air'}),fixture({id:'pending-original'})],h=harness(identityHandler(canonical))
@@ -1582,7 +1584,9 @@ test('unified filters use proposal status, owner and date with genuine baseline 
  h.state.status.value='Pending Review';assert.equal(h.state.displayedRows.value.length,1)
  h.state.queueOrigin.value='all';h.state.search.value='Botanist Aina';assert.equal(h.state.displayedRows.value.length,1)
  h.state.search.value='CHANGE-'+uuid;assert.equal(h.state.displayedRows.value.length,1)
- h.state.species.value=h.state.proposalItems.value[0].baseline.speciesId;h.state.owner.value='staff:real-botanist-subject';h.state.date.value='2026-11-17';assert.equal(h.state.displayedRows.value.length,1)
+ h.state.species.value=h.state.proposalItems.value[0].baseline.speciesId;assert.equal(h.state.displayedRows.value.length,1,'Species filter uses verified baseline Species')
+ h.state.owner.value='staff:real-botanist-subject';assert.equal(h.state.displayedRows.value.length,1,'owner filter uses proposal submitter')
+ h.state.date.value='2026-11-17';assert.equal(h.state.displayedRows.value.length,1,'date filter uses proposal submission date')
  h.state.date.value='2026-10-01';assert.equal(h.state.displayedRows.value.length,0)
  h.state.date.value='';h.state.search.value='';h.state.submissionType.value='original';assert.equal(h.state.displayedRows.value.length,1)
  assert.ok(h.state.speciesOptions.value.some(item=>item.id===h.state.proposalItems.value[0].baseline.speciesId))
@@ -1786,7 +1790,7 @@ test('edit summaries share table filters and use request status, date and typed 
   assert.equal(edit.id,uuid);assert.equal(edit.observation_edit.observation_id,uuid)
   assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[1,0,0,0,1])
   h.state.submissionType.value='edit';h.state.search.value='CHANGE-'+uuid;assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[1,0,0,0,0])
-  h.state.search.value='';h.state.date.value='2026-11-17';assert.equal(h.state.displayedRows.value.length,1);assert.equal(h.state.summaryCounts.value[0].count,1)
+  h.state.search.value='';h.state.date.value='2026-11-17';assert.equal(h.state.displayedRows.value.length,1,'date filter matches the edit request date');assert.equal(h.state.summaryCounts.value[0].count,1)
   h.state.date.value='2026-11-02';assert.equal(h.state.displayedRows.value.length,0);assert.equal(h.state.summaryCounts.value[0].count,0)
   h.state.date.value='';h.state.owner.value='missing';assert.equal(h.state.summaryCounts.value[0].count,0);h.state.owner.value=''
   h.state.receiveProposalState({rows:[{...edit,status:'Rejected'}],names:{},loading:false,error:''});assert.deepEqual(Array.from(h.state.summaryCounts.value,c=>c.count),[0,0,0,1,0])

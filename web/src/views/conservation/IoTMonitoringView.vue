@@ -807,17 +807,18 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
 .officer-layout .iot-device-scroll .iot-device-table .column-actions { width: 12rem; }
 .iot-device-card-icon, .iot-device-cell-label { display: none; }
 @container (max-width: 767px) {
-  .officer-layout .iot-device-scroll { overflow: visible; }
-  .officer-layout .iot-device-scroll .iot-device-table { display: block; width: 100%; min-width: 0; table-layout: auto; }
+  .officer-layout.officer-layout.officer-layout .iot-device-scroll { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; overflow: visible; }
+  .officer-layout.officer-layout .iot-device-scroll .iot-device-table { display: block; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; table-layout: auto; }
   .iot-device-table colgroup { display: none; }
   .iot-device-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
-  .iot-device-table tbody { display: grid; gap: 14px; }
-  .officer-layout .iot-device-scroll .iot-device-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; padding: 16px; border: 1px solid #d7e0db; border-radius: 16px; background: #fff; }
-  .officer-layout .iot-device-scroll .iot-device-table td { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 0; border: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+  .iot-device-table tbody { display: grid; width: 100%; min-width: 0; gap: 14px; }
+  .officer-layout .iot-device-scroll .iot-device-table tbody tr { display: grid; box-sizing: border-box; grid-template-columns: minmax(0, 1fr); width: 100%; max-width: 100%; gap: 10px; min-width: 0; padding: 16px; border: 1px solid #d7e0db; border-radius: 16px; background: #fff; }
+  .officer-layout .iot-device-scroll .iot-device-table td { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; padding: 0; border: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
   .iot-device-card-icon { position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; background: #dcebd8; color: #245443; }
   .iot-device-card-icon svg { width: 26px; height: 26px; }
   .officer-layout .iot-device-scroll .iot-device-table td:first-child { position: relative; display: block; min-height: 44px; padding-left: 56px; color: #174c38; font-size: 15px; font-weight: 700; }
-  .iot-device-cell-label { display: block; flex: 0 0 min(40%, 140px); color: #426b56; font-size: 12px; line-height: 1.5; font-weight: 600; }
+  .iot-device-cell-label { display: block; flex: 0 0 auto; color: #426b56; font-size: 11px; line-height: 1.5; font-weight: 600; white-space: nowrap; }
+  .iot-device-cell-label::after { content: ':'; }
   .iot-device-table td:first-child .iot-device-cell-label { margin-bottom: 3px; }
   .iot-device-table td:first-child > strong { display: block; min-width: 0; }
   .iot-device-table td:first-child .iot-device-cell-label,

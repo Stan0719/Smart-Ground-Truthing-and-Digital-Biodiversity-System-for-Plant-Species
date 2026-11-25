@@ -12,12 +12,12 @@ sheet.walkRules(rule => rules.push(rule))
 const values = rule => Object.fromEntries(rule.nodes.filter(n => n.type === 'decl').map(n => [n.prop, n.value]))
 const find = (part, property) => rules.find(r => r.selector.includes(part) && values(r)[property] !== undefined)
 
-test('page polish is opt-in for exactly the eight requested Officer routes, excluding Overview and other roles', () => {
+test('page polish is opt-in for the nine Officer content routes, excluding Overview and other roles', () => {
   const layout = read('layouts/ConservationOfficerLayout.vue')
   const { descriptor } = parse(layout)
   const attr = descriptor.template.content.match(/:data-officer-standard="([^"]+)"/)[1]
   const routes = [...attr.matchAll(/'conservation-([^']+)'/g)].map(m => m[1])
-  assert.deepEqual(routes, ['profile', 'species', 'observations', 'reviews', 'map', 'iot', 'alerts', 'reports'])
+  assert.deepEqual(routes, ['plants', 'profile', 'species', 'observations', 'reviews', 'map', 'iot', 'alerts', 'reports'])
   assert.match(attr, /includes\(String\(route.name\)\) \? '' : undefined/)
   assert.ok(descriptor.scriptSetup.content.includes("import '../styles/officer-page-polish.css'"))
   assert.doesNotMatch(read('main.ts'), /officer-page-polish/)

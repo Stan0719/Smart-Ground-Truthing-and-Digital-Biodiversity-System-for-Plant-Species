@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
-import { createServer } from 'vite'
+import { readFileSync } from 'node:fs'
+import vm from 'node:vm'
+import ts from 'typescript'
+import * as vue from 'vue'
 
 const translationHash = async value => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(b=>b.toString(16).padStart(2,'0')).join('')
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -13,7 +15,7 @@ async function waitFor(predicate, message) {
   assert.fail(message)
 }
 
-test('same-locale field registration does not cancel an active translation request', async (context) => {
+test('same-locale field registration does not cancel an active translation request', async (testContext) => {
   const originals = {
     fetch: globalThis.fetch,
     window: globalThis.window,
@@ -31,19 +33,37 @@ test('same-locale field registration does not cancel an active translation reque
     createElementNS: () => ({}),
   } })
   Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis })
-  const server = await createServer({
-    root: fileURLToPath(new URL('..', import.meta.url)),
-    configFile: false,
-    envDir: false,
-    plugins: [],
-    logLevel: 'silent',
-    server: { middlewareMode: true },
-    appType: 'custom',
-  })
-  context.after(async () => {
+  const source = readFileSync(new URL('../src/services/databaseTranslation.ts', import.meta.url), 'utf8')
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  const exports = {}
+  const moduleContext = {
+    exports,
+    require: name => {
+      if (name === 'vue') return vue
+      throw new Error(`Unexpected database translation dependency: ${name}`)
+    },
+    console,
+    AbortController,
+    AbortSignal,
+    Response,
+    TextEncoder,
+    WeakRef,
+    setTimeout,
+    clearTimeout,
+    crypto: globalThis.crypto,
+    fetch: (...args) => globalThis.fetch(...args),
+  }
+  moduleContext.globalThis = moduleContext
+  moduleContext.window = { setTimeout: (...args) => setTimeout(...args), clearTimeout: (...args) => clearTimeout(...args) }
+  vm.runInNewContext(compiled, moduleContext)
+  const translation = exports
+  const locale = vue.ref('en')
+  testContext.after(async () => {
     globalThis.fetch = originals.fetch
     console.info = originals.info
-    await server.close()
+    translation.clearDatabaseTranslationTargets()
     for (const key of ['window', 'document', 'localStorage', 'navigator']) {
       const original = originals[key]
       if (original === undefined) delete globalThis[key]
@@ -51,9 +71,7 @@ test('same-locale field registration does not cancel an active translation reque
     }
   })
 
-  const { i18n } = await server.ssrLoadModule('/src/i18n.ts')
-  const translation = await server.ssrLoadModule('/src/services/databaseTranslation.ts')
-  translation.configureDatabaseTranslation(i18n.global.locale)
+  translation.configureDatabaseTranslation(locale)
   const requests = []
   let releaseFirst
   globalThis.fetch = (url, options) => new Promise((resolve) => {
@@ -71,7 +89,7 @@ test('same-locale field registration does not cancel an active translation reque
 
   const first = { description: 'Original first.' }
   const second = { description: 'Original second.' }
-  i18n.global.locale.value = 'ms'
+  locale.value = 'ms'
   translation.trackDatabaseTranslationFields([{ recordType: 'species', recordId: '19', fieldName: 'description', target: first }])
   await waitFor(() => requests.length === 1, 'first translation request did not start')
   translation.trackDatabaseTranslationFields([{ recordType: 'species', recordId: '20', fieldName: 'description', target: second }])
@@ -87,5 +105,5 @@ test('same-locale field registration does not cancel an active translation reque
   assert.deepEqual(JSON.parse(requests[1].options.body).entries, [{ recordType: 'species', recordId: '20', fieldName: 'description', sourceHash: await translationHash('Original second.') }])
   await waitFor(() => first.description === 'Huraian diterjemahkan.' && second.description === 'Huraian kedua.', 'returned translations did not update their reactive targets')
   translation.clearDatabaseTranslationTargets()
-  i18n.global.locale.value = 'en'
+  locale.value = 'en'
 })

@@ -154,3 +154,10 @@ test('page uses canonical adapter without legacy fixtures, writes or visual rede
   assert.match(camera, /\/camera-api\/camera-events/)
   assert.match(camera, /\/camera-api\/video-feed/)
 })
+
+test('mobile sensor device cards keep each labeled value on one vertically centered row', () => {
+  assert.match(page, /@container \(max-width: 767px\)/)
+  assert.match(page, /\.officer-layout \.iot-device-scroll \.iot-device-table td \{ display: flex; flex-wrap: nowrap; align-items: center; gap: 4px;/)
+  assert.match(page, /\.iot-device-cell-label::after \{ content: ':'; \}/)
+  assert.match(page, /\.iot-device-scroll \.iot-device-table \{ display: block; box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0;/)
+})

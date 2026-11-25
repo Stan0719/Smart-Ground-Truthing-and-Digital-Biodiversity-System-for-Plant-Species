@@ -61,6 +61,7 @@ test('the intended taxonomy route retains Officer-only access and accepts the ex
       connect: () => assert.fail('taxonomy reads must not create/check out a photo-management transaction') },
     auth: { session: async token => accounts[Object.keys(tokens).find(key => tokens[key] === token)] || null,
       event: async () => {} },
+    origins: new Set(['http://127.0.0.1']),
   }).listen(0, '127.0.0.1')
   await once(server, 'listening')
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) })

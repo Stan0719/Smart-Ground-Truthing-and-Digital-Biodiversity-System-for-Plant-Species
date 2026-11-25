@@ -108,7 +108,7 @@ test('header styling is isolated from cards/charts/other roles and leaves status
   assert.match(alerts, /@click="openAlert\(alert\)"/)
   const iot = read('views/conservation/IoTMonitoringView.vue')
   assert.match(iot, /motion_detected \? 'high' : 'approved'/)
-  assert.match(iot, /valueOrDash\(item.reading.temperature_c, ' °C'\)/)
+  assert.match(iot, /<SensorThresholdStatus :value="item\.reading\.temperature_c" :configured="item\.device\.thresholds\?\.temperature" metric="temperature" unit="°C"/)
   const reports = read('views/conservation/ReportsView.vue')
   assert.match(reports, /@click="exportPdf"/); assert.match(reports, /@click="exportCsv"/)
   for (const page of ['ObservationsView', 'ReviewSubmissionsView', 'PlantSpeciesView', 'BiodiversityMapView']) assert.ok(!read(`views/conservation/${page}.vue`).includes('officer-data-tables.css'))

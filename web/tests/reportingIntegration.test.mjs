@@ -303,6 +303,7 @@ test('production report source has no conservationStore, fake dates, or persiste
   assert.doesNotMatch(source, /conservationStore|speciesForPlant|2026-09-01|2026-10-03/)
   assert.match(source, /requestReport\(snapshot\)/)
   assert.match(source, /rt\('downloadOnly'\)/)
+  assert.match(source, /class="persistence-note"[^>]*>\{\{ rt\('downloadOnly'\) \}\}/)
   assert.doesNotMatch(source, /Saved Report|report history/i)
 })
 

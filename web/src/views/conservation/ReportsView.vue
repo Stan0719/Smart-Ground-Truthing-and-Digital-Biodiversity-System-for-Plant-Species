@@ -239,6 +239,7 @@ onMounted(() => loadReport())
     <div v-else-if="loadError" class="report-state error" role="alert"><strong>{{ rt('loadFailed') }}</strong><span>{{ loadError }}</span><button class="primary-button" type="button" @click="loadReport(retryFilters)">{{ rt('retry') }}</button></div>
     <article v-else-if="report" class="report-preview">
       <header class="report-title"><h2>{{ rt('speciesApprovedSummary') }}</h2><p class="applied-scope" :aria-description="appliedScope">{{ appliedPeriodLabel }}</p><p>{{ rt('generatedAt') }}: <strong>{{ generatedAt }}</strong></p></header>
+      <p class="persistence-note">{{ rt('downloadOnly') }}</p>
       <div class="metric-grid"><div class="metric"><span>{{ rt('totalSpecies') }}</span><strong>{{ totalSpecies }}</strong></div><div class="metric"><span>{{ rt('totalApprovedPlants') }}</span><strong>{{ totalApprovedPlants }}</strong></div><div class="metric"><span>{{ rt('matchingRows') }}</span><strong>{{ filteredRows.length }}</strong></div></div>
       <div class="report-view-switch" role="group" :aria-label="rt('reportView')">
         <button type="button" class="report-view-button" :class="{ active: reportView === 'graph' }" :aria-pressed="reportView === 'graph'" @click="reportView = 'graph'">{{ rt('graphView') }}</button>

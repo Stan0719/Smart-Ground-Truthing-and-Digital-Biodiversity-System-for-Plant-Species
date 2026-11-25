@@ -5,7 +5,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { once } = require("node:events");
 const sharp = require("sharp");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installTranslationStorage } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 
 test("species request content revisions protect pending edits and every review decision", async t => {
@@ -22,6 +22,7 @@ test("species request content revisions protect pending edits and every review d
     VALUES('staff:bot','legacy','legacy','Legacy','Common','Genus','Family','Least Concern','Description','Forest',$1)`, [photo]);
   await pool.query(migration("016-species-request-content-revision.sql"));
   await pool.query(migration("017-species-review-cycle.sql"));
+  await installTranslationStorage(pool);
   await pool.query(migration("016-species-request-content-revision.sql"));
   await pool.query(migration("017-species-review-cycle.sql"));
   const legacy = (await pool.query("SELECT content_revision,content_updated_at FROM species_request_submission WHERE client_key='legacy'")).rows[0];

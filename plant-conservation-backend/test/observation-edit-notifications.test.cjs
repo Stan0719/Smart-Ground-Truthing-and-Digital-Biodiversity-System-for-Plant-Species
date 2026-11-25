@@ -1,7 +1,7 @@
 "use strict";
 const test=require('node:test'),assert=require('node:assert/strict');
 const {readFileSync}=require('node:fs'),{join}=require('node:path'),{once}=require('node:events');
-const {createPlantDatabase}=require('./postgres-fixture.cjs');
+const {createPlantDatabase,installTranslationStorage}=require('./postgres-fixture.cjs');
 const {createPlantApp}=require('../server.js');
 const {createOfficerNotificationDelivery}=require('../officer-notification-delivery.cjs');
 const {enqueueObservationEdit}=require('../observation-edit-notifications.cjs');
@@ -9,6 +9,7 @@ const {createObservationEditNotificationReconciliation}=require('../observation-
 test('notification-only 030: real 029 proposals, exact evidence, durable delivery and inbox',async t=>{
  const db=await createPlantDatabase();t.after(()=>db.end());await db.query('SET search_path TO plant_app,pg_catalog');
  for(const file of ['004-species-requests.sql','006-atomic-plant-submissions.sql','008-record-change-submissions.sql','009-record-version-history.sql','013-staff-notification-foundation.sql','016-species-request-content-revision.sql','017-species-review-cycle.sql','021-observation-edit-requests.sql','022-cancel-edit-requests.sql','024-record-change-review-events.sql','025-original-plant-withdrawal.sql','026-original-species-withdrawal.sql','027-original-observation-withdrawal.sql','028-immutable-record-version-revisions.sql','029-observation-submission-versions.sql'])await db.query(readFileSync(join(__dirname,'../migrations',file),'utf8'));
+ await installTranslationStorage(db);
  await db.query(`INSERT INTO species(species_id,scientific_name,common_name,rbac_data) VALUES(1,'Plantus fixture','Fixture','{}');
  INSERT INTO rbac_species_visibility VALUES(1,'public');
  INSERT INTO plant_record(plant_id,species_id,registered_subject,rbac_status,qr_token) VALUES(1,1,'staff:alice','Approved','notice-qr');

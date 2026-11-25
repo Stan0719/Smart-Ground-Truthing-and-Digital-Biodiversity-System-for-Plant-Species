@@ -5,7 +5,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { once } = require("node:events");
 const sharp = require("sharp");
-const { createPlantDatabase, installRecordChangeNotifications } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installRecordChangeNotifications, installTranslationStorage } = require("./postgres-fixture.cjs");
 const { createOfficerNotificationDelivery } = require("../officer-notification-delivery.cjs");
 const { createPlantApp } = require("../server.js");
 
@@ -23,6 +23,7 @@ test("approved-record handoff: queue, transactional outbox, recipients and compe
   await pool.query(migration("008-record-change-submissions.sql"));
   await pool.query(migration("009-record-version-history.sql"));
   await installRecordChangeNotifications(pool);
+  await installTranslationStorage(pool);
   const photo = await sharp({ create: { width: 4, height: 4, channels: 3, background: "green" } }).jpeg().toBuffer();
   const species = (await pool.query("INSERT INTO species(scientific_name,common_name,description,rbac_data) VALUES('Species A','Common A','Original description',$1) RETURNING species_id",
     [{ habitat: "Forest", culturalSignificance: "Existing cultural knowledge", retainedMetadata: { source: "fixture" }, approvalStatus: "Approved", submittedBy: "staff:bot" }])).rows[0].species_id;

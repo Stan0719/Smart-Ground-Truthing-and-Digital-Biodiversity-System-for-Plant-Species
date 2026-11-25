@@ -1232,6 +1232,7 @@
     "unavailable": "不可用",
     "userChartLabel": "{total} 个账户的用户分布",
     "sensorStatusChartLabel": "已注册设备共 {total} 台，其中活跃 {active} 台、未活跃 {inactive} 台",
+    "sensorLoadError": "无法加载传感器状态。请刷新仪表板后重试。",
     "loadingActivity": "正在加载活动…",
     "noActivity": "暂无活动记录。",
     "activityUnavailable": "活动记录不可用。",

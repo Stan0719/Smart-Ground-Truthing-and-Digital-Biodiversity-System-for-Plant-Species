@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { once } = require("node:events");
-const { createPlantDatabase, installRecordChangeNotifications } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installRecordChangeNotifications, installTranslationStorage } = require("./postgres-fixture.cjs");
 const { createReadySpeciesPhotoDatabase } = require("./species-photo-bigint-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 const { readGallery, saveGallery } = require("../species-gallery.cjs");
@@ -33,6 +33,7 @@ const migrate = async (pool) => {
     await pool.query(
       readFileSync(join(__dirname, "../migrations", name), "utf8"),
     );
+  await installTranslationStorage(pool);
 };
 const body = (revision, ids, primary = null, removed = []) => ({
   expectedRevision: revision,
@@ -408,6 +409,7 @@ test("HTTP review paths preserve Officer images, request-photo history and retry
   await installRecordChangeNotifications(pool);
   await pool.query(readFileSync(join(__dirname, "../migrations/016-species-request-content-revision.sql"), "utf8"));
   await pool.query(readFileSync(join(__dirname, "../migrations/017-species-review-cycle.sql"), "utf8"));
+  await installTranslationStorage(pool);
   t.after(() => pool.end());
   const sharp = require("sharp");
   const photo = await sharp({

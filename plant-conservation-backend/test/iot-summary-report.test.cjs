@@ -3,7 +3,7 @@ const test = require("node:test"), assert = require("node:assert/strict");
 const { once } = require("node:events");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installIoTLiveReadingAggregates } = require("./postgres-fixture.cjs");
 const { generateIoTSummary: generate, options, mountIoTSummaryReport } = require("../iot-summary-report.cjs");
 const { createPlantApp } = require("../server.js");
 const base = { contractVersion: "1", device: "sensor", period: "custom", start: "2026-11-01", end: "2026-11-01" };
@@ -17,6 +17,7 @@ test("strict version, device, measurement, interval and calendar validation", ()
 
 test("PostgreSQL aggregation filters, gaps, types, extrema and sample-weighted mean", async t => {
   const db = await createPlantDatabase(); t.after(() => db.end());
+  await installIoTLiveReadingAggregates(db);
   await db.query("INSERT INTO iot_device(id,name,key_hash) VALUES('sensor','Sensor one','fixture'),('other','Other','fixture'),('empty','Empty','fixture')");
   const insert = async (id, at, values, device = "sensor") => db.query('INSERT INTO sensor_reading(id,device_id,"values",created_at) VALUES($1,$2,$3,$4)', [id, device, JSON.stringify(values), at]);
   await insert("before", "2026-10-31T15:59:59Z", { temperature: 999 });
@@ -93,6 +94,7 @@ test("summary HTTP route precedes category route and retains authorization", asy
 
 test("Movement counts exact binary samples, rejects invalid historical values and preserves v1 compatibility", async t => {
   const db = await createPlantDatabase(); t.after(() => db.end());
+  await installIoTLiveReadingAggregates(db);
   await db.query("INSERT INTO iot_device(id,name,key_hash) VALUES('sensor','Sensor one','fixture'),('empty','Empty','fixture')");
   let id = 0;
   const insert = async (values, at) => db.query('INSERT INTO sensor_reading(id,device_id,"values",created_at) VALUES($1,\'sensor\',$2,$3)', [String(++id), JSON.stringify(values), at]);
@@ -161,6 +163,7 @@ test("timeout rolls back, releases connection and does not disclose SQL", async 
 
 test("authorized HTTP summary uses a read-only transaction and returns bounded complete JSON", async t => {
   const db = await createPlantDatabase(); t.after(() => db.end());
+  await installIoTLiveReadingAggregates(db);
   await db.query("INSERT INTO iot_device(id,name,key_hash) VALUES('sensor','Sensor one','fixture')");
   await db.query(`INSERT INTO sensor_reading(id,device_id,"values",created_at) VALUES('one','sensor','{"temperature":0}','2026-10-31T16:00:00Z')`);
   const statements = [];
@@ -181,6 +184,7 @@ test("authorized HTTP summary uses a read-only transaction and returns bounded c
 
 test("summary compatibility preserves raw history and native weighted windows without fabricating readings", async t => {
   const db = await createPlantDatabase(); t.after(() => db.end());
+  await installIoTLiveReadingAggregates(db);
   await db.query("INSERT INTO iot_device(id,name,key_hash) VALUES('compat','Compatible sensor','synthetic')");
   await db.query(`INSERT INTO sensor_reading(id,device_id,"values",created_at) VALUES
     ('raw-compat','compat','{"temperature":0,"movement":1}','2026-11-01T00:04Z')`);

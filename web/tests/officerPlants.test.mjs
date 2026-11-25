@@ -22,6 +22,7 @@ function harness(read) {
  const context={exports,AbortController,setTimeout,clearTimeout,require(name){
   if(name==='vue')return {...vue,onBeforeUnmount(fn){cleanups.push(fn)},resolveComponent:name=>name}
   if(name==='vue-i18n')return {useI18n:()=>({t:key=>key})}
+  if(name.endsWith('/officerDropdown'))return {vOfficerDropdown:{}}
   if(name.endsWith('.vue'))return {}
   if(name.endsWith('/auth'))return {sessionSnapshot:()=>({user,pending:false}),subscribeSession:fn=>{listener=fn;return()=>{}}}
   if(name.endsWith('officerPlants'))return {readOfficerPlants:(...args)=>{calls.push(args);return read(...args)}}

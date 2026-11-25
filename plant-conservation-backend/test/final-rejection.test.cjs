@@ -5,7 +5,7 @@ const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { once } = require("node:events");
 const sharp = require("sharp");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installTranslationStorage } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 
 test("final rejection, linked cascade and review cycles preserve submission identity", async t => {
@@ -17,6 +17,7 @@ test("final rejection, linked cascade and review cycles preserve submission iden
   const migration = name => readFileSync(join(__dirname, "../migrations", name), "utf8");
   for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql", "009-record-version-history.sql"])
     await pool.query(migration(name));
+  await installTranslationStorage(pool);
   const photo = await sharp({ create: { width: 3, height: 3, channels: 3, background: "green" } }).jpeg().toBuffer();
   await pool.query(`INSERT INTO species_request_submission(owner_subject,client_key,payload_hash,scientific_name,common_name,genus_name,family_name,conservation_status,description,habitat,photo)
     VALUES('staff:bot','legacy','legacy','Legacy','Common','Genus','Family','Least Concern','Description','Forest',$1)`, [photo]);

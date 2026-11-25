@@ -1055,6 +1055,7 @@
     "unavailable": "Unavailable",
     "userChartLabel": "User distribution across {total} accounts",
     "sensorStatusChartLabel": "{active} active and {inactive} inactive devices out of {total} registered devices",
+    "sensorLoadError": "Sensor status could not be loaded. Please refresh the dashboard to retry.",
     "loadingActivity": "Loading activity…",
     "noActivity": "No activity recorded.",
     "activityUnavailable": "Activity unavailable.",
@@ -2691,6 +2692,7 @@
       "noMatches": "No report rows match the search.",
       "exportCsv": "Export CSV",
       "exportPdf": "Export PDF",
+      "downloadOnly": "CSV and PDF reports are downloaded locally. The backend does not save generated report files or report history.",
       "csvDownloaded": "CSV report downloaded.",
       "pdfDownloaded": "PDF report downloaded.",
       "errors": {

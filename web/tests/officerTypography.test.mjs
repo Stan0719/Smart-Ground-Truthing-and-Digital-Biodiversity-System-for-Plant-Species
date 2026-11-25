@@ -78,7 +78,6 @@ test('shared type rules beat the actual small Vue-scoped overrides without editi
     ['views/conservation/PlantSpeciesView.vue', '.form-grid > .form-field > label', '.form-field > label'],
     ['views/conservation/ConservationProfileView.vue', '.settings-field > span', '.settings-field > span'],
     ['views/conservation/ConservationDashboardView.vue', '.quick-grid strong', '.quick-grid strong'],
-    ['views/conservation/ReportsView.vue', '.persistence-note', '.persistence-note'],
     ['views/conservation/BiodiversityMapView.vue', '.coordinate-note', '.coordinate-note'],
     ['components/conservation/SpeciesPhotoManager.vue', '.photo-header h2', '.photo-header h2'],
   ]) {
@@ -92,6 +91,8 @@ test('shared type rules beat the actual small Vue-scoped overrides without editi
     const originalSpecificity = specificity(original + '[data-v-type-audit]')
     assert.ok(compare(specificity(sharedRule.selector), originalSpecificity) > 0, path)
   }
+  assert.match(read('views/conservation/ReportsView.vue'), /class="persistence-note"/)
+  assert.ok(find('.persistence-note', 'font-size'), 'the shared Officer scale covers the report download disclosure')
 })
 
 test('tables retain scrolling, middle alignment, adjacent copy icons and nonwrapping badges/actions', () => {

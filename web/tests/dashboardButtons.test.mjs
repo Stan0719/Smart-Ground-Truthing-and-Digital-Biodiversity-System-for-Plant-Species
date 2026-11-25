@@ -118,12 +118,12 @@ test('Observations uses one primary action and retains the nonbreaking table act
   const observation = readFileSync(new URL('../src/views/conservation/ObservationsView.vue', import.meta.url), 'utf8')
   const review = readFileSync(new URL('../src/views/conservation/ReviewSubmissionsView.vue', import.meta.url), 'utf8')
   assert.match(observation, /class="table-scroll observations-scroll"/)
-  const group = observation.match(/<td class="actions-cell"><div class="action-group">([\s\S]*?)<\/div><\/td>/)?.[1]
+  const group = observation.match(/<td class="actions-cell">[\s\S]*?<div class="action-group">([\s\S]*?)<\/div><\/td>/)?.[1]
   assert.ok(group)
-  // Four field actions, or five registration/legacy actions; primary variants are exclusive.
-  assert.equal((group.match(/class="action-button"/g) || []).length, 6)
+  // Five source nodes represent four runtime actions because View/Review are v-if/v-else alternatives.
+  assert.equal((group.match(/class="action-button(?: [^"]*)?"/g) || []).length, 5)
   assert.match(group, /<button v-if="canReviewField\(item\)"/)
-  assert.match(group, /<button v-else class="action-button" @click="open\(item\)"/)
+  assert.match(group, /<button v-else type="button" class="action-button observation-icon-action"[^>]*@click="open\(item\)"/)
   assert.match(group, /<RouterLink v-if="authorizedOfficer && item.origin !== 'subsequent_observation'/)
   assert.match(group, /@click="open\(item, true\)"/)
   assert.match(review, /class="table-scroll reviews-scroll"/)

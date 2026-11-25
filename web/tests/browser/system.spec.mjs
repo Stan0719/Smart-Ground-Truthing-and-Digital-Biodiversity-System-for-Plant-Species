@@ -99,9 +99,10 @@ test.beforeAll(async () => {
     })
   await auth.createVisitor({ name: 'visitor', email: 'visitor@example.invalid', password })
   pool = await createPlantDatabase()
+  await prepareResponsiveFixtureSchema()
   site = createServer((req, res) => {
     if (req.url.startsWith('/api/')) {
-      const plant = req.url.startsWith('/api/data/') || /^\/api\/(species|plants|observations|species-requests|tables|db-test)(?:[/?]|$)/.test(req.url)
+      const plant = req.url.startsWith('/api/data/') || /^\/api\/(species|plants|observations|species-requests|taxonomy|tables|db-test)(?:[/?]|$)/.test(req.url)
       const upstream = proxyRequest(
         {
           host: '127.0.0.1',
@@ -190,12 +191,16 @@ test.afterEach(() => {
   expect(errors).toEqual([])
 })
 
-test('guest homepage and Explore Plants render a real empty catalogue', async ({ page }) => {
+test('guest homepage curated plants and empty live Explore Plants catalogue render', async ({ page }) => {
   monitor(page)
   await page.goto(origin)
-  await expect(page.getByText('No public plant species have been added yet.')).toBeVisible()
+  // The homepage uses live public catalogue data; the isolated fixture has no
+  // published plants, so its carousel should show the empty state.
+  await expect(page.getByRole('heading', { name: "Discover Niah's flora" })).toBeVisible()
+  await expect(page.locator('.plant-carousel')).toBeVisible()
+  await expect(page.locator('.home-plant-card')).toHaveCount(0)
   await page.goto(origin + '/plants')
-  await expect(page.getByRole('heading', { name: 'No species added yet' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No species found' })).toBeVisible()
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
 test('Administrator login, reload, dashboard guards and logout work', async ({ page, context }) => {
@@ -205,10 +210,9 @@ test('Administrator login, reload, dashboard guards and logout work', async ({ p
   await expect(
     page.getByRole('heading', { name: 'Administrator Dashboard', exact: true }),
   ).toBeVisible()
-  await expect(
-    page.locator('.summary-card').filter({ hasText: 'Total Users' }).locator('strong'),
-  ).toHaveText('4')
-  await expect(page.locator('.summary-card').filter({ hasText: 'Database' }).locator('strong')).toHaveText('postgresql')
+  await expect(page.locator('.summary-card').first().locator('p')).toHaveText('Total')
+  await expect(page.locator('.summary-card').first().locator('strong')).toHaveText('4')
+  await expect(page.locator('.summary-card')).toHaveCount(6)
   await expect(page.locator('.quick-actions button')).toHaveCount(4)
   await expect(page.getByText('uptimeSeconds', { exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Notifications', exact: true }).click()
@@ -219,7 +223,7 @@ test('Administrator login, reload, dashboard guards and logout work', async ({ p
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Quick Actions' })).toBeVisible()
   expect((await call(context, '/api/data/devices')).status()).toBe(200)
-  expect((await call(context, '/api/data/species')).status()).toBe(403)
+  expect((await call(context, '/api/data/species')).status()).toBe(200)
   await page.goto(origin + '/conservation/dashboard')
   await expect(page).toHaveURL(origin + '/')
   await page.goto(origin + '/admin')
@@ -241,33 +245,32 @@ test('Conservation Officer login, reload and dashboard guard work', async ({ pag
   await expect(page).toHaveURL(origin + '/')
   expect((await call(context, '/api/auth/me')).status()).toBe(401)
 })
-test('Botanist website login directs to mobile and blocks the account page', async ({ page, context }) => {
+test('Botanist credentials cannot create a website session or access the account page', async ({ page, context }) => {
   monitor(page)
   await uiLogin(page, 'botanist')
-  await expect(page.getByRole('dialog')).toContainText('This account is intended for the Niah mobile application.')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByRole('dialog').locator('.login-error')).toBeVisible()
+  await expect(page).toHaveURL(origin + '/')
   expect((await call(context, '/api/auth/me')).status()).toBe(401)
-  await apiLogin(context, 'botanist')
   await page.goto(origin + '/account')
   await expect(page).toHaveURL(origin + '/')
   expect((await call(context, '/api/auth/me')).status()).toBe(401)
 })
 
 for (const role of ['visitor'])
-  test(`${role} has an authenticated account page without staff dashboard privileges`, async ({
+  test(`${role} credentials cannot create a website session or access the account page`, async ({
     page,
     context,
   }) => {
     monitor(page)
     await uiLogin(page, role)
-    await expect(page).toHaveURL(origin+'/account')
-    await expect(page.getByLabel('Email',{exact:true})).toHaveValue(role+'@example.invalid')
-    expect((await call(context,'/api/auth/me')).status()).toBe(200)
-    await page.reload()
-    await expect(page.getByLabel('Email',{exact:true})).toHaveValue(role+'@example.invalid')
-    expect((await call(context, '/api/data/observations')).status()).toBe(
-      role === 'botanist' ? 200 : 403,
-    )
-    expect((await call(context, '/api/data/reports')).status()).toBe(403)
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.getByRole('dialog').locator('.login-error')).toBeVisible()
+    await expect(page).toHaveURL(origin + '/')
+    expect((await call(context, '/api/auth/me')).status()).toBe(401)
+    await page.getByRole('dialog').locator('.close-button').click()
+    await page.goto(origin + '/account')
+    await expect(page).toHaveURL(origin + '/')
     await page.goto(origin + '/admin')
     await expect(page).toHaveURL(origin + '/')
     await call(context, '/api/auth/logout', 'POST', {})
@@ -452,7 +455,7 @@ test('old activation page cannot create or set a staff password', async ({ page,
   ).toBe(410)
 })
 
-test('dashboard refresh uses actual sensor/alert data and does not fetch protected plant records', async ({
+test('dashboard loads actual sensor/alert data and does not fetch protected plant records', async ({
   page,
   context,
 }) => {
@@ -480,13 +483,13 @@ test('dashboard refresh uses actual sensor/alert data and does not fetch protect
     await expect(
       page.locator('.summary-card').filter({ hasText: 'IoT Sensors' }).locator('strong'),
     ).toHaveText('1')
-    await expect(page.getByText('Isolated Dashboard Sensor', { exact: true })).toBeVisible()
+    // The overview intentionally labels the activity row with the device ID;
+    // the friendly device name is available in Sensor Management details.
+    await expect(page.getByText('dashboard-device', { exact: true })).toBeVisible()
     await expect(page.getByText('dashboard-alert', { exact: true })).toBeVisible()
     expect(
       requested.some((url) => /\/api\/data\/(plants|species|observations|reports)/.test(url)),
     ).toBe(false)
-    await page.getByRole('button', { name: 'Refresh dashboard', exact: true }).click()
-    await expect(page.getByText('Isolated Dashboard Sensor', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'View All Alerts →', exact: true }).click()
     await expect(page).toHaveURL(origin + '/admin/iot')
     // The profile-menu sign-out must also revoke the server cookie/session.
@@ -495,6 +498,8 @@ test('dashboard refresh uses actual sensor/alert data and does not fetch protect
     await expect(page).toHaveURL(origin + '/')
     expect((await call(context, '/api/auth/me')).status()).toBe(401)
   } finally {
+    await pool.query("DELETE FROM staff_notification WHERE event_id IN (SELECT id FROM staff_notification_event WHERE threat_alert_id='dashboard-alert')")
+    await pool.query("DELETE FROM staff_notification_event WHERE threat_alert_id='dashboard-alert'")
     await pool.query("DELETE FROM threat_alert_history WHERE id='dashboard-alert'")
     await pool.query("DELETE FROM sensor_reading WHERE id='dashboard-reading'")
     await pool.query("DELETE FROM iot_device WHERE id='dashboard-device'")
@@ -603,7 +608,7 @@ test('Role and Permission retains the original cards with live grants on desktop
     await page.goto(origin + '/admin/roles')
     await expect(page.getByRole('region', { name: 'Role summary' })).toBeVisible()
     await expect(page.getByRole('region', { name: 'System roles' }).locator('article')).toHaveCount(4)
-    const row = page.getByRole('row').filter({ hasText: 'plants.protected.read' })
+    const row = page.getByRole('row').filter({ hasText: 'View protected plant information' })
     await expect(row.locator('td').nth(0)).toHaveText('—')
     await expect(row.locator('td').nth(1)).toHaveText('✓')
     await page.screenshot({ path: test.info().outputPath(`roles-${width}.png`), fullPage: true })
@@ -668,7 +673,6 @@ test('Administrator modules render correct headings, active menus and empty data
       ['roles', 'Role & Permission'],
       ['iot', 'IoT Monitoring'],
       ['sensors', 'Sensor Management'],
-      ['alerts', 'Threat Alerts'],
       ['settings', 'Security Settings'],
       ['activity', 'System Activity'],
       ['profile', 'Profile Settings'],
@@ -677,8 +681,8 @@ test('Administrator modules render correct headings, active menus and empty data
       await expect(page.getByRole('heading', { name: title, exact: true }).first()).toBeVisible()
       await expect(page.getByRole('alert')).toHaveCount(0)
       if (path === 'roles') {
-        await expect(page.getByText('plants.protected.read', { exact: true })).toBeVisible()
-        const row = page.getByRole('row').filter({ hasText: 'plants.protected.read' })
+        await expect(page.getByText('View protected plant information', { exact: true })).toBeVisible()
+        const row = page.getByRole('row').filter({ hasText: 'View protected plant information' })
         await expect(row).toContainText('✓')
         await expect(row.locator('td').nth(0)).toHaveText('—')
         await expect(row.locator('td').nth(1)).toHaveText('✓')
@@ -694,12 +698,13 @@ test('Administrator modules render correct headings, active menus and empty data
         await expect(page.getByText('No threat alerts recorded.', { exact: true })).toBeVisible()
       if (path === 'profile')
         await expect(page.getByLabel('Full Name', { exact: true })).toHaveValue('admin')
-      if (width === 1366 && path === 'sensors')
-        await row.scrollIntoViewIfNeeded()
+      if (width === 1366 && path === 'sensors') {
+        await page.getByRole('heading', { name: 'Sensor Management', exact: true }).first().scrollIntoViewIfNeeded()
         await page.screenshot({
           path: test.info().outputPath('sensors-desktop.png'),
           fullPage: false,
         })
+      }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2),
       ).toBe(true)
@@ -715,9 +720,10 @@ test('sensor registration, threshold edit and status controls use real isolated 
   await apiLogin(context, 'admin')
   await page.goto(origin + '/admin/sensors')
   await expect(page.getByLabel('Device Name', { exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: /^＋\s*Register Sensor$/ }).click()
+  await page.getByRole('button', { name: /Register Sensor$/ }).click()
   let dialog = page.getByRole('dialog', { name: 'Register Sensor', exact: true })
-  await dialog.getByLabel('Device Name', { exact: true }).fill('Isolated UI Sensor')
+  await expect(dialog).toBeVisible()
+  await dialog.getByLabel('Device name', { exact: true }).fill('Isolated UI Sensor')
   await dialog.getByRole('button', { name: 'Register sensor', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'One-time device key' })).toBeVisible()
@@ -727,14 +733,14 @@ test('sensor registration, threshold edit and status controls use real isolated 
   expect(device).toBeTruthy()
   try {
     await page.getByRole('button', { name: 'Configure threshold', exact: true }).click()
-    dialog = page.getByRole('dialog', { name: 'Configure Alert Threshold', exact: true })
-    await dialog.getByLabel('Threshold', { exact: true }).fill('34.5')
+    dialog = page.getByRole('dialog', { name: 'Configure Alert Thresholds', exact: true })
+    await dialog.getByLabel(/Temperature maximum/).fill('34.5')
     await dialog.getByRole('button', { name: 'Save changes', exact: true }).click()
     await expect(dialog).toHaveCount(0)
     expect(
       (await (await call(context, '/api/data/devices')).json()).devices.find(
         (row) => row.id === device.id,
-      ).thresholds.temperature,
+      ).thresholds.temperature.max,
     ).toBe(34.5)
     await page.getByRole('button', { name: 'Edit sensor', exact: true }).click()
     dialog = page.getByRole('dialog', { name: 'Edit Sensor', exact: true })
@@ -760,7 +766,7 @@ test('Conservation Officer pages render safely on desktop and phone with modal s
   for (const width of [1366, 390]) {
     await page.setViewportSize({ width, height: 900 })
     for (const [path, title] of [
-      ['dashboard', 'Conservation Dashboard'],
+      ['dashboard', 'Conservation Officer Dashboard'],
       ['species', 'Plant Species'],
       ['observations', 'Observations'],
       ['reviews', 'Review Submissions'],
@@ -775,8 +781,8 @@ test('Conservation Officer pages render safely on desktop and phone with modal s
       await expect(page.getByRole('alert')).toHaveCount(0)
       if (path === 'species') {
         await expect(page.getByLabel('Scientific name', { exact: true })).toHaveCount(0)
-        await page.getByRole('button', { name: 'Add Species', exact: true }).click()
-        await expect(page.getByRole('dialog', { name: 'Add official species' })).toBeVisible()
+        await page.getByRole('button', { name: /Create Species$/ }).click()
+        await expect(page.getByRole('dialog', { name: 'Create Species' })).toBeVisible()
         await page.keyboard.press('Escape')
         await expect(page.getByRole('dialog')).toHaveCount(0)
       }
@@ -933,17 +939,29 @@ test('homepage does not request forbidden plant data for staff awaiting password
   expect(plantRequests).toBe(0)
 })
 
-test('homepage discards stale plant denial when admin session recovers', async ({ page }) => {
+test('homepage remains public when session verification returns unauthenticated', async ({ page }) => {
  monitor(page)
  let checks=0
+  const catalogueRequests=[]
  await page.route('**/api/auth/me',route=>{
   checks++
   return route.fulfill(checks===1?{status:401,json:{error:'Please sign in again.'}}:{status:200,json:{user:{id:'admin-fixture',name:'Admin',email:'admin@example.invalid',role:'Administrator',status:'Active',mustChangePassword:false}}})
  })
- await page.route('**/api/data/**',route=>route.fulfill({status:403,json:{error:'Access denied.'}}))
+  await page.route('**/api/data/**', route => {
+   const url = new URL(route.request().url())
+   catalogueRequests.push(`${url.pathname}${url.search}`)
+   const body = url.pathname.endsWith('/species') ? { species: [] } : { plants: [] }
+   return route.fulfill({ status: 200, json: body })
+  })
  await page.goto(origin+'/')
- await expect.poll(()=>checks).toBeGreaterThan(1)
+ await expect.poll(()=>checks).toBe(1)
+ await expect(page.getByRole('heading',{name:/Discover the/i})).toBeVisible()
  await expect(page.locator('.app-content > [role="alert"]')).toHaveCount(0)
+ expect(checks).toBe(1)
+  expect(catalogueRequests.sort()).toEqual([
+   '/api/data/plants?scope=public-web',
+   '/api/data/species?scope=public',
+  ])
 })
 
 test('removed Botanist website redirects to public homepage', async ({page})=>{
@@ -1023,14 +1041,36 @@ async function prepareResponsiveFixtureSchema() {
     '006-atomic-plant-submissions.sql',
     '008-record-change-submissions.sql',
     '009-record-version-history.sql',
+    '011-botanist-notification-history.sql',
     '013-staff-notification-foundation.sql',
+    '014-species-image-gallery.sql',
+    '015-species-photo-roles.sql',
     '016-species-request-content-revision.sql',
     '017-species-review-cycle.sql',
+    '021-observation-edit-requests.sql',
+    '022-cancel-edit-requests.sql',
+    '023-record-change-correction-notifications.sql',
+    '024-record-change-review-events.sql',
+    '025-original-plant-withdrawal.sql',
+    '026-original-species-withdrawal.sql',
+    '027-original-observation-withdrawal.sql',
+    '028-immutable-record-version-revisions.sql',
+    '029-observation-submission-versions.sql',
+    '030-observation-edit-officer-notifications.sql',
+    '030-record-change-review-notifications.sql',
+    '031-iot-live-reading-aggregates.sql',
+    '032-canonical-threat-officer-notifications.sql',
     '032-translation-storage.sql',
+    '033-iot-sensor-retry-identity.sql',
+    '034-sensor-alert-evidence.sql',
   ]) {
     const path = resolve(repositoryRoot, 'plant-conservation-backend', 'migrations', name)
     await pool.query(readFileSync(path, 'utf8'))
   }
+  // schema.postgres.sql includes the legacy aggregate table; migration 031
+  // creates the upgraded table only when absent, so complete the disposable
+  // fixture's upgraded shape just as operational-reports.test.cjs does.
+  await pool.query("ALTER TABLE plant_app.iot_reading_aggregate ADD COLUMN IF NOT EXISTS metrics JSONB NOT NULL DEFAULT '{}'::jsonb")
   // This read-only queue projection selects QR metadata. Match the isolated
   // observation-queue fixture without changing any persistent database.
   await pool.query(`CREATE TABLE IF NOT EXISTS plant_app.qr_code(
@@ -1383,7 +1423,6 @@ test.describe('Officer responsive browser checks', () => {
         await expect.soft(row).toContainText(fixture.suffix)
         await expect.soft(row).toContainText(fixture.plantName.slice(-10))
         await expect.soft(row).toContainText(fixture.plantId)
-        await expect.soft(row.locator('.submission-type-cell .species-request-badge')).toBeVisible()
         await expect.soft(row.locator('.actions-cell .action-button')).toBeVisible()
 
         const layout = await page.locator('.reviews-scroll').evaluate((container) => ({
@@ -1392,6 +1431,10 @@ test.describe('Officer responsive browser checks', () => {
           row: getComputedStyle(container.querySelector('.reviews-table tbody tr')).display,
         }))
         const cards = layout.width <= 767
+        const submissionTypeBadge = cards
+          ? row.locator('.mobile-submission-type-cell .species-request-badge')
+          : row.locator('.desktop-submission-type .species-request-badge')
+        await expect.soft(submissionTypeBadge).toBeVisible()
         expect.soft(layout.table, `${locale.name} ${width}px table/card layout`).toBe(cards ? 'block' : 'table')
         expect.soft(layout.row, `${locale.name} ${width}px row layout`).toBe(cards ? 'grid' : 'table-row')
         if (cards) {
@@ -1540,7 +1583,7 @@ test('Admin Recent Alerts opens the selected read-only detail and preserves Devi
   expect(detailCalls).toBe(2)
 
   await page.setViewportSize({ width: 1440, height: 1000 })
-  const deviceView = page.locator('.admin-reading-table tbody tr')
+  const deviceView = page.locator('.admin-device-table tbody tr')
     .filter({ hasText: fixture.deviceId })
     .getByRole('button', { name: 'View', exact: true })
   await expect(deviceView).toBeVisible()

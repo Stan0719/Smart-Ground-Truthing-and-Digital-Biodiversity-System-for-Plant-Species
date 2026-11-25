@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { once } = require('node:events');
-const { createPlantDatabase, installRecordChangeNotifications } = require('./postgres-fixture.cjs');
+const { createPlantDatabase, installRecordChangeNotifications, installTranslationStorage } = require('./postgres-fixture.cjs');
 const { createPlantApp } = require('../server.js');
 
 test('edit cancellation is owner-scoped, soft, auditable, and releases locks', async (t) => {
@@ -17,6 +17,7 @@ test('edit cancellation is owner-scoped, soft, auditable, and releases locks', a
     await pool.query(migration(name));
   }
   await installRecordChangeNotifications(pool);
+  await installTranslationStorage(pool);
   await pool.query(`    INSERT INTO species(species_id,scientific_name,common_name,rbac_data) VALUES(1,'Plantus testus','Test plant','{"approvalStatus":"Approved"}');
     INSERT INTO rbac_species_visibility(species_id,visibility) VALUES(1,'public');
     INSERT INTO plant_record(plant_id,species_id,registered_subject,scientific_name,rbac_status,qr_token) VALUES(1,1,'staff:bot','Plant original','Approved','cancel-qr');

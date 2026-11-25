@@ -6,13 +6,14 @@ const { once } = require("node:events");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
-const { createPlantDatabase } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installIoTLiveReadingAggregates } = require("./postgres-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 const { generateOperationalReport } = require("../operational-reports.cjs");
 
 test("live IoT readings stay in memory while completed 10-minute windows are aggregated", async t => {
   const pool = await createPlantDatabase();
   t.after(() => pool.end());
+  await installIoTLiveReadingAggregates(pool);
   await pool.query("INSERT INTO species(scientific_name) VALUES('Synthetic species')");
   await pool.query("INSERT INTO plant_record(species_id,registered_subject,qr_token) VALUES(1,'test','one')");
   const deviceId = "11111111-1111-4111-8111-111111111111";

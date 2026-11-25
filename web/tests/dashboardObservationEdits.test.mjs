@@ -68,7 +68,9 @@ test('all locales render valid labels; canonical Dashboard metrics and other sec
  for(const language of ['en','ms','zh-CN']){const h=harness([await proposal()],language);try{await flush();assert.ok(text(h.render()).includes(h.messages.dashboardObservationEdits.title));assert.ok(text(h.render()).includes(h.messages.dashboardObservationEdits.scope))}finally{h.stop()}}
  const source=readFileSync(new URL('../src/views/conservation/ConservationDashboardView.vue',import.meta.url),'utf8')
  assert.doesNotMatch(source,/DashboardObservationEdits|loadObservationEditQueue|observationEditRequest|dashboardObservationEdits\./)
- assert.match(source,/observationTotals.value\?\.pending/);assert.match(source,/loadObservations\(\), loadRegistrations\(\), loadFieldObservations\(\), loadPlants\(\), loadSpecies\(\), loadAlerts\(\)/)
+ assert.match(source,/observationTotals.value\?\.pending/)
+ assert.match(source,/Promise\.allSettled\(\[loadObservations\(\), loadRegistrations\(\), loadFieldObservations\(\), loadPlants\(\), loadSpecies\(\)\]\)/)
+ assert.match(source,/alertsRefresh\.start\(\)/,'threat alerts use their independent refresh lifecycle')
  for(const section of ['pendingPlantRegistrations','pendingObservations','speciesConservation'])assert.ok(source.includes(section),section)
  const overview=parse(source).descriptor
  assert.equal(compileTemplate({source:overview.template.content,filename:'ConservationDashboardView.vue',id:'dashboard-overview'}).errors.length,0)

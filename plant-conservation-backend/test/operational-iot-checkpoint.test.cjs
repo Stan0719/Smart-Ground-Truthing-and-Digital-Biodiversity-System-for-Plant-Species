@@ -1,11 +1,12 @@
 "use strict";
 const test=require('node:test'),assert=require('node:assert/strict');
-const {createPlantDatabase}=require('./postgres-fixture.cjs');
+const {createPlantDatabase,installIoTLiveReadingAggregates}=require('./postgres-fixture.cjs');
 const {generateOperationalReport:generate}=require('../operational-reports.cjs');
 const query={period:'custom',start:'2026-11-04',end:'2026-11-04',device:'report-sensor'};
 const stat=(r,key)=>r.statistics.find(s=>s.key===key).value;
 test('incoming Environmental report combines legacy, completed and active durable data with sample-weighted statistics',async t=>{
  const db=await createPlantDatabase();t.after(()=>db.end());
+ await installIoTLiveReadingAggregates(db);
  await db.query("INSERT INTO iot_device(id,name,key_hash) VALUES('report-sensor','Report sensor','synthetic'),('checkpoint-only','Checkpoint only','synthetic')");
  await db.query(`INSERT INTO sensor_reading(id,device_id,"values",created_at) VALUES
  ('legacy-zero','report-sensor','{"temperature":0,"movement":0}','2026-11-04T00:00Z'),

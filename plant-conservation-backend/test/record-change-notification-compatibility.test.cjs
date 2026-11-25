@@ -2,7 +2,7 @@
 const test = require("node:test"), assert = require("node:assert/strict");
 const { once } = require("node:events"), { readFileSync } = require("node:fs"), { join } = require("node:path");
 const sharp = require("sharp");
-const { createPlantDatabase, installRecordChangeNotifications } = require("./postgres-fixture.cjs");
+const { createPlantDatabase, installRecordChangeNotifications, installTranslationStorage } = require("./postgres-fixture.cjs");
 const { seedRegistrationReceipt } = require("./registration-provenance-fixture.cjs");
 const { createPlantApp } = require("../server.js");
 
@@ -12,6 +12,7 @@ async function fixture(t, state = "ready") {
   for (const name of ["004-species-requests.sql", "006-atomic-plant-submissions.sql", "008-record-change-submissions.sql",
     "009-record-version-history.sql", "016-species-request-content-revision.sql", "017-species-review-cycle.sql", "022-cancel-edit-requests.sql", "024-record-change-review-events.sql"])
     await migrate(name);
+  await installTranslationStorage(pool);
   if (state !== "missing") {
     await migrate("011-botanist-notification-history.sql");
     if (state === "legacy") await migrate("023-record-change-correction-notifications.sql");

@@ -1189,6 +1189,7 @@
     "unavailable": "Tidak tersedia",
     "userChartLabel": "Agihan pengguna merentas {total} akaun",
     "sensorStatusChartLabel": "{active} peranti aktif dan {inactive} tidak aktif daripada {total} peranti berdaftar",
+    "sensorLoadError": "Status sensor tidak dapat dimuatkan. Sila muat semula papan pemuka untuk mencuba lagi.",
     "loadingActivity": "Memuatkan aktiviti…",
     "noActivity": "Tiada aktiviti direkodkan.",
     "activityUnavailable": "Aktiviti tidak tersedia.",

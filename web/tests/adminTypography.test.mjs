@@ -1,7 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
 import postcss from 'postcss'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import { formatAdminLastLogin } from '../src/utils/adminLastLogin.ts'
@@ -71,14 +70,18 @@ test('Last Login uses day-month-year order, localized months and local timezone 
     const fields = Object.fromEntries(parts.map(part => [part.type, part.value]))
     assert.equal(formatAdminLastLogin(value, locale), `${fields.day} ${fields.month} ${fields.year}, ${fields.hour}:${fields.minute}`)
   }
-  const url = new URL('../src/utils/adminLastLogin.ts', import.meta.url).href
-  for (const zone of ['Asia/Kuching', 'UTC']) {
-    const actual = execFileSync(process.execPath, ['--input-type=module', '-e',
-      `import { formatAdminLastLogin } from ${JSON.stringify(url)}; process.stdout.write(formatAdminLastLogin(${JSON.stringify(value)}, 'en-GB'))`],
-      { encoding: 'utf8', env: { ...process.env, TZ: zone } })
-    assert.equal(actual, new Intl.DateTimeFormat('en-GB', {
-      timeZone: zone, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-    }).format(new Date(value)))
-    assert.equal(actual, zone === 'Asia/Kuching' ? '6 Nov 2026, 04:54' : '5 Nov 2026, 20:54')
+  const originalZone = process.env.TZ
+  try {
+    for (const zone of ['Asia/Kuching', 'UTC']) {
+      process.env.TZ = zone
+      const actual = formatAdminLastLogin(value, 'en-GB')
+      assert.equal(actual, new Intl.DateTimeFormat('en-GB', {
+        timeZone: zone, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(new Date(value)))
+      assert.equal(actual, zone === 'Asia/Kuching' ? '6 Nov 2026, 04:54' : '5 Nov 2026, 20:54')
+    }
+  } finally {
+    if (originalZone === undefined) delete process.env.TZ
+    else process.env.TZ = originalZone
   }
 })
