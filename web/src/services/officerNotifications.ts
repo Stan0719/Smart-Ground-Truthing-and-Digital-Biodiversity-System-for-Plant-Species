@@ -34,7 +34,7 @@ function validThreatContext(value: unknown): boolean {
     [row.reading_id, row.camera_id].every(id => id === null || typeof id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(id))
 }
 
-export function createOfficerInbox(options: { transport: typeof fetch; navigate: (destination: Destination) => Promise<boolean> }) {
+export function createOfficerInbox(options: { transport: typeof fetch; navigate: (destination: Destination) => Promise<boolean>; onNewThreatAlerts?: (alerts: OfficerNotice[]) => void }) {
   const state = reactive({ items: [] as OfficerNotice[], unread: null as number | null, loading: false, busy: false, ready: false,
     operationError: '', listError: '', countError: '',
     get error(): string { return this.operationError || this.listError || this.countError }, hasMore: false, cursor: null as string | null, boundary: null as string | null })
@@ -147,13 +147,28 @@ export function createOfficerInbox(options: { transport: typeof fetch; navigate:
           if (next) seen.add(next)
           if (!page.has_more || index === pagesToRefresh - 1) {
             // Revalidate the loaded page depth under a fresh server cursor boundary.
-            state.items = [...new Map(fresh.map(item => [item.id, item])).values()]
+            const refreshedItems = [...new Map(fresh.map(item => [item.id, item])).values()]
+            const knownAlertIds = new Set(state.items
+              .filter(item => item.event_type === 'threat_alert_created')
+              .map(item => item.resource.id))
+            const announcedAlertIds = new Set<string>()
+            const newThreatAlerts = refreshedItems.filter(item => {
+              if (item.event_type !== 'threat_alert_created' || knownAlertIds.has(item.resource.id) || announcedAlertIds.has(item.resource.id)) return false
+              announcedAlertIds.add(item.resource.id)
+              return true
+            })
+            state.items = refreshedItems
             state.hasMore = page.has_more as boolean
             state.cursor = next
             state.boundary = result.read_through as string
             loadedPages = index + 1
             if (countId === countRequest) { state.unread = result.unread_count as number; state.countError = '' }
             state.listError = ''
+            // Initial loads and pagination are intentionally silent. Only a successful
+            // background refresh of a previously loaded inbox can announce new alerts.
+            if (newThreatAlerts.length) {
+              try { options.onNewThreatAlerts?.(newThreatAlerts) } catch { /* Sound is best-effort. */ }
+            }
             return
           }
           cursor = next

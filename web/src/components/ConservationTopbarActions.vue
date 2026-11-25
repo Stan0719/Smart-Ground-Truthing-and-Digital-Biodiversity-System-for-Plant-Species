@@ -56,7 +56,33 @@ const notificationsOpen = ref(false)
 const notificationList = ref<HTMLElement | null>(null)
 const profileOpen = ref(false)
 const notificationButton = ref<HTMLButtonElement | null>(null)
-const inbox = createOfficerInbox({ transport: (...args) => fetch(...args), navigate: async destination => {
+let notificationAudio: AudioContext | null = null
+let notificationAudioReady = false
+const unlockNotificationAudio = () => {
+  if (!window.AudioContext) return
+  try {
+    notificationAudio ??= new window.AudioContext()
+    if (notificationAudio.state === 'running') notificationAudioReady = true
+    else void notificationAudio.resume().then(() => { notificationAudioReady = notificationAudio?.state === 'running' }).catch(() => {})
+  } catch { /* Audio is optional and must never block notification use. */ }
+}
+const playThreatAlertSound = () => {
+  if (!notificationAudioReady || notificationAudio?.state !== 'running') return
+  try {
+    const context = notificationAudio
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    const start = context.currentTime
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(740, start)
+    gain.gain.setValueAtTime(0.0001, start)
+    gain.gain.exponentialRampToValueAtTime(0.035, start + 0.015)
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18)
+    oscillator.connect(gain); gain.connect(context.destination)
+    oscillator.start(start); oscillator.stop(start + 0.19)
+  } catch { /* Audio playback is best-effort. */ }
+}
+const inbox = createOfficerInbox({ transport: (...args) => fetch(...args), onNewThreatAlerts: playThreatAlertSound, navigate: async destination => {
   await router.push(destination)
   return router.currentRoute.value.name === destination.name &&
     Object.entries(destination.query || {}).every(([key, value]) => router.currentRoute.value.query[key] === value)
@@ -173,6 +199,8 @@ onMounted(() => {
   mounted = true
   document.addEventListener('click', handleOutsideClick)
   document.addEventListener('keydown', onKeydown)
+  document.addEventListener('pointerdown', unlockNotificationAudio, { once: true })
+  document.addEventListener('keydown', unlockNotificationAudio, { once: true })
   refreshLoop = createOfficerNotificationRefresh({
     refresh: refreshNotifications,
     ready: () => notificationState.ready,
@@ -186,6 +214,9 @@ onBeforeUnmount(() => {
   refreshLoop?.stop()
   document.removeEventListener('click', handleOutsideClick)
   document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('pointerdown', unlockNotificationAudio)
+  document.removeEventListener('keydown', unlockNotificationAudio)
+  if (notificationAudio) void notificationAudio.close().catch(() => {})
 })
 </script>
 

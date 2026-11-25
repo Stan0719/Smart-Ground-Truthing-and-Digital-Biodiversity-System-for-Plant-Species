@@ -86,6 +86,8 @@ test('Officer component preserves dimensions and renders real-state controls wit
   const template = compileTemplate({ source: descriptor.template.content, filename: 'ConservationTopbarActions.vue', id: 'officer-bell', compilerOptions: { bindingMetadata: script.bindings } })
   assert.equal(template.errors.length, 0)
   assert.doesNotMatch(content, /data\/conservationNotifications|slice\(0, 5\)|OBS004|CAM-NOTICE/)
+  assert.match(content, /onNewThreatAlerts: playThreatAlertSound/)
+  assert.match(content, /oscillator\.start\(start\)/)
   assert.match(content, /notificationState\.hasMore/); assert.match(content, /nt\('loading'\)/)
   assert.match(content, /event\.key === 'Escape'/); assert.match(content, /notificationButton\.value\?\.focus\(\)/)
   assert.match(content, /width: min\(360px, calc\(100vw - 24px\)\)/); assert.match(content, /max-height: 350px/)
@@ -488,6 +490,23 @@ test('Threat notices reject forged source/metric context; unavailable exact aler
  for(const status of [403,404,503]){
   const h=setup(async(url)=>url.includes('/alerts/')?Response.json({}, {status}):page([base]));await h.client.load();assert.equal(await h.client.open(h.client.state.items[0]),false);assert.equal(h.calls.filter(c=>c.options.method==='POST').length,0);h.client.dispose()
  }
+})
+test('new threat alert sound callback is silent on initial load and pagination, then deduplicates background refreshes by alert ID',async()=>{
+ const threat=(notificationId,alertId)=>notice(notificationId,{event_type:'threat_alert_created',resource:{kind:'threat_alert',id:alertId},threat_context:{source:'Sensor',metric:'temperature',value:31,device_id:'sensor',reading_id:'reading-'+alertId,camera_id:null}})
+ let phase='initial'
+ const announced=[]
+ const client=createOfficerInbox({transport:async url=>{
+  if(url.includes('cursor=')) return url.includes('older-new')
+   ? page([threat(4,'new-alert'),threat(5,'old-alert')])
+   : page([threat(2,'old-alert')])
+  return phase==='initial' ? page([notice(1)],true,'older') : page([threat(3,'new-alert')],true,'older-new')
+ },navigate:async()=>true,onNewThreatAlerts:alerts=>announced.push(...alerts.map(alert=>alert.resource.id))})
+ client.setSession(officer,false)
+ await client.load();assert.deepEqual(announced,[])
+ await client.load(true);assert.deepEqual(announced,[],'older paginated alerts must not sound')
+ phase='poll';await client.refresh();assert.deepEqual(announced,['new-alert'],'one sound event per new alert even if a page repeats it')
+ await client.refresh();assert.deepEqual(announced,['new-alert'],'repeated polling must not replay an existing alert')
+ client.dispose()
 })
 test('Sensor and Camera bell titles, metric context and icons render in EN/MS/ZH',()=>{
  for(const locale of ['en','ms','zh-CN']){

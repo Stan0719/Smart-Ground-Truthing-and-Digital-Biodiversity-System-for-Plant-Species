@@ -1642,6 +1642,86 @@ test('Admin notification bell dispatches fetch, retries, renders and marks a syn
   expect(pageErrors, 'no uncaught browser errors').toEqual([])
   await expect.poll(async () => page.evaluate(() => window.__niahUnhandledRejections)).toEqual([])
 })
+
+test('Officer threat notifications play one unlocked sound only for newly polled sensor or camera alerts', async ({ page }) => {
+  monitor(page)
+  await guardResponsiveNetwork(page)
+  await page.addInitScript(() => {
+    window.__niahAudioStats = { contexts: 0, resumes: 0, starts: 0 }
+    class SyntheticAudioContext {
+      state = 'suspended'
+      currentTime = 1
+      destination = {}
+      constructor() { window.__niahAudioStats.contexts++ }
+      resume() { window.__niahAudioStats.resumes++; this.state = 'running'; return Promise.resolve() }
+      close() { this.state = 'closed'; return Promise.resolve() }
+      createOscillator() {
+        return { type: '', frequency: { setValueAtTime() {} }, connect() {}, start() { window.__niahAudioStats.starts++ }, stop() {} }
+      }
+      createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} } }
+    }
+    Object.defineProperty(window, 'AudioContext', { configurable: true, value: SyntheticAudioContext })
+  })
+
+  const threat = (id, alertId, source, metric, readAt = null, alertStatus = 'New') => ({
+    id, event_type: 'threat_alert_created', created_at: '2026-11-25T01:00:00.000Z', read_at: readAt,
+    alert_status: alertStatus,
+    species_review_required: false,
+    resource: { kind: 'threat_alert', id: alertId },
+    threat_context: { source, metric, value: source === 'Sensor' ? 31 : 1, device_id: source === 'Sensor' ? 'synthetic-sensor' : 'synthetic-camera', reading_id: source === 'Sensor' ? `reading-${alertId}` : null, camera_id: source === 'Camera' ? `camera-${alertId}` : null },
+  })
+  const submission = { id: '00000000-0000-4000-8000-000000000001', event_type: 'registration_submitted', created_at: '2026-11-25T01:00:00.000Z', read_at: null, species_review_required: false, resource: { kind: 'observation', id: '1' } }
+  const existingAlert = threat('00000000-0000-4000-8000-000000000002', 'existing-alert', 'Sensor', 'temperature')
+  let notifications = [existingAlert, submission]
+  let listRequests = 0
+  await page.route((url) => url.origin === origin && url.pathname === '/api/data/staff-notifications', async (route) => {
+    listRequests++
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      notifications, unread_count: notifications.filter((item) => !item.read_at).length,
+      page: { has_more: false, next_cursor: null }, read_through: 'synthetic-read-boundary',
+    }) })
+  })
+  await page.route((url) => url.origin === origin && url.pathname === '/api/data/staff-notifications/unread-count', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ unread_count: notifications.filter((item) => !item.read_at).length }) }),
+  )
+  // Dashboard startup catalogue calls are unrelated to the notification behavior
+  // and can lack tables in the disposable fixture; keep this scenario synthetic.
+  await page.route((url) => url.origin === origin && ['/api/plants', '/api/data/plants'].includes(url.pathname), (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ plants: [] }) }),
+  )
+
+  await uiLogin(page, 'officer')
+  const bell = page.locator('.notification-button')
+  await expect(bell).toBeVisible()
+  await expect.poll(() => listRequests).toBeGreaterThan(0)
+  await bell.click() // A real user gesture unlocks the synthetic AudioContext.
+  await expect(page.locator('.notification-item')).toHaveCount(2)
+  await expect.poll(() => page.evaluate(() => window.__niahAudioStats.resumes)).toBe(1)
+  expect(await page.evaluate(() => window.__niahAudioStats.starts)).toBe(0, 'initial load and existing alerts are silent')
+
+  const poll = async () => {
+    await page.waitForTimeout(1100) // Respect the inbox focus-refresh throttle.
+    const before = listRequests
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect.poll(() => listRequests).toBeGreaterThan(before)
+  }
+  notifications = [existingAlert, submission,
+    threat('00000000-0000-4000-8000-000000000003', 'new-sensor-alert', 'Sensor', 'temperature'),
+    threat('00000000-0000-4000-8000-000000000004', 'new-camera-alert', 'Camera', 'human_detected')]
+  await poll()
+  await expect.poll(() => page.evaluate(() => window.__niahAudioStats.starts)).toBe(1)
+
+  await poll()
+  expect(await page.evaluate(() => window.__niahAudioStats.starts)).toBe(1, 'repeated polling and existing alerts must not replay')
+
+  // Read/status changes on existing alerts and new ordinary submissions are silent.
+  notifications = [threat(existingAlert.id, 'existing-alert', 'Sensor', 'temperature', '2026-11-25T01:05:00.000Z', 'Under Review'), submission,
+    threat('00000000-0000-4000-8000-000000000003', 'new-sensor-alert', 'Sensor', 'temperature'),
+    threat('00000000-0000-4000-8000-000000000004', 'new-camera-alert', 'Camera', 'human_detected'),
+    { ...submission, id: '00000000-0000-4000-8000-000000000005', resource: { kind: 'observation', id: '2' } }]
+  await poll()
+  expect(await page.evaluate(() => window.__niahAudioStats.starts)).toBe(1, 'status changes and normal submission notices must not sound')
+})
 for(const [role,paths] of [['admin',adminPaths],['officer',officerPaths]])for(const path of paths){
  test('PostgreSQL page connection '+path,async({page,context})=>{
   await apiLogin(context,role);
