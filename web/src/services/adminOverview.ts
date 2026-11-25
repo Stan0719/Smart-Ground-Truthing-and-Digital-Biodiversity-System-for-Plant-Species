@@ -10,9 +10,9 @@ export interface OverviewAlert { id: string; device_id: string; metric: string; 
 export interface OverviewEvent { id: number; reason: string; created_at: string | number }
 export interface OverviewData {
   users: OverviewUser[] | null; devices: OverviewDevice[] | null; alerts: OverviewAlert[] | null
-  events: OverviewEvent[] | null; totals: { plants: number; alerts: number } | null; healthy: boolean
+  events: OverviewEvent[] | null; totals: { plants: number; alerts: number } | null
 }
-export const emptyOverview = (): OverviewData => ({ users: null, devices: null, alerts: null, events: null, totals: null, healthy: false })
+export const emptyOverview = (): OverviewData => ({ users: null, devices: null, alerts: null, events: null, totals: null })
 function collection<T>(value: unknown): T[] {
   if (!Array.isArray(value)) throw Error('Invalid dashboard response.')
   return value as T[]
@@ -28,7 +28,6 @@ export async function loadOverview(): Promise<OverviewData> {
       if (![r.overview?.plants, r.overview?.alerts].every(n => Number.isSafeInteger(n) && n >= 0)) throw Error('Invalid dashboard totals.')
       result.totals = r.overview
     }),
-    api<{ system: { database: string } }>('/admin/system').then(r => { result.healthy = r.system?.database === 'postgresql' }),
   ])
   return result
 }

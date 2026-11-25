@@ -10,6 +10,7 @@ import StaffDialog from '../components/StaffDialog.vue'
 import { api, logout, type AuthUser } from '../services/auth'
 import { plantApi, type Device } from '../services/plantApi'
 import { DEFAULT_SENSOR_THRESHOLDS, sensorLimits, thresholdRangeLabel, type SensorThresholds } from '../services/sensorThresholds'
+import { vOfficerDropdown } from '../components/conservation/officerDropdown'
 const { t } = useI18n()
 const da = (key: string) => t('adminDeviceAssignment.' + key)
 const assignmentLabel = (device: Device) => { const a = currentAssignment(device); return a.state === 'assigned' ? plantLabel(a.id) : da(a.state) }
@@ -320,7 +321,7 @@ watch(section, () => {
           v-model="search"
           :aria-label="section === 'roles' ? 'Search permissions' : 'Search records'"
           placeholder="Search records…"
-        /><select
+        /><select v-officer-dropdown
           v-if="section === 'sensors' || section === 'iot'"
           v-model="filter"
           aria-label="Device status"

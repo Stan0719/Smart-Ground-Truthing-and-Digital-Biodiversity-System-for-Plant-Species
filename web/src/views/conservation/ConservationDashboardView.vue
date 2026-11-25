@@ -12,8 +12,11 @@ import { observationOrigin, readQueuePage } from '../../services/observationQueu
 import { formatObservationId } from '../../utils/observationId'
 import { formatPlantId } from '../../utils/plantId'
 import { loadCanonicalAlertQueue, type CanonicalThreatAlert } from '../../services/threatAlerts'
+import { loadAlertContext, type AlertContext } from '../../services/alertEvidence'
+import { loadCameraEvents } from '../../services/cameraEvents'
+import type { CameraEvent } from '../../types/cameraMonitoring'
 import { createThreatAlertRefresh } from '../../services/threatAlertRefresh'
-import { alertSource, alertStatusLabel, alertTypeLabel } from '../../utils/threatAlertDisplay'
+import { alertSource, alertStatusLabel, alertTypeLabel, sensorUnit } from '../../utils/threatAlertDisplay'
 import { threatAlertBadgeStyle } from '../../utils/workflowBadge'
 import { useConservationText } from '../../composables/useConservationText'
 
@@ -43,6 +46,13 @@ interface ApiSpecies {
   scientific_name?: string | null
   common_name?: string | null
   conservation_status?: string | null
+}
+
+interface DashboardAlertEvidence {
+  signature: string
+  state: 'loading' | 'ready' | 'unavailable'
+  context?: AlertContext
+  cameraEvent?: CameraEvent | null
 }
 
 const router = useRouter()
@@ -79,6 +89,12 @@ onBeforeUnmount(() => { disposed = true; for (const controller of previewControl
 const plants = ref<ApiPlant[]>([])
 const species = ref<ApiSpecies[]>([])
 const alerts = ref<CanonicalThreatAlert[]>([])
+const dashboardAlertEvidence = ref<Record<string, DashboardAlertEvidence>>({})
+const alertContextControllers = new Map<string, AbortController>()
+let cameraEvidenceController: AbortController | null = null
+let cameraEvidenceGeneration = 0
+let cameraEvidenceRequestKey = ''
+let alertEvidenceSessionGeneration = 0
 const alertsLoaded = ref(false)
 let alertsSequence = 0
 let alertsController: AbortController | null = null
@@ -221,11 +237,81 @@ const loadAlerts = async () => {
     if (controller.signal.aborted || disposed || sequence !== alertsSequence || accountId !== session.value.user?.id || !authorizedOfficer.value) return
     alerts.value = result.alerts
     alertsLoaded.value = true
+    void loadDashboardAlertEvidence(result.alerts)
   } catch {
     if (controller.signal.aborted || disposed || sequence !== alertsSequence || accountId !== session.value.user?.id) return
     alertsError.value = alertText('Unable to retrieve threat alerts.')
   } finally {
     if (!controller.signal.aborted && sequence === alertsSequence && !disposed) alertsLoading.value = false
+  }
+}
+
+const alertSignature = (alert: CanonicalThreatAlert) => [alert.id, alert.deviceId, alert.readingId, alert.metric, alert.value, alert.detectedAt].join('|')
+const recentAlertRows = (rows: CanonicalThreatAlert[]) => [...rows]
+  .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || a.id.localeCompare(b.id))
+  .slice(0, 3)
+function clearDashboardAlertEvidence() {
+  for (const controller of alertContextControllers.values()) controller.abort()
+  alertContextControllers.clear()
+  cameraEvidenceController?.abort(); cameraEvidenceController = null; cameraEvidenceGeneration++; cameraEvidenceRequestKey = ''
+  alertEvidenceSessionGeneration++
+  dashboardAlertEvidence.value = {}
+}
+async function loadDashboardAlertEvidence(rows: CanonicalThreatAlert[]) {
+  if (!authorizedOfficer.value || disposed) return
+  const sessionGeneration = alertEvidenceSessionGeneration
+  const targets = recentAlertRows(rows), signatures = new Map(targets.map(alert => [alert.id, alertSignature(alert)]))
+  for (const [id, controller] of alertContextControllers) {
+    if (!signatures.has(id) || dashboardAlertEvidence.value[id]?.signature !== signatures.get(id)) { controller.abort(); alertContextControllers.delete(id) }
+  }
+  const nextEvidence: Record<string, DashboardAlertEvidence> = {}
+  for (const alert of targets) {
+    const prior = dashboardAlertEvidence.value[alert.id]
+    if (prior?.signature === alertSignature(alert) && prior.state === 'ready') nextEvidence[alert.id] = prior
+    else if (prior?.signature === alertSignature(alert) && prior.state === 'loading') nextEvidence[alert.id] = prior
+    else nextEvidence[alert.id] = { signature: alertSignature(alert), state: 'loading' }
+  }
+  dashboardAlertEvidence.value = nextEvidence
+  const accountId = session.value.user?.id
+  const stillCurrent = (id: string, signature: string) => !disposed && alertEvidenceSessionGeneration === sessionGeneration && authorizedOfficer.value && accountId === session.value.user?.id && signatures.get(id) === signature && dashboardAlertEvidence.value[id]?.signature === signature
+  const store = (id: string, signature: string, result: Omit<DashboardAlertEvidence, 'signature'>) => {
+    if (!stillCurrent(id, signature)) return
+    dashboardAlertEvidence.value = { ...dashboardAlertEvidence.value, [id]: { signature, ...result } }
+  }
+  await Promise.all(targets.filter(alert => alertSource(alert) === 'Sensor' && dashboardAlertEvidence.value[alert.id]?.state === 'loading' && !alertContextControllers.has(alert.id)).map(async alert => {
+    const signature = signatures.get(alert.id)!, controller = new AbortController()
+    alertContextControllers.set(alert.id, controller)
+    try {
+      const context = await loadAlertContext(alert, controller.signal)
+      store(alert.id, signature, { state: 'ready', context })
+    } catch {
+      store(alert.id, signature, { state: 'unavailable' })
+    } finally {
+      if (alertContextControllers.get(alert.id) === controller) alertContextControllers.delete(alert.id)
+    }
+  }))
+  const cameras = targets.filter(alert => alertSource(alert) === 'Camera' && dashboardAlertEvidence.value[alert.id]?.state === 'loading')
+  const cameraRequestKey = cameras.map(alert => `${alert.id}:${signatures.get(alert.id)}`).sort().join('|')
+  if (cameraEvidenceController && cameraEvidenceRequestKey !== cameraRequestKey) {
+    cameraEvidenceController.abort(); cameraEvidenceController = null; cameraEvidenceGeneration++; cameraEvidenceRequestKey = ''
+  }
+  if (!cameras.length && cameraEvidenceController) {
+    cameraEvidenceController.abort(); cameraEvidenceController = null; cameraEvidenceGeneration++; cameraEvidenceRequestKey = ''
+  }
+  if (cameras.length && !cameraEvidenceController) {
+    cameraEvidenceRequestKey = cameraRequestKey
+    const generation = ++cameraEvidenceGeneration, controller = new AbortController(); cameraEvidenceController = controller
+    try {
+      const result = await loadCameraEvents(controller.signal)
+      if (generation !== cameraEvidenceGeneration || controller.signal.aborted) return
+      for (const alert of cameras) {
+        const signature = signatures.get(alert.id)!
+        const event = result.events.find(item => item.eventId === alert.id && item.cameraId === alert.cameraId && item.eventType === alert.metric && Date.parse(item.detectedAt) === Date.parse(alert.detectedAt)) ?? null
+        store(alert.id, signature, { state: 'ready', cameraEvent: event })
+      }
+    } catch {
+      if (generation === cameraEvidenceGeneration && !controller.signal.aborted) for (const alert of cameras) store(alert.id, signatures.get(alert.id)!, { state: 'unavailable' })
+    } finally { if (cameraEvidenceController === controller) { cameraEvidenceController = null; cameraEvidenceRequestKey = '' } }
   }
 }
 
@@ -241,6 +327,7 @@ onBeforeUnmount(() => {
   alertsRefresh?.stop()
   alertsController?.abort()
   alertsSequence++
+  clearDashboardAlertEvidence()
 })
 
 watch(() => [authorizedOfficer.value, session.value.user?.id] as const, ([ready, id], previous) => {
@@ -249,6 +336,7 @@ watch(() => [authorizedOfficer.value, session.value.user?.id] as const, ([ready,
     alertsController?.abort()
     alertsSequence++
     alerts.value = []; alertsLoaded.value = false
+    clearDashboardAlertEvidence()
     alertsLoading.value = true; alertsError.value = ''
     for (const controller of previewControllers.values()) controller.abort()
     registrationRows.value = []; fieldRows.value = []; observations.value = []; observationTotals.value = null
@@ -299,18 +387,59 @@ const speciesById = computed(
   () => new Map(species.value.map((item) => [String(item.species_id), item])),
 )
 const speciesForPlant = (plant: ApiPlant) => speciesById.value.get(String(plant.species_id))
-const recentAlerts = computed(() =>
-  [...alerts.value]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime() || a.id.localeCompare(b.id))
-    .slice(0, 3),
-)
-const alertDisplayLabels = computed(() => monitoringLabels(alerts.value.map(alert => alert.id)))
-const alertId = (id: string) => alertDisplayLabels.value.get(id) || id
+const recentAlerts = computed(() => recentAlertRows(alerts.value))
 const alertTypeText = (alert: CanonicalThreatAlert) => alertText(alertTypeLabel(alert.metric))
 const alertStatusText = (alert: CanonicalThreatAlert) => alertText(alertStatusLabel(alert.status))
 const alertSourceText = (alert: CanonicalThreatAlert) => alertText(alertSource(alert))
+const alertIconType = (alert: CanonicalThreatAlert) => {
+  if (alertSource(alert) === 'Sensor') return ({ temperature: 'temperature', humidity: 'humidity', soilMoisture: 'soil', rainfall: 'rainfall', movement: 'movement', sound: 'sound' } as Record<string, string>)[alert.metric] || 'general'
+  if (alertSource(alert) === 'Camera') return ({ possible_plant_contact: 'camera', human_detected: 'human', animal_detected: 'animal', suspicious_movement: 'movement' } as Record<string, string>)[alert.metric] || 'camera'
+  return 'general'
+}
 const alertBadgeStyle = (alert: CanonicalThreatAlert) => threatAlertBadgeStyle(alert.status)
 const alertCanOpen = (alert: CanonicalThreatAlert) => /^[A-Za-z0-9_-]{1,200}$/.test(alert.id)
+const overviewAlertPlant = (alert: CanonicalThreatAlert) => {
+  const evidence = dashboardAlertEvidence.value[alert.id]
+  const eventPlant = evidence?.context?.plant_at_detection
+  const cameraPlant = evidence?.cameraEvent?.plantId
+  const currentPlant = evidence?.context?.current_assignment
+  const plantId = eventPlant?.state === 'verified' ? eventPlant.plant_id : cameraPlant || (currentPlant?.state === 'verified' ? currentPlant.plant_id : null)
+  if (!plantId) return { text: t('conservationDashboard.alertCard.plantUnavailable'), isCurrent: false }
+  const plant = plants.value.find(item => String(item.plant_id) === String(plantId))
+  const name = plant ? speciesForPlant(plant)?.scientific_name?.trim() : ''
+  return { text: `${formatPlantId(plantId) || t('conservationDashboard.alertCard.plantUnavailable')}${name ? ` · ${alertText(name)}` : ''}`, isCurrent: eventPlant?.state !== 'verified' && !cameraPlant && currentPlant?.state === 'verified' }
+}
+const overviewAlertTitle = (alert: CanonicalThreatAlert) => {
+  const evidence = dashboardAlertEvidence.value[alert.id]
+  if (alertSource(alert) === 'Camera') {
+    if (evidence?.cameraEvent?.title) return alertText(evidence.cameraEvent.title)
+    const cameraTitleKeys: Record<string, string> = { possible_plant_contact: 'possiblePlantContact', human_detected: 'humanActivity', animal_detected: 'animalActivity', suspicious_movement: 'suspiciousMovement' }
+    const key = cameraTitleKeys[alert.metric]
+    return key ? t(`conservationDashboard.alertCard.titles.${key}`) : alertTypeText(alert)
+  }
+  if (alertSource(alert) === 'Sensor') {
+    const direction = evidence?.context?.historical_threshold?.direction
+    const metricKeys: Record<string, string> = { temperature: 'temperature', humidity: 'humidity', soilMoisture: 'soilMoisture', rainfall: 'rainfall', movement: 'movement', sound: 'sound' }
+    const metric = metricKeys[alert.metric]
+    const key = metric && direction ? `${direction}${metric[0]!.toUpperCase()}${metric.slice(1)}` : `${metric}Threshold`
+    if (metric && te(`conservationDashboard.alertCard.titles.${key}`)) return t(`conservationDashboard.alertCard.titles.${key}`)
+  }
+  return alertTypeText(alert)
+}
+const overviewAlertDetail = (alert: CanonicalThreatAlert) => {
+  const evidence = dashboardAlertEvidence.value[alert.id]
+  const unit = sensorUnit(alert.metric)
+  const value = `${alert.value}${unit ? ` ${unit}` : ''}`
+  if (alertSource(alert) === 'Camera') return evidence?.cameraEvent?.description ? alertText(evidence.cameraEvent.description) : t('conservationDashboard.alertCard.details.unavailable')
+  const threshold = evidence?.context?.historical_threshold
+  if (threshold?.direction === 'high') return t('conservationDashboard.alertCard.details.aboveMaximum', { value, limit: `${threshold.limit}${unit ? ` ${unit}` : ''}` })
+  if (threshold?.direction === 'low') return t('conservationDashboard.alertCard.details.belowMinimum', { value, limit: `${threshold.limit}${unit ? ` ${unit}` : ''}` })
+  return t('conservationDashboard.alertCard.details.recordedValue', { value })
+}
+const overviewAlertThresholdExceeded = (alert: CanonicalThreatAlert) => {
+  const direction = dashboardAlertEvidence.value[alert.id]?.context?.historical_threshold?.direction
+  return alertSource(alert) === 'Sensor' && (direction === 'high' || direction === 'low')
+}
 const mapPlants = computed(() =>
   plants.value.flatMap((plant) => {
     // This overview represents approved biodiversity records, not the review queue.
@@ -446,7 +575,75 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
       <strong>{{ card[1] }}</strong>
     </article>
   </section>
-  <section class="panel pending-review-panel">
+
+  <div class="two-column dashboard-lower">
+<section class="panel conservation-status-panel">
+      <header class="panel-header">
+        <div>
+          <p class="section-kicker">{{ t('conservationDashboard.speciesHealth') }}</p>
+          <h2>{{ t('conservationDashboard.speciesConservationStatus') }}</h2>
+        </div>
+      </header>
+      <p v-if="speciesLoading" class="dashboard-state">Loading species...</p>
+      <p v-else-if="speciesError" class="dashboard-state error-state">{{ speciesError }}</p>
+      <template v-else>
+        <p class="status-scope">{{ t('conservationDashboard.speciesStatusScope', { total: species.length }) }}</p>
+        <div v-for="itemStatus in biodiversityStatuses" :key="itemStatus" class="conservation-row" :data-status="statusClass(itemStatus)">
+          <div class="overview-row"><span>{{ dataLabel(itemStatus) }}</span><strong>{{ statusCount(itemStatus) }}</strong></div>
+          <div class="status-track" role="img" :aria-label="t('conservationDashboard.speciesStatusShare', { status: dataLabel(itemStatus), count: statusCount(itemStatus), total: species.length })"><span class="status-fill" :style="{ width: statusShare(itemStatus) + '%' }"></span></div>
+        </div>
+      </template>
+    </section>
+
+<section class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="section-kicker">{{ t('conservationDashboard.attentionRequired') }}</p>
+          <h2>{{ t('conservationDashboard.conservationAlerts') }}</h2>
+        </div>
+        <button class="secondary-button" @click="go('conservation-alerts')">
+          {{ t('conservationDashboard.viewAllAlerts') }} →
+        </button>
+      </header>
+      <p v-if="alertsLoading && !alertsLoaded" class="dashboard-state">{{ alertText('Loading threat alerts...') }}</p>
+      <p v-else-if="alertsError && (!alertsLoaded || !recentAlerts.length)" class="dashboard-state error-state" role="status">{{ alertsError }}</p>
+      <p v-else-if="!recentAlerts.length" class="dashboard-state">{{ alertText('No threat alerts found.') }}</p>
+      <p v-if="alertsError && alertsLoaded && recentAlerts.length" class="dashboard-state error-state" role="status">{{ alertsError }}</p>
+      <button
+        v-for="alert in recentAlerts"
+        :key="alert.id"
+        class="alert-preview"
+        type="button"
+        :disabled="!alertCanOpen(alert)"
+        :aria-label="`${overviewAlertTitle(alert)} · ${overviewAlertPlant(alert).text} · ${overviewAlertDetail(alert)} · ${dt(alert.detectedAt)} · ${alertStatusText(alert)}`"
+        @click="alertCanOpen(alert) && go('conservation-alerts', { alert: alert.id })"
+      >
+        <span class="alert-preview-icon" :class="`alert-icon-${alertIconType(alert)}`" aria-hidden="true">
+          <svg v-if="alertIconType(alert) === 'temperature'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0Z"/><path d="M12 12v5"/></svg>
+          <svg v-else-if="alertIconType(alert) === 'humidity'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3s-6.5 7.1-6.5 11.8a6.5 6.5 0 1 0 13 0C18.5 10.1 12 3 12 3Z"/></svg>
+          <svg v-else-if="alertIconType(alert) === 'soil'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-9m0 3C5 15 4 10 4 5c5 0 8 3 8 8m0-2c0-5 4-8 8-8 0 5-1 10-8 10"/></svg>
+          <svg v-else-if="alertIconType(alert) === 'rainfall'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 15h10a4 4 0 0 0 .4-8A6 6 0 0 0 6 8a3.5 3.5 0 0 0 1 7Z"/><path d="m8 18-1 2m6-2-1 2m6-2-1 2"/></svg>
+          <svg v-else-if="alertIconType(alert) === 'movement'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="15.5" cy="4.5" r="2"/><path d="m12 22 2-6-3-3 2-4 4 3 3 1M11 13l-4 2-3 4m7-11-3 3-4 1"/></svg>
+          <svg v-else-if="alertIconType(alert) === 'camera'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3l1.5-2h7L17 7h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          <svg v-else-if="alertIconType(alert) === 'animal'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13c-2.3 1.2-3.5 3-3 5 .4 1.5 2.1 2 4 1.2 2-.9 4-.9 6 0 1.9.8 3.6.3 4-1.2.5-2-0.7-3.8-3-5-1.4-.7-2.3-2-4-2s-2.6 1.3-4 2Z"/><ellipse cx="5.5" cy="8" rx="1.7" ry="2.3"/><ellipse cx="10" cy="5.5" rx="1.7" ry="2.3"/><ellipse cx="14" cy="5.5" rx="1.7" ry="2.3"/><ellipse cx="18.5" cy="8" rx="1.7" ry="2.3"/></svg>
+          <svg v-else-if="alertIconType(alert) === 'human'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="3"/><path d="M3 20v-1a6 6 0 0 1 12 0v1M17 11a3 3 0 1 0 0-6m1 9a5 5 0 0 1 3 4v1"/></svg>
+          <svg v-else-if="alertIconType(alert) === 'sound'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4h4l5 4V6l-5 4H3Z"/><path d="M16 9a5 5 0 0 1 0 6m3-9a9 9 0 0 1 0 12"/></svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 22 20H2L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg>
+        </span>
+        <div class="alert-preview-copy">
+          <strong>{{ overviewAlertTitle(alert) }}</strong>
+          <small><span v-if="overviewAlertPlant(alert).isCurrent">{{ t('conservationDashboard.alertCard.currentAssignment') }}: </span>{{ overviewAlertPlant(alert).text }} · {{ alertSourceText(alert) }}</small>
+          <small class="alert-preview-detail" :class="{ 'threshold-exceeded': overviewAlertThresholdExceeded(alert) }">{{ overviewAlertDetail(alert) }}</small>
+          <small>{{ dt(alert.detectedAt) }}</small>
+        </div>
+        <span class="badge alert-severity-badge" :style="alertBadgeStyle(alert)">{{
+          alertStatusText(alert)
+        }}</span>
+      </button>
+    </section>
+  </div>
+
+<section class="panel pending-review-panel">
       <header class="panel-header">
         <div>
           <p class="section-kicker">{{ t('conservationDashboard.requiresReview') }}</p>
@@ -500,8 +697,8 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
       </div>
     </section>
 
-  <div class="two-column overview-medium">
-    <section class="panel pending-observations-panel">
+  <div class="two-column dashboard-lower">
+<section class="panel pending-observations-panel">
       <header class="panel-header">
         <div>
           <p class="section-kicker">{{ t('conservationDashboard.fieldRecords') }}</p>
@@ -534,27 +731,7 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
       </div>
     </section>
 
-    <section class="panel conservation-status-panel">
-      <header class="panel-header">
-        <div>
-          <p class="section-kicker">{{ t('conservationDashboard.speciesHealth') }}</p>
-          <h2>{{ t('conservationDashboard.speciesConservationStatus') }}</h2>
-        </div>
-      </header>
-      <p v-if="speciesLoading" class="dashboard-state">Loading species...</p>
-      <p v-else-if="speciesError" class="dashboard-state error-state">{{ speciesError }}</p>
-      <template v-else>
-        <p class="status-scope">{{ t('conservationDashboard.speciesStatusScope', { total: species.length }) }}</p>
-        <div v-for="itemStatus in biodiversityStatuses" :key="itemStatus" class="conservation-row" :data-status="statusClass(itemStatus)">
-          <div class="overview-row"><span>{{ dataLabel(itemStatus) }}</span><strong>{{ statusCount(itemStatus) }}</strong></div>
-          <div class="status-track" role="img" :aria-label="t('conservationDashboard.speciesStatusShare', { status: dataLabel(itemStatus), count: statusCount(itemStatus), total: species.length })"><span class="status-fill" :style="{ width: statusShare(itemStatus) + '%' }"></span></div>
-        </div>
-      </template>
-    </section>
-  </div>
-
-  <div class="two-column dashboard-lower">
-    <section class="panel">
+<section class="panel">
       <header class="panel-header">
         <div>
           <p class="section-kicker">{{ t('conservationDashboard.parkCoverage') }}</p>
@@ -568,42 +745,12 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
       <p v-else-if="plantsError" class="dashboard-state error-state">{{ plantsError }}</p>
       <BiodiversityMapPreview v-else :plants="mapPlants" />
     </section>
-
-    <section class="panel">
-      <header class="panel-header">
-        <div>
-          <p class="section-kicker">{{ t('conservationDashboard.attentionRequired') }}</p>
-          <h2>{{ t('conservationDashboard.conservationAlerts') }}</h2>
-        </div>
-        <button class="secondary-button" @click="go('conservation-alerts')">
-          {{ t('conservationDashboard.viewAllAlerts') }} →
-        </button>
-      </header>
-      <p v-if="alertsLoading && !alertsLoaded" class="dashboard-state">{{ alertText('Loading threat alerts...') }}</p>
-      <p v-else-if="alertsError && (!alertsLoaded || !recentAlerts.length)" class="dashboard-state error-state" role="status">{{ alertsError }}</p>
-      <p v-else-if="!recentAlerts.length" class="dashboard-state">{{ alertText('No threat alerts found.') }}</p>
-      <p v-if="alertsError && alertsLoaded && recentAlerts.length" class="dashboard-state error-state" role="status">{{ alertsError }}</p>
-      <button
-        v-for="alert in recentAlerts"
-        :key="alert.id"
-        class="alert-preview"
-        type="button"
-        :disabled="!alertCanOpen(alert)"
-        @click="alertCanOpen(alert) && go('conservation-alerts', { alert: alert.id })"
-      >
-        <div>
-          <strong>{{ alertTypeText(alert) }}</strong
-          ><small
-            >{{ alertId(alert.id) }} · {{ alertSourceText(alert) }} ·
-            {{ alert.deviceId }} · {{ dt(alert.createdAt) }} · {{ alertStatusText(alert) }}</small
-          >
-        </div>
-        <span class="badge alert-severity-badge" :style="alertBadgeStyle(alert)">{{
-          alertStatusText(alert)
-        }}</span>
-      </button>
-    </section>
   </div>
+
+
+
+
+
 
   <section class="panel">
     <header class="panel-header">
@@ -791,10 +938,11 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
 }
 .alert-preview {
   width: 100%;
-  padding: 13px 0;
+  min-width: 0;
+  padding: 14px 0;
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 12px;
   border: 0;
   border-bottom: 1px solid #edf0ed;
   background: transparent;
@@ -806,22 +954,39 @@ const speciesName = (item?: { scientific_name?: string | null; common_name?: str
 .alert-preview:hover {
   background: #f6f9f6;
 }
-.alert-preview div {
+.alert-preview:focus-visible { outline: 3px solid #33745d; outline-offset: 2px; border-radius: 8px; }
+.alert-preview-icon { width: 44px; height: 44px; flex: 0 0 44px; display: grid; place-items: center; border-radius: 12px; background: #e7eee9; color: #34775c; }
+.alert-preview-icon svg { width: 20px; height: 20px; }
+.alert-icon-temperature { background: #fbe9e1; color: #c65334; }
+.alert-icon-humidity, .alert-icon-rainfall { background: #e7f1fb; color: #2874ad; }
+.alert-icon-soil, .alert-icon-camera { background: #e8f0e8; color: #34775c; }
+.alert-icon-movement, .alert-icon-human, .alert-icon-sound { background: #f0eafb; color: #674aa0; }
+.alert-icon-animal { background: #fff2d9; color: #b47708; }
+.alert-icon-general { background: #fde8e7; color: #bd3d36; }
+.alert-preview-copy {
+  flex: 1 1 auto;
+  min-width: 0;
   display: grid;
-  gap: 4px;
+  gap: 3px;
 }
 .alert-preview strong {
-  font-size: 11px;
+  color: #254c3e;
+  font-size: 13px;
+  line-height: 1.4;
 }
 .alert-preview small {
-  color: #8a9992;
-  font-size: 9px;
+  color: #60756b;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
+.alert-preview small.alert-preview-detail { color: #60756b; font-weight: 400; }
+.officer-layout.officer-layout.officer-layout .alert-preview small.alert-preview-detail.threshold-exceeded { color: #b42318; font-weight: 700; }
 .alert-severity-badge {
   width: auto;
   min-width: 48px;
   flex: 0 0 auto;
-  align-self: center;
+  align-self: flex-start;
   padding: 5px 9px;
   display: inline-flex;
   align-items: center;

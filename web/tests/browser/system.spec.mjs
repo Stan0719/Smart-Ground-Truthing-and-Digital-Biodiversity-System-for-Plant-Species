@@ -610,17 +610,50 @@ test('Role and Permission retains the original cards with live grants on desktop
   }
 })
 
-test('Administrator dashboard retains its original sections on a phone', async ({ page, context }) => {
+test('Administrator dashboard charts and section order remain responsive', async ({ page, context }) => {
   monitor(page)
   await apiLogin(context, 'admin')
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto(origin + '/admin')
-  await expect(page.locator('.summary-card')).toHaveCount(6)
-  await expect(page.getByRole('heading', { name: 'Sensor Status Overview' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Recent Threat Alerts' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Quick Actions' })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-  await page.screenshot({ path: test.info().outputPath('admin-dashboard-phone.png'), fullPage: false })
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url())
+    if (['127.0.0.1', 'localhost'].includes(url.hostname) || ['data:', 'blob:'].includes(url.protocol)) return route.continue()
+    return route.abort()
+  })
+  // The dashboard charts do not depend on inbox delivery. Keep this browser
+  // scenario independent of the notification tables in the PGlite fixture.
+  await page.route(/\/api\/data\/staff-notifications(?:\/.*)?(?:\?.*)?$/, route => {
+    const path = new URL(route.request().url()).pathname
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(path.endsWith('/unread-count')
+        ? { unread_count: 0 }
+        : { notifications: [], unread_count: 0, read_through: '2026-11-25T00:00:00.000Z' }),
+    })
+  })
+  for (const width of [1366, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(origin + '/admin')
+    await expect(page.locator('.summary-card')).toHaveCount(6)
+    await expect(page.getByRole('heading', { name: 'User Summary' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Sensor Status Overview' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Recent Threat Alerts' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Recent Sensor Activity' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Recent System Activity' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Quick Actions' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'System Status' })).toHaveCount(0)
+    await expect(page.locator('.user-donut')).toBeVisible()
+    await expect(page.locator('.user-legend li')).toHaveCount(4)
+    await expect(page.locator('.sensor-bar-row')).toHaveCount(2)
+    await expect(page.locator('.connectivity-note')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /Manage Users/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /View IoT Monitoring/ })).toBeVisible()
+    const userBox = await page.locator('.user-summary').boundingBox()
+    const sensorBox = await page.locator('.sensor-overview').boundingBox()
+    if (width > 920) expect(sensorBox.x).toBeGreaterThan(userBox.x + userBox.width / 2)
+    else expect(sensorBox.y).toBeGreaterThan(userBox.y + userBox.height - 1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await page.screenshot({ path: test.info().outputPath(`admin-dashboard-${width}.png`), fullPage: true })
+  }
 })
 
 test('Administrator modules render correct headings, active menus and empty data on desktop and phone', async ({
@@ -1073,10 +1106,16 @@ async function seedAdminAlertFixture() {
      VALUES($1,$2,'{"temperature":31}'::jsonb,'2026-11-22T08:00:00Z')`,
     [readingId, deviceId],
   )
+  const sensorEvidence = JSON.stringify({
+    version: 1, device_id: deviceId, plant_id: null, metric: 'temperature', value: 31,
+    limits: { min: 26, max: 30 }, direction: 'high',
+    values: { temperature: 31, humidity: 70, movement: 1, rainfall: 4049, soilMoisture: 4095 },
+    captured_at: '2026-11-22T08:00:00Z', received_at: '2026-11-22T08:00:01Z',
+  })
   await pool.query(
-    `INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value,status,created_at,detected_at)
-     VALUES($1,$2,$3,'temperature',31,'New','2026-11-22T08:01:00Z','2026-11-22T08:00:00Z')`,
-    [alertId, deviceId, readingId],
+    `INSERT INTO threat_alert_history(id,device_id,reading_id,metric,value,status,created_at,detected_at,sensor_evidence)
+     VALUES($1,$2,$3,'temperature',31,'New','2026-11-22T08:01:00Z','2026-11-22T08:00:00Z',$4::jsonb)`,
+    [alertId, deviceId, readingId, sensorEvidence],
   )
   return { deviceId, alertId, readingId }
 }
@@ -1453,6 +1492,7 @@ test('Admin Recent Alerts opens the selected read-only detail and preserves Devi
     .filter({ hasText: fixture.alertId })
     .getByRole('button', { name: 'View', exact: true })
   await expect(alertView).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
   await alertView.click()
   const alertDialog = page.getByRole('dialog', { name: 'Alert Details' })
   await expect(alertDialog.getByRole('status')).toContainText('Loading alert details')
@@ -1460,16 +1500,28 @@ test('Admin Recent Alerts opens the selected read-only detail and preserves Devi
   await expect(alertDialog.getByRole('alert')).toBeVisible()
   await expect(alertDialog.getByRole('button', { name: 'Retry' })).toBeVisible()
   await alertDialog.getByRole('button', { name: 'Retry' }).click()
-  await expect(alertDialog.getByText(fixture.alertId, { exact: true })).toBeVisible()
+  await expect(alertDialog.locator('.live-alert-identifier code').first()).toHaveAttribute('title', fixture.alertId)
   await expect(alertDialog.getByText('Synthetic Admin Alert Sensor')).toBeVisible()
   await expect(alertDialog.getByText(fixture.readingId, { exact: true })).toBeVisible()
+  const alertTypeValue = await alertDialog.locator('dt').filter({ hasText: 'Alert Type' })
+    .evaluate((element) => element.nextElementSibling?.textContent?.trim())
+  expect(alertTypeValue).toBe('Temperature')
   const recordedMetric = await alertDialog.locator('dt').filter({ hasText: 'Metric' })
     .evaluate((element) => element.nextElementSibling?.textContent?.trim())
   const recordedValue = await alertDialog.locator('dt').filter({ hasText: 'Recorded Value' })
     .evaluate((element) => element.nextElementSibling?.textContent?.trim())
-  expect(recordedMetric).toBe('temperature')
-  expect(recordedValue).toBe('31')
-  await page.screenshot({ path: test.info().outputPath('admin-alert-details.png'), fullPage: true })
+  expect(recordedMetric).toBe('Temperature')
+  expect(recordedValue).toBe('31 °C')
+  const modalWidth = await alertDialog.evaluate(element => ({ client: element.clientWidth, scroll: element.scrollWidth }))
+  expect(modalWidth.scroll).toBeLessThanOrEqual(modalWidth.client)
+  await expect(alertDialog.getByText('26 °C', { exact: true })).toBeVisible()
+  await expect(alertDialog.getByText('30 °C', { exact: true })).toBeVisible()
+  await expect(alertDialog.getByText('Above Maximum Threshold')).toBeVisible()
+  await expect(alertDialog.getByText('The recorded Temperature exceeds the maximum threshold by 1 °C.')).toBeVisible()
+  await expect(alertDialog.getByText('70%', { exact: true })).toBeVisible()
+  await expect(alertDialog.getByText('4,049', { exact: true })).toBeVisible()
+  await expect(alertDialog).not.toContainText('"limits"')
+  await page.screenshot({ path: test.info().outputPath('admin-alert-details.png'), fullPage: false })
   const severityValue = await alertDialog.locator('dt').filter({ hasText: 'Severity' })
     .evaluate((element) => element.nextElementSibling?.textContent?.trim())
   expect(severityValue).toBe('—')
@@ -1487,6 +1539,7 @@ test('Admin Recent Alerts opens the selected read-only detail and preserves Devi
   await expect(alertView).toBeFocused()
   expect(detailCalls).toBe(2)
 
+  await page.setViewportSize({ width: 1440, height: 1000 })
   const deviceView = page.locator('.admin-reading-table tbody tr')
     .filter({ hasText: fixture.deviceId })
     .getByRole('button', { name: 'View', exact: true })

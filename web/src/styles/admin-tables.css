@@ -90,3 +90,28 @@
   .admin-shell.admin-shell.admin-shell .sensor-device-scroll .sensor-device-table .badge { white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
   .admin-shell.admin-shell.admin-shell .sensor-device-scroll .sensor-device-table td.empty { display: block; padding: 12px 0; text-align: center; }
 }
+
+/* IoT monitoring has more columns, so switch to the same device cards earlier. */
+@container sensor-devices (max-width: 1050px) {
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-device-scroll { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-device-table { display: block; min-width: 0; width: 100%; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-device-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-device-table tbody { display: grid; gap: 16px; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-device-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 16px; border: 1px solid #d7e0db; border-radius: 16px; background: #fff; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-device-table td { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; max-width: 100%; width: auto; padding: 0; border: 0; font-size: 14px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-cell-label { display: inline-flex; align-items: center; color: #426b56; font-size: 14px; font-weight: 600; line-height: 1.5; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-identity-cell { position: relative; display: block; padding-left: 64px; min-height: 48px; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-device-name { color: #174c38; font-size: 18px; font-weight: 700; line-height: 1.5; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-identity-cell small { display: block; font-size: 12px; line-height: 1.5; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-card-icon { position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 10px; background: #dcebd8; color: #245443; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-card-icon svg { width: 32px; height: 32px; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-type-cell { margin-top: -6px; padding: 0 0 16px 64px; border-bottom: 1px solid #d7e0db; font-size: 16px; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-type-cell .sensor-cell-label { display: none; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-actions-cell { display: block; margin-top: 4px; padding-top: 12px; border-top: 1px solid #d7e0db; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-actions-cell .actions { width: 100%; min-width: 0; gap: 0; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-actions-cell button { display: flex; flex: 1 1 0; width: 100%; height: auto; min-width: 0; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 10px; background: #3b8065; color: #fff; font-size: 14px; font-weight: 700; line-height: 1.5; white-space: normal; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-actions-cell button:hover { background: #2f6f56; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-actions-cell button:focus-visible { outline: 2px solid #245443; outline-offset: 2px; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .badge { white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
+  .admin-shell.admin-shell.admin-shell .iot-monitoring-container .sensor-device-table td.empty { display: block; padding: 12px 0; text-align: center; }
+}

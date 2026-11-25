@@ -376,13 +376,10 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
       <header class="panel-header">
         <div>
           <h2>{{ t('conservationPages.iot.devices') }}</h2>
-          <span class="panel-description"
-            >PostgreSQL sensor devices and their latest readings.</span
-          >
         </div>
       </header>
       <p v-if="!filteredDevices.length" class="state-message">No sensor devices found.</p>
-      <div v-else class="table-scroll officer-table-scroll" role="region" :aria-label="t('conservationPages.iot.devices')" tabindex="0">
+      <div v-else class="table-scroll officer-table-scroll iot-device-scroll" role="region" :aria-label="t('conservationPages.iot.devices')" tabindex="0">
         <table class="officer-data-table iot-device-table"><colgroup><col class="column-id" /><col class="column-name" /><col class="column-type" /><col class="column-identifier" /><col class="column-plant" /><col class="column-description" /><col class="column-status" /><col class="column-time" /><col class="column-time" /><col class="column-actions" /></colgroup>
           <thead>
             <tr>
@@ -401,21 +398,26 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
           <tbody>
             <tr v-for="device in filteredDevices" :key="String(device.sensor_id)">
               <td>
+                <span class="iot-device-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M10 7h4m-4 10h4M4 8v8m16-8v8"/></svg></span>
+                <span class="iot-device-cell-label" aria-hidden="true">Sensor ID</span>
                 <strong><MonitoringIdentifier :value="device.sensor_id" :labels="deviceLabels" /></strong>
               </td>
-              <td>{{ device.device_name }}</td>
-              <td>{{ device.device_type }}</td>
-              <td>{{ valueOrDash(device.serial_number) }}</td>
-              <td>{{ plantDisplayId(device.latest_reading) }}</td>
-              <td>{{ valueOrDash(device.location_description) }}</td>
+              <td><span class="iot-device-cell-label" aria-hidden="true">Device Name</span><strong class="iot-device-name">{{ device.device_name }}</strong></td>
+              <td><span class="iot-device-cell-label" aria-hidden="true">Device Type</span>{{ device.device_type }}</td>
+              <td><span class="iot-device-cell-label" aria-hidden="true">Serial Number</span>{{ valueOrDash(device.serial_number) }}</td>
+              <td><span class="iot-device-cell-label" aria-hidden="true">Related Plant</span>{{ plantDisplayId(device.latest_reading) }}</td>
+              <td><span class="iot-device-cell-label" aria-hidden="true">Location Description</span>{{ valueOrDash(device.location_description) }}</td>
               <td>
+                <span class="iot-device-cell-label" aria-hidden="true">Status</span>
                 <span class="badge" :class="device.status.toLowerCase()">{{ device.status }}</span>
               </td>
-              <td>{{ device.installed_at ? dt(device.installed_at) : '—' }}</td>
+              <td><span class="iot-device-cell-label" aria-hidden="true">Installed At</span>{{ device.installed_at ? dt(device.installed_at) : '—' }}</td>
               <td>
+                <span class="iot-device-cell-label" aria-hidden="true">Latest Reading</span>
                 {{ device.latest_reading ? dt(device.latest_reading.recorded_at) : 'No reading' }}
               </td>
               <td>
+                <span class="iot-device-cell-label" aria-hidden="true">Actions</span>
                 <div class="action-group">
                   <button class="action-button" @click="selectedDevice = device">
                     {{ t('common.view') }}
@@ -789,6 +791,44 @@ const rainfallChartPoints = computed(() => chartPointsFor('rainfall_mm'))
   .officer-layout.officer-layout .reading-details-modal .reading-measurement dd { font-size: 18px; }
   .officer-layout.officer-layout .reading-details-modal .reading-actions { gap: 10px; }
   .officer-layout.officer-layout .reading-details-modal .reading-actions .action-button { flex: 1 1 170px; padding: 10px 14px; }
+}
+.iot-device-scroll { container-type: inline-size; }
+.officer-layout.officer-layout .iot-device-scroll .iot-device-table { min-width: 96rem; }
+.officer-layout .iot-device-scroll .iot-device-table th,
+.officer-layout .iot-device-scroll .iot-device-table td { padding-right: 10px; padding-left: 10px; }
+.officer-layout .iot-device-scroll .iot-device-table .column-id { width: 13rem; }
+.officer-layout .iot-device-scroll .iot-device-table .column-name { width: 12rem; }
+.officer-layout .iot-device-scroll .iot-device-table .column-type { width: 8rem; }
+.officer-layout .iot-device-scroll .iot-device-table .column-identifier { width: 11rem; }
+.officer-layout .iot-device-scroll .iot-device-table .column-plant { width: 7rem; }
+.officer-layout .iot-device-scroll .iot-device-table .column-description { width: 14rem; }
+.officer-layout .iot-device-scroll .iot-device-table .column-status { width: 8rem; }
+.officer-layout .iot-device-scroll .iot-device-table .column-time { width: 10rem; }
+.officer-layout .iot-device-scroll .iot-device-table .column-actions { width: 12rem; }
+.iot-device-card-icon, .iot-device-cell-label { display: none; }
+@container (max-width: 767px) {
+  .officer-layout .iot-device-scroll { overflow: visible; }
+  .officer-layout .iot-device-scroll .iot-device-table { display: block; width: 100%; min-width: 0; table-layout: auto; }
+  .iot-device-table colgroup { display: none; }
+  .iot-device-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+  .iot-device-table tbody { display: grid; gap: 14px; }
+  .officer-layout .iot-device-scroll .iot-device-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; padding: 16px; border: 1px solid #d7e0db; border-radius: 16px; background: #fff; }
+  .officer-layout .iot-device-scroll .iot-device-table td { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 0; border: 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+  .iot-device-card-icon { position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; background: #dcebd8; color: #245443; }
+  .iot-device-card-icon svg { width: 26px; height: 26px; }
+  .officer-layout .iot-device-scroll .iot-device-table td:first-child { position: relative; display: block; min-height: 44px; padding-left: 56px; color: #174c38; font-size: 15px; font-weight: 700; }
+  .iot-device-cell-label { display: block; flex: 0 0 min(40%, 140px); color: #426b56; font-size: 12px; line-height: 1.5; font-weight: 600; }
+  .iot-device-table td:first-child .iot-device-cell-label { margin-bottom: 3px; }
+  .iot-device-table td:first-child > strong { display: block; min-width: 0; }
+  .iot-device-table td:first-child .iot-device-cell-label,
+  .iot-device-table td:nth-child(2) .iot-device-cell-label { display: none; }
+  .officer-layout .iot-device-scroll .iot-device-table td:nth-child(2) { margin-top: -12px; padding: 0 0 12px 56px; border-bottom: 1px solid #d7e0db; font-size: 16px; }
+  .iot-device-table .iot-device-name { color: #174c38; overflow-wrap: anywhere; }
+  .officer-layout .iot-device-scroll .iot-device-table td:nth-child(10) { display: block; margin-top: 3px; padding-top: 12px; border-top: 1px solid #d7e0db; }
+  .iot-device-table td:nth-child(10) .iot-device-cell-label { display: none; }
+  .officer-layout .iot-device-scroll .iot-device-table td:nth-child(10) .action-group { display: flex; width: 100%; min-width: 0; gap: 8px; }
+  .officer-layout .iot-device-scroll .iot-device-table td:nth-child(10) .action-group > * { flex: 1 1 0; min-width: 0; }
+  .officer-layout .iot-device-scroll .iot-device-table td:nth-child(10) .action-button { width: 100%; min-height: 44px; justify-content: center; white-space: normal; }
 }
 .iot-device-table .badge.active {
   background: #DCFCE7;

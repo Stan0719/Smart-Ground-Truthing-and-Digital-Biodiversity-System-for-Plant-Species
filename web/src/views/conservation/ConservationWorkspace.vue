@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { plantApi, type Species, type Observation, type Device } from '../../services/plantApi'
 import AuthorizedMap from '../../components/AuthorizedMap.vue'
 import StaffDialog from '../../components/StaffDialog.vue'
+import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 const route = useRoute(),
   mode = computed(() => String(route.name || '')),
   error = ref(''),
@@ -407,7 +408,7 @@ watch(mode, () => {
           v-model="search"
           aria-label="Search species"
           placeholder="Search scientific or common name"
-        /><select v-model="status" aria-label="Species classification">
+        /><select v-officer-dropdown v-model="status" aria-label="Species classification">
           <option>All</option>
           <option value="public">Public</option>
           <option value="internal">Scientific staff</option>
@@ -464,7 +465,7 @@ watch(mode, () => {
           v-model="search"
           aria-label="Search observations"
           placeholder="Search plant, submitter or morphology…"
-        /><select v-model="status" aria-label="Observation status">
+        /><select v-officer-dropdown v-model="status" aria-label="Observation status">
           <option>All</option>
           <option>Draft</option>
           <option>Pending Review</option>
@@ -601,7 +602,7 @@ watch(mode, () => {
           v-model="search"
           aria-label="Search alerts"
           placeholder="Search metric or device…"
-        /><select v-model="status" aria-label="Alert status">
+        /><select v-officer-dropdown v-model="status" aria-label="Alert status">
           <option>All</option>
           <option>New</option>
           <option>Reviewing</option>

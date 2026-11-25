@@ -8,6 +8,7 @@ import { reviewDateTime } from '../../utils/officerMonitoringDisplay'
 import OfficerPlantDelete from '../../components/conservation/OfficerPlantDelete.vue'
 import OfficerPlantEdit from '../../components/conservation/OfficerPlantEdit.vue'
 import OfficerPlantView from '../../components/conservation/OfficerPlantView.vue'
+import { vOfficerDropdown } from '../../components/conservation/officerDropdown'
 const editing=ref<string|null>(null),deleting=ref<string|null>(null),viewing=ref<string|null>(null),deleteFeedback=ref('')
 const { t } = useI18n()
 const text = (key: string) => t('officerPlants.' + key)
@@ -107,7 +108,7 @@ onBeforeUnmount(() => { generation++; controller?.abort(); clearTimeout(timer); 
     <header class="page-intro"><div><p class="page-kicker">{{ text('eyebrow') }}</p><h2>{{ text('title') }}</h2></div></header>
     <div class="control-bar registry-filters">
       <label class="field"><span>{{ text('search') }}</span><input v-model="q" type="search" maxlength="200" :placeholder="text('searchPlaceholder')" /></label>
-      <label class="field"><span>{{ text('species') }}</span><select v-model="species"><option value="">{{ text('allSpecies') }}</option><option v-for="choice in choices" :key="choice.id" :value="choice.id">{{ choice.name }}</option></select></label>
+      <label class="field"><span>{{ text('species') }}</span><select v-officer-dropdown v-model="species"><option value="">{{ text('allSpecies') }}</option><option v-for="choice in choices" :key="choice.id" :value="choice.id">{{ choice.name }}</option></select></label>
     </div>
     <p v-if="deleteFeedback" role="status">{{ deleteFeedback }}</p>
     <section class="panel registry-panel" :aria-busy="loading">

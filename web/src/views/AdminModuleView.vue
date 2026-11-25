@@ -8,6 +8,8 @@ import AdminPageShell from '../components/AdminPageShell.vue'
 import AdminTableIdentifier from '../components/AdminTableIdentifier.vue'
 import {api} from '../services/auth'
 import { plantApi } from '../services/plantApi'
+import { newestReadingsByDevice, relativeReadingAge } from '../utils/adminIotDisplay'
+import { vOfficerDropdown } from '../components/conservation/officerDropdown'
 
 type Section = 'roles' | 'iot' | 'sensors' | 'alerts' | 'activity' | 'settings'
 const props = defineProps<{ section: Section }>()
@@ -229,6 +231,9 @@ watch(() => Boolean(exportModalOpen.value || alertModal.value || liveAlertDetail
   }
 })
 onBeforeUnmount(() => {
+  iotDisposed = true
+  stopIoTRefresh()
+  iotRequestVersion += 1
   for (const [node, inert] of adminModalInertNodes) node.inert = inert
   adminModalInertNodes.clear()
   document.documentElement.style.overflow = adminModalPreviousOverflow
@@ -402,6 +407,7 @@ interface PlantDevice {
   status: string
   thresholds: Record<string, number>
   last_seen: string | null
+  latest_reading?: PlantReading | null
 }
 interface PlantReading {
   id: string
@@ -434,9 +440,11 @@ const selectedLiveAlert = ref<PlantAlert | null>(null)
 const liveAlertDetail = ref<ThreatAlertDetail | null>(null)
 const liveAlertDetailLoading = ref(false)
 const liveAlertDetailError = ref('')
+const liveAlertIdentifierFeedback = ref('')
 let liveAlertDetailRequestVersion = 0
 let liveAlertDetailOpener: HTMLElement | null = null
 const iotLoading = ref(false)
+const iotRefreshing = ref(false)
 const devicesLoaded = ref(false)
 const readingsLoaded = ref(false)
 const alertsLoaded = ref(false)
@@ -444,25 +452,73 @@ const devicesError = ref('')
 const readingsError = ref('')
 const alertsError = ref('')
 let iotRequestVersion = 0
+let iotRequestInFlight = false
+let iotRefreshQueued = false
+let iotDisposed = false
+let iotPollTimer: ReturnType<typeof setInterval> | undefined
+let iotAgeTimer: ReturnType<typeof setInterval> | undefined
+let iotLastRefreshAt = 0
+const iotClock = ref(Date.now())
 
 const scalarText = (value: string | number | null | undefined, fallback = '—') =>
   value === null || value === undefined || value === '' ? fallback : String(value)
 const alertDetailText = (value: unknown) =>
   typeof value === 'string' || typeof value === 'number' ? String(value) : '—'
+const alertRecord = (value: unknown): Record<string, unknown> | undefined => {
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value) as unknown } catch { return undefined }
+  }
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+const alertNumber = (value: unknown): number | undefined => {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN
+  return Number.isFinite(number) ? number : undefined
+}
+const alertMetricUnits: Record<string, string> = {
+  temperature: '°C',
+  humidity: '%',
+}
+const alertMetricLabel = (metric: string) => {
+  const key = `adminModules.alertDetails.metrics.${metric}`
+  return te(key) ? t(key) : metric.replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
+}
+const formatAlertNumber = (value: number) => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 2 }).format(value)
+const formatAlertMeasurement = (metric: string, value: unknown) => {
+  const number = alertNumber(value)
+  if (number === undefined) return alertDetailText(value)
+  const formatted = formatAlertNumber(number)
+  const unit = alertMetricUnits[metric]
+  return unit === '%' ? `${formatted}${unit}` : unit ? `${formatted} ${unit}` : formatted
+}
+const shortenAlertIdentifier = (value: string) => value.length > 30 ? `${value.slice(0, 18)}…${value.slice(-8)}` : value
+async function copyLiveAlertIdentifier(value: string) {
+  try {
+    if (!navigator.clipboard?.writeText) throw Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(value)
+    liveAlertIdentifierFeedback.value = t('adminModules.alertDetails.identifierCopied')
+  } catch {
+    liveAlertIdentifierFeedback.value = t('adminModules.alertDetails.identifierCopyFailed')
+  }
+}
 const formattedTimestamp = (value: string | null | undefined) => {
   if (value === null || value === undefined || value === '') return '—'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '—' : formatActivityTimestamp(date.toISOString())
 }
 const latestReadingByDevice = computed(() => {
-  const latest = new Map<string, PlantReading>()
-  for (const reading of liveReadings.value) {
-    if (!latest.has(reading.device_id)) latest.set(reading.device_id, reading)
+  const latest = newestReadingsByDevice(liveReadings.value)
+  for (const device of liveDevices.value) {
+    const candidate = device.latest_reading
+    if (!candidate || !Number.isFinite(Date.parse(candidate.created_at))) continue
+    const current = latest.get(device.id)
+    if (!current || Date.parse(candidate.created_at) > Date.parse(current.created_at)) latest.set(device.id, candidate)
   }
   return latest
 })
 const sensorRows = computed<IoTSensor[]>(() => liveDevices.value.map((device) => {
-  const reading = latestReadingByDevice.value.get(device.id)
+  const reading = latestReadingByDevice.value.get(device.id) || device.latest_reading || undefined
   const values = reading?.values || {}
   const measurement = (name: string, suffix = '') => {
     const value = values[name]
@@ -491,17 +547,27 @@ const sensorRows = computed<IoTSensor[]>(() => liveDevices.value.map((device) =>
 }))
 
 async function loadAdminIoTData() {
+  if (iotDisposed || props.section !== 'iot') return
+  if (iotRequestInFlight) { iotRefreshQueued = true; return }
+  iotRefreshQueued = false
+  iotRequestInFlight = true
   const version = ++iotRequestVersion
-  iotLoading.value = true
+  if (!devicesLoaded.value && !readingsLoaded.value && !alertsLoaded.value) iotLoading.value = true
+  else iotRefreshing.value = true
   devicesError.value = ''
   readingsError.value = ''
   alertsError.value = ''
   const [devicesResult, readingsResult, alertsResult] = await Promise.allSettled([
-    plantApi<DevicesResponse>('/devices'),
-    plantApi<ReadingsResponse>('/readings'),
-    plantApi<AlertsResponse>('/alerts'),
+    Promise.resolve().then(() => plantApi<DevicesResponse>('/devices')),
+    Promise.resolve().then(() => plantApi<ReadingsResponse>('/readings')),
+    Promise.resolve().then(() => plantApi<AlertsResponse>('/alerts')),
   ])
-  if (version !== iotRequestVersion) return
+  if (version !== iotRequestVersion) {
+    iotRequestInFlight = false
+    iotRefreshing.value = false
+    if (props.section === 'iot' && iotRefreshQueued) void loadAdminIoTData()
+    return
+  }
   if (devicesResult.status === 'fulfilled' && Array.isArray(devicesResult.value.devices)) {
     liveDevices.value = devicesResult.value.devices
     devicesLoaded.value = true
@@ -527,11 +593,37 @@ async function loadAdminIoTData() {
       : 'The alerts API returned an invalid response.'
   }
   iotLoading.value = false
+  iotRefreshing.value = false
+  iotLastRefreshAt = Date.now()
+  iotRequestInFlight = false
+  if (iotRefreshQueued && props.section === 'iot') void loadAdminIoTData()
 }
 
+function stopIoTRefresh() {
+  if (iotPollTimer) clearInterval(iotPollTimer)
+  if (iotAgeTimer) clearInterval(iotAgeTimer)
+  iotPollTimer = undefined
+  iotAgeTimer = undefined
+  window.removeEventListener('focus', refreshIoTWhenStale)
+  document.removeEventListener('visibilitychange', refreshIoTWhenVisible)
+}
+function refreshIoTWhenStale() {
+  if (props.section === 'iot' && !document.hidden && Date.now() - iotLastRefreshAt >= 30_000) void loadAdminIoTData()
+}
+function refreshIoTWhenVisible() {
+  if (!document.hidden) refreshIoTWhenStale()
+}
+function startIoTRefresh() {
+  stopIoTRefresh()
+  void loadAdminIoTData()
+  iotPollTimer = setInterval(() => { if (!document.hidden) void loadAdminIoTData() }, 60_000)
+  iotAgeTimer = setInterval(() => { iotClock.value = Date.now() }, 30_000)
+  window.addEventListener('focus', refreshIoTWhenStale)
+  document.addEventListener('visibilitychange', refreshIoTWhenVisible)
+}
 watch(() => props.section, (section) => {
-  if (section === 'iot') void loadAdminIoTData()
-  else iotRequestVersion += 1
+  if (section === 'iot') startIoTRefresh()
+  else { stopIoTRefresh(); iotRequestVersion += 1; iotLoading.value = false; iotRefreshing.value = false }
 }, { immediate: true })
 
 const alerts = ref<ThreatAlert[]>([
@@ -756,45 +848,78 @@ const selectedLiveAlertDevice = computed(() =>
 )
 const liveAlertDetailFields = computed(() => {
   const alert = liveAlertDetail.value
-  if (!alert) return [] as { label: string; value: string }[]
-  const evidence = alert.sensor_evidence && typeof alert.sensor_evidence === 'object'
-    ? alert.sensor_evidence as Record<string, unknown>
-    : undefined
-  const plant = alert.plant_id ?? evidence?.plant_id ?? selectedLiveAlertDevice.value?.plant_id
+  if (!alert) return [] as Array<{ key: string; label: string; value: string; secondary?: string; badge?: 'severity' | 'status'; copyable?: boolean; icon: string }>
+  const evidence = alertRecord(alert.sensor_evidence)
+  const hasDetectionPlant = Boolean(evidence && Object.prototype.hasOwnProperty.call(evidence, 'plant_id'))
+  const plant = hasDetectionPlant ? evidence?.plant_id : alert.plant_id ?? selectedLiveAlertDevice.value?.plant_id
   const timestamp = alert.detected_at ?? alert.created_at
-  const fields: Array<[string, unknown]> = [
-    ['Alert ID', alert.id],
-    ['Alert Type', alert.alert_type ?? alert.metric ?? selectedLiveAlert.value?.metric],
-    ['Severity', alert.severity],
-    ['Device', selectedLiveAlertDevice.value?.name
-      ? `${selectedLiveAlertDevice.value.name} (${alert.device_id ?? selectedLiveAlert.value?.device_id ?? '—'})`
-      : alert.device_id ?? selectedLiveAlert.value?.device_id],
-    ['Associated Plant', plant],
-    ['Timestamp', timestamp ? formattedTimestamp(String(timestamp)) : undefined],
-    ['Status', alert.status ?? selectedLiveAlert.value?.status],
+  const deviceId = alert.device_id ?? selectedLiveAlert.value?.device_id
+  const deviceName = selectedLiveAlertDevice.value?.name
+  const alertType = alert.alert_type ?? alert.metric ?? selectedLiveAlert.value?.metric
+  const alertTypeLabel = typeof alertType === 'string' && ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall', 'sound'].includes(alertType)
+    ? alertMetricLabel(alertType)
+    : alertType
+  const fields: Array<{ key: string; value: unknown; secondary?: unknown; badge?: 'severity' | 'status'; copyable?: boolean; icon: string }> = [
+    { key: 'alertId', value: alert.id, copyable: true, icon: 'M4 6h16M4 12h16M4 18h16' },
+    { key: 'alertType', value: alertTypeLabel, icon: 'M12 3 21 8 12 13 3 8 12 3M3 12l9 5 9-5M3 16l9 5 9-5' },
+    { key: 'severity', value: alert.severity, badge: 'severity', icon: 'M4 19a8 8 0 1 1 16 0M12 11l4-3M12 11v4' },
+    { key: 'device', value: deviceName ?? deviceId, secondary: deviceName ? deviceId : undefined, copyable: Boolean(deviceName && deviceId), icon: 'M4 8h16v12H4zM8 4v4m8-4v4M8 14h.01M12 14h.01M16 14h.01' },
+    { key: 'associatedPlant', value: plant, icon: 'M20 4C11 4 5 7 5 14a6 6 0 0 0 6 6c7 0 9-7 9-16ZM4 21c3-5 7-8 12-11' },
+    { key: 'timestamp', value: timestamp ? formattedTimestamp(String(timestamp)) : undefined, icon: 'M5 5h14v15H5zM8 3v4m8-4v4M5 10h14' },
+    { key: 'status', value: alert.status ?? selectedLiveAlert.value?.status, badge: 'status', icon: 'M4 5h12l4 7-4 7H4zM8 12h.01' },
   ]
-  return fields.map(([label, value]) => ({ label, value: alertDetailText(value) }))
+  return fields.map(field => ({ ...field, label: t(`adminModules.alertDetails.${field.key}`), value: alertDetailText(field.value), secondary: field.secondary == null ? undefined : String(field.secondary) }))
 })
-const liveAlertRecordedFields = computed(() => {
+const liveAlertReading = computed(() => {
+  const alert = liveAlertDetail.value
+  if (!alert) return null
+  const evidence = alertRecord(alert.sensor_evidence)
+  const values = alertRecord(evidence?.values)
+  const limits = alertRecord(evidence?.limits)
+  const metricValue = alert.metric ?? evidence?.metric ?? selectedLiveAlert.value?.metric
+  const metric = typeof metricValue === 'string' ? metricValue : ''
+  const recordedValue = alert.value ?? evidence?.value ?? (metric && values ? values[metric] : undefined) ?? selectedLiveAlert.value?.value
+  const number = alertNumber(recordedValue)
+  const minimum = alertNumber(limits?.min)
+  const maximum = alertNumber(limits?.max)
+  const direction = evidence?.direction
+  const threshold = direction === 'high' ? maximum : direction === 'low' ? minimum : undefined
+  const difference = number !== undefined && threshold !== undefined ? Math.abs(number - threshold) : undefined
+  const thresholdNotice = difference !== undefined && threshold !== undefined && number !== undefined &&
+    (direction === 'high' ? number > threshold : direction === 'low' ? number < threshold : false)
+    ? {
+        title: t(direction === 'high' ? 'adminModules.alertDetails.aboveMaximum' : 'adminModules.alertDetails.belowMinimum'),
+        description: t(direction === 'high' ? 'adminModules.alertDetails.aboveMaximumDescription' : 'adminModules.alertDetails.belowMinimumDescription', {
+          metric: alertMetricLabel(metric), difference: formatAlertNumber(difference), unit: alertMetricUnits[metric] ? ` ${alertMetricUnits[metric]}` : '',
+        }),
+      }
+    : null
+  const supportedMetrics = ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall', 'sound']
+  const supporting = supportedMetrics.flatMap(name => {
+    if (!values || name === metric || alertNumber(values[name]) === undefined) return []
+    const labelKey = `adminModules.alertDetails.metrics.${name}`
+    return [{ label: t(labelKey), value: formatAlertMeasurement(name, values[name]) }]
+  })
+  return {
+    metric: metric ? alertMetricLabel(metric) : '—',
+    value: formatAlertMeasurement(metric, recordedValue),
+    minimum: minimum === undefined ? undefined : formatAlertMeasurement(metric, minimum),
+    maximum: maximum === undefined ? undefined : formatAlertMeasurement(metric, maximum),
+    thresholdNotice,
+    supporting,
+  }
+})
+const liveAlertOtherFields = computed(() => {
   const alert = liveAlertDetail.value
   if (!alert) return [] as { label: string; value: string }[]
-  const fields: Array<[string, unknown]> = [
-    ['Reading ID', alert.reading_id],
-    ['Metric', alert.metric],
-    ['Recorded Value', alert.value],
-    ['Camera ID', alert.camera_id],
-    ['Description', alert.description],
-    ['Sensor Evidence', alert.sensor_evidence],
-    ['Video Reference', alert.video_path],
-  ]
-  return fields.flatMap(([label, value]) => {
-    if (value === null || value === undefined || value === '') return []
-    let rendered: string
-    if (typeof value === 'object') {
-      try { rendered = JSON.stringify(value) } catch { return [] }
-    } else rendered = String(value)
-    return [{ label, value: rendered }]
-  })
+  return [
+    ['readingId', alert.reading_id],
+    ['cameraId', alert.camera_id],
+    ['description', alert.description],
+    ['videoReference', alert.video_path],
+  ].flatMap(([key, value]) => value === null || value === undefined || value === ''
+    ? []
+    : [{ label: t(`adminModules.alertDetails.${key}`), value: String(value) }])
 })
 const filteredAlerts = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -832,14 +957,17 @@ const inactiveDeviceCount = computed(() => liveDevices.value.filter((device) => 
 const onlineSensorCount = computed(() => sensors.value.filter((sensor) => sensor.status === 'Online').length)
 const offlineSensorCount = computed(() => sensors.value.filter((sensor) => sensor.status === 'Offline').length)
 const latestReadingAge = computed(() => {
-  const timestamps = liveReadings.value
-    .map((reading) => new Date(reading.created_at).getTime())
-    .filter((timestamp) => Number.isFinite(timestamp))
+  void iotClock.value
+  const timestamps = [
+    ...liveReadings.value.map((reading) => reading.created_at),
+    ...liveDevices.value.map((device) => device.latest_reading?.created_at).filter((value): value is string => Boolean(value)),
+  ].map((value) => Date.parse(value)).filter(Number.isFinite)
   if (!timestamps.length) return '—'
-  const minutes = Math.max(0, Math.floor((Date.now() - Math.max(...timestamps)) / 60000))
-  return minutes < 1 ? 'Just now' : `${minutes} min${minutes === 1 ? '' : 's'} ago`
+  const age = relativeReadingAge(new Date(Math.max(...timestamps)).toISOString(), iotClock.value)
+  return age ? t(`adminModules.iot.relativeTime.${age.key}`, age.params || {}) : '—'
 })
-const devicesWithReadingsCount = computed(() => liveDevices.value.filter((device) => device.last_seen !== null).length)
+const devicesWithReadingsCount = computed(() => sensorRows.value.filter((sensor) => sensor.lastReading !== '—').length)
+const hasSensorReadings = computed(() => sensorRows.value.some((sensor) => sensor.readingId !== '—'))
 const maintenanceSensorCount = computed(
   () => sensors.value.filter((s) => s.status === 'Maintenance').length,
 )
@@ -1035,7 +1163,7 @@ async function loadLiveAlertDetail() {
       await nextTick()
       const dialog = document.querySelector<HTMLElement>('.live-alert-detail-modal')
       if (dialog && !dialog.contains(document.activeElement))
-        dialog.querySelector<HTMLElement>('[aria-label="Close alert details"]')?.focus({ preventScroll: true })
+        dialog.querySelector<HTMLElement>('.live-alert-modal-head > button')?.focus({ preventScroll: true })
     }
   }
 }
@@ -1045,6 +1173,7 @@ function openLiveAlertDetails(alert: PlantAlert) {
   selectedLiveAlert.value = alert
   liveAlertDetail.value = null
   liveAlertDetailError.value = ''
+  liveAlertIdentifierFeedback.value = ''
   liveAlertDetailOpen.value = true
   void loadLiveAlertDetail()
 }
@@ -1056,6 +1185,7 @@ function closeLiveAlertDetails() {
   selectedLiveAlert.value = null
   liveAlertDetail.value = null
   liveAlertDetailError.value = ''
+  liveAlertIdentifierFeedback.value = ''
   liveAlertDetailLoading.value = false
   void nextTick(() => {
     if (!liveAlertDetailOpen.value && opener?.isConnected) opener.focus({ preventScroll: true })
@@ -1529,7 +1659,7 @@ const confirmDeleteSensor = () => {
             <p>{{ t('adminModules.iot.networkEyebrow') }}</p>
             <h2>Device status and reporting</h2>
           </div>
-          <span class="live"><i></i>{{ iotLoading ? 'Loading API data' : devicesError || readingsError || alertsError ? 'API unavailable' : 'PostgreSQL API data' }}</span>
+          <span v-if="iotRefreshing" class="iot-refreshing" role="status" aria-live="polite">{{ t('adminModules.iot.refreshing') }}</span>
         </div>
         <div class="network-metrics">
           <article>
@@ -1556,7 +1686,7 @@ const confirmDeleteSensor = () => {
             <p>{{ t('adminModules.iot.liveFeed') }}</p>
             <h2>Latest Available Readings</h2>
           </div>
-          <span class="live"><i></i>{{ iotLoading ? 'Loading API data' : devicesError || readingsError ? 'Device or reading API unavailable' : 'PostgreSQL API data' }}</span>
+          <span v-if="iotRefreshing" class="iot-refreshing" role="status" aria-live="polite">{{ t('adminModules.iot.refreshing') }}</span>
         </div>
         <div class="filters">
           <label
@@ -1564,59 +1694,68 @@ const confirmDeleteSensor = () => {
             ><input
               v-model="search"
               :placeholder="t('adminModules.iot.searchPlaceholder')" /></label
-          ><select v-model="filter">
+          ><select v-officer-dropdown v-model="filter">
             <option>All</option>
             <option v-for="status in iotStatusOptions" :key="status" :value="status">{{ status }}</option>
           </select>
         </div>
-        <div class="table-scroll admin-table-scroll" tabindex="0" role="region" aria-label="IoT records">
-          <p v-if="readingsError" role="alert">Reading data unavailable: {{ readingsError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></p>
-          <p v-else-if="iotLoading && !readingsLoaded">Loading readings…</p>
-          <p v-else-if="readingsLoaded && !liveReadings.length">No readings received yet.</p>
-          <table class="admin-data-table admin-reading-table">
+        <div class="sensor-device-container iot-monitoring-container">
+        <div class="table-scroll admin-table-scroll sensor-device-scroll" tabindex="0" role="region" aria-label="IoT records">
+          <p v-if="readingsError" role="alert">{{ t('adminModules.iot.readingsUnavailable', { error: readingsError }) }} <button class="table-action" type="button" @click="loadAdminIoTData">{{ t('adminModules.alertDetails.retry') }}</button></p>
+          <p v-else-if="iotLoading && !readingsLoaded">{{ t('adminModules.iot.loadingApi') }}…</p>
+          <p v-else-if="readingsLoaded && !hasSensorReadings">{{ t('adminModules.iot.noReadings') }}</p>
+          <table class="admin-data-table admin-device-table sensor-device-table">
+            <colgroup>
+              <col style="width: 12%"><col style="width: 12%"><col style="width: 8%">
+              <col style="width: 9%"><col style="width: 8%"><col style="width: 10%">
+              <col style="width: 8%"><col style="width: 7%"><col style="width: 8%">
+              <col style="width: 11%"><col style="width: 7%">
+            </colgroup>
             <thead>
               <tr>
-                <th>Sensor</th>
-                <th>Device</th>
-                <th>Plant</th>
-                <th>Temperature</th>
-                <th>Humidity</th>
+                <th>{{ t('adminModules.columns.deviceName') }}</th>
+                <th>{{ t('adminModules.columns.deviceType') }}</th>
+                <th>{{ t('adminModules.columns.plantId') }}</th>
+                <th>{{ t('adminModules.columns.temperature') }}</th>
+                <th>{{ t('adminModules.columns.humidity') }}</th>
                 <th>{{ t('adminModules.columns.soilMoisture') }}</th>
-                <th>Rainfall</th>
-                <th>Motion</th>
-                <th>Status</th>
+                <th>{{ t('adminModules.columns.rainfall') }}</th>
+                <th>{{ t('adminModules.columns.motion') }}</th>
+                <th>{{ t('adminModules.columns.status') }}</th>
                 <th>{{ t('adminModules.columns.lastReading') }}</th>
-                <th>Action</th>
+                <th>{{ t('adminModules.columns.actions') }}</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-if="iotLoading && !devicesLoaded"><td colspan="11">Loading sensors…</td></tr>
-              <tr v-else-if="devicesError"><td colspan="11">{{ devicesError }} <button class="table-action" type="button" @click="loadAdminIoTData">Retry</button></td></tr>
-              <tr v-else-if="!liveDevices.length"><td colspan="11">No devices registered yet.</td></tr>
-              <tr v-else-if="!filteredIoTSensors.length"><td colspan="11">No sensors match these filters.</td></tr>
+              <tr v-if="iotLoading && !devicesLoaded"><td colspan="11">{{ t('adminModules.iot.loadingDevices') }}</td></tr>
+              <tr v-else-if="devicesError"><td colspan="11">{{ devicesError }} <button class="table-action" type="button" @click="loadAdminIoTData">{{ t('adminModules.alertDetails.retry') }}</button></td></tr>
+              <tr v-else-if="!liveDevices.length"><td colspan="11">{{ t('adminModules.iot.noDevices') }}</td></tr>
+              <tr v-else-if="!filteredIoTSensors.length"><td colspan="11">{{ t('adminModules.iot.noMatchingDevices') }}</td></tr>
               <tr v-for="s in filteredIoTSensors" :key="s.id">
-                <td>
-                  <strong><AdminTableIdentifier :value="s.id" copy-label="Copy full Sensor ID" /></strong>
+                <td class="sensor-identity-cell">
+                  <span class="sensor-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="12" height="11" rx="3"/><path d="M7 19v3m4-3v3M7 11v4h4v-4M16 3a7 7 0 0 1 6 6m-7-2a3 3 0 0 1 3 3"/></svg></span>
+                  <strong class="sensor-device-name">{{ dataLabel(s.deviceName) }}</strong><small><AdminTableIdentifier :value="s.id" copy-label="Copy full Sensor ID" /></small>
                 </td>
-                <td>{{ dataLabel(s.deviceName) }}</td>
-                <td>{{ s.plant }}</td>
-                <td>{{ s.temperature }}</td>
-                <td>{{ s.humidity }}</td>
-                <td>{{ s.soilMoisture }}</td>
-                <td>{{ dataLabel(s.rainfall) }}</td>
-                <td>{{ dataLabel(s.movement) }}</td>
-                <td>
+                <td class="sensor-type-cell"><span class="sensor-cell-label">{{ t('adminModules.columns.deviceType') }}</span>{{ dataLabel(s.deviceType) }}</td>
+                <td><span class="sensor-cell-label">{{ t('adminModules.columns.plantId') }}:</span>{{ s.plant }}</td>
+                <td><span class="sensor-cell-label">{{ t('adminModules.columns.temperature') }}:</span>{{ s.temperature }}</td>
+                <td><span class="sensor-cell-label">{{ t('adminModules.columns.humidity') }}:</span>{{ s.humidity }}</td>
+                <td><span class="sensor-cell-label">{{ t('adminModules.columns.soilMoisture') }}:</span>{{ s.soilMoisture }}</td>
+                <td><span class="sensor-cell-label">{{ t('adminModules.columns.rainfall') }}:</span>{{ dataLabel(s.rainfall) }}</td>
+                <td><span class="sensor-cell-label">{{ t('adminModules.columns.motion') }}:</span>{{ dataLabel(s.movement) }}</td>
+                <td><span class="sensor-cell-label">{{ t('adminModules.columns.status') }}:</span>
                   <em class="badge" :class="s.status.toLowerCase()">{{ s.status }}</em>
                 </td>
-                <td>{{ dataLabel(s.lastReading) }}</td>
-                <td>
-                  <button class="table-action" type="button" @click="openSensorDetails(s)">
+                <td><span class="sensor-cell-label">{{ t('adminModules.columns.lastReading') }}:</span>{{ dataLabel(s.lastReading) }}</td>
+                <td class="sensor-actions-cell">
+                  <div class="actions"><button class="table-action" type="button" @click="openSensorDetails(s)">
                     View
-                  </button>
+                  </button></div>
                 </td>
               </tr>
             </tbody>
           </table>
+        </div>
         </div>
       </section>
       <section class="panel">
@@ -1716,7 +1855,7 @@ const confirmDeleteSensor = () => {
             ><input
               v-model="search"
               :placeholder="t('adminModules.sensors.searchPlaceholder')" /></label
-          ><select v-model="filter">
+          ><select v-officer-dropdown v-model="filter">
             <option>All</option>
             <option>Online</option>
             <option>Offline</option>
@@ -1823,13 +1962,13 @@ const confirmDeleteSensor = () => {
             ><span>⌕</span
             ><input v-model="search" :placeholder="t('adminModules.alerts.searchPlaceholder')"
           /></label>
-          <select v-model="alertStatusFilter" :aria-label="t('adminModules.alerts.filterByStatus')">
+          <select v-officer-dropdown v-model="alertStatusFilter" :aria-label="t('adminModules.alerts.filterByStatus')">
             <option value="All Statuses">{{ t('common.allStatuses') }}</option>
             <option v-for="item in ['New', 'Reviewing', 'Resolved']" :key="item" :value="item">
               {{ dataLabel(item) }}
             </option>
           </select>
-          <select v-model="alertSeverityFilter" aria-label="Filter alerts by severity">
+          <select v-officer-dropdown v-model="alertSeverityFilter" aria-label="Filter alerts by severity">
             <option>All Severities</option>
             <option>High</option>
             <option>Medium</option>
@@ -1924,7 +2063,7 @@ const confirmDeleteSensor = () => {
             ><input
               v-model="search"
               :placeholder="t('adminModules.activity.searchPlaceholder')" /></label
-          ><select v-model="filter">
+          ><select v-officer-dropdown v-model="filter">
             <option value="All">{{ t('common.all') }}</option>
             <option v-for="item in ['Info', 'Security', 'Warning']" :key="item" :value="item">
               {{ dataLabel(item) }}
@@ -2089,46 +2228,89 @@ const confirmDeleteSensor = () => {
         @keydown="trapModalFocus"
         @keydown.esc="closeLiveAlertDetails"
       >
-        <header class="sensor-modal-head">
-          <div>
-            <p>THREAT ALERT</p>
-            <h2 id="live-alert-details-title">Alert Details</h2>
+        <header class="sensor-modal-head live-alert-modal-head">
+          <div class="live-alert-heading">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 22 20H2L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg>
+            <div>
+              <p>{{ t('adminModules.alertDetails.eyebrow') }}</p>
+              <h2 id="live-alert-details-title">{{ t('adminModules.alertDetails.title') }}</h2>
+            </div>
           </div>
-          <button type="button" aria-label="Close alert details" @click="closeLiveAlertDetails">×</button>
+          <button type="button" :aria-label="t('adminModules.alertDetails.closeAlertDetails')" @click="closeLiveAlertDetails">×</button>
         </header>
 
-        <p v-if="liveAlertDetailLoading" role="status">Loading alert details…</p>
-        <div v-else-if="liveAlertDetailError" class="detail-section" role="alert">
-          <p>{{ liveAlertDetailError }}</p>
-          <div class="sensor-modal-actions alert-modal-actions">
-            <button class="secondary" type="button" @click="loadLiveAlertDetail">Retry</button>
-            <button class="primary" type="button" @click="closeLiveAlertDetails">Close</button>
+        <div class="live-alert-modal-content">
+          <p v-if="liveAlertDetailLoading" class="live-alert-loading" role="status">{{ t('adminModules.alertDetails.loading') }}</p>
+          <div v-else-if="liveAlertDetailError" class="detail-section live-alert-error" role="alert">
+            <p>{{ liveAlertDetailError }}</p>
+            <div class="sensor-modal-actions alert-modal-actions">
+              <button class="secondary" type="button" @click="loadLiveAlertDetail">{{ t('adminModules.alertDetails.retry') }}</button>
+              <button class="primary" type="button" @click="closeLiveAlertDetails">{{ t('adminModules.alertDetails.close') }}</button>
+            </div>
           </div>
+          <template v-else-if="liveAlertDetail">
+            <section class="detail-section live-alert-section">
+              <h3 class="live-alert-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M8 9h8M8 13h8M8 17h5"/></svg>
+                {{ t('adminModules.alertDetails.alertDetails') }}
+              </h3>
+              <dl class="live-alert-field-grid">
+                <div v-for="field in liveAlertDetailFields" :key="field.key" class="live-alert-field">
+                  <dt><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path :d="field.icon" stroke-linecap="round" stroke-linejoin="round"/></svg>{{ field.label }}</dt>
+                  <dd>
+                    <span v-if="field.badge" class="live-alert-badge" :class="[`is-${field.badge}`, `is-${field.value.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`]">{{ field.value }}</span>
+                    <span v-else-if="field.copyable" class="live-alert-identifier">
+                      <code :title="field.value">{{ shortenAlertIdentifier(field.value) }}</code>
+                      <button type="button" :aria-label="t('adminModules.alertDetails.copyIdentifier')" @click.stop="copyLiveAlertIdentifier(field.value)">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg>
+                      </button>
+                    </span>
+                    <span v-else>{{ field.value }}</span>
+                    <small v-if="field.secondary"><span class="live-alert-identifier"><code :title="field.secondary">{{ shortenAlertIdentifier(field.secondary) }}</code><button type="button" :aria-label="t('adminModules.alertDetails.copyIdentifier')" @click.stop="copyLiveAlertIdentifier(field.secondary)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg></button></span></small>
+                  </dd>
+                </div>
+              </dl>
+            </section>
+
+            <section class="detail-section live-alert-section">
+              <h3 class="live-alert-section-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
+                {{ t('adminModules.alertDetails.recordedDetails') }}
+              </h3>
+              <template v-if="liveAlertReading">
+                <dl class="live-alert-reading-grid">
+                  <div><dt>{{ t('adminModules.alertDetails.metric') }}</dt><dd>{{ liveAlertReading.metric }}</dd></div>
+                  <div><dt>{{ t('adminModules.alertDetails.recordedValue') }}</dt><dd class="live-alert-recorded-value">{{ liveAlertReading.value }}</dd></div>
+                  <div v-if="liveAlertReading.minimum !== undefined"><dt>{{ t('adminModules.alertDetails.minimumThreshold') }}</dt><dd>{{ liveAlertReading.minimum }}</dd></div>
+                  <div v-if="liveAlertReading.maximum !== undefined"><dt>{{ t('adminModules.alertDetails.maximumThreshold') }}</dt><dd>{{ liveAlertReading.maximum }}</dd></div>
+                </dl>
+                <div v-if="liveAlertReading.thresholdNotice" class="live-alert-threshold-notice" role="status">
+                  <strong><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 22 20H2L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg>{{ liveAlertReading.thresholdNotice.title }}</strong>
+                  <p>{{ liveAlertReading.thresholdNotice.description }}</p>
+                </div>
+                <div v-if="liveAlertReading.supporting.length" class="live-alert-supporting-readings">
+                  <h4>{{ t('adminModules.alertDetails.otherReadings') }}</h4>
+                  <dl class="live-alert-reading-grid">
+                    <div v-for="reading in liveAlertReading.supporting" :key="reading.label"><dt>{{ reading.label }}</dt><dd>{{ reading.value }}</dd></div>
+                  </dl>
+                </div>
+                <p v-if="liveAlertReading.metric === '—' && liveAlertReading.value === '—' && !liveAlertReading.supporting.length" class="empty-evidence">{{ t('adminModules.alertDetails.noRecordedData') }}</p>
+              </template>
+              <p v-else class="empty-evidence">{{ t('adminModules.alertDetails.noRecordedData') }}</p>
+            </section>
+
+            <section v-if="liveAlertOtherFields.length" class="detail-section live-alert-section">
+              <h3 class="live-alert-section-title">{{ t('adminModules.alertDetails.otherDetails') }}</h3>
+              <dl class="live-alert-reading-grid">
+                <div v-for="field in liveAlertOtherFields" :key="field.label"><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>
+              </dl>
+            </section>
+            <p v-if="liveAlertIdentifierFeedback" class="live-alert-copy-feedback" role="status" aria-live="polite">{{ liveAlertIdentifierFeedback }}</p>
+            <div class="sensor-modal-actions live-alert-modal-actions">
+              <button class="primary" type="button" @click="closeLiveAlertDetails">{{ t('adminModules.alertDetails.close') }}</button>
+            </div>
+          </template>
         </div>
-        <template v-else-if="liveAlertDetail">
-          <div class="detail-section">
-            <h3>ALERT DETAILS</h3>
-            <dl>
-              <div v-for="field in liveAlertDetailFields" :key="field.label">
-                <dt>{{ field.label }}</dt>
-                <dd>{{ field.value }}</dd>
-              </div>
-            </dl>
-          </div>
-          <div class="detail-section">
-            <h3>RECORDED DETAILS</h3>
-            <dl v-if="liveAlertRecordedFields.length">
-              <div v-for="field in liveAlertRecordedFields" :key="field.label" class="detail-wide">
-                <dt>{{ field.label }}</dt>
-                <dd>{{ field.value }}</dd>
-              </div>
-            </dl>
-            <p v-else class="empty-evidence">No additional recorded details are available.</p>
-          </div>
-          <div class="sensor-modal-actions">
-            <button class="primary" type="button" @click="closeLiveAlertDetails">Close</button>
-          </div>
-        </template>
       </section>
     </div>
 
@@ -2549,6 +2731,33 @@ const confirmDeleteSensor = () => {
 </template>
 
 <style scoped>
+.iot-refreshing {
+  flex: 0 0 auto;
+  color: #6f8278;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-reading-table.admin-reading-table) {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  white-space: normal;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-reading-table.admin-reading-table :is(th, td)) {
+  padding: 9px 7px;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+:global(.admin-shell.admin-shell.admin-shell .admin-reading-table.admin-reading-table td:has(.table-action)) {
+  width: auto;
+  white-space: normal;
+}
+@media (max-width: 1024px) {
+  :global(.admin-shell.admin-shell.admin-shell .admin-reading-table.admin-reading-table) { min-width: 1000px; }
+}
+@media (max-width: 620px) {
+  :global(.admin-shell.admin-shell.admin-shell .admin-reading-table.admin-reading-table) { min-width: 960px; }
+}
 * {
   box-sizing: border-box;
 }
@@ -2907,6 +3116,7 @@ td i {
   grid-template-columns: minmax(240px, 1fr) 160px 160px;
 }
 .filters label {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2915,8 +3125,16 @@ td i {
   border-radius: 9px;
   background: #f9fbf8;
 }
+.filters label:focus-within {
+  border-color: #6d927b;
+  box-shadow: 0 0 0 2px #dce8de;
+}
 .filters input {
-  width: 100%;
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 10px 0;
   border: 0;
   outline: 0;
@@ -2924,6 +3142,11 @@ td i {
   color: #36574b;
   font: inherit;
   font-size: 10px;
+}
+.admin-shell.admin-shell.admin-shell .filters input:focus-visible {
+  outline: 0;
+  outline-offset: 0;
+  box-shadow: none;
 }
 .filters select {
   padding: 0 11px;
@@ -3486,6 +3709,270 @@ td i {
   font-weight: 700;
   overflow-wrap: anywhere;
 }
+.live-alert-detail-modal {
+  width: min(900px, 100%);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.live-alert-modal-head {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  min-height: 82px;
+  margin: 0;
+  padding: 16px 22px;
+  align-items: center;
+  background: linear-gradient(115deg, #124936, #1f684e);
+  color: #fff;
+}
+.live-alert-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.live-alert-heading > svg {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+}
+.live-alert-modal-head p {
+  color: #d5e9dd;
+  font-size: 10px;
+}
+.live-alert-modal-head h2 {
+  color: #fff;
+  font-size: 22px;
+}
+.live-alert-modal-head > button {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, .25);
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+}
+.live-alert-modal-head > button:focus-visible,
+.live-alert-detail-modal button:focus-visible {
+  outline: 3px solid #a8dfbe;
+  outline-offset: 3px;
+}
+.live-alert-modal-content {
+  padding: 18px 22px 20px;
+}
+.live-alert-section {
+  margin-top: 12px;
+  padding: 0;
+  overflow: hidden;
+  border-color: #d3e1d8;
+  border-radius: 12px;
+}
+.live-alert-section-title {
+  min-height: 44px;
+  margin: 0 !important;
+  padding: 10px 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #205b45;
+  color: #fff !important;
+  font-size: 13px !important;
+  letter-spacing: .35px !important;
+}
+.live-alert-section-title svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+}
+.live-alert-field-grid,
+.live-alert-reading-grid {
+  margin: 0;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+}
+.live-alert-field {
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: minmax(105px, .9fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: 10px;
+  border-radius: 9px;
+  background: #eef4ef;
+}
+.live-alert-field dt {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #254a3b;
+  font-size: 12px;
+  font-weight: 650;
+}
+.live-alert-field dt svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #176044;
+}
+.live-alert-field dd {
+  min-width: 0;
+  margin: 0;
+  color: #203a30;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.live-alert-field dd small {
+  display: block;
+  margin-top: 3px;
+  color: #62756b;
+  font-size: 11px;
+  font-weight: 500;
+}
+.live-alert-identifier {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+}
+.live-alert-identifier code {
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-alert-identifier button {
+  width: 23px;
+  height: 23px;
+  padding: 3px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #24674d;
+  cursor: pointer;
+}
+.live-alert-identifier button:hover {
+  background: #dcebe0;
+}
+.live-alert-identifier button svg {
+  width: 16px;
+  height: 16px;
+}
+.live-alert-copy-feedback {
+  margin: 0;
+  color: #315f48;
+  font-size: 12px;
+}
+.live-alert-badge {
+  min-height: 27px;
+  padding: 5px 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 99px;
+  background: #e4eee8;
+  color: #234b3a;
+  font-size: 11px;
+}
+.live-alert-badge.is-high,
+.live-alert-badge.is-critical {
+  background: #fce8e4;
+  color: #a33425;
+}
+.live-alert-badge.is-medium,
+.live-alert-badge.is-warning {
+  background: #fff2d9;
+  color: #855300;
+}
+.live-alert-reading-grid {
+  padding: 14px 17px;
+  gap: 14px 24px;
+}
+.live-alert-reading-grid dt {
+  color: #64786d;
+  font-size: 12px;
+  font-weight: 600;
+}
+.live-alert-reading-grid dd {
+  margin: 4px 0 0;
+  color: #213b30;
+  font-size: 15px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.live-alert-reading-grid .live-alert-recorded-value {
+  color: #a8342a;
+}
+.live-alert-threshold-notice {
+  margin: 0 16px 14px;
+  padding: 12px 14px;
+  border-radius: 9px;
+  background: #fff5e5;
+  color: #80500b;
+}
+.live-alert-threshold-notice strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.live-alert-threshold-notice svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+.live-alert-threshold-notice p {
+  margin: 6px 0 0 26px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.live-alert-supporting-readings {
+  margin: 0 16px 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e3ebe5;
+}
+.live-alert-supporting-readings h4 {
+  margin: 0 0 2px;
+  color: #375f4d;
+  font-size: 12px;
+}
+.live-alert-supporting-readings .live-alert-reading-grid {
+  padding-inline: 0;
+}
+.live-alert-other-details .live-alert-reading-grid {
+  padding: 14px 17px;
+}
+.live-alert-loading,
+.live-alert-error {
+  margin: 0;
+  color: #506b5e;
+  font-size: 14px;
+}
+.live-alert-loading {
+  padding: 30px 8px;
+  text-align: center;
+}
+.live-alert-modal-actions {
+  margin-top: 14px;
+}
+.live-alert-modal-actions button {
+  min-width: 100px;
+  min-height: 40px;
+  border-radius: 8px;
+  background: #267355;
+}
 .sensor-modal-actions {
   margin-top: 18px;
   display: flex;
@@ -3719,6 +4206,76 @@ td i {
   .network-overview,
   .sensor-modal {
     padding: 17px;
+  }
+  .live-alert-detail-modal {
+    max-height: calc(100dvh - 24px);
+    padding: 0;
+    border-radius: 13px;
+  }
+  .live-alert-modal-head {
+    min-height: 68px;
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .live-alert-heading {
+    gap: 10px;
+  }
+  .live-alert-heading > svg {
+    width: 25px;
+    height: 25px;
+  }
+  .live-alert-modal-head h2 {
+    font-size: 18px;
+  }
+  .live-alert-modal-head > button {
+    width: 36px;
+    height: 36px;
+  }
+  .live-alert-modal-content {
+    padding: 12px 13px 15px;
+  }
+  .live-alert-section {
+    margin-top: 10px;
+    border-radius: 10px;
+  }
+  .live-alert-section-title {
+    min-height: 40px;
+    padding: 9px 11px;
+    font-size: 12px !important;
+  }
+  .live-alert-field-grid,
+  .live-alert-reading-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+    padding: 10px;
+  }
+  .live-alert-field {
+    min-height: 48px;
+    grid-template-columns: minmax(105px, .8fr) minmax(0, 1.2fr);
+    gap: 8px;
+    padding: 7px 8px;
+  }
+  .live-alert-field dt {
+    font-size: 11px;
+  }
+  .live-alert-field dd {
+    font-size: 12px;
+  }
+  .live-alert-reading-grid dd {
+    font-size: 14px;
+  }
+  .live-alert-threshold-notice {
+    margin: 0 10px 10px;
+    padding: 10px;
+  }
+  .live-alert-threshold-notice p {
+    margin-left: 0;
+  }
+  .live-alert-supporting-readings {
+    margin-inline: 10px;
+  }
+  .live-alert-modal-actions button {
+    min-height: 42px;
   }
   .sensor-view-modal {
     width: 100%;

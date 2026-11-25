@@ -14,7 +14,7 @@ import * as speciesRequestRules from '../src/services/reviewSpeciesRequest.ts'
 import { observationOrigin, readQueuePage } from '../src/services/observationQueue.ts'
 import { formatObservationId } from '../src/utils/observationId.ts'
 import * as threatAlertService from '../src/services/threatAlerts.ts'
-import { alertSource, alertStatusLabel, alertTypeLabel } from '../src/utils/threatAlertDisplay.ts'
+import { alertSource, alertStatusLabel, alertTypeLabel, sensorUnit } from '../src/utils/threatAlertDisplay.ts'
 import { threatAlertBadgeStyle } from '../src/utils/workflowBadge.ts'
 const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'utf8')
 const source = read('views/conservation/ConservationDashboardView.vue')
@@ -62,8 +62,15 @@ function harness(language='en',data=seed(),transport=null) {
       const alerts=body.alerts.map(item=>({...item,id:item.id,deviceId:item.device_id,readingId:item.reading_id,cameraId:item.camera_id,metric:item.metric,value:item.value,status:item.status,detectedAt:item.detected_at||item.created_at,createdAt:item.created_at,videoPath:item.video_path,responses:body.responses.filter(row=>row.alert_id===item.id).map(row=>({id:row.id,alertId:row.alert_id,officerSubject:row.officer_subject,note:row.note,status:row.status,createdAt:row.created_at}))}))
       return{alerts,alertsCapped:false,historyCapped:false}
     }}
+    if(name.endsWith('/alertEvidence'))return{loadAlertContext:async alert=>({
+      current_assignment:{state:'verified',basis:'current_device_assignment',device_id:alert.deviceId,plant_id:'18'},
+      plant_at_detection:{state:'verified',plant_id:'18'},
+      reading:{state:'verified',basis:'alert_snapshot',id:alert.readingId,device_id:alert.deviceId,received_at:alert.detectedAt, captured_at:alert.detectedAt,values:{[alert.metric]:alert.value}},
+      historical_threshold:alert.value > 0 ? {min:null,max:alert.value-1,direction:'high',limit:alert.value-1} : {min:1,max:null,direction:'low',limit:1},
+    })}
+    if(name.endsWith('/cameraEvents'))return{loadCameraEvents:async()=>[]}
     if(name.endsWith('/threatAlertRefresh'))return{createThreatAlertRefresh:()=>({start(){},stop(){},refresh(){}})}
-    if(name.endsWith('/threatAlertDisplay'))return{alertSource,alertStatusLabel,alertTypeLabel}
+    if(name.endsWith('/threatAlertDisplay'))return{alertSource,alertStatusLabel,alertTypeLabel,sensorUnit}
     if(name.endsWith('/workflowBadge'))return{threatAlertBadgeStyle}
     if(name.endsWith('/useConservationText'))return{useConservationText:()=>({ct:translate})}
     if(name.endsWith('.vue'))return{__esModule:true,default:{name:name.split('/').at(-1).replace('.vue','')}}
@@ -72,7 +79,7 @@ function harness(language='en',data=seed(),transport=null) {
   vm.runInNewContext(`(function(){${transpile(script.content)}})()`,context)
   const scope=vue.effectScope(),state=scope.run(()=>context.exports.default.setup({}, {expose(){}}))
   vm.runInNewContext(`(function(){${transpile(template.code)}})()`,context)
-  return{state,calls,routes,render:()=>context.exports.render({},[],{},vue.proxyRefs(state),{},{}),async load(){await Promise.all([state.loadObservations(),state.loadRegistrations(),state.loadFieldObservations(),state.loadPlants(),state.loadSpecies(),state.loadAlerts()]);await vue.nextTick()},session(user,pending=false){session={user,pending};listener(user,pending)},stop(){cleanups.forEach(fn=>fn());scope.stop();assert.ok(unsubscribed)}}
+  return{state,calls,routes,render:()=>context.exports.render({},[],{},vue.proxyRefs(state),{},{}),async load(){await Promise.all([state.loadObservations(),state.loadRegistrations(),state.loadFieldObservations(),state.loadPlants(),state.loadSpecies(),state.loadAlerts()]);await new Promise(resolve=>setImmediate(resolve));await vue.nextTick()},session(user,pending=false){session={user,pending};listener(user,pending)},stop(){cleanups.forEach(fn=>fn());scope.stop();assert.ok(unsubscribed)}}
 }
 
 test('Overview keeps all six loaded count sources and removes visible count scope notes',async()=>{
@@ -138,7 +145,7 @@ test('map, health breakdown, alerts and all navigation shortcuts retain actual s
     assert.ok(!map.props.plants.some(plant=>plant.id==='PL019'))
     for(const button of tree.filter(node=>node.type==='button'&&node.props?.onClick))button.props.onClick()
     for(const destination of ['conservation-species','conservation-reviews','conservation-observations','conservation-reports','conservation-map','conservation-alerts'])assert.ok(h.routes.some(route=>route.name===destination))
-    assert.ok(text(h.render()).includes('Temperature Threshold'))
+    assert.ok(text(h.render()).includes('High Temperature Detected'))
   }finally{h.stop()}
 })
 
@@ -236,8 +243,8 @@ test('Overview labels, table headings and shortcuts localize consistently in Eng
     const h=harness(language);try{
       await h.load();const data=JSON.parse(read(`locales/${language}.json`)).conservationDashboard
       assert.ok(text(h.render()).includes(data.summary.recentObservations));assert.ok(!text(h.render()).includes(data.countScope));assert.ok(!text(h.render()).includes(data.approvedMapRecords))
-      const messages=JSON.parse(read(`locales/${language}.json`)),alertMessages=messages.conservationText
-      assert.ok(text(h.render()).includes(alertMessages.temperaturethreshold));assert.ok(text(h.render()).includes(messages.dashboardValues.new))
+      const messages=JSON.parse(read(`locales/${language}.json`)),alertMessages=messages.conservationDashboard.alertCard.titles
+      assert.ok(text(h.render()).includes(alertMessages.highTemperature));assert.ok(text(h.render()).includes(messages.dashboardValues.new))
       for(const key of ['pendingPlantRegistrations','pendingObservations','fieldRecords'])assert.ok(text(h.render()).includes(data[key]))
       assert.ok(text(h.render()).includes(data.actions.searchObservations));assert.ok(!text(h.render()).includes('conservationDashboard.'))
     }finally{h.stop()}
@@ -275,17 +282,19 @@ test('attention-first cards reuse the original metric values and show consistent
   }finally{h.stop()}
 })
 
-test('full-width registrations precede paired field observations/status while map, alerts and shortcuts remain in place',async()=>{
+test('dashboard groups alerts with species status, then registrations, then observations with species distribution',async()=>{
   const h=harness();try{
     await h.load();const root=h.render(),sections=nodes(root).filter(node=>node.type==='section'&&String(node.props?.class).includes('panel'))
     assert.equal(sections.length,6)
-    assert.ok(sections[0].props.class.includes('pending-review-panel'))
-    assert.ok(sections[1].props.class.includes('pending-observations-panel'))
-    assert.ok(sections[2].props.class.includes('conservation-status-panel'))
-    assert.ok(text(sections[3]).includes('Species Distribution'));assert.ok(text(sections[4]).includes('Conservation Alerts'));assert.ok(text(sections[5]).includes('Quick Actions'))
-    const medium=nodes(root).find(node=>node.type==='div'&&node.props?.class==='two-column overview-medium')
-    assert.ok(nodes(medium).includes(sections[1]));assert.ok(nodes(medium).includes(sections[2]));assert.ok(!nodes(medium).includes(sections[0]))
-    const table=nodes(sections[0]).find(node=>node.type==='table')
+    assert.ok(sections[0].props.class.includes('conservation-status-panel'))
+    assert.ok(text(sections[1]).includes('Conservation Alerts'))
+    assert.ok(sections[2].props.class.includes('pending-review-panel'))
+    assert.ok(sections[3].props.class.includes('pending-observations-panel'))
+    assert.ok(text(sections[4]).includes('Species Distribution'));assert.ok(text(sections[5]).includes('Quick Actions'))
+    const rows=nodes(root).filter(node=>node.type==='div'&&String(node.props?.class).includes('two-column'))
+    assert.ok(nodes(rows[0]).includes(sections[0]));assert.ok(nodes(rows[0]).includes(sections[1]))
+    assert.ok(!nodes(rows[0]).includes(sections[2]));assert.ok(nodes(rows[1]).includes(sections[3]));assert.ok(nodes(rows[1]).includes(sections[4]))
+    const table=nodes(sections[2]).find(node=>node.type==='table')
     assert.deepEqual(nodes(table).filter(node=>node.type==='th').map(text),['Plant ID','Species','Submitted','Status','Action'])
     assert.deepEqual(nodes(table).filter(node=>node.type==='col').slice(0,2).map(node=>node.props.class),['overview-plant','overview-species'])
     const row=nodes(table).find(node=>node.type==='tr'&&node.key===seed().observations[2].id)
@@ -341,10 +350,10 @@ test('review sections use independent loading/error states and keep their existi
     assert.equal(text(h.render()).split('Loading observations...').length-1,2)
     await h.load()
     const panels=nodes(h.render()).filter(node=>node.type==='section'&&String(node.props?.class).includes('panel'))
-    assert.ok(text(panels[0]).includes('Pending Plant Registrations'));assert.ok(!text(panels[0]).includes('Observation ID'))
-    assert.ok(text(panels[1]).includes('Pending Observations'));assert.ok(text(panels[1]).includes('Field Records'))
-    nodes(panels[0]).find(node=>node.type==='button'&&text(node).includes('View All Submissions')).props.onClick()
-    nodes(panels[1]).find(node=>node.type==='button'&&text(node).includes('View All Observations')).props.onClick()
+    assert.ok(text(panels[2]).includes('Pending Plant Registrations'));assert.ok(!text(panels[2]).includes('Observation ID'))
+    assert.ok(text(panels[3]).includes('Pending Observations'));assert.ok(text(panels[3]).includes('Field Records'))
+    nodes(panels[2]).find(node=>node.type==='button'&&text(node).includes('View All Submissions')).props.onClick()
+    nodes(panels[3]).find(node=>node.type==='button'&&text(node).includes('View All Observations')).props.onClick()
     assert.equal(h.routes[0].name,'conservation-reviews');assert.equal(h.routes[1].name,'conservation-observations')
     h.state.registrationError.value='Observation source unavailable'
     assert.equal(nodes(h.render()).filter(node=>node.type==='table').length,1)

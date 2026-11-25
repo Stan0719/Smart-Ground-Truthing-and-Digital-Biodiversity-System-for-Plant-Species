@@ -84,11 +84,35 @@ test('Recent Alerts opens selected authorized detail in a read-only modal and De
   assert.match(source, /liveAlertDetailLoading/)
   assert.match(source, /liveAlertDetailError/)
   assert.match(source, /@click="loadLiveAlertDetail"/)
+  assert.match(source, /querySelector<HTMLElement>\('\.live-alert-modal-head > button'\)/)
   assert.match(source, /aria-modal="true"[\s\S]*?@keydown="trapModalFocus"[\s\S]*?@keydown\.esc="closeLiveAlertDetails"/)
   const liveModal = source.slice(source.indexOf('v-if="liveAlertDetailOpen"'), source.indexOf('v-if="alertModal === \'view\''))
   assert.doesNotMatch(liveModal, /responses\.manage|Mark as Reviewing|Resolve/)
   assert.match(source, /deviceType: scalarText\(device\.device_type\)/)
   assert.match(source, /serialNumber: '—'[\s\S]*?locationDescription: '—'[\s\S]*?installedAt: '—'/)
+})
+
+test('Admin alert details render localized sensor evidence as readable measurements and preserve responsive dialog behavior', () => {
+  const source = read('views/AdminModuleView.vue')
+  assert.match(source, /const alertRecord = \(value: unknown\)[\s\S]*?JSON\.parse\(value\)/)
+  assert.match(source, /const alertMetricUnits: Record<string, string> = \{[\s\S]*temperature: '°C',[\s\S]*humidity: '%'/)
+  assert.match(source, /const supportedMetrics = \['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall', 'sound'\]/)
+  assert.match(source, /evidence\?\.limits/)
+  assert.match(source, /hasOwnProperty\.call\(evidence, 'plant_id'\)[\s\S]*?const plant = hasDetectionPlant \? evidence\?\.plant_id/)
+  assert.match(source, /liveAlertReading\.thresholdNotice/)
+  assert.match(source, /class="live-alert-identifier"[\s\S]*copyLiveAlertIdentifier\(field\.value\)/)
+  assert.doesNotMatch(source.slice(source.indexOf('v-if="liveAlertDetailOpen"'), source.indexOf('v-if="alertModal === \'view\'')), /Sensor Evidence|JSON\.stringify\(value\)/)
+  assert.match(source, /\.live-alert-detail-modal[\s\S]*max-height: calc\(100dvh - 32px\)/)
+  assert.match(source, /\.live-alert-field-grid,[\s\S]*grid-template-columns: minmax\(0, 1fr\)/)
+
+  for (const locale of ['en', 'ms', 'zh-CN']) {
+    const messages = JSON.parse(readFileSync(new URL(`../src/locales/${locale}.json`, import.meta.url), 'utf8'))
+    const details = messages.adminModules.alertDetails
+    assert.ok(details.title)
+    assert.ok(details.aboveMaximum)
+    assert.ok(details.minimumThreshold)
+    for (const metric of ['temperature', 'humidity', 'soilMoisture', 'movement', 'rainfall', 'sound']) assert.ok(details.metrics[metric], `${locale}: ${metric}`)
+  }
 })
 
 test('alert read and response permissions retain the existing Administrator and Officer boundary', () => {

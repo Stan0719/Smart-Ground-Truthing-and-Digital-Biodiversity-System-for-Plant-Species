@@ -40,20 +40,23 @@ onMounted(() => {
 onBeforeUnmount(() => { disposed = true; generation++; stopSession?.(); window.removeEventListener('focus', refresh) })
 const accounts = computed(() => accountSummary(overview.value.users))
 const active = computed(() => overview.value.devices?.filter(d => d.status === 'Active').length ?? null)
+const inactive = computed(() => overview.value.devices?.filter(d => d.status === 'Inactive').length ?? null)
 const shown = (value: number | null | undefined) => value ?? (loading.value ? '…' : '—')
 const currentDate = computed(() => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuching', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now.value))
 const greeting = computed(() => {
   const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuching', hour: 'numeric', hourCycle: 'h23' }).format(now.value))
   return hour < 12 ? 'Good morning, Administrator' : hour < 18 ? 'Good afternoon, Administrator' : 'Good evening, Administrator'
 })
-const lastSync = computed(() => {
-  const times = overview.value.devices?.map(d => d.latest_reading?.created_at).filter((v): v is string => Boolean(v)).filter(v => Number.isFinite(Date.parse(v))) ?? []
-  return times.length ? overviewDate(times.sort((a, b) => Date.parse(b) - Date.parse(a))[0]) : '—'
-})
-const donutStyle = computed(() => {
-  const total = overview.value.devices?.length ?? 0
-  const percent = total ? (active.value ?? 0) / total * 100 : 0
-  return { background: `conic-gradient(#3b9671 0 ${percent}%, #e5e7eb ${percent}% 100%)` }
+const userDonutStyle = computed(() => {
+  const total = accounts.value?.total ?? 0
+  const colors = ['#246b4f', '#648da8', '#c89442', '#8977a9']
+  let stop = 0
+  const segments = userRoles.value.map((role, index) => {
+    const start = stop
+    stop += total ? role.count / total * 100 : 0
+    return `${colors[index]} ${start}% ${stop}%`
+  })
+  return { background: `conic-gradient(${total ? segments.join(', ') : '#e7ede9 0 100%'})` }
 })
 
 const openUserManagement = async () => {
@@ -85,8 +88,8 @@ const summaryCards = computed(() => [
   { title: 'totalUsers', value: shown(accounts.value?.total), note: accounts.value ? `${accounts.value.roles} account roles` : loading.value ? 'Loading accounts…' : 'Account directory unavailable', icon: '♙', tone: 'green' },
   { title: 'plantRecords', value: shown(overview.value.totals?.plants), note: 'Individual plant records', icon: '♧', tone: 'green' },
   { title: 'iotSensors', value: shown(overview.value.devices?.length), note: 'Registered devices', icon: '⌁', tone: 'blue' },
-  { title: 'activeSensors', value: shown(active.value), note: 'Active registration status', icon: '✓', tone: 'success' },
-  { title: 'offlineSensors', value: '—', note: 'Connectivity unavailable', icon: '×', tone: 'neutral' },
+  { title: 'activeSensors', value: shown(active.value), icon: '✓', tone: 'success' },
+  { title: 'offlineSensors', value: '—', icon: '×', tone: 'neutral' },
   { title: 'threatAlerts', value: shown(overview.value.totals?.alerts), note: 'Not resolved', icon: '!', tone: 'danger' },
 ])
 const threatAlerts = computed(() => (overview.value.alerts ?? []).slice().sort((a,b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0,3).map(a => ({
@@ -99,10 +102,20 @@ const sensorActivity = computed(() => (overview.value.devices ?? []).filter(d =>
   movement: d.latest_reading?.values.movement == null ? '—' : String(d.latest_reading.values.movement),
   status: d.status, update: overviewDate(d.latest_reading?.created_at),
 })))
-const userRoles = computed(() => ['Administrator', 'Conservation Officer', 'Botanist', 'Visitor'].map((role,index) => {
-  const count = accounts.value?.users.filter(u => u.role === role).length ?? 0
-  return { label: role, value: shown(accounts.value ? count : null), percent: accounts.value?.total ? count / accounts.value.total * 100 : 0, color: ['#28745a','#55a781','#91c7a8','#bed9cb'][index] }
+const userRoles = computed(() => [
+  { role: 'Administrator', title: 'administrators' },
+  { role: 'Conservation Officer', title: 'conservationOfficers' },
+  { role: 'Botanist', title: 'botanists' },
+  { role: 'Visitor', title: 'visitors' },
+].map((item,index) => {
+  const count = accounts.value?.users.filter(u => u.role === item.role).length ?? 0
+  return { label: t(`adminDashboard.roles.${item.title}`), count, value: shown(accounts.value ? count : null), percent: accounts.value?.total ? count / accounts.value.total * 100 : 0, color: ['#246b4f','#648da8','#c89442','#8977a9'][index] }
 }))
+const sensorStatuses = computed(() => [
+  { label: t('adminDashboard.activeSensors'), count: active.value, color: '#31916b' },
+  { label: t('adminDashboard.inactiveSensors'), count: inactive.value, color: '#8aa69a' },
+])
+const sensorStatusPercent = (count: number | null) => overview.value.devices?.length ? Math.min(100, (count ?? 0) / overview.value.devices.length * 100) : 0
 const activities = computed(() => (overview.value.events ?? []).slice(0,4).map(e => ({ id: e.id, title: e.reason.replaceAll('_',' '), time: overviewDate(e.created_at), type: 'user' })))
 const dataLabel = (value: string) => {
   const key = `dashboardValues.${value.toLowerCase().replace(/[^a-z0-9]+/g, '')}`
@@ -142,7 +155,69 @@ const dataLabel = (value: string) => {
         </article>
       </section>
 
+      <section class="panel quick-actions">
+        <div class="panel-header">
+          <div>
+            <p class="section-kicker">{{ t('adminDashboard.shortcuts') }}</p>
+            <h2>{{ t('adminDashboard.quickActions') }}</h2>
+          </div>
+        </div>
+        <div class="action-grid">
+          <button type="button" @click="openUserManagement">
+            <span>＋</span>
+            <div>
+              <strong>{{ t('adminDashboard.actions.addUser') }}</strong
+              ><small>{{ t('adminDashboard.actions.createAccount') }}</small>
+            </div>
+          </button>
+          <button type="button" @click="openIoTMonitoring">
+            <span>⌁</span>
+            <div>
+              <strong>{{ t('adminDashboard.actions.viewSensors') }}</strong
+              ><small>{{ t('adminDashboard.actions.openIot') }}</small>
+            </div>
+          </button>
+          <button type="button" @click="openThreatAlerts">
+            <span>!</span>
+            <div>
+              <strong>{{ t('adminDashboard.actions.viewAlerts') }}</strong
+              ><small>{{ t('adminDashboard.actions.reviewThreats') }}</small>
+            </div>
+          </button>
+          <button type="button" @click="openSystemActivity">
+            <span>↻</span>
+            <div>
+              <strong>{{ t('adminDashboard.actions.systemActivity') }}</strong
+              ><small>{{ t('adminDashboard.actions.viewAuditTrail') }}</small>
+            </div>
+          </button>
+        </div>
+      </section>
+
       <div class="dashboard-grid primary-grid">
+        <section class="panel user-summary">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">{{ t('adminDashboard.accessOverview') }}</p>
+              <h2>{{ t('adminDashboard.userSummary') }}</h2>
+            </div>
+            <button class="secondary-button" type="button" @click="openUserManagement">
+              {{ t('adminDashboard.manageUsers') }} →
+            </button>
+          </div>
+          <div class="user-chart-layout">
+            <div class="user-donut" :style="userDonutStyle" role="img" :aria-label="t('adminDashboard.userChartLabel', { total: shown(accounts?.total ?? null) })">
+              <div><strong>{{ shown(accounts?.total ?? null) }}</strong><span>{{ t('adminDashboard.totalUsers') }}</span></div>
+            </div>
+            <ul class="user-legend" :aria-label="t('adminDashboard.userSummary')">
+              <li v-for="role in userRoles" :key="role.label">
+                <span class="legend-swatch" :style="{ background: role.color }" aria-hidden="true"></span>
+                <span>{{ role.label }}</span><strong>{{ role.value }}</strong>
+              </li>
+            </ul>
+          </div>
+        </section>
+
         <section class="panel sensor-overview">
           <div class="panel-header">
             <div>
@@ -153,66 +228,17 @@ const dataLabel = (value: string) => {
               {{ t('adminDashboard.viewIotMonitoring') }} →
             </button>
           </div>
-          <div class="sensor-content">
-            <div class="donut" :style="donutStyle" role="img" :aria-label="'Active registration status; connectivity unavailable'">
-              <div>
-                <strong>{{ shown(overview.devices?.length) }}</strong><span>{{ t('adminDashboard.totalSensors') }}</span>
+          <div class="sensor-status-chart" role="img" :aria-label="t('adminDashboard.sensorStatusChartLabel', { active: shown(active), inactive: shown(inactive), total: shown(overview.devices?.length) })">
+            <div class="sensor-chart-total"><strong>{{ shown(overview.devices?.length) }}</strong><span>{{ t('adminDashboard.totalSensors') }}</span></div>
+            <div class="sensor-bars">
+              <div v-for="item in sensorStatuses" :key="item.label" class="sensor-bar-row">
+                <div class="sensor-bar-copy"><span>{{ item.label }}</span><strong>{{ shown(item.count) }}</strong></div>
+                <div class="sensor-bar-track"><span :style="{ width: `${sensorStatusPercent(item.count)}%`, background: item.color }"></span></div>
               </div>
-            </div>
-            <div class="sensor-legend">
-              <div>
-                <span class="dot active-dot"></span>
-                <p>
-                  {{ t('adminDashboard.activeSensors')
-                  }}<small>{{ 'Active registration status' }}</small>
-                </p>
-                <strong>{{ shown(active) }}</strong>
-              </div>
-              <div>
-                <span class="dot offline-dot"></span>
-                <p>
-                  {{ t('adminDashboard.offlineSensors')
-                  }}<small>{{ 'Connectivity unavailable' }}</small>
-                </p>
-                <strong>—</strong>
-              </div>
-              <div class="uptime">
-                <span>{{ t('adminDashboard.networkAvailability') }}</span
-                ><strong>—</strong>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel system-status">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">{{ t('adminDashboard.services') }}</p>
-              <h2>{{ t('adminDashboard.systemStatus') }}</h2>
-            </div>
-            <span class="all-operational" style="background: #f3f4f6; color: #617169">{{ 'Service checks' }}</span>
-          </div>
-          <div class="service-list">
-            <div>
-              <span><i :style="{ background: overview.healthy ? undefined : '#9ca3af' }"></i>{{ t('adminDashboard.webSystem') }}</span
-              ><strong :style="{ color: overview.healthy ? undefined : '#617169' }">{{ loading ? 'Checking…' : overview.healthy ? 'Operational' : 'Unavailable' }}</strong>
-            </div>
-            <div>
-              <span><i style="background: #9ca3af"></i>{{ t('adminDashboard.iotService') }}</span
-              ><strong style="color: #617169">Unknown</strong>
-            </div>
-            <div>
-              <span><i style="background: #9ca3af"></i>{{ t('adminDashboard.sensorNetwork') }}</span
-              ><strong style="color: #617169">Unavailable</strong>
-            </div>
-            <div>
-              <span><i style="background: #9ca3af"></i>{{ t('adminDashboard.lastSync') }}</span
-              ><strong>{{ lastSync }}</strong>
             </div>
           </div>
         </section>
       </div>
-
       <section class="panel table-panel">
         <div class="panel-header admin-table-title">
           <div>
@@ -311,93 +337,22 @@ const dataLabel = (value: string) => {
         </div>
       </section>
 
-      <div class="dashboard-grid lower-grid">
-        <section class="panel user-summary">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">{{ t('adminDashboard.accessOverview') }}</p>
-              <h2>{{ t('adminDashboard.userSummary') }}</h2>
-            </div>
-            <button class="secondary-button" type="button" @click="openUserManagement">
-              {{ t('adminDashboard.manageUsers') }} →
-            </button>
-          </div>
-          <div class="role-list">
-            <div v-for="role in userRoles" :key="role.label" class="role-row">
-              <div class="role-copy">
-                <span>{{ role.label }}</span
-                ><strong>{{ role.value }}</strong>
-              </div>
-              <div class="role-track">
-                <span :style="{ width: `${role.percent}%`, background: role.color }"></span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel activity-panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">{{ t('adminDashboard.auditTrail') }}</p>
-              <h2>{{ t('adminDashboard.recentSystemActivity') }}</h2>
-            </div>
-          </div>
-          <div class="timeline">
-            <p v-if="!activities.length">{{ loading ? 'Loading activity…' : overview.events ? 'No activity recorded.' : 'Activity unavailable.' }}</p>
-            <div
-              v-for="activity in activities"
-              :key="activity.id"
-              class="timeline-item"
-              :class="activity.type"
-            >
-              <span class="timeline-dot"></span>
-              <div>
-                <strong>{{ activity.title }}</strong
-                ><time>{{ activity.time }}</time>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <section class="panel quick-actions">
+      <section class="panel activity-panel full-activity-panel">
         <div class="panel-header">
           <div>
-            <p class="section-kicker">{{ t('adminDashboard.shortcuts') }}</p>
-            <h2>{{ t('adminDashboard.quickActions') }}</h2>
+            <p class="section-kicker">{{ t('adminDashboard.auditTrail') }}</p>
+            <h2>{{ t('adminDashboard.recentSystemActivity') }}</h2>
           </div>
         </div>
-        <div class="action-grid">
-          <button type="button" @click="openUserManagement">
-            <span>＋</span>
-            <div>
-              <strong>{{ t('adminDashboard.actions.addUser') }}</strong
-              ><small>{{ t('adminDashboard.actions.createAccount') }}</small>
-            </div>
-          </button>
-          <button type="button" @click="openIoTMonitoring">
-            <span>⌁</span>
-            <div>
-              <strong>{{ t('adminDashboard.actions.viewSensors') }}</strong
-              ><small>{{ t('adminDashboard.actions.openIot') }}</small>
-            </div>
-          </button>
-          <button type="button" @click="openThreatAlerts">
-            <span>!</span>
-            <div>
-              <strong>{{ t('adminDashboard.actions.viewAlerts') }}</strong
-              ><small>{{ t('adminDashboard.actions.reviewThreats') }}</small>
-            </div>
-          </button>
-          <button type="button" @click="openSystemActivity">
-            <span>↻</span>
-            <div>
-              <strong>{{ t('adminDashboard.actions.systemActivity') }}</strong
-              ><small>{{ t('adminDashboard.actions.viewAuditTrail') }}</small>
-            </div>
-          </button>
+        <div class="timeline">
+          <p v-if="!activities.length">{{ loading ? t('adminDashboard.loadingActivity') : overview.events ? t('adminDashboard.noActivity') : t('adminDashboard.activityUnavailable') }}</p>
+          <div v-for="activity in activities" :key="activity.id" class="timeline-item" :class="activity.type">
+            <span class="timeline-dot"></span>
+            <div><strong>{{ activity.title }}</strong><time>{{ activity.time }}</time></div>
+          </div>
         </div>
       </section>
+
     </div>
   </AdminPageShell>
 </template>
@@ -494,7 +449,8 @@ const dataLabel = (value: string) => {
 }
 .primary-grid {
   margin-top: 18px;
-  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.75fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
 }
 .lower-grid {
   margin-top: 18px;
@@ -507,6 +463,7 @@ const dataLabel = (value: string) => {
   background: #fff;
   box-shadow: 0 7px 22px rgba(35, 70, 53, 0.045);
 }
+.primary-grid > .panel { align-self: stretch; box-sizing: border-box; height: auto; min-height: 264px; margin: 0; }
 .panel-header {
   margin-bottom: 21px;
   display: flex;
@@ -524,6 +481,7 @@ const dataLabel = (value: string) => {
 .danger-kicker {
   color: #c75b49;
 }
+.admin-table-title .section-kicker { color: #e8f3ed; }
 .panel h2 {
   margin: 0;
   color: #254c3e;
@@ -568,6 +526,43 @@ const dataLabel = (value: string) => {
   justify-content: center;
   gap: clamp(35px, 6vw, 85px);
 }
+.user-chart-layout {
+  min-height: 218px; height: calc(100% - 70px); display: flex; align-items: center; justify-content: center;
+  gap: clamp(24px, 4vw, 54px);
+}
+.user-donut {
+  position: relative; width: 166px; height: 166px; flex: 0 0 166px;
+  display: grid; place-items: center; border-radius: 50%;
+}
+.user-donut::before { content: ''; position: absolute; inset: 22px; border-radius: 50%; background: #fff; }
+.user-donut > div { z-index: 1; display: grid; gap: 3px; text-align: center; }
+.user-donut strong { color: #254c3e; font-size: 32px; line-height: 1; }
+.user-donut span { color: #708078; font-size: 12px; font-weight: 700; }
+.user-legend { width: min(100%, 300px); margin: 0; padding: 0; list-style: none; }
+.user-legend li {
+  min-height: 42px; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center; gap: 10px; border-bottom: 1px solid #edf0ed;
+  color: #4b655b; font-size: 12px;
+}
+.user-legend li:last-child { border-bottom: 0; }
+.user-legend strong { color: #294f41; font-size: 13px; }
+.legend-swatch { width: 9px; height: 9px; border-radius: 50%; }
+.sensor-status-chart {
+  min-height: 218px; height: calc(100% - 70px); display: grid; grid-template-columns: 120px minmax(0, 1fr);
+  align-items: center; gap: 26px;
+}
+.sensor-chart-total {
+  min-height: 120px; display: grid; align-content: center; justify-items: center; gap: 5px;
+  border-radius: 16px; background: #eff5f0;
+}
+.sensor-chart-total strong { color: #254c3e; font-size: 30px; line-height: 1; }
+.sensor-chart-total span { color: #708078; font-size: 10px; font-weight: 600; text-align: center; }
+.sensor-bars { min-width: 0; }
+.sensor-bar-row { margin: 0 0 23px; }
+.sensor-bar-copy { margin-bottom: 8px; display: flex; justify-content: space-between; gap: 12px; color: #4b655b; font-size: 12px; font-weight: 700; }
+.sensor-bar-copy strong { color: #294f41; font-size: 14px; }
+.sensor-bar-track { height: 10px; overflow: hidden; border-radius: 999px; background: #edf1ed; }
+.sensor-bar-track span { height: 100%; display: block; border-radius: inherit; transition: width .25s ease; }
 .donut {
   width: 168px;
   height: 168px;
@@ -842,6 +837,7 @@ td strong {
 .quick-actions {
   margin-top: 18px;
 }
+.full-activity-panel { margin-top: 18px; }
 .action-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -902,6 +898,8 @@ td strong {
   .action-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+  .user-chart-layout { gap: 24px; }
+  .sensor-status-chart { grid-template-columns: 100px minmax(0, 1fr); gap: 18px; }
 }
 @media (max-width: 620px) {
   .welcome-row {
@@ -933,6 +931,10 @@ td strong {
   .sensor-content {
     flex-direction: column;
   }
+  .user-chart-layout { min-height: 0; height: auto; flex-direction: column; gap: 18px; }
+  .user-legend { width: 100%; }
+  .sensor-status-chart { min-height: 0; height: auto; grid-template-columns: 1fr; }
+  .sensor-chart-total { min-height: 78px; }
   .panel {
     padding: 19px;
   }
